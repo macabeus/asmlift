@@ -418,6 +418,13 @@ const PROBE_NEST_MAP: SymbolMap = new Map([
 ]);
 
 export const SYNTHETIC: SynthSpec[] = [
+  // ── baseline ──────────────────────────────────────────────────────────────────────────
+  // The control group: a function carrying no other feature. Its body must derive no tag at all
+  // (no operator, no branch, no call), or it stops being a control. The corpus's only `baseline`
+  // row used to be `kleod:ReturnOne:agbcc` (retired), which the 2026-09 source swap found is not a
+  // function (it is the `movs r0, #1; bx lr` tail label of `StringCompare` in testyourmine/kleod's
+  // asm/util.s), so the control lives here, where no binary can dispute its boundaries.
+  { sym: 'retone', src: 'int retone(void){ return 1; }', features: ['baseline'], toolchains: ['agbcc'] },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
@@ -2030,7 +2037,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the assign-back that lands the result in a local before the `return` then has TWO spellings —
   // R1's now-dead value var (`/regcopy-ret`) or a fresh one (`/regcopy-ret-fresh`). Which one the
   // source used is not derivable from the asm, so both are ranked. The reuse side is already
-  // pinned by real rows (`kleod:MultiplyQ8`/`MultiplyQ4`, `pokeemerald:MathUtil_Mul16`, all agbcc,
+  // pinned by real rows (`kleod:MultiplyQ8` on kl-eod-decomp's source before 2026-09-13, `pokeemerald:MathUtil_Mul16`, all agbcc,
   // where the fresh tail scores 3 against the reuse tail's 0); this row is the fresh side, which
   // no corpus row exercised.
   // WHY ido7.1 ALONE. The three spellings are three different objects only on ido: measured on
@@ -3955,7 +3962,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // COVERAGE. No row CARRIED the `narrow-counter` tag before this family — trivially, the tag is new.
   // The SHAPE was not uncovered. Reference side: 22 base rows pass this tag's own floor predicate,
-  // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`) already MATCHES — a narrow counter is
+  // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`, retired 2026-09-13) then MATCHED — a narrow counter is
   // not automatically a gap. Candidate side: 17 base agbcc rows already carry a narrowed self-
   // increment in their PUBLISHED asmlift output, 2 of those MATCHing; exactly ONE carries the SIGNED
   // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). That row's
@@ -5170,10 +5177,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // against the harness's, so this rig cannot speak to that row. Quote the SCOPE with the number.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
   // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
-  // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
-  // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. So an exact-token
-  // census of the plain admission never sees that row at all; a substring one does, and a deletion
-  // aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` costs that match.
+  // `/scopebase-coalesce`, and one of those won a match — `kleod:UpdateHUDCounterDisplay:agbcc`
+  // (retired 2026-09-13), MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`.
+  // So an exact-token census of the plain admission never saw that row at all; a substring one did,
+  // and a deletion aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` cost that match.
   // The two neighbour rows ARE guards on the roster, but on a CONFIGURATION and not on one lever
   // each, and naming one lever is what makes such a guard go vacuous. `/unfolded` binds the same
   // base on both, so a SINGLE-row ablation moves neither: `livepark` is MATCH with `/livebase`
@@ -6307,7 +6314,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════
   // Fourteen agbcc-only rows pinning the six capability gaps the CountCollectedGems attribution
   // names, plus one class that fell out of `nestacc`, each with its two-sided control where one
-  // exists. `kleod:CountCollectedGems:agbcc` is the highest-scoring non-matching kleod row —
+  // exists. `kleod:CountCollectedGems:agbcc` (retired 2026-09-13) was the highest-scoring non-matching kleod row —
   // `asmlift=diff:290 m2c=noncompile(1)`, 319 target lines against an 85-line reference — and a
   // cumulative ablation chain that walks its winner to the reference one spelling at a time reads
   // 290 → 184 → 159 → 58 → 40 → 36 → 50 → 0, the last step byte-exact. These rows are that chain's
@@ -6686,7 +6693,7 @@ export const SYNTHETIC: SynthSpec[] = [
     // takes the cast form and scores diff:5 — measured, by making the member path refuse exactly
     // as the global path does and re-running.
     //
-    // Its real-tier inhabitant is `kleod:CheckWorldCompletion:agbcc`, whose reference spells a
+    // Its real-tier inhabitant was `kleod:CheckWorldCompletion:agbcc` (retired 2026-09-13), whose reference spells a
     // nested `gUnk_03004670->unk8[var_r0][var_r2]` that agbcc collapsed into one flat counter
     // before the add. `k` there runs 0..47 through a declared row of 8, which is out of bounds and
     // byte-identical — the same object, as this row's own MATCH shows, and the only spelling that

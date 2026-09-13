@@ -63,6 +63,13 @@ describe('selectCases', () => {
   it('returns nothing for a name no row carries', () => {
     expect(selectCases([row('kleod:Foo:agbcc')], 'Nope')).toEqual([]);
   });
+
+  // After an upstream rename `bench target Old` resolved the row and `bench fan Old` found nothing.
+  it('selects a renamed row by its former name, exactly and by substring', () => {
+    const renamed = { id: 'kleod:EntityLookup:agbcc', aliases: ['sub_0803D140'] } as Case;
+    expect(selectCases([renamed], 'kleod:sub_0803D140:agbcc')).toEqual([renamed]);
+    expect(selectCases([renamed, row('kleod:Foo:agbcc')], 'sub_0803D140')).toEqual([renamed]);
+  });
 });
 
 describe('scoreLine', () => {
@@ -532,6 +539,38 @@ describe('fanDiffLine', () => {
   it('says a row the base never had was ADDED since, not that its fan grew from nothing', () => {
     const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', candidateCount: 4 }]));
     expect(line).toContain('is not in the artifact at origin/main');
+  });
+
+  it('does not compare against another decompilation’s row at the same address', () => {
+    // `fan --base` across a source swap: the base's row at this address is a different author's
+    // source, so its count is not this row's earlier fan. A renamed row of the SAME decomp still is.
+    const at = (id: string, sym: string, repo: string, candidateCount: number) => ({
+      id,
+      sym,
+      project: 'kleod',
+      toolchain: 'agbcc',
+      tier: 'real',
+      addr: '0x08010000',
+      sourceUrl: `https://github.com/${repo}/blob/abc/src/x.c#L1-L2`,
+      asmlift: { candidateCount },
+    });
+    const now = {
+      id: 'kleod:PauseMenuScreenHandler:agbcc',
+      sym: 'PauseMenuScreenHandler',
+      project: 'kleod',
+      toolchain: 'agbcc',
+      tier: 'real' as const,
+      addr: '0x08010000',
+      sourceUrl: 'https://github.com/macabeus/kleod/blob/abc/src/x.c#L1-L2',
+    };
+    const swapped = {
+      results: [at('kleod:PIUE:agbcc', 'PIUE', 'Dream-Atelier/kl-eod-decomp', 77760)],
+    } as unknown as BenchOutput;
+    expect(fanDiffLine(now.id, 27360, 'origin/main', swapped, now)).toContain('is not in the artifact at origin/main');
+    const renamed = {
+      results: [at('kleod:sub_08010000:agbcc', 'sub_08010000', 'macabeus/kleod', 27000)],
+    } as unknown as BenchOutput;
+    expect(fanDiffLine(now.id, 27360, 'origin/main', renamed, now)).toContain('27000 → 27360');
   });
 
   it('says a ref it cannot read is a ref it cannot read', () => {

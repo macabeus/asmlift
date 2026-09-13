@@ -14,8 +14,10 @@
 //                  bytes, and compiles a count-collapsed third spelling to show the COUNT is not
 //                  free either.
 //
-// The lever earns its place: returning `null` from `hoistScopedBases` costs
-// kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
+// The lever earned its place on kleod's kl-eod-decomp rows: returning `null` from `hoistScopedBases`
+// cost kleod:UpdateHUDCounterDisplay its match. That row was retired on 2026-09-13 with its source,
+// so no current benchmark row is known to guard this file; re-measure by ablation on the current
+// rows before naming one.
 //
 // `l3/basecse.ts` already hoists a reused leaf base — at three positions now, of which two are in
 // the TOP-LEVEL statement list (the function top, or an init's first use where a roster row asks
@@ -677,7 +679,8 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
    *  puts one `cond` object at two tree positions), and it is harmless today only because the shapes
    *  are derived AFTER this lever in `rank.ts`, an ordering nothing pins. A whole-function decline
    *  would make a future producer that shares one node silently delete every base this pass names —
-   *  including `kleod:UpdateHUDCounterDisplay`'s match, which returning `null` costs. Refusing the
+   *  including, until that row was retired (2026-09-13), `kleod:UpdateHUDCounterDisplay`'s match,
+   *  which returning `null` cost. Refusing the
    *  key that actually shares costs that key's spelling and nothing else, and the differ still has
    *  every other spelling in the list.
    *

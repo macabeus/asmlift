@@ -1372,7 +1372,7 @@ export function enumerateCandidates(
       });
     }
     // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
-    // (kleod:DecompressDma), and the joint spelling is reachable from neither lever alone. The
+    // (kleod:DecompressDma, on kl-eod-decomp's source, before 2026-09-13), and the joint spelling is reachable from neither lever alone. The
     // bases whose placement moves the row are the ones only this lever's ablation binds, and
     // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
     for (const { suffix, hoist, volatiles } of paired) {
@@ -2010,7 +2010,7 @@ export function enumerateCandidates(
               // winners, THREE changed the source they publish — `synthetic:unfoldpark`
               // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
               // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
-              // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
+              // `synthetic:foldpark` and `kleod:DecompressDma` (kl-eod-decomp's source, before 2026-09-13) were byte-identical renames. The two
               // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
               // publishes that field, `bench regression` does not).
               //

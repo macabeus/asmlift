@@ -176,8 +176,9 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // the scope itself rather than on an approximation of it.
   //
   // An ADMISSION, not a default: forced on, the spelling is REPLACED across the fan rather than
-  // added to it, which costs `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and
-  // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
+  // added to it, which costs `kleod:MultiplyQ8` (measured on kl-eod-decomp's source, before 2026-09-13) and `pokeemerald:MathUtil_Mul16` their matches
+  // (and cost `MultiplyQ4`, its byte-for-byte twin, until the 2026-09 kleod source swap retired that
+  // row as a duplicate). On the roster that is unreachable — `compareScored`
   // orders by score and the un-homed sibling rides beside it.
   //
   // Its fan is essentially one row's: over the corpus rows the gate admits, 2790 → 5841
@@ -593,7 +594,8 @@ export const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  SAME two sources and `seen` collapses them, so only removing both takes the fan down.)
  *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
  *  211, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
- *  number the artifact already carries, and each of them ENTAILED rather than separately scored:
+ *  number the artifact carried then (all three retired 2026-09-13), and each of them ENTAILED
+ *  rather than separately scored:
  *  the ablated candidate set is a strict SUBSET of the control one on every row here (enumerated
  *  both ways, 0 sources ADDED and 0 RELABELLED — `ProcessInputAndUpdateEntities` 58752 → 48384
  *  with 10368 carrying the token, `CountCollectedGems` 576 → 384 with 192, `RollRandomLevelVariant`

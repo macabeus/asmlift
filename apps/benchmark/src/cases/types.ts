@@ -9,9 +9,11 @@ import type { Scorer } from '../eval/asmlift';
 import type { BuiltTarget, Toolchain } from '../toolchains';
 
 export interface Case {
-  id: string; // `${project}:${sym}:${toolchain}` — the stable row id
+  id: string; // `${project}:${sym}:${toolchain}` — the readable row id (identity: bench-schema `rowIdentity`)
   tier: 'synthetic' | 'real';
   sym: string;
+  addr?: string; // real tier: the function's ELF address — the row's identity
+  aliases?: string[]; // real tier: earlier upstream names
   project: string; // "synthetic" | manifest project name
   language: 'c' | 'c++';
   features: string[];

@@ -28,6 +28,7 @@ import {
   compareSweeps,
   fanGuard,
   recordFileRefusal,
+  rekeyFans,
   renderDiff,
   selectsRow,
   sweepRefusal,
@@ -415,6 +416,59 @@ describe('the --fan size guard reads its own SELECTION, not just the artifact', 
   });
 });
 
+describe('the --fan guard prices the CURRENT rows, joined by identity', () => {
+  const OLD = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/x.c#L1-L2';
+  const NEW = 'https://github.com/macabeus/kleod/blob/6f149e3/src/x.c#L1-L2';
+  const row = (sym: string, addr: string, sourceUrl: string, aliases?: string[]) => ({
+    id: `kleod:${sym}:agbcc`,
+    project: 'kleod',
+    sym,
+    toolchain: 'agbcc',
+    tier: 'real' as const,
+    addr,
+    sourceUrl,
+    ...(aliases ? { aliases } : {}),
+  });
+  const priced = (r: ReturnType<typeof row>, n: number) => ({ ...r, asmlift: { candidateCount: n } });
+
+  it('does not hand a removed row’s price to another decompilation’s row at the same address', () => {
+    // The kleod swap, measured before this join: the guard still "skipped" the no-longer-selected
+    // ProcessInputAndUpdateEntities by id, six rows that kept their names made the artifact look like
+    // it priced the selection, and PauseMenuScreenHandler — the new row at that address, 27,360
+    // spellings — was enumerated unguarded. Through identity the old prices reach no current row, so
+    // the kleod selection is priced by nothing and fanGuard refuses instead of failing open.
+    const fans = rekeyFans(
+      [
+        priced(row('ProcessInputAndUpdateEntities', '0x08010000', OLD), 77760),
+        priced(row('MultiplyQ8', '0x08000948', OLD), 1),
+      ],
+      [row('PauseMenuScreenHandler', '0x08010000', NEW), row('MultiplyQ8', '0x08000948', NEW)],
+    );
+    expect([...fans.keys()]).toEqual([]);
+    const g = fanGuard({ tiers: ['real'], project: 'kleod' }, { fans, path: '/r.json', rows: 2 });
+    expect(g.unreadable).toContain('prices no row at all');
+  });
+
+  it('keeps a renamed row’s price under its new id, and a synthetic row’s under its id', () => {
+    const synthetic = {
+      id: 'synthetic:add:agbcc',
+      project: 'synthetic',
+      sym: 'add',
+      toolchain: 'agbcc',
+      tier: 'synthetic' as const,
+      asmlift: { candidateCount: 2 },
+    };
+    const fans = rekeyFans(
+      [priced(row('sub_08010000', '0x08010000', NEW), 77760), synthetic],
+      [row('PauseMenuScreenHandler', '0x08010000', NEW, ['sub_08010000'])],
+    );
+    expect(Object.fromEntries(fans)).toEqual({ 'kleod:PauseMenuScreenHandler:agbcc': 77760, 'synthetic:add:agbcc': 2 });
+    expect(fanGuard({ tiers: ['real'], project: 'kleod' }, { fans, path: '/r.json', rows: 2 })).toEqual({
+      over: { 'kleod:PauseMenuScreenHandler:agbcc': 77760 },
+    });
+  });
+});
+
 describe('which rows a selection names', () => {
   it('applies the same three filters `collect` does, over an id', () => {
     // `--only` is a substring of the SYM and not of the id (`syntheticCases`/`realCases` both
@@ -430,6 +484,45 @@ describe('which rows a selection names', () => {
     // the substring matches the SYM, not the project or the toolchain
     expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
     expect(selectsRow({ ...both, only: 'agbcc' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+  });
+
+  it('answers to a former name, as `collect` does', () => {
+    // `realCases` selects a renamed row by its old name (bench-schema onlySelects); without the
+    // aliases here, the fan guard would call that row unselected and price the sweep without it.
+    const r = { tiers: ['real'] as const, only: 'sub_0803D1' };
+    expect(selectsRow(r, 'kleod:EntityLookup:agbcc')).toBe(false);
+    expect(selectsRow(r, 'kleod:EntityLookup:agbcc', ['sub_0803D140'])).toBe(true);
+  });
+});
+
+describe('the --fan guard refuses PER PROJECT, not only selection-wide', () => {
+  // Measured on the kleod swap before the fix, with the pre-swap artifact: `--project kleod` was
+  // refused, `--tier real` was not — five priced projects masked the one priced by nothing, and
+  // PauseMenuScreenHandler (27,360 spellings) would have enumerated unguarded.
+  const current = [
+    { id: 'sa3:GetInput:agbcc', project: 'sa3' },
+    { id: 'kleod:PauseMenuScreenHandler:agbcc', project: 'kleod' },
+  ];
+  const artifact = (pairs: [string, number][]) => ({ fans: new Map(pairs), path: '/r.json', rows: 2, current });
+
+  it('refuses a tier-wide selection when one of its projects is priced by nothing', () => {
+    const g = fanGuard({ tiers: ['real'] }, artifact([['sa3:GetInput:agbcc', 120]]));
+    expect(g.unreadable).toContain('prices no row of kleod');
+    // …and a selection that names only the priced project still sweeps
+    expect(fanGuard({ tiers: ['real'], project: 'sa3' }, artifact([['sa3:GetInput:agbcc', 120]])).unreadable).toBe(
+      undefined,
+    );
+  });
+
+  it('passes once every selected project is priced', () => {
+    const g = fanGuard(
+      { tiers: ['real'] },
+      artifact([
+        ['sa3:GetInput:agbcc', 120],
+        ['kleod:PauseMenuScreenHandler:agbcc', 27360],
+      ]),
+    );
+    expect(g).toEqual({ over: { 'kleod:PauseMenuScreenHandler:agbcc': 27360 } });
   });
 });
 
@@ -466,6 +559,10 @@ describe('the --fan size guard', () => {
     // overnight one.
     expect(SWEEP_FAN_LIMIT).toBeGreaterThan(13728);
     expect(SWEEP_FAN_LIMIT).toBeLessThan(77760);
+    // …and on the rows at those addresses after the 2026-09-13 kleod swap (`bench fan --enumerate`):
+    // the largest admitted row enumerates 8,416 and the only row over the limit 27,360.
+    expect(SWEEP_FAN_LIMIT).toBeGreaterThan(8416);
+    expect(SWEEP_FAN_LIMIT).toBeLessThan(27360);
   });
 });
 

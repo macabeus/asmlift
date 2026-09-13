@@ -130,7 +130,8 @@ asmlift only cares which sections end up in the one file `elf:` names, so mix an
   `.debug_str`).
 
 A worked example with all three channels is the Klonoa decomp's
-[`asmlift-elf` target](https://github.com/Dream-Atelier/kl-eod-decomp/blob/main/Makefile):
+[`asmlift-elf` target](https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/Makefile#L115-L152)
+(the benchmark's fork of `testyourmine/kleod`):
 agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft; the project's default
 `make` sha-verifies the same link.
 

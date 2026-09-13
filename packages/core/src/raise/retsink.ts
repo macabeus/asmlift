@@ -28,7 +28,8 @@
 // four blocks collapsed to two, with no unconditional branch to the merge at all. For the {0,1} pair
 // it goes further and folds branchlessly (`negs r0,r0; lsrs r0,r0,#31`), erasing the comparison too.
 // So where the TARGET holds that diamond, a merge variable is the spelling of some other function,
-// and sinking is the only candidate that can match (`kleod:IsSelectButtonPressed:agbcc`).
+// and sinking is the only candidate that can match (measured on `kleod:IsSelectButtonPressed:agbcc`,
+// retired 2026-09-13).
 //
 // ONE MODEL, NOT TWO. The predicate is `narrowlocal.ts`'s exported `armIsOneSet` — no op that
 // `REEVAL_UNSAFE_OPS` calls unsafe, and EXACTLY one result-producing op — read here by
@@ -362,7 +363,7 @@ export const SELECT_GATES: readonly Gate<SelectCandidate>[] = [
     // for agbcc to hoist above the compare, so nothing says it would not re-emit this shape.
     //
     // SUBSUMED ON THIS CORPUS, and the row ids are the point. Instrumenting `firstRejection` over
-    // all 1039 rows shows the clause first-refusing two agbcc sites — `kleod:Decompress` and
+    // all 1039 rows shows the clause first-refusing two agbcc sites — `kleod:Decompress` (kl-eod-decomp's source, before 2026-09-13) and
     // `kleod:ReadKeyInput` — so the ARM Thumb frontend really does hand this table operand-less
     // `ret` merges. Ablating it still moves 0 rows,
     // because `arms-are-one-set` refuses both a step later. It is kept for the same reason

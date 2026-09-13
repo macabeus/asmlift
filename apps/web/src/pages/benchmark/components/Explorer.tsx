@@ -1,4 +1,4 @@
-import type { DecompilerId, FunctionResult, Outcome } from '@asmlift/bench-schema';
+import { type DecompilerId, type FunctionResult, type Outcome, resolveRow } from '@asmlift/bench-schema';
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
@@ -81,7 +81,15 @@ export function Explorer({
   const [filters, setFilters] = useQueryStates(FILTER_PARSERS, { urlKeys: FILTER_URL_KEYS });
   const [{ sort: sortKey, dir: sortDir }, setSort] = useQueryStates(SORT_PARSERS);
   const [selectedId, setSelectedId] = useQueryState('fn', parseAsString.withOptions({ history: 'push' }));
-  const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
+  // `fn=` names a row by its READABLE id (`project:sym:toolchain`), the one spelling a person can
+  // read in a shared link. It still survives an upstream rename: the old name moves into the row's
+  // `aliases`, and resolveRow (bench-schema) opens the row through it. The address is deliberately
+  // NOT written: it is identity within one decompilation, and a link keyed by it would open another
+  // decompilation's row at the same address the day a project's source moves.
+  const selected = useMemo(
+    () => (selectedId === null ? null : (resolveRow(rows, selectedId) ?? null)),
+    [rows, selectedId],
+  );
 
   const projects = useMemo(() => distinct(rows, (r) => r.project), [rows]);
   const isas = useMemo(() => distinct(rows, (r) => r.isa), [rows]);

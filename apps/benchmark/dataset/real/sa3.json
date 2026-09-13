@@ -27,6 +27,7 @@
   "functions": [
     {
       "sym": "AbsMax",
+      "addr": "0x080b0fec",
       "features": [
         "arithmetic",
         "branch",
@@ -38,6 +39,7 @@
     },
     {
       "sym": "SeedRng",
+      "addr": "0x080b0fd8",
       "features": [
         "global",
         "store"
@@ -54,6 +56,7 @@
     },
     {
       "sym": "Random",
+      "addr": "0x080b0fb4",
       "features": [
         "global",
         "pointer",
@@ -66,6 +69,7 @@
     },
     {
       "sym": "sa2__sub_808558C",
+      "addr": "0x080b1064",
       "features": [
         "arithmetic",
         "branch"
@@ -76,6 +80,7 @@
     },
     {
       "sym": "sa2__sub_8085654",
+      "addr": "0x080b112c",
       "features": [
         "arithmetic",
         "int64"
@@ -86,6 +91,7 @@
     },
     {
       "sym": "sa2__sub_80855C0",
+      "addr": "0x080b1098",
       "features": [
         "arithmetic",
         "int64"
@@ -96,6 +102,7 @@
     },
     {
       "sym": "sa2__sub_80856DC",
+      "addr": "0x080b11b4",
       "features": [
         "arithmetic"
       ],
@@ -105,6 +112,7 @@
     },
     {
       "sym": "sa2__sub_8085714",
+      "addr": "0x080b11ec",
       "features": [
         "arithmetic"
       ],
@@ -114,6 +122,7 @@
     },
     {
       "sym": "sa2__sub_8085758",
+      "addr": "0x080b1230",
       "features": [
         "arithmetic"
       ],
@@ -123,6 +132,7 @@
     },
     {
       "sym": "EwramInitHeap",
+      "addr": "0x080c6ac4",
       "features": [
         "struct",
         "field",
@@ -140,6 +150,7 @@
     },
     {
       "sym": "EwramMalloc",
+      "addr": "0x080c6ad8",
       "features": [
         "struct",
         "field",
@@ -152,6 +163,7 @@
     },
     {
       "sym": "EwramFree",
+      "addr": "0x080c6b3c",
       "features": [
         "struct",
         "field",
@@ -169,6 +181,7 @@
     },
     {
       "sym": "numToASCII",
+      "addr": "0x080bf3cc",
       "features": [
         "array",
         "branch"
@@ -184,6 +197,7 @@
     },
     {
       "sym": "Base10DigitsToHexNibbles",
+      "addr": "0x080bf40c",
       "features": [],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
       "m2cCtx": true,
@@ -192,6 +206,7 @@
     },
     {
       "sym": "VerifyFlashSector_Core",
+      "addr": "0x080c6ebc",
       "features": [
         "pointer",
         "cast",
@@ -203,6 +218,7 @@
     },
     {
       "sym": "sa2__sub_8004418",
+      "addr": "0x080bf30c",
       "features": [
         "branch",
         "cast",
@@ -217,6 +233,7 @@
     },
     {
       "sym": "GetSaveSectorChecksum",
+      "addr": "0x0800212c",
       "features": [
         "pointer",
         "cast",
@@ -229,6 +246,7 @@
     },
     {
       "sym": "VramMalloc",
+      "addr": "0x080c3224",
       "features": [
         "global",
         "array",
@@ -242,6 +260,7 @@
     },
     {
       "sym": "VramGetTotalAllocatedTiles",
+      "addr": "0x080c3334",
       "features": [
         "global",
         "array",
@@ -254,6 +273,7 @@
     },
     {
       "sym": "GetInput",
+      "addr": "0x080bca94",
       "features": [
         "array",
         "branch",
@@ -271,6 +291,7 @@
     },
     {
       "sym": "sa2__sub_8007858",
+      "addr": "0x080c2fbc",
       "features": [
         "pointer",
         "global",
@@ -288,6 +309,7 @@
     },
     {
       "sym": "sa2__sub_8007958",
+      "addr": "0x080c30bc",
       "features": [
         "pointer",
         "global",
@@ -305,6 +327,7 @@
     },
     {
       "sym": "sa2__sub_80856F8",
+      "addr": "0x080b11d0",
       "features": [
         "arithmetic"
       ],
@@ -314,6 +337,7 @@
     },
     {
       "sym": "sa2__sub_8085720",
+      "addr": "0x080b11f8",
       "features": [
         "arithmetic"
       ],
@@ -323,6 +347,7 @@
     },
     {
       "sym": "sa2__sub_8085798",
+      "addr": "0x080b1270",
       "features": [
         "arithmetic"
       ],
@@ -332,6 +357,7 @@
     },
     {
       "sym": "sa2__sub_808595C",
+      "addr": "0x080b1434",
       "features": [
         "arithmetic"
       ],
@@ -341,6 +367,7 @@
     },
     {
       "sym": "sa2__sub_80838CC",
+      "addr": "0x080af3a4",
       "features": [
         "struct",
         "field",
@@ -358,6 +385,7 @@
     },
     {
       "sym": "sa2__sub_808399C",
+      "addr": "0x080af474",
       "features": [
         "struct",
         "field",
@@ -375,6 +403,7 @@
     },
     {
       "sym": "OamMalloc",
+      "addr": "0x080c108c",
       "features": [
         "branch",
         "global",
@@ -391,6 +420,7 @@
     },
     {
       "sym": "sa2__sub_8083504",
+      "addr": "0x080aefdc",
       "features": [
         "struct",
         "field",
@@ -409,6 +439,7 @@
     },
     {
       "sym": "ProcessOamBuffers",
+      "addr": "0x080c1124",
       "features": [
         "global",
         "struct",
@@ -423,6 +454,7 @@
     },
     {
       "sym": "sa2__sub_80078D4",
+      "addr": "0x080c3038",
       "features": [
         "global"
       ],
@@ -433,6 +465,7 @@
     },
     {
       "sym": "PackSaveSector",
+      "addr": "0x0800132c",
       "features": [
         "array",
         "memory"
@@ -449,6 +482,7 @@
     },
     {
       "sym": "sub_804DC38",
+      "addr": "0x0804dc38",
       "features": [
         "struct",
         "field"
@@ -460,6 +494,7 @@
     },
     {
       "sym": "Sio32MultiLoadMain",
+      "addr": "0x080c412c",
       "features": [
         "global"
       ],
@@ -470,6 +505,7 @@
     },
     {
       "sym": "sub_802DFC8",
+      "addr": "0x0802dfc8",
       "features": [
         "value-home",
         "sign-extend",
@@ -490,6 +526,7 @@
     },
     {
       "sym": "sub_806132C",
+      "addr": "0x0806132c",
       "features": [
         "struct",
         "field",
@@ -507,6 +544,7 @@
     },
     {
       "sym": "sub_804D360",
+      "addr": "0x0804d360",
       "features": [
         "struct",
         "field",
@@ -524,6 +562,7 @@
     },
     {
       "sym": "Sio32MultiLoadIntr",
+      "addr": "0x080c4310",
       "features": [
         "global",
         "branch"
@@ -540,6 +579,7 @@
     },
     {
       "sym": "sub_803213C",
+      "addr": "0x0803213c",
       "features": [
         "value-home",
         "zero-extend",
@@ -560,6 +600,7 @@
     },
     {
       "sym": "Player_800D978",
+      "addr": "0x0800d978",
       "features": [
         "bitfield",
         "struct",
@@ -596,6 +637,7 @@
     },
     {
       "sym": "sub_8001FD4",
+      "addr": "0x08001fd4",
       "features": [
         "global",
         "pointer",

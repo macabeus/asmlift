@@ -616,7 +616,8 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  reading the population: where `raise/globalshape.ts` shapes a name the structurer usually spells
  *  it bare and no key exists here at all — but a shape is ONE element type for the whole name, so an
  *  access that strides something else keeps its cast and its key. `kleod:SetupBG3WindowOverlay`'s
- *  `gBgInfo` derives `elemSize 4` and still reaches this table at stride 28, in both arms.
+ *  `gBgInfo` (a row retired 2026-09-13) derived `elemSize 4` and still reached this table at stride
+ *  28, in both arms.
  *
  *  What this table admits, censused over the artifact's 370 agbcc rows: map-less 8 rows / 10 keys,
  *  map-ful 10 rows / 12 keys. TWO shapes, and the arms differ:

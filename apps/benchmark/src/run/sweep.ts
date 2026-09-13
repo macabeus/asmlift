@@ -47,11 +47,13 @@
 // whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
 // your branch SPELLS differently, which is the question a round asks twenty times before it asks
 // the other one once.
+import { type Identifiable, joinArtifacts, onlySelects } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { realRowIdentities } from '../cases/manifests';
 import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { TOOLCHAINS } from '../toolchains';
 import { ARMS, type SweepSelection, TREE_MODULES } from './sweep-driver';
@@ -221,16 +223,60 @@ export function renderDiff(d: SweepDiff): string[] {
  *  exclude `CountCollectedGems`, which is this project's most-enumerated row and therefore the
  *  sweep's best customer; higher admits a row whose price nobody has measured.
  *
+ *  AFTER THE 2026-09-13 KLEOD SWAP the rows above are retired (dataset/retired-rows.json), and the
+ *  bracket was re-measured on the rows now at those addresses — `pnpm bench fan <row> --enumerate`,
+ *  wall clock including the target build, compile-free:
+ *
+ *    kleod:PauseMenuScreenHandler:agbcc               27,360   over the limit, 91.2 s
+ *    kleod:AthleticChallengeScrollUpdate:agbcc         8,416   16.6 s
+ *    kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc   3,600   50.5 s
+ *
+ *  20,000 still sits between them. The giant is a third of the old one and the tier's cost profile
+ *  moved with it: the NEXT artifact, not these numbers, is what prices the corpus.
+ *
  *  A row the artifact does not carry has no recorded count and IS enumerated: the guard protects
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
 export const SWEEP_FAN_LIMIT = 20000;
+
+type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
+
+/** The artifact's recorded fans, keyed by the CURRENT dataset's row ids — joined by row identity
+ *  (bench-schema `joinArtifacts`), never by the id the artifact happened to publish.
+ *
+ *  Keyed by the artifact's own ids, this guard failed OPEN across the kleod source swap, and loudly
+ *  in the wrong direction: `ProcessInputAndUpdateEntities` (77,760) was still "skipped" by name
+ *  although no longer selected, six unrelated rows that kept their names made the artifact look like
+ *  it priced the selection, and `PauseMenuScreenHandler` — the row now at that address, a different
+ *  decompilation's source — was enumerated unguarded. Through the join, a renamed row keeps its
+ *  recorded price, a row of another decompilation at the same address has none, and a real row the
+ *  dataset no longer carries prices nothing. Synthetic rows are keyed by id on both sides. */
+export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Identifiable[]): Map<string, number> {
+  const priced = recorded.filter((r) => typeof r.asmlift?.candidateCount === 'number');
+  const join = joinArtifacts(priced, current);
+  const currentId = new Map(current.map((r) => [join.headKey(r), r.id]));
+  const out = new Map<string, number>();
+  for (const r of priced) {
+    const id = r.tier === 'real' ? currentId.get(join.baseKey(r)) : r.id;
+    if (id !== undefined) {
+      out.set(id, r.asmlift!.candidateCount!);
+    }
+  }
+  return out;
+}
 
 /** sym → the fan the committed artifact recorded, for the `--fan` guard. Read off the COMMITTED
  *  `results.json` in this worktree rather than through `git show`: the guard's job is to keep a
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
  *  turn the guard off. A row the artifact does not carry (a new dataset row) has no recorded
  *  count and is enumerated — the guard protects against the known giants, and says so. */
-export function recordedFans(): { fans: Map<string, number>; unreadable?: string; path?: string; rows?: number } {
+export function recordedFans(): {
+  fans: Map<string, number>;
+  unreadable?: string;
+  path?: string;
+  rows?: number;
+  /** the CURRENT dataset's real rows — what a selection can name, priced or not (see fanGuard) */
+  current?: readonly Pick<Identifiable, 'id' | 'project' | 'aliases'>[];
+} {
   const path = join(RESULTS_DIR, 'results.json');
   // NO ARTIFACT AT ALL is this guard's documented open case: a checkout that has never published
   // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
@@ -245,18 +291,12 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
   }
   const out = new Map<string, number>();
   try {
-    const { results } = JSON.parse(readFileSync(path, 'utf8')) as {
-      results: { id: string; asmlift: { candidateCount?: number } }[];
-    };
+    const { results } = JSON.parse(readFileSync(path, 'utf8')) as { results: RecordedRow[] };
     if (!Array.isArray(results)) {
       return { fans: out, path, unreadable: `${path} has no top-level \`results\` array` };
     }
-    for (const r of results) {
-      if (typeof r.asmlift?.candidateCount === 'number') {
-        out.set(r.id, r.asmlift.candidateCount);
-      }
-    }
-    return { fans: out, path, rows: results.length };
+    const current = realRowIdentities();
+    return { fans: rekeyFans(results, current), path, rows: results.length, current };
   } catch (e) {
     return { fans: out, path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
   }
@@ -264,12 +304,18 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
 
 /** Does this selection name that row? The same three filters `collect` applies, over a row ID
  *  instead of a `Case` — `synthetic:<sym>:<toolchain>` or `<project>:<sym>:<toolchain>`, where
- *  `--only` is a substring of the SYM (`syntheticCases`/`realCases` both filter `x.sym`, not the
- *  id) and the synthetic tier is the rows whose project is `synthetic`.
+ *  `--only` is a substring of the SYM or of a former name (`syntheticCases`/`realCases` both filter
+ *  through bench-schema `onlySelects`, not the id) and the synthetic tier is the rows whose project
+ *  is `synthetic`. Pass the row's `aliases`, or a renamed row reads as unselected here while
+ *  `collect` sweeps it.
  *
  *  Exported because it is what lets the `--fan` guard say how much of its own selection the
  *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
-export function selectsRow(o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>, id: string): boolean {
+export function selectsRow(
+  o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>,
+  id: string,
+  aliases?: readonly string[],
+): boolean {
   const parts = id.split(':');
   if (parts.length < 3) {
     return false;
@@ -282,7 +328,7 @@ export function selectsRow(o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>, 
   if (o.project !== undefined && project !== o.project) {
     return false;
   }
-  return o.only === undefined || sym.includes(o.only);
+  return onlySelects(o.only, sym, aliases);
 }
 
 export interface SweepOptions extends SweepSelection {
@@ -568,17 +614,20 @@ export function fanGuard(
   o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>,
   artifact: ReturnType<typeof recordedFans>,
 ): { over: Record<string, number>; unreadable?: string } {
-  const { fans, unreadable, path, rows } = artifact;
+  const { fans, unreadable, path, rows, current } = artifact;
   if (unreadable !== undefined) {
     return { over: {}, unreadable };
   }
+  const aliasesOf = new Map((current ?? []).map((r) => [r.id, r.aliases]));
   const over: Record<string, number> = {};
   let priced = 0;
+  const pricedProjects = new Set<string>();
   for (const [id, n] of fans) {
-    if (!selectsRow(o, id)) {
+    if (!selectsRow(o, id, aliasesOf.get(id))) {
       continue;
     }
     priced++;
+    pricedProjects.add(id.slice(0, id.indexOf(':')));
     if (n > SWEEP_FAN_LIMIT) {
       over[id] = n;
     }
@@ -604,6 +653,25 @@ export function fanGuard(
           ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.candidateCount\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
           : `${path} prices ${fans.size} row(s) and not one of the rows this selection names, so it bounds nothing here`,
     };
+  }
+  // AND PER PROJECT, because the count above is selection-wide: five priced projects masked one
+  // unpriced one. Measured on the kleod source swap with the pre-swap artifact: `--project kleod
+  // --fan` refused (0 priced), while `--tier real --fan` found 114 priced rows in the other five
+  // projects (af 10, marioparty3 24, pokeemerald 35, sa3 35, snowboardkids2 10) and 0 in kleod, so
+  // `over` came back empty and PauseMenuScreenHandler (27,360 spellings, over SWEEP_FAN_LIMIT)
+  // would have enumerated unguarded. Every re-pin of a project's source reopens exactly this until the artifact
+  // is regenerated. Only the real tier can be checked this way — `current` is the dataset's REAL
+  // rows — so a synthetic-only hole is still covered by the selection-wide count alone.
+  if (path !== undefined && current !== undefined) {
+    const unpriced = [...new Set(current.filter((r) => selectsRow(o, r.id, r.aliases)).map((r) => r.project))].filter(
+      (p) => !pricedProjects.has(p),
+    );
+    if (unpriced.length > 0) {
+      return {
+        over: {},
+        unreadable: `${path} prices no row of ${unpriced.join(', ')} that this selection names, so it bounds nothing there — regenerate the artifact, narrow the selection, or pass --force`,
+      };
+    }
   }
   return { over };
 }
@@ -654,7 +722,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
       `asmlift: [sweep] --fan needs the committed artifact to size what it is about to enumerate, and it does not: ${unreadable}`,
     );
     note(
-      `asmlift: [sweep] --force enumerates every row anyway (kleod:ProcessInputAndUpdateEntities is 77,760 spellings).`,
+      `asmlift: [sweep] --force enumerates every row anyway, including any over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT}.`,
     );
     return 2;
   }

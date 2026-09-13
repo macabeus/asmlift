@@ -8,7 +8,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-/** The bench-owned klonoa (kleod) checkout — created by `pnpm bench setup --project kleod --build`. */
+/** The klonoa checkout of Dream-Atelier/kl-eod-decomp these suites measure. NOT the benchmark's kleod
+ *  project any more: since 2026-09-13 the benchmark's kleod rows come from testyourmine/kleod and
+ *  `pnpm bench setup --project kleod --build` builds `checkouts/kleod`, not this directory. The
+ *  functions these suites compile are kl-eod-decomp's, read through ITS `decomp.yaml`
+ *  `tools.asmlift.compiler` key, which the new decomp's `decomp.yaml` does not carry. */
 export const KLEOD_CHECKOUT = resolve(
   import.meta.dirname,
   '../../../../apps/benchmark/checkouts/klonoa-empire-of-dreams',
@@ -25,8 +29,11 @@ export function kleodCheckoutGate(tag: string, paths: string[], binaries: string
   ];
   if (missing.length > 0) {
     console.warn(
-      `[${tag}] klonoa checkout/toolchain incomplete — skipping ` +
-        `(pnpm bench setup --project kleod --build): missing ${missing.join(', ')}`,
+      `[${tag}] klonoa checkout/toolchain incomplete — skipping. Remedy: clone ` +
+        `https://github.com/Dream-Atelier/kl-eod-decomp (branch asmlift-benchmark, 494f499) into ` +
+        `apps/benchmark/checkouts/klonoa-empire-of-dreams, run its setup.sh (python >= 3.11 first on PATH), ` +
+        `then gmake and gmake asmlift-elf. \`pnpm bench setup --project kleod\` no longer builds this ` +
+        `checkout. Missing: ${missing.join(', ')}`,
     );
     return false;
   }

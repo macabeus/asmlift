@@ -55,7 +55,8 @@ The harness never reads the project's `.s` and never runs the project's `decomp.
 - **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
   built, against whatever `build/…/tu.o` the project's make produced.
 
-Measured on `kleod:StrCpy:agbcc`, one of the smallest real agbcc rows (11 of the 126 have a shorter
+Measured on `kleod:StrCpy:agbcc` — a row retired on 2026-09-13 with the kleod source swap
+(`apps/benchmark/dataset/retired-rows.json`), so every number below describes no current row — one of the smallest real agbcc rows (11 of the 126 have a shorter
 `targetAsm`), at one asmlift commit (`3a06c74`). Both runs are seconds. The one step that can take
 minutes is step 1's: an unbuilt sidecar ELF makes `bench target` run `make asmlift-elf` in your
 checkout (below).

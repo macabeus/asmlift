@@ -10,6 +10,7 @@
 // Shape is VALIDATED at load time so a typo fails with the
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
+import { ADDR_PATTERN, type Identifiable } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -20,7 +21,18 @@ import { WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 
 export interface RealFunction {
+  /** The upstream project's name for the function, as-is — presentation, and the row id's middle. */
   sym: string;
+  /** The function's address in the project's linked ELF — the row's IDENTITY (bench-schema
+   *  `rowIdentity`). `0x` + 8 lowercase hex, the spelling the vendored symbol map keys by; GBA
+   *  ROM-mapped with the Thumb bit clear, N64 VRAM. MEASURED from the build artifact, never
+   *  typed from a name: `test/real-manifests.test.ts` holds it equal to the address the
+   *  committed `tu/<project>/symbols.json.gz` gives `sym`. */
+  addr: string;
+  /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
+   *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
+   *  brief that named the old spelling keeps resolving to this row. */
+  aliases?: string[];
   features: string[];
   funcC: string; // the extracted function source (verbatim from the decomp)
   sourceUrl?: string; // commit-pinned GitHub permalink to funcC's span in the project
@@ -28,7 +40,8 @@ export interface RealFunction {
   /** A HAND-WRITTEN m2c `--context` for this row: callee prototypes the project's own vendored
    *  headers happen not to declare, so `m2cCtx` alone would lose them. Held symmetric with
    *  `proto` by test/authored-facts.test.ts — a callee named to one decompiler and not the other
-   *  is the defect that check exists to catch. Six kleod rows use it; every other real row takes
+   *  is the defect that check exists to catch. No row uses it today (six kleod rows did before the
+   *  2026-09-13 swap); every real row takes
    *  the vendored context below. */
   ctx?: string;
   /** Feed m2c the function's VENDORED project context: the exact bytes the project's own
@@ -46,7 +59,7 @@ export interface RealFunction {
    *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
    *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`). Neither tool is
    *             handed the row's own signature out of the reference source — with one measured
-   *             exception on 8 rows, README residual 4.
+   *             exception, README residual 4.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
    *  against a tool handed layouts outright. This flag is set on every real row without a
@@ -81,8 +94,13 @@ export interface RealManifest {
   /** The pinned integration branch on that fork (provenance base + one integration commit);
    *  `bench vendor`/`bench fidelity` verify the checkout sits on its remote head. */
   branch: string;
-  /** Make target that derives the ELF `decomp.yaml` names (DWARF types-sidecar projects:
-   *  af/marioparty3/snowboardkids2). Absent ⇒ the plain project build produces the ELF. */
+  /** Make target that derives the ELF `decomp.yaml` names — every real project has one today,
+   *  because every one of them declares a DERIVED `tools.asmlift.elf` (a copy of the linked ELF
+   *  carrying a DWARF sidecar). Absent ⇒ the plain project build produces the ELF. NOT optional
+   *  decoration: the published repro script prints the derive step only when this is set
+   *  (`src/report/repro-scripts.ts`), so an unset field silently tells every reader of those rows
+   *  to reproduce them from a map the rows were not measured with. Gated in
+   *  `test/real-manifests.test.ts` against the checkout's own Makefile. */
   elfMake?: string;
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
@@ -156,9 +174,55 @@ export function validateManifest(m: unknown, file: string): string[] {
   if (!Array.isArray(man.functions) || man.functions.length === 0) {
     problems.push(`${file}: "functions" must be a non-empty array`);
   } else {
+    const addrs = new Map<string, string>();
+    const names = new Map<string, string>();
     for (const f of man.functions) {
       if (typeof f.sym !== 'string' || typeof f.funcC !== 'string' || !Array.isArray(f.features)) {
         problems.push(`${file}: function entry missing sym/funcC/features (${JSON.stringify(f.sym)})`);
+      }
+      // identity: one address per row, and no two rows of a project at the same one
+      if (typeof f.addr !== 'string' || !ADDR_PATTERN.test(f.addr)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "addr" must be the ELF address as 0x + 8 lowercase hex (got ${JSON.stringify(f.addr)})`,
+        );
+      } else if (addrs.has(f.addr)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} shares addr ${f.addr} with ${JSON.stringify(addrs.get(f.addr))}`,
+        );
+      } else {
+        addrs.set(f.addr, f.sym);
+      }
+      // the second half of identity: WHOSE source sits at that address. `joinArtifacts` keeps two
+      // rows that meet at an address apart only when both cite a repository, so a row without a
+      // `sourceUrl` would join another decompilation's row there silently. Required, and required
+      // to cite the repository this manifest pins — the fork `bench setup` clones.
+      const cited =
+        typeof f.sourceUrl === 'string'
+          ? /^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\/[0-9a-f]{7,40}\//.exec(f.sourceUrl)?.[1]
+          : undefined;
+      if (cited === undefined) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" must be a commit-pinned https://github.com/<owner>/<name>/blob/<sha>/… permalink (got ${JSON.stringify(f.sourceUrl)})`,
+        );
+      } else if (typeof man.repo === 'string' && cited !== man.repo) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" cites ${cited}, not this manifest's repo ${man.repo}`,
+        );
+      }
+      // a name — current or former — answers to exactly one row, or a citation of it is ambiguous
+      if (
+        f.aliases !== undefined &&
+        (!Array.isArray(f.aliases) || f.aliases.some((a) => typeof a !== 'string' || !a))
+      ) {
+        problems.push(`${file}: ${JSON.stringify(f.sym)} "aliases" must be an array of names when present`);
+      }
+      for (const n of [f.sym, ...(Array.isArray(f.aliases) ? f.aliases : [])]) {
+        if (names.has(n)) {
+          problems.push(
+            `${file}: the name ${JSON.stringify(n)} answers to two rows (${JSON.stringify(names.get(n))}, ${JSON.stringify(f.sym)})`,
+          );
+        }
+        names.set(n, f.sym);
       }
     }
   }
@@ -244,4 +308,22 @@ export function loadManifests(): VendoredManifest[] {
 /** VENDOR/VERIFY loader: validated manifests, live checkouts required by the caller. */
 export function loadManifestsForVendor(): RealManifest[] {
   return loadRaw();
+}
+
+/** Every real row the dataset carries, as the fields row identity is computed from (bench-schema
+ *  `rowIdentity`/`joinArtifacts`) — read off the manifests alone, no vendored TU and no checkout, so
+ *  a guard that must join an artifact to the CURRENT rows can afford to ask. */
+export function realRowIdentities(): Identifiable[] {
+  return loadRaw().flatMap((man) =>
+    man.functions.map((f) => ({
+      id: `${man.project}:${f.sym}:${man.toolchain}`,
+      project: man.project,
+      sym: f.sym,
+      toolchain: man.toolchain,
+      tier: 'real' as const,
+      addr: f.addr,
+      ...(f.aliases !== undefined ? { aliases: f.aliases } : {}),
+      ...(f.sourceUrl !== undefined ? { sourceUrl: f.sourceUrl } : {}),
+    })),
+  );
 }

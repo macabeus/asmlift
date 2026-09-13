@@ -20,8 +20,70 @@ const base: RealManifest = {
   branch: 'asmlift-benchmark',
   cppIncludes: [],
   headers: [],
-  functions: [{ sym: 'f', features: [], funcC: 'int f(void) { return 1; }' }],
+  functions: [
+    {
+      sym: 'f',
+      addr: '0x08000000',
+      features: [],
+      funcC: 'int f(void) { return 1; }',
+      sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.c#L1-L1',
+    },
+  ],
 };
+
+describe('validateManifest: row identity', () => {
+  const GOOD = base.functions[0].sourceUrl;
+  // `sourceUrl` is taken from an options bag, not a defaulted parameter: a default would swallow
+  // the explicit `undefined` the missing-URL case passes.
+  const fn = (sym: string, addr: unknown, aliases?: string[], over: { sourceUrl?: unknown } = { sourceUrl: GOOD }) =>
+    ({
+      sym,
+      addr,
+      aliases,
+      features: [],
+      funcC: `int ${sym}(void) { return 1; }`,
+      sourceUrl: over.sourceUrl,
+    }) as RealManifest['functions'][number];
+
+  test('a row must cite a commit-pinned permalink into the repo its manifest pins', () => {
+    // `joinArtifacts` keys two rows at one address apart by the repository each cites, and skips
+    // that split when either side cites none — so a row with no sourceUrl would join another
+    // decompilation's row at its address without a word.
+    for (const bad of [undefined, '', 'https://github.com/macabeus/fakeproj/tree/main/src/f.c', 42]) {
+      const p = validateManifest(
+        { ...base, functions: [fn('f', '0x08000000', undefined, { sourceUrl: bad })] },
+        'x.json',
+      );
+      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"sourceUrl" must be a commit-pinned/);
+    }
+    const other = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/f.c#L1-L1';
+    const p = validateManifest(
+      { ...base, functions: [fn('f', '0x08000000', undefined, { sourceUrl: other })] },
+      'x.json',
+    );
+    expect(p.join('\n')).toMatch(/cites Dream-Atelier\/kl-eod-decomp, not this manifest's repo macabeus\/fakeproj/);
+  });
+
+  test('an address must be spelled 0x + 8 lowercase hex, as the symbol map keys it', () => {
+    for (const bad of [undefined, '0800045c', '0x0800045C', '0x800045c', 0x0800045c]) {
+      const p = validateManifest({ ...base, functions: [fn('f', bad)] }, 'x.json');
+      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"addr" must be the ELF address/);
+    }
+  });
+
+  test('two rows of one project at the same address are one function listed twice', () => {
+    const p = validateManifest({ ...base, functions: [fn('f', '0x08000000'), fn('g', '0x08000000')] }, 'x.json');
+    expect(p.join('\n')).toMatch(/shares addr 0x08000000/);
+  });
+
+  test('a name — current or former — may answer to only one row, or a citation of it is ambiguous', () => {
+    const p = validateManifest(
+      { ...base, functions: [fn('ReadU16', '0x08000000', ['sub_0804B270']), fn('sub_0804B270', '0x08000004')] },
+      'x.json',
+    );
+    expect(p.join('\n')).toMatch(/"sub_0804B270" answers to two rows/);
+  });
+});
 
 describe('validateManifest: repo/branch pins', () => {
   test('a well-formed manifest validates', () => {

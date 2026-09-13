@@ -7,7 +7,7 @@
 //
 // Toolchain-free (the dataset sources plus the committed artifact), so CI runs it on a hosted
 // runner with no compilers: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`.
-import { FEATURES } from '@asmlift/bench-schema';
+import { FEATURES, type Identifiable, rowNames } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +21,7 @@ import {
   splitParams,
 } from '../src/cases/authored-facts';
 import { JUDGEMENT_FLOOR, stripLiterals } from '../src/cases/features';
+import { retiredRows } from '../src/cases/retired';
 
 const ALL_SPECS = [...SYNTHETIC, ...SYNTHETIC_CPP];
 
@@ -243,10 +244,14 @@ describe('the dataset cites only benchmark rows that exist', () => {
   const DATASET = join(import.meta.dirname, '..', 'dataset');
   const rows = (
     JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
-      results: { id: string; project: string; sym: string }[];
+      results: Identifiable[];
     }
   ).results;
-  const CITABLE = new Set(rows.flatMap((r) => [`${r.project}:${r.sym}`, r.id]));
+  // a row's id and its former names (`aliases`), each with and without the toolchain
+  const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
+  // rows that no longer exist, citable by the name a dated measurement was taken under — the same
+  // register citations.test.ts reads, and the same rule (dataset/retired-rows.json)
+  const RETIRED = new Set(retiredRows().flatMap((r) => [r.id, r.id.slice(0, r.id.lastIndexOf(':'))]));
   const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
   const CITATION = new RegExp(`\\b(${PROJECTS.join('|')}):[A-Za-z_]\\w*(?::[\\w.]+)?`, 'g');
 
@@ -279,8 +284,8 @@ describe('the dataset cites only benchmark rows that exist', () => {
 
   it.each(found)('dataset/$file:$line cites $cited', ({ cited, file, line }) => {
     expect(
-      CITABLE.has(cited),
-      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed results.json.\n` +
+      CITABLE.has(cited) || RETIRED.has(cited),
+      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed results.json nor a retired row.\n` +
         `  Renamed? Update the citation. Not a benchmark row (a checkout function, a dogfooding\n` +
         `  find)? Write it in prose naming where to look, so the spelling stops promising a row.`,
     ).toBe(true);

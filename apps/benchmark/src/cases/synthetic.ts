@@ -1,5 +1,6 @@
 // Synthetic (Tier A) case provider: flatten (authored spec × assigned toolchains) → Case[].
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
+import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
@@ -47,7 +48,7 @@ export interface SyntheticFilter {
 }
 
 export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
-  const specs = [...SYNTHETIC, ...SYNTHETIC_CPP].filter((s) => !filter.only || s.sym.includes(filter.only));
+  const specs = [...SYNTHETIC, ...SYNTHETIC_CPP].filter((s) => onlySelects(filter.only, s.sym));
   const cases: Case[] = [];
   for (const spec of specs) {
     for (const tcId of spec.toolchains) {

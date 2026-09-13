@@ -1,5 +1,5 @@
 // Comments state which benchmark row guards a mechanism — "removing this gate costs
-// kleod:UpdateFadeEffect its match". Since `benchmark.yml` runs `bench regression`, the named row is
+// <project>:<Sym> its match". Since `benchmark.yml` runs `bench regression`, the named row is
 // what makes CI fail if the mechanism breaks, so the claim's precondition is that the row still
 // exists — and a row's symbol changes whenever a manifest does. This asserts the precondition.
 //
@@ -8,9 +8,12 @@
 //
 // `project:sym` is therefore reserved for rows. A checkout function or a dogfooding find is real
 // evidence but cannot be re-run that way, so it goes in prose naming where to look.
+import { type Identifiable, retiredIdentifiable, retiredKeySet, retirementKeys, rowNames } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+import { retiredRows } from '../src/cases/retired';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -25,13 +28,27 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
  *  not add `dataset` here: it would be a second assertion of one convention. */
 const SCANNED = ['packages/core/src', 'packages/core/test', 'packages/cli/src', 'packages/cli/test', 'docs'];
 
-const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
-  id: string;
-  project: string;
-  sym: string;
-}[];
+const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8'))
+  .results as Identifiable[];
 
-const CITABLE = new Set(rows.flatMap((r) => [`${r.project}:${r.sym}`, r.id]));
+/** Every name a row answers to, with and without its toolchain — its id AND its former names
+ *  (`aliases`), so an upstream rename leaves every citation of the old spelling resolving. */
+const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
+/** Rows that no longer exist, cited by the name they were MEASURED under (dataset/retired-rows.json).
+ *  A dated number keeps its row's old name rather than moving to whatever row now sits at that
+ *  address: another decompilation's source at the same address is a different row, and moving the
+ *  name would attach the number to a row nobody measured. Such a citation guards nothing.
+ *
+ *  WHAT THIS DOES NOT CHECK: that the citation is dated, or that it stops claiming a live guard.
+ *  That is a review rule, not a machine one, and the two machine versions were measured and
+ *  declined (2026-09-13, over packages/, docs/, apps/benchmark/{dataset,test} and .claude/commands):
+ *  requiring a date, `retired`, `kl-eod-decomp`, a PR number or a sha within three lines fails 180
+ *  of the 245 retired-only citations, nearly all of them historical attribution notes; restricting
+ *  that to lines with guard or match language flags 17, at least 6 of them false (selector fixtures,
+ *  a dated `290/404 → 171/387`, a past-tense "did, until"). The present-tense guard claims were
+ *  re-tensed by hand on the swap. Write a new one about a retired row as history, dated. */
+const REGISTER = retiredRows();
+const RETIRED = new Set(REGISTER.flatMap((r) => [r.id, r.id.slice(0, r.id.lastIndexOf(':'))]));
 const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
 /** `project:sym`, optionally `:toolchain`. Matched on every line rather than comments only: a
  *  citation-shaped identifier in code is possible but has no inhabitant in these trees. */
@@ -105,10 +122,30 @@ describe('every cited benchmark row exists', () => {
 
   it.each(found)('$file:$line cites $cited', ({ cited, file, line }) => {
     expect(
-      CITABLE.has(cited),
-      `${file}:${line} cites '${cited}', which is not a row in the committed results.json.\n` +
-        `  Renamed? Update the citation. Not a benchmark row (a checkout function, a dogfooding\n` +
-        `  find)? Write it in prose naming where to look, so the spelling stops promising a row.`,
+      CITABLE.has(cited) || RETIRED.has(cited),
+      `${file}:${line} cites '${cited}', which is not a row in the committed results.json nor a retired row.\n` +
+        `  Renamed upstream? Add the old name to the row's aliases. Not a benchmark row (a checkout\n` +
+        `  function, a dogfooding find)? Write it in prose naming where to look, so the spelling stops\n` +
+        `  promising a row.`,
     ).toBe(true);
+  });
+});
+
+describe('the retired-row register', () => {
+  it('names no row the committed artifact still carries — by identity under its repository, not by id', () => {
+    // A retired entry that is really a live row would excuse that row's disappearance from the
+    // regression gate. Compared by identity and id each qualified by the cited repository
+    // (bench-schema `retirementKeys`), NOT by id: kleod's MultiplyQ8 is a live id of the new
+    // decompilation and a retired row of the old one, and an id-keyed check could only pass by
+    // leaving that retired row out of the register.
+    const live = retiredKeySet(REGISTER);
+    const carried = rows.filter((r) => retirementKeys(r).some((k) => live.has(k))).map((r) => r.id);
+    expect(carried, `dataset/retired-rows.json retires rows results.json still carries: ${carried.join(', ')}`).toEqual(
+      [],
+    );
+  });
+
+  it('keys every entry under a repository, or it would excuse nothing', () => {
+    expect(REGISTER.filter((e) => retirementKeys(retiredIdentifiable(e)).length === 0).map((e) => e.id)).toEqual([]);
   });
 });

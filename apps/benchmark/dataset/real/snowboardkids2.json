@@ -29,6 +29,7 @@
   "functions": [
     {
       "sym": "func_800B0DC0_1DCF60",
+      "addr": "0x800b0dc0",
       "features": [
         "pointer",
         "struct",
@@ -43,6 +44,7 @@
     },
     {
       "sym": "getTableEntryByU16Index",
+      "addr": "0x80019280",
       "features": [
         "struct",
         "array",
@@ -62,6 +64,7 @@
     },
     {
       "sym": "func_80038000_38C00",
+      "addr": "0x80038000",
       "features": [
         "branch",
         "global",
@@ -76,6 +79,7 @@
     },
     {
       "sym": "func_80037FE0_38BE0",
+      "addr": "0x80037fe0",
       "features": [
         "array",
         "global",
@@ -89,6 +93,7 @@
     },
     {
       "sym": "func_80018DC0_199C0",
+      "addr": "0x80018dc0",
       "features": [
         "struct",
         "global",
@@ -107,6 +112,7 @@
     },
     {
       "sym": "func_80021C00_22800",
+      "addr": "0x80021c00",
       "features": [
         "branch",
         "compare"
@@ -124,6 +130,7 @@
     },
     {
       "sym": "func_80021D88_22988",
+      "addr": "0x80021d88",
       "features": [
         "branch"
       ],
@@ -140,6 +147,7 @@
     },
     {
       "sym": "initSteppedMatrixController",
+      "addr": "0x80006ab0",
       "features": [
         "struct",
         "memory",
@@ -158,6 +166,7 @@
     },
     {
       "sym": "GenericTriggerInit",
+      "addr": "0x80018cb0",
       "features": [
         "struct",
         "field",
@@ -176,6 +185,7 @@
     },
     {
       "sym": "func_80035F80_36B80",
+      "addr": "0x80035f80",
       "features": [
         "branch",
         "cast"
@@ -188,6 +198,7 @@
     },
     {
       "sym": "func_80014440_15040",
+      "addr": "0x80014440",
       "features": [
         "global",
         "array"
@@ -205,6 +216,7 @@
     },
     {
       "sym": "func_8002ADB4_2B9B4",
+      "addr": "0x8002adb4",
       "features": [
         "fixed-point",
         "branch",
@@ -217,6 +229,7 @@
     },
     {
       "sym": "func_8002B4B8_2C0B8",
+      "addr": "0x8002b4b8",
       "features": [
         "branch",
         "fixed-point"
@@ -228,6 +241,7 @@
     },
     {
       "sym": "func_8001BD74_1C974",
+      "addr": "0x8001bd74",
       "features": [
         "branch",
         "pointer",
@@ -245,6 +259,7 @@
     },
     {
       "sym": "func_8001BCDC_1C8DC",
+      "addr": "0x8001bcdc",
       "features": [
         "struct",
         "field",
@@ -264,6 +279,7 @@
     },
     {
       "sym": "func_8002BE94_2CA94",
+      "addr": "0x8002be94",
       "features": [
         "struct",
         "array"
@@ -281,6 +297,7 @@
     },
     {
       "sym": "loadAssetGroupResources",
+      "addr": "0x800030b4",
       "features": [
         "struct",
         "array"
@@ -298,6 +315,7 @@
     },
     {
       "sym": "func_800167B0_173B0",
+      "addr": "0x800167b0",
       "features": [
         "struct",
         "field"
@@ -315,6 +333,7 @@
     },
     {
       "sym": "func_8002ACFC_2B8FC",
+      "addr": "0x8002acfc",
       "features": [
         "fixed-point",
         "branch"
@@ -327,6 +346,7 @@
     },
     {
       "sym": "func_8002A390_2AF90",
+      "addr": "0x8002a390",
       "features": [
         "struct",
         "branch"
@@ -339,6 +359,7 @@
     },
     {
       "sym": "func_800154A8_160A8",
+      "addr": "0x800154a8",
       "features": [
         "branch"
       ],
@@ -348,6 +369,7 @@
     },
     {
       "sym": "func_800B4B30_1E1BE0",
+      "addr": "0x800b4b30",
       "features": [
         "branch"
       ],
@@ -358,6 +380,7 @@
     },
     {
       "sym": "func_800B5B7C_1E2C2C",
+      "addr": "0x800b5b7c",
       "features": [
         "struct"
       ],
@@ -368,6 +391,7 @@
     },
     {
       "sym": "func_800B68F4_1E39A4",
+      "addr": "0x800b68f4",
       "features": [
         "struct"
       ],
@@ -378,6 +402,7 @@
     },
     {
       "sym": "func_800B93F0_1E64A0",
+      "addr": "0x800b93f0",
       "features": [
         "branch"
       ],
@@ -388,6 +413,7 @@
     },
     {
       "sym": "func_80028BB0_297B0",
+      "addr": "0x80028bb0",
       "features": [
         "struct"
       ],
@@ -398,6 +424,7 @@
     },
     {
       "sym": "func_80028D90_29990",
+      "addr": "0x80028d90",
       "features": [
         "struct"
       ],
@@ -408,6 +435,7 @@
     },
     {
       "sym": "func_800B7620_1E46D0",
+      "addr": "0x800b7620",
       "features": [
         "struct",
         "branch",
@@ -420,6 +448,7 @@
     },
     {
       "sym": "func_800B7760_1E4810",
+      "addr": "0x800b7760",
       "features": [
         "struct",
         "branch"
@@ -431,6 +460,7 @@
     },
     {
       "sym": "func_800B9C20_1E6CD0",
+      "addr": "0x800b9c20",
       "features": [
         "struct"
       ],
@@ -441,6 +471,7 @@
     },
     {
       "sym": "func_8002A2D0_2AED0",
+      "addr": "0x8002a2d0",
       "features": [
         "struct",
         "branch"
@@ -452,6 +483,7 @@
     },
     {
       "sym": "func_80051C80_52880",
+      "addr": "0x80051c80",
       "features": [
         "branch",
         "array"
@@ -463,6 +495,7 @@
     },
     {
       "sym": "func_8005DF10_5EB10",
+      "addr": "0x8005df10",
       "features": [
         "pointer",
         "array"
@@ -479,6 +512,7 @@
     },
     {
       "sym": "func_8001E104_1ED04",
+      "addr": "0x8001e104",
       "features": [
         "struct",
         "pointer",
@@ -492,6 +526,7 @@
     },
     {
       "sym": "func_8005AE8C_5BA8C",
+      "addr": "0x8005ae8c",
       "features": [
         "int64",
         "memory",
@@ -509,6 +544,7 @@
     },
     {
       "sym": "func_800B2C18_A2AC8",
+      "addr": "0x800b2c18",
       "features": [
         "struct",
         "pointer",
@@ -521,6 +557,7 @@
     },
     {
       "sym": "func_8005AB58_5B758",
+      "addr": "0x8005ab58",
       "features": [
         "int64",
         "memory",
@@ -539,6 +576,7 @@
     },
     {
       "sym": "func_800B3F2C_A3DDC",
+      "addr": "0x800b3f2c",
       "features": [
         "struct",
         "pointer",
@@ -551,6 +589,7 @@
     },
     {
       "sym": "func_800B3784_A3634",
+      "addr": "0x800b3784",
       "features": [
         "struct",
         "pointer",
@@ -568,6 +607,7 @@
     },
     {
       "sym": "func_80038090_38C90",
+      "addr": "0x80038090",
       "features": [
         "struct",
         "pointer"
@@ -584,6 +624,7 @@
     },
     {
       "sym": "func_8006FEBC_70ABC",
+      "addr": "0x8006febc",
       "features": [
         "struct",
         "field",
@@ -609,6 +650,7 @@
     },
     {
       "sym": "unlockAllContent",
+      "addr": "0x80016070",
       "features": [
         "array",
         "variable-index",

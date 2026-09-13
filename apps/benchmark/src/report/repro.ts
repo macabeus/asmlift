@@ -112,8 +112,8 @@ export async function repro(
   writeFileSync(path, script);
 
   // THE TOOL'S OWN published figure. Printing `row.asmlift` under `--tool m2c` states a number this
-  // script cannot produce, next to a script that produces a different one: on `kleod:StrCpy:agbcc`
-  // asmlift is 5/8 and m2c is 6/7, and the reader compares the C in out.c against the wrong one.
+  // script cannot produce, next to a script that produces a different one: on any row the two tools
+  // score differently, the reader compares the C in out.c against the wrong one.
   const published = tool === 'm2c' ? row.m2c : row.asmlift;
   log(
     `repro: ${row.id} — ${tool} ${published.outcome} ${published.score ?? '-'}/${published.maxScore ?? '-'} as published`,

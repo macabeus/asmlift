@@ -13,7 +13,7 @@
 // has no benchmark row, so it is measured outside the harness". So every way of finding no row
 // here is a message instead: a missing ref throws out of `readCommitted`, and a symbol with no row
 // exits 1 naming both causes.
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { type BenchOutput, type FunctionResult, rowNames } from '@asmlift/bench-schema';
 import { execFileSync } from 'node:child_process';
 
 import { REPO_ROOT } from '../config';
@@ -28,9 +28,11 @@ import { RESULTS_PATH, readCommitted } from './committed';
  *  ROW ID instead — ids are `project:sym:toolchain`, both briefs teach them, and this command
  *  prints them, so pasting back what it printed has to work rather than silently select nothing. */
 export function selectRows(results: readonly FunctionResult[], needle: string): FunctionResult[] {
+  // A row answers to its former names too (`aliases`), so a brief or a doc written before an
+  // upstream rename still selects the row it meant.
   return needle.includes(':')
-    ? results.filter((r) => r.id.includes(needle))
-    : results.filter((r) => r.sym.includes(needle));
+    ? results.filter((r) => rowNames(r).some((n) => n.includes(needle)))
+    : results.filter((r) => [r.sym, ...(r.aliases ?? [])].some((n) => n.includes(needle)));
 }
 
 const score = (s: number | null | undefined, m: number | null | undefined): string =>

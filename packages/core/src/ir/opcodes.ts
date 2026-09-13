@@ -254,8 +254,9 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  is raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
  *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short-circuit
  *  re-guards it. Adding the two reads
- *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
- *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible.
+ *  here cost three byte-matches (kleod:UpdateHUDCounterDisplay, retired 2026-09-13 with its source,
+ *  plus synthetic:breakloop and synthetic:strcmp1), so the argument was load-bearing rather than
+ *  merely plausible. Not re-measured since the kleod row's retirement.
  *
  *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
  *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is

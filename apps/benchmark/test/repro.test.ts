@@ -46,7 +46,7 @@ function run(needle: string, opts: Parameters<typeof repro>[1] = {}) {
 
 describe('bench repro — the ways it can find no row', () => {
   test('a mistyped id exits 1 and names BOTH causes, rather than printing nothing', async () => {
-    const r = await run('kleod:StrCpyy:agbcc', { out: scratch() });
+    const r = await run('kleod:sub_0803E8CCX:agbcc', { out: scratch() });
     expect(r.code).toBe(1);
     expect(r.err).toContain('no row for');
     // both causes: a typo, and a target that has no row because it is measured outside the harness
@@ -63,14 +63,14 @@ describe('bench repro — the ways it can find no row', () => {
   });
 
   test('an unknown --tool exits 2 rather than silently writing the asmlift script', async () => {
-    const r = await run('kleod:StrCpy:agbcc', { out: scratch(), tool: 'asmlfit' });
+    const r = await run('kleod:sub_0803E8CC:agbcc', { out: scratch(), tool: 'asmlfit' });
     expect(r.code).toBe(2);
     expect(r.err).toContain('unknown --tool');
   });
 });
 
 describe('bench repro — the script it hands over', () => {
-  const id = 'kleod:StrCpy:agbcc';
+  const id = 'kleod:sub_0803E8CC:agbcc';
   const fn = results.find((r) => r.id === id)!;
 
   test("carries the row's own input asm and the built-bin invocation, with no placeholder left", async () => {
@@ -79,7 +79,7 @@ describe('bench repro — the script it hands over', () => {
     expect(r.code).toBe(0);
     const script = readFileSync(join(dir, 'repro-asmlift.sh'), 'utf8');
     expect(script).toContain(fn.targetAsm.trimEnd());
-    expect(script).toContain('bench target kleod:StrCpy:agbcc');
+    expect(script).toContain('bench target kleod:sub_0803E8CC:agbcc');
     expect(script).toContain('--score-against target.o');
     // materialize() filled the placeholders — an unfilled one is a script that cd's to /path/to
     expect(script).not.toContain("ASMLIFT_PATH='/path/to/asmlift'");
@@ -100,7 +100,7 @@ describe('bench repro — the script it hands over', () => {
   });
 
   test("--tool m2c states M2C's published figure, not asmlift's", async () => {
-    // These differ on this row — asmlift 5/8, m2c 6/7 — so printing the asmlift one beside the
+    // These differ on this row — asmlift 8/26, m2c 0/24 — so printing the asmlift one beside the
     // m2c script hands the reader the wrong thing to compare out.c against.
     const r = await run(id, { out: scratch(), tool: 'm2c' });
     expect(fn.m2c.score).not.toBe(fn.asmlift.score);
@@ -117,14 +117,16 @@ describe('bench repro — the script it hands over', () => {
     // Asked of git, not of a regex over .gitignore: `codeDirtyPaths` cannot answer it, because
     // `git status --porcelain` never lists an ignored path in the first place — which is exactly
     // why the fix is an ignored directory and not a smarter predicate.
-    const rel = relative(REPO_ROOT, reproDirFor('kleod:StrCpy:agbcc'));
+    const rel = relative(REPO_ROOT, reproDirFor('kleod:sub_0803E8CC:agbcc'));
     expect(rel.startsWith(LOCAL_SCRATCH_DIR)).toBe(true);
     const check = spawnSync('git', ['check-ignore', '-q', join(rel, 'out.c')], { cwd: REPO_ROOT });
     expect(check.status, `git check-ignore ${join(rel, 'out.c')}`).toBe(0);
   });
 
   test('the row id becomes ONE directory name — a `:` is not a path separator to fall through', () => {
-    expect(reproDirFor('kleod:StrCpy:agbcc').endsWith(join('.local', 'repro', 'kleod_StrCpy_agbcc'))).toBe(true);
+    expect(reproDirFor('kleod:sub_0803E8CC:agbcc').endsWith(join('.local', 'repro', 'kleod_sub_0803E8CC_agbcc'))).toBe(
+      true,
+    );
     // an id is harness-generated, but this composes a filesystem path out of one, so a separator
     // or a traversal in it must land in the name and not in the path
     expect(relative(join(REPO_ROOT, '.local', 'repro'), reproDirFor('a/../b:c:d'))).toBe('a_.._b_c_d');

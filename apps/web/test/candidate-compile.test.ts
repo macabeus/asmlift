@@ -105,16 +105,21 @@ describe('the one stderr line the UI shows', () => {
   });
 });
 
-describe('the reported row ranks: kleod:UpdateWorldMapNodeTile:agbcc, opened in the playground', () => {
+// THE ROW MOVED, THE FUNCTION DID NOT. The report named kl-eod-decomp's `UpdateWorldMapNodeTile`; since
+// the 2026-09-13 kleod swap the row at that ROM address is testyourmine/kleod's `WorldMapScreenDrawPath`.
+// Re-pointed by measurement, not by address: `pnpm bench target kleod:WorldMapScreenDrawPath:agbcc`
+// relocates the same three pool globals the report names (`gBgTilemapBufs`, `gUnk_08116748`,
+// `gUnk_08116880`, twice each), so the enumeration below still exercises the reported mechanism.
+describe('the reported function ranks: kleod:WorldMapScreenDrawPath:agbcc, opened in the playground', () => {
   const results = JSON.parse(
     readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
   ) as { results: { id: string }[] };
-  const row = results.results.find((r) => r.id === 'kleod:UpdateWorldMapNodeTile:agbcc');
+  const row = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
 
   test('the row the bug report names is in the shipped dataset', () => {
     // Pinned by id inside a file every bench round regenerates: without this, a dataset change
     // turns the acceptance test into an opaque TypeError instead of a sentence.
-    expect(row, 'kleod:UpdateWorldMapNodeTile:agbcc present in the shipped results.json').toBeTruthy();
+    expect(row, 'kleod:WorldMapScreenDrawPath:agbcc present in the shipped results.json').toBeTruthy();
   });
 
   test('every candidate compiles in a TU that declares the globals its source spells', () => {
@@ -123,7 +128,7 @@ describe('the reported row ranks: kleod:UpdateWorldMapNodeTile:agbcc, opened in 
     expect(canOpenInPlayground(row as never)).toBe(true);
     const share = playgroundShare(row as never)!;
     expect(share.target).toBe('agbcc'); // ranking is gated to the agbcc target (Playground.tsx)
-    expect(share.name).toBe('UpdateWorldMapNodeTile'); // the row's symbol, carried by the hand-off
+    expect(share.name).toBe('WorldMapScreenDrawPath'); // the row's symbol, carried by the hand-off
     // `backend: cBackend` exactly as the scorer passes it, so the hand-off this test claims to
     // reproduce is the scorer's by construction rather than by today's default.
     const cands = enumerateCandidates(share.name!, share.asm, ARMV4T_AGBCC, { backend: cBackend });

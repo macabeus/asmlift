@@ -33,10 +33,11 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 246 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
-project context verbatim (the row publishes the file as `ctxRef`); six kleod rows instead carry a
+context**: all 252 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
+project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry a
 hand-written `ctx` naming callees the project's headers do not declare, held symmetric with the
-`proto` hints asmlift gets by `test/authored-facts.test.ts`. Synthetic rows carry the prototype in
+`proto` hints asmlift gets by `test/authored-facts.test.ts`; none does since the 2026-09-13 kleod
+swap (six kleod rows did before it). Synthetic rows carry the prototype in
 the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
 what that translation unit preprocesses to, **never an invented type** (where a project types a
 global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
@@ -104,7 +105,7 @@ moves no asmlift row.
 _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
-   bulk (2179 of 41016 entries; af 26 of 61860, kleod 25, sa3 8, marioparty3 7, snowboardkids2 5).
+   bulk (2179 of 41016 entries; af 26 of 61860, kleod 7 of 676, sa3 8, marioparty3 7, snowboardkids2 5).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
    `.state/.frameCounter/.type/.datap` in the context.
@@ -114,12 +115,12 @@ _Favouring m2c._
 3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
    and m2c can READ it, so where it declares a struct type for a project static table
    (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
-4. **`prependC` forward declarations.** On 8 rows (7 kleod, `pokeemerald:AcroBikeHandleInputTurning`)
-   the declaration the reference needs to compile standalone IS the row's own signature, and it is
-   the only declaration of it in that context — the one place a signature fact still reaches m2c
-   and not asmlift. Measured by deleting the line and re-running m2c: 3 of the 8 change output
-   (`ConfigureEntityBehavior`, `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none is a
-   match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
+4. **`prependC` forward declarations.** On 1 row (`pokeemerald:AcroBikeHandleInputTurning`; 8 before
+   the 2026-09-13 kleod swap, 7 of them kleod) the declaration the reference needs to compile
+   standalone IS the row's own signature, and it is the only declaration of it in that context — the
+   one place a signature fact still reaches m2c and not asmlift. Measured before the swap by deleting
+   the line and re-running m2c: 3 of the 8 changed output (`ConfigureEntityBehavior`,
+   `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none a match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
    scorer also compiles against. Named by `test/authored-facts.test.ts`.
 
 _Favouring asmlift._
@@ -331,14 +332,64 @@ Host prerequisites (macOS; verified empirically):
 
 - Xcode CLT (`/usr/bin/cc` — host tools build with `/usr/bin` ahead of homebrew, several
   projects' host tools miscompile under homebrew gcc), plus homebrew `gmake`, `wget`, `libpng`
-- an `arm-none-eabi` toolchain on PATH (GBA projects: pokeemerald, sa3, kleod)
-- python >= 3.11 first on PATH for kleod's `setup.sh`; any python3 for the others
+- an `arm-none-eabi` toolchain on PATH (GBA projects: pokeemerald, sa3, kleod). kleod builds
+  its ROM through `arm-none-eabi-cpp` as well: its headers act on `__APPLE__`, which every
+  host preprocessor here defines
+- any python3
 - big-endian `mips-linux-gnu` binutils under `/opt/cross` (af), and Rosetta
   (`softwareupdate --install-rosetta` — af's IDO recomp and marioparty3's KMC gcc are x86_64)
 - Docker (snowboardkids2 builds inside a linux/amd64 container; the `asmlift-elf` DWARF
   sidecar targets also fall back to Docker when no host `mips-linux-gnu-gcc` exists)
 - baseroms: setup copies them from the sibling user checkouts when found; otherwise place them
   manually (the status table names the missing file and destination)
+
+### Re-pinning or swapping a project
+
+The manifest is data a person regenerates, so the recipe is written down here rather than left in
+the round that first ran it.
+
+- **Identity is the address, within one decompilation.** `addr` is read off the project's linked ELF
+  (`readelf -sW`/`nm`, Thumb bit clear on agbcc) and `test/real-manifests.test.ts` holds it equal to
+  the committed `tu/<project>/symbols.json.gz`. Two rows at one address that cite different
+  repositories are different rows (bench-schema `joinArtifacts`): a source swap is removed + added.
+  The repository is read off `sourceUrl`, which the manifest validator requires on every real row
+  and requires to cite the manifest's own `repo`. It is the FORK that is cited, so moving a fork to
+  another owner reads as every row removed and added, too.
+- **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
+  identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
+  the TU file names are keyed by `sym`, so the alias table alone does not make a rename. A function
+  is also named by its CALLERS: grep every row's `funcC`, `prependC` and `proto` in the project for
+  the old name (kleod's `sub_0804B254` appears in three other rows' `funcC` and `prependC`), and
+  let `bench vendor` rewrite the vendored contexts that declare it. Every selector (`bench fan`,
+  `bench run --only`, `bench sweep --only`, `bench target`) still answers to the old name through
+  `aliases`.
+- **A source swap retires rows.** List EVERY removed row in `dataset/retired-rows.json`, with the
+  `addr` and `sourceUrl` it was measured under — including rows whose id the new decompilation
+  reuses (kleod's `MultiplyQ8`): the register is keyed by identity and id qualified by the cited
+  repository, so such an entry does not collide with the live row. `bench regression` and
+  `bench diff` then print those rows `retired`, apart from `missing`/`removed`, so a row another
+  project silently lost still fails the gate. Every dated measurement of a removed row keeps citing
+  it by the name it was measured under. Never move such a citation to the row now at that address:
+  its fan, outcome and cost were measured on another author's source, context and symbol map. Only a
+  claim RE-MEASURED on the new row may name it. The citation gates accept a retired name but cannot
+  tell a dated note from a stale "this row guards …" (see `test/citations.test.ts` for why that is
+  a review rule): re-tense every such claim by hand, and a citation of a REUSED id still reads as the
+  live row, so date it in prose.
+- **Wiring a row from its own TU** (what kleod's 2026-09-13 rows used): `funcC` is the definition's
+  verbatim span at the pinned commit; `prependC` is that TU's file-scope declarations minus the row's
+  own prototype, plus a prototype for each same-TU callee no header declares; `headers` is the union
+  of the TUs' `#include`s, in the order committed — kleod's was assembled by hand from an include
+  census and is not a derived order, so the fidelity check below is what vouches for it; `proto`
+  gives `returnsVoid` exactly where the return type is `void`; tags are the judgement tags that pass
+  `JUDGEMENT_FLOOR` on the new body. Then check fidelity the harness's way: every row, compiled
+  standalone, equals the ROM function bytes (relocations masked).
+- **Pins.** A fork branch is the upstream commit plus one integration commit. kleod's is
+  `macabeus/kleod@6f149e3` on upstream `testyourmine/kleod@64a83ad`; the upstream sha is otherwise
+  only in the fork's README.
+- **Vendoring preprocesses with the host `cpp-14`** (Homebrew GCC on the machine that vendored kleod),
+  not the project's toolchain. Checked on kleod's 42 TUs and 13 contexts: 0 `__APPLE__`/`__DATA,`
+  hits. A future row whose TU defines `EWRAM_DATA`/`INCBIN` data can pick those up; grep the blobs
+  after vendoring.
 
 ## Harness layout (`src/`)
 

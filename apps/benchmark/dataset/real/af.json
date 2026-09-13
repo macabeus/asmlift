@@ -14,6 +14,7 @@
   "functions": [
     {
       "sym": "gfxopen",
+      "addr": "0x800d3860",
       "features": [
         "pointer",
         "arithmetic"
@@ -25,6 +26,7 @@
     },
     {
       "sym": "ListAlloc_Init",
+      "addr": "0x800d6390",
       "features": [
         "struct",
         "field",
@@ -37,6 +39,7 @@
     },
     {
       "sym": "mem_copy",
+      "addr": "0x800998c0",
       "features": [
         "pointer",
         "memory"
@@ -53,6 +56,7 @@
     },
     {
       "sym": "mem_clear",
+      "addr": "0x8009992c",
       "features": [
         "pointer",
         "memory"
@@ -69,6 +73,7 @@
     },
     {
       "sym": "mem_cmp",
+      "addr": "0x80099980",
       "features": [
         "pointer",
         "branch"
@@ -80,6 +85,7 @@
     },
     {
       "sym": "chase_s",
+      "addr": "0x80099b90",
       "features": [
         "branch",
         "arithmetic",
@@ -92,6 +98,7 @@
     },
     {
       "sym": "chase_s2",
+      "addr": "0x80099d14",
       "features": [
         "arithmetic",
         "pointer",
@@ -104,6 +111,7 @@
     },
     {
       "sym": "lbRk_IsLeapMonth",
+      "addr": "0x800d5f28",
       "features": [
         "branch"
       ],
@@ -114,6 +122,7 @@
     },
     {
       "sym": "lbRk_SeirekiDays",
+      "addr": "0x800d5e70",
       "features": [
         "array",
         "arithmetic",
@@ -126,6 +135,7 @@
     },
     {
       "sym": "lbRk_IsKyuurekiLeapYear",
+      "addr": "0x800d5efc",
       "features": [
         "array",
         "branch",
@@ -138,6 +148,7 @@
     },
     {
       "sym": "chase_s3",
+      "addr": "0x80099d74",
       "features": [
         "branch",
         "arithmetic",
@@ -150,6 +161,7 @@
     },
     {
       "sym": "get_percent",
+      "addr": "0x8009b160",
       "features": [
         "cast",
         "branch",
@@ -162,6 +174,7 @@
     },
     {
       "sym": "check_percent_abs",
+      "addr": "0x8009ae60",
       "features": [
         "float",
         "branch"
@@ -173,6 +186,7 @@
     },
     {
       "sym": "add_calc2",
+      "addr": "0x8009a6b8",
       "features": [
         "float",
         "branch",
@@ -190,6 +204,7 @@
     },
     {
       "sym": "add_calc0",
+      "addr": "0x8009a728",
       "features": [
         "float",
         "branch",
@@ -207,6 +222,7 @@
     },
     {
       "sym": "adds",
+      "addr": "0x8009aba8",
       "features": [
         "arithmetic",
         "branch",
@@ -224,6 +240,7 @@
     },
     {
       "sym": "add_calc_short_angle3",
+      "addr": "0x8009aad8",
       "features": [
         "cast",
         "arithmetic",
@@ -236,6 +253,7 @@
     },
     {
       "sym": "xyz_t_sub",
+      "addr": "0x8009a140",
       "features": [
         "struct",
         "field",
@@ -253,6 +271,7 @@
     },
     {
       "sym": "rgba_t_move",
+      "addr": "0x8009ac4c",
       "features": [
         "struct",
         "field",
@@ -270,6 +289,7 @@
     },
     {
       "sym": "ValueSet__s_xyz",
+      "addr": "0x8009a54c",
       "features": [
         "struct",
         "bitfield",
@@ -287,6 +307,7 @@
     },
     {
       "sym": "never_zero",
+      "addr": "0x800b0154",
       "features": [
         "float",
         "branch",
@@ -299,6 +320,7 @@
     },
     {
       "sym": "limiter",
+      "addr": "0x800b01bc",
       "features": [
         "float",
         "branch",
@@ -311,6 +333,7 @@
     },
     {
       "sym": "mRmTp_ItemNo2FtrSize",
+      "addr": "0x800be69c",
       "features": [
         "array",
         "arithmetic",
@@ -323,6 +346,7 @@
     },
     {
       "sym": "chase_angle",
+      "addr": "0x80099ad4",
       "features": [
         "float",
         "branch",
@@ -335,6 +359,7 @@
     },
     {
       "sym": "chase_f",
+      "addr": "0x80099c18",
       "features": [
         "float",
         "branch"
@@ -346,6 +371,7 @@
     },
     {
       "sym": "chase_f3",
+      "addr": "0x80099e88",
       "features": [
         "float",
         "branch"
@@ -357,6 +383,7 @@
     },
     {
       "sym": "inter_float",
+      "addr": "0x80099f30",
       "features": [
         "float",
         "branch"
@@ -368,6 +395,7 @@
     },
     {
       "sym": "xyz_t_add",
+      "addr": "0x8009a108",
       "features": [
         "struct"
       ],
@@ -378,6 +406,7 @@
     },
     {
       "sym": "xyz_t_mult_v",
+      "addr": "0x8009a1d4",
       "features": [
         "struct",
         "float"
@@ -389,6 +418,7 @@
     },
     {
       "sym": "search_position_angleY",
+      "addr": "0x8009a2f8",
       "features": [
         "struct",
         "float"
@@ -400,6 +430,7 @@
     },
     {
       "sym": "xyz_t_sub_ss",
+      "addr": "0x8009a178",
       "features": [
         "struct"
       ],
@@ -410,6 +441,7 @@
     },
     {
       "sym": "spolar2world",
+      "addr": "0x800b02d4",
       "features": [
         "struct",
         "float"
@@ -421,6 +453,7 @@
     },
     {
       "sym": "Skin_Matrix_MulMatrix",
+      "addr": "0x800c7018",
       "features": [
         "float",
         "matrix",
@@ -438,6 +471,7 @@
     },
     {
       "sym": "_MtxF_to_Mtx",
+      "addr": "0x800e1180",
       "features": [
         "union",
         "array",
@@ -452,6 +486,7 @@
     },
     {
       "sym": "suMtxMakeSRT",
+      "addr": "0x800e2318",
       "features": [
         "float",
         "array",
@@ -469,6 +504,7 @@
     },
     {
       "sym": "sAdo_Get_KokeruLabel",
+      "addr": "0x800d2438",
       "features": [
         "branch"
       ],
@@ -479,6 +515,7 @@
     },
     {
       "sym": "add_calc_a",
+      "addr": "0x8009a77c",
       "features": [
         "float",
         "branch",
@@ -492,6 +529,7 @@
     },
     {
       "sym": "get_percent_forAccelBrake",
+      "addr": "0x8009af38",
       "features": [
         "float",
         "branch",
@@ -504,6 +542,7 @@
     },
     {
       "sym": "Skin_Matrix_SetQuaternion",
+      "addr": "0x800c80b0",
       "features": [
         "float",
         "matrix",
@@ -521,6 +560,7 @@
     },
     {
       "sym": "atans_table",
+      "addr": "0x800e0008",
       "features": [
         "float",
         "branch"
@@ -532,6 +572,7 @@
     },
     {
       "sym": "mPl_SceneNo2SoundRoomType",
+      "addr": "0x80804240",
       "features": [
         "switch-arms",
         "branch"
@@ -552,6 +593,7 @@
     },
     {
       "sym": "getScissorView",
+      "addr": "0x800cab64",
       "features": [
         "struct",
         "field",

@@ -22,7 +22,7 @@
 // The line shapes are deliberately the CLI's (`asmlift: [score] …`, `[dropped]`, `[withheld]`,
 // `[ranked]`), so docs/ranked-repro.md's comparison recipe — `grep -F '[score]'` over two runs —
 // works across the two commands without a second recipe to keep in step.
-import type { BenchOutput } from '@asmlift/bench-schema';
+import { type BenchOutput, type Identifiable, joinArtifacts, resolveRow, selectByRef } from '@asmlift/bench-schema';
 import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
@@ -152,6 +152,10 @@ export function fanDiffLine(
   now: number | undefined,
   base: string,
   committed: BenchOutput | { error: string },
+  /** the CURRENT row, joined to the base artifact the way every gate joins two artifacts
+   *  (bench-schema `joinArtifacts`): a row renamed since `base` is still found at its address, and a
+   *  row of ANOTHER decompilation at that address is not — its fan was never this row's. */
+  row?: Identifiable,
 ): string {
   // What THIS run has to offer, as a clause, because each sentence below has to end with it and
   // "this run enumerates undefined" is the kind of line that gets pasted into a PR body.
@@ -160,7 +164,11 @@ export function fanDiffLine(
   if ('error' in committed) {
     return `asmlift: [fan-diff] cannot read the artifact at ${base}: ${committed.error.split('\n')[0]}`;
   }
-  const was = committed.results.find((r) => r.id === rowId);
+  const join = row === undefined ? undefined : joinArtifacts(committed.results, [row]);
+  const was =
+    row === undefined || join === undefined
+      ? resolveRow(committed.results, rowId)
+      : committed.results.find((r) => join.baseKey(r) === join.headKey(row));
   if (was === undefined) {
     return (
       `asmlift: [fan-diff] ${rowId} is not in the artifact at ${base} — this row was added since, so ` +
@@ -348,8 +356,9 @@ function baseArtifact(base: string): BenchOutput | { error: string } {
  *  command that silently picks one of four toolchains for a symbol answers a question nobody
  *  asked. */
 export function selectCases(cases: Case[], query: string): Case[] {
-  const exact = cases.filter((c) => c.id === query);
-  return exact.length > 0 ? exact : cases.filter((c) => c.id.includes(query));
+  // bench-schema `selectByRef`: the same exact-then-substring rule over every name the row has had,
+  // so a row renamed upstream is still selected by the name a brief typed.
+  return selectByRef(cases, query);
 }
 
 /** One candidate as the CLI spells it — through the CLI's OWN renderer, denominator included.
@@ -852,7 +861,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     if (o.base === undefined || baseline === undefined) {
       return;
     }
-    console.log(fanDiffLine(c.id, n, o.base, baseline));
+    console.log(fanDiffLine(c.id, n, o.base, baseline, { ...c, toolchain: c.toolchain.id }));
     if (!stamped) {
       stamped = true;
       const stale = fanBaseStaleNote(o.base, commitsSinceArtifact(o.base));

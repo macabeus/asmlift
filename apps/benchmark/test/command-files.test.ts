@@ -58,6 +58,7 @@
 //   - Outside `.claude/commands/**` the rule is still "dated or deferred", and a date in a dated
 //     LOG is not checked for freshness — a historical incident is not a stale price, and no
 //     measured threshold separates them.
+import { type Identifiable, resolveRow } from '@asmlift/bench-schema';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -335,27 +336,45 @@ describe('the unmatchable register is falsified by the artifact', () => {
         'moved, and scanning the rest of the page would treat the near-miss table as closed rows',
     ).toBeGreaterThanOrEqual(0);
     const to = lines.findIndex((l, i) => i > from && l.startsWith('## '));
-    return lines
-      .slice(from + 1, to === -1 ? lines.length : to)
-      .map((l) => l.match(ROW_ID)?.[1])
-      .filter((id): id is string => Boolean(id));
+    // EVERY table line past the header and separator must parse as a row. Filtering the
+    // unparseable ones out made a malformed entry invisible: measured with the table otherwise
+    // empty, `| af:gfxopen:ido7.1 | stop-here | nonmatch | … |` (the id without backticks, a row
+    // that MATCHES) passed this gate, because it parsed to no id and the count check below was
+    // satisfied by the page's retired entry alone.
+    const table = lines.slice(from + 1, to === -1 ? lines.length : to).filter((l) => l.trimStart().startsWith('|'));
+    const entries = table.filter((l, i) => !(i === 0 || /^\|\s*:?-{3,}/.test(l.trim())));
+    const malformed = entries.filter((l) => !ROW_ID.test(l));
+    expect(
+      malformed,
+      `${REGISTER} has register lines this gate cannot read — a row id must be the first cell, in backticks`,
+    ).toEqual([]);
+    return entries.map((l) => l.match(ROW_ID)![1]);
   };
 
   it('every row it closes is still a nonmatch in results.json', () => {
     const ids = registerRows();
+    // THE PAGE HAS TO STILL PARSE, and the register alone can no longer prove it: its only entry's row
+    // was retired with the project source it came from (2026-09-13) and the table is empty. So the
+    // count asserted is register rows PLUS retired entries (`## Retired: \`Sym\` (project)`), and
+    // each retired entry is itself checked below — it claims its row is gone, which the artifact
+    // can falsify. This count alone does NOT prove the table parses (the retired entry satisfies it
+    // whatever the table holds); `registerRows` fails on any table line it cannot read.
+    const retired = [...readFileSync(REGISTER, 'utf8').matchAll(/^## Retired: `([\w.]+)` \((\w+)\)$/gm)].map(
+      (m) => `${m[2]}:${m[1]}`,
+    );
     expect(
-      ids.length,
-      `no row parsed out of ${REGISTER}'s table — either the register is empty (delete this gate) or ` +
-        'its table shape moved and this check went blind',
+      ids.length + retired.length,
+      `neither a register row nor a retired entry parsed out of ${REGISTER} — either the page holds no ` +
+        'entry at all (delete this gate) or its shape moved and this check went blind',
     ).toBeGreaterThan(0);
 
-    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as {
-      id: string;
+    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as (Identifiable & {
       asmlift?: { outcome?: string };
-    }[];
+    })[];
     const falsified: string[] = [];
     for (const id of ids) {
-      const row = artifact.find((r) => r.id === id);
+      // resolved as every row reference is — a row renamed upstream still answers to the id written here
+      const row = resolveRow(artifact, id);
       // `citations.test.ts` also resolves this id, and this assertion is KEPT anyway rather than
       // deferred to it: an id that stops resolving leaves `row?.asmlift?.outcome` undefined, which
       // is not `'match'`, so without this line the check below passes over an empty set and this
@@ -372,6 +391,11 @@ describe('the unmatchable register is falsified by the artifact', () => {
       `the register calls these rows unmatchable and the artifact says asmlift matched them. An entry ` +
         `is falsified by one honest spelling reaching the target bytes, and a published match IS one: ` +
         `delete the entry, do not annotate it. ${falsified.join(', ')}`,
+    ).toEqual([]);
+    const stillLive = retired.filter((ref) => resolveRow(artifact, ref) !== undefined);
+    expect(
+      stillLive,
+      `${REGISTER} retires these rows and the committed results.json still carries them: ${stillLive.join(', ')}`,
     ).toEqual([]);
   });
 });
@@ -526,13 +550,18 @@ describe('docs/bench-cost.md', () => {
         return r.tier === tier && typeof r.asmlift?.rankSeconds === 'number';
       });
     const sum = (rows: { asmlift: { rankSeconds: number } }[]) => rows.reduce((a, r) => a + r.asmlift.rankSeconds, 0);
-    const row = (id: string) => artifact.results.find((r: { id: string }) => r.id === id);
+    type CostRow = Identifiable & { asmlift: { rankSeconds: number; candidateCount: number } };
+    const row = (id: string): CostRow => {
+      const r = resolveRow(artifact.results as CostRow[], id);
+      expect(r, `docs/bench-cost.md §3 names ${id}, which is not a row of the artifact`).toBeDefined();
+      return r!;
+    };
     const group = (n: number) => Math.round(n).toLocaleString('en-US');
 
     const real = ranked('real');
     const synthetic = ranked('synthetic');
-    const piue = row('kleod:ProcessInputAndUpdateEntities:agbcc');
-    const ccg = row('kleod:CountCollectedGems:agbcc');
+    const piue = row('kleod:PauseMenuScreenHandler:agbcc');
+    const ccg = row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc');
 
     const expected = [
       `${group(sum(real))} s over ${real.length}`,
