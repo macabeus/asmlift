@@ -20,18 +20,49 @@ const base: RealManifest = {
   branch: 'asmlift-benchmark',
   cppIncludes: [],
   headers: [],
-  functions: [{ sym: 'f', addr: '0x08000000', features: [], funcC: 'int f(void) { return 1; }' }],
+  functions: [
+    {
+      sym: 'f',
+      addr: '0x08000000',
+      features: [],
+      funcC: 'int f(void) { return 1; }',
+      sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.c#L1-L1',
+    },
+  ],
 };
 
 describe('validateManifest: row identity', () => {
-  const fn = (sym: string, addr: unknown, aliases?: string[]) =>
+  const GOOD = base.functions[0].sourceUrl;
+  // `sourceUrl` is taken from an options bag, not a defaulted parameter: a default would swallow
+  // the explicit `undefined` the missing-URL case passes.
+  const fn = (sym: string, addr: unknown, aliases?: string[], over: { sourceUrl?: unknown } = { sourceUrl: GOOD }) =>
     ({
       sym,
       addr,
       aliases,
       features: [],
       funcC: `int ${sym}(void) { return 1; }`,
+      sourceUrl: over.sourceUrl,
     }) as RealManifest['functions'][number];
+
+  test('a row must cite a commit-pinned permalink into the repo its manifest pins', () => {
+    // `joinArtifacts` keys two rows at one address apart by the repository each cites, and skips
+    // that split when either side cites none — so a row with no sourceUrl would join another
+    // decompilation's row at its address without a word.
+    for (const bad of [undefined, '', 'https://github.com/macabeus/fakeproj/tree/main/src/f.c', 42]) {
+      const p = validateManifest(
+        { ...base, functions: [fn('f', '0x08000000', undefined, { sourceUrl: bad })] },
+        'x.json',
+      );
+      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"sourceUrl" must be a commit-pinned/);
+    }
+    const other = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/f.c#L1-L1';
+    const p = validateManifest(
+      { ...base, functions: [fn('f', '0x08000000', undefined, { sourceUrl: other })] },
+      'x.json',
+    );
+    expect(p.join('\n')).toMatch(/cites Dream-Atelier\/kl-eod-decomp, not this manifest's repo macabeus\/fakeproj/);
+  });
 
   test('an address must be spelled 0x + 8 lowercase hex, as the symbol map keys it', () => {
     for (const bad of [undefined, '0800045c', '0x0800045C', '0x800045c', 0x0800045c]) {

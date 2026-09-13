@@ -191,6 +191,23 @@ export function validateManifest(m: unknown, file: string): string[] {
       } else {
         addrs.set(f.addr, f.sym);
       }
+      // the second half of identity: WHOSE source sits at that address. `joinArtifacts` keeps two
+      // rows that meet at an address apart only when both cite a repository, so a row without a
+      // `sourceUrl` would join another decompilation's row there silently. Required, and required
+      // to cite the repository this manifest pins — the fork `bench setup` clones.
+      const cited =
+        typeof f.sourceUrl === 'string'
+          ? /^https:\/\/github\.com\/([^/]+\/[^/]+)\/blob\/[0-9a-f]{7,40}\//.exec(f.sourceUrl)?.[1]
+          : undefined;
+      if (cited === undefined) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" must be a commit-pinned https://github.com/<owner>/<name>/blob/<sha>/… permalink (got ${JSON.stringify(f.sourceUrl)})`,
+        );
+      } else if (typeof man.repo === 'string' && cited !== man.repo) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" cites ${cited}, not this manifest's repo ${man.repo}`,
+        );
+      }
       // a name — current or former — answers to exactly one row, or a citation of it is ambiguous
       if (
         f.aliases !== undefined &&
