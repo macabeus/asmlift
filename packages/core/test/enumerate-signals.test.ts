@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { variationToken } from '../src/variation-tokens';
 
 describe('the enumeration reports its own silent deletions', () => {
   it('a gated variation and a deduped tree both reach the caller', () => {
@@ -29,7 +30,7 @@ describe('the enumeration reports its own silent deletions', () => {
       }
       try {
         enumerateCandidates(m[1], asm, ARMV4T_AGBCC, {
-          onVariationGated: (suffix) => gated.push(suffix),
+          onVariationGated: (variation) => gated.push(variation),
           onTreeDeduped: () => {
             deduped++;
           },
@@ -42,6 +43,10 @@ describe('the enumeration reports its own silent deletions', () => {
     expect(enumerated).toBeGreaterThan(0);
     // several DISTINCT variations stand down, not one gate firing repeatedly on one function
     expect(new Set(gated).size).toBeGreaterThan(1);
+    // each report is one registered variation's name, not a `/`-prefixed suffix
+    for (const variation of gated) {
+      expect(variationToken(variation).variationKind).toBe('structure');
+    }
     expect(deduped).toBeGreaterThan(0);
   });
 });

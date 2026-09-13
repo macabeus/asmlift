@@ -146,7 +146,7 @@ export interface EnumerateOptions {
    *  candidate fails loudly in a self-declared world — this is what lets the consumer say which
    *  undeclared name was asmlift's own refusal rather than a symbol it never saw. */
   onRefusedDeclaration?: (name: string, reason: RefusedDeclarationReason) => void;
-  /** Called with the variation's suffix each time a STRUCTURE variation's shared gate says this
+  /** Called with the variation's name (`defsite`) each time a STRUCTURE variation's shared gate says this
    *  function has no inhabitant for it, so the alternative is never enumerated.
    *
    *  The two callbacks below report the enumeration's two SILENT candidate-deleting sites, and
@@ -161,7 +161,7 @@ export interface EnumerateOptions {
    *  Nothing shipped passes either one, so a channel that had stopped firing would be invisible in
    *  exactly the way the channel exists to prevent. `test/enumerate-signals.test.ts` pins that both
    *  reach a caller. */
-  onVariationGated?: (suffix: string) => void;
+  onVariationGated?: (variation: string) => void;
   /** Called once per structure setting whose structured tree an earlier setting already produced —
    *  the tree dedup, which is where most of the cross's factors of two go. See `onVariationGated` for why both
    *  are here rather than on the result. */
@@ -747,7 +747,7 @@ export function enumerateCandidates(
   let structureSettings: StructureSetting[] = declRankSettings.map((s) => ({ ...s, ...allStructureVariationsOff }));
   for (const variation of STRUCTURE_VARIATIONS) {
     if (variation.sharedGate !== undefined && !variation.sharedGate(sharedLift, sharedLiftDefs)) {
-      opts.onVariationGated?.(variation.suffix);
+      opts.onVariationGated?.(variation.suffix.slice(1));
       continue;
     }
     structureSettings = [
