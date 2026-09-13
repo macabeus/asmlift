@@ -227,7 +227,7 @@ describe('declaration shapes (P2)', () => {
     }
   });
 
-  test('the axis is INERT where the recovery never fires — no arm, no fan', () => {
+  test('the variation is INERT where the recovery never fires — no alternative, no fan', () => {
     // The gate is a superset (it asks whether the FUNCTION names a multidimensional array, not
     // whether any residual carries a row term), so the flat spelling's own codegen still admits
     // the variation — and both arms then structure the identical tree, which the tree dedup collapses.
@@ -280,7 +280,7 @@ describe('declaration shapes (P2)', () => {
     expect(run('f', body, pick)).toContain('gPick[a0][a1]');
   });
 
-  test('a CONSTANT row is left where it was — nothing referees that respelling', () => {
+  test('a CONSTANT row is left where it was — nothing referees that rewrite', () => {
     // `&g + 4 + a0` is `g[1][a0]` and `g[0][a0 + 4]` at the same address AND the same
     // instructions, so the recovery declines and today's spelling stands.
     const constRow =
@@ -292,7 +292,7 @@ describe('declaration shapes (P2)', () => {
   // THE REFUSAL THAT KEEPS THE RULE FROM BEING READ BACKWARDS. `((u16 *)&g)[(a0 << 10) + a1]`
   // scales ONCE, at the end: `lsl #0xa; add; lsl #0x1`. That is a different program from
   // `g[a0][a1]` (`lsl #0xb` and `lsl #0x1`, separate) — measured, and pinned by
-  // packages/cli/test/matching/array-rank-axis.test.ts. asmlift lifts the single scale to an
+  // packages/cli/test/matching/array-rank-variation.test.ts. asmlift lifts the single scale to an
   // index already in ELEMENTS, where the row term sits at the row's stride in elements and looks
   // exactly like the two-subscript source's — so recovering subscripts there would emit a source
   // that does not reproduce the input asm, on the strength of evidence that says the opposite.

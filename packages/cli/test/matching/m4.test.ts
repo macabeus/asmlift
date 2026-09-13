@@ -38,7 +38,7 @@ test('M4a: the neutral `/` node lowers to C `/` and Pascal `div`', () => {
   expect(p).toContain('a0 div 2');
 });
 
-test('M4b: flipping target.compiler changes the output (the compiler axis is consumed)', () => {
+test('M4b: flipping target.compiler changes the output (the compiler field is consumed)', () => {
   const asm = compileTargetAsm('int half(int x){ return x / 2; }');
   const folds: TargetDescription = ARMV4T_AGBCC; // compiler: "agbcc"
   const other: TargetDescription = { ...ARMV4T_AGBCC, compiler: 'ido' }; // a compiler the idiom isn't tagged for

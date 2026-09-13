@@ -839,7 +839,7 @@ describe('a name the project map describes is never claimed by the derivation', 
   });
 });
 
-describe('both symbol-variant arms agree about a name the map does NOT know', () => {
+describe('both symbol-map settings agree about a name the map does NOT know', () => {
   // The declaration dictionary is derived ONCE, off the map-ful probe, and used by every
   // candidate — including the `/raw-globals` arm, which structures off its OWN map-less lift. For
   // a symbol the POOL spells (`.word gTbl`) the two lifts see the same `gaddr`, so the two
@@ -1032,11 +1032,11 @@ describe('sameDerivedShape: what "the declaration will carry this" means', () =>
 
 describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does', () => {
   // `/flat-rank` exists BECAUSE the asm underdetermines the choice between `g[r][i]` and the flat
-  // byte arithmetic (matching/array-rank-axis.test.ts compiles the pair). Its enumeration gate
+  // byte arithmetic (matching/array-rank-variation.test.ts compiles the pair). Its enumeration gate
   // therefore asks the MAP OR THE DERIVED SHAPES, because structure() builds the symbol render
   // context from the union of the two: supplying the rank from a new place does not make the
   // choice determined, and nothing reports a candidate that was never enumerated.
-  test('both arms are enumerated, and they are genuinely different spellings', () => {
+  test('default and alternative are both enumerated, and they are genuinely different spellings', () => {
     const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);
     const on = cands.filter((c) => !hasVariation(c.label.split('/'), 'flat-rank'));
@@ -1046,7 +1046,7 @@ describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does',
     expect(off.every((c) => !c.source.includes('gPtrTbl[a0]'))).toBe(true);
   });
 
-  test('a rank-1 derivation opens no arm — the axis has nothing to turn off', () => {
+  test('a rank-1 derivation opens no alternative — the variation has nothing to turn off', () => {
     // The gate is asked of the EVIDENCE, not of the derivation's mere existence: a symbol with no
     // declared rank spells the same tree either way, and the pair would be dedup fodder.
     expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.label)).toEqual(['unsigned', 'signed']);

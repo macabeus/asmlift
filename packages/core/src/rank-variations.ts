@@ -52,7 +52,7 @@ import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure
  *  that setting's own lifted fn (a map-lifted shared lift spells const bases as gaddr, which would
  *  blind the /raw-globals siblings — the /addr-home lesson). `strip` opts the variation into the
  *  dropped-sibling closure: a candidate with it ON is skipped when its OFF sibling failed the
- *  boundary contracts. Two variations are EXEMPT from structure()'s assertPrimaryAccepts invariant:
+ *  boundary contracts. Two variations are EXEMPT from structure()'s assertDefaultAccepts invariant:
  *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
  *  declarations — neither adds materialization or merging, so neither can unlock a function the
  *  default declines (reread also skips the strip closure). Both exemptions are stated here
@@ -72,7 +72,7 @@ export interface StructuringAxis {
     | 'siteSense';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
-  probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
+  probeGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   variantGate?: (fn: Fn) => boolean;
   strip: boolean;
 }
@@ -87,8 +87,8 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'reread',
     suffix: '/reread-globals',
     options: (on) => ({ rereadGlobals: on }),
-    probeGate: (probe, defs) =>
-      probe.blocks.some((b) =>
+    probeGate: (sharedLift, defs) =>
+      sharedLift.blocks.some((b) =>
         b.ops.some((op) => op.opcode === 'load' && globalCellOf(defs, op.operands[0], op.attrs.off as number) !== null),
       ),
     strip: false,
@@ -102,8 +102,8 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'inplace',
     suffix: '/inplace',
     options: (on) => ({ materializeJoinFeeds: on }),
-    probeGate: (probe, defs) =>
-      probe.blocks.some((b) =>
+    probeGate: (sharedLift, defs) =>
+      sharedLift.blocks.some((b) =>
         b.ops.some(
           (op) =>
             op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => defs.get(a)?.opcode === 'load')),
@@ -119,11 +119,12 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'mergeNames',
     suffix: '/merge-names',
     options: (on) => ({ coalesceMergeNames: on }),
-    probeGate: (probe) =>
-      probe.blocks
+    probeGate: (sharedLift) =>
+      sharedLift.blocks
         .slice(1)
         .some(
-          (b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1,
+          (b) =>
+            b.params.length > 0 && new Set(sharedLift.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1,
         ),
     strip: true,
   },
@@ -212,7 +213,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'unsCmp',
     suffix: '/uns-cmp',
     options: (on) => ({ unsignedCompareSpelling: on }),
-    probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
+    probeGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
   },
   // `/fresh-merge` — the parameter-merge-home variation (structure.ts `freshParamMerge`, whose
@@ -239,7 +240,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'freshMerge',
     suffix: '/fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
-    probeGate: (probe) => hasParamRootedMerge(probe),
+    probeGate: (sharedLift) => hasParamRootedMerge(sharedLift),
     strip: true,
   },
   // `/copy-defpos` — the EDGE-COPY ORDER variation (structure.ts `preferDefPosCopyOrder`). The frontend

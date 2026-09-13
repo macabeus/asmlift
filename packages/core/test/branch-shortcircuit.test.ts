@@ -896,7 +896,7 @@ function comparisonTree(): Fn {
 // The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
 // soundness, so it is the one with a second arm: `foldTreeOwned` takes the fold, `onTreeOwned`
 // reports the site either way, and rank.ts gates its variation on that report.
-describe('the connective-vs-tree axis', () => {
+describe('the connective-vs-tree variation', () => {
   test('`foldTreeOwned` takes the fold the tree refusal owns, and the result verifies', () => {
     const fn = comparisonTree();
     expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true })).toBe(true);

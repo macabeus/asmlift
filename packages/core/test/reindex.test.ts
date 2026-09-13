@@ -419,7 +419,7 @@ describe('the remaining stated gates, pinned', () => {
   });
 });
 
-test('the /indexed/volatile product: the kept numeric base qualifies for the volatile lever', () => {
+test('the /indexed/volatile pairing: the kept numeric base qualifies for the volatile variation', () => {
   const indexed = reindexWalks(
     guardedCountdown((body) => {
       const els = (body[0] as Stmt & { k: 'if' }).else;
@@ -437,7 +437,7 @@ test('keptWalks collects the walk-pointer names a fired loop kept as its base', 
   expect(kept).toEqual(new Set(['v0']));
 });
 
-test('keptWalks collects the v1 while-walk base (here a param — harmless to the volatile lever)', () => {
+test('keptWalks collects the v1 while-walk base (here a param — harmless to the volatile variation)', () => {
   const kept = new Set<string>();
   expect(reindexWalks(walkSum(), kept)).not.toBeNull();
   expect(kept).toEqual(new Set(['a0']));

@@ -179,7 +179,7 @@ function gen(seed: number): SFn {
   };
 }
 
-describe('unmerge differential fuzz — the oracle this lever shipped without', () => {
+describe('unmerge differential fuzz — the oracle this variation shipped without', () => {
   test('every tree the ladder ACCEPTS computes what the merged spelling computed', () => {
     let fired = 0;
     const bad: string[] = [];
@@ -332,7 +332,7 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
 // throws under one of those ablations does not fail loudly — it yields zero candidates and reads as
 // an ordinary decline. Ablating `tail-is-not-an-if` is the live instance: it leaves the rung
 // refusal to `pushJoin`'s own narrowing, and a cast there would read `.then` off an `assign`.
-describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
+describe('unmerge fuzz — every ablation a shipped variation is allowed to make', () => {
   test('declines, and never throws', () => {
     const heuristics = <C>(t: readonly Gate<C>[]): string[] => t.filter((g) => !g.sound).map((g) => g.id);
     const ablations: [string, UnmergeGates][] = [

@@ -116,7 +116,7 @@ export interface SymbolPointee {
  *  NO POINTEE, and the absence is UPSTREAM's rather than a shape asmlift dropped:
  *  `@gba-kit/debug-info`'s `TypeFacts` — what a `FunctionSignature`'s params are made of — is
  *  exactly these three fields. {@link SymbolInfo.pointee} exists only for a symbol AT AN ADDRESS.
- *  Widening this is priced in docs/level-tower.md and pinned in test/param-pointee-axis.test.ts. */
+ *  Widening this is priced in docs/level-tower.md and pinned in test/param-pointee-variation.test.ts. */
 export interface SymbolTypeFacts {
   size: number | null;
   signed: boolean | null;

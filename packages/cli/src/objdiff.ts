@@ -124,7 +124,7 @@ function targetEntry(path: string): NonNullable<typeof parsedTarget> {
  *  and wherever the pin moves no instruction the two spellings are the same object, so most of a
  *  fan's scoring calls are repeats — one LoadBGTilemapData run compiled 26880 candidates.
  *  Recognising a repeat HERE is an observation about two files;
- *  predicting it in the enumerator is a claim about codegen, and core's test/sign-axis.test.ts is
+ *  predicting it in the enumerator is a claim about codegen, and core's test/signedness-variation.test.ts is
  *  where that claim dies.
  *
  *  The key is the candidate's own CONTENT, hashed, plus the symbol — the rest of what a score

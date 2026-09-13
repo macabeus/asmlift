@@ -1318,7 +1318,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // widening it to the class would make them refuse values the address-home scope only claims
   // when its own variation is ON — a candidate lost with no candidate gained. Where both variations run the
   // two scopes may claim one value, which is a no-op: `materialize` is a set and the address-home
-  // scope, running first, is what registers `axisHomedBases`.
+  // scope, running first, is what registers `addressHomedBases`.
   const usedOnlyAsSharedBase = (v: Value): boolean => {
     const sites = useSitesOf.get(v) ?? [];
     const consumers = new Set(sites.map((s) => s.op));
@@ -1341,7 +1341,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     mergeFeedOps = mergeFeedHomes(fn, mdom, defOf, new Set(mloops.flatMap((L) => [...L.body])));
   }
   /** result values the address-home variation materialized — the load rule's admission key */
-  const axisHomedBases = new Set<Value>();
+  const addressHomedBases = new Set<Value>();
   /** The loop-expression-home variation's scope: 2+ distinct consumers of the value, at least one of
    *  them inside a loop the def's block is outside (loop model = the caller's dominators; absent ⇒
    *  never).
@@ -1528,7 +1528,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             !multiBlockHeaders.has(b)
           ) {
             materialize.add(op);
-            axisHomedBases.add(pr);
+            addressHomedBases.add(pr);
           }
           // Fourth scope, under the loop-expression-home variation (AnalyzeOptions.homeLoopExprs): a
           // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
@@ -1648,7 +1648,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // asm read once into the register the home just reproduced — home the value too, at the
         // load's own position. Only through variation-homed bases (the fixpoint's later sweep sees them
         // even though reverse order visits the load first); the general multi-render re-read stays
-        // the default rule below. axisHomedBases registers on the same sweep that materializes the
+        // the default rule below. addressHomedBases registers on the same sweep that materializes the
         // base — safe because no other rule can pre-empt a value the variation would home: base-slot-only
         // means no successor-arg use (outside copyInterdependent's read set), and the variation's scope
         // excludes consts, the const arm's only clientele.
@@ -1656,7 +1656,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           homeSharedAddresses &&
           op.opcode === 'load' &&
           consumers.length > 1 &&
-          axisHomedBases.has(op.operands[0]) &&
+          addressHomedBases.has(op.operands[0]) &&
           !multiBlockHeaders.has(b)
         ) {
           materialize.add(op);

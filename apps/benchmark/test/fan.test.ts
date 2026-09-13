@@ -617,7 +617,10 @@ describe('fanBaseStaleNote', () => {
   });
 
   it('warns that part of the move may already be on the base, naming the commits', () => {
-    const n = fanBaseStaleNote('origin/main', { at: 'abcdef1234', scoring: ['1111111 a lever', '2222222 another'] });
+    const n = fanBaseStaleNote('origin/main', {
+      at: 'abcdef1234',
+      scoring: ['1111111 a variation', '2222222 another'],
+    });
     expect(n).toContain('2 commit(s) on origin/main since then change what the fan is');
     expect(n).toContain('1111111');
     expect(n).toContain('may already be');

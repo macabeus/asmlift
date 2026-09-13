@@ -19,8 +19,8 @@ import { hasVariation } from '../src/variation-tokens';
 
 /** Which passes the mock fails at every `/defsite` point. The primary pass is the one without the
  *  follow; the `/shared-ret` pass is the one with the follow on a fn the primary pass also saw. */
-const fail = { primary: false, sharedRet: false };
-const primaryFns = new Set<string>();
+const fail = { default: false, sharedRet: false };
+const defaultFns = new Set<string>();
 
 vi.mock('../src/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/pipeline')>();
@@ -31,12 +31,12 @@ vi.mock('../src/pipeline', async (importOriginal) => {
       const opts = args[1] ?? {};
       const text = print(fn);
       if (!opts.followEarlyReturns) {
-        primaryFns.add(text);
+        defaultFns.add(text);
       }
-      const pass = !opts.followEarlyReturns ? 'primary' : primaryFns.has(text) ? 'sharedRet' : 'sharedTail';
+      const pass = !opts.followEarlyReturns ? 'default' : defaultFns.has(text) ? 'sharedRet' : 'sharedTail';
       if (
         opts.anchorConstCopies &&
-        ((pass === 'primary' && fail.primary) || (pass === 'sharedRet' && fail.sharedRet))
+        ((pass === 'default' && fail.default) || (pass === 'sharedRet' && fail.sharedRet))
       ) {
         throw new Error('mocked contract failure');
       }
@@ -67,7 +67,7 @@ const THUMB_FLAT =
 
 const run = (asm: string, failing: typeof fail) => {
   Object.assign(fail, failing);
-  primaryFns.clear();
+  defaultFns.clear();
   const errors: string[] = [];
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     prototypes: P,
@@ -79,8 +79,8 @@ const run = (asm: string, failing: typeof fail) => {
 test.each([
   ['/shared-tail', THUMB],
   ['/shared-ret', THUMB_LEFT],
-])('the %s twin skips every axis point its primary sibling dropped, and keeps the rest', (suffix, asm) => {
-  const { errors, cands } = run(asm, { primary: true, sharedRet: false });
+])('the %s alternative skips every setting its default sibling dropped, and keeps the rest', (suffix, asm) => {
+  const { errors, cands } = run(asm, { default: true, sharedRet: false });
   const reported = (l: string) => l.split('/').slice(1);
   expect(
     errors.some(
@@ -90,13 +90,13 @@ test.each([
         !hasVariation(reported(l), 'shared-tail'),
     ),
   ).toBe(true);
-  const twin = cands.filter((c) => hasVariation(c.label.split('/'), suffix.slice(1)));
-  expect(twin.length).toBeGreaterThan(0);
-  expect(twin.filter((c) => hasVariation(c.label.split('/'), 'defsite'))).toEqual([]);
+  const alternative = cands.filter((c) => hasVariation(c.label.split('/'), suffix.slice(1)));
+  expect(alternative.length).toBeGreaterThan(0);
+  expect(alternative.filter((c) => hasVariation(c.label.split('/'), 'defsite'))).toEqual([]);
 });
 
-test('a point the `/shared-ret` twin drops still ships in the `/shared-tail` twin', () => {
-  const { errors, cands } = run(THUMB_FLAT, { primary: false, sharedRet: true });
+test('a setting the `/shared-ret` alternative drops still ships in the `/shared-tail` alternative', () => {
+  const { errors, cands } = run(THUMB_FLAT, { default: false, sharedRet: true });
   expect(
     errors.some(
       (l) => hasVariation(l.split('/').slice(1), 'shared-ret') && hasVariation(l.split('/').slice(1), 'defsite'),

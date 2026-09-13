@@ -42,7 +42,7 @@ const HALF = [
   '',
 ].join('\n');
 
-test('the axis offers the def-position spelling beside the record-ordered one', () => {
+test('the variation offers the def-position spelling beside the record-ordered one', () => {
   const cands = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {});
   const base = cands.find((c) => c.label === 'signed');
   const sibling = cands.find((c) => c.label === 'signed/copy-defpos');
@@ -60,11 +60,11 @@ test('the axis offers the def-position spelling beside the record-ordered one', 
   expect(sibling!.source).toContain('v0 = a1;\n    v1 = a0;');
 });
 
-test('…and it is a real product: every spelling gets the sibling, never just the base', () => {
+test('…and it is a real pairing: every candidate gets the sibling, never just the default', () => {
   const labels = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.label);
-  const withAxis = labels.filter((l) => hasVariation(l.split('/').slice(-1), 'copy-defpos'));
-  expect(withAxis.length).toBeGreaterThan(0);
-  for (const l of withAxis) {
+  const withVariation = labels.filter((l) => hasVariation(l.split('/').slice(-1), 'copy-defpos'));
+  expect(withVariation.length).toBeGreaterThan(0);
+  for (const l of withVariation) {
     expect(labels).toContain(l.slice(0, -'/copy-defpos'.length));
   }
 });
@@ -77,7 +77,7 @@ test('the gate withholds the sibling where the two orders cannot differ', () => 
   ).toBe(false);
 });
 
-test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis', () => {
+test('an UNMEASURED fn has no question to ask: parsed IR never admits the variation', () => {
   // The record is the frontend's measurement; a parsed fn carries none, so the def-position proxy
   // is already what runs and the sibling would be the same tree.
   const fn = parse(`fn f {
@@ -168,7 +168,7 @@ const LATCH_FOLD = `fn latchfold {
   ret %10
 }`;
 
-test('the latch fold changes the answer after the probe has been asked', () => {
+test('the latch fold changes the answer after the gate has been asked', () => {
   const fn = parse(LATCH_FOLD);
   verify(fn);
   const [entry, header, body, latch, exit] = fn.blocks;

@@ -385,7 +385,7 @@ because #148 shipped `/copy-defpos` (`rank.ts`), the edge-copy-order variation, 
 That was disclosed in its own PR and still invalidated every carried LBG number, because nobody
 re-stated the baseline against it.
 
-`/site-sense` (the per-site branch sense, `rank-axes.ts`) is the same shape and is **GATED**, which
+`/site-sense` (the per-site branch sense, `rank-variations.ts`) is the same shape and is **GATED**, which
 is the part to carry forward: it is enumerated only on a function whose raised IR holds a branch
 `raise/shortcircuit.ts` folded, so it multiplies the fan on those functions and on no others. Over
 the synthetic tier a lift-only census finds **34 rows carrying such a branch** (of 770; 130 rows the

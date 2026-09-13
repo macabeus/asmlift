@@ -119,7 +119,7 @@ test('an address-taken local has an identity the constant cannot stand in for', 
   expect(inlineConstBases(s)).toBeNull();
 });
 
-test('a use that is not an `index` base is outside what the lever re-spells', () => {
+test('a use that is not an `index` base is outside what the variation re-spells', () => {
   const s = fn(
     [{ name: 'p', type: PTR }],
     [...twoUses(), { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'var', name: 'p' }] } }],
@@ -196,7 +196,7 @@ test('`inlinableConstBases` names exactly the locals the gate admits', () => {
 // `(T *)&gSym`, whose initializer is an `addr` and not a const at all; `nearbase` spells every
 // member but the lowest as `(p0 + k)[0]`, an `otherUses`; `argbase` names one base per call
 // argument, so a hoist has one use where this variation wants two.
-test('no base-hoist lever produces a local this one would eat', () => {
+test('no base-hoist variation produces a local this one would eat', () => {
   const cidx = (value: number, i: number, width = 4): Expr => ({
     k: 'index',
     base: { k: 'const', value },
@@ -316,7 +316,7 @@ const ereaderCandidates = (): ReturnType<typeof enumerateCandidates> =>
     },
   });
 
-test('the primary keeps the pointer local — the pool load is a fact, the name is not', () => {
+test('the default keeps the pointer local — the pool load is a fact, the name is not', () => {
   const plain = ereaderCandidates().find((c) => c.label === 'unsigned')!;
   expect(plain.source).toContain('u16 * v0;');
   expect(plain.source).toContain('v0 = (u16 *)67109384;');
@@ -328,7 +328,7 @@ test('/inlinebase spells the constant at each access and drops the local', () =>
   expect(c.source).toContain('*(u16 *)67109384 = 0;');
 });
 
-test('the /inlinebase × /vol-slot pair spells both, and neither lever reaches it alone', () => {
+test('the /inlinebase × /vol-slot pair spells both, and neither variation reaches it alone', () => {
   const labels = ereaderCandidates().map((c) => c.label);
   expect(labels).toContain('unsigned/inlinebase');
   expect(labels).toContain('unsigned/vol-slot');
@@ -338,7 +338,7 @@ test('the /inlinebase × /vol-slot pair spells both, and neither lever reaches i
   expect(pair.source).not.toContain('v0');
 });
 
-test('the qualified output is enumerated alongside its plain twin', () => {
+test('the qualified output is enumerated alongside the plain candidate', () => {
   const labels = ereaderCandidates().map((c) => c.label);
   for (const q of ['unsigned/inlinebase/volatile', 'unsigned/inlinebase/volatile/vol-slot']) {
     expect(labels).toContain(q);

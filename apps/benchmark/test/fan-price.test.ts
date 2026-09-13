@@ -13,7 +13,7 @@ import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { describe, expect, test, vi } from 'vitest';
 
 import { fanSize, fanSizeOfError, runAsmlift } from '../src/eval/asmlift';
-import { rowKey } from '../src/report/stale-check';
+import { comparableRow } from '../src/report/stale-check';
 import { costNote, rowLine } from '../src/run/runner';
 import type { Toolchain } from '../src/toolchains';
 
@@ -167,21 +167,25 @@ describe('what the gates do with a recorded cost', () => {
   // candidate cache. Compared, `stale-check` would answer `stale` unconditionally and stop being
   // a question.
   test('stale-check ignores rankSeconds — otherwise every run is stale by construction', () => {
-    expect(rowKey(row(side({ candidateCount: 96, rankSeconds: 1.2 })))).toBe(
-      rowKey(row(side({ candidateCount: 96, rankSeconds: 41.7 }))),
+    expect(comparableRow(row(side({ candidateCount: 96, rankSeconds: 1.2 })))).toBe(
+      comparableRow(row(side({ candidateCount: 96, rankSeconds: 41.7 }))),
     );
   });
 
   // …and an artifact written before the field existed must compare equal to a fresh run carrying
   // it, or the first run after this lands reports every row stale over a value nobody can read.
   test('stale-check reads an artifact that predates rankSeconds as unchanged', () => {
-    expect(rowKey(row(side({ candidateCount: 96 })))).toBe(rowKey(row(side({ candidateCount: 96, rankSeconds: 3.3 }))));
+    expect(comparableRow(row(side({ candidateCount: 96 })))).toBe(
+      comparableRow(row(side({ candidateCount: 96, rankSeconds: 3.3 }))),
+    );
   });
 
   // The fan is deterministic, so a fan that moved IS a change worth committing — and is the change
   // this artifact started recording in order to stop losing.
   test('stale-check DOES compare candidateCount', () => {
-    expect(rowKey(row(side({ candidateCount: 96 })))).not.toBe(rowKey(row(side({ candidateCount: 384 }))));
+    expect(comparableRow(row(side({ candidateCount: 96 })))).not.toBe(
+      comparableRow(row(side({ candidateCount: 384 }))),
+    );
   });
 });
 

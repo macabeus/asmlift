@@ -164,7 +164,7 @@ test('signed-use evidence blocks the flip', () => {
   expect(src).not.toMatch(/u32 v\d+;/);
 });
 
-test('off by default: the axis-off spelling keeps the uncast signed rendering', () => {
+test('off by default: the default spelling keeps the uncast signed rendering', () => {
   expect(emit(LOOPBOUND, false)).not.toContain('(u32)');
   expect(emit(RECON, false)).not.toMatch(/u32 v\d+;/);
 });

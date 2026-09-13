@@ -224,7 +224,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   **A VARIATION'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT — the #161 dating rule, generalised
   from counts to prices.** A number here is a delta between two candidate sets, and a round that
   changes the structurer changes both sets; so a variation measured as expensive is not refuted, it is
-  dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the
+  dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-variations.ts`) is the
   worked case — one variation, one row (`kleod:CountCollectedGems:agbcc`), the variation untouched throughout,
   **+44** against the #172-era winner and **+24** at #169's base, both MEASURED, then **−17/352**
   once #184 and #185 flattened the ladder and dropped the accumulator copies. It was the most
@@ -239,7 +239,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   off a base no predicate in the pass has. The delta such a measurement produces is a whole-FUNCTION
   one, and enumeration is what makes that honest — it buys no per-SITE reach, and saying otherwise is
   the trap this project has paid for three times wearing its opposite face; `PRE_FAN_PRODUCTS`' own
-  header in `rank-axes.ts` prices that refusal with a measured k.
+  header in `rank-variations.ts` prices that refusal with a measured k.
 
   **The corollary a "shrink the fan" round wants, and it is that round's whole answer: a variation's
   own LICENCE cannot prune it for CPU.** Skipping a variation wherever a predicate proves it cannot
@@ -330,7 +330,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   confined under an integer→pointer conversion, which all four of those nodes are — and agbcc
   refutes that one on the same address: `*(u8 *)((a0 >> 2) + K)` is `asrs` under the signed pin
   against `lsrs` under the unsigned one. The lattice is pinned in
-  [`test/sign-axis.test.ts`](../packages/core/test/sign-axis.test.ts). What IS removable is removed
+  [`test/signedness-variation.test.ts`](../packages/core/test/signedness-variation.test.ts). What IS removable is removed
   by OBSERVATION rather than prediction, and belongs in the scorer, not the enumerator: identical
   candidate objects have one score by definition, which is where
   [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
@@ -358,7 +358,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   signature parameter in any of the six carries a pointee**, because `@gba-kit/debug-info`'s
   `TypeFacts` is `{size, signed, pointer?}` — the absence is upstream's, so the round's first
   commit is an upstream release and a re-vendor before any threading. Pinned in
-  [`test/param-pointee-axis.test.ts`](../packages/core/test/param-pointee-axis.test.ts).
+  [`test/param-pointee-variation.test.ts`](../packages/core/test/param-pointee-variation.test.ts).
 
   THE NEXT STEP THIS MEASUREMENT NAMES IS NOT A DECLARED POINTEE. There is one shape where a pointee is
   byte-load-bearing — a whole-struct assignment, `*dst = *src` through two `struct S *`, which
@@ -386,7 +386,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
   `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
   (`/regionbase`) — and the count, not the declaration scope, is what agbcc discriminates on
-  ([`decl-scope-axis.test.ts`](../packages/cli/test/matching/decl-scope-axis.test.ts) compiles both
+  ([`decl-scope-variation.test.ts`](../packages/cli/test/matching/decl-scope-variation.test.ts) compiles both
   spellings and both directions).
   All but `gvn` and basecse's own committed hoist are candidate generators, so their
   disagreement costs a candidate. Those two are committed, so theirs would cost a **match**, and
@@ -678,7 +678,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   `apps/benchmark/src/run/gate-census.ts`'s header).
 
   **What makes a pass censusable is a fact about its CALLER.** Sixteen passes in `packages/core/src`
-  take their table as a parameter; FIVE of them can be censused, because `rank-axes.ts` and
+  take their table as a parameter; FIVE of them can be censused, because `rank-variations.ts` and
   `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_FAN_PRODUCTS`,
   and the branch short-circuit fold, `member-arrays`, `narrowlocal` and `paramwidth` in
   `PRE_RECOVERY_PASSES` — and two are registered (`--pass unmerge`, `--pass arm-reread`). A pass

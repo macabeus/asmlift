@@ -453,7 +453,7 @@ function spellablePointee(
  *  shipped passes exist to emit (basecse/nearbase/scopebase). It is a per-site DEFAULT and not a
  *  ranked variation for the OTHER reason of the two docs/level-tower.md gives: those two forms TIE in
  *  bytes, so a variation would enumerate a candidate that can never win. Contrast the GLOBAL rank
- *  recovery one indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which
+ *  recovery one indirection up (`cli/test/matching/array-rank-variation.test.ts`, `/flat-rank`), which
  *  IS a variation because its two spellings do not tie. Do not read this gate as "the asm decided" and
  *  carry that reading to a case where the alternatives differ in bytes.
  *
@@ -843,7 +843,7 @@ function arrayAccess(
     //
     // Both cases say decline: in the first the evidence points the other way, in the second there
     // is none. The recovery therefore lives on the byte residual alone (memAccess), where the two
-    // spellings are still distinguishable. Pinned by matching/array-rank-axis.test.ts.
+    // spellings are still distinguishable. Pinned by matching/array-rank-variation.test.ts.
     const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
@@ -1522,7 +1522,7 @@ export interface StructureOptions {
   //                   own premise is false and the flat spelling reaches it too.
   //
   // WHICH ROW OF THAT TABLE IS PINNED: the agbcc pair, by
-  // packages/cli/test/matching/array-rank-axis.test.ts, which compiles both spellings through the
+  // packages/cli/test/matching/array-rank-variation.test.ts, which compiles both spellings through the
   // klonoa checkout's own template. The other three were measured by hand and nothing re-runs
   // them, so treat them as the record of a measurement rather than as a live check.
   //
@@ -1696,7 +1696,7 @@ export interface StructureHooks {
  *
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
  *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
-function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
+function assertDefaultAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
   structure(
     fn,
     {
@@ -1934,7 +1934,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     anchorConstCopies ||
     followEarlyReturns
   ) {
-    assertPrimaryAccepts(fn, opts, hooks);
+    assertDefaultAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);

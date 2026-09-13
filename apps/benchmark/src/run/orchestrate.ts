@@ -33,7 +33,7 @@ export interface OrchestrateOptions {
  * shard already share. Only when EVERY failing shard says cache — one shard that failed for its own
  * reason is a run whose headline is that failure, not the store.
  */
-export const fanExitCode = (failedCodes: number[]): number =>
+export const shardsExitCode = (failedCodes: number[]): number =>
   failedCodes.length > 0 && failedCodes.every((c) => c === CACHE_MISMATCH_EXIT) ? CACHE_MISMATCH_EXIT : 1;
 
 export interface ShardOutcome {
@@ -305,7 +305,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   if (failedShards > 0) {
     // all tiers stitched (partial results persist for debugging), but the run itself failed
     const failedCodes = [...outcomes.values()].flat().flatMap((o) => (o.code === 0 ? [] : [o.code]));
-    if (fanExitCode(failedCodes) === CACHE_MISMATCH_EXIT) {
+    if (shardsExitCode(failedCodes) === CACHE_MISMATCH_EXIT) {
       console.error(
         `\n${failedShards} shard(s) exited ${CACHE_MISMATCH_EXIT}: a stored answer disagreed with a fresh ` +
           `compile. The store is serving objects this toolchain no longer produces — see the [candcache] ` +

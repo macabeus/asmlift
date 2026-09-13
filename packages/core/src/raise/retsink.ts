@@ -290,7 +290,7 @@ export const FALL_IN_GATES: readonly Gate<FallInCandidate>[] = [
     id: 'one-dispatch-owning-the-merge',
     why: 'both arms of ONE dispatch on one scrutinee, and that dispatch owns the return merge',
     sound: false,
-    guardedBy: 'ablating the dispatch gate reads an `if` join, and a guarded switch, as fall-ins',
+    guardedBy: 'retsink.test.ts: ablating the dispatch gate reads an `if` join, and a guarded switch, as fall-ins',
     rejects: (c) => c.dispatches.length === 0,
   },
 ];

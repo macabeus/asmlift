@@ -306,7 +306,7 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 // type-correct way to delete it: ablated, tsc stays clean and every offline and matching suite stays
 // green, and the triple publishes an unprovable spelling as asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
 // the thing to pin.
-describe('a proof obligation survives every lever composed after it (rank.ts composeLevers)', () => {
+describe('a proof obligation survives every respell variation composed after it (rank.ts composeLevers)', () => {
   const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });
   const plain = (name: string) => (): SFn => tree(name);
   const proving = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: true });

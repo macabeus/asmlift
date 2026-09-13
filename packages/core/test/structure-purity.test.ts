@@ -1,7 +1,7 @@
 // `structure()` reads `fn` and produces a fresh `SFn`. That was a comment in rank.ts until the
 // `/merge-names` variation made it LOAD-BEARING INSIDE `structure()` itself: with the variation on, the
 // un-merged structuring runs first so that a candidate can never unlock a function the primary
-// declines (`assertPrimaryAccepts`). If structuring ever mutated `fn`, the merged run would be
+// declines (`assertDefaultAccepts`). If structuring ever mutated `fn`, the merged run would be
 // working on a different function than the one that was checked, silently.
 //
 // So this pins the promise where nothing else does: two runs of the same options agree, the variation
@@ -80,16 +80,16 @@ test.skipIf(CORPUS.length === 0)('structuring does not mutate the function it re
     }
     checked++;
     if (print(fn) !== before) {
-      defects.push(`${name}: the primary run mutated the graph`);
+      defects.push(`${name}: the default run mutated the graph`);
     }
     // the variation-on runs, then the default again — a leaked counter or a mutated graph shows here
-    for (const [label, axisOpts] of [
+    for (const [label, variationOpts] of [
       ['/merge-names', { coalesceMergeNames: true }],
       ['/inplace', { materializeJoinFeeds: true }],
       ['/addr-home', { homeSharedAddresses: true }],
     ] as const) {
       try {
-        structure(fn, { ...opts, ...axisOpts });
+        structure(fn, { ...opts, ...variationOpts });
       } catch {
         /* the variation declining is not a purity defect */
       }

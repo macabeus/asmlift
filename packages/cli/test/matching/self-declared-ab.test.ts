@@ -135,7 +135,7 @@ describe.runIf(HAVE)('self-declared vs headers-wrapper A/B — klonoa dogfood (c
 
   test.each(DOGFOOD)('%s: named winner byte-identical self-declared vs headers-wrapper', (fn) => {
     const row = rows.get(fn);
-    expect(row, `no scored NAMED candidate for ${fn} — the symbol-map lever went inert`).toBeDefined();
+    expect(row, `no scored NAMED candidate for ${fn} — the symbol-map variation went inert`).toBeDefined();
     const { named, selfHex, wrapper } = row!;
     if (wrapper.ok) {
       expect(wrapper.hex, `object bytes diverge for ${fn} (${named.label}) — synthesis drifted`).toBe(selfHex);

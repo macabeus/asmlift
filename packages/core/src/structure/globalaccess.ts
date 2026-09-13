@@ -123,7 +123,7 @@ export function bareArrayElement(si: SymbolInfo, width: number, signed: boolean)
 // reduce to: `(r<<11) + (i<<1)` and `((r<<10) + i) << 1` differ only in where the element scale
 // sits, which is exactly what the division removes. So this runs on the byte residual and
 // arrayAccess does not call it — see the note at that site for what the two spellings measure.
-// `packages/cli/test/matching/array-rank-axis.test.ts` compiles both halves of that.
+// `packages/cli/test/matching/array-rank-variation.test.ts` compiles both halves of that.
 //
 // The recovered address is the SAME address either way (C scales `[r]` by the declared row size,
 // which is the constant the arithmetic multiplied by), so this is a spelling, not a re-addressing.

@@ -9,7 +9,7 @@
 //                  and the three-block-scoped one assemble byte-identically. So there is no nested
 //                  declaration block here and none is needed — the locals are declared at function
 //                  top and only their ASSIGNMENTS are placed per region. That compiler fact is
-//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-axis.test.ts
+//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-variation.test.ts
 //                  compiles both spellings through the project's own agbcc and compares the object
 //                  bytes, and compiles a count-collapsed third spelling to show the COUNT is not
 //                  free either.

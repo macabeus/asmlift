@@ -126,7 +126,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
     id: 'other-uses',
     why: 'a use the substitution cannot reach would name the deleted local',
     sound: true,
-    guardedBy: 'inlinebase.test.ts: a use that is not an `index` base is outside what the lever re-spells',
+    guardedBy: 'inlinebase.test.ts: a use that is not an `index` base is outside what the variation re-spells',
     rejects: (c) => c.m.otherUses !== 0,
   },
   {

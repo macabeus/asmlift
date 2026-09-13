@@ -9,7 +9,7 @@
 //
 // Each test below fails the moment a pointee starts to matter — which is the point. When it does,
 // the refusal is stale and belongs re-measured, not re-asserted. The sibling refusal is
-// test/sign-axis.test.ts; the prose half is docs/level-tower.md. Toolchain-free.
+// test/signedness-variation.test.ts; the prose half is docs/level-tower.md. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
 import { type ParamType, type Prototypes, declaredWidth, prototypesFromSymbols } from '../src/proto';
@@ -53,10 +53,10 @@ const STRUCT_PARAM =
 
 describe('the pointee asmlift emits is SYNTHESIZED from the asm, not declared', () => {
   test('a pointer parameter recovers a struct tag and an interior spelling on its own', () => {
-    const [primary] = sources(STRUCT_PARAM, {});
-    expect(primary).toContain('struct Struct0 { s32 field_0; u16 field_4; u8 field_6; s32 field_8; };');
-    expect(primary).toContain('void f(u32 a0, struct Struct0 * a1)');
-    expect(primary).toContain('a1->field_6 = a0;');
+    const [defaultSource] = sources(STRUCT_PARAM, {});
+    expect(defaultSource).toContain('struct Struct0 { s32 field_0; u16 field_4; u8 field_6; s32 field_8; };');
+    expect(defaultSource).toContain('void f(u32 a0, struct Struct0 * a1)');
+    expect(defaultSource).toContain('a1->field_6 = a0;');
   });
 
   test('…so declaring the pointee — or declaring nothing but the arity — changes no candidate', () => {

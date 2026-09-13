@@ -7,7 +7,7 @@
 // `volatile-p1` qualifies `p1` — and that trailing `-…` is the variation's SUBJECT.
 //
 // WHY A CLOSED TABLE. The parts are minted by string concatenation in `rank.ts` and
-// `rank-axes.ts`, several of them parameterized (`${label}-${c.merged}`, `homesplit-${tag}`,
+// `rank-variations.ts`, several of them parameterized (`${label}-${c.merged}`, `homesplit-${tag}`,
 // `sense-${m}`), so the set of names is open by construction and nothing but this table closes it.
 // Three checks hold the table to the code: a static scan of the mint literals
 // (`packages/core/test/variation-tokens.test.ts`), every name the committed benchmark artifact
@@ -39,7 +39,7 @@ export interface VariationToken {
 const LOCALS = /[a-z]+\d+(?:-[a-z]+\d+)*/;
 
 /** Every variation, grouped by kind in name order. The order of this table is not published
- *  behaviour: enumeration order is decided in `rank.ts` and `rank-axes.ts`, never here. */
+ *  behaviour: enumeration order is decided in `rank.ts` and `rank-variations.ts`, never here. */
 export const VARIATION_TOKENS: readonly VariationToken[] = [
   // signedness: always the first part of a name, because both answers are enumerated
   { name: 'unsigned', variationKind: 'signedness' },

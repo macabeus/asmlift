@@ -375,7 +375,7 @@ describe('what the cluster rule actually is', () => {
   });
 });
 
-describe('a throwing lever is reported, not swallowed', () => {
+describe('a throwing variation is reported, not swallowed', () => {
   test('onLeverError fires with the label and the first error line', () => {
     // `dropped` records only candidates the SCORER refused, so without this hook a variation that
     // throws or fails a boundary contract would vanish with no trace — indistinguishable from one

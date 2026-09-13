@@ -42,7 +42,7 @@ describe('a guessed argument that survived from an earlier block', () => {
     expect(cs.some((c) => hasVariation(c.label.split('/'), 'setup-args'))).toBe(false);
   });
 
-  test('the lever is inert where the calling block set every argument up itself', () => {
+  test('the variation is inert where the calling block set every argument up itself', () => {
     // Nothing to disagree about: `mov r0,#1` is this block's own setup, so both readings are 1.
     const body = '\tmov\tr0, #1\n\tbl\tbar\n';
     expect(cands(body).every((c) => c.source.includes('bar(1)'))).toBe(true);
@@ -72,7 +72,7 @@ describe('a guessed argument that survived from an earlier block', () => {
     expect(labels).toContain('unsigned/setup-args/flip-join');
   });
 
-  test('a DECLARED arity is not the lever’s to narrow', () => {
+  test('a DECLARED arity is not the variation’s to narrow', () => {
     // The headers already answered the question the variation exists to ask, so no sibling is offered
     // and the argument survives in every spelling.
     const cs = enumerateCandidates('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, {

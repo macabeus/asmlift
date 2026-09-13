@@ -67,7 +67,7 @@ describe('the displacement is the evidence, and only the displacement', () => {
     expect(cBackend.emit(spellOperandMembers(lifted(OPERAND))!)).toContain('((struct Off0 *)50345064)->m14');
   });
 
-  test('the respelled tree satisfies the boundary contracts a ranked lever is re-checked against', () => {
+  test('the respelled tree satisfies the boundary contracts a respell variation is re-checked against', () => {
     const out = spellOperandMembers(lifted(OPERAND))!;
     expect(() => {
       assertResolved(out);

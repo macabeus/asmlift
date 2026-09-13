@@ -231,7 +231,7 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     expect(refused).toEqual([{ name: 'v0', reason: 'emitter-name' }]);
   });
 
-  test('the emitter already avoids the collision where a LEVER mints the name', () => {
+  test('the emitter already avoids the collision where a VARIATION mints the name', () => {
     // Renaming the same global to `p0` (a pointer local l3/basecse.ts would otherwise mint) does
     // NOT collide: it names its base local around the global, so the declaration stands and
     // nothing is refused. `p0` is outside the grammar for exactly that reason — the refusal

@@ -7,7 +7,7 @@
 //
 // It knows nothing about variations or ranking: the enumeration driver hands it a dictionary and
 // asks each emitted tree for its references. A SIBLING MODULE, never a `rank/` directory — see the
-// same note on rank-axes.ts.
+// same note on rank-variations.ts.
 import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
@@ -223,7 +223,7 @@ export function makeRefCollector(ctx: {
       //     `tree.locals`: every use of the emitter's local binds the extern instead, and the
       //     loop pointer it was holding becomes a store to that global once per iteration.
       // Both compile, both are wrong, and a compiling wrong answer is the one outcome this
-      // project trades nothing for — so the spelling dies here and `fanOut`'s catch reports it.
+      // project trades nothing for — so the spelling dies here and `respellTree`'s catch reports it.
       // If every spelling of every tree dies, the row declines LOUDLY naming the collision.
       if (bound.has(r.name) || EMITTER_NAME.test(r.name)) {
         refuse(r.name, 'emitter-name');

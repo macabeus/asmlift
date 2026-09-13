@@ -149,7 +149,7 @@ const RETBASE = `fn retbase {
 }
 `;
 
-test('a ret-operand base still passes the gate, and the axis homes it under returnsVoid', () => {
+test('a ret-operand base still passes the gate, and the variation homes it under returnsVoid', () => {
   expect(hasHomeableSharedAddress(parse(RETBASE))).toBe(true);
   const emitVoid = (on: boolean): string => {
     const fn = parse(RETBASE);
@@ -162,7 +162,7 @@ test('a ret-operand base still passes the gate, and the axis homes it under retu
   expect(count(emitVoid(false), '134576844')).toBeGreaterThanOrEqual(2);
 });
 
-test('the same base genuinely returned is refused by the axis — gate over-approximates only', () => {
+test('the same base genuinely returned is refused by the variation — gate over-approximates only', () => {
   const emitRet = (on: boolean): string => {
     const fn = parse(RETBASE);
     verify(fn);

@@ -128,7 +128,7 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
 // the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
 // one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
 // evidence about the WIRING, not about the variations, which leaves nothing but this test pinning the label.
-test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the primary spelling', () => {
+test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, not the default source', () => {
   // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
   // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.
   const asm = [
@@ -180,17 +180,17 @@ test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the p
   expect(seen.every((l) => hasVariation(l.split('/').slice(1), 'unmerge'))).toBe(true); // …and every report names it
 });
 
-// …AND THE PRE-RESPELL NAME HAS TO REACH THE VARIATION REFUSALS TOO, not just the primary emit's. The
-// test above refuses the pre-fan tree's PRIMARY spelling, which makes `fanOut` report and return
+// …AND THE PRE-RESPELL NAME HAS TO REACH THE VARIATION REFUSALS TOO, not just the default emit's. The
+// test above refuses the pre-respell tree's DEFAULT source, which makes `respellTree` report and return
 // before a single re-spelling runs — so it cannot see the four other `onLeverError` sites inside
 // that function, each of which is reachable from both fans and each of which already carries a
 // suffix naming a VARIATION. On a pre-respell tree that variation is a variation applied to the REWRITE, so a
 // refusal of `/unmerge/volatile` reported as `/volatile` sends the reader at a spelling that did
 // not fail and is still in the fan — the same wrong cause, one variation further down.
 //
-// The fixture therefore keeps the pre-fan tree SPELLABLE and refuses only what a variation built on
+// The fixture therefore keeps the pre-respell tree SPELLABLE and refuses only what a variation built on
 // top of it emitted.
-test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () => {
+test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-respell suffix too', () => {
   // Same cross-jump shape as above, plus a device-block base written at two displacements before
   // the `if` — a numeric-address pointer local that survives `/unmerge`, so the unmerged tree
   // still admits `/volatile` and the fan reaches `unsigned/unmerge/volatile`.
@@ -227,7 +227,7 @@ test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () 
   // the fixture really reaches a VARIATION's candidate built on the pre-respell tree
   const deeper = all.filter((c) => hasVariation(c.label.split('/').slice(0, -1), 'unmerge'));
   expect(deeper.length).toBeGreaterThan(0);
-  // …and the pre-fan tree's own primary spelling is NOT among what we refuse, so `fanOut` gets
+  // …and the pre-respell tree's own default source is NOT among what we refuse, so `respellTree` gets
   // past the early return and into the re-spellings
   const refused = new Set(deeper.map((c) => c.source));
   expect(all.some((c) => hasVariation(c.label.split('/').slice(-1), 'unmerge') && !refused.has(c.source))).toBe(true);

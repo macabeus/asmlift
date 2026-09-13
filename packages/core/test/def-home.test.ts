@@ -293,7 +293,7 @@ test('a read through a named global homes at its def block, address still inline
 // Which is where this rule and the `/reread-globals` variation meet: the variation spells a named global's
 // read at each of its uses, this rule spells it once at the def block, and the rule runs first —
 // so on a declaring target the variation reaches only reads whose renders sit in their own block.
-test('the def-block rule pre-empts the value-home axis on a strictly dominated read', () => {
+test('the def-block rule pre-empts the value-home variation on a strictly dominated read', () => {
   expect(count(emit(CONE, false, true, true), 'gTable')).toBe(2);
   expect(emit(CONE, true, true, true)).toBe(emit(CONE, true));
 });

@@ -106,7 +106,7 @@ test('with a return VALUE to consume it, the read stays in the return', () => {
   expect(src).not.toMatch(/^\s*\*\(s32 \*\)\d+;$/m);
 });
 
-test('ORDINARY RAM refuses on EVIDENCE — a lever CAN qualify it, which is why that is not the test', () => {
+test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is why that is not the test', () => {
   // 0x02000100 is EWRAM — outside `capabilities.deviceRegisters` [0x04000000, 0x04000400).
   expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;', 'return;']);
   // 0x08117BCC is ROM. This is the population the refusal actually protects: a WRONG `returnsVoid`

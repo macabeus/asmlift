@@ -5176,7 +5176,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // candidates-only rig that does not hand the row its `ctx` enumerates a fan of FOUR for it
   // against the harness's, so this rig cannot speak to that row. Quote the SCOPE with the number.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS: rank.ts also enumerates COALESCED
-  // results of the same `hoistScopedBases` through their own `enumerate` call, and one of those won a
+  // results of the same `hoistScopedBases` through their own `respellEach` call, and one of those won a
   // match — `kleod:UpdateHUDCounterDisplay:agbcc` (retired 2026-09-13), MATCH on
   // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, the name it was measured under.
   // A candidate's variations name what was applied, not a route a deletion must remove: deleting
@@ -5733,7 +5733,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `gPacked.dreamStones = v`) together.
   //
   // AT MATCH LEVEL, BOTH ROWS BRACKET THE SAME ONE-LINE DELETION: the `/no-bitfield` entry in
-  // `bitfieldCands`. Delete it and `bfwordread` goes 0 → 1 and `bfwordwrite` goes 0 → 8. Both
+  // `bitfieldSettings`. Delete it and `bfwordread` goes 0 → 1 and `bfwordwrite` goes 0 → 8. Both
   // numbers are read off THESE ROWS through the harness itself (`bench run --tier synthetic --only
   // <sym> --toolchain agbcc --serial`, `ASMLIFT_CANDCACHE=0`), control re-run beside each. TAKE
   // THEM OFF THE ROW AND NOT OFF A STANDALONE CLI PROBE: a probe of the write shape scores that
@@ -6973,7 +6973,7 @@ export const SYNTHETIC: SynthSpec[] = [
     // enumerates. Here both `if`s RECONVERGE and the second is spelled as its dual, so no single
     // value of `negateJoinedBranchSense` is right at both: the fan scores 4 with the variation OFF and
     // 4 with it ON. Hand-writing asmlift's own winner with only the second site dualized is
-    // byte-exact, so the whole residual is the sense — and `/site-sense` (rank-axes.ts) now spells
+    // byte-exact, so the whole residual is the sense — and `/site-sense` (rank-variations.ts) now spells
     // exactly that mix and MATCHES.
     sym: 'joinsense',
     src:
@@ -7205,7 +7205,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // merge-home/uns-cmp/site-sense/unmerge/livebase`, 39/352. Two independent routes agree, both at
   // `d6b21ba`: `pnpm bench fan kleod:CountCollectedGems:agbcc --force` (5952 scored, 0 dropped)
   // gives best-WITH 39/352 against best-WITHOUT 56/352, the two candidates' variations differing only in the
-  // trailing home variation; and emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-axes.ts), then
+  // trailing home variation; and emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-variations.ts), then
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier real --only CountCollectedGems`, lands the row on
   // that same 56/352. So the variation is neither missing nor mis-ranked: where the ladder duplicates an
   // arm, the duplicated copies must re-materialise their own pool operands and the merged spelling

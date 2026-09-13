@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { SIGN_CANDS } from '../src/rank-axes';
+import { SIGN_CANDS } from '../src/rank-variations';
 import {
   VARIATION_KINDS,
   VARIATION_TOKENS,
@@ -143,8 +143,8 @@ describe('hasVariation / hasVariations compare whole variations and refuse unreg
 // CI runs, and so does an entry for a variation nothing mints any more. A parameterized subject
 // (`/sense-${m}`, `/homesplit-${tag}`, `${label}-${c.merged}`) contributes its registered prefix.
 // Blind spot, stated: a mint with no literal segment at all; the enumerated-corpus check sees it.
-describe('closure over the mint literals of rank.ts and rank-axes.ts', () => {
-  const src = ['rank.ts', 'rank-axes.ts']
+describe('closure over the mint literals of rank.ts and rank-variations.ts', () => {
+  const src = ['rank.ts', 'rank-variations.ts']
     .map((f) => readFileSync(join(import.meta.dirname, '..', 'src', f), 'utf8'))
     .join('\n')
     .split('\n')

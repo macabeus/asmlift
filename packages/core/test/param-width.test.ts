@@ -243,7 +243,7 @@ describe('every refusal is load-bearing', () => {
   }
 });
 
-describe('the signedness axis has nothing left to ask', () => {
+describe('the signedness variation has nothing left to ask', () => {
   // agbcc's `void f(s16 d, s32 *out) { out[0] = d; }`: the prologue extension states the
   // signedness, so pinning the parameter signed-then-unsigned would only widen it back.
   const NARROW_PARAM_ASM = 'f:\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r1]\n\tbx\tlr\n';

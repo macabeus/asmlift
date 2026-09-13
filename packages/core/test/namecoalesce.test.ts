@@ -94,7 +94,7 @@ test('the two arms of a merge chain become one pair of variables', () => {
   expect(out).toContain('v0 = a1[2];');
 });
 
-test('the axis is off by default — the same function keeps four variables and two copies', () => {
+test('the variation is off by default — the same function keeps four variables and two copies', () => {
   const out = uncoalesced(JOIN_CHAIN);
   expect(out.match(/^ {4}s32 v\d+;$/gm)).toHaveLength(4);
   expect(out).toContain('v0 = v2;');
@@ -255,7 +255,7 @@ test('two parameters of one block never share a name', () => {
   expect(() => emit(TRAILING_DOWHILE, 'sibling-params')).toThrow(/writes 'v\d+' twice/);
 });
 
-test('a candidate never unlocks a function the primary declines', () => {
+test('a candidate never unlocks a function the default declines', () => {
   // `varName` is an input to the loop emitters' hazard predicates, not only to spelling: merging
   // two names turns a real edge copy into an identity one, and a guard that asks "does this edge
   // write anything" stops seeing the hazard. Structuring without the variation first is what makes that

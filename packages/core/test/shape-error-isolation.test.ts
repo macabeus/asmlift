@@ -45,7 +45,7 @@ describe('one throwing shape does not take the others with it', () => {
     expect(errors.every((e) => e.error.includes('mocked shape failure'))).toBe(true);
   });
 
-  test('…and the report names the SHAPE SUBSET, not just the lever it was derived onto', () => {
+  test('…and the report names the SHAPE SUBSET, not just the variation it was derived onto', () => {
     // the subset is the candidate's identity, so that is what a failure is reported under: the
     // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
     expect(errors.every((e) => hasVariation(e.label.split('/').slice(1), 'initfirst'))).toBe(true);
@@ -53,7 +53,7 @@ describe('one throwing shape does not take the others with it', () => {
     expect([...shapeSuffixes].sort()).toEqual(['/initfirst', '/initfirst/pollguard/pollread']);
   });
 
-  test('…while the LATER subsets are still derived ONTO THE LEVER TREES', () => {
+  test('…while the LATER subsets are still derived ONTO THE RESPELLED TREES', () => {
     // `/pollguard` on its own comes from the base-tree shape loop, which has always had its own
     // try per subset — the regression this pins is the shapes derived INSIDE `respell`, so the
     // assertion has to name a variation and a shape together.
@@ -64,7 +64,7 @@ describe('one throwing shape does not take the others with it', () => {
     ).toBeGreaterThan(0);
   });
 
-  test('…and the lever spellings the shapes derive FROM are untouched', () => {
+  test('…and the respelled sources the shapes derive FROM are untouched', () => {
     expect(cands.filter((c) => hasVariation(c.label.split('/'), 'regionbase')).length).toBeGreaterThan(0);
   });
 });

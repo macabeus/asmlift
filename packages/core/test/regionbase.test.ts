@@ -10,7 +10,7 @@
 // the three-block-scoped-declarations spelling assemble to byte-identical code on the row this was
 // built for. So there is no nested declaration block here and none is needed — the locals are
 // declared at function top and only their ASSIGNMENTS are placed per region. This file cannot
-// CHECK that (it is toolchain-free); packages/cli/test/matching/decl-scope-axis.test.ts compiles
+// CHECK that (it is toolchain-free); packages/cli/test/matching/decl-scope-variation.test.ts compiles
 // both spellings and compares the bytes, in BOTH directions — placement free, count not.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -286,7 +286,7 @@ describe('a rule the region rule makes VACUOUS is dropped, not left reading as s
   });
 });
 
-describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
+describe('the variation is OFFERED, and it reaches the shape the row needs', () => {
   // The real `synthetic:dmascope` disassembly. Its DMA base 0x040000D4 is spelled in three disjoint
   // regions — each `if` arm of a loop body, and the post-loop tail — and no variation asmlift ships
   // binds it to more than ONE local: `basecse`/`/livebase`/`/scopebase` all place at most one.
@@ -316,7 +316,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
   });
 
-  test('…and the store the lever leaves INLINE keeps its qualifier too', () => {
+  test('…and the store the variation leaves INLINE keeps its qualifier too', () => {
     // The variation homes the regions that hold two or more direct uses and leaves every other
     // spelling of the same device address inline — here `((s32 *)67109076)[2] = v1;`, the write to
     // REG_DMA0CNT that starts the transfer. `/volatile` qualifies a pointer LOCAL and cannot reach

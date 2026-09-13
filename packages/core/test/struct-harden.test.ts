@@ -77,7 +77,7 @@ const BOTHIFS = `fn bothifs {
   ret %0
 }
 `;
-describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
+describe('STRUCT-HARDEN: the compiler behaviors are load-bearing', () => {
   test('preserveDivergentBranchSense flips branch direction on a divergent if', () => {
     // true (IDO/MIPS behavior, and the safe default): reproduce the source forward-branch by
     // negating the condition and putting the taken arm as the `else`.
@@ -90,7 +90,7 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     );
   });
 
-  test('negateJoinedBranchSense flips a JOINED if and leaves the divergent axis independent', () => {
+  test('negateJoinedBranchSense flips a JOINED if and leaves the divergent sense independent', () => {
     // The four sense combinations are four DISTINCT spellings: each option moves exactly its own
     // if class. Without the ipd guard on the joined branch, flip-join would re-negate a
     // divergent if whose preserve pin is false — collapsing {divergent flipped × joined flipped}
@@ -152,7 +152,7 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     expect(emit(ARGORD, { orderArgCopiesByWriteOrder: false })).toContain('v0 = a0 + a1;\n    v1 = a1 + a0;');
   });
 
-  test('absent levers default to true', () => {
+  test('absent compiler behaviors default to true', () => {
     // A caller passing no option must get exactly the option-true behavior.
     expect(emit(DIVERGE, {})).toBe(emit(DIVERGE, { preserveDivergentBranchSense: true }));
     expect(emit(ARGORD, {})).toBe(emit(ARGORD, { orderArgCopiesByWriteOrder: true }));
@@ -160,7 +160,7 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
 });
 
 describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehaviors", () => {
-  test('every compilerBehaviors lever flows into StructureOptions (no field dropped)', () => {
+  test('every compilerBehaviors field flows into StructureOptions (no field dropped)', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC]) {
       const opts = structureOptionsFor(t, false);
       expect(opts.returnsVoid).toBe(false);

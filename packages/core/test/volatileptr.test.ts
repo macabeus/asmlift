@@ -59,7 +59,7 @@ test('a symbol-fed pointer local is excluded — the map owns that declaration',
   expect(volatilePtrLocals(s)).toBeNull();
 });
 
-test('no qualifying local declines rather than duplicating the primary', () => {
+test('no qualifying local declines rather than duplicating the default', () => {
   const s = fn([{ name: 'n', type: T.s(32) }], [{ k: 'assign', name: 'n', value: { k: 'const', value: 3 } }]);
   expect(volatilePtrLocals(s)).toBeNull();
 });
@@ -127,7 +127,7 @@ test('the veto propagates through local copies to a fixpoint', () => {
   expect(volatilePtrLocals(s)).toBeNull();
 });
 
-test('`only` narrows the lever: a qualifying local outside the set is not marked, and an empty yield declines', () => {
+test('`only` narrows the variation: a qualifying local outside the set is not marked, and an empty yield declines', () => {
   const s = fn(
     [
       { name: 'p', type: T.ptr(T.u(16)) },
@@ -163,7 +163,7 @@ test('two qualifying locals yield the two proper subsets, labeled by member', ()
   expect(p1only.locals.find((l) => l.name === 'p0')!.pointeeVolatile).toBeUndefined();
 });
 
-test('one qualifying local yields no subsets — the plain lever already is that candidate', () => {
+test('one qualifying local yields no subsets — the plain variation already is that candidate', () => {
   expect(volatileSubsetCandidates(fn(twoPtrs, [init('p1', 0x40000d4)]))).toEqual([]);
 });
 

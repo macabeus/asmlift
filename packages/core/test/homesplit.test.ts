@@ -105,7 +105,7 @@ describe('the withhold is DATA — one rejection in the existing gate type', () 
   });
 });
 
-describe('the pipe reaches the shape neither lever reaches alone', () => {
+describe('the pipe reaches the shape neither variation reaches alone', () => {
   test('the withheld base becomes N REGION locals; the other keeps its head home', () => {
     const p = splitHomeBases(TWO_BASES, { ...OPTS, key: DMA_KEY })!;
     expect(p).not.toBeNull();
@@ -183,7 +183,7 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
     return fn([arms, { k: 'for', init, cond: { k: 'var', name: 'i' }, inc, body: [] }], [{ name: 'i', type: T.s(32) }]);
   };
 
-  test('homesplit-drops-device-volatile: a device READ left inline is qualified by neither product', () => {
+  test('homesplit-drops-device-volatile: a device READ left inline is qualified by neither pairing', () => {
     // `/volatile` reaches only MINTED POINTER LOCALS and `/vol-store` only a STORE at a fixed device
     // address, so a device read the region rule leaves inline carries no qualifier at all — and
     // withholding the key is what leaves it there.

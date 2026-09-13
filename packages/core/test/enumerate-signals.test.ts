@@ -14,7 +14,7 @@ import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
 describe('the enumeration reports its own silent deletions', () => {
-  it('a gated axis and a deduped tree both reach the caller', () => {
+  it('a gated variation and a deduped tree both reach the caller', () => {
     // A NAMED handful rather than the whole agbcc corpus: two signals are the assertion, and
     // sweeping every fixture only buys wall clock against the suite's own timeout.
     const FIXTURES = ['agbcc-clamp0.s', 'agbcc-gcd.s'];

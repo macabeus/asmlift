@@ -554,7 +554,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     });
   });
 
-  test('the /livebase/volatile product: the hoisted numeric base qualifies for the volatile lever', () => {
+  test('the /livebase/volatile pairing: the hoisted numeric base qualifies for the volatile variation', () => {
     const out = hoistBaseLocals(poll(), LIVEBASE_GATES);
     const vol = volatilePtrLocals(out);
     expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
@@ -593,7 +593,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(initOrder([...admitted('a0'), refusedLoop])).toEqual([0x3001000, 0x40000d4]);
   });
 
-  test('mixed bases, refused base first-used first: the lever init moves ahead of the default one', () => {
+  test('mixed bases, refused base first-used first: the init the variation hoists moves ahead of the default one', () => {
     expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
   });
 
@@ -630,7 +630,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(out.body.slice(0, 3).map((s) => (s as Stmt & { k: 'assign' }).name)).toEqual(['p0', 'v1', 'v2']);
   });
 
-  test('a base the default gates already admitted leaves nothing: the lever declines', () => {
+  test('a base the default gates already admitted leaves nothing: the variation declines', () => {
     const hoisted = hoistBaseLocals(
       fn([
         { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
@@ -686,7 +686,7 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
     });
   });
 
-  test("the axis is one gate: ablating `single-cell` is /livebase's own admission", () => {
+  test("the variation is one gate: ablating `single-cell` is /livebase's own admission", () => {
     expect(without(LIVEBASE_BLOCK_GATES, 'single-cell').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
     expect(boundBases(hoistBaseLocals(mixed(), without(LIVEBASE_BLOCK_GATES, 'single-cell')))).toEqual(
       boundBases(hoistBaseLocals(mixed(), LIVEBASE_GATES)),
@@ -772,7 +772,7 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
     expect(boundBases(hoistBaseLocals(parked(), LIVEBASE_BLOCK_GATES))).toEqual([]);
   });
 
-  test("the axis is one gate: ablating `folded-offset` is /livebase's own admission", () => {
+  test("the variation is one gate: ablating `folded-offset` is /livebase's own admission", () => {
     expect(without(UNFOLDED_GATES, 'folded-offset').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
     expect(admittedBases(parked(), without(UNFOLDED_GATES, 'folded-offset'))).toEqual(
       admittedBases(parked(), LIVEBASE_GATES),
@@ -961,7 +961,7 @@ describe('the block admission is WIRED into enumeration', () => {
 
   test('/basefold declines where its exemption binds nothing', () => {
     // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there — and every key
-    // it could have bound the DEFAULT hoist already took, before `fanOut` saw the tree.
+    // it could have bound the DEFAULT hoist already took, before `respellTree` saw the tree.
     expect(cands.map((x) => x.label).filter((l) => hasVariation(l.split('/'), 'basefold'))).toEqual([]);
   });
 
@@ -1138,7 +1138,7 @@ ${body}
     expect(admittedBases(decompile('f', ORDERED, off, {}).sfn, ORDERBASE_GATES)).toEqual([]);
   });
 
-  test('the lever is on the roster and wins the row it was built for', () => {
+  test('the variation is on the roster and wins the row it was built for', () => {
     const labels = enumerateCandidates('f', ORDERED, ARMV4T_AGBCC).map((c) => c.label);
     expect(labels).toContain('unsigned/orderbase');
     // …and it is not offered where the order says otherwise

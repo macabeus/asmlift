@@ -59,7 +59,7 @@ describe('the winner-label properties rank.ts argues from', () => {
     expect(unpaired.map((w) => `${w.id}  ${w.label}`)).toEqual([]);
   });
 
-  it('exactly one winner carries /no-ptr-elem, and it is the synthetic row the axis was built for', () => {
+  it('exactly one winner carries /no-ptr-elem, and it is the synthetic row the variation was built for', () => {
     // Guards the `/no-ptr-elem` census paragraph, "EXACTLY ONE WINNING LABEL IN THE ARTIFACT
     // CARRIES `/no-ptr-elem` — READ THAT ONE, NOT A ZERO". The paragraph's whole point is that a
     // zero over the REAL tier is 0 of ONE reaching row, so the variation's two-sidedness has to be read

@@ -76,7 +76,7 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.best.source.split('-1').length - 1).toBe(1);
   });
 
-  test('each if class carries its own orientation axis: /flip-branch divergent, /flip-join joined', () => {
+  test('each if class carries its own orientation variation: /flip-branch divergent, /flip-join joined', () => {
     // Asserted on the CANDIDATE LIST, not on the winner: the default sense already spells `&&`
     // for the divergent shape, so a winner assertion would pass with the variation deleted.
     const divergent = compileTargetAsm(

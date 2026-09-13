@@ -55,7 +55,7 @@ function recordingBackend(): { backend: LanguageBackend; emitted: string[] } {
   };
 }
 
-describe('the signedness axis declines where the pin writes nothing', () => {
+describe('the signedness variation declines where the pin writes nothing', () => {
   // r0 is dereferenced, so it recovers as a pointer and NO_PIN_KINDS excludes it: `pinScalarParams`
   // has no scalar entry param to write, and both passes would lift the identical function.
   const PTR_ONLY = '\tldr\tr1, [r0]\n\tadd\tr1, r1, #1\n\tstr\tr1, [r0]\n';
@@ -91,7 +91,7 @@ describe('the signedness axis declines where the pin writes nothing', () => {
   const SCALAR_AND_GLOBAL =
     'f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadds\tr0, r0, r1\n\tbx\tlr\n.L1:\n\t.word\t0x8057acc\n';
 
-  test('both symbol variants carry both passes', () => {
+  test('both symbol-map settings carry both passes', () => {
     const symbols: SymbolMap = new Map([[0x8057acc, [{ name: 'gCounter', kind: 'data' }]]]);
     const cands = enumerateCandidates('f', SCALAR_AND_GLOBAL, ARMV4T_AGBCC, { symbols });
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'signed', 'unsigned/raw-globals', 'signed/raw-globals']);

@@ -66,7 +66,7 @@ test('`no-frame` is the rule that refuses it, and it is the FIRST one that would
   expect(firstRejection(without(VOL_SLOT_GATES, 'no-frame'), registerHomed)).toBe('access-set');
 });
 
-test('an already-volatile frame local declines rather than duplicating the primary', () => {
+test('an already-volatile frame local declines rather than duplicating the default', () => {
   const s = fn(
     [{ name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 1 }, volatile: true }],
     [{ k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } }],
@@ -181,7 +181,7 @@ const SPILL = `f:
 \tbx\tr1
 `;
 
-test('the primary keeps the plain declaration — the slot is a fact, the qualifier is not', () => {
+test('the default keeps the plain declaration — the slot is a fact, the qualifier is not', () => {
   expect(decompile('f', SPILL, ARMV4T_AGBCC).source).toContain('u16 sp4;');
 });
 

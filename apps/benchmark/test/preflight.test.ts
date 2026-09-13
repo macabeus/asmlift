@@ -189,7 +189,7 @@ describe('the whole preflight, against a real throwaway checkout', () => {
     });
   });
 
-  test('an empty checkout refuses nothing on the git axis', () => {
+  test('an empty checkout refuses nothing on the git check', () => {
     expect(
       preflightRefusals({ tiers: ['real'] }, { repoRoot: repo(), probe: ok }).refusals.some((r) =>
         r.includes('differs from HEAD'),

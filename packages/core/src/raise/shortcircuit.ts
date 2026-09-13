@@ -440,7 +440,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // variation's own `thenS.length && elseS.length` gate needs) and 12 hold two or more conditions
 // carrying a connective. TWO-ARMED is the count that matters: both sense booleans exclude a
 // one-armed `if` by construction, so a tally of `if (` of any kind is the wrong denominator.
-// The per-SITE negation is `/site-sense` (rank-axes.ts), which reads the orientation this fold
+// The per-SITE negation is `/site-sense` (rank-variations.ts), which reads the orientation this fold
 // stamps on the fused branch (`scSharedOnFall`, below) instead of the per-function boolean. A gate
 // on whether to ENUMERATE the variation does not reach the mixed spelling and removes one the differ
 // would referee.
@@ -1182,7 +1182,7 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 //     ways. (1) `/reread-globals`. Under that STRUCTURE variation analysis.ts lets a store to a
 //     DIFFERENT named global through (`mayWriteGlobal`, ir/alias.ts), so there the copy inlines —
 //     but this pass runs once per LIFT, and rank.ts structures every `/reread-globals` candidate
-//     from a lift it shares with the others (`liftVariants`), so the verdict cannot follow the
+//     from a lift it shares with the others (`liftSettings`), so the verdict cannot follow the
 //     variation without a lift of its own. It errs toward REFUSING, at a measured price:
 //     `if (a && (gQ2[1] & 0x7f) == 0x7f) { gK = 1; gQ2[1] &= 0x80; return; } fnB();` keeps a 3/23
 //     nest where the fold matches on that variation (MATCH 0/21 with this rule ablated), and so does the

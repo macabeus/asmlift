@@ -82,7 +82,7 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
     expect(sites(undefined)).toBe(sites(POOL_SYMBOLS));
   });
 
-  test('…and each symbol variant enumerates the axis off its own answer', () => {
+  test('…and each symbol-map setting enumerates the variation off its own answer', () => {
     const conn = enumerateCandidates('f', POOL_ASM, ARMV4T_AGBCC, { prototypes: P, symbols: POOL_SYMBOLS }).filter(
       (c) => hasVariation(c.label.split('/'), 'connective'),
     );

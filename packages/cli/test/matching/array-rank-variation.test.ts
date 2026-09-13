@@ -16,7 +16,7 @@
 //     `arrayAccess` holds (see the note at that site).
 //
 // All of it lived in commit messages. This repo's idiom for a load-bearing compiler fact is a
-// pinned test (matching/decl-scope-axis.test.ts, core/test/sign-axis.test.ts), so here it is, with
+// pinned test (matching/decl-scope-variation.test.ts, core/test/signedness-variation.test.ts), so here it is, with
 // the flags it was measured under — the klonoa checkout's own `tools.asmlift.compiler` template.
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus
@@ -31,7 +31,11 @@ import { compileFromCommand } from '../../src/compile-command';
 import { loadDecompConfig } from '../../src/config';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
-const HAVE = kleodCheckoutGate('array-rank-axis', ['decomp.yaml', 'tools/agbcc/bin/agbcc'], ['arm-none-eabi-objcopy']);
+const HAVE = kleodCheckoutGate(
+  'array-rank-variation',
+  ['decomp.yaml', 'tools/agbcc/bin/agbcc'],
+  ['arm-none-eabi-objcopy'],
+);
 
 // The klonoa template prepends the project context, which already carries `u16`/`u32` — only the
 // two tables are ours, and both spellings of each pair reference the SAME symbol, so the literal

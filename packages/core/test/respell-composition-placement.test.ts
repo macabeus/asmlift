@@ -28,7 +28,7 @@ vi.mock('../src/l3/sinkinit', () => ({
   }),
 }));
 
-describe('a def-moving pass composed onto a placing lever is judged', () => {
+describe('a def-moving pass composed onto a placing variation is judged', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
   const errors: { label: string; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {

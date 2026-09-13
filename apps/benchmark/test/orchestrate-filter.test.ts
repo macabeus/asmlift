@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import {
   type StitchResult,
   emptySelectionError,
-  fanExitCode,
   shardQueue,
+  shardsExitCode,
   tierIsFiltered,
   tierLine,
 } from '../src/run/orchestrate';
@@ -97,16 +97,16 @@ describe('shardQueue', () => {
 // The fan-out is the only thing between that status and the person who typed `pnpm bench run`, and
 // 1 — the status a build failure, an empty selection and a crashed shard already share — would say
 // no more than the `[candcache]` line already in the scrollback.
-describe('fanExitCode', () => {
+describe('shardsExitCode', () => {
   it('propagates the cache status only when every failing shard says cache', () => {
-    expect(fanExitCode([CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
-    expect(fanExitCode([CACHE_MISMATCH_EXIT, CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
-    expect(fanExitCode([CACHE_MISMATCH_EXIT, 1]), 'one shard failed for its own reason').toBe(1);
-    expect(fanExitCode([1, 1])).toBe(1);
+    expect(shardsExitCode([CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
+    expect(shardsExitCode([CACHE_MISMATCH_EXIT, CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
+    expect(shardsExitCode([CACHE_MISMATCH_EXIT, 1]), 'one shard failed for its own reason').toBe(1);
+    expect(shardsExitCode([1, 1])).toBe(1);
   });
 
   it('is 1 when nothing failed — the caller asks it only after a failure, and it may not invent one', () => {
-    expect(fanExitCode([])).toBe(1);
+    expect(shardsExitCode([])).toBe(1);
   });
 });
 

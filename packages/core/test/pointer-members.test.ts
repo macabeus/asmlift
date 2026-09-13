@@ -221,7 +221,7 @@ describe('refusals — anything that does not land on an element boundary keeps 
 // compiled against agbcc they differ in which register the `add` targets, at every constant
 // tested. So both are emitted and the differ referees, exactly as `/no-bitfield` does for the
 // member read it names.
-describe('the element spelling is enumerated as an axis the differ referees', () => {
+describe('the element spelling is enumerated as a variation the differ referees', () => {
   const ELEM_WALK =
     `f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #4]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n` +
     `\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tbx\tlr\n` +
@@ -236,21 +236,21 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
     expect(off?.source).not.toContain('pMap)[a0');
   });
 
-  test('with NO map the axis has no inhabitant and is not enumerated', () => {
+  test('with NO map the variation has no inhabitant and is not enumerated', () => {
     // structure() normalizes the option to false without `symbols`, so a second arm would be the
     // identical tree — the decline is what keeps the fan from doubling for nothing
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, {});
     expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
   });
 
-  test('a map with no SIZED pointer field does not enumerate the axis either', () => {
+  test('a map with no SIZED pointer field does not enumerate the variation either', () => {
     // `void *` sizes no element, so the rule could not fire and the 2x cross would buy nothing
     const voidOnly = ptrsInfo({ layout: [{ name: 'pTiles', offset: 0, size: 4, pointer: true }] });
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(voidOnly) });
     expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
   });
 
-  test('the axis follows the FUNCTION naming a container, not the map declaring one', () => {
+  test('the variation follows the FUNCTION naming a container, not the map declaring one', () => {
     // What the gate saves is structuring work, which no assertion here can see: the dedup
     // collapses the pair wherever the variation changed nothing, so the candidate count is the same
     // either way. What this pins is the pair — absent where the function does not name a

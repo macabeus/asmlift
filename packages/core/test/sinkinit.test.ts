@@ -91,7 +91,7 @@ describe('sinking a leading base init to its first use', () => {
     expect(sinkInitsToFirstUse(fn([init('p0', 0x3001100), plain()]))).toBeNull();
   });
 
-  test('no leading init at all: the lever declines', () => {
+  test('no leading init at all: the variation declines', () => {
     expect(sinkInitsToFirstUse(fn([plain(), init('p0', 0x3001100), read('p0', 1)]))).toBeNull();
   });
 });
@@ -353,7 +353,7 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
     // this one stays label-free.
   });
 
-  test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
+  test('and it is reachable no other way: the plain variation finds nothing to sink here', () => {
     expect(
       labels.filter(
         (l) =>

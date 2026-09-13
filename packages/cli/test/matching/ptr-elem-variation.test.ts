@@ -3,7 +3,7 @@
 // `structure/structure.ts`'s `ptrMemberElement` spells a whole-element subscript through a
 // map-declared pointer MEMBER (`gBgDataPtrs.pBufBg3Tilemap[i + 157]`) where the byte arithmetic
 // the asm actually carries would otherwise stand. `/no-ptr-elem` is the arm that turns it off
-// (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemCands`), and the two are the same
+// (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemSettings`), and the two are the same
 // ADDRESS and different OBJECTS — so the differ referees.
 //
 // No REAL row wins under a label containing `ptr-elem`, and that is a fact about the CORPUS, not
@@ -44,7 +44,7 @@ import { loadSymbolMap } from '../../src/symbols-provider';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
 const SYMS_ELF = 'klonoa-eod-syms.elf';
-const HAVE = kleodCheckoutGate('ptr-elem-axis', [SYMS_ELF], ['arm-none-eabi-as']);
+const HAVE = kleodCheckoutGate('ptr-elem-variation', [SYMS_ELF], ['arm-none-eabi-as']);
 
 /** The container the map declares — `struct BgDataPtrs` at 0x03004790, whose `pBufBg2Tilemap` is
  *  a `u8 *` and whose `pBufBg3Tilemap` is a `u16 *`. Only the shape matters here; the map is the
@@ -124,14 +124,14 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
     }
   }, 600_000);
 
-  test('the map really declares the sized pointer members this axis needs', () => {
+  test('the map really declares the sized pointer members this variation needs', () => {
     const info = [...symbols.values()].flat().find((i) => i.name === 'gBgDataPtrs');
     expect(info?.layout?.filter((f) => f.pointer && [1, 2, 4].includes(f.pointeeSize ?? 0))).toHaveLength(4);
   });
 
   for (const s of SHAPES) {
     describe(s.name, () => {
-      test('the axis is enumerated at all — both arms present, so the comparison is real', () => {
+      test('the variation is enumerated at all — default and alternative both present, so the comparison is real', () => {
         expect(
           ranked.get(`${s.name}/byte`)?.labels.filter((l) => hasVariation(l.split('/'), 'no-ptr-elem')).length,
         ).toBeGreaterThan(0);
@@ -143,7 +143,7 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
         expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(true);
       });
 
-      test('ELEMENT target: the default matches — the axis is two-sided, not a better default', () => {
+      test('ELEMENT target: the default matches — the variation is two-sided, not a better default', () => {
         const r = ranked.get(`${s.name}/elem`);
         expect(r?.score).toBe(0);
         expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(false);
