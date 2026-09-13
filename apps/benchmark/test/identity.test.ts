@@ -81,6 +81,27 @@ describe('joinArtifacts', () => {
     expect(j.bridged).toBe(0);
   });
 
+  test('the same ADDRESS cited from a DIFFERENT repository does not join either: a source swap is removed + added', () => {
+    // The kleod swap: 37 of the 42 new rows sit at an old row's address. Before this rule, a base
+    // that carried addresses read CountCollectedGems (match) → WorldMapScreenCheckNewWorldUnlocked
+    // (nonmatch) as ONE row losing its match, while a name-keyed base read the same pair as missing
+    // + added: one swap, two answers, chosen by which artifact was the base.
+    const old = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/x.c#L1-L2';
+    const base = [
+      real('CountCollectedGems', { addr: '0x0801e0b4', sourceUrl: old }),
+      real('Kept', { addr: '0x08000100' }),
+    ];
+    const head = [
+      real('WorldMapScreenCheckNewWorldUnlocked', { addr: '0x0801e0b4' }),
+      real('Kept', { addr: '0x08000100' }),
+    ];
+    const j = joinArtifacts(base, head);
+    expect(head.map(j.headKey)).not.toContain(j.baseKey(base[0]));
+    expect(base.map(j.baseKey)).not.toContain(j.headKey(head[0]));
+    // the same-repository row beside it still joins at its address
+    expect(j.baseKey(base[1])).toBe(j.headKey(head[1]));
+  });
+
   test('the same NAME cited from a DIFFERENT repository does not join: it is another decompilation', () => {
     const base = [
       real('MultiplyQ8', { sourceUrl: 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/math.c#L1-L2' }),

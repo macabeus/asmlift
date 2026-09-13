@@ -22,7 +22,7 @@
 // The line shapes are deliberately the CLI's (`asmlift: [score] …`, `[dropped]`, `[withheld]`,
 // `[ranked]`), so docs/ranked-repro.md's comparison recipe — `grep -F '[score]'` over two runs —
 // works across the two commands without a second recipe to keep in step.
-import { type BenchOutput, resolveRow, rowIdentity } from '@asmlift/bench-schema';
+import { type BenchOutput, type Identifiable, joinArtifacts, resolveRow } from '@asmlift/bench-schema';
 import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
@@ -152,9 +152,10 @@ export function fanDiffLine(
   now: number | undefined,
   base: string,
   committed: BenchOutput | { error: string },
-  /** the row's identity (bench-schema `rowIdentity`) — tried before `rowId`, so a row renamed since
-   *  `base` is still found at its address */
-  identity?: string,
+  /** the CURRENT row, joined to the base artifact the way every gate joins two artifacts
+   *  (bench-schema `joinArtifacts`): a row renamed since `base` is still found at its address, and a
+   *  row of ANOTHER decompilation at that address is not — its fan was never this row's. */
+  row?: Identifiable,
 ): string {
   // What THIS run has to offer, as a clause, because each sentence below has to end with it and
   // "this run enumerates undefined" is the kind of line that gets pasted into a PR body.
@@ -163,9 +164,11 @@ export function fanDiffLine(
   if ('error' in committed) {
     return `asmlift: [fan-diff] cannot read the artifact at ${base}: ${committed.error.split('\n')[0]}`;
   }
+  const join = row === undefined ? undefined : joinArtifacts(committed.results, [row]);
   const was =
-    (identity === undefined ? undefined : resolveRow(committed.results, identity)) ??
-    resolveRow(committed.results, rowId);
+    row === undefined || join === undefined
+      ? resolveRow(committed.results, rowId)
+      : committed.results.find((r) => join.baseKey(r) === join.headKey(row));
   if (was === undefined) {
     return (
       `asmlift: [fan-diff] ${rowId} is not in the artifact at ${base} — this row was added since, so ` +
@@ -857,7 +860,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     if (o.base === undefined || baseline === undefined) {
       return;
     }
-    console.log(fanDiffLine(c.id, n, o.base, baseline, rowIdentity({ ...c, toolchain: c.toolchain.id })));
+    console.log(fanDiffLine(c.id, n, o.base, baseline, { ...c, toolchain: c.toolchain.id }));
     if (!stamped) {
       stamped = true;
       const stale = fanBaseStaleNote(o.base, commitsSinceArtifact(o.base));

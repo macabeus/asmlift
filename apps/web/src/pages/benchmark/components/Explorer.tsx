@@ -1,4 +1,4 @@
-import { type DecompilerId, type FunctionResult, type Outcome, resolveRow, rowIdentity } from '@asmlift/bench-schema';
+import { type DecompilerId, type FunctionResult, type Outcome, resolveRow } from '@asmlift/bench-schema';
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
@@ -81,9 +81,11 @@ export function Explorer({
   const [filters, setFilters] = useQueryStates(FILTER_PARSERS, { urlKeys: FILTER_URL_KEYS });
   const [{ sort: sortKey, dir: sortDir }, setSort] = useQueryStates(SORT_PARSERS);
   const [selectedId, setSelectedId] = useQueryState('fn', parseAsString.withOptions({ history: 'push' }));
-  // `fn=` names a row by its IDENTITY (a real row's address), so a link survives the upstream
-  // renaming the function. A link written before identities — `fn=<project:sym:toolchain>` — and a
-  // link naming a row's former symbol resolve through the same lookup (bench-schema resolveRow).
+  // `fn=` names a row by its READABLE id (`project:sym:toolchain`), the one spelling a person can
+  // read in a shared link. It still survives an upstream rename: the old name moves into the row's
+  // `aliases`, and resolveRow (bench-schema) opens the row through it. The address is deliberately
+  // NOT written: it is identity within one decompilation, and a link keyed by it would open another
+  // decompilation's row at the same address the day a project's source moves.
   const selected = useMemo(
     () => (selectedId === null ? null : (resolveRow(rows, selectedId) ?? null)),
     [rows, selectedId],
@@ -325,7 +327,7 @@ export function Explorer({
             {filtered.map((r) => (
               <tr
                 key={r.id}
-                onClick={() => void setSelectedId(rowIdentity(r))}
+                onClick={() => void setSelectedId(r.id)}
                 className="cursor-pointer border-t border-slate-800 hover:bg-slate-800/40"
               >
                 <td className="px-3 py-2 font-mono text-slate-100">{r.sym}</td>

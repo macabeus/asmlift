@@ -123,8 +123,29 @@ export function joinArtifacts(base: readonly Identifiable[], head: readonly Iden
     baseKeys.set(r, b ?? rowIdentity(r));
   }
   const headKeys = new Map<Identifiable, string>();
+  const headByKey = new Map<string, Identifiable>();
   for (const r of head) {
-    headKeys.set(r, bridge(r, baseNames) ?? rowIdentity(r));
+    const k = bridge(r, baseNames) ?? rowIdentity(r);
+    headKeys.set(r, k);
+    headByKey.set(k, r);
+  }
+  // THE SAME RULE ON THE ADDRESS PATH. An address is a fact about the binary, and two
+  // decompilations of one ROM put different authors' source at the same address: when kleod's rows
+  // moved from one decomp to another, 37 of the 42 new rows sat at an old row's address, and keyed
+  // by address alone a regression gate read "same row, match → nonmatch" for rows that had never
+  // been measured. So two real rows that meet at an address but cite their source from two
+  // different repositories are two rows, each keyed apart by its repository — exactly what the
+  // name bridge above refuses. A fork MOVE (one decomp under a new owner) reads as removed + added
+  // too; that is honest, and rarer than a re-pin.
+  for (const r of base) {
+    const k = baseKeys.get(r)!;
+    const h = headByKey.get(k);
+    const br = sourceRepo(r);
+    const hr = h === undefined ? undefined : sourceRepo(h);
+    if (h !== undefined && r.tier === 'real' && br !== undefined && hr !== undefined && br !== hr) {
+      baseKeys.set(r, `${k}@${br}`);
+      headKeys.set(h, `${k}@${hr}`);
+    }
   }
   return {
     baseKey: (r) => baseKeys.get(r) ?? rowIdentity(r),
