@@ -8,6 +8,7 @@
 // toolchain, is the property that matters downstream: identical winner, identical per-candidate
 // scores in identical order, identical drops.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm } from '@asmlift/toolchains';
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,11 +34,11 @@ describe('the pooled ranked run is the serial ranked run', () => {
     // and the winner is decided by score rather than by being the only survivor
     const { serial, pooled } = await bothWays('ifor', 'int ifor(int a, int b){ if (a || b) return 42; return 7; }');
     expect(pooled.candidates.length).toBeGreaterThan(1);
-    expect(pooled.best.label).toBe(serial.best.label);
-    expect(pooled.best.source).toBe(serial.best.source);
-    expect(pooled.best.score).toEqual(serial.best.score);
-    expect(pooled.candidates.map((c) => [c.label, c.score.score])).toEqual(
-      serial.candidates.map((c) => [c.label, c.score.score]),
+    expect(joinVariations(pooled.winner.variations)).toBe(joinVariations(serial.winner.variations));
+    expect(pooled.winner.source).toBe(serial.winner.source);
+    expect(pooled.winner.score).toEqual(serial.winner.score);
+    expect(pooled.candidates.map((c) => [joinVariations(c.variations), c.score.score])).toEqual(
+      serial.candidates.map((c) => [joinVariations(c.variations), c.score.score]),
     );
     expect(pooled.dropped).toEqual(serial.dropped);
   });
@@ -47,9 +48,9 @@ describe('the pooled ranked run is the serial ranked run', () => {
     const obj = assembleTarget(asm);
     const one = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 1, worker });
     const many = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 8, worker });
-    expect(many.best.label).toBe(one.best.label);
-    expect(many.candidates.map((c) => [c.label, c.score.score])).toEqual(
-      one.candidates.map((c) => [c.label, c.score.score]),
+    expect(joinVariations(many.winner.variations)).toBe(joinVariations(one.winner.variations));
+    expect(many.candidates.map((c) => [joinVariations(c.variations), c.score.score])).toEqual(
+      one.candidates.map((c) => [joinVariations(c.variations), c.score.score]),
     );
   });
 
@@ -78,9 +79,9 @@ describe('the pooled ranked run is the serial ranked run', () => {
     const serial = decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
     const pooled = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, { jobs: 3, worker: slotWorker });
     expect(pooled.dropped).toEqual(serial.dropped); // a stale/absent object would land here
-    expect(pooled.best.label).toBe(serial.best.label);
-    expect(pooled.candidates.map((c) => [c.label, c.score.score])).toEqual(
-      serial.candidates.map((c) => [c.label, c.score.score]),
+    expect(joinVariations(pooled.winner.variations)).toBe(joinVariations(serial.winner.variations));
+    expect(pooled.candidates.map((c) => [joinVariations(c.variations), c.score.score])).toEqual(
+      serial.candidates.map((c) => [joinVariations(c.variations), c.score.score]),
     );
   });
 

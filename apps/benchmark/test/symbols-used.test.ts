@@ -1,4 +1,4 @@
-// symbolsUsed / candidateLabel PROVENANCE CAPTURE (eval/asmlift.ts): a scored row records which
+// symbolsUsed / winnerVariations PROVENANCE CAPTURE (eval/asmlift.ts): a scored row records which
 // candidate spelling won the differ and — on map rows — every map symbol the winner's output
 // references, shape pre-formatted for the report. The ranking itself is mocked (no compiler in
 // this suite); the refs it hands back are REAL — derived by core's enumeration from the exact
@@ -10,6 +10,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation, joinVariations } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
 import { runAsmlift, symbolShape, symbolsUsedFrom } from '../src/eval/asmlift';
@@ -40,16 +41,18 @@ const SCORE: MatchScore = {
   breakdown: { insert: 0, delete: 0, replace: 0, opMismatch: 3, argMismatch: 0 },
 };
 
-/** Rank-for-real minus the scorer: enumerate the true candidates, pick by label predicate. */
-function rankPicking(pick: (label: string) => boolean): void {
+/** Rank-for-real minus the scorer: enumerate the true candidates, pick by a predicate over their variations. */
+function rankPicking(pick: (variations: readonly string[]) => boolean): void {
   ranked.mockImplementation((name, asm, target, _obj, opts) => {
     const cands = enumerateCandidates(name, asm, target, opts);
-    const cand = cands.find((c) => pick(c.label));
+    const cand = cands.find((c) => pick(c.variations));
     if (!cand) {
-      throw new Error(`no candidate matches the pick among: ${cands.map((c) => c.label).join(', ')}`);
+      throw new Error(
+        `no candidate matches the pick among: ${cands.map((c) => joinVariations(c.variations)).join(', ')}`,
+      );
     }
     const scored = { ...cand, score: SCORE };
-    return { best: scored, candidates: [scored], dropped: [], withheld: [] };
+    return { winner: scored, candidates: [scored], dropped: [], withheld: [] };
   });
 }
 
@@ -58,15 +61,15 @@ const LOADH = 'f:\n\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x
 const COUNTER: SymbolInfo = { name: 'gCounter', kind: 'data', shape: 'scalar', size: 2, signed: false };
 const MAP: SymbolMap = new Map([[0x03001234, [COUNTER]]]);
 
-describe('symbolsUsed / candidateLabel capture (pinned)', () => {
-  test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the label', () => {
-    rankPicking((l) => !l.includes('/raw-globals'));
+describe('symbolsUsed / winnerVariations capture (pinned)', () => {
+  test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the variations', () => {
+    rankPicking((v) => !hasVariation(v, 'raw-globals'));
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([{ name: 'gCounter', shape: 'scalar u16' }]);
-    expect(r.candidateLabel).toBeDefined();
-    expect(r.candidateLabel).not.toContain('/raw-globals');
+    expect(r.winnerVariations).toBeDefined();
+    expect(hasVariation(r.winnerVariations!, 'raw-globals')).toBe(false);
   });
 
   test('a CALL target is never recorded, even alongside a recorded data ref', () => {
@@ -76,7 +79,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
       [0x03001234, [COUNTER]],
       [0x08001000, [{ name: 'DoThing', kind: 'code' }]],
     ]);
-    rankPicking((l) => !l.includes('/raw-globals'));
+    rankPicking((v) => !hasVariation(v, 'raw-globals'));
     const r = runAsmlift(TC, 'f', body, '/nonexistent.o', undefined, noCompile, map);
     const names = (r.symbolsUsed ?? []).map((s) => s.name);
     expect(names).toContain('gCounter');
@@ -84,19 +87,19 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
   });
 
   test('a raw-globals winner on a map row ⇒ symbolMap true, symbolsUsed HONESTLY empty', () => {
-    rankPicking((l) => l.includes('/raw-globals'));
+    rankPicking((v) => hasVariation(v, 'raw-globals'));
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([]);
-    expect(r.candidateLabel).toContain('/raw-globals'); // the label says which spelling won
+    expect(hasVariation(r.winnerVariations!, 'raw-globals')).toBe(true); // the variations say which spelling won
   });
 
-  test('no map ⇒ no symbolsUsed field at all; the label still records the winner', () => {
+  test('no map ⇒ no symbolsUsed field at all; the variations still record the winner', () => {
     rankPicking(() => true);
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r).not.toHaveProperty('symbolMap');
     expect(r).not.toHaveProperty('symbolsUsed');
-    expect(r.candidateLabel).toBeDefined();
+    expect(r.winnerVariations).toBeDefined();
   });
 
   test('an unscored row (noncompile) carries neither provenance field', () => {
@@ -106,7 +109,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('symbolsUsed');
-    expect(r).not.toHaveProperty('candidateLabel');
+    expect(r).not.toHaveProperty('winnerVariations');
   });
 
   test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', () => {
@@ -166,15 +169,17 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
-        best: scored,
+        winner: scored,
         candidates: [scored],
-        dropped: [{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }],
+        dropped: [{ variations: ['unsigned'], error: "too many arguments to `thunk_sub_080002A0'" }],
         withheld: [],
       };
     });
     const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
-    expect(r.droppedCandidates).toEqual([{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }]);
+    expect(r.droppedCandidates).toEqual([
+      { variations: ['unsigned'], error: "too many arguments to `thunk_sub_080002A0'" },
+    ]);
   });
 
   test('every candidate building ⇒ the field is absent, not an empty array', () => {
@@ -191,17 +196,17 @@ describe('withheld candidates are recorded too, and are a different fact', () =>
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
-        best: scored,
+        winner: scored,
         candidates: [scored],
         dropped: [],
-        withheld: [{ label: 'unsigned/unreduce', score: 35, why: WHY }],
+        withheld: [{ variations: ['unsigned', 'unreduce'], score: 35, why: WHY }],
       };
     });
     const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
     // NOT folded into droppedCandidates: nothing failed to build, and reporting one as the other
     // would make the dropped column name compile errors that never happened.
     expect(r.droppedCandidates).toBeUndefined();
-    expect(r.withheldCandidates).toEqual([{ label: 'unsigned/unreduce', score: 35, why: WHY }]);
+    expect(r.withheldCandidates).toEqual([{ variations: ['unsigned', 'unreduce'], score: 35, why: WHY }]);
   });
 
   test('nothing withheld ⇒ the field is absent, not an empty array', () => {

@@ -56,7 +56,7 @@ function magicS(d: number): { M: number; s: number } {
 }
 
 /** Forward UNSIGNED magic generator (Hacker's Delight §10-8). Returns the multiplier `M`, shift `s`,
- *  and the `add` indicator (true ⇒ the "add-correction" variant that needs an extra `+x` term —
+ *  and the `add` indicator (true ⇒ the "add-correction" form that needs an extra `+x` term —
  *  matched by matchUnsignedAddCorrection, not the simple `mulhu>>s` shape). */
 function magicU(d: number): { M: number; s: number; add: boolean } {
   const u = (x: number) => x >>> 0;
@@ -312,7 +312,7 @@ function matchSignedMagic(ctx: Ctx, mul: Op): Match | null {
 }
 
 /** Match the SIMPLE unsigned magic-division DAG `shr_u(mulhu(x, M), s)` (no correction) and
- *  reconstruct+verify the divisor. The add-correction variant (`t + ((x−t)>>1)`) is not matched
+ *  reconstruct+verify the divisor. The add-correction form (`t + ((x−t)>>1)`) is not matched
  *  here — its `mulhu` result feeds a `sub`, not a direct `shr_u`, so this matcher naturally declines it. */
 function matchUnsignedSimpleMagic(ctx: Ctx, mul: Op): Match | null {
   const bound = bindMulOperands(ctx, mul);

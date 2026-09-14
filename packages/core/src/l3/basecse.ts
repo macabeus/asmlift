@@ -13,14 +13,14 @@
 // question the source answered per BASE — one register file spelled as a pointer local beside
 // scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
 // reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
-// inline, and rank's LIVEBASE_ADMISSIONS roster emits each table's hoist — and every product of
+// inline, and rank's LIVEBASE_HOISTS roster emits each table's hoist — and every composition onto
 // it — as its own candidate family, for the differ to referee between them. The unit is
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds.
 //
 // COVERAGE: the roster (rank.ts) is SEVEN rows over FIVE gate tables — two PAIRS share a table and
 // differ only in placement, `/basefold` with `/basefold/sinkinit` and `/orderbase` with
-// `/orderbase/scoped` — and it is a set of hand-picked SUBSETS rather than a narrowness ranking;
+// `/orderbase-scoped` — and it is a set of hand-picked SUBSETS rather than a narrowness ranking;
 // only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
 // whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
 // `UNFOLDED_GATES` does. Measured at ONE stated scope, `decompile()`'s default structuring,
@@ -61,7 +61,7 @@
 // and `ldrb r0, [r4, #0x3]` — agbcc CSEs the symbol reference where it re-materializes the integer
 // — so the inline subscript spelling produces exactly the shape this rule reads as evidence
 // against it. asmlift lifts that asm back to the correct `((u8 *)&gS)[3]` and then offers the
-// named-base respelling anyway. Measured reach: of the 21 keys the symbol half newly admits over
+// spelling through a named base anyway. Measured reach: of the 21 keys the symbol half newly admits over
 // the artifact's agbcc rows in both symbol-map configurations, 4 are on a base whose address the
 // tree also uses as a value (2 distinct keys, on `kleod:ProcessInputAndUpdateEntities` and
 // `pokeemerald:TrySetCantSelectMoveBattleScript`).
@@ -74,14 +74,14 @@
 // `synthetic:foldhead` its match — which is why `index.operandOff` is carried from the lift
 // instead of re-derived, and why a committed pass that can drop it is worth a test
 // (test/basecse.test.ts, the "`operandOff` is provenance" describe). WHAT EACH ROW IS WORTH is
-// measured in rank.ts's note on `BASEFOLD_ADMISSIONS`, not here, and the two rows are not worth
+// measured in rank.ts's note on `BASEFOLD_HOISTS`, not here, and the two rows are not worth
 // the same thing. Promoting the hint to a default would need this paragraph to say something it
 // does not.
 //
-// It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
+// It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below backs a variation rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
 // the memory operand: `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
-// byte-identical to the named-base spelling, and the same holds for a union member and for a
+// byte-identical to the spelling through a named base, and the same holds for a union member and for a
 // store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
 // and the differ referees.
 //
@@ -97,7 +97,7 @@
 // AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is never an `index`-of-leaf, so
 // scalar recovery is untouched). Non-leaf bases (a local, a struct-element `p[a0]`,
 // arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
-// MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
+// MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` variation
 // (structure/analysis.ts homeSharedAddresses) serves the shared gaddr-free ARITHMETIC bases
 // instead.
 // The hoisted local carries the access's pointer type, so the
@@ -149,8 +149,8 @@ const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `
 /** The key's own grammar, read back — `<leafId>[ <type>] <width> <signed>`.
  *
  *  IT LIVES BESIDE `keyOf` BECAUSE THAT IS THE ONLY THING THAT MAKES IT SAFE. The key is a string
- *  and its readers are elsewhere — `l3/homesplit.ts` builds a candidate LABEL out of it, and a
- *  label is a candidate's identity — so a second file knowing this grammar is a collision waiting
+ *  and its readers are elsewhere — `l3/homesplit.ts` builds a candidate's VARIATION out of it, and a
+ *  candidate's variations are its identity — so a second file knowing this grammar is a collision waiting
  *  for the next base kind (`homeSplitTag` states the one the cast form causes).
  *
  *  The one space inside a cast's base id is this grammar's own separator, not the type's: every
@@ -357,7 +357,7 @@ export interface BaseKey {
    *  what a pointer local's own initializer STATEMENT produces (see raise/globalshape.ts's header
    *  for the compile that separates the two), while the inline cast produces the other order — so
    *  it is evidence a home is what the source wrote. Read only by `ORDERBASE_GATES` (rank.ts);
-   *  false for every base a compiler that has not opted in produced, which is what keeps the axis
+   *  false for every base a compiler that has not opted in produced, which is what keeps the variation
    *  off those targets. */
   orderLicensed: boolean;
 }
@@ -453,7 +453,7 @@ export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(BASECSE_GATES, 'single-use'),
 ];
 
-/** The `/livebase` lever's admission (rank.ts): the default rules with both PLACEMENT heuristics
+/** The `/livebase` variation's admission (rank.ts): the default rules with both PLACEMENT heuristics
  *  ablated, keeping only `single-use`. `loop` and `repeated-const-offset` predict which spelling
  *  the compiler chose, and both predictions have a counterexample — an MMIO poll (`p[2] = go;
  *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
@@ -466,7 +466,7 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
 
 /** `/livebase-block`'s admission (rank.ts): `/livebase` plus `single-cell`. The two tables differ
  *  by exactly one gate, so `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own
- *  admission and this selectivity axis prices by ablation like every other.
+ *  admission and this selectivity rule prices by ablation like every other.
  *
  *  `single-cell` GENERATES a narrower candidate; it does not classify, and taking it for a compiler
  *  fact is the way to misuse it. Its counterexample is in this corpus: `synthetic:sizebound`'s
@@ -489,13 +489,13 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  whenever an admission is added to or removed from the roster.
  *  HOW: prefer the edit-free form — import this array and `splice` the gate out of it before the
  *  first `enumerateCandidates` call, since the roster holds a reference to this very object. The
- *  env-read recipe on BASEFOLD_ADMISSIONS edits files instead, and a tap reverted underneath a
+ *  env-read recipe on BASEFOLD_HOISTS edits files instead, and a tap reverted underneath a
  *  running process reports ZEROES rather than crashing, which reads exactly like "the rule never
  *  fires"; if you use it, hash the tree either side of the window and quote both hashes.
  *
- *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT — "only a row whose winner carries
+ *  A CENSUS OVER WINNERS' VARIATIONS CANNOT STAND IN FOR THAT — "only a row whose winner carries
  *  `/livebase-block` can move" is unsound for the reason rank.ts's `seen` dedup spells out. This
- *  table's own winning-label census reads 5 rows and read 7 before `/unfolded` shipped, and the
+ *  table's own census over winners' variations reads 5 rows and read 7 before `/unfolded` shipped, and the
  *  two that left differ: `synthetic:foldpark` by RENAME (byte-identical source, MATCH either
  *  side), `synthetic:unfoldpark` because its winning SPELLING changed, 402 bytes at diff:9 to 397
  *  at MATCH.
@@ -644,8 +644,8 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  exemption cannot have.
  *
  *  `loop` and `repeated-const-offset` STAY. Neither is about the base's identity and both are fan
- *  control; ablating them is `/livebase`'s axis, already on the roster, and a row that wants the
- *  product is one roster line. THE PRICE OF THAT IS A HOLE, and it is named rather than left for a
+ *  control; ablating them is `/livebase`'s variation, already on the roster, and a row that wants the
+ *  pairing is one hoist. THE PRICE OF THAT IS A HOLE, and it is named rather than left for a
  *  reader to find: a licensed base with a use inside a loop is admitted by NO table on the roster —
  *  this one refuses it on `loop`, and every table that ablates `loop` refuses it on `cast-base` or
  *  `single-use` — which is the "a base set that is no row's stays unreachable" debt
@@ -738,13 +738,13 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  `scope` DECLINES, and the overload is how a caller is told: `null` means the placement had
  *  nothing to say about this function, because no init landed inside a nested list. That tree is
  *  byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), and the roster withholds the
- *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_ADMISSIONS) — so returning it
+ *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_HOISTS) — so returning it
  *  ships the withheld candidate under the scoped row's name.
  *
  *  IT WITHDRAWS A SPELLING RATHER THAN COLLAPSING A DUPLICATE, which is what the decline costs.
- *  `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
+ *  `ORDERBASE_HOISTS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
  *  at `first-use` for this table and the refused tree has no twin to fold into — its shape and
- *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
+ *  `/volatile` compositions go with it. Over each project's whole `asm` tree, map-ful: of the 48
  *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
  *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
  *  on two of those, both map-ful — the `kleod:StreamCmd_SetBGScroll` row (fan 11), and
@@ -805,13 +805,13 @@ export function hoistBaseLocals(
   }
   const out = { ...sfn, body, locals };
   // The two FLAT placements can only put the run in the top-level list, above every use of it by
-  // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship
+  // construction. `scope` puts an init inside a nested list, which is where a placing variation can ship
   // the one failure the byte differ rewards — a read of a local whose assignment does not reach it —
   // so the tree it emits is checked rather than argued (contracts.ts).
   //
   // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
   // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
-  // `structureChecked` before rank's levers see the tree (pipeline.ts), and `scope` moves those
+  // `structureChecked` before rank's variations see the tree (pipeline.ts), and `scope` moves those
   // inits too — so `newLocals` names less than half of what has to be judged. Real inhabitants, in the
   // CHECKOUTS rather than in a benchmark row — `DecompressAndLoadLevel` in klonoa and `sub_8052474`
   // in sa3, both map-ful — each sink one inherited `p0` beside the minted `p1`.

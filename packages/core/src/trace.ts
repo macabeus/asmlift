@@ -280,7 +280,7 @@ function traceTower(
   );
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
-  // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap lever as decompile()
+  // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap option as decompile()
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, returnsVoid),

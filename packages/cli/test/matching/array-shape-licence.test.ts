@@ -17,8 +17,8 @@
 // (a symbol subscripted twice, agbcc CSEing the pool word) is the reason the order rule is asked of
 // every access rather than of the first.
 //
-// This repo's idiom for a load-bearing compiler fact is a pinned test (array-rank-axis.test.ts,
-// decl-scope-axis.test.ts, core/test/sign-axis.test.ts), and `pnpm test:matching` is in neither CI
+// This repo's idiom for a load-bearing compiler fact is a pinned test (array-rank-variation.test.ts,
+// decl-scope-variation.test.ts, core/test/signedness-variation.test.ts), and `pnpm test:matching` is in neither CI
 // nor the benchmark — so a claim that is not here is a claim nothing re-checks.
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus

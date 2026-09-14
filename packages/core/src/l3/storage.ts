@@ -9,7 +9,7 @@
 // SHADOWING is what the copies disagreed on, and the disagreement is REAL rather than drift: a
 // name can be declared both a global and a local, because `SFn.globals` records what the code
 // REFERENCES (structure.ts `noteGlobal`) independently of what it declares. Which answer is right
-// depends on how the asking lever will SPELL the name, so the two questions are two functions
+// depends on how the asking pass will SPELL the name, so the two questions are two functions
 // here instead of one set each caller filters its own way:
 //   • it keeps the reference verbatim (`(u8 *)g`) — the shadow is harmless, the spelling denotes
 //     whatever the original access denoted: `declaredGlobals`;

@@ -29,7 +29,7 @@ describe('boolean-value && recovery: matches byte-exact and prints &&', () => {
       expect(r.source).toContain('&&'); // the connective was recovered (single-shot already folds it)
       expect(r.source).not.toContain('v0'); // no merge variable
       expect(r.source).not.toContain('>> 31'); // branchless bool-normalize was folded away
-      expect(rk.best.score.match).toBe(true);
+      expect(rk.winner.score.match).toBe(true);
     });
   }
 });

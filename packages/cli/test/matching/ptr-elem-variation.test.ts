@@ -3,11 +3,11 @@
 // `structure/structure.ts`'s `ptrMemberElement` spells a whole-element subscript through a
 // map-declared pointer MEMBER (`gBgDataPtrs.pBufBg3Tilemap[i + 157]`) where the byte arithmetic
 // the asm actually carries would otherwise stand. `/no-ptr-elem` is the arm that turns it off
-// (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemCands`), and the two are the same
+// (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemSettings`), and the two are the same
 // ADDRESS and different OBJECTS — so the differ referees.
 //
-// No REAL row wins under a label containing `ptr-elem`, and that is a fact about the CORPUS, not
-// about the axis: the enumeration gate needs a symbol map declaring a pointer member with a
+// No REAL row's winner carries `/no-ptr-elem`, and that is a fact about the CORPUS, not
+// about the variation: the enumeration gate needs a symbol map declaring a pointer member with a
 // pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
 // decompiled caller happens to have been written in the element form.
 //
@@ -17,7 +17,7 @@
 //
 // SO WHAT IS THIS FILE FOR, given the row exists. Two things the row cannot do. It runs against
 // the PROJECT'S OWN map and toolchain rather than an authored map, so it would catch a divergence
-// between what an ELF really says and what the dataset hand-writes; and it pins the axis TWO-SIDED
+// between what an ELF really says and what the dataset hand-writes; and it pins the variation TWO-SIDED
 // on four shapes at once — on the byte target the arm is the only match, on the element target the
 // default is — where a benchmark row can only ever pin the side it was compiled from.
 //
@@ -35,6 +35,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
@@ -43,7 +44,7 @@ import { loadSymbolMap } from '../../src/symbols-provider';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
 const SYMS_ELF = 'klonoa-eod-syms.elf';
-const HAVE = kleodCheckoutGate('ptr-elem-axis', [SYMS_ELF], ['arm-none-eabi-as']);
+const HAVE = kleodCheckoutGate('ptr-elem-variation', [SYMS_ELF], ['arm-none-eabi-as']);
 
 /** The container the map declares — `struct BgDataPtrs` at 0x03004790, whose `pBufBg2Tilemap` is
  *  a `u8 *` and whose `pBufBg3Tilemap` is a `u16 *`. Only the shape matters here; the map is the
@@ -81,11 +82,12 @@ const SHAPES = [
   },
 ] as const;
 
-/** The best-scoring candidate's label and score for one reference source, lifted with the map. */
+/** The best-scoring candidate's variations and score for one reference source, lifted with the map,
+ *  beside the variations of every candidate in the fan. */
 interface Ranked {
-  label: string;
+  variations: readonly string[];
   score: number;
-  labels: string[];
+  fan: (readonly string[])[];
 }
 
 describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the bytes (checkout-gated)', () => {
@@ -102,14 +104,14 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
       symbols,
       prototypes: { f: { returnsVoid: src.startsWith('void ') } },
     });
-    let best: Ranked = { label: '', score: Number.POSITIVE_INFINITY, labels: cands.map((c) => c.label) };
+    let best: Ranked = { variations: [], score: Number.POSITIVE_INFINITY, fan: cands.map((c) => c.variations) };
     for (const c of cands) {
       // the per-candidate declaration block the CLI's scorer prepends (cli/src/rank.ts
       // `declarationsOf`) — a candidate names the map's symbols and does not declare them itself.
       const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
       const s = scoreC(decls + c.source, 'f', obj);
       if (s.score < best.score) {
-        best = { label: c.label, score: s.score, labels: best.labels };
+        best = { variations: c.variations, score: s.score, fan: best.fan };
       }
     }
     return best;
@@ -123,27 +125,29 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
     }
   }, 600_000);
 
-  test('the map really declares the sized pointer members this axis needs', () => {
+  test('the map really declares the sized pointer members this variation needs', () => {
     const info = [...symbols.values()].flat().find((i) => i.name === 'gBgDataPtrs');
     expect(info?.layout?.filter((f) => f.pointer && [1, 2, 4].includes(f.pointeeSize ?? 0))).toHaveLength(4);
   });
 
   for (const s of SHAPES) {
     describe(s.name, () => {
-      test('the axis is enumerated at all — both arms present, so the comparison is real', () => {
-        expect(ranked.get(`${s.name}/byte`)?.labels.filter((l) => l.includes('no-ptr-elem')).length).toBeGreaterThan(0);
+      test('the variation is enumerated at all — default and alternative both present, so the comparison is real', () => {
+        expect(ranked.get(`${s.name}/byte`)?.fan.filter((v) => hasVariation(v, 'no-ptr-elem')).length).toBeGreaterThan(
+          0,
+        );
       });
 
       test('BYTE target: `/no-ptr-elem` matches and the element default does not', () => {
         const r = ranked.get(`${s.name}/byte`);
         expect(r?.score).toBe(0);
-        expect(r?.label).toContain('no-ptr-elem');
+        expect(hasVariation(r!.variations, 'no-ptr-elem')).toBe(true);
       });
 
-      test('ELEMENT target: the default matches — the axis is two-sided, not a better default', () => {
+      test('ELEMENT target: the default matches — the variation is two-sided, not a better default', () => {
         const r = ranked.get(`${s.name}/elem`);
         expect(r?.score).toBe(0);
-        expect(r?.label).not.toContain('no-ptr-elem');
+        expect(hasVariation(r!.variations, 'no-ptr-elem')).toBe(false);
       });
     });
   }

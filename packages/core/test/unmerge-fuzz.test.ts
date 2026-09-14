@@ -179,7 +179,7 @@ function gen(seed: number): SFn {
   };
 }
 
-describe('unmerge differential fuzz — the oracle this lever shipped without', () => {
+describe('unmerge differential fuzz — the oracle this variation shipped without', () => {
   test('every tree the ladder ACCEPTS computes what the merged spelling computed', () => {
     let fired = 0;
     const bad: string[] = [];
@@ -231,7 +231,7 @@ describe('unmerge differential fuzz — the oracle this lever shipped without', 
     // 60000 seeds is ~0.9s alone, and this suite forks 211 files in parallel, where the sibling
     // measured the same shape of loop at 3.4x its solo cost — past vitest's 5s default, which
     // fails as a TIMEOUT rather than as a divergence. narrowlocal-fuzz.test.ts carries the same
-    // budget for the same reason. The seed count itself is NOT the lever to turn down: at 15000
+    // budget for the same reason. The seed count itself is NOT the knob to turn down: at 15000
     // this arm fires 845 times, under its own 1000 floor (measured).
   }, 90_000);
 });
@@ -327,12 +327,12 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
 // "the enumeration still found some", not a count of the tables. All five are listed anyway
 // because the list then grows for free when a heuristic is added to either of them.
 //
-// `ablateHeuristic` exists so a shipped axis may drop a `sound: false` gate and re-run the pass as
-// a ranked candidate; `rank.ts`'s PRE-FAN loop wraps `apply` in `try { } catch { }`, so a pass that
+// `ablateHeuristic` exists so a shipped variation may drop a `sound: false` gate and re-run the pass as
+// a ranked candidate; `rank.ts`'s pre-respell loop wraps `apply` in `try { } catch { }`, so a pass that
 // throws under one of those ablations does not fail loudly — it yields zero candidates and reads as
 // an ordinary decline. Ablating `tail-is-not-an-if` is the live instance: it leaves the rung
 // refusal to `pushJoin`'s own narrowing, and a cast there would read `.then` off an `assign`.
-describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
+describe('unmerge fuzz — every ablation a shipped variation is allowed to make', () => {
   test('declines, and never throws', () => {
     const heuristics = <C>(t: readonly Gate<C>[]): string[] => t.filter((g) => !g.sound).map((g) => g.id);
     const ablations: [string, UnmergeGates][] = [

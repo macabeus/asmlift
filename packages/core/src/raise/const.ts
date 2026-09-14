@@ -176,10 +176,10 @@ export function recognizeConsts(fn: Fn): boolean {
       // `%s` is also the value bb0 hands the join. Folding it to `const 1` deletes the accumulator's
       // last reference, so every later level sees an arm that materialises a literal and spells it
       // as one (`v = 1;` with an `else v = 0;`) instead of the `s += 1` the target records — and the
-      // enumeration gate for the shipped `/merge-home` axis, which is what would have spelled the
+      // enumeration gate for the shipped `/merge-home` variation, which is what would have spelled the
       // hoisted init, reads FALSE because the merge feed it looks for is gone.
       //
-      // The mapping is a FUNCTION, not a choice, so this is a default and not an axis: a register
+      // The mapping is a FUNCTION, not an open question, so this is a default and not a variation: a register
       // carried across a branch is not a literal being materialised, whichever compiler produced it.
       //
       // IT IS A PROXY, and the two carve-outs are where it is bought back. Edge-carrying is evidence

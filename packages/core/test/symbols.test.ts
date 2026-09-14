@@ -20,6 +20,7 @@ import {
   symbolsByName,
 } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
 const run = (sym: string, body: string, symbols?: SymbolMap) =>
@@ -210,30 +211,32 @@ describe('declaration shapes (P2)', () => {
   // recovery is enumerated as `/flat-rank`'s ON arm with the differ refereeing.
   test('the displaced flat spelling is enumerated as the `/flat-rank` arm', () => {
     const cands = enumerateCandidates('f', asmOf('f', ROW_AND_ELEM), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
-    const flat = cands.filter((c) => c.label.includes('/flat-rank'));
+    const flat = cands.filter((c) => hasVariation(c.variations, 'flat-rank'));
     expect(flat.length).toBeGreaterThan(0);
     for (const c of flat) {
       expect(c.source).toContain('*(u16 *)((a0 << 11) + (a1 << 1) + (u32)&gRows)');
       expect(c.source).not.toContain('gRows[a0][a1]');
     }
     // …and the recovered spelling is still the one the unsuffixed candidates carry
-    const plain = cands.filter((c) => !c.label.includes('/flat-rank') && !c.label.includes('/raw-globals'));
+    const plain = cands.filter(
+      (c) => !hasVariation(c.variations, 'flat-rank') && !hasVariation(c.variations, 'raw-globals'),
+    );
     expect(plain.length).toBeGreaterThan(0);
     for (const c of plain) {
       expect(c.source).toContain('gRows[a0][a1]');
     }
   });
 
-  test('the axis is INERT where the recovery never fires — no arm, no fan', () => {
+  test('the variation is INERT where the recovery never fires — no alternative, no fan', () => {
     // The gate is a superset (it asks whether the FUNCTION names a multidimensional array, not
     // whether any residual carries a row term), so the flat spelling's own codegen still admits
-    // the axis — and both arms then structure the identical tree, which the tree dedup collapses.
-    // Pinned because an axis that doubled the fan for nothing would be a price with no question.
+    // the variation — and both arms then structure the identical tree, which the tree dedup collapses.
+    // Pinned because a variation that doubled the fan for nothing would be a price with no question.
     const flat =
       '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
       '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
     const cands = enumerateCandidates('f', asmOf('f', flat), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
-    expect(cands.filter((c) => c.label.includes('/flat-rank'))).toHaveLength(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'flat-rank'))).toHaveLength(0);
   });
 
   test('the recovery is INERT without the rank — a rank-1 declaration keeps the flat spelling', () => {
@@ -277,7 +280,7 @@ describe('declaration shapes (P2)', () => {
     expect(run('f', body, pick)).toContain('gPick[a0][a1]');
   });
 
-  test('a CONSTANT row is left where it was — nothing referees that respelling', () => {
+  test('a CONSTANT row is left where it was — nothing referees that rewrite', () => {
     // `&g + 4 + a0` is `g[1][a0]` and `g[0][a0 + 4]` at the same address AND the same
     // instructions, so the recovery declines and today's spelling stands.
     const constRow =
@@ -289,7 +292,7 @@ describe('declaration shapes (P2)', () => {
   // THE REFUSAL THAT KEEPS THE RULE FROM BEING READ BACKWARDS. `((u16 *)&g)[(a0 << 10) + a1]`
   // scales ONCE, at the end: `lsl #0xa; add; lsl #0x1`. That is a different program from
   // `g[a0][a1]` (`lsl #0xb` and `lsl #0x1`, separate) — measured, and pinned by
-  // packages/cli/test/matching/array-rank-axis.test.ts. asmlift lifts the single scale to an
+  // packages/cli/test/matching/array-rank-variation.test.ts. asmlift lifts the single scale to an
   // index already in ELEMENTS, where the row term sits at the row's stride in elements and looks
   // exactly like the two-subscript source's — so recovering subscripts there would emit a source
   // that does not reproduce the input asm, on the strength of evidence that says the opposite.
@@ -1029,9 +1032,9 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
     const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
-    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/raw-globals']);
-    const best = rankBy(cands, 'f', () => ({ score: 7 })).best; // every candidate scores the same
-    expect(best.label).toBe('unsigned');
+    expect(cands.map((c) => c.variations)).toEqual([['unsigned'], ['unsigned', 'raw-globals']]);
+    const best = rankBy(cands, 'f', () => ({ score: 7 })).winner; // every candidate scores the same
+    expect(joinVariations(best.variations)).toBe('unsigned');
     expect(best.source).toContain('return gCounter;');
   });
 
@@ -1039,8 +1042,10 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
     const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
-    const best = rankBy(cands, 'f', (_s, _sym, c) => ({ score: c.label.includes('raw') ? 1 : 2 })).best;
-    expect(best.label).toBe('unsigned/raw-globals');
+    const best = rankBy(cands, 'f', (_s, _sym, c) => ({
+      score: hasVariation(c.variations, 'raw-globals') ? 1 : 2,
+    })).winner;
+    expect(joinVariations(best.variations)).toBe('unsigned/raw-globals');
   });
 });
 

@@ -19,8 +19,8 @@ import { readCommitted, scrub } from './committed';
  *  `rankSeconds` is dropped for the same reason the scratch paths are scrubbed, and it is the
  *  sharper case: it is wall clock, so it differs on EVERY row of EVERY run — machine load, docker,
  *  and ~5× between a cold and a warm candidate cache. Left in, this file would answer `stale`
- *  unconditionally and stop being a question at all. `candidateCount` STAYS: enumeration is a
- *  deterministic cross over axes, so a fan that moved is a real change and exactly the one this
+ *  unconditionally and stop being a question at all. `fanSize` STAYS: enumeration is a
+ *  deterministic cross over variations, so a fan that moved is a real change and exactly the one this
  *  artifact started recording in order to stop losing.
  *
  *  DELETED rather than blanked, so an artifact that predates the field still compares equal to a
@@ -32,7 +32,7 @@ const comparable = (d: FunctionResult['asmlift']): Record<string, unknown> => {
 
 /** Exported for the test: which fields this file compares is the whole of its verdict, and a
  *  nondeterministic one added to a row would turn `fresh` into an answer it can never give. */
-export const rowKey = (r: FunctionResult): string =>
+export const comparableRow = (r: FunctionResult): string =>
   JSON.stringify({
     ...r,
     asmlift: comparable(r.asmlift),
@@ -62,9 +62,9 @@ export function staleCheck(base = 'HEAD'): 'stale' | 'fresh' {
 
   // joined by identity (bench-schema joinArtifacts), the same join the regression and diff gates use
   const joined = joinArtifacts(committed.results, fresh.results);
-  const committedRows = new Map(committed.results.map((r) => [joined.baseKey(r), rowKey(r)]));
+  const committedRows = new Map(committed.results.map((r) => [joined.baseKey(r), comparableRow(r)]));
   for (const r of fresh.results) {
-    if (committedRows.get(joined.headKey(r)) !== rowKey(r)) {
+    if (committedRows.get(joined.headKey(r)) !== comparableRow(r)) {
       return 'stale';
     }
   }

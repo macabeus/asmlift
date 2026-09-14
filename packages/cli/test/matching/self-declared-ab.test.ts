@@ -22,6 +22,7 @@
 // setup --project kleod --build`) plus the arm-none-eabi binutils the project itself uses.
 // Missing pieces skip GREEN with a console.warn, docker-gate.ts style.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -135,10 +136,13 @@ describe.runIf(HAVE)('self-declared vs headers-wrapper A/B — klonoa dogfood (c
 
   test.each(DOGFOOD)('%s: named winner byte-identical self-declared vs headers-wrapper', (fn) => {
     const row = rows.get(fn);
-    expect(row, `no scored NAMED candidate for ${fn} — the symbol-map lever went inert`).toBeDefined();
+    expect(row, `no scored NAMED candidate for ${fn} — the symbol-map variation went inert`).toBeDefined();
     const { named, selfHex, wrapper } = row!;
     if (wrapper.ok) {
-      expect(wrapper.hex, `object bytes diverge for ${fn} (${named.label}) — synthesis drifted`).toBe(selfHex);
+      expect(
+        wrapper.hex,
+        `object bytes diverge for ${fn} (${joinVariations(named.variations)}) — synthesis drifted`,
+      ).toBe(selfHex);
       return;
     }
     // The one accepted failure class: the headers world cannot DECLARE a code symbol no

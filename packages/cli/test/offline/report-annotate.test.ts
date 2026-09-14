@@ -145,7 +145,7 @@ test('…and so does the candidate RANKING beside it, through decompileWithRepor
     },
   });
   expect(report.candidates?.length).toBeGreaterThan(0);
-  // NOT "every candidate spells the cast form" — the ranking legitimately carries respellings of
+  // NOT "every candidate spells the cast form" — the ranking legitimately carries other spellings of
   // the headline that are neither the bare name nor the cast (`/orderbase` homes the base in a
   // pointer local). What the forwarding claim is about is the BARE form, which only a map-less
   // enumeration could produce here, so that is what is asserted per candidate.

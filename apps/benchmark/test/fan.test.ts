@@ -1,6 +1,6 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
-import { rankedSummaryLine } from '@asmlift/cli/score-format';
+import { rankedSummaryLine, threwLine, threwStep } from '@asmlift/cli/score-format';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { describe, expect, it } from 'vitest';
@@ -30,11 +30,11 @@ const row = (id: string): Case => ({ id }) as Case;
  *  `[ranked]` line carries that are claims rather than counts. */
 const NO_DECLS = { synthesized: [], stamp: 'asmlift source deadbee' };
 
-const cand = (label: string, score: number, rows: number, match = false): RankedCandidate =>
+const cand = (name: string, score: number, rows: number, match = false): RankedCandidate =>
   ({
-    label,
-    source: `/* ${label} */`,
-    group: 0,
+    variations: name.split('/'),
+    source: `/* ${name} */`,
+    preference: 0,
     score: { symbol: 'f', score, rows, match, matching: rows - score, breakdown: {} },
   }) as unknown as RankedCandidate;
 
@@ -88,7 +88,7 @@ describe('scoreLine', () => {
 describe('renderFan', () => {
   const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
     ({
-      best: cand('a', 0, 12, true),
+      winner: cand('a', 0, 12, true),
       candidates: [cand('a', 0, 12, true), cand('b', 3, 12), cand('c', 4, 13)],
       dropped: [],
       withheld: [],
@@ -103,7 +103,7 @@ describe('renderFan', () => {
     expect(out).toContain('asmlift: [score] b: 3/12');
     expect(out).toContain('asmlift: [score] c: 4/13');
     expect(out).toContain(
-      'asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best a: 0/12 (match) [asmlift source deadbee]',
+      'asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, winner a: 0/12 (match) [asmlift source deadbee]',
     );
   });
 
@@ -114,12 +114,12 @@ describe('renderFan', () => {
     const out = renderFan(
       ranked({
         dropped: [
-          { label: 'd1', error: 'error: x undeclared\nmore' },
-          { label: 'd2', error: 'error: y undeclared' },
+          { variations: ['d1'], error: 'error: x undeclared\nmore' },
+          { variations: ['d2'], error: 'error: y undeclared' },
         ],
         withheld: [
-          { label: 'w1', score: 2, why: 'needs a byte-exact proof' },
-          { label: 'w2', score: 5, why: 'needs a byte-exact proof' },
+          { variations: ['w1'], score: 2, why: 'needs a byte-exact proof' },
+          { variations: ['w2'], score: 5, why: 'needs a byte-exact proof' },
         ],
       }),
       NO_DECLS,
@@ -134,18 +134,21 @@ describe('renderFan', () => {
 });
 
 describe('pickCandidate', () => {
-  const cands = [cand('a', 0, 12, true), cand('b', 3, 12)];
+  const cands = [cand('a', 0, 12, true), cand('b', 3, 12), cand('b/c', 5, 12)];
 
-  it('finds a candidate by its exact label — the whole `--show` feature', () => {
+  it('finds a candidate by its exact variations — the whole `--show` feature', () => {
     expect(pickCandidate(cands, 'b')?.source).toBe('/* b */');
+    expect(pickCandidate(cands, 'b/c')?.source).toBe('/* b/c */');
+    // a longer name listed first is not the one asked for
+    expect(pickCandidate([cand('b/c', 5, 12), cand('b', 3, 12)], 'b')?.source).toBe('/* b */');
   });
 
-  it('spells the winner `best`, so the published row can be quoted without knowing its label', () => {
-    expect(pickCandidate(cands, 'best')?.label).toBe('a');
+  it('names the winner `winner`, so the published row can be quoted without knowing its variations', () => {
+    expect(pickCandidate(cands, 'winner')?.variations).toEqual(['a']);
   });
 
-  // A typo'd label and a lever that produced no candidate at all are the same silence otherwise.
-  it('returns undefined for a label nothing carries, so the caller can say so', () => {
+  // A typo'd name and a variation that produced no candidate at all are the same silence otherwise.
+  it('returns undefined for variations nothing carries, so the caller can say so', () => {
     expect(pickCandidate(cands, 'nope')).toBeUndefined();
   });
 });
@@ -164,7 +167,7 @@ it('will score a fan the size of the largest row measured through it', () => {
 describe('the [ranked] line', () => {
   const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
     ({
-      best: cand('a', 0, 12, true),
+      winner: cand('a', 0, 12, true),
       candidates: [cand('a', 0, 12, true), cand('b', 3, 12)],
       dropped: [],
       withheld: [],
@@ -179,7 +182,7 @@ describe('the [ranked] line', () => {
         dropped: 0,
         withheld: 0,
         synthesized: 0,
-        best: cand('a', 0, 12, true),
+        winner: cand('a', 0, 12, true),
         stamp: 'asmlift source deadbee',
       }),
     );
@@ -201,12 +204,26 @@ describe('the [ranked] line', () => {
   });
 });
 
+// What a throwing step applied is not a candidate's name (no signedness leads it), so the line
+// must not print it shaped like one.
+describe('the [threw] line', () => {
+  it('prints the step after the function, not joined onto it', () => {
+    expect(threwLine('f', threwStep(['unmerge', 'vol-slot']), 'boom')).toBe(
+      'asmlift: [threw] f unmerge/vol-slot threw (no candidate from it): boom',
+    );
+  });
+
+  it('names a structured tree whose own source threw', () => {
+    expect(threwStep([])).toBe('(default source)');
+  });
+});
+
 // The world a row's candidates compile in decides whether an invented declaration can affect the
 // score at all: a real row is compiled through the project's headers (compile/real.ts drops the
 // block), a synthetic row has nothing but the block.
 describe('synthesizedRefs', () => {
   const withRefs = {
-    label: 'a',
+    variations: ['a'],
     symbolRefs: [
       { name: 'gA', synthesized: true },
       { name: 'gB', synthesized: false },
@@ -222,20 +239,27 @@ describe('synthesizedRefs', () => {
   });
 });
 
-// Under `--enumerate` nothing is scored, so `best` would name whatever enumeration emitted first —
+// Under `--enumerate` nothing is scored, so `winner` would name whatever enumeration emitted first —
 // a near-worst spelling under the winner's name, to a round both briefs have told that `--show
-// best` is the winner.
+// winner` is the winner.
 describe('optionRefusal', () => {
-  it('refuses --show best under --enumerate, where nothing has been scored', () => {
-    expect(optionRefusal({ enumerateOnly: true, show: 'best' })).toContain('no winner to name');
+  it('refuses --show winner under --enumerate, where nothing has been scored', () => {
+    expect(optionRefusal({ enumerateOnly: true, show: 'winner' })).toContain('no winner to name');
   });
 
-  it('allows --show <label> under --enumerate — an enumerated candidate carries its source', () => {
+  it('allows --show <variations> under --enumerate — an enumerated candidate carries its source', () => {
     expect(optionRefusal({ enumerateOnly: true, show: 'unsigned' })).toBeUndefined();
+    expect(optionRefusal({ enumerateOnly: true, show: 'unsigned/defsite' })).toBeUndefined();
   });
 
-  it('allows --show best on the scored path, which is sorted best-first', () => {
-    expect(optionRefusal({ show: 'best' })).toBeUndefined();
+  it('refuses --show that names no variations, before any work', () => {
+    for (const show of ['unsigned//defsite', '/unsigned', 'unsigned/']) {
+      expect(optionRefusal({ show })).toContain('names no candidate');
+    }
+  });
+
+  it('allows --show winner on the scored path, which is sorted best-first', () => {
+    expect(optionRefusal({ show: 'winner' })).toBeUndefined();
   });
 
   // `--force` raises the COMPILE limit, and both enumeration-only paths compile nothing — `--asm`
@@ -400,21 +424,25 @@ describe('estimatedScoreTime', () => {
 describe('unshowable', () => {
   const ranked = {
     candidates: [],
-    dropped: [{ label: 'raw-globals', error: 'gFoo undeclared' }],
-    withheld: [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }],
+    dropped: [{ variations: ['unsigned', 'raw-globals'], error: 'gFoo undeclared' }],
+    withheld: [{ variations: ['unsigned', 'unreduce'], score: 2, why: 'needs a byte-exact proof' }],
   } as unknown as RankedResult;
 
-  it('says a label was DROPPED, and names the flag that can still print its source', () => {
-    const msg = unshowable('raw-globals', ranked);
+  it('says a candidate was DROPPED, and names the flag that can still print its source', () => {
+    const msg = unshowable('unsigned/raw-globals', ranked);
     expect(msg).toContain('was dropped');
-    expect(msg).toContain('--enumerate --show raw-globals');
+    expect(msg).toContain('--enumerate --show unsigned/raw-globals');
   });
 
-  it('says a label was WITHHELD — it scored, so `no such candidate` would be a lie', () => {
-    expect(unshowable('unreduce', ranked)).toContain('was withheld');
+  it('says a candidate was WITHHELD — it scored, so `no such candidate` would be a lie', () => {
+    expect(unshowable('unsigned/unreduce', ranked)).toContain('was withheld');
   });
 
-  it('falls back to the fan listing for a label nothing carries', () => {
+  it('matches whole variations, never a part of a name', () => {
+    expect(unshowable('raw-globals', ranked)).toContain('no candidate with variations');
+  });
+
+  it('falls back to the fan listing for variations nothing carries', () => {
     expect(unshowable('nope', ranked)).toContain('see the [score] lines above');
   });
 
@@ -432,8 +460,8 @@ describe('unshowable', () => {
 // the published row's noncompile outcome means" under zero `[dropped]` lines. Both briefs tell a
 // round to pass `--force`.
 describe('noFanReport', () => {
-  const dropped = [{ label: 'unsigned', error: 'agbcc failed: c.c:12' }];
-  const withheld = [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }];
+  const dropped = [{ variations: ['unsigned'], error: 'agbcc failed: c.c:12' }];
+  const withheld = [{ variations: ['unsigned', 'unreduce'], score: 2, why: 'needs a byte-exact proof' }];
 
   it('reads NOTHING SCORED off the error class, and prints the drop list that rides on it', () => {
     const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
@@ -487,7 +515,7 @@ describe('noFanReport', () => {
 
   // `--show` was silently dropped here — on a `noncompile` row, i.e. the one row class where
   // EVERY candidate is unshowable and the advice earns its keep.
-  it('answers --show instead of ignoring it, and names --enumerate for a dropped label', () => {
+  it('answers --show instead of ignoring it, and names --enumerate for a dropped candidate', () => {
     const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
     expect(noFanReport('sa3:f:agbcc', e, 'unsigned').notes.join('\n')).toContain('--enumerate --show unsigned');
   });
@@ -502,11 +530,11 @@ describe('noFanReport', () => {
 // the same row. `LoadBGTilemapData` went 59,904 → 225,792 in six days and that series exists only
 // because rounds happened to type it into commit subjects; this is the command that asks.
 describe('fanDiffLine', () => {
-  const artifact = (rows: { id: string; candidateCount?: number }[]): BenchOutput =>
+  const artifact = (rows: { id: string; fanSize?: number }[]): BenchOutput =>
     ({
       results: rows.map((r) => ({
         id: r.id,
-        asmlift: r.candidateCount === undefined ? {} : { candidateCount: r.candidateCount },
+        asmlift: r.fanSize === undefined ? {} : { fanSize: r.fanSize },
       })),
     }) as unknown as BenchOutput;
 
@@ -515,17 +543,15 @@ describe('fanDiffLine', () => {
       'proj:Fn:agbcc',
       225792,
       'origin/main',
-      artifact([{ id: 'proj:Fn:agbcc', candidateCount: 59904 }]),
+      artifact([{ id: 'proj:Fn:agbcc', fanSize: 59904 }]),
     );
     expect(line).toBe('asmlift: [fan-diff] proj:Fn:agbcc: 59904 → 225792 (3.77×) vs origin/main');
   });
 
-  // A fan that SHRANK is the same line under 1 — a round that prunes an axis is reporting a
+  // A fan that SHRANK is the same line under 1 — a round that prunes a variation is reporting a
   // multiplier too, and a renderer that only knows growth makes it invisible.
   it('reports a shrink as a multiplier under 1', () => {
-    expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', candidateCount: 96 }]))).toContain(
-      '96 → 48 (0.50×)',
-    );
+    expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', fanSize: 96 }]))).toContain('96 → 48 (0.50×)');
   });
 
   // Three ways there is no comparison, and they are three different facts. A silence would let a
@@ -537,14 +563,14 @@ describe('fanDiffLine', () => {
   });
 
   it('says a row the base never had was ADDED since, not that its fan grew from nothing', () => {
-    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', candidateCount: 4 }]));
+    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', fanSize: 4 }]));
     expect(line).toContain('is not in the artifact at origin/main');
   });
 
   it('does not compare against another decompilation’s row at the same address', () => {
     // `fan --base` across a source swap: the base's row at this address is a different author's
     // source, so its count is not this row's earlier fan. A renamed row of the SAME decomp still is.
-    const at = (id: string, sym: string, repo: string, candidateCount: number) => ({
+    const at = (id: string, sym: string, repo: string, fanSize: number) => ({
       id,
       sym,
       project: 'kleod',
@@ -552,7 +578,7 @@ describe('fanDiffLine', () => {
       tier: 'real',
       addr: '0x08010000',
       sourceUrl: `https://github.com/${repo}/blob/abc/src/x.c#L1-L2`,
-      asmlift: { candidateCount },
+      asmlift: { fanSize },
     });
     const now = {
       id: 'kleod:PauseMenuScreenHandler:agbcc',
@@ -582,7 +608,7 @@ describe('fanDiffLine', () => {
   // so there is no count on THIS side, on all 234 of them — the row class `attribute-function.md`
   // sends rounds to. The base's recorded count is the answer there.
   it('says the fan LEFT when the base counted and this run has none', () => {
-    const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', candidateCount: 26880 }]));
+    const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', fanSize: 26880 }]));
     expect(line).toContain('records 26880 candidate(s) for r');
     expect(line).toContain('that fan LEFT, it did not shrink to zero');
   });
@@ -592,8 +618,8 @@ describe('fanDiffLine', () => {
   it('never renders a missing count as a number, on any of the four sentences', () => {
     for (const committed of [
       artifact([{ id: 'r' }]),
-      artifact([{ id: 'other', candidateCount: 4 }]),
-      artifact([{ id: 'r', candidateCount: 8 }]),
+      artifact([{ id: 'other', fanSize: 4 }]),
+      artifact([{ id: 'r', fanSize: 8 }]),
     ]) {
       const line = fanDiffLine('r', undefined, 'origin/main', committed);
       expect(line).not.toContain('undefined');
@@ -617,7 +643,10 @@ describe('fanBaseStaleNote', () => {
   });
 
   it('warns that part of the move may already be on the base, naming the commits', () => {
-    const n = fanBaseStaleNote('origin/main', { at: 'abcdef1234', scoring: ['1111111 a lever', '2222222 another'] });
+    const n = fanBaseStaleNote('origin/main', {
+      at: 'abcdef1234',
+      scoring: ['1111111 a variation', '2222222 another'],
+    });
     expect(n).toContain('2 commit(s) on origin/main since then change what the fan is');
     expect(n).toContain('1111111');
     expect(n).toContain('may already be');

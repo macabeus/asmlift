@@ -217,7 +217,7 @@ export interface MergePair {
  *  `const-fed` is what keeps three of them (ablate it and the span path offers 273). A rule
  *  refusing every in-loop local would make that bound redundant; this one does not, so any further
  *  relaxation of `const-fed` is a multiplier, and two call sites pay it (`/coalesce` and
- *  `/scopebase-coalesce`; the `/livebase` pairings enumerate the ARM path and pay
+ *  `/scopebase/coalesce`; the `/livebase` pairings enumerate the ARM path and pay
  *  ARM_DISJOINT_GATES' `arm-init` instead). */
 export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   {
@@ -271,14 +271,14 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   },
 ];
 
-/** Every legal single merge, each as its own tree — NOT one committed choice.
+/** Every legal single merge, each as its own tree — NOT one committed decision.
  *
  *  Which pair a register allocator coalesced is not derivable from the L3 tree, and first-fit gets
  *  it wrong. Run kleod:UpdateHUDCounterDisplay's published repro script (results.json carries it)
  *  and read the candidate table: of its two legal merges, one scores WORSE than not merging at all
  *  and declaration order is the one that picks it. Emitting no merges at all costs that row its
  *  match, which is what guards this file. `rank.ts` already has the idiom for exactly this —
- *  `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so every candidate is
+ *  `/regcopy`'s "the tail decision is allocator-ambiguous, so both are ranked" — so every candidate is
  *  emitted and the differ referees.
  *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on
@@ -378,7 +378,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
 
 /** The arm-disjoint merges alone — the class the livebase pairings enumerate (rank.ts): the
  *  demanding row's shared counter is arm-disjoint, and the span-model merges already ride the
- *  plain /coalesce label, so pairing them too would multiply candidates with no row behind it. */
+ *  plain /coalesce variation, so pairing them too would multiply candidates with no row behind it. */
 export function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
   return armDisjointUnder(ARM_DISJOINT_GATES, sfn).candidates;
 }

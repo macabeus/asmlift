@@ -1,4 +1,4 @@
-// SPILL-SLOT ORDER — the per-compiler default that declares slot-homed locals in the target's
+// SPILL-SLOT ORDER — the compiler behavior that declares slot-homed locals in the target's
 // own frame order.
 //
 // The law it models: gcc 2.9 hands a spilled user local its frame slot by DECLARATION RANK —

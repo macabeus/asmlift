@@ -11,6 +11,7 @@ import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 import { c } from './helpers';
 
 const U8P = T.ptr(T.int(8, false));
@@ -90,7 +91,7 @@ describe('sinking a leading base init to its first use', () => {
     expect(sinkInitsToFirstUse(fn([init('p0', 0x3001100), plain()]))).toBeNull();
   });
 
-  test('no leading init at all: the lever declines', () => {
+  test('no leading init at all: the variation declines', () => {
     expect(sinkInitsToFirstUse(fn([plain(), init('p0', 0x3001100), read('p0', 1)]))).toBeNull();
   });
 });
@@ -140,7 +141,7 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
 });
 
 // The `/sinkinit` SUFFIX has two producers in `rank.ts` — `/livebase*/sinkinit` composes a second
-// pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a label
+// pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a name
 // read out of a `[score]` log or an artifact row does not say which. They must therefore be the
 // SAME TRANSFORM, or one suffix names two things in the namespace cross-round attribution greps.
 describe('composition and argument are one transform: sink(head(x)) === firstUse(x)', () => {
@@ -228,7 +229,7 @@ describe('composition and argument are one transform: sink(head(x)) === firstUse
 
 describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
   // It consults neither the first-use query nor the ordering sort. Stated in l3/hoist.ts and
-  // pinned here so a reader who takes the enum for one axis is corrected by a failing test rather
+  // pinned here so a reader who takes the enum for one dimension is corrected by a failing test rather
   // than by a compiled row: `l3/nearbase.ts` relies on the run beneath it keeping its own order
   // (synthetic:dmafield), and `l3/basecse.ts` is typed out of reaching this value at all.
   const named = (name: string, sym: string): BaseInit => ({
@@ -290,7 +291,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
       'p0',
       'exprstmt',
     ]);
-    // the contrast: `head` sits in the same POSITION and reorders, so the two are not one axis
+    // the contrast: `head` sits in the same POSITION and reorders, so the two are not one dimension
     expect(placeBaseLocals(sfn, minted, 'head').body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
       'q0',
       'p0',
@@ -304,31 +305,31 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
 
 describe('the /livebase pairing is WIRED into enumeration', () => {
   // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
-  // hoist refuses outright, so the tree this lever reads on its own carries no init at all.
+  // hoist refuses outright, so the tree this variation reads on its own carries no init at all.
   const fan = enumerateCandidates(
     'mixpoll',
     readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8'),
     ARMV4T_AGBCC,
     { prototypes: { mixpoll: { returnsVoid: true } } },
   );
-  const labels = fan.map((x) => x.label);
-  const sourceOf = (label: string): string | undefined => fan.find((c) => c.label === label)?.source;
+  const names = fan.map((x) => x.variations);
+  const sourceOf = (name: string): string | undefined => fan.find((c) => joinVariations(c.variations) === name)?.source;
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
-    expect(labels).toContain('signed/livebase/sinkinit');
-    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
+    expect(names).toContainEqual(['signed', 'livebase', 'sinkinit']);
+    // PINNED AS A PROGRAM, because a candidate's variations are not an attribution (see the `seen` dedup in rank.ts).
     // WHICH route emits the sunk narrow program is exactly what `seen` decides, and it moves under
     // roster edits that change no program at all: on this fixture `/unfolded` binds the same
-    // register file `/livebase-block` does, its roster row runs before the `/livebase ×` product
-    // loops, and it places at first use — so it takes the label today, and ablating that row leaves
-    // the same 60 distinct sources with the same sunk program relabelled
-    // `signed/livebase-block/volatile/sinkinit`. A label-keyed assertion goes red there for a
-    // program that never moved. A substring one (`some label contains livebase-block`) fails the
+    // register file `/livebase-block` does, its hoist runs before the `/livebase ×` pairing
+    // loops, and it places at first use — so it names the candidate today, and ablating that hoist leaves
+    // the same 60 distinct sources with the same sunk program renamed
+    // `signed/livebase-block/volatile/sinkinit`. A name-keyed assertion goes red there for a
+    // program that never moved. A substring one (`some name contains livebase-block`) fails the
     // other way: the twelve HEAD-placed narrow candidates satisfy it with the sunk spelling gone
     // entirely.
     //
-    // So SEARCH for the program and let whichever route produced it own the label. What has to hold
-    // is that the narrow admission's bases reach the differ SUNK: the same declarations and the same
+    // So SEARCH for the program and let whichever route produced it own the name. What has to hold
+    // is that the narrow hoist's bases reach the differ SUNK: the same declarations and the same
     // statements as the head-placed narrow candidate, differing only in where the base init sits
     // relative to the loop counter's `v0 = 0;`. Ablating the narrow family itself (`single-cell` out
     // of LIVEBASE_BLOCK_GATES) takes `head` away and this goes red, which is the regression it is
@@ -345,15 +346,19 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
         cand.source.indexOf('v0 = 0;') < cand.source.indexOf('p0 = (s32 *)'),
     );
     expect(sunk).toHaveLength(1);
-    // Its label today is `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
-    // with that roster row ablated. Deliberately NOT asserted: either is the same program. That
-    // leaves the ROSTER ROW unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
-    // it" owns that subject, keyed on the base SET only that row parks. Two tests, two subjects;
-    // this one stays label-free.
+    // Its variations today are `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
+    // with that hoist ablated. Deliberately NOT asserted: either is the same program. That
+    // leaves the HOIST unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
+    // it" owns that subject, keyed on the base SET only that hoist parks. Two tests, two subjects;
+    // this one asserts no name for the sunk candidate.
   });
 
-  test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
-    expect(labels.filter((l) => l.includes('sinkinit') && !l.includes('livebase'))).toEqual([]);
+  test('and it is reachable no other way: the plain variation finds nothing to sink here', () => {
+    expect(
+      names.filter(
+        (v) => hasVariation(v, 'sinkinit') && !hasVariation(v, 'livebase') && !hasVariation(v, 'livebase-block'),
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -426,7 +431,7 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
 
 describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', () => {
   // A `scope` run that put nothing in a nested list emits the `first-use` tree. `rank.ts` withholds
-  // the flat `first-use` row for this gate table deliberately (ORDERBASE_ADMISSIONS: measured at
+  // the flat `first-use` row for this gate table deliberately (ORDERBASE_HOISTS: measured at
   // zero over the four rows where it differs from `head`), so returning that tree here ships the
   // withheld candidate under the scoped one's name. Over each project's whole `asm` tree, map-ful:
   // of the 48 functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do
@@ -466,7 +471,7 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
     expect(arm.k === 'if' && arm.then.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store']);
   });
 
-  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped label', () => {
+  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped name', () => {
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'scope')).toBeNull();
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'head').body).toHaveLength(2);
   });

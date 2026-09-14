@@ -341,7 +341,7 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
     if (!names.size || /unmodelled instruction/.test(e.message)) {
       throw e;
     }
-    // Through `gapReasonFor`, so the classifier sees its canonical text — a hand-written variant
+    // Through `gapReasonFor`, so the classifier sees its canonical text — a hand-written spelling
     // misses the mnemonic-anchored classes and every attributed decline lands in the generic bucket.
     const list = [...names].sort().map(gapReasonFor).join(', ');
     throw new StructureError(`${e.message} — and the function carries ${list}, which is the more likely cause`);

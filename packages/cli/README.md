@@ -105,8 +105,8 @@ just means fewer names, never a guess:
 | DWARF (`-g`)                            | Declaration shapes — array/struct/pointer, signedness, `volatile`/`const` — that drive typed spellings like `gCtx.frameCounter`, and signatures for the functions this ELF compiled from C: a callee's arity drives its call-argument recovery |
 | `.debug_macinfo` (`-g3`)                | Address-cast macro names (`#define gCounter (*(u16 *)0x03001234)`) — names no symbol table can carry. The macro spelling also matches the **numeric** literal-pool word the original build has, where an extern would emit a relocated one     |
 
-Every map fact is a ranked lever, never an override: naming a global can change an old
-compiler's codegen, so the named spelling and its raw-address sibling are both enumerated, and
+Every map fact is ranked, never an override: naming a global can change an old compiler's
+codegen, so the named spelling and its `/raw-globals` sibling are both enumerated, and
 `--score-against`'s byte-diff picks the winner — a tie goes to the name. Unmapped addresses
 (MMIO registers, unnamed cells) keep the honest cast spelling.
 
@@ -169,7 +169,7 @@ asmlift fn.s --target agbcc --proto '{"fn": {"params": ["int", "void *"]}}'
 `"u8"`/`"s16"`/&c., the C89 base types and any pointer are read; a project typedef is not, and a
 spelling asmlift cannot read leaves the asm's own inference standing. The list never PINS a width
 the asm did not carry — a declaration that agrees with an elided extension would take the
-signedness axis off the table before the differ ever ranked it.
+signedness variation off the table before the differ ever ranked it.
 
 ## Using it as a library
 

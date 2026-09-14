@@ -25,6 +25,7 @@ import { decompile, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations, joinVariations } from '../src/variation-tokens';
 import { c } from './helpers';
 
 // `fromOperand` marks the access whose offset reached the MEMORY OPERAND — the DISPLACEMENT the
@@ -473,7 +474,7 @@ describe('leaf-base hoisting', () => {
       expect(
         admittedBases(input, BASEFOLD_GATES).filter((k) => !admittedBases(input, BASECSE_GATES).includes(k)),
       ).toHaveLength(1);
-      // the use-count rule, alone — unchanged by the lever's existence
+      // the use-count rule, alone — unchanged by the variation's existence
       expect(hoistBaseLocals(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
       // ...and dropping the exemption's gate drops `reachedOnce` with it, landing on that exact
       // table, which is why the exemption's own price is the diff and not an ablation.
@@ -523,7 +524,7 @@ describe('leaf-base hoisting', () => {
 describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', () => {
   // The MMIO poll: three stores plus a busy-wait re-read of the same fixed offset, all through
   // one constant base. `loop` and `repeated-const-offset` both reject it, yet the compiler holds
-  // the base in ONE register throughout — the shape the lever exists for.
+  // the base in ONE register throughout — the shape the variation exists for.
   const poll = (): SFn =>
     fn([
       { k: 'store', lval: cidx(0x40000d4, c(0)), value: { k: 'var', name: 'a0' } },
@@ -553,7 +554,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     });
   });
 
-  test('the /livebase/volatile product: the hoisted numeric base qualifies for the volatile lever', () => {
+  test('the /livebase/volatile composition: the hoisted numeric base qualifies for the volatile variation', () => {
     const out = hoistBaseLocals(poll(), LIVEBASE_GATES);
     const vol = volatilePtrLocals(out);
     expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
@@ -564,7 +565,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(hoistBaseLocals(input, LIVEBASE_GATES)).toBe(input);
   });
 
-  // Mixed admitted+refused bases: the lever re-runs on a tree whose head already holds the
+  // Mixed admitted+refused bases: the variation re-runs on a tree whose head already holds the
   // default run's init, and pool-load order is FIRST-USE order across both — whichever base the
   // body touches first gets its init first, not whichever pass hoisted it.
   const admitted = (v: string): Stmt[] => [
@@ -592,7 +593,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(initOrder([...admitted('a0'), refusedLoop])).toEqual([0x3001000, 0x40000d4]);
   });
 
-  test('mixed bases, refused base first-used first: the lever init moves ahead of the default one', () => {
+  test('mixed bases, refused base first-used first: the init the variation hoists moves ahead of the default one', () => {
     expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
   });
 
@@ -629,7 +630,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(out.body.slice(0, 3).map((s) => (s as Stmt & { k: 'assign' }).name)).toEqual(['p0', 'v1', 'v2']);
   });
 
-  test('a base the default gates already admitted leaves nothing: the lever declines', () => {
+  test('a base the default gates already admitted leaves nothing: the variation declines', () => {
     const hoisted = hoistBaseLocals(
       fn([
         { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
@@ -685,7 +686,7 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
     });
   });
 
-  test("the axis is one gate: ablating `single-cell` is /livebase's own admission", () => {
+  test("the variation is one gate: ablating `single-cell` is /livebase's own admission", () => {
     expect(without(LIVEBASE_BLOCK_GATES, 'single-cell').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
     expect(boundBases(hoistBaseLocals(mixed(), without(LIVEBASE_BLOCK_GATES, 'single-cell')))).toEqual(
       boundBases(hoistBaseLocals(mixed(), LIVEBASE_GATES)),
@@ -771,7 +772,7 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
     expect(boundBases(hoistBaseLocals(parked(), LIVEBASE_BLOCK_GATES))).toEqual([]);
   });
 
-  test("the axis is one gate: ablating `folded-offset` is /livebase's own admission", () => {
+  test("the variation is one gate: ablating `folded-offset` is /livebase's own admission", () => {
     expect(without(UNFOLDED_GATES, 'folded-offset').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
     expect(admittedBases(parked(), without(UNFOLDED_GATES, 'folded-offset'))).toEqual(
       admittedBases(parked(), LIVEBASE_GATES),
@@ -828,13 +829,13 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 
   test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
-    // THE TABLE IS NOT THE LEVER — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
-    // delete that one roster row and the whole `/unfolded` family leaves the ranked path
+    // THE TABLE IS NOT THE VARIATION — `rank.ts`'s `UNFOLDED_HOISTS` is, and it needs its own pin:
+    // delete that one hoist and the whole `/unfolded` family leaves the ranked path
     // (`synthetic:unfoldpark`'s fan 44 → 36) without any table in `basecse.ts` changing its answer.
-    // `sinkinit.test.ts` owns the sunk PROGRAM and must stay label-free to do it, so it cannot own
+    // `sinkinit.test.ts` owns the sunk PROGRAM and must stay free of candidate names to do it, so it cannot own
     // this: whichever route emits that program satisfies it. Two tests, two subjects.
     //
-    // Program-keyed for the same reason, so `seen`'s first-label-wins cannot decide it: what only
+    // Program-keyed for the same reason, so `seen`'s first-route-wins cannot decide it: what only
     // this row reaches is a candidate parking EXACTLY the two evidenced bases and leaving
     // `0x03002040` — the cell whose offset the pool already carried — inline. On this fixture that
     // is 8 candidates with the row, 0 with it ablated, and 0 on a target not declaring the fold.
@@ -856,7 +857,7 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 });
 
-describe('the block admission is WIRED into enumeration', () => {
+describe('the block hoist is WIRED into enumeration', () => {
   // Real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
   // one DMA register file at three offsets beside three IWRAM halfwords read-modified in place,
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
@@ -869,17 +870,21 @@ describe('the block admission is WIRED into enumeration', () => {
   const cands = candsFor('mixpoll');
 
   test('the narrower hoist reaches the candidate list, plain and volatile', () => {
-    // the roster's own four labels — the pairings that ride on them are their own tests' business
-    expect(cands.filter((x) => /^signed\/livebase(-block)?(\/volatile)?$/.test(x.label)).map((x) => x.label)).toEqual([
-      'signed/livebase',
-      'signed/livebase/volatile',
-      'signed/livebase-block',
-      'signed/livebase-block/volatile',
+    // the roster's own four candidates — the pairings that ride on them are their own tests' business
+    expect(
+      cands
+        .filter((x) => /^signed\/livebase(-block)?(\/volatile)?$/.test(joinVariations(x.variations)))
+        .map((x) => x.variations),
+    ).toEqual([
+      ['signed', 'livebase'],
+      ['signed', 'livebase', 'volatile'],
+      ['signed', 'livebase-block'],
+      ['signed', 'livebase-block', 'volatile'],
     ]);
   });
 
   test('it binds the register file alone and leaves the scalar cells inline', () => {
-    const src = cands.find((x) => x.label === 'signed/livebase-block/volatile')!.source;
+    const src = cands.find((x) => joinVariations(x.variations) === 'signed/livebase-block/volatile')!.source;
     expect(src).toContain('volatile s32 * p0;');
     expect(src).toContain('p0 = (s32 *)67109076;');
     expect(src).toContain('*(u16 *)50335816 = *(u16 *)50335816 + 1;');
@@ -887,19 +892,19 @@ describe('the block admission is WIRED into enumeration', () => {
   });
 
   test('one base and no cell beside it ⇒ it DECLINES rather than repeat /livebase', () => {
-    const labels = candsFor('onepoll').map((x) => x.label);
-    expect(labels).toContain('signed/livebase/volatile');
-    expect(labels.filter((l) => l.includes('livebase-block'))).toEqual([]);
+    const names = candsFor('onepoll').map((x) => x.variations);
+    expect(names).toContainEqual(['signed', 'livebase', 'volatile']);
+    expect(names.filter((v) => hasVariation(v, 'livebase-block'))).toEqual([]);
   });
 
   test('/basefold reaches the roster where the target declares the fold, and only there', () => {
     // `corpus/agbcc-basecell.s` is synthetic:basecell:agbcc — ONE access through a numeric base at
     // a non-zero byte offset, the shape the default table refuses and this admission exempts.
-    const labels = candsFor('basecell').map((x) => x.label);
-    expect(labels).toContain('unsigned/basefold');
+    const names = candsFor('basecell').map((x) => x.variations);
+    expect(names).toContainEqual(['unsigned', 'basefold']);
     // its first use IS its first statement, so the sunk row re-emits the head row's source and the
     // dedup collapses it — the second placement costs nothing where it cannot move anything
-    expect(labels.filter((l) => l.includes('basefold/sinkinit'))).toEqual([]);
+    expect(names.filter((v) => hasVariations(v, ['basefold', 'sinkinit']))).toEqual([]);
     // the fold is a per-compiler declaration, so a target without it never offers the row
     const noFold = {
       ...ARMV4T_AGBCC,
@@ -907,8 +912,8 @@ describe('the block admission is WIRED into enumeration', () => {
     };
     expect(
       candsFor('basecell', noFold)
-        .map((x) => x.label)
-        .filter((l) => l.includes('basefold')),
+        .map((x) => x.variations)
+        .filter((v) => hasVariation(v, 'basefold')),
     ).toEqual([]);
   });
 
@@ -917,9 +922,9 @@ describe('the block admission is WIRED into enumeration', () => {
     // three statements down, so head placement and first-use placement are different trees. Both
     // are offered and the differ referees: the row is a MATCH on the sunk one, and the head one
     // scores WORSE than not hoisting at all (the ladder is in the dataset's note).
-    const labels = candsFor('foldsink').map((x) => x.label);
-    expect(labels).toContain('unsigned/basefold');
-    expect(labels).toContain('unsigned/basefold/sinkinit');
+    const names = candsFor('foldsink').map((x) => x.variations);
+    expect(names).toContainEqual(['unsigned', 'basefold']);
+    expect(names).toContainEqual(['unsigned', 'basefold', 'sinkinit']);
   });
 
   test('two rows binding DIFFERENT bases both ride — the set half of the shadow rule', () => {
@@ -930,9 +935,9 @@ describe('the block admission is WIRED into enumeration', () => {
     // `/basefold/sinkinit` share one gate object, so without it the sunk row is shadowed on every
     // function and never fires at all ('the admission rides at BOTH placements where they differ',
     // the only test that fails when the clause goes).
-    const labels = candsFor('mixpoll').map((x) => x.label);
-    expect(labels.filter((l) => l.endsWith('/livebase'))).not.toEqual([]);
-    expect(labels.filter((l) => l.endsWith('/livebase-block'))).not.toEqual([]);
+    const names = candsFor('mixpoll').map((x) => x.variations);
+    expect(names.filter((v) => hasVariation(v.slice(-1), 'livebase'))).not.toEqual([]);
+    expect(names.filter((v) => hasVariation(v.slice(-1), 'livebase-block'))).not.toEqual([]);
   });
 
   test('the SYMBOL half reaches the roster end to end, from real agbcc output', () => {
@@ -941,7 +946,7 @@ describe('the block admission is WIRED into enumeration', () => {
     // else about the symbol half is pinned on hand-built trees with `operandOff` written in by the
     // test, or on the real-tier row, which needs the 2.2 GB project checkouts. This is the one
     // offline gate that runs the whole chain: lift → `operandOff` → `BASEFOLD_GATES` → both
-    // placement labels. It fails on `origin/main`'s core, where the gate binds nothing.
+    // placement names. It fails on `origin/main`'s core, where the gate binds nothing.
     const sfn = structureChecked(
       frontendFor(ARMV4T_AGBCC).lift(
         'sub_803213C',
@@ -953,55 +958,67 @@ describe('the block admission is WIRED into enumeration', () => {
     );
     expect(admittedBases(sfn, BASEFOLD_GATES)).toEqual(['a:gStageData 1 false']);
     expect(admittedBases(sfn, BASECSE_GATES)).toEqual([]);
-    const labels = candsFor('tailmerge', ARMV4T_AGBCC, 'sub_803213C').map((x) => x.label);
-    expect(labels).toContain('unsigned/basefold');
-    expect(labels).toContain('unsigned/basefold/sinkinit');
+    const names = candsFor('tailmerge', ARMV4T_AGBCC, 'sub_803213C').map((x) => x.variations);
+    expect(names).toContainEqual(['unsigned', 'basefold']);
+    expect(names).toContainEqual(['unsigned', 'basefold', 'sinkinit']);
   });
 
   test('/basefold declines where its exemption binds nothing', () => {
     // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there — and every key
-    // it could have bound the DEFAULT hoist already took, before `fanOut` saw the tree.
-    expect(cands.map((x) => x.label).filter((l) => l.includes('basefold'))).toEqual([]);
+    // it could have bound the DEFAULT hoist already took, before `respellTree` saw the tree.
+    expect(cands.map((x) => x.variations).filter((v) => hasVariation(v, 'basefold'))).toEqual([]);
   });
 
   test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
-    // The `/livebase ×` products fan over the rows that declared `pairings`, and this one does
-    // not — so the labels it contributes are its own family and nothing crossed with it. Read on
-    // `foldsink`, where BOTH roster rows fire and are distinct: on `basecell` they emit the same
+    // The `/livebase ×` pairings run over the hoists that declared `pairings`, and this one does
+    // not — so the candidates it contributes are its own family and nothing crossed with it. Read on
+    // `foldsink`, where BOTH of its hoists fire and are distinct: on `basecell` they emit the same
     // source and `seen` keeps only the head one, so `/basefold/sinkinit` is absent there for a
     // reason that has nothing to do with pairings and this test would pass without checking
     // anything.
     const basefold = candsFor('foldsink')
-      .map((x) => x.label)
-      .filter((l) => l.includes('basefold'));
-    expect(basefold).toContain('unsigned/basefold');
-    expect(basefold).toContain('unsigned/basefold/sinkinit');
-    // the roster's own two suffixes and nothing else — no product crossed with them
-    for (const suffix of ['/indexed', '/nearbase', '/coalesce']) {
-      expect(basefold.filter((l) => l.includes(suffix))).toEqual([]);
+      .map((x) => x.variations)
+      .filter((v) => hasVariation(v, 'basefold'));
+    expect(basefold).toContainEqual(['unsigned', 'basefold']);
+    expect(basefold).toContainEqual(['unsigned', 'basefold', 'sinkinit']);
+    // the two basefold hoists' own candidates and nothing else — no pairing crossed with them
+    for (const name of ['indexed', 'nearbase', 'coalesce']) {
+      expect(basefold.filter((v) => hasVariation(v, name))).toEqual([]);
     }
-    expect(basefold.filter((l) => l.includes('/sinkinit') && !l.includes('/basefold/sinkinit'))).toEqual([]);
+    expect(basefold.filter((v) => hasVariation(v, 'sinkinit') && !hasVariations(v, ['basefold', 'sinkinit']))).toEqual(
+      [],
+    );
   });
 
-  test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
+  test('every /livebase PAIRING runs over the roster, and one of them is reachable no other way', () => {
     // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
     // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
     // /nearbase no neighbour cells to cluster; only the narrow one leaves it inline, so the
     // pairing exists on `-block` alone.
-    const labels = candsFor('sizebound').map((x) => x.label);
-    expect(labels).toContain('signed/livebase-block/volatile/nearbase');
-    expect(labels.filter((l) => l.startsWith('signed/livebase/') && l.includes('nearbase'))).toEqual([]);
+    const names = candsFor('sizebound').map((x) => x.variations);
+    expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
+    expect(
+      names.filter((v) => hasVariations(v.slice(0, 2), ['signed', 'livebase']) && hasVariation(v.slice(2), 'nearbase')),
+    ).toEqual([]);
   });
 
   test('/nearbase rides at BOTH orderings, so nothing commits its placement uncontested', () => {
     // `l3/nearbase.ts` places its cluster inits above the run already there, on the strength of
     // one row and no compiler fact. The sunk sibling is the other ordering; without it that
     // choice decides `synthetic:dmafield`'s match with no candidate beside it to lose to.
-    const labels = candsFor('sizebound').map((x) => x.label);
-    expect(labels).toContain('signed/livebase-block/volatile/nearbase');
-    expect(labels).toContain('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit');
+    const names = candsFor('sizebound').map((x) => x.variations);
+    expect(names).toContainEqual(['signed', 'livebase-block', 'volatile', 'nearbase']);
+    expect(names).toContainEqual([
+      'signed',
+      'defsite',
+      'loop-entry',
+      'livebase-block',
+      'volatile',
+      'nearbase',
+      'sinkinit',
+    ]);
     // and the sunk one is a DIFFERENT candidate, not a relabelled duplicate
-    const src = (l: string) => candsFor('sizebound').find((x) => x.label === l)!.source;
+    const src = (l: string) => candsFor('sizebound').find((x) => joinVariations(x.variations) === l)!.source;
     expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
       src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
     );
@@ -1127,11 +1144,15 @@ ${body}
     expect(admittedBases(decompile('f', ORDERED, off, {}).sfn, ORDERBASE_GATES)).toEqual([]);
   });
 
-  test('the lever is on the roster and wins the row it was built for', () => {
-    const labels = enumerateCandidates('f', ORDERED, ARMV4T_AGBCC).map((c) => c.label);
-    expect(labels).toContain('unsigned/orderbase');
+  test('the variation is on the roster and wins the row it was built for', () => {
+    const names = enumerateCandidates('f', ORDERED, ARMV4T_AGBCC).map((c) => c.variations);
+    expect(names).toContainEqual(['unsigned', 'orderbase']);
     // …and it is not offered where the order says otherwise
-    expect(enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).map((c) => c.label)).not.toContain('unsigned/orderbase');
+    expect(
+      enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).some(
+        (c) => c.variations.length === 2 && hasVariations(c.variations, ['unsigned', 'orderbase']),
+      ),
+    ).toBe(false);
   });
 
   test('a key whose accesses DISAGREE on the stamp is refused whole, never half-homed', () => {

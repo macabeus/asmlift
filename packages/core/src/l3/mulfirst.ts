@@ -1,10 +1,10 @@
-// L3 re-spelling lever: put the PRODUCT operand first in a commutative `+`.
+// L3 respell variation: put the PRODUCT operand first in a commutative `+`.
 //
 // structure.ts's def-order rule spells commutative operands in EVALUATION order, which recovers
 // gcc's left-to-right source order. IDO and mwcc break the correspondence for exactly one shape:
 // in `a*b + c` they SCHEDULE the independent load of `c` above the product's `mflo`/`mullw`, so
 // the machine add reads (c, product) and def order re-spells the source's product-first sum as
-// c-first. Which order the source used is not recoverable from positions there — so this lever
+// c-first. Which order the source used is not recoverable from positions there — so this variation
 // emits the product-first sibling and the differ referees (verified byte-identical against IDO
 // on the bg_area row; the def-order spelling stays in the list for sources that really were
 // c-first).
@@ -12,7 +12,7 @@
 // SCOPE (decline over approximate): a `+` is flipped only when exactly ONE side is a product
 // (`bin('*')` at the root, casts looked through) — two products or none leave nothing to anchor
 // the flip on. A side carrying an effect (a call, a marker) never moves — evaluation order of
-// the operands is what the lever edits. Declines (null) when no `+` changes, so no duplicate
+// the operands is what the variation edits. Declines (null) when no `+` changes, so no duplicate
 // candidate.
 import type { Expr, SFn } from './ast';
 import { exprHasEffect, mapExprChildren, mapStmtExprs } from './ast';

@@ -173,7 +173,7 @@ describe('declaredFields — bitfields seat by BIT cursor', () => {
 });
 
 describe('the option is inert without a map — the `/no-bitfield` decline rests on this', () => {
-  // rank.ts does not enumerate `/no-bitfield` on the `/raw-globals` variant, because with no map
+  // rank.ts does not enumerate `/no-bitfield` on the `/raw-globals` setting, because with no map
   // both arms structure the IDENTICAL tree. structure() makes that true for every reader of the
   // option rather than for the one that happens to sit inside `if (symCtx && …)` today: with
   // `symbols` absent the option is normalized to false at the boundary. These two tests are the

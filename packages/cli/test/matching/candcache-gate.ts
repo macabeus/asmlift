@@ -13,7 +13,7 @@
 // WHAT THIS IS AND IS NOT. Essentially every test in the suite compiles through
 // `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`, `compileMipsTarget`), which contains ZERO
 // references to this cache — so those are not audited. Four files reach `compileFromCommand`
-// (`ranked-parallel`, `self-declared-ab`, `decl-scope-axis`, `candcache-verify`); with no
+// (`ranked-parallel`, `self-declared-ab`, `decl-scope-variation`, `candcache-verify`); with no
 // per-project opt-in to withhold, all of them compile through a live `verify` cache against the
 // default store, and a disagreement fails the run for real. MEASURED, the whole suite against an
 // empty private store (`ASMLIFT_CANDCACHE_DIR=<empty> pnpm test:matching`): 327 tests passed, 3

@@ -19,8 +19,8 @@
 // the memory operand — and only the CONJUNCTION reproduces the target.
 //
 // READ AS A MAPPING FROM THE ASM these four corners say `adds` ⇒ volatile-and-advanced, which is a
-// FUNCTION, and the level tower says a function is a default. The answer to that — why it is an
-// axis anyway, and what would turn it into a `compilerBehaviors` default — is at the `/advance`
+// FUNCTION, and the level tower says a function is a default. The answer to that — why it is a
+// variation anyway, and what would turn it into a `compilerBehaviors` default — is at the `/advance`
 // roster entry in rank.ts. It is not "the subscript spelling is right for every access the compiler
 // folded": those accesses carry no stamp, so the rule below never sees them.
 import { expect, test } from 'vitest';
@@ -35,6 +35,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 import { count, traceOf, tracesDiffer } from './helpers';
 
 // Two halfword stores 2 bytes apart through ONE address register — the `REG_WININ` pair, reduced.
@@ -145,7 +146,7 @@ test('the advanced access still denotes the cell its absolute address names', ()
   expect(out).toContain('67108938');
 });
 
-// ── the lever ────────────────────────────────────────────────────────────────────────────────
+// ── the variation ────────────────────────────────────────────────────────────────────────────
 // The decline cases build trees directly rather than lifting asm: each one differs from the
 // admitted shape in exactly ONE of the pass's rules, which an IR fixture cannot isolate (the
 // evidence and the addresses are produced together by the fold).
@@ -494,13 +495,13 @@ _0804E730: .4byte 0x04000048
 _0804E734: .4byte 0x03004D84
 `;
 
-const swrCandidates = (target: typeof ARMV4T_AGBCC): { label: string; source: string }[] =>
+const swrCandidates = (target: typeof ARMV4T_AGBCC): { variations: readonly string[]; source: string }[] =>
   enumerateCandidates('StreamCmd_SetWindowRegs', KLEOD_SWR, target, {
     prototypes: { StreamCmd_SetWindowRegs: { returnsVoid: true } },
   });
 
 test('the row enumerates the advanced spelling, qualified', () => {
-  const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => c.label.endsWith('/advance/volatile'));
+  const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => hasVariations(c.variations, ['advance', 'volatile']));
   expect(qualified).toBeDefined();
   // The byte-exact spelling, compiled against the row's own target object.
   expect(qualified!.source).toMatch(/volatile u16 \* p0;/);
@@ -511,20 +512,21 @@ test('the row enumerates the advanced spelling, qualified', () => {
   expect(lines[0]).toContain('p0 = (u16 *)67108936;');
 });
 
-// The PLAIN label, both ways round. agbcc folds `p = p + 1; *p` back into `strh [r3, #2]` (the four
+// The PLAIN variation, both ways round. agbcc folds `p = p + 1; *p` back into `strh [r3, #2]` (the four
 // corners in this file's header), so its un-qualified spelling is byte-identical to the indexed one
 // the roster already offers and rank.ts withholds it — while a target that has NOT been compiled on
-// that pair keeps it, which is the whole point of gating on a behaviour instead of deleting a label.
-test('the plain /advance label follows compilerBehaviors.foldsPointerAdvance', () => {
+// that pair keeps it, which is the whole point of gating on a behaviour instead of deleting a variation.
+test('the plain /advance variation follows compilerBehaviors.foldsPointerAdvance', () => {
   expect(ARMV4T_AGBCC.compilerBehaviors.foldsPointerAdvance).toBe(true);
-  const plain = (t: typeof ARMV4T_AGBCC): boolean => swrCandidates(t).some((c) => c.label.endsWith('/advance'));
+  const plain = (t: typeof ARMV4T_AGBCC): boolean =>
+    swrCandidates(t).some((c) => hasVariation(c.variations, 'advance') && !hasVariation(c.variations, 'volatile'));
   expect(plain(ARMV4T_AGBCC)).toBe(false);
   const unmeasured = {
     ...ARMV4T_AGBCC,
     compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsPointerAdvance: undefined },
   };
   expect(plain(unmeasured)).toBe(true);
-  // and the qualified product rides on BOTH: `volatile` is what bars the fold
-  expect(swrCandidates(ARMV4T_AGBCC).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
-  expect(swrCandidates(unmeasured).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
+  // and the `/advance/volatile` composition rides on BOTH: `volatile` is what bars the fold
+  expect(swrCandidates(ARMV4T_AGBCC).some((c) => hasVariations(c.variations, ['advance', 'volatile']))).toBe(true);
+  expect(swrCandidates(unmeasured).some((c) => hasVariations(c.variations, ['advance', 'volatile']))).toBe(true);
 });

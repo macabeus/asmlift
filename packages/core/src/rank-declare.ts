@@ -5,9 +5,9 @@
 // (`bareGlobalAccessFacts`), which names exist at all (`bareGlobalSymbols`), and which of them a
 // declaration must REFUSE to claim (`makeRefCollector`, via `RefusedDeclarationReason`).
 //
-// It knows nothing about axes, levers or ranking: the enumeration driver hands it a dictionary and
+// It knows nothing about variations or ranking: the enumeration driver hands it a dictionary and
 // asks each emitted tree for its references. A SIBLING MODULE, never a `rank/` directory — see the
-// same note on rank-axes.ts.
+// same note on rank-variations.ts.
 import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
@@ -134,7 +134,7 @@ const EMITTER_NAME = /^[avt]\d+$/;
 
 /** Why a name the candidate's tree references got NO declaration. Reported rather than silently
  *  applied, because an undeclared name and a REFUSED one produce the same `'x' undeclared` from
- *  the compiler and only the second one is asmlift's own decision. Same argument as `onLeverError`
+ *  the compiler and only the second one is asmlift's own decision. Same argument as `onEnumerationError`
  *  one screen down: a refusal nobody can see is indistinguishable from a capability that was
  *  never there.
  *
@@ -223,7 +223,7 @@ export function makeRefCollector(ctx: {
       //     `tree.locals`: every use of the emitter's local binds the extern instead, and the
       //     loop pointer it was holding becomes a store to that global once per iteration.
       // Both compile, both are wrong, and a compiling wrong answer is the one outcome this
-      // project trades nothing for — so the spelling dies here and `fanOut`'s catch reports it.
+      // project trades nothing for — so the spelling dies here and `respellTree`'s catch reports it.
       // If every spelling of every tree dies, the row declines LOUDLY naming the collision.
       if (bound.has(r.name) || EMITTER_NAME.test(r.name)) {
         refuse(r.name, 'emitter-name');

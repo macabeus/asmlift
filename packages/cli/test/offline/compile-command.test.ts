@@ -59,7 +59,7 @@ test('a prelude-tolerant template keeps the prelude (probe verdict cached across
 });
 
 test('a broken template keeps the prelude and fails loudly on the real candidate', () => {
-  // both probe variants fail ⇒ the template itself is broken; the candidate compile must throw
+  // both probe forms fail ⇒ the template itself is broken; the candidate compile must throw
   // the template's own error, never a silent prelude decision
   const compile = compileFromCommand('test -f {{inputPath}} && false && cp {{inputPath}} {{outputPath}}');
   expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(/compile command failed/);

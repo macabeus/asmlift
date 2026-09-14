@@ -1,4 +1,4 @@
-// The `/inlinebase` lever (l3/inlinebase.ts): a pointer local holding a CONSTANT address is
+// The `/inlinebase` variation (l3/inlinebase.ts): a pointer local holding a CONSTANT address is
 // deleted and each access through it re-spelled as the cast constant. The gate conditions are
 // what these tests pin — one bare, nonzero `const` assignment at the body's top level that
 // nothing mentions earlier, no address taken, every use an `index` base, 2+ of them — and nothing
@@ -15,6 +15,7 @@ import { hoistScopedBases } from '../src/l3/scopebase';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { joinVariations } from '../src/variation-tokens';
 
 const PTR = T.ptr(T.u(16));
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
@@ -24,7 +25,7 @@ const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   retType: T.void(),
   body,
 });
-/** `*p` — the one use shape the lever re-spells */
+/** `*p` — the one use shape the variation re-spells */
 const deref = (name: string): Expr => ({
   k: 'index',
   base: { k: 'var', name },
@@ -119,7 +120,7 @@ test('an address-taken local has an identity the constant cannot stand in for', 
   expect(inlineConstBases(s)).toBeNull();
 });
 
-test('a use that is not an `index` base is outside what the lever re-spells', () => {
+test('a use that is not an `index` base is outside what the variation re-spells', () => {
   const s = fn(
     [{ name: 'p', type: PTR }],
     [...twoUses(), { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'var', name: 'p' }] } }],
@@ -158,9 +159,9 @@ test('a local fed a bare `0` is NULL, not an address', () => {
   expect(inlinableConstBases(s)).toEqual(['p']);
 });
 
-// rank.ts's `/inlinebase/volatile` output narrows the qualifier lever to the locals this one
-// deletes, so the two gates have to agree about what an address is — a local either lever admits
-// alone would put an unqualified access under a label that says every one is qualified.
+// rank.ts's `/inlinebase/volatile` output narrows the qualifier variation to the locals this one
+// deletes, so the two gates have to agree about what an address is — a local either variation admits
+// alone would put an unqualified access under a variation that says every one is qualified.
 test('every local the qualified output inlines is one the qualifier reached', () => {
   const s = fn([{ name: 'p', type: PTR }], twoUses());
   const only = new Set(inlinableConstBases(s));
@@ -188,15 +189,15 @@ test('`inlinableConstBases` names exactly the locals the gate admits', () => {
   expect(inlinableConstBases(fn([{ name: 'p', type: PTR }], twoUses().slice(0, 2)))).toEqual([]);
 });
 
-// THE CROSS-MODULE PROMISE: no base-hoist lever may produce a local this one would eat. Pinned
-// behaviourally, on each lever's own smallest firing shape, because it is a constraint neither
+// THE CROSS-MODULE PROMISE: no base-hoist variation may produce a local this one would eat. Pinned
+// behaviourally, on each variation's own smallest firing shape, because it is a constraint neither
 // side's own tests state. Only `basecse` rests on the CAST — patching it to hoist the bare base
-// fails this test, so the separation from that one lever really is a spelling agreement. The
+// fails this test, so the separation from that one variation really is a spelling agreement. The
 // other three are separated structurally and would survive the same edit: `scopebase` hoists
 // `(T *)&gSym`, whose initializer is an `addr` and not a const at all; `nearbase` spells every
 // member but the lowest as `(p0 + k)[0]`, an `otherUses`; `argbase` names one base per call
-// argument, so a hoist has one use where this lever wants two.
-test('no base-hoist lever produces a local this one would eat', () => {
+// argument, so a hoist has one use where this variation wants two.
+test('no base-hoist variation produces a local this one would eat', () => {
   const cidx = (value: number, i: number, width = 4): Expr => ({
     k: 'index',
     base: { k: 'const', value },
@@ -316,35 +317,38 @@ const ereaderCandidates = (): ReturnType<typeof enumerateCandidates> =>
     },
   });
 
-test('the primary keeps the pointer local — the pool load is a fact, the name is not', () => {
-  const plain = ereaderCandidates().find((c) => c.label === 'unsigned')!;
+test('the default keeps the pointer local — the pool load is a fact, the name is not', () => {
+  const plain = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned')!;
   expect(plain.source).toContain('u16 * v0;');
   expect(plain.source).toContain('v0 = (u16 *)67109384;');
 });
 
 test('/inlinebase spells the constant at each access and drops the local', () => {
-  const c = ereaderCandidates().find((x) => x.label === 'unsigned/inlinebase')!;
+  const c = ereaderCandidates().find((x) => joinVariations(x.variations) === 'unsigned/inlinebase')!;
   expect(c.source).not.toContain('v0');
   expect(c.source).toContain('*(u16 *)67109384 = 0;');
 });
 
-test('the /inlinebase × /vol-slot pair spells both, and neither lever reaches it alone', () => {
-  const labels = ereaderCandidates().map((c) => c.label);
-  expect(labels).toContain('unsigned/inlinebase');
-  expect(labels).toContain('unsigned/vol-slot');
-  const pair = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/vol-slot')!;
+test('the /inlinebase × /vol-slot pair spells both, and neither variation reaches it alone', () => {
+  const names = ereaderCandidates().map((c) => c.variations);
+  expect(names).toContainEqual(['unsigned', 'inlinebase']);
+  expect(names).toContainEqual(['unsigned', 'vol-slot']);
+  const pair = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/vol-slot')!;
   expect(pair.source).toContain('volatile u16 sp0;');
   expect(pair.source).toContain('*(u16 *)67109384 = sp0;');
   expect(pair.source).not.toContain('v0');
 });
 
-test('the qualified output is enumerated alongside its plain twin', () => {
-  const labels = ereaderCandidates().map((c) => c.label);
-  for (const q of ['unsigned/inlinebase/volatile', 'unsigned/inlinebase/volatile/vol-slot']) {
-    expect(labels).toContain(q);
-    expect(labels).toContain(q.replace('/volatile', ''));
+test('the qualified output is enumerated alongside the plain candidate', () => {
+  const names = ereaderCandidates().map((c) => c.variations);
+  for (const q of [
+    ['unsigned', 'inlinebase', 'volatile'],
+    ['unsigned', 'inlinebase', 'volatile', 'vol-slot'],
+  ]) {
+    expect(names).toContainEqual(q);
+    expect(names).toContainEqual(q.filter((v) => v !== 'volatile'));
   }
-  const q = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  const q = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/volatile/vol-slot')!;
   expect(q.source).toContain('*(volatile u16 *)67109384 = sp0;');
   expect(q.source).toContain('volatile u16 sp0;');
 });
@@ -354,7 +358,7 @@ test('the qualified output is enumerated alongside its plain twin', () => {
 // inside the target's device window, which is what admits the preference at all.
 test('at an exact tie the qualified spelling wins, from either enumeration order', () => {
   const cands = ereaderCandidates();
-  const pick = (label: string) => cands.find((c) => c.label === label)!;
+  const pick = (label: string) => cands.find((c) => joinVariations(c.variations) === label)!;
   const q = pick('unsigned/inlinebase/volatile/vol-slot');
   const plain = pick('unsigned/inlinebase/vol-slot');
   expect(q.deviceVolatile).toBeGreaterThan(0);
@@ -377,10 +381,10 @@ test('the same spelling over an IWRAM address earns no preference', () => {
       RestoreSerialTimer3IntrHandlers: VOID0,
     },
   });
-  const q = cands.find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  const q = cands.find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/volatile/vol-slot')!;
   expect(q.source).toContain('*(volatile u16 *)50355396');
   expect(q.deviceVolatile).toBeUndefined();
-  const plain = cands.find((c) => c.label === 'unsigned/inlinebase/vol-slot')!;
+  const plain = cands.find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/vol-slot')!;
   const scored = (c: Candidate, order: number) => ({ ...c, score: { score: 0 }, order });
   expect(compareScored(scored(q, 1), scored(plain, 0))).toBeGreaterThan(0);
 });

@@ -7,13 +7,13 @@
 // LOWER `[sp,#k]`, and a source whose two spilled locals are declared the other way round compiles
 // to the same object with those two operands swapped and nothing else moved.
 //
-// A PER-COMPILER DEFAULT, NOT A RANKED AXIS. The asm does not underdetermine the answer: a
+// A COMPILER BEHAVIOR, NOT A RANKED VARIATION. The asm does not underdetermine the answer: a
 // `[sp,#k]` operand NAMES the slot, and slot → declaration rank is a FUNCTION once the compiler is
-// fixed. An axis exists where two source spellings collapse to the same object and only the differ
+// fixed. A variation exists where two source spellings collapse to the same object and only the differ
 // can choose between them; here the object chooses. The fan cost is zero — this rewrites the one
 // tree every candidate already carries, adding no candidate, no `structure()` call and no compile.
 //
-// WHY `emit` OWNS IT. Two reasons, and they point the same way. It must run AFTER every L3 lever,
+// WHY `emit` OWNS IT. Two reasons, and they point the same way. It must run AFTER every L3 respell variation,
 // because each of those rebuilds the declaration list (appends: basecse, scopebase, argbase,
 // nearbase, regspell, reindex; filters: unmerge, coalesce, dce, inlinebase, pollguard, unreduce),
 // and `emit` is last by construction. And it must NOT run at a `.emit(` call site: there are seven

@@ -16,7 +16,7 @@ import type { SymbolMap, SymbolTypeFacts } from './symbols';
  *  the extension is an inference off an encoding two different C sources produce. Where the asm
  *  carries no extension, this list is NOT consulted: pinning there would type every parameter of
  *  every row from the declaration, and a declared `u32` kills rank.ts's signed arm before the
- *  differ ever sees it. That half is an axis question and is not answered here. */
+ *  differ ever sees it. That half is a variation question and is not answered here. */
 export type ParamType = string;
 
 /** What the headers know about one function. All fields optional: a partial table (only
@@ -143,7 +143,7 @@ export function validatePrototypes(value: unknown): string[] {
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
  *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
- *  are read for the list's length alone (test/param-pointee-axis.test.ts). */
+ *  are read for the list's length alone (test/param-pointee-variation.test.ts). */
 function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   if (t.pointer) {
     return 'void *';

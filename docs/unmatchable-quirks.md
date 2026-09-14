@@ -74,7 +74,7 @@ Three traps, all measured on 2026-09-12 on this machine's toolchain (Arm GNU Too
   file then reports "does not reach the target bytes", which is the NECESSARY half passing for the
   wrong reason: a sweep that proves nothing, reported as a verdict that closes a row.
 
-The spelling asmlift actually publishes comes from `pnpm bench fan <row-id> --show best`, so the
+The spelling asmlift actually publishes comes from `pnpm bench fan <row-id> --show winner`, so the
 first thing to try is always **that `candidate` plus the construct**: if the row is a quirk row, the
 delta is usually one line.
 
@@ -115,7 +115,7 @@ Two sources are in play below and `results.json` already names them, so this pag
 rather than "published" for both. The **`refSource`** — the kleod ground truth — is
 `void StrCpy(u8 *dst, u8 *src)` with `u32 c` and a loop body that reads `*src` into `c`, stores it
 through `dst`, **reads `*src` into `c` a second time**, then advances both pointers. The
-**`candidate`** is what asmlift emits (`pnpm bench fan --show best`), which declares `s32 v0` and
+**`candidate`** is what asmlift emits (`pnpm bench fan --show winner`), which declares `s32 v0` and
 carries no second read. They differ by exactly the one line this page is about.
 
 ### The residual is one instruction, not three
@@ -268,7 +268,7 @@ assignment. Everything tried so far still costs more than it saves — twelve ro
 forms (`for(;;){…;if(!c)break;}`, `while(1){…;if(c==0)return;}` and `goto`, each in
 `u32`/`s32`/`int`/`u8`) all re-emit the leading `021c` and give
 `021c08781070013201310028f9d17047`, and the test-at-top form above pays an extra tail store — but
-this is the axis where a falsification would not require the unsound part, and it is squarely
+this is the dimension where a falsification would not require the unsound part, and it is squarely
 asmlift's business.
 
 If either arrives, delete this entry and re-run the sweep.

@@ -65,19 +65,20 @@ export interface DecompilerResult {
    *  absent for name-only symbols). Sorted by name, uncapped. Present exactly when a scored
    *  row ran with the map; EMPTY ⇒ the winning spelling (e.g. '/raw-globals') named none. */
   symbolsUsed?: { name: string; shape?: string }[];
-  /** asmlift only, scored rows: the label of the candidate spelling that won the differ
-   *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
-  candidateLabel?: string;
+  /** asmlift only, scored rows: the variations of the candidate that won the differ ranking, in
+   *  the order it applied them (e.g. `["unsigned", "raw-globals"]`) — which combination of
+   *  variations produced `source`. Printed `/`-joined (`unsigned/raw-globals`). */
+  winnerVariations?: readonly string[];
   /** asmlift only, RANKED rows: HOW BIG THIS ROW'S FAN WAS — every candidate spelling
    *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
-   *  `bench run` costs, and the number that says whether an axis a round shipped multiplied it.
+   *  `bench run` costs, and the number that says whether a variation a round shipped multiplied it.
    *
    *  Nothing else in the artifact carries it: `droppedCandidates.length +
    *  withheldCandidates.length` is the REFUSED part of a fan and on most rows is 0. Without the
    *  whole count, a fan that goes 59,904 → 225,792 (`LoadBGTilemapData`, in six days) and a real
    *  tier whose wall clock rises 6.0× on an unchanged 252 rows are invisible to every gate.
    *
-   *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over axes, not a measurement —
+   *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over variations, not a measurement —
    *  so unlike `rankSeconds` it is comparable between two artifacts and belongs in `stale-check`'s
    *  row key. The qualification is not decorative: `ASMLIFT_PERSITE_SENSE=<n>` (packages/cli
    *  rank.ts) forks the branch-sense booleans one bit per site and multiplies this by 2^n, read
@@ -86,9 +87,9 @@ export interface DecompilerResult {
    *
    *  Absent ⇒ the row never reached the ranked pass (`declined` on a phase-1 gap, or `failed`).
    *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
-  candidateCount?: number;
+  fanSize?: number;
   /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
-   *  objdiff-score every candidate. The price `candidateCount` predicts, as this machine actually
+   *  objdiff-score every candidate. The price `fanSize` predicts, as this machine actually
    *  paid it.
    *
    *  NOT A MEASUREMENT OF THE DECOMPILER and never comparable between two artifacts as a claim
@@ -107,16 +108,16 @@ export interface DecompilerResult {
    *  log, never an attribution on its own. */
   rankSeconds?: number;
   /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
-   *  the ranking, each with the compiler's first diagnostic line. A dropped sibling is a defect
+   *  the ranking, each named by its variations with the compiler's first diagnostic line. A dropped sibling is a defect
    *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean
    *  win with no trace that another spelling was refused. Absent ⇒ every candidate built. */
-  droppedCandidates?: { label: string; error: string }[];
+  droppedCandidates?: { variations: readonly string[]; error: string }[];
   /** asmlift only, scored rows: candidate spellings that BUILT and SCORED and were then withheld
    *  for want of a byte-exact proof, each with the score it reached and the reason publication
    *  needed one. A different fact from `droppedCandidates` — nothing failed — and recorded for the
    *  same reason: a row whose winner outranks a withheld sibling, or whose own winner is published
    *  only because it matched, says none of that anywhere else. Absent ⇒ nothing was withheld. */
-  withheldCandidates?: { label: string; score: number; rows?: number; why: string }[];
+  withheldCandidates?: { variations: readonly string[]; score: number; rows?: number; why: string }[];
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute

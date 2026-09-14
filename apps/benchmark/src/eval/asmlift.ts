@@ -68,15 +68,15 @@ export function rankOptionsFor(
     ...(asmData ? { asmData } : {}),
     ...(compile ? { compile } : {}),
     // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
-    // ranked lever rides along, so a symbol-fed row can never score worse than without.
+    // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
   };
 }
 
-/** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its label, its score and
+/** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its variations, its score and
  *  the source it was scored from (`Scored extends Candidate`).
  *
- *  `runAsmlift` publishes four facts out of this object — the winner's label and source, the
+ *  `runAsmlift` publishes four facts out of this object — the winner's variations and source, the
  *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
  *  one supported way to read them, and it is deliberately the SAME call the harness makes rather
  *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
@@ -86,7 +86,7 @@ export function asmliftFan(
   sym: string,
   asm: string,
   obj: string,
-  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onLeverError'>,
+  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
 ): RankedResult {
   return decompileRanked(sym, asm, tc.targetDesc, obj, opts);
 }
@@ -120,7 +120,7 @@ export function fanSizeOfError(e: unknown): number | undefined {
  *  synthetic tier. */
 const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).toFixed(2));
 
-// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
+// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous variations
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
 // winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
 // scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
@@ -183,7 +183,7 @@ export function runAsmlift(
   const rankT0 = Date.now();
   try {
     const ranked = asmliftFan(tc, sym, asm, obj, opts);
-    const best = ranked.best;
+    const best = ranked.winner;
     const s = best.score;
     return {
       decompiler: 'asmlift',
@@ -192,11 +192,11 @@ export function runAsmlift(
       // which map symbols its output references — best.symbolRefs is derived in core from the
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
       // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
-      candidateLabel: best.label,
+      winnerVariations: best.variations,
       // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
       // count is every spelling enumerated (the two refusal lists below are the rest of it); the
       // seconds are this machine's price for that count, cache state included.
-      candidateCount: fanSize(ranked),
+      fanSize: fanSize(ranked),
       rankSeconds: secondsSince(rankT0),
       // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
       // candidate that compiles — but dropping them SILENTLY published a clean win over a
@@ -228,7 +228,7 @@ export function runAsmlift(
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
-      ...(fan === undefined ? {} : { candidateCount: fan }),
+      ...(fan === undefined ? {} : { fanSize: fan }),
       rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,

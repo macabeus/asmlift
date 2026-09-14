@@ -6,7 +6,7 @@
 // another program. So the oracle is behaviour, not bytes — the same one `namecoalesce-fuzz` uses,
 // and the generator, interpreter and comparison are shared in `helpers.ts`.
 //
-// The REFERENCE here is not "the axis off", because there is no axis: the walk is the committed
+// The REFERENCE here is not "the variation off", because there is no variation: the walk is the committed
 // path. It is a table that admits NOTHING, under which every parameter mints a name of its own and
 // every edge copy is written out — the SSA-destruction spelling that is correct by construction.
 //

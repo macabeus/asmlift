@@ -12,6 +12,7 @@ import { cBackend } from '../src/backend/c';
 import type { LanguageBackend } from '../src/l3/ast';
 import { NoScorableCandidateError, NoSpellableCandidateError, enumerateCandidates, rankBy } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 // `a0 < a1 ? 1 : 0` — a divergent if whose compare the signedness pin casts under the `unsigned`
 // candidate (both params declared u32, the compare opcode signed).
@@ -40,15 +41,15 @@ const refusing = (refuse: RegExp): LanguageBackend => ({
 
 test('a tree the backend refuses drops its candidates and keeps the others', () => {
   const seen: string[] = [];
-  const all = enumerateCandidates('f', ASM, ARMV4T_AGBCC).map((c) => c.label);
+  const all = enumerateCandidates('f', ASM, ARMV4T_AGBCC).map((c) => c.variations);
   const kept = enumerateCandidates('f', ASM, ARMV4T_AGBCC, {
     backend: refusing(/\(s32\)/),
-    onLeverError: (label, error) => seen.push(`${label}: ${error}`),
-  }).map((c) => c.label);
+    onEnumerationError: (variations, error) => seen.push(`${variations.join('/')}: ${error}`),
+  }).map((c) => c.variations);
   // the pin fires only under `unsigned`, so exactly the signed candidates survive
-  expect(all).toContain('unsigned');
+  expect(all).toContainEqual(['unsigned']);
   expect(kept.length).toBeGreaterThan(0);
-  expect(kept.every((l) => !l.startsWith('unsigned'))).toBe(true);
+  expect(kept.every((v) => !hasVariation(v, 'unsigned'))).toBe(true);
   // and the refusal is REPORTED, never swallowed — the same channel a dropped re-spelling uses
   expect(seen.some((s) => s.includes('refusing backend'))).toBe(true);
 });
@@ -93,7 +94,7 @@ test('every candidate failing to score throws the class, carrying both refusal l
   expect(thrown).toBeInstanceOf(NoScorableCandidateError);
   const e = thrown as NoScorableCandidateError;
   expect(e.message.startsWith("no scorable candidate for 'f': ")).toBe(true);
-  expect(e.dropped.map((d) => d.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.dropped.map((d) => d.variations)).toEqual(candidates.map((c) => c.variations));
   expect(e.withheld).toEqual([]);
 });
 
@@ -112,22 +113,21 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
   expect(thrown).toBeInstanceOf(NoScorableCandidateError);
   const e = thrown as NoScorableCandidateError;
   expect(e.dropped).toEqual([]);
-  expect(e.withheld.map((w) => w.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.withheld.map((w) => w.variations)).toEqual(candidates.map((c) => c.variations));
   expect(e.message).toContain('2 candidate(s) withheld, none scored');
 });
 
-// …AND IT MUST SAY WHICH SPELLING IT REFUSED. The PRE-FAN products (rank.ts PRE_FAN_PRODUCTS)
-// rewrite the TREE and then run this same fan over the result, so a backend refusal there deletes
-// the lever's whole half of the row's candidates. Reported under the bare function name it is
-// byte-identical to a refusal of the PRIMARY spelling, which sends the reader at the one spelling
+// …AND IT MUST SAY WHICH SPELLING IT REFUSED. The pre-respell variations (rank.ts PRE_RESPELL_VARIATIONS)
+// rewrite the TREE and then run this same respell set over the result, so a backend refusal there deletes
+// the variation's whole half of the row's candidates. Reported with no variations it is
+// identical to a refusal of the DEFAULT spelling, which sends the reader at the one spelling
 // that did not fail — the wrong-cause attribution the channel exists to remove.
 //
-// This is the ONE assertion on the `[lever]` line's content anywhere, and NOT because no lever
-// throws over the corpus. `onLeverError` has exactly one caller — packages/cli/src/main.ts — and
-// the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
-// one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
-// evidence about the WIRING, not about the levers, which leaves nothing but this test pinning the label.
-test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the primary spelling', () => {
+// A `pnpm bench run` cannot print the `[threw]` line at all: it reaches `decompileRanked`
+// (apps/benchmark/src/eval/asmlift.ts) without an `onEnumerationError`, and only the CLI and
+// `pnpm bench fan` supply one. Its absence over the whole corpus is evidence about the WIRING, not
+// about the variations, so this test and the next are what pin the variations a report carries.
+test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, not the default source', () => {
   // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
   // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.
   const asm = [
@@ -149,17 +149,17 @@ test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the p
     '\t.word\t0x03002000',
   ].join('\n');
 
-  const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  const unmerged = plain.filter((l) => l.includes('/unmerge'));
-  expect(unmerged.length).toBeGreaterThan(0); // the fixture really reaches the pre-fan product
+  const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.variations);
+  const unmerged = plain.filter((v) => hasVariation(v, 'unmerge'));
+  expect(unmerged.length).toBeGreaterThan(0); // the fixture really reaches the pre-respell variation
 
-  // a backend that emits normally but refuses exactly the trees the pre-fan product produced
+  // a backend that emits normally but refuses exactly the trees the pre-respell variation produced
   const refused = new Set(
     enumerateCandidates('f', asm, ARMV4T_AGBCC)
-      .filter((c) => c.label.includes('/unmerge'))
+      .filter((c) => hasVariation(c.variations, 'unmerge'))
       .map((c) => c.source),
   );
-  const seen: string[] = [];
+  const seen: (readonly string[])[] = [];
   const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     backend: {
       ...cBackend,
@@ -171,25 +171,25 @@ test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the p
         return source;
       },
     },
-    onLeverError: (label) => seen.push(label),
-  }).map((c) => c.label);
+    onEnumerationError: (variations) => seen.push(variations),
+  }).map((c) => c.variations);
 
-  expect(kept.some((l) => l.includes('/unmerge'))).toBe(false); // the half really was deleted
+  expect(kept.some((v) => hasVariation(v, 'unmerge'))).toBe(false); // the half really was deleted
   expect(seen.length).toBeGreaterThan(0);
-  expect(seen.every((l) => l.includes('/unmerge'))).toBe(true); // …and every report names it
+  expect(seen.every((v) => hasVariation(v, 'unmerge'))).toBe(true); // …and every report names it
 });
 
-// …AND THE PRE-FAN LABEL HAS TO REACH THE LEVER REFUSALS TOO, not just the primary emit's. The
-// test above refuses the pre-fan tree's PRIMARY spelling, which makes `fanOut` report and return
-// before a single re-spelling runs — so it cannot see the four other `onLeverError` sites inside
+// …AND THE PRE-RESPELL NAME HAS TO REACH THE VARIATION REFUSALS TOO, not just the default emit's. The
+// test above refuses the pre-respell tree's DEFAULT source, which makes `respellTree` report and return
+// before a single re-spelling runs — so it cannot see the four other `onEnumerationError` sites inside
 // that function, each of which is reachable from both fans and each of which already carries a
-// suffix naming a LEVER. On a pre-fan tree that lever is a lever applied to the REWRITE, so a
+// suffix naming a VARIATION. On a pre-respell tree that variation is a variation applied to the REWRITE, so a
 // refusal of `/unmerge/volatile` reported as `/volatile` sends the reader at a spelling that did
-// not fail and is still in the fan — the same wrong cause, one lever further down.
+// not fail and is still in the fan — the same wrong cause, one variation further down.
 //
-// The fixture therefore keeps the pre-fan tree SPELLABLE and refuses only what a lever built on
+// The fixture therefore keeps the pre-respell tree SPELLABLE and refuses only what a variation built on
 // top of it emitted.
-test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () => {
+test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-respell suffix too', () => {
   // Same cross-jump shape as above, plus a device-block base written at two displacements before
   // the `if` — a numeric-address pointer local that survives `/unmerge`, so the unmerged tree
   // still admits `/volatile` and the fan reaches `unsigned/unmerge/volatile`.
@@ -223,15 +223,15 @@ test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () 
   ].join('\n');
 
   const all = enumerateCandidates('f', asm, ARMV4T_AGBCC);
-  // the fixture really reaches a LEVER spelling built on the pre-fan tree
-  const deeper = all.filter((c) => /\/unmerge\/./.test(c.label));
+  // the fixture really reaches a VARIATION's candidate built on the pre-respell tree
+  const deeper = all.filter((c) => hasVariation(c.variations.slice(0, -1), 'unmerge'));
   expect(deeper.length).toBeGreaterThan(0);
-  // …and the pre-fan tree's own primary spelling is NOT among what we refuse, so `fanOut` gets
+  // …and the pre-respell tree's own default source is NOT among what we refuse, so `respellTree` gets
   // past the early return and into the re-spellings
   const refused = new Set(deeper.map((c) => c.source));
-  expect(all.some((c) => /\/unmerge$/.test(c.label) && !refused.has(c.source))).toBe(true);
+  expect(all.some((c) => hasVariation(c.variations.slice(-1), 'unmerge') && !refused.has(c.source))).toBe(true);
 
-  const seen: string[] = [];
+  const seen: (readonly string[])[] = [];
   const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     backend: {
       ...cBackend,
@@ -243,11 +243,11 @@ test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () 
         return source;
       },
     },
-    onLeverError: (label) => seen.push(label),
-  }).map((c) => c.label);
+    onEnumerationError: (variations) => seen.push(variations),
+  }).map((c) => c.variations);
 
-  expect(kept.some((l) => /\/unmerge\/./.test(l))).toBe(false); // the lever spellings really died
+  expect(kept.some((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(false); // the candidates built on the pre-respell tree really died
   expect(seen.length).toBeGreaterThan(0);
-  // every report names the pre-fan spelling it was fanning, ahead of the lever that failed
-  expect(seen.every((l) => l.includes('/unmerge/'))).toBe(true);
+  // every report lists `unmerge` ahead of the respell variation that failed
+  expect(seen.every((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(true);
 });

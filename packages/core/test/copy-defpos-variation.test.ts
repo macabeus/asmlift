@@ -1,4 +1,4 @@
-// `/copy-defpos` — the EDGE-COPY ORDER axis (rank.ts STRUCTURING_AXES, structure.ts
+// `/copy-defpos` — the EDGE-COPY ORDER variation (rank-variations.ts STRUCTURE_VARIATIONS, structure.ts
 // `preferDefPosCopyOrder`).
 //
 // The frontend measures the order each predecessor wrote its successors' keys, and the default
@@ -12,7 +12,7 @@
 //
 // What this file pins: the sibling exists and is a genuinely different program where the two orders
 // differ, the gate withholds it where they do not — and the gate is a question about ONE lift, not
-// about the function, which is why rank asks it per symbol variant on the fn it is about to
+// about the function, which is why rank asks it per symbol-map setting on the fn it is about to
 // structure.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,6 +27,7 @@ import { enumerateCandidates } from '../src/rank';
 import { edgeCopyOrdersDiffer } from '../src/structure/structure';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const GCD = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
 // No CFG edge carries two copies at all, so the two orders cannot differ.
@@ -41,10 +42,10 @@ const HALF = [
   '',
 ].join('\n');
 
-test('the axis offers the def-position spelling beside the record-ordered one', () => {
+test('the variation offers the def-position spelling beside the record-ordered one', () => {
   const cands = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {});
-  const base = cands.find((c) => c.label === 'signed');
-  const sibling = cands.find((c) => c.label === 'signed/copy-defpos');
+  const base = cands.find((c) => joinVariations(c.variations) === 'signed');
+  const sibling = cands.find((c) => joinVariations(c.variations) === 'signed/copy-defpos');
   expect(base).toBeDefined();
   expect(sibling).toBeDefined();
   // The LOOP is a cyclic copy set, and agbcc's own `add r4, r0, #0` — the loop's first instruction
@@ -59,22 +60,24 @@ test('the axis offers the def-position spelling beside the record-ordered one', 
   expect(sibling!.source).toContain('v0 = a1;\n    v1 = a0;');
 });
 
-test('…and it is a real product: every spelling gets the sibling, never just the base', () => {
-  const labels = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.label);
-  const withAxis = labels.filter((l) => l.endsWith('/copy-defpos'));
-  expect(withAxis.length).toBeGreaterThan(0);
-  for (const l of withAxis) {
-    expect(labels).toContain(l.slice(0, -'/copy-defpos'.length));
+test('…and it is crossed with every candidate: each one gets a sibling, not just the default', () => {
+  const names = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.variations);
+  const withVariation = names.filter((v) => hasVariation(v.slice(-1), 'copy-defpos'));
+  expect(withVariation.length).toBeGreaterThan(0);
+  for (const v of withVariation) {
+    expect(names).toContainEqual(v.slice(0, -1));
   }
 });
 
 test('the gate withholds the sibling where the two orders cannot differ', () => {
   const fn = frontendFor(ARMV4T_AGBCC).lift('half', HALF, ARMV4T_AGBCC, {}, undefined, undefined);
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
-  expect(enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => c.label.includes('copy-defpos'))).toBe(false);
+  expect(
+    enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => hasVariation(c.variations, 'copy-defpos')),
+  ).toBe(false);
 });
 
-test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis', () => {
+test('an UNMEASURED fn has no question to ask: parsed IR never admits the variation', () => {
   // The record is the frontend's measurement; a parsed fn carries none, so the def-position proxy
   // is already what runs and the sibling would be the same tree.
   const fn = parse(`fn f {
@@ -89,11 +92,11 @@ test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis',
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
 });
 
-// WHY THE GATE IS A `variantGate` AND NOT A `probeGate`: the answer is a fact about one LIFT at one
+// WHY THE GATE IS A `perLiftGate` AND NOT A `sharedGate`: the answer is a fact about one LIFT at one
 // STAGE, and both of those move under it. Neither costs a candidate today, so what these pin is the
-// facts a reader checking the axis entry's argument needs.
+// facts a reader checking the variation entry's argument needs.
 
-// (1) THE SYMBOL VARIANT. One asm, two lifts: with a map naming its two pool addresses the record
+// (1) THE SYMBOL-MAP SETTING. One asm, two lifts: with a map naming its two pool addresses the record
 // and the proxy agree, without one they do not. rank enumerates both lifts, so a gate asked once on
 // the map-ful probe answers for a program the `/raw-globals` sibling is not.
 const HUD = readFileSync(join(import.meta.dirname, 'corpus/agbcc-hudcount.s'), 'utf8');
@@ -130,8 +133,8 @@ const HUD_MAP: SymbolMap = new Map([
 ]);
 
 test('the same function answers the gate differently with and without a symbol map', () => {
-  // Asked where rank asks it: on the variant's own FULLY RAISED fn, which is what structure()
-  // reads. (On the bare lift both variants answer true — the disagreement is made by the tower.)
+  // Asked where rank asks it: on that setting's own FULLY RAISED fn, which is what structure()
+  // reads. (On the bare lift both settings answer true — the disagreement is made by the tower.)
   const raised = (symbols: SymbolMap | undefined) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift('UpdateHUDCollectibleCount', HUD, ARMV4T_AGBCC, {}, undefined, symbols);
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
@@ -165,7 +168,7 @@ const LATCH_FOLD = `fn latchfold {
   ret %10
 }`;
 
-test('the latch fold changes the answer after the probe has been asked', () => {
+test('the latch fold changes the answer after the gate has been asked on the shared lift', () => {
   const fn = parse(LATCH_FOLD);
   verify(fn);
   const [entry, header, body, latch, exit] = fn.blocks;

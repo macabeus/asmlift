@@ -1,4 +1,5 @@
 import type { DecompilerId, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { useMemo, useState } from 'react';
 
 import { CodeBlock, type CodeLanguage } from '../../../shared/components/CodeBlock';
@@ -31,7 +32,7 @@ function scoreLabel(r: DecompilerResult): string {
 function qualityFlags(q: DecompilerResult['quality']): string[] {
   const flags: string[] = [];
   if (q.unkGlue > 0) {
-    flags.push(`${q.unkGlue} undecompiled glue token(s)`);
+    flags.push(`${q.unkGlue} undecompiled glue marker(s)`);
   }
   if (q.gotos > 0) {
     flags.push(`${q.gotos} goto(s)`);
@@ -281,8 +282,8 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   if (r.symbolMap && scored) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
-  if (r.candidateLabel) {
-    digest.push(`winner ${r.candidateLabel}`);
+  if (r.winnerVariations) {
+    digest.push(`winner ${joinVariations(r.winnerVariations)}`);
   }
 
   return (
@@ -346,12 +347,12 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 ))}
               </div>
             )}
-            {r.candidateLabel && (
+            {r.winnerVariations && (
               <div
                 className="mt-1.5 font-mono text-slate-500"
                 title="the candidate spelling that won the differ ranking"
               >
-                winner: {r.candidateLabel}
+                winner: {joinVariations(r.winnerVariations)}
               </div>
             )}
           </ProvenanceRow>

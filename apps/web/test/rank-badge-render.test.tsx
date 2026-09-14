@@ -23,8 +23,8 @@ describe('RankBadge progress', () => {
     expect(out).toContain('role="progressbar"');
     expect(out).not.toContain('aria-valuenow');
     expect(out).not.toContain('aria-valuemax');
-    expect(out).toContain('enumerating candidate spellings');
-    expect(out).toContain('aria-valuetext="enumerating candidate spellings…"');
+    expect(out).toContain('enumerating candidates');
+    expect(out).toContain('aria-valuetext="enumerating candidates…"');
   });
 
   test('the progressbar has an accessible NAME, and the visible sentence sits OUTSIDE it', () => {
@@ -32,7 +32,7 @@ describe('RankBadge progress', () => {
     // tree, leaving an unnamed widget carrying only aria-valuetext. The sentence is a sibling.
     const out = html({ status: 'loading', phase: 'enumerating' });
     expect(out).toContain('aria-label="candidate ranking"');
-    expect(out.indexOf('<span>enumerating candidate spellings…</span>')).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf('<span>enumerating candidates…</span>')).toBeGreaterThanOrEqual(0);
     expect(out.indexOf('<span>enumerating')).toBeLessThan(out.indexOf('role="progressbar"'));
   });
 

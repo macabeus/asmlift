@@ -5,7 +5,7 @@
 // sweep.ts, fanhash.ts, det.mts, c3-census.mts, rowhash.mts, kcensus.mts…), 31 driver calls by 14
 // agents, and a compile-free differential re-lift was reinvented in 37 rounds. Their scripts agree
 // on the payload almost exactly — per row, the emitted C's hash, its diagnostic count, and
-// optionally the enumerated fan's label/source hash — and disagree on everything that is not the
+// optionally the enumerated fan's variations/source hash — and disagree on everything that is not the
 // payload: where the script lives, how it resolves `@asmlift/*`, which tree it points at, whether
 // it shards, and which rows it skips. That remainder is what got rewritten, not the idea. The
 // three failure modes it produced, all measured in this project's own transcripts:
@@ -56,9 +56,9 @@ import { join, resolve } from 'node:path';
 import { realRowIdentities } from '../cases/manifests';
 import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { TOOLCHAINS } from '../toolchains';
-import { ARMS, type SweepSelection, TREE_MODULES } from './sweep-driver';
+import { MAP_MODES, type SweepSelection, TREE_MODULES } from './sweep-driver';
 
-/** One row, one arm, in one tree. Every field is a fact a hand rig recorded, and the set is
+/** One row, one map mode, in one tree. Every field is a fact a hand rig recorded, and the set is
  *  closed on purpose: a sweep whose payload each round extends is a rig with a stable filename,
  *  and the diff below has to know every field to compare it. */
 export interface SweepRecord {
@@ -67,8 +67,8 @@ export interface SweepRecord {
   /** `harness` = the row's own configuration (`rankOptionsFor`); `nomap` = the same minus the
    *  symbol map. Both, because a symbol-fed row and the same row without one take different paths
    *  through naming and global recovery, and a change that moves only one of them is exactly the
-   *  change a one-arm rig reports as inert. */
-  arm: string;
+   *  change a one-map-mode rig reports as inert. */
+  mapMode: string;
   /** sha1/12 of the scrubbed asm this record was lifted FROM, and of the option object it was
    *  lifted WITH (`rankOptionsFor`'s result — prototypes, `asmData`, the symbol map). The INPUT,
    *  recorded because each side of a comparison loads its own tree's dataset and harness: without
@@ -86,12 +86,18 @@ export interface SweepRecord {
   marks?: number;
   /** the first line of what the lift threw, when it did */
   threw?: string;
-  /** `--fan` only: how many spellings enumeration produced (`enumerateRanked`) */
+  /** `--fan` only: how many candidates enumeration produced (`enumerateRanked`) */
   fan?: number;
-  /** `--fan` only: sha1/12 over `label\0source` pairs IN ENUMERATION ORDER. Ordered and not
+  /** `--fan` only: sha1/12 over (variations, source) pairs IN ENUMERATION ORDER, each name `/`-joined. Ordered and not
    *  sorted: the order is what the ranker consumes, so a reorder with the same set is a real
    *  change to what gets scored first, and `--repeat` exists to tell a reorder from a flake. */
   fanHash?: string;
+  /** `--fan` only: sha1/12 over the candidates' sources alone, in enumeration order — see
+   *  `fanDigests` in sweep-driver.ts for what each of the three fan hashes can see. */
+  fanSourceHash?: string;
+  /** `--fan` only: sha1/12 over the candidates' variations alone, each as its `/`-joined string,
+   *  in enumeration order. */
+  fanVariationsHash?: string;
   /** `--fan` only: the first line of what enumeration threw. Not an error — `enumerateRanked` has
    *  no annotate mode, so every row that publishes `declined` throws here (234 of the 1,062 rows
    *  the artifact carries at bd7ad596), and the census must count them rather than stop at the
@@ -103,8 +109,10 @@ export interface SweepRecord {
 }
 
 /** The fields the diff compares, in the order it prints them. The INPUT fields come first, because
- *  a line that opens `asm … -> …` is a different finding from one that opens `src … -> …`. */
-const FIELDS = [
+ *  a line that opens `asm … -> …` is a different finding from one that opens `src … -> …`. A record
+ *  field missing from this list is written to `--json` and never compared, so a sweep that gains a
+ *  field gains it here too. */
+export const FIELDS = [
   'asm',
   'opts',
   'src',
@@ -114,6 +122,8 @@ const FIELDS = [
   'threw',
   'fan',
   'fanHash',
+  'fanSourceHash',
+  'fanVariationsHash',
   'fanThrew',
   'skipped',
 ] as const;
@@ -132,7 +142,7 @@ export function unmeasuredCounts(records: readonly SweepRecord[]): { total: numb
 
 export interface RecordMove {
   id: string;
-  arm: string;
+  mapMode: string;
   fields: { field: string; from: unknown; to: unknown }[];
 }
 
@@ -148,9 +158,9 @@ export interface SweepDiff {
   notMeasured: number;
 }
 
-const key = (r: SweepRecord): string => `${r.id} ${r.arm}`;
+const key = (r: SweepRecord): string => `${r.id} ${r.mapMode}`;
 
-/** BASE against HEAD, per row and per arm. Both sides are produced by the SAME driver code (this
+/** BASE against HEAD, per row and per map mode. Both sides are produced by the SAME driver code (this
  *  tree's), differing only in which tree's decompiler it points at — the property every hand rig
  *  had by accident (one script, two invocations) and the one thing a base/head comparison cannot
  *  be correct without. */
@@ -167,7 +177,7 @@ export function compareSweeps(base: SweepRecord[], head: SweepRecord[]): SweepDi
     }
     const fields = FIELDS.filter((f) => br[f] !== hr[f]).map((f) => ({ field: f, from: br[f], to: hr[f] }));
     if (fields.length > 0) {
-      moved.push({ id: hr.id, arm: hr.arm, fields });
+      moved.push({ id: hr.id, mapMode: hr.mapMode, fields });
     } else if (unmeasured(hr)) {
       notMeasured++;
     } else {
@@ -191,7 +201,7 @@ const show = (v: unknown): string => (v === undefined ? '-' : typeof v === 'stri
 export function renderDiff(d: SweepDiff): string[] {
   const lines = d.moved.map(
     (m) =>
-      `asmlift: [moved] ${m.id} ${m.arm} — ${m.fields.map((f) => `${f.field} ${show(f.from)} -> ${show(f.to)}`).join(', ')}`,
+      `asmlift: [moved] ${m.id} ${m.mapMode} — ${m.fields.map((f) => `${f.field} ${show(f.from)} -> ${show(f.to)}`).join(', ')}`,
   );
   for (const k of d.baseOnly) {
     lines.push(`asmlift: [base-only] ${k} — the base tree produced this record and this tree did not`);
@@ -206,7 +216,7 @@ export function renderDiff(d: SweepDiff): string[] {
  *
  *  Not a wall-clock guard, because a wall-clock guard cannot pre-empt: enumerating one row is a
  *  single call that returns when it returns. So the guard reads the committed artifact's own
- *  `candidateCount` for the row and refuses BEFORE paying, the way `bench fan`'s `FAN_SCORE_LIMIT`
+ *  `fanSize` for the row and refuses BEFORE paying, the way `bench fan`'s `FAN_SCORE_LIMIT`
  *  refuses before compiling.
  *
  *  WHAT IT EXCLUDES, off the committed artifact at bd7ad596 — checked, not assumed, because every
@@ -238,7 +248,7 @@ export function renderDiff(d: SweepDiff): string[] {
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
 export const SWEEP_FAN_LIMIT = 20000;
 
-type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
+type RecordedRow = Identifiable & { asmlift?: { fanSize?: number } };
 
 /** The artifact's recorded fans, keyed by the CURRENT dataset's row ids — joined by row identity
  *  (bench-schema `joinArtifacts`), never by the id the artifact happened to publish.
@@ -251,14 +261,14 @@ type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
  *  recorded price, a row of another decompilation at the same address has none, and a real row the
  *  dataset no longer carries prices nothing. Synthetic rows are keyed by id on both sides. */
 export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Identifiable[]): Map<string, number> {
-  const priced = recorded.filter((r) => typeof r.asmlift?.candidateCount === 'number');
+  const priced = recorded.filter((r) => typeof r.asmlift?.fanSize === 'number');
   const join = joinArtifacts(priced, current);
   const currentId = new Map(current.map((r) => [join.headKey(r), r.id]));
   const out = new Map<string, number>();
   for (const r of priced) {
     const id = r.tier === 'real' ? currentId.get(join.baseKey(r)) : r.id;
     if (id !== undefined) {
-      out.set(id, r.asmlift!.candidateCount!);
+      out.set(id, r.asmlift!.fanSize!);
     }
   }
   return out;
@@ -526,24 +536,24 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
   }
   if (o.asmDir !== undefined && o.fan === true && o.force !== true) {
     // THE GUARD CANNOT REACH THIS POPULATION. `SWEEP_FAN_LIMIT` is read off the committed
-    // artifact's `candidateCount`, which exists for dataset rows only, so `--asm-dir --fan`
+    // artifact's `fanSize`, which exists for dataset rows only, so `--asm-dir --fan`
     // enumerates every file unbounded — and the tree this flag exists to sweep,
     // `checkouts/<project>/asm/nonmatchings`, is where the five-hour functions live. Measured on
     // this branch: one 1.6 KB klonoa `.s` in a directory of its own had not finished enumerating
     // at 120 s, while the only line printed named a dataset row the invocation never iterated.
     return '--fan over --asm-dir has no size guard: the limit is read off the committed artifact, which prices dataset rows only, and this population includes functions priced at over five hours. Sweep a directory you have measured and pass --force.';
   }
-  const bad = o.arms.filter((a) => !(ARMS as readonly string[]).includes(a));
+  const bad = o.mapModes.filter((a) => !(MAP_MODES as readonly string[]).includes(a));
   if (bad.length > 0) {
-    return `unknown --arms ${bad.join(', ')} — the arms are 'harness' (the row's own configuration) and 'nomap' (that, minus the symbol map)`;
+    return `unknown --map-modes ${bad.join(', ')} — the map modes are 'harness' (the row's own configuration) and 'nomap' (that, minus the symbol map)`;
   }
-  if (o.arms.length === 0) {
-    return '--arms selected nothing';
+  if (o.mapModes.length === 0) {
+    return '--map-modes selected nothing';
   }
-  if (new Set(o.arms).size !== o.arms.length) {
-    // The duplicate collapses in `compareSweeps`' Map, so `--arms harness,harness` lifts twice and
+  if (new Set(o.mapModes).size !== o.mapModes.length) {
+    // The duplicate collapses in `compareSweeps`' Map, so `--map-modes harness,harness` lifts twice and
     // reports one record — accepted-then-ignored, the class every other pair here is refused for.
-    return `--arms names ${o.arms.join(',')} — each arm at most once`;
+    return `--map-modes names ${o.mapModes.join(',')} — each map mode at most once`;
   }
   return undefined;
 }
@@ -572,10 +582,10 @@ export function recordFileRefusal(file: string, parsed: unknown): string | undef
       r === null ||
       typeof r !== 'object' ||
       typeof (r as SweepRecord).id !== 'string' ||
-      typeof (r as SweepRecord).arm !== 'string',
+      typeof (r as SweepRecord).mapMode !== 'string',
   );
   if (bad >= 0) {
-    return `${file} is not a sweep record file: entry ${bad} has no \`id\`/\`arm\` pair, which is what a comparison keys on`;
+    return `${file} is not a sweep record file: entry ${bad} has no \`id\`/\`mapMode\` pair, which is what a comparison keys on`;
   }
   return undefined;
 }
@@ -584,7 +594,7 @@ const selectionOf = (o: SweepOptions): SweepSelection => ({
   tiers: o.tiers,
   ...(o.only !== undefined ? { only: o.only } : {}),
   ...(o.project !== undefined ? { project: o.project } : {}),
-  arms: o.arms,
+  mapModes: o.mapModes,
   ...(o.fan !== undefined ? { fan: o.fan } : {}),
   ...(o.force !== undefined ? { force: o.force } : {}),
   ...(o.overLimit !== undefined ? { overLimit: o.overLimit } : {}),
@@ -650,7 +660,7 @@ export function fanGuard(
       over: {},
       unreadable:
         fans.size === 0
-          ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.candidateCount\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
+          ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.fanSize\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
           : `${path} prices ${fans.size} row(s) and not one of the rows this selection names, so it bounds nothing here`,
     };
   }
@@ -703,13 +713,13 @@ export async function sweep(o: SweepOptions): Promise<number> {
     // NEITHER SIDE'S RECORDS ARE THIS PROCESS'S. `--json`/`--compare` exist to split a comparison
     // across two machines, so both files were written by a run this one did not watch. A pair with
     // no key in common was not swept over the same selection — a truncated write, two different
-    // `--only`s, one side's `--arms` — and comparing them reports every record as base-only or
+    // `--only`s, one side's `--map-modes` — and comparing them reports every record as base-only or
     // head-only, which is arithmetic, not an answer.
-    const shared = new Set(sides[0].map((r) => `${r.id} ${r.arm}`));
-    const overlap = sides[1].filter((r) => shared.has(`${r.id} ${r.arm}`)).length;
+    const shared = new Set(sides[0].map((r) => `${r.id} ${r.mapMode}`));
+    const overlap = sides[1].filter((r) => shared.has(`${r.id} ${r.mapMode}`)).length;
     if (overlap === 0) {
       note(
-        `asmlift: [sweep] ${o.compare[0]} and ${o.compare[1]} share no record: ${sides[0].length} and ${sides[1].length} record(s) and not one id+arm in common, so nothing was compared. Sweep both sides over the same --tier/--only/--project/--arms.`,
+        `asmlift: [sweep] ${o.compare[0]} and ${o.compare[1]} share no record: ${sides[0].length} and ${sides[1].length} record(s) and not one id+map mode in common, so nothing was compared. Sweep both sides over the same --tier/--only/--project/--map-modes.`,
       );
       return 2;
     }
@@ -727,18 +737,18 @@ export async function sweep(o: SweepOptions): Promise<number> {
     return 2;
   }
   const sel = selectionOf({ ...o, overLimit: over });
-  if (o.asmDir !== undefined && o.asmProject === undefined && o.arms.includes('harness')) {
-    // ACCEPTED, and said out loud: with no project there is no symbol map, so the `harness` arm is
-    // the `nomap` arm under another name. The record is still emitted under both (a rectangular
+  if (o.asmDir !== undefined && o.asmProject === undefined && o.mapModes.includes('harness')) {
+    // ACCEPTED, and said out loud: with no project there is no symbol map, so the `harness` map mode is
+    // the `nomap` map mode under another name. The record is still emitted under both (a rectangular
     // record set is what makes the row-set arithmetic readable), but a reader must not read two
-    // identical arms as evidence that the map changed nothing.
+    // identical map modes as evidence that the map changed nothing.
     note(
-      `asmlift: [sweep] --asm-dir without --asm-project: there is no symbol map, so the 'harness' arm IS the 'nomap' arm here.`,
+      `asmlift: [sweep] --asm-dir without --asm-project: there is no symbol map, so the 'harness' map mode IS the 'nomap' map mode here.`,
     );
   }
   for (const [id, n] of Object.entries(over)) {
     note(
-      `asmlift: [sweep] --fan skips ${id}: ${n} recorded spellings, over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT} (--force to enumerate it anyway)`,
+      `asmlift: [sweep] --fan skips ${id}: its recorded fan of ${n} candidates is over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT} (--force to enumerate it anyway)`,
     );
   }
 
@@ -782,7 +792,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
   const secs = (t: number): string => ((Date.now() - t) / 1000).toFixed(1);
   const un = unmeasuredCounts(head);
   note(
-    `asmlift: [sweep] this tree: ${head.length} record(s) over ${new Set(head.map((r) => r.id)).size} row(s), ${o.arms.join('+')}${o.fan ? ', +fan' : ''} — ${secs(t0)} s${
+    `asmlift: [sweep] this tree: ${head.length} record(s) over ${new Set(head.map((r) => r.id)).size} row(s), ${o.mapModes.join('+')}${o.fan ? ', +fan' : ''} — ${secs(t0)} s${
       un.total > 0 ? `; ${un.total} NOT MEASURED (toolchain ${un.toolchain}, build ${un.build})` : ''
     }`,
   );
@@ -810,7 +820,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
       const d = compareSweeps(head, again);
       for (const m of d.moved) {
         disagreed++;
-        note(`asmlift: [nondet] run ${i + 1} ${m.id} ${m.arm} — ${m.fields.map((f) => f.field).join(', ')}`);
+        note(`asmlift: [nondet] run ${i + 1} ${m.id} ${m.mapMode} — ${m.fields.map((f) => f.field).join(', ')}`);
       }
       for (const k of [...d.baseOnly, ...d.headOnly]) {
         disagreed++;

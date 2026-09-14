@@ -1,4 +1,4 @@
-// L3 re-spelling lever: declare a recovered WORD field a POINTER (`void *field_4;` rather than
+// L3 respell variation: declare a recovered WORD field a POINTER (`void *field_4;` rather than
 // `s32 field_4;`), and cast at each read.
 //
 // raise/structs.ts recovers a field's type from the ACCESS WIDTH alone — a 4-byte load is `s32`,
@@ -34,13 +34,13 @@
 // each use computes the same value it did. Nothing else moves. THE 32-BIT ASSUMPTION IS ASSERTED,
 // NOT CHECKED — there is no pointer-width field on TargetDescription to check it against, and the
 // assumption is already tower-wide (`l3/typing.ts`'s `ptrElemBytes` returns 4 for any pointee). On
-// a 64-bit target this lever would change a struct's LAYOUT rather than only its spelling, so the
+// a 64-bit target this variation would change a struct's LAYOUT rather than only its spelling, so the
 // width field is what that target's first row must add, and this note is where to start.
 //
 // IT FLIPS EVERY ADMITTED FIELD AT ONCE, and its own paragraph above says the knowledge is
 // PER-FIELD — so the subset enumeration `l3/volatileptr.ts` does for exactly this reason
-// (`volatileSubsetCandidates`, capped at three locals) is the shape this lever will eventually
-// want. It is not built yet because nothing demands it: swept over 834 corpus trees, the lever
+// (`volatileSubsetCandidates`, capped at three locals) is the shape this variation will eventually
+// want. It is not built yet because nothing demands it: swept over 834 corpus trees, the variation
 // fires on 42, and 34 of those have a single admitted field. The six 2-field trees and the two
 // 4-field ones (`sa3:sa2__sub_8083504` flips Struct0.field_8/12 and Struct2.field_8/12 together)
 // are where 1 of 3 and 1 of 15 non-empty subsets is reachable. A row that needs one of the missing

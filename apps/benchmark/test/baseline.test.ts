@@ -75,7 +75,7 @@ describe('formatRow', () => {
   // to quoting a stale artifact number.
   test('a ranked row shows the fan it cost and the seconds it took', () => {
     const ranked = row('p:f:agbcc', 'f', {
-      asmlift: { outcome: 'nonmatch', score: 1, maxScore: 2, candidateCount: 5952, rankSeconds: 518.42 },
+      asmlift: { outcome: 'nonmatch', score: 1, maxScore: 2, fanSize: 5952, rankSeconds: 518.42 },
     } as unknown as Partial<FunctionResult>);
     expect(formatRow(ranked)).toContain('fan=5952 rank=518.4s');
   });

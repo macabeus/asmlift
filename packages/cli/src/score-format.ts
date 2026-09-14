@@ -2,13 +2,29 @@
 // paste is spelled. Its consumers today are this CLI's argv entry point and the benchmark's
 // `bench fan`; `main.ts` re-exports `scoreOf`, which is where the offline suite reaches it.
 //
-// It imports nothing, and that leafness buys nothing today: both consumers already pull `./score`
-// (and objdiff-wasm behind it). What this module owns is the SPELLING — the same line rendered by
-// two commands — and that is the property to preserve when adding to it.
+// It imports only core's variation registry, for the one join a candidate's name prints through.
+// That leafness buys nothing today: both consumers already pull `./score` (and objdiff-wasm behind
+// it). What this module owns is the SPELLING — the same line rendered by two commands — and that
+// is the property to preserve when adding to it.
+import { joinVariations } from '@asmlift/core/variation-tokens';
+
+/** What a `[threw]` line says threw: the variations the throwing step applied, as core's
+ *  `onEnumerationError` reports them, or `(default source)` for `[]`. It is not a candidate's name
+ *  (it never starts with a signedness), so the line prints it after the function instead of
+ *  joining it onto one. Also the key a consumer dedups `[threw]` lines on: identical steps print once. */
+export function threwStep(variations: readonly string[]): string {
+  return variations.length === 0 ? '(default source)' : joinVariations(variations);
+}
+
+/** The `[threw]` line, which the CLI and `bench fan` both print. No trailing newline. */
+export function threwLine(fn: string, step: string, error: string): string {
+  return `asmlift: [threw] ${fn} ${step} threw (no candidate from it): ${error}`;
+}
+
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE ANY asmlift COMMAND PRINTS: the CLI's `[score]` table, the
- *  `[ranked]` line's `best …`, the `[withheld]` line, the `[progress]` line — and the benchmark's
+ *  `[ranked]` line's `winner …`, the `[withheld]` line, the `[progress]` line — and the benchmark's
  *  `bench fan`, which prints those same four for one row. A reader comparing two runs cannot be
  *  asked to know which lines carry a denominator, and the harness is where two runs get compared.
  *
@@ -51,13 +67,13 @@ export function rankedSummaryLine(a: {
   dropped: number;
   withheld: number;
   synthesized: number;
-  best: { label: string; score: { score: number; rows?: number; match?: boolean } };
+  winner: { variations: readonly string[]; score: { score: number; rows?: number; match?: boolean } };
   stamp: string;
 }): string {
   return (
     `asmlift: [ranked] ${a.scored} candidate(s) scored, ${a.dropped} dropped, ` +
     `${a.withheld} withheld, ${a.synthesized} synthesized, ` +
-    `best ${a.best.label}: ${scoreOf(a.best.score)} ` +
+    `winner ${joinVariations(a.winner.variations)}: ${scoreOf(a.winner.score)} ` +
     `[${a.stamp}]`
   );
 }

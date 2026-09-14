@@ -1,4 +1,4 @@
-// The /initfirst lever (l3/initfirst.ts): a loop init moves above its guard and the guard reads
+// The /initfirst variation (l3/initfirst.ts): a loop init moves above its guard and the guard reads
 // the initialized variable. Both source forms lift to the same IR — a const has no position, and
 // an adjacent pure-read pair collapses to one load either way — so the differ referees between
 // them. The read case's refusals (volatile, un-owned names, raw-address derefs, compare-meaning)
@@ -404,7 +404,7 @@ test('a CONST init still moves under an effectful condition — nothing crosses 
 });
 
 // `/uns-cmp` renders one compare operand `(u32)…` to make the branch unsigned, and on a
-// zero-trip guard that operand IS the init's const. Without the cast tolerance the two levers
+// zero-trip guard that operand IS the init's const. Without the cast tolerance the two variations
 // cannot appear in one candidate, which is what `synthetic:unsguard:agbcc` needs.
 test('a (u32)-cast comparison side still matches the init it spells: (u32)0 < n → v < n', () => {
   const r = initFirstGuards(

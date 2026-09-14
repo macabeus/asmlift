@@ -1,9 +1,9 @@
-// STRUCT-HARDEN: the structurer's compiler-canonicalization levers — the divergent-if branch
-// sense, the JOINED-if branch sense (rank.ts's /flip-join axis, threaded through
+// STRUCT-HARDEN: the structurer's compiler-canonicalization options — the divergent-if branch
+// sense, the JOINED-if branch sense (rank.ts's /flip-join variation, threaded through
 // StructureOptions rather than target data), and the arg-copy emission order. These tests prove
-// the levers are LOAD-BEARING — flipping each visibly changes the emitted structure — so they
+// the options are LOAD-BEARING — flipping each visibly changes the emitted structure — so they
 // are real data, not decorative scaffolding.
-// (The third lever, `coalesceLoopInit`, is exercised behaviorally by the `countdown` loop fixture
+// (The third option, `coalesceLoopInit`, is exercised behaviorally by the `countdown` loop fixture
 // in packages/cli/test/matching/mips-controlflow.test.ts, where IDO's true keeps the induction var in its arg register;
 // here it is only checked for correct target→StructureOptions projection.) Toolchain-free.
 import { describe, expect, test } from 'vitest';
@@ -53,7 +53,7 @@ const ARGORD = `fn argord {
 `;
 
 // One DIVERGENT if (arms both return) and one JOINED if (arms reconverge on the final ret) in a
-// single function, so the two sense axes can be shown independent.
+// single function, so the two sense options can be shown independent.
 const BOTHIFS = `fn bothifs {
 ^bb0(%0: s32, %1: s32*):
   %2: s32 = const {value=0}
@@ -77,7 +77,7 @@ const BOTHIFS = `fn bothifs {
   ret %0
 }
 `;
-describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
+describe('STRUCT-HARDEN: the compiler behaviors are load-bearing', () => {
   test('preserveDivergentBranchSense flips branch direction on a divergent if', () => {
     // true (IDO/MIPS behavior, and the safe default): reproduce the source forward-branch by
     // negating the condition and putting the taken arm as the `else`.
@@ -90,8 +90,8 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     );
   });
 
-  test('negateJoinedBranchSense flips a JOINED if and leaves the divergent axis independent', () => {
-    // The four sense combinations are four DISTINCT spellings: each axis moves exactly its own
+  test('negateJoinedBranchSense flips a JOINED if and leaves the divergent sense independent', () => {
+    // The four sense combinations are four DISTINCT spellings: each option moves exactly its own
     // if class. Without the ipd guard on the joined branch, flip-join would re-negate a
     // divergent if whose preserve pin is false — collapsing {divergent flipped × joined flipped}
     // into a duplicate.
@@ -102,7 +102,7 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
       emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: true }),
     ];
     expect(new Set(four).size).toBe(4);
-    // flipping the JOINED axis alone never touches the divergent if's spelling
+    // flipping the JOINED option alone never touches the divergent if's spelling
     const divergentLine = (src: string) => src.split('\n').find((l) => l.includes('if ('));
     expect(divergentLine(four[0])).toBe(divergentLine(four[1]));
     expect(divergentLine(four[2])).toBe(divergentLine(four[3]));
@@ -132,8 +132,8 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
   });
 
   test('the joined sense DEFAULTS to the divergent one', () => {
-    // The axis's zero point, not a second constant: the layout evidence a joined `if` leaves is
-    // the evidence the divergent case already reads, so an absent lever spells both classes the
+    // The joined option's zero point, not a second constant: the layout evidence a joined `if` leaves is
+    // the evidence the divergent case already reads, so an absent option spells both classes the
     // same way and a target that opts out of one opts out of both.
     expect(emit(BOTHIFS, {})).toBe(emit(BOTHIFS, { negateJoinedBranchSense: true }));
     expect(emit(BOTHIFS, { preserveDivergentBranchSense: false })).toBe(
@@ -152,15 +152,15 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     expect(emit(ARGORD, { orderArgCopiesByWriteOrder: false })).toContain('v0 = a0 + a1;\n    v1 = a1 + a0;');
   });
 
-  test('absent levers default to true', () => {
-    // A caller passing no lever must get exactly the lever-true behavior.
+  test('absent compiler behaviors default to true', () => {
+    // A caller passing no option must get exactly the option-true behavior.
     expect(emit(DIVERGE, {})).toBe(emit(DIVERGE, { preserveDivergentBranchSense: true }));
     expect(emit(ARGORD, {})).toBe(emit(ARGORD, { orderArgCopiesByWriteOrder: true }));
   });
 });
 
 describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehaviors", () => {
-  test('every compilerBehaviors lever flows into StructureOptions (no field dropped)', () => {
+  test('every compilerBehaviors field flows into StructureOptions (no field dropped)', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC]) {
       const opts = structureOptionsFor(t, false);
       expect(opts.returnsVoid).toBe(false);
@@ -172,15 +172,15 @@ describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehavio
   });
 
   test("coalesceLoopInit is the bag's REAL distinguishing inhabitant (differs across compilers)", () => {
-    // The compilerBehaviors bag is earned only if at least one lever actually differs between real
+    // The compilerBehaviors bag is earned only if at least one compiler behavior actually differs between real
     // targets (else it is uniform scaffolding). The BEHAVIORAL proof that this value changes
     // codegen is the `countdown` fixture (mips-controlflow.test.ts), byte-exact only because IDO's
-    // true keeps the induction var in a0. The two branch/arg levers are, by contrast, uniform-true
+    // true keeps the induction var in a0. The two branch/arg options are, by contrast, uniform-true
     // today.
     expect(MIPS_IDO.compilerBehaviors.coalesceLoopInit).toBe(true);
     expect(MIPS_GCC.compilerBehaviors.coalesceLoopInit).toBe(true); // corpus-offline: gcc-gcd.asm
     expect(ARMV4T_AGBCC.compilerBehaviors.coalesceLoopInit).toBe(false);
-    // …and the two branch/arg levers are genuinely uniform across every real compiler (the honest
+    // …and the two branch/arg options are genuinely uniform across every real compiler (the honest
     // scaffolding claim — no target sets either false today). For the copy order that is not the
     // whole story and must not be read as one: WHICH order a measured edge takes is two-sided
     // inside a single compiler (mwcc rows on both sides), so it is refereed per row by rank.ts's

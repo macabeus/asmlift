@@ -490,7 +490,7 @@ describe('a block parameter extended at its only read is declared at that width'
 
   test('the extension kind picks the signedness and its width the type', () => {
     // The whole loop moves to the new width, not just the carrier's own read: a `zext16` write-back
-    // under an `s8` carrier is not a signedness variant, it is a different (and refused) program —
+    // under an `s8` carrier is not a signedness alternative, it is a different (and refused) program —
     // `edge-reader` reads exactly that disagreement.
     const at = (op: string, width: number) =>
       run(NARROW_COUNTER.replaceAll('width=16', `width=${width}`).replace('sext %2 {width=', `${op} %2 {width=`)).fn

@@ -6,9 +6,9 @@
 //   • the effect-ordering model — which defs must MATERIALIZE as named temps at their own
 //     program position instead of inlining at their use (calls/loads for effect order, plus
 //     the pure defs the homing rules claim);
-//   • the HOMING-AXIS ENUMERATION GATES — one export per candidate axis, each answering "does
-//     this function hold a value the axis would home at all" so rank.ts can skip an axis whose
-//     candidate would only duplicate the default. Each mirrors its axis's scope inside `analyze`
+//   • the HOMING-VARIATION ENUMERATION GATES — one export per structure variation, each answering
+//     "does this function hold a value the variation would home at all" so rank.ts can skip a
+//     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
 import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
@@ -75,7 +75,7 @@ function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
  *  scopebase.ts and nearbase.ts serves those bases instead). The walk deliberately crosses loads —
  *  a gaddr reachable only through a load's address keeps its cast at that load's own deref, so
  *  over-refusal there costs a candidate, never soundness. That over-refusal is why the
- *  derived-read-home axis asks its own pair instead (an address in the cone OUTSIDE a read, plus
+ *  derived-read-home variation asks its own pair instead (an address in the cone OUTSIDE a read, plus
  *  `rendersAsAddress` on the value): reads over named globals are its whole clientele. */
 function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   const seen = new Set<Value>();
@@ -98,10 +98,10 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   return false;
 }
 
-/** THE ADDRESS-HOME AXIS'S SCOPE: every value whose MERGE CLASS (ir/core.ts `mergeClasses`) is
+/** THE ADDRESS-HOME VARIATION'S SCOPE: every value whose MERGE CLASS (ir/core.ts `mergeClasses`) is
  *  used only as the base of memory accesses, and at 2+ of them.
  *
- *  WHY THE CLASS AND NOT THE VALUE. The question the axis asks is about a REGISTER — did the
+ *  WHY THE CLASS AND NOT THE VALUE. The question the variation asks is about a REGISTER — did the
  *  machine derive one address and dereference it at several sites — and a register that survives a
  *  branch merge is spelled in functional-form SSA as an edge argument plus a block parameter. So a
  *  base each arm derives and the join then reads is N+1 SSA values with one base use apiece, none
@@ -139,7 +139,7 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *
  *  The FIRST is about which classes the widening adds. Of the 25+8 functions above exactly one
  *  carries a class reaching a loop-header parameter (marioparty3
- *  `func_80112508_523648_filesel`, 2 values, map-less), and neither value is one the axis could
+ *  `func_80112508_523648_filesel`, 2 values, map-less), and neither value is one the variation could
  *  materialize; `addr-home.test.ts` pins both halves. A loop-carried pointer INDUCTION is refused
  *  by its own increment, a non-base use of a class member. The loop-header class that does survive
  *  has a back-edge value READ FROM MEMORY, so its only def is a `load` and the enumeration gate
@@ -152,7 +152,7 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *  in. It is load-bearing and measurable: replace that clause with `true` and marioparty3
  *  `func_8010923C_18E46C_cosmic_coaster` stops structuring at all — it throws the
  *  `carriesPreUpdate` StructureError this paragraph is about — while `func_80033910_34510` and
- *  `func_80033970_34570` go from axis-inert to changing their source. So the hazard is real; it is
+ *  `func_80033970_34570` go from variation-inert to changing their source. So the hazard is real; it is
  *  answered by WHERE a home may sit rather than by WHICH class may have one, which is a refusal
  *  the widening does not touch and the plan's class guard would have restated. Note what that
  *  implies about the enumeration gate: it deliberately
@@ -214,7 +214,7 @@ export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
   return out;
 }
 
-/** Is `d` a def one of the homing axes could seat in a local — a def at all, and a PURE
+/** Is `d` a def one of the homing variations could seat in a local — a def at all, and a PURE
  *  non-memory one that is not a `const`? The three enumeration gates below share this filter and
  *  each then adds its own cone/address/shape refusals.
  *
@@ -258,14 +258,14 @@ function readCone(op0: Op, defOf: Map<Value, Op>): Op[] | null {
   return reads;
 }
 
-/** rank.ts's enumeration gate for the `/addr-home` axis: does the function HAVE a value the axis
- *  would home — a non-const pure def whose merge class is a shared base, with no gaddr/laddr in
- *  its cone? Mirrors the axis's scope rule in `analyze` (the same `sharedBaseClasses` call), minus
+/** rank.ts's enumeration gate for the `/addr-home` variation: does the function HAVE a value the
+ *  variation would home — a non-const pure def whose merge class is a shared base, with no gaddr/laddr in
+ *  its cone? Mirrors the variation's scope rule in `analyze` (the same `sharedBaseClasses` call), minus
  *  the loop-header seat refusal (that needs the loop model; a false positive costs one
  *  duplicate-collapsed candidate, never a wrong one).
  *
  *  `ignoreRet` is true here: a `ret` operand may be a void phantom, which `analyze` skips under
- *  `returnsVoid` and this gate cannot know. For a genuinely returned base the axis's own rule
+ *  `returnsVoid` and this gate cannot know. For a genuinely returned base the variation's own rule
  *  still refuses, costing one duplicate-collapsed candidate — the same trade as the loop-header
  *  divergence. */
 export function hasHomeableSharedAddress(fn: Fn): boolean {
@@ -279,17 +279,17 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
   return false;
 }
 
-/** rank.ts's enumeration gate for the `/expr-home` axis: does the function HAVE a value the
- *  axis would home — a pure non-const def with 2+ distinct consumers, at least one of them inside
+/** rank.ts's enumeration gate for the `/expr-home` variation: does the function HAVE a value the
+ *  variation would home — a pure non-const def with 2+ distinct consumers, at least one of them inside
  *  a loop the def sits outside, cone-free? Loops here are LAYOUT ranges (a successor at an
- *  equal-or-earlier block position closes one) where the axis's own rule uses the dominator model,
+ *  equal-or-earlier block position closes one) where the variation's own rule uses the dominator model,
  *  and consumers here come from op operands only, where the rule counts `useSitesOf` and so counts
  *  branch args too — unlike hasHomeableSharedAddress this therefore diverges in BOTH directions. A
  *  false positive costs one duplicate-collapsed candidate. A false negative silently skips the arm:
  *  on IR whose block layout does not follow dominance, which every frontend avoids by laying blocks
  *  out in address order (a natural loop's back edge points backward), and on a value EITHER of
  *  whose two consumers is a branch arg, which the rule would home and this never enumerates. The
- *  second is unwitnessed over the 856-row bench the axis was measured on (#97), and costs a
+ *  second is unwitnessed over the 856-row bench the variation was measured on (#97), and costs a
  *  missing candidate, never a wrong one. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
@@ -334,8 +334,8 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
   return false;
 }
 
-/** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
- *  axis would home — a pure non-const, non-pointer def with 2+ consumers standing on a same-block
+/** rank.ts's enumeration gate for the `/derived-home` variation: does the function HAVE a value the
+ *  variation would home — a pure non-const, non-pointer def with 2+ consumers standing on a same-block
  *  memory read that is used nowhere else and reaches it with no write in between, and with no call
  *  or standalone address in the cone? A TRUE here DOUBLES the whole structuring cross for the
  *  function — not one candidate — so every refusal cheap enough to state without the positioned
@@ -347,8 +347,8 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
  *  cross whose every candidate the source dedup then collapses. Under: use counting here is by SLOT
  *  over operands and successor args, where `analyze` drops a void function's `ret` operand — so a
  *  read whose second use is a suppressed return is refused here and admitted there, silently
- *  skipping the arm. That shape is a void function returning the very halfword it read, which no
- *  caller can observe; the axis's clientele reads to compute, not to return. */
+ *  skipping the alternative. That shape is a void function returning the very halfword it read, which no
+ *  caller can observe; the variation's clientele reads to compute, not to return. */
 export function hasDerivedReadHome(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const consumers = new Map<Value, Set<Op>>();
@@ -431,7 +431,7 @@ function naturalLoops(
   return loops;
 }
 
-/** THE MERGE-FEED-HOME axis's scope (rank.ts `/merge-home`, AnalyzeOptions.homeMergeFeeds): the
+/** THE MERGE-FEED-HOME variation's scope (rank.ts `/merge-home`, AnalyzeOptions.homeMergeFeeds): the
  *  pure defs it materializes.
  *
  *  A merge parameter whose incoming edges render ONE value's expression twice or more is a value
@@ -444,7 +444,7 @@ function naturalLoops(
  *  clientele (a value re-derived at two ordinary uses) is a value the compiler DOES re-materialize
  *  for free. What a merge slot adds is that the two renders are mutually exclusive ARMS of one
  *  branch. Which side the source spelled is still not derivable (nothing stops a source from
- *  writing the expression twice), so this is a differ-refereed candidate axis, never a default.
+ *  writing the expression twice), so this is a differ-refereed candidate variation, never a default.
  *
  *  Refusals:
  *    • a value whose cone holds a gaddr/laddr (`coneHoldsAddr`) — rendered standalone an `&g + i`
@@ -455,13 +455,13 @@ function naturalLoops(
  *      in their cone — derived from, or loaded from, a pointer param — and there the backend does
  *      re-derive the byte cast (`v0 = (u8 *)*a1 + 6;` then `v0 = (u8 *)v0 + 2;`). Address-shaped
  *      bases belong to the cast-aware machinery in l3/basecse.ts, scopebase.ts and nearbase.ts;
- *      this axis does not offer a second spelling of them.
+ *      this variation does not offer a second spelling of them.
  *    • an op whose answer depends on WHERE it runs, or that can TRAP — `REEVAL_UNSAFE_OPS`, read
  *      from the registry rather than re-listed. Both halves carry: for a read WHERE it happens is
  *      the read rules' question, and a homed divide becomes an unconditional statement at a def
  *      block raise/shortcircuit.ts may have made, on paths C's own `&&` would have re-guarded —
  *      the KNOWN GAP `ir/opcodes.ts` books against `HOIST_UNSAFE_OPS`.
- *    • an `undef` — the axis's premise is a value the source COMPUTED once above the branch, and
+ *    • an `undef` — the variation's premise is a value the source COMPUTED once above the branch, and
  *      an uninitialised register was never computed at all: homed, it spells `v0 = uninit_r5;`,
  *      a copy of a value nothing wrote, which no asm can have.
  *    • a value in a `&&`/`||`'s guarded cone WHOSE CONE HOLDS a re-evaluation-unsafe op —
@@ -481,7 +481,7 @@ function naturalLoops(
  *      joins with params) is refused by this clause and no other, and lifting it takes that
  *      function's map-less enumeration 75264 → 150528 candidates, 102s → 207s. A null there is
  *      this refusal, not an absent idiom.
- *  The `analyze` scope adds nothing to this list — the whole predicate is here, so the axis's
+ *  The `analyze` scope adds nothing to this list — the whole predicate is here, so the variation's
  *  enumeration gate can run it rather than approximate it. */
 function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, Op>, inLoop: Set<Block>): Set<Op> {
   // Every block's incoming COPY SITES — the places its edge assignments render, each once. Neither
@@ -578,7 +578,7 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
       const d = defOf.get(x);
       return d !== undefined && REEVAL_UNSAFE_OPS.has(d.opcode);
     });
-  /** may this op's result be materialized at its def — and is this axis the one to do it? */
+  /** may this op's result be materialized at its def — and is this variation the one to do it? */
   const eligible = (op: Op): boolean => {
     const v = op.results[0];
     return (
@@ -647,8 +647,8 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   return out;
 }
 
-/** rank.ts's enumeration gate for the `/merge-home` axis: does the function HAVE a value the axis
- *  would home? The scope itself rather than a restatement of it, so the gate and the rule cannot
+/** rank.ts's enumeration gate for the `/merge-home` variation: does the function HAVE a value the
+ *  variation would home? The scope itself rather than a restatement of it, so the gate and the rule cannot
  *  drift apart — admitting still says only that the rule fires, not that the tree changes. */
 export function hasMergeFeedHome(fn: Fn): boolean {
   const dom = dominators(fn);
@@ -685,7 +685,7 @@ export interface AnalyzeOptions {
   /** Dominator sets, when the caller already holds them (structure() does) — consumed by the
    *  live-across-a-loop rule's back-edge detection. Absent ⇒ that rule stands down. */
   dom?: Map<Block, Set<Block>>;
-  /** THE value-home axis (rank.ts `/reread-globals`). A read of a named global is barred from
+  /** THE value-home variation (rank.ts `/reread-globals`). A read of a named global is barred from
    *  rendering at its use by any write in between — even a store to an unrelated global, which
    *  cannot possibly change what it sees. That over-conservatism is what invents the locals the
    *  round-5 dogfood measured as its highest-cost defect ("hoists what agbcc re-reads"):
@@ -699,38 +699,38 @@ export interface AnalyzeOptions {
    *  scoped), so today's spelling is never wrong — only sometimes not the one the compiler was
    *  given.
    *  Which side matches is genuinely per-function (the same dogfood watched agbcc go both ways
-   *  inside ONE function), so this is a differ-refereed candidate axis, never a default.
+   *  inside ONE function), so this is a differ-refereed candidate variation, never a default.
    *
    *  SCOPE, since `readsStayWhereWritten` below now answers the same question — read once and
-   *  reuse, or read per use — with the opposite default: this axis owns renders in the read's OWN
+   *  reuse, or read per use — with the opposite default: this variation owns renders in the read's OWN
    *  block, where nothing about placement is in evidence and both spellings really do compile.
    *  A read whose every render sits in a STRICTLY DOMINATED block is the default's, and on a
-   *  target that declares it the axis cannot produce the re-read spelling there (the rule
+   *  target that declares it the variation cannot produce the re-read spelling there (the rule
    *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
    *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
   /** "does the project declare this global volatile?" — a read of a volatile object may NOT be
-   *  duplicated or moved, so the axis above refuses on one. Answers false for a symbol the map
+   *  duplicated or moved, so the variation above refuses on one. Answers false for a symbol the map
    *  does not carry (and for no map at all), which is the same posture the multi-render rule has
    *  always had: without a declaration nothing here can know, and the differ referees the extra
-   *  load. Where the map DOES know, the axis is silent about it rather than wrong. */
+   *  load. Where the map DOES know, the variation is silent about it rather than wrong. */
   volatileGlobal?: (name: string) => boolean;
-  /** The in-place-join axis (rank.ts `/inplace`). A load whose result is a `cond_br` successor
+  /** The in-place-join variation (rank.ts `/inplace`). A load whose result is a `cond_br` successor
    *  ARG feeds a merge: rendered inline it has no name, so the merge param mints a fresh variable
    *  and BOTH arms must assign it. Materialized, the naming walk can home the merge in the load's
    *  own variable, the identity arm elides, and the `if` renders one-sided — `v = *p; if (v > 31)
    *  v = 32;` — which is also what reuses the load's register when recompiled. Whether the source
    *  spelled the temp or the overwrite is not derivable from the asm, so this is a differ-refereed
-   *  candidate axis, never a default. Plain `br` args (loop-carried values) are out of scope:
+   *  candidate variation, never a default. Plain `br` args (loop-carried values) are out of scope:
    *  their homes are the loop-param machinery's question. */
   materializeJoinFeeds?: boolean;
-  /** The address-home axis (rank.ts `/addr-home`). A pure computed address the asm derived ONCE
+  /** The address-home variation (rank.ts `/addr-home`). A pure computed address the asm derived ONCE
    *  and dereferenced at 2+ sites renders, by default, re-derived at each use — and the loads
    *  through it re-read per use — where the original source may have spelled a pointer local plus
    *  scalar temps (`u8 *entry = (u8 *)((a0 << 2) + base); type = entry[1]; idx = entry[0];`).
    *  The two spellings are codegen-visible (the re-derive folds each deref offset into its OWN
    *  pool literal; the home shares one base register across `[rN, #k]` accesses) and which one
-   *  the source used is not derivable from asm, so this is a differ-refereed candidate axis,
+   *  the source used is not derivable from asm, so this is a differ-refereed candidate variation,
    *  never a default. With it on: a non-const pure value whose MERGE CLASS is consumed ONLY as
    *  the base operand of 2+ memory accesses materializes (`sharedBaseClasses` — the class is what
    *  makes a base the arms derive and the join dereferences one register rather than three
@@ -740,11 +740,11 @@ export interface AnalyzeOptions {
    *  standalone, an address cone's value changes: the byte-stride cast lives at the use — see
    *  coneHoldsAddr; those bases stay with l3/basecse.ts, scopebase.ts and nearbase.ts), and the
    *  multi-block-loop-header seat refusal is the decline-avoidance half (same as
-   *  liveAcrossLoop's). An L3 re-spell could not host this axis: by structuring's end the loads
+   *  liveAcrossLoop's). An L3 respell variation could not host this one: by structuring's end the loads
    *  have already rendered per-use inside separate arms, and only this phase's positioned
    *  memory model can merge them into pre-branch temps. */
   homeSharedAddresses?: boolean;
-  /** The loop-expression-home axis (rank.ts `/expr-home`). A pure computed value defined outside
+  /** The loop-expression-home variation (rank.ts `/expr-home`). A pure computed value defined outside
    *  a loop and consumed by 2+ distinct ops, at least one of them inside that loop, is one the
    *  compiler holds in a (callee-saved) register across the iterations — it never re-derives per
    *  use in a loop —
@@ -753,10 +753,10 @@ export interface AnalyzeOptions {
    *  declared type is the IR value's recovered type, so a u32 value's compares stay unsigned
    *  through the local. Straight-line multi-use values stay OUT (the small-constant class the
    *  const-across-call scope's note records); shared memory-access bases are `/addr-home`'s.
-   *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
+   *  Same refusals as that variation: gaddr/laddr cones and multi-block-loop-header seats. Adding
    *  materialization preserves semantics for the admitted values, exactly as above. */
   homeLoopExprs?: boolean;
-  /** The derived-read-home axis (rank.ts `/derived-home`). A memory read whose value is not used
+  /** The derived-read-home variation (rank.ts `/derived-home`). A memory read whose value is not used
    *  directly but through a pure computation with 2+ consumers puts the home on the WRONG node:
    *  the read materializes (its consumer resolves no single render position) and the computation
    *  then re-derives from that local at every use, where the asm computed it ONCE — the read's
@@ -765,7 +765,7 @@ export interface AnalyzeOptions {
    *  non-const value with 2+ consumers whose operand cone bottoms out at a memory read
    *  materializes instead; the read then renders exactly once, inside the home.
    *
-   *  A differ-refereed axis, not a fix: agbcc CSEs a re-derived expression back to one
+   *  A differ-refereed variation, not a fix: agbcc CSEs a re-derived expression back to one
    *  instruction often enough that both spellings do compile, and which one the source spelled is
    *  not derivable. What the cone's read supplies is the evidence the straight-line case otherwise
    *  lacks — `/expr-home` takes a loop as proof the value stayed in a register, and a
@@ -779,23 +779,23 @@ export interface AnalyzeOptions {
    *  changes which paths read, how often, and in what order). A cone crossing a `call` (homing
    *  would move a side effect). A standalone gaddr/laddr in the cone, or a value that is ITSELF an
    *  address (rendered standalone the byte-stride cast lands outside the sum — see
-   *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling axes refuse. */
+   *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling variations refuse. */
   homeDerivedReads?: boolean;
-  /** The merge-feed-home axis (rank.ts `/merge-home`). A pure value one join's incoming edges
+  /** The merge-feed-home variation (rank.ts `/merge-home`). A pure value one join's incoming edges
    *  render into the SAME parameter slot from 2+ places materializes at its def: the copy machinery
    *  has no name to reference, so the default re-derives the whole expression per arm
    *  (`m = (-(b & 1) | b & 1) >> 31 & 0x400;` in both) and agbcc if-converts each copy. The scope
    *  and every refusal it states are `mergeFeedHomes` above, which the enumeration gate also runs. */
   homeMergeFeeds?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
-   *  The sibling of the homing axes above: there the question is which register or offset holds a
+   *  The sibling of the homing variations above: there the question is which register or offset holds a
    *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
-   *  block STRICTLY DOMINATES has no rule at all above — those axes want 2+ consumers or a shared
+   *  block STRICTLY DOMINATES has no rule at all above — those variations want 2+ consumers or a shared
    *  base — so it sinks and each arm re-reads it: a second load either way, plus a second pool
    *  literal when the address folded to a constant.
    *
-   *  A per-compiler DATA lever (TargetDescription.compilerBehaviors `readsStayWhereWritten`), not
-   *  a differ-refereed axis, and that distinction is the argument: an axis exists where the asm
+   *  A compiler behavior (TargetDescription.compilerBehaviors `readsStayWhereWritten`), not
+   *  a differ-refereed variation, and that distinction is the argument: a variation exists where the asm
    *  UNDERDETERMINES the source, some pass having collapsed two spellings onto one output
    *  (`/uns-cmp`'s non-negativity proof is the type case). Where the compiler emits a read in the
    *  block the source spelled it in, re-spelling it at the block the asm read in reproduces that
@@ -1030,7 +1030,7 @@ function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
  *  `reachFrom` is the plain successors-transitive set, excluding the start block itself, cached per
  *  factory — which is why this is a factory: the cache belongs to one `analyze` call.
  *
- *  `reachAvoiding` never passes THROUGH `avoid` — the def-block-avoiding variant for per-iteration
+ *  `reachAvoiding` never passes THROUGH `avoid` — the def-block-avoiding form for per-iteration
  *  path checks: a path that re-enters the def's block re-executes the def, so writes on it belong
  *  to the NEXT dynamic instance (which re-renders anyway) and must not count against this one.
  *  Uncached (per-decision graphs are small). */
@@ -1057,7 +1057,7 @@ function makeReach(): {
     reachCache.set(b, r);
     return r;
   };
-  // Reachability that never passes THROUGH `avoid` — the def-block-avoiding variant for
+  // Reachability that never passes THROUGH `avoid` — the def-block-avoiding form for
   // per-iteration path checks: a path that re-enters the def's block re-executes the def, so
   // writes on it belong to the NEXT dynamic instance (which re-renders anyway) and must not
   // count against this one. Uncached (per-decision graphs are small).
@@ -1141,7 +1141,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // because their edge copy is on the one path that reaches the successor, so nothing conditional
   // happens to them.
   //
-  // `condBrArgFed` is the `/inplace` axis's narrower reading — a preference about where a load's
+  // `condBrArgFed` is the `/inplace` variation's narrower reading — a preference about where a load's
   // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
   const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
@@ -1235,7 +1235,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   // EVERY position a value's expression renders at — `emitPos` generalized to the whole set (it
   // answers one place or gives up), by following ALL consumers transitively. That matters for
-  // the value-home axis: a pure expression with two consumers (`gOut = e; return e;`) has no single
+  // the value-home variation: a pure expression with two consumers (`gOut = e; return e;`) has no single
   // emit position, so `emitPos` answers null and every memory read feeding it is forced into a
   // local — even when re-reading at both places is provably equivalent. Null only for a genuine
   // cycle (defensive: SSA use-def is acyclic through ops), which the caller treats as unresolvable.
@@ -1309,16 +1309,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  holds the loaded value and the address stays inline at the deref, which is why the load rules
    *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
-  // ── the address-home axis's scope ─────────────────────────────────────────────────────────
+  // ── the address-home variation's scope ────────────────────────────────────────────────────
   // Over the MERGE CLASS, so a base the arms derive and the join dereferences counts as the one
-  // register it is — see `sharedBaseClasses`. Computed once, and only under the axis.
+  // register it is — see `sharedBaseClasses`. Computed once, and only under the variation.
   const sharedBaseClass = homeSharedAddresses ? sharedBaseClasses(fn, returnsVoid) : new Set<Value>();
-  // The same question asked of the VALUE ALONE, which is what the two axes below need: their
+  // The same question asked of the VALUE ALONE, which is what the two variations below need: their
   // "shared bases stay the address-home scope's" exclusion is a hand-off between scopes, and
   // widening it to the class would make them refuse values the address-home scope only claims
-  // when its own axis is ON — a candidate lost with no candidate gained. Where both axes run the
+  // when its own variation is ON — a candidate lost with no candidate gained. Where both variations run the
   // two scopes may claim one value, which is a no-op: `materialize` is a set and the address-home
-  // scope, running first, is what registers `axisHomedBases`.
+  // scope, running first, is what registers `addressHomedBases`.
   const usedOnlyAsSharedBase = (v: Value): boolean => {
     const sites = useSitesOf.get(v) ?? [];
     const consumers = new Set(sites.map((s) => s.op));
@@ -1329,7 +1329,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       )
     );
   };
-  // The merge-feed-home axis's ops, settled BEFORE the fixpoint: the scope reads the IR alone (no
+  // The merge-feed-home variation's ops, settled BEFORE the fixpoint: the scope reads the IR alone (no
   // render positions, no `materialize`), so it cannot change as the set grows. Unlike the rules
   // that stand down without the caller's `dom`, this one computes its own: rank.ts has already
   // admitted the candidate on `hasMergeFeedHome`, which runs the same scope, so standing down here
@@ -1340,9 +1340,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     const mloops = mdom === dom ? loopBodies : naturalLoops(fn, mdom, predsOf);
     mergeFeedOps = mergeFeedHomes(fn, mdom, defOf, new Set(mloops.flatMap((L) => [...L.body])));
   }
-  /** result values the address-home axis materialized — the load rule's admission key */
-  const axisHomedBases = new Set<Value>();
-  /** The loop-expression-home axis's scope: 2+ distinct consumers of the value, at least one of
+  /** result values the address-home variation materialized — the load rule's admission key */
+  const addressHomedBases = new Set<Value>();
+  /** The loop-expression-home variation's scope: 2+ distinct consumers of the value, at least one of
    *  them inside a loop the def's block is outside (loop model = the caller's dominators; absent ⇒
    *  never).
    *
@@ -1360,7 +1360,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       loopBodies.some((L) => !L.body.has(defBlk) && consumers.some((c) => L.body.has(opBlock.get(c)!)))
     );
   };
-  /** The derived-read-home axis's scope: does `op0` stand on a memory READ that may render at
+  /** The derived-read-home variation's scope: does `op0` stand on a memory READ that may render at
    *  `op0`'s own position?
    *
    *  The cone walk STOPS at a read — its address stays inline at the deref, so nothing below it is
@@ -1368,7 +1368,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  (a side effect), and a gaddr/laddr reached OUTSIDE a read's address (rendered standalone an
    *  `&g + i` loses the memAccess's byte-stride cast). `coneHoldsAddr` cannot answer this: it
    *  crosses reads, so it refuses every value standing on a named global's load — which is this
-   *  axis's whole clientele.
+   *  variation's whole clientele.
    *
    *  At least one read is required. A value derivable from locals and constants alone is one the
    *  compiler re-materializes for free, and homing it only adds copies — the small-constant class
@@ -1381,7 +1381,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  A read OUTSIDE the cone bars it too. The default's "loads never bar a load" holds for reads
    *  the compiler leaves unsequenced inside ONE expression, which is what the cone's own reads
    *  become; a foreign read renders in a different statement, so moving past it reorders two
-   *  accesses — for two MMIO cells (this axis's clientele) an observable swap, as when `A`'s
+   *  accesses — for two MMIO cells (this variation's clientele) an observable swap, as when `A`'s
    *  derived value sits below `B`'s and homing both puts `B`'s read first.
    *
    *  And each read's value must go NOWHERE BUT the cone: exactly one use site. Homing resolves a
@@ -1390,9 +1390,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  `ldrh`, which for a volatile cell is precisely the duplication `volatileGlobal` refuses. Two
    *  homed values over one read is the same shape from the other side (each is the other's second
    *  use), so one test covers both. This is what makes "renders once, inside the home" a property
-   *  rather than an aspiration: without it the axis silently doubles a hardware read.
+   *  rather than an aspiration: without it the variation silently doubles a hardware read.
    *
-   *  The same block is what makes the axis's claim true at all: the register handoff it reproduces
+   *  The same block is what makes the variation's claim true at all: the register handoff it reproduces
    *  is one straight-line run of the asm, `ldrh` into `eor` into three uses. Across blocks WHICH
    *  BLOCK reads is `readsStayWhereWritten`'s question, not this one, and answering it here goes
    *  wrong in both directions — a value below a branch pulls the read into an arm that may not
@@ -1513,10 +1513,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
-          // Folding the FOUR AXIS scopes below into one predicate-parameterized scope is BOOKED
+          // Folding the FOUR VARIATION scopes below into one predicate-parameterized scope is BOOKED
           // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
           // along with the price the fourth one added to it (the gate duplication).
-          // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
+          // Third scope, under the address-home variation only (see AnalyzeOptions.homeSharedAddresses):
           // a non-const pure value whose MERGE CLASS is used only as the base of 2+ memory
           // accesses.
           if (
@@ -1528,9 +1528,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             !multiBlockHeaders.has(b)
           ) {
             materialize.add(op);
-            axisHomedBases.add(pr);
+            addressHomedBases.add(pr);
           }
-          // Fourth scope, under the loop-expression-home axis (AnalyzeOptions.homeLoopExprs): a
+          // Fourth scope, under the loop-expression-home variation (AnalyzeOptions.homeLoopExprs): a
           // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
           // def sits outside. Shared bases stay the previous scope's (its load rule needs the
           // registration).
@@ -1545,7 +1545,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           ) {
             materialize.add(op);
           }
-          // Fifth scope, under the derived-read-home axis (AnalyzeOptions.homeDerivedReads): a
+          // Fifth scope, under the derived-read-home variation (AnalyzeOptions.homeDerivedReads): a
           // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
           // the third scope's and values consumed across a loop the fourth's; what this one adds
           // is the straight-line case, which neither reaches.
@@ -1561,10 +1561,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           ) {
             materialize.add(op);
           }
-          // Sixth scope, under the merge-feed-home axis (AnalyzeOptions.homeMergeFeeds) —
-          // `mergeFeedHomes` above. The only one of the FOUR AXIS scopes that admits a `const`; the
+          // Sixth scope, under the merge-feed-home variation (AnalyzeOptions.homeMergeFeeds) —
+          // `mergeFeedHomes` above. The only one of the FOUR VARIATION scopes that admits a `const`; the
           // other const clientele is the first scope, a const live across a call. For the sibling
-          // axes a re-derived const is re-materialization, the compiler's own behavior, while a
+          // variations a re-derived const is re-materialization, the compiler's own behavior, while a
           // const the arms of a branch merge is one it held in a register across them
           // (`mov r5, #0` once, not per arm).
           if (homeMergeFeeds && mergeFeedOps.has(op)) {
@@ -1576,7 +1576,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (!r || !useSitesOf.has(r)) {
           continue;
         } // dead call → exprstmt (unchanged)
-        // Under the value-home axis: which named global cell this op reads, if any. A constant-
+        // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
         // everything. Null ⇒ every write bars, exactly as before.
         const cell =
@@ -1644,19 +1644,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             continue;
           }
         }
-        // Address-home axis: a multi-render load THROUGH a base this axis homed re-reads what the
+        // Address-home variation: a multi-render load THROUGH a base this variation homed re-reads what the
         // asm read once into the register the home just reproduced — home the value too, at the
-        // load's own position. Only through axis-homed bases (the fixpoint's later sweep sees them
+        // load's own position. Only through variation-homed bases (the fixpoint's later sweep sees them
         // even though reverse order visits the load first); the general multi-render re-read stays
-        // the default rule below. axisHomedBases registers on the same sweep that materializes the
-        // base — safe because no other rule can pre-empt a value the axis would home: base-slot-only
-        // means no successor-arg use (outside copyInterdependent's read set), and the axis's scope
+        // the default rule below. addressHomedBases registers on the same sweep that materializes the
+        // base — safe because no other rule can pre-empt a value the variation would home: base-slot-only
+        // means no successor-arg use (outside copyInterdependent's read set), and the variation's scope
         // excludes consts, the const arm's only clientele.
         if (
           homeSharedAddresses &&
           op.opcode === 'load' &&
           consumers.length > 1 &&
-          axisHomedBases.has(op.operands[0]) &&
+          addressHomedBases.has(op.operands[0]) &&
           !multiBlockHeaders.has(b)
         ) {
           materialize.add(op);
@@ -1667,8 +1667,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // so it is sound iff every render still sees the def-time memory: NO write anywhere
         // between the def and ANY render (cycle-aware, conservative write set). Otherwise a temp.
         //
-        // WHERE it renders. Without the axis: one position per consumer, and a consumer with no
-        // single position (its own value renders in several places) refuses. With the axis a load
+        // WHERE it renders. Without the variation: one position per consumer, and a consumer with no
+        // single position (its own value renders in several places) refuses. With the variation a load
         // resolves the whole SET instead — the second half of the value-home defect, where the
         // local is invented not by a barrier but because the pure expression downstream is itself
         // duplicated (`gOut = (gValue << 1) + gValue; return (gValue << 1) + gValue;`). Never for a
@@ -1698,7 +1698,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // exactly as it originally chose to. Loads never bar a load (reads don't conflict).
         const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
         const isBarrier = (x: Op): boolean => {
-          // Value-home axis: a store/astore this read is PROVABLY disjoint from (a different named
+          // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
           // global) does not sequence against it, so the read may still render at its use.
           if (barsThisRead && (x.opcode === 'store' || x.opcode === 'astore') && !barsThisRead(x)) {
             return false;

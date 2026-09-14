@@ -20,6 +20,7 @@ import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -49,7 +50,7 @@ import type { RankedResult } from './rank';
 // must be able to reach it without importing this argv entry point — and `./score` is no home for
 // it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
 // that edge.
-import { rankedSummaryLine, scoreOf } from './score-format';
+import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
 
 export { scoreOf } from './score-format';
 
@@ -179,7 +180,8 @@ function rankedStderr(a: {
   targetTrace: string;
   warn: string;
   ranked: RankedResult;
-  leverErrors: Map<string, string>;
+  /** each `[threw]` line, keyed by its `threwStep` */
+  enumerationErrors: Map<string, string>;
   /** the probe's verdict: `true` = candidates compiled in the SELF-DECLARED world */
   selfDeclared: boolean;
   phaseReport: string;
@@ -187,18 +189,18 @@ function rankedStderr(a: {
   protoNote: string;
 }): string {
   const { ranked } = a;
-  const table = ranked.candidates.map((c) => `asmlift: [score] ${c.label}: ${scoreOf(c.score)}\n`).join('');
-  // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
-  // fails to build looks identical to one that declined unless the drops are visible.
-  // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
-  // which presumes the spelling was enumerated at all. A lever that threw produced no
-  // candidate to drop.
-  const levers = [...a.leverErrors]
-    .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
+  const table = ranked.candidates
+    .map((c) => `asmlift: [score] ${joinVariations(c.variations)}: ${scoreOf(c.score)}\n`)
     .join('');
+  // Candidates the scorer refused are recorded, not silent: a variation whose every candidate
+  // fails to build looks identical to one that declined unless the drops are visible.
+  // …and the same idea one stage EARLIER: `[dropped]` reports a candidate the SCORER refused,
+  // which presumes the candidate was enumerated at all. A variation that threw produced no
+  // candidate to drop.
+  const threw = [...a.enumerationErrors.values()].map((line) => `${line}\n`).join('');
   const drops = ranked.dropped.length
     ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
-      `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
+      `${joinVariations(ranked.dropped[0].variations)}: ${ranked.dropped[0].error}\n`
     : '';
   // WITHHELD is a different fact from dropped and gets its own line: these compiled and scored
   // and were then refused publication for want of a byte-exact proof (Candidate.matchOnly).
@@ -206,7 +208,7 @@ function rankedStderr(a: {
   // them out entirely would make `candidates scored` under-count the fan with no trace.
   const held = ranked.withheld.length
     ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-      `${ranked.withheld[0].label} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
+      `${joinVariations(ranked.withheld[0].variations)} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
     : '';
   // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
   // named, and where no symbol map knows them asmlift synthesizes their declarations — width
@@ -216,7 +218,7 @@ function rankedStderr(a: {
   // in the SELF-DECLARED world, which is the probe's verdict and nobody else's — in the
   // headers world the block is dropped and the project's own declarations did the work, so the
   // COUNT is zero there whatever the fan named.
-  const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
+  const assumed = (ranked.winner.symbolRefs ?? []).filter((r) => r.synthesized);
   const synthesized = a.selfDeclared ? assumed.length : 0;
   const declared = synthesized > 0 ? declaredBlock(assumed) : '';
   // The counts docs/ranked-repro.md requires beside every ranked score, as ONE line that is
@@ -241,7 +243,7 @@ function rankedStderr(a: {
     dropped: ranked.dropped.length,
     withheld: ranked.withheld.length,
     synthesized,
-    best: ranked.best,
+    winner: ranked.winner,
     stamp: a.stamp,
   })}\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
@@ -250,7 +252,7 @@ function rankedStderr(a: {
     a.targetTrace +
     a.warn +
     table +
-    levers +
+    threw +
     drops +
     held +
     declared +
@@ -329,7 +331,7 @@ async function loadProjectSymbolMap(
     // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
     // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
     // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
-    // would then exit 0 having scored a different source under a different label — a silent wrong
+    // would then exit 0 having scored a different source under different variations — a silent wrong
     // answer wearing a published repro script's provenance. Both shapes are input errors here.
     if ('error' in parsed) {
       return failure({
@@ -652,20 +654,21 @@ export async function runCli(
       // Under `--progress` — the flag that already says "report on this run as it goes" — the run
       // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
-      // A lever that THREW is a defect and must not read as a lever that declined — core rank.ts
-      // makes that argument for its own channel, and this is the consumer it had been missing.
-      // Deduped by label: the enumeration walks a lever over every axis point, so one broken pass
+      // A variation that THREW is a defect and must not read as a variation that declined — core rank.ts
+      // makes that argument for its own channel.
+      // Deduped by the step that threw (`threwStep`): the enumeration walks a variation over every setting, so one broken pass
       // would otherwise print thousands of identical lines. Silent when nothing threw.
-      const leverErrors = new Map<string, string>();
+      const enumerationErrors = new Map<string, string>();
       const rankOpts = {
         backend,
         asmData,
         prototypes,
         symbols,
         compile,
-        onLeverError: (label: string, error: string) => {
-          if (!leverErrors.has(label)) {
-            leverErrors.set(label, error);
+        onEnumerationError: (variations: readonly string[], error: string) => {
+          const step = threwStep(variations);
+          if (!enumerationErrors.has(step)) {
+            enumerationErrors.set(step, threwLine(name, step, error));
           }
         },
         ...(onProgress ? { onProgress } : {}),
@@ -685,13 +688,13 @@ export async function runCli(
       // Read AFTER the tree sample, which is work this run did and the clock should have charged.
       const phaseReport = clock?.report() ?? '';
       return {
-        code: rankedExitCode(ranked.best.score.match),
-        stdout: ranked.best.source,
+        code: rankedExitCode(ranked.winner.score.match),
+        stdout: ranked.winner.source,
         stderr: rankedStderr({
           targetTrace,
           warn,
           ranked,
-          leverErrors,
+          enumerationErrors,
           selfDeclared: compilers.selfDeclared() === true,
           phaseReport,
           stamp,

@@ -1,8 +1,8 @@
 // THE PLACEMENT DIFFERENTIAL, one composition inwards.
 //
-// `rank.ts`'s `respell` re-checks a lever's placement across the statement SHAPES derived onto it.
-// The lever-on-lever products in the same file were outside that check: `sinkInitsToFirstUse(…)`
-// and `nearBaseClusters(…)` run on a tree a PLACING lever already built, and the composition
+// `rank.ts`'s `respell` re-checks a variation's placement across the stacked variations derived onto it.
+// The variation-on-variation compositions in the same file were outside that check: `sinkInitsToFirstUse(…)`
+// and `nearBaseClusters(…)` run on a tree a PLACING variation already built, and the composition
 // happens INSIDE one `make()` thunk, so the intermediate tree never reached the differential. A
 // def-MOVING pass can move a def below a use exactly as a shape can — and a base local whose
 // assignment does not reach its use is a DIFFERENT VARIABLE, C that compiles, scores and can win.
@@ -17,6 +17,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 vi.mock('../src/l3/sinkinit', () => ({
   // every top-level assignment to the END of the body — the minted base locals included, so their
@@ -27,22 +28,28 @@ vi.mock('../src/l3/sinkinit', () => ({
   }),
 }));
 
-describe('a def-moving pass composed onto a placing lever is judged', () => {
+describe('a def-moving pass composed onto a placing variation is judged', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
-  const errors: { label: string; error: string }[] = [];
+  const errors: { variations: readonly string[]; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onLeverError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (variations, error) => errors.push({ variations, error }),
   });
 
   test('the composition is DROPPED, not scored', () => {
     // `/livebase/sinkinit` and `/nearbase/sinkinit` both fire on this disassembly, and both mint
     // the locals the mover then strands.
-    expect(cands.filter((c) => /(livebase|nearbase)\/(volatile\/)?(nearbase\/)?sinkinit/.test(c.label))).toEqual([]);
+    const composed = [
+      ['livebase', 'sinkinit'],
+      ['livebase', 'volatile', 'sinkinit'],
+      ['nearbase', 'sinkinit'],
+      ['nearbase', 'volatile', 'sinkinit'],
+    ];
+    expect(cands.filter((c) => composed.some((run) => hasVariations(c.variations, run)))).toEqual([]);
   });
 
-  test('…and it is REPORTED, with the composed label naming it', () => {
-    const named = errors.filter((e) => e.label.includes('sinkinit'));
+  test('…and it is REPORTED, with the composed variations naming it', () => {
+    const named = errors.filter((e) => hasVariation(e.variations, 'sinkinit'));
     expect(named.length).toBeGreaterThan(0);
     expect(named.every((e) => /assignment does not reach/.test(e.error))).toBe(true);
   });
@@ -50,6 +57,12 @@ describe('a def-moving pass composed onto a placing lever is judged', () => {
   test('…while `/sinkinit` on the BASE tree is untouched — it mints nothing to strand', () => {
     // the differential judges MINTED locals only, so a mover applied to the primary tree is not
     // this check's business and stays in the fan.
-    expect(cands.some((c) => c.label.endsWith('/sinkinit') && !/livebase|nearbase/.test(c.label))).toBe(true);
+    expect(
+      cands.some(
+        (c) =>
+          hasVariation(c.variations.slice(-1), 'sinkinit') &&
+          !['livebase', 'livebase-block', 'nearbase'].some((n) => hasVariation(c.variations, n)),
+      ),
+    ).toBe(true);
   });
 });

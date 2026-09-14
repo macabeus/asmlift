@@ -21,7 +21,7 @@ export interface DecompFixture {
   /** reference C compiled with the fixture's toolchain to produce BOTH the scoring target
    *  and asmlift's input */
   referenceC: string;
-  /** toolchain axis (default "agbcc"; "mwcc" fixtures are Docker-gated) */
+  /** toolchain (default "agbcc"; "mwcc" fixtures are Docker-gated) */
   toolchain?: FixtureToolchain;
   /** idiom patterns for the lift. Omitted = DEFAULT_IDIOM_PATTERNS — decompile()'s own
    *  default and the benchmark path. Pass `[]` to pin the naive no-idiom baseline. */

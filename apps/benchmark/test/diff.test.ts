@@ -35,7 +35,7 @@ const row = (
 const out = (...results: FunctionResult[]): BenchOutput =>
   ({ meta: { generatedAt: 'whenever' }, results }) as unknown as BenchOutput;
 
-const drop = (label: string) => ({ label, error: 'did not build' });
+const drop = (name: string) => ({ variations: [name], error: 'did not build' });
 
 const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
 
@@ -87,10 +87,10 @@ describe('compareMeasurements', () => {
 
   test('the ranked WINNER changing identity at an equal score is a change', () => {
     const r = compareMeasurements(
-      out(row('a', { candidateLabel: 'signed' })),
-      out(row('a', { candidateLabel: 'signed/flip-join' })),
+      out(row('a', { winnerVariations: ['signed'] })),
+      out(row('a', { winnerVariations: ['signed', 'flip-join'] })),
     );
-    expect(r.changed.map((c) => c.field)).toEqual(['asmlift.candidateLabel']);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.winnerVariations', from: 'signed', to: 'signed/flip-join' }]);
   });
 
   test('both decompilers are watched, and source is reported by size not pasted', () => {
@@ -208,11 +208,12 @@ describe('compareMeasurements', () => {
 
   // THE FAN MOVED AND NOTHING ELSE DID. Over `eb6dec7d`→`2fed1e42` this is 2 real rows
   // (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`): identical
-  // source, identical score, identical label, a different number of spellings that failed to build.
+  // source, identical score, identical winner's variations, a different number of spellings that failed to build.
   // The COUNT is watched and the LIST is not — the list runs to 51,840 entries on one row of the
   // current artifact.
   test('a fan that grew is caught, by its count and not by pasting it', () => {
-    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `cand${i}`, error: 'did not build' }));
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ variations: [`cand${i}`], error: 'did not build' }));
     const r = compareMeasurements(
       out(row('a', { droppedCandidates: many(41472) })),
       out(row('a', { droppedCandidates: many(51840) })),
@@ -289,8 +290,8 @@ describe('the rows a branch added, compared against the branch own artifact', ()
 describe('compareFans', () => {
   test('names the rows whose fan moved, biggest absolute move first', () => {
     const r = compareFans(
-      out(row('a', { candidateCount: 96 }), row('b', { candidateCount: 59904 })),
-      out(row('a', { candidateCount: 192 }), row('b', { candidateCount: 225792 })),
+      out(row('a', { fanSize: 96 }), row('b', { fanSize: 59904 })),
+      out(row('a', { fanSize: 192 }), row('b', { fanSize: 225792 })),
     );
     expect(r.changed).toEqual([
       { id: 'b', from: 59904, to: 225792 },
@@ -302,10 +303,7 @@ describe('compareFans', () => {
   // The cost question is not the neutrality question: a fan that held is silence here, and a
   // published field that moved is not this section's business.
   test('an unchanged fan moves nothing, whatever the row`s score did', () => {
-    const r = compareFans(
-      out(row('a', { candidateCount: 96, score: 3 })),
-      out(row('a', { candidateCount: 96, score: 9 })),
-    );
+    const r = compareFans(out(row('a', { fanSize: 96, score: 3 })), out(row('a', { fanSize: 96, score: 9 })));
     expect(r.changed).toEqual([]);
     expect(r.compared).toBe(1);
   });
@@ -313,7 +311,7 @@ describe('compareFans', () => {
   // The transition: `origin/main`'s artifact predates the field, and reading `undefined → 96` as a
   // move would report the whole corpus on the first comparison after this lands.
   test('a base row with no recorded count is not a move — it is an unanswerable comparison', () => {
-    const r = compareFans(out(row('a')), out(row('a', { candidateCount: 96 })));
+    const r = compareFans(out(row('a')), out(row('a', { fanSize: 96 })));
     expect(r.changed).toEqual([]);
     expect(r).toMatchObject({ compared: 0, unrecorded: 1, baseTotal: 0, freshTotal: 0 });
   });
@@ -322,7 +320,7 @@ describe('compareFans', () => {
   // to 0 would publish a fan collapse for a row nobody enumerated — but it is not silence either:
   // the count the base recorded left the corpus, and `vanished` is where it is said.
   test('a row the fresh run never ranked is not compared — it is recorded as vanished', () => {
-    const r = compareFans(out(row('a', { candidateCount: 96 })), out(row('a', { outcome: 'declined' })));
+    const r = compareFans(out(row('a', { fanSize: 96 })), out(row('a', { outcome: 'declined' })));
     expect(r).toMatchObject({ compared: 0, unrecorded: 0, changed: [] });
     expect(r.vanished).toEqual([{ id: 'a', from: 96, to: 0 }]);
   });
@@ -332,8 +330,8 @@ describe('compareFans', () => {
   // set — the section's own subject, invisible in the section.
   test('a vanished fan does not read as a perfect 1.00×', () => {
     const r = compareFans(
-      out(row('big', { candidateCount: 50000 }), row('a', { candidateCount: 100 })),
-      out(row('big', { outcome: 'declined' }), row('a', { candidateCount: 100 })),
+      out(row('big', { fanSize: 50000 }), row('a', { fanSize: 100 })),
+      out(row('big', { outcome: 'declined' }), row('a', { fanSize: 100 })),
     );
     expect(r).toMatchObject({ compared: 1, baseTotal: 100, freshTotal: 100, changed: [] });
     expect(r.vanished).toEqual([{ id: 'big', from: 50000, to: 0 }]);
@@ -375,7 +373,7 @@ describe('the fan section', () => {
   // there is a false cause printed on exactly the run whose fan line a reader would trust.
   test('a fresh run that ranked nothing says the series is ending, not starting', () => {
     const r = compareFans(
-      out(row('a', { candidateCount: 100 }), row('b', { candidateCount: 200 })),
+      out(row('a', { fanSize: 100 }), row('b', { fanSize: 200 })),
       out(row('a', { outcome: 'declined' }), row('b', { outcome: 'declined' })),
     );
     const lines = fanLines(r, 'origin/main', 0);
@@ -458,10 +456,7 @@ describe('the fan section', () => {
   // in neither population — while `freshCounted` is over ALL fresh rows. Unpaired, the "N more
   // counted here" clause under-reports on exactly the rounds that add benchmark rows.
   test('a row the branch added and ranked is counted as counted-here', () => {
-    const r = compareFans(
-      out(row('a', { candidateCount: 10 })),
-      out(row('a', { candidateCount: 10 }), row('new', { candidateCount: 96 })),
-    );
+    const r = compareFans(out(row('a', { fanSize: 10 })), out(row('a', { fanSize: 10 }), row('new', { fanSize: 96 })));
     expect(r.unrecorded).toBe(1);
     expect(fanLines(r, 'origin/main', 2).at(-1)).toContain('1 more counted here and not at origin/main');
   });
@@ -477,7 +472,7 @@ describe('the fan section', () => {
     expect(lines[0]).not.toContain('series starts here');
   });
 
-  // An axis that touches 600 rows must not bury the totals line under 600 lines.
+  // A variation that touches 600 rows must not bury the totals line under 600 lines.
   test('caps the named rows and says how many more moved', () => {
     const changed = Array.from({ length: FAN_ROWS_SHOWN + 3 }, (_, i) => ({ id: `r${i}`, from: 10, to: 20 + i }));
     const lines = fanLines(rep({ changed }), 'origin/main', 900);

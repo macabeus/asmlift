@@ -67,7 +67,7 @@ export interface RewritePattern {
   // `applies` is DATA, consumed generically by patternApplies — NOT an `arch ==` branch.
   // `isa` pins the ISA; `compilers` pins which COMPILERS emit this idiom (the same shift-sequence
   // for `/2` is produced by agbcc AND gcc, so a compiler LIST, not a single arch, is the honest
-  // predicate); `capabilities` is a hardware predicate. An absent axis means "don't constrain on it".
+  // predicate); `capabilities` is a hardware predicate. An absent field means "don't constrain on it".
   applies: { isa?: string; compilers?: string[]; capabilities?: Partial<{ hwDivide: boolean; hwFloat: boolean }> };
   match: MatchNode; // rooted at the op result to replace
   // NOTE: a RELATIONAL guard (a `where` clause constraining the bound immediates, e.g. "two shift
@@ -93,10 +93,10 @@ export interface RewritePattern {
   unsequencedRightFirst?: [string, string];
 }
 
-/** Does this pattern apply to `target`? Every DECLARED axis must match: the ISA (so an idiom can be
+/** Does this pattern apply to `target`? Every DECLARED field must match: the ISA (so an idiom can be
  *  pinned to one frontend), the compiler set (so an idiom fires only for the compilers that emit
  *  it — the reason MIPS+IDO and MIPS+GCC are distinguishable despite one frontend), and every
- *  declared capability. An omitted axis is unconstrained. */
+ *  declared capability. An omitted field is unconstrained. */
 export function patternApplies(
   p: RewritePattern,
   target: { id: string; compiler: string; capabilities: { hwDivide: boolean; hwFloat: boolean } },
@@ -172,7 +172,7 @@ export const SDIV_POW2_2: RewritePattern = {
 // out as its own definition. Folding the triple back to one `smod`/`umod` gives recovery and the
 // structurer the operator the source wrote, and re-emitting `%` reproduces the triple byte-exact.
 //
-// This is NOT the `capabilities.hwDivide` axis: MIPS also divides in hardware and needs no fold at
+// This is NOT the `capabilities.hwDivide` field: MIPS also divides in hardware and needs no fold at
 // all, because `div` leaves the remainder in `hi` and the frontend reads it straight out. The
 // narrower fact is a hardware divide that yields the QUOTIENT ONLY; `isa: 'ppc'` STANDS IN for it
 // until a second ISA earns the capability, and `compilers` carries the measured half, that mwcc's

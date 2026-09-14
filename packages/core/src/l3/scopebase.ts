@@ -1,4 +1,4 @@
-// L3 re-spelling lever: name a reused global base in a pointer local placed by SCOPE rather than at
+// L3 respell variation: name a reused global base in a pointer local placed by SCOPE rather than at
 // the function top. Two region rules ship, one pass and one collected index behind them:
 //
 //   `/scopebase`   ONE local for a key, at the innermost list holding all of its uses (else the
@@ -9,12 +9,12 @@
 //                  and the three-block-scoped one assemble byte-identically. So there is no nested
 //                  declaration block here and none is needed — the locals are declared at function
 //                  top and only their ASSIGNMENTS are placed per region. That compiler fact is
-//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-axis.test.ts
+//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-variation.test.ts
 //                  compiles both spellings through the project's own agbcc and compares the object
 //                  bytes, and compiles a count-collapsed third spelling to show the COUNT is not
 //                  free either.
 //
-// The lever earned its place on kleod's kl-eod-decomp rows: returning `null` from `hoistScopedBases`
+// The variation earned its place on kleod's kl-eod-decomp rows: returning `null` from `hoistScopedBases`
 // cost kleod:UpdateHUDCounterDisplay its match. That row was retired on 2026-09-13 with its source,
 // so no current benchmark row is known to guard this file; re-measure by ablation on the current
 // rows before naming one.
@@ -30,8 +30,8 @@
 //   narrows that range and does not close it: the init still lands ABOVE the `if`. `l3/hoist.ts`'s
 //   third placement, `scope`, now does close it for the run basecse places, so "into a nested list"
 //   is no longer this file's alone; what stays here is the base this file can SEE (below) and the
-//   COUNT question (`REGION_RULES`), which no placement answers. That argument is why the lever is
-//   scope-aware; it is NOT a claim about what the lever achieves, and no committed measurement
+//   COUNT question (`REGION_RULES`), which no placement answers. That argument is why the variation is
+//   scope-aware; it is NOT a claim about what the variation achieves, and no committed measurement
 //   separates basecse's two flat placements (the one that did edited a reference source by hand and
 //   cannot be re-run). On kleod:UpdateHUDCounterDisplay the primary path declines outright (a later
 //   pass retired the phi it keyed on, so the base's uses span the function body), and the cluster
@@ -49,7 +49,7 @@
 // shape. The decomp author's alternative is a no-op read-modify-write (`g[0][K] += 0;`) purely to
 // force that materialization; naming the base is the same codegen without the quirk.
 //
-// A LEVER, not a rewrite: both region rules are emitted as ADDITIONAL candidates (rank.ts
+// A VARIATION, not a committed rewrite: both region rules are emitted as ADDITIONAL candidates (rank.ts
 // `/scopebase`, `/regionbase`) with the differ refereeing, so the un-hoisted spelling is always
 // still in the list and neither can cost a match.
 //
@@ -62,7 +62,7 @@
 // sees it (they check resolution, deref typing, and whether a local is written ANYWHERE).
 //
 // ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
-// rank's levers see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
+// rank's variations see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
 // refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
 // which is why `SCOPEBASE_GATES` re-states basecse's rules rather than assuming those bases never
 // arrive.
@@ -74,7 +74,7 @@ import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator, takenNames } from './hoist';
 import { addressableGlobals } from './storage';
 
-/** A base this lever may name: a leaf whose value is a fixed address. */
+/** A base this variation may name: a leaf whose value is a fixed address. */
 type LeafBase = Extract<Expr, { k: 'addr' } | { k: 'const' } | { k: 'var' }>;
 
 /** THE identity of a base — what makes two accesses "the same address".
@@ -91,7 +91,7 @@ export interface AccessCtx {
   readonly addressable: ReadonlySet<string>;
 }
 
-/** Which accesses this lever may re-point. BOTH rules are SOUND: each one, removed, makes the
+/** Which accesses this variation may re-point. BOTH rules are SOUND: each one, removed, makes the
  *  rewrite name DIFFERENT BYTES — C that compiles, type-checks and scores, which is the failure
  *  mode nothing downstream catches.
  *
@@ -126,7 +126,7 @@ export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
   },
 ];
 
-/** An access this lever may re-point, or null. */
+/** An access this variation may re-point, or null. */
 function eligible(
   e: Expr,
   globals: ReadonlySet<string>,
@@ -322,7 +322,7 @@ function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site
   return best;
 }
 
-/** How a key's uses are cut into REGIONS — the one axis this pass varies. Names a `REGION_RULES`
+/** How a key's uses are cut into REGIONS — the one dimension this pass varies. Names a `REGION_RULES`
  *  entry; it is the only field a production caller passes. */
 export type RegionSelector = 'whole' | 'per-region';
 
@@ -445,7 +445,7 @@ const LOOP_RULES: readonly Gate<RegionCtx>[] = [
   },
 ];
 
-/** The admission rules. NONE is sound: a wrong choice here names the same address in a different
+/** The admission rules. NONE is sound: a wrong decision here names the same address in a different
  *  place, so it costs bytes and a match, never meaning — the eligibility table above is where
  *  meaning is at stake, and `rank.ts` keeps the un-hoisted spelling beside every candidate.
  *
@@ -533,7 +533,7 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
  *  admits.
  *
  *  ONE RULE HERE IS PRICED BY A ROW; three are not. Ablating `region-single-use` moves
- *  `synthetic:dmascope` — the lever's own row — while `region-repeated-const-offset`,
+ *  `synthetic:dmascope` — the variation's own row — while `region-repeated-const-offset`,
  *  `per-iteration-use` and `regions-degenerate` each leave all five gating rows exactly where they
  *  stand. NO SCORE PAIR IS QUOTED for that move: `dmascope` is MATCH in the committed artifact, so
  *  a pair whose unablated endpoint is a nonmatch score describes a corpus state that no longer
@@ -556,7 +556,7 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
 
 /** THE REGION RULE, as a value. A third rule is one entry here — a partition, a gate table, and
  *  the population its counting rules are judged over — rather than three hand-edited branches in
- *  three functions, which is the same doctrine `rank.ts` states for its own admissions ("one entry
+ *  three functions, which is the same doctrine `rank-variations.ts` states for its hoist roster ("one entry
  *  here, one gate table, and that table's line in the gate-contract roster — not nine hand-edited
  *  sites that can drift"). */
 export interface RegionRule {
@@ -677,7 +677,7 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
    *  PER KEY, not per function, and the difference is not hypothetical. Nothing in the L3 contract
    *  forbids the sharing — `l3/pollguard.ts` already emits it (`{ k: 'if', cond: s.cond, then: [s] }`
    *  puts one `cond` object at two tree positions), and it is harmless today only because the shapes
-   *  are derived AFTER this lever in `rank.ts`, an ordering nothing pins. A whole-function decline
+   *  are derived AFTER this variation in `rank.ts`, an ordering nothing pins. A whole-function decline
    *  would make a future producer that shares one node silently delete every base this pass names —
    *  including, until that row was retired (2026-09-13), `kleod:UpdateHUDCounterDisplay`'s match,
    *  which returning `null` cost. Refusing the
@@ -760,14 +760,14 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
 
 /**
  * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
- * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
+ * qualifies (the caller then adds no candidate rather than a duplicate of the default).
  */
 export const hoistScopedBases = (sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null =>
   applyScopedBasePlan(sfn, planScopedBases(sfn, opts));
 
 /**
  * `plan` applied to the tree it was planned over — null when it decided nothing (the caller then
- * adds no candidate rather than a duplicate of the primary).
+ * adds no candidate rather than a duplicate of the default).
  *
  * IDENTITY-BOUND to that tree, and not by the type: `scope` is matched against statement LISTS and
  * `repoint` against access NODES, both by reference. A plan from a DIFFERENT tree therefore splices

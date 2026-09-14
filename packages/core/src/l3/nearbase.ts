@@ -1,9 +1,9 @@
-// L3 re-spelling lever: NEIGHBOR absolute addresses derive from one shared base local.
+// L3 respell variation: NEIGHBOR absolute addresses derive from one shared base local.
 //
 // A cluster of raw-address accesses a few bytes apart is one object's cells: the compiler holds
 // the object's base in a register and derives each cell (`add #72` / `add #74` off one pool
 // word, a halfword offset beyond the load range forcing the add, the in-range word staying
-// `[rN, #112]`), where a per-cell spelling anchors one pool constant per address. This lever
+// `[rN, #112]`), where a per-cell spelling anchors one pool constant per address. This variation
 // re-spells every deref base in a cluster as an offset from a `u8 *` base local holding the
 // cluster's lowest address, and the differ referees:
 //
@@ -21,7 +21,7 @@
 // VALUE inside its window re-spells too, as `(s32)(b + off)` — the address of a cell handed to
 // something (a DMA source register) is the same derived add in the original, and the two
 // spellings are value-equal by construction, so the differ referees — including an integer that
-// only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
+// only coincidentally lands in the window, which is the stated cost of the variation (the `s32` cast
 // assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
 // (null) when no cluster forms.
 import { baseConst } from './address';
@@ -31,7 +31,7 @@ import { type BaseInit, nameAllocator, placeBaseLocals } from './hoist';
 
 /** `span` is the target's single-add-immediate derivation reach
  *  (TargetDescription.compilerBehaviors.nearBaseSpan) — a target that declares none never runs
- *  this lever. */
+ *  this variation. */
 export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   if (!Number.isFinite(span) || span < 0) {
     return null; // a hostile span stalls the cluster window instead of shrinking it

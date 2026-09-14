@@ -253,7 +253,7 @@ test('CLI: an unreadable or malformed symbols map is loud, never a silent map-le
 // covers a file that is missing or is not JSON — both throw. But `symbolMapFromJson` is a total
 // function over `Object.entries`, so `[]`, `{}` and `{"nope": []}` are all VALID JSON that reduce
 // to an EMPTY map with no error at all, and an empty map is byte-for-byte the state a map-less run
-// is in. Unchecked, each of them exits 0 and scores a DIFFERENT source under a DIFFERENT label
+// is in. Unchecked, each of them exits 0 and scores a DIFFERENT source under DIFFERENT variations
 // while a published repro script says the row had a map: a silent wrong answer wearing the
 // provenance of a real one. Each shape is asserted separately — a single case would pass on a
 // check that only rejected arrays.

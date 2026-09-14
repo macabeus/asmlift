@@ -43,7 +43,7 @@ import { recognizeStructs } from './structs';
  *  A field here selects between spellings its pass can already produce; none of them relaxes a
  *  soundness refusal, and each recognizer documents its own. */
 export interface PreRecoveryOptions {
-  /** raise/shortcircuit.ts `recognizeBranchShortCircuit` — the connective-vs-comparison-tree axis. */
+  /** raise/shortcircuit.ts `recognizeBranchShortCircuit` — the connective-vs-comparison-tree question. */
   shortCircuit?: BranchShortCircuitOptions;
 }
 

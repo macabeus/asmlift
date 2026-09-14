@@ -15,7 +15,7 @@ import type { RankPhase, RankProgress } from './rank-progress';
 const PHASE_TEXT: Record<Exclude<RankPhase, 'scoring'>, string> = {
   queued: 'waiting for the ranking worker…',
   assembling: 'assembling the target asm…',
-  enumerating: 'enumerating candidate spellings…',
+  enumerating: 'enumerating candidates…',
   ranking: 'ranking scored candidates…',
 };
 

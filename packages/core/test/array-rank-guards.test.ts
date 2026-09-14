@@ -14,9 +14,10 @@ import type { Expr, SFn } from '../src/l3/ast';
 import { exprChildren, exprEquals, mapExprChildren } from '../src/l3/ast';
 import { localMentions, readsOf } from '../src/l3/mentions';
 import { decompile } from '../src/pipeline';
-import { compareScored, composeLevers, rankBy, withheldReason } from '../src/rank';
+import { compareScored, composeRespellVariations, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { joinVariations } from '../src/variation-tokens';
 
 const ixLead = (lead?: (number | string)[]): Expr => ({
   k: 'index',
@@ -91,8 +92,8 @@ describe('a `lead` is walked like every other sub-expression', () => {
     };
     const m = localMentions(f);
     expect(readsOf(m.get('r')!)).toBe(1);
-    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base
-    // levers re-spell exactly that use shape.
+    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base-hoisting
+    // variations re-spell exactly that use shape.
     expect(m.get('r')!.baseUses).toBe(0);
     expect(m.get('r')!.otherUses).toBe(1);
     // the sibling positions still count as they always did
@@ -166,8 +167,8 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
   // moving a read down a span that arms a DMA transfer. It is offered, scored, and then either
   // wins on the differ's own proof or is withheld: never shown as the best-effort answer on a
   // nonmatch row, which is the case the POLICY note says a wrong re-spelling would poison.
-  const plain = { label: 'unsigned', group: 0, source: 'a;' };
-  const proofed = { label: 'unsigned/unreduce', group: 0, source: 'b;', matchOnly: true as const };
+  const plain = { variations: ['unsigned'], preference: 0, source: 'a;' };
+  const proofed = { variations: ['unsigned', 'unreduce'], preference: 0, source: 'b;', matchOnly: true as const };
 
   test('a byte-exact score publishes it, and any other score withholds it', () => {
     expect(withheldReason(proofed, { score: 0 })).toBeNull();
@@ -179,12 +180,12 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
   test('rankBy withholds it rather than dropping it — the two are different facts', () => {
     const score = (source: string) => ({ score: source === 'b;' ? 5 : 40 });
     const r = rankBy([plain, proofed], 'f', (source) => score(source));
-    expect(r.candidates.map((c) => c.label)).toEqual(['unsigned']);
+    expect(r.candidates.map((c) => c.variations)).toEqual([['unsigned']]);
     expect(r.dropped).toEqual([]);
-    expect(r.withheld.map((w) => [w.label, w.score])).toEqual([['unsigned/unreduce', 5]]);
+    expect(r.withheld.map((w) => [joinVariations(w.variations), w.score])).toEqual([['unsigned/unreduce', 5]]);
     // …and it WINS when it earns it, even though it scored second-best above
     const won = rankBy([plain, proofed], 'f', (source) => (source === 'b;' ? { score: 0 } : { score: 40 }));
-    expect(won.best.label).toBe('unsigned/unreduce');
+    expect(joinVariations(won.winner.variations)).toBe('unsigned/unreduce');
     expect(won.withheld).toEqual([]);
   });
 
@@ -195,7 +196,9 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
     const withRows = rankBy([plain, proofed], 'f', (source) =>
       source === 'b;' ? { score: 5, rows: 38 } : { score: 40, rows: 64 },
     );
-    expect(withRows.withheld).toEqual([{ label: 'unsigned/unreduce', score: 5, rows: 38, why: expect.any(String) }]);
+    expect(withRows.withheld).toEqual([
+      { variations: ['unsigned', 'unreduce'], score: 5, rows: 38, why: expect.any(String) },
+    ]);
 
     const noRows = rankBy([plain, proofed], 'f', (source) => ({ score: source === 'b;' ? 5 : 40 }));
     expect(noRows.withheld[0]).not.toHaveProperty('rows');
@@ -210,9 +213,9 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
   // Score dominates absolutely; everything below only chooses what the READER sees. The pieces
   // under it exist because the C backend's shift cast made a WRONG signedness pin byte-equal to
   // the right one — before that, the wrong pin simply lost on score.
-  const cand = (label: string, group: number, source: string, score: number, order: number) => ({
-    label,
-    group,
+  const cand = (name: string, preference: number, source: string, score: number, order: number) => ({
+    variations: name.split('/'),
+    preference,
     source,
     score: { score },
     order,
@@ -221,7 +224,7 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
   test('score wins over everything', () => {
     const worse = cand('a', 0, 'x;', 1, 0);
     const better = cand('b', 1, '(u32)(s32)(u8)x;', 0, 9);
-    expect([worse, better].sort(compareScored)[0].label).toBe('b');
+    expect([worse, better].sort(compareScored)[0].variations).toEqual(['b']);
   });
 
   test('a named symbol-map spelling beats its /raw-globals sibling at equal bytes', () => {
@@ -230,14 +233,14 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
     // anonymous byte offsets. The group comparison is what stops that.
     const named = cand('signed', 0, 'a0 = (s32)(gSys.idx << 24) >> 24;', 20, 0);
     const raw = cand('signed/raw-globals', 1, 'p0 = (u8 *)&gSys; a0 = p0[1] << 24 >> 24;', 20, 1);
-    expect([raw, named].sort(compareScored)[0].label).toBe('signed');
+    expect([raw, named].sort(compareScored)[0].variations).toEqual(['signed']);
   });
 
   test('WITHIN a group, fewer casts wins over enumeration order', () => {
     // the wrong signedness pin is what manufactures the cast, and it is enumerated FIRST
     const noisy = cand('unsigned', 0, 'return (s32)a0 >> a1;', 0, 0);
     const clean = cand('signed', 0, 'return a0 >> a1;', 0, 1);
-    expect([noisy, clean].sort(compareScored)[0].label).toBe('signed');
+    expect([noisy, clean].sort(compareScored)[0].variations).toEqual(['signed']);
   });
 
   test('an ADDRESS cast is not counted — it is the correct source spelling, not noise', () => {
@@ -248,10 +251,10 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
     // counted as noise. It must not be.
     const addr = cand('named', 0, 'return (u32)&gSym + 4;', 0, 0);
     const bare = cand('raw', 0, 'return 50336308 + 4;', 0, 1);
-    expect([bare, addr].sort(compareScored)[0].label).toBe('named');
+    expect([bare, addr].sort(compareScored)[0].variations).toEqual(['named']);
     // …while a genuine value cast in the same position DOES lose.
     const noisy = cand('noisy', 0, 'return (u32)v0 + 4;', 0, 0);
-    expect([bare, noisy].sort(compareScored)[0].label).toBe('raw');
+    expect([bare, noisy].sort(compareScored)[0].variations).toEqual(['raw']);
   });
 
   test('at equal casts the COMPACTER spelling wins over enumeration order', () => {
@@ -266,17 +269,17 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
       0,
     );
     const short = cand('unsigned/defsite', 0, 's32 v0;\nv0 = 0;\nif (a0 == 0) v0 = 1;\nreturn v0;', 0, 1);
-    expect([long, short].sort(compareScored)[0].label).toBe('unsigned/defsite');
+    expect([long, short].sort(compareScored)[0].variations).toEqual(['unsigned', 'defsite']);
     // …and it stays UNDER the cast count: a compacter spelling does not buy its way past noise.
     const noisy = cand('noisy', 0, 'return (u32)v0;', 0, 0);
     const clean = cand('clean', 0, 's32 v1;\nv1 = v0;\nreturn v1;', 0, 1);
-    expect([noisy, clean].sort(compareScored)[0].label).toBe('clean');
+    expect([noisy, clean].sort(compareScored)[0].variations).toEqual(['clean']);
   });
 
   test('equal on every key falls back to enumeration order — a strict total order', () => {
     const a = cand('a', 0, 'x;', 0, 0);
     const b = cand('b', 0, 'x;', 0, 1);
-    expect([b, a].sort(compareScored).map((c) => c.label)).toEqual(['a', 'b']);
+    expect([b, a].sort(compareScored).map((c) => c.variations)).toEqual([['a'], ['b']]);
   });
 });
 
@@ -300,48 +303,47 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 // THE PROPAGATION RULE, which is the other half of the mechanism above. `withheldReason` decides
 // what a proof-gated spelling may publish AT; this decides which spellings are proof-gated at all.
 //
-// The obligation is created by ONE lever (`/unreduce`, when it cannot settle a device-memory fact
-// from inside the pass) and has to survive every lever composed after it. That carry used to be
-// hand-written per pairing — `return { sfn: t, needsProof: u.needsProof }` — and the union type
-// made `return t;` a type-correct way to delete it: ablated, tsc stayed clean and every offline and
-// matching suite stayed green, and the triple would have published an unprovable spelling as
-// asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
+// The obligation is created by ONE variation (`/unreduce`, when it cannot settle a device-memory fact
+// from inside the pass) and has to survive every variation composed after it. Written by hand per
+// pairing — `return { sfn: t, needsProof: u.needsProof }` — the union type makes `return t;` a
+// type-correct way to delete it: ablated, tsc stays clean and every offline and matching suite stays
+// green, and the triple publishes an unprovable spelling as asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
 // the thing to pin.
-describe('a proof obligation survives every lever composed after it (rank.ts composeLevers)', () => {
+describe('a proof obligation survives every respell variation composed after it (rank.ts composeRespellVariations)', () => {
   const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });
   const plain = (name: string) => (): SFn => tree(name);
   const proving = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: true });
   const settled = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: false });
-  const proofOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.needsProof : false);
-  const treeOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.sfn : r);
+  const proofOf = (r: ReturnType<typeof composeRespellVariations>) => (r && 'sfn' in r ? r.needsProof : false);
+  const treeOf = (r: ReturnType<typeof composeRespellVariations>) => (r && 'sfn' in r ? r.sfn : r);
 
   test('an obligation raised by an EARLY stage rides through the later ones', () => {
-    const out = composeLevers(tree('in'), [proving('a'), plain('b'), plain('c')]);
+    const out = composeRespellVariations(tree('in'), [proving('a'), plain('b'), plain('c')]);
     expect(proofOf(out)).toBe(true);
     expect(treeOf(out)?.name).toBe('c'); // and the last stage's tree is what is emitted
   });
 
   test('an obligation raised by a LATE stage is carried too', () => {
-    expect(proofOf(composeLevers(tree('in'), [plain('a'), proving('b')]))).toBe(true);
+    expect(proofOf(composeRespellVariations(tree('in'), [plain('a'), proving('b')]))).toBe(true);
   });
 
   test('a stage that settles its own fact does not gate the composition', () => {
-    const out = composeLevers(tree('in'), [settled('a'), plain('b')]);
+    const out = composeRespellVariations(tree('in'), [settled('a'), plain('b')]);
     expect(proofOf(out)).toBe(false);
     expect(treeOf(out)?.name).toBe('b');
   });
 
   test('no obligation anywhere leaves the spelling ungated', () => {
-    expect(proofOf(composeLevers(tree('in'), [plain('a'), plain('b')]))).toBe(false);
+    expect(proofOf(composeRespellVariations(tree('in'), [plain('a'), plain('b')]))).toBe(false);
   });
 
-  // REQUIRE-ALL, not skip-on-decline: the label names the levers that fired, so a composition
-  // missing one of them must not be emitted under the full label.
+  // REQUIRE-ALL, not skip-on-decline: a candidate's variations name the ones that fired, so a
+  // composition missing one of them must not be emitted under all of their names.
   test('one declining stage declines the whole composition, wherever it sits', () => {
     const decline = () => null;
-    expect(composeLevers(tree('in'), [decline, proving('b')])).toBeNull();
-    expect(composeLevers(tree('in'), [proving('a'), decline])).toBeNull();
-    expect(composeLevers(tree('in'), [plain('a'), decline, plain('c')])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [decline, proving('b')])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [proving('a'), decline])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [plain('a'), decline, plain('c')])).toBeNull();
   });
 
   test("each stage is handed the PREVIOUS stage's tree, not the original", () => {
@@ -349,7 +351,7 @@ describe('a proof obligation survives every lever composed after it (rank.ts com
     const step =
       (name: string) =>
       (s: SFn): SFn => (seen.push(s.name), tree(name));
-    composeLevers(tree('in'), [step('a'), step('b'), step('c')]);
+    composeRespellVariations(tree('in'), [step('a'), step('b'), step('c')]);
     expect(seen).toEqual(['in', 'a', 'b']);
   });
 });

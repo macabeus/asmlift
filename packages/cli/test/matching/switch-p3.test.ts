@@ -68,7 +68,7 @@ SYMBOL TABLE:
     expect(readJumpTable(ad, '@15', 0, 4)).toEqual([0x20, 0x28, 0x30, 0x38]);
   });
 
-  // MIPS variant: entries stored as `.text` offsets in `.rodata` bytes (REL), reloc against `.text`.
+  // MIPS form: entries stored as `.text` offsets in `.rodata` bytes (REL), reloc against `.text`.
   const MIPS_DUMP = `
 Contents of section .rodata:
  0000 00000034 0000003c 00000044 0000004c  ...4...<...D...L

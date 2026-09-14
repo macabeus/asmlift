@@ -3,7 +3,7 @@
 //
 // WHY IT TAKES A TREE ROOT AND DYNAMIC-IMPORTS. A base-versus-head sweep needs BASE's decompiler
 // to lift the base side and HEAD's to lift the head side, while the METHOD — which rows, which
-// arms, which fields, in which order — stays fixed. Two ways to get that, and the hand rigs used
+// map modes, which fields, in which order — stays fixed. Two ways to get that, and the hand rigs used
 // both:
 //
 //   - run the base tree's OWN sweep command. Correct, and impossible against a revision older than
@@ -40,7 +40,7 @@ export interface SweepSelection {
   /** real tier only: one manifest project */
   project?: string;
   /** `harness` (the row's own configuration) and/or `nomap` (that, minus the symbol map) */
-  arms: readonly string[];
+  mapModes: readonly string[];
   /** also enumerate each row's fan (see `SWEEP_FAN_LIMIT` — 120× the lift) */
   fan?: boolean;
   /** enumerate rows the committed artifact prices above `SWEEP_FAN_LIMIT` anyway */
@@ -53,7 +53,7 @@ export interface SweepSelection {
   asmDir?: string;
   /** `--asm-dir` only: which target lifted them */
   toolchain?: string;
-  /** `--asm-dir` only: whose symbol map to use for the `harness` arm */
+  /** `--asm-dir` only: whose symbol map to use for the `harness` map mode */
   asmProject?: string;
   /** `--repeat` only: iterate the selection in REVERSE. A pass that carries state between rows
    *  (a module-level cache, a counter, a `Map` keyed by nothing row-specific) disagrees with
@@ -71,7 +71,7 @@ const firstLine = (e: unknown): string =>
 /** Serialization of ONE `Map`/`Set`/typed array, cached on the container's identity.
  *
  *  WHY: a project's vendored symbol map is ONE object shared by all 42 of that project's rows —
- *  1,784 entries for kleod, 41,016 for pokeemerald — and the sweep digests it once per row per arm.
+ *  1,784 entries for kleod, 41,016 for pokeemerald — and the sweep digests it once per row per map mode.
  *  A/B'd on the real tier's 504 records, two runs each: a plain `JSON.stringify` digest is
  *  31.7 / 31.9 s, serializing the containers every time is 43.7 / 43.6 s (+37%), and caching on
  *  identity is 35.2 / 35.0 s (+10%) and catches the same perturbations, because the expensive
@@ -83,6 +83,46 @@ const firstLine = (e: unknown): string =>
  *  producer that mutated a symbol map in place mid-sweep would be reported as unchanged here (and
  *  would already break `--repeat`, which exists to catch exactly that class). */
 const serialized = new WeakMap<object, string>();
+
+/** One candidate as the enumeration of the tree this driver runs hands it back — the two fields of
+ *  core's `Candidate` the fan hashes read, declared here because nothing is imported from that tree
+ *  (see the header). */
+export type SweptCandidate = { variations: readonly string[]; source: string };
+
+/** The `--fan` payload of one enumeration: its size and three ordered hashes over its candidates.
+ *
+ *  THREE HASHES AND NOT ONE, because a change to what a candidate is CALLED and a change to what it
+ *  SAYS are different findings, and one hash over both cannot tell them apart:
+ *
+ *    - `fanHash` covers each candidate's variations and source together, in enumeration order.
+ *    - `fanSourceHash` covers the sources alone. It holds still under a change that only renames
+ *      variations, and it moves under anything that changes, adds, drops or REORDERS a source —
+ *      order being what `compareScored` breaks a score tie by.
+ *    - `fanVariationsHash` covers the names alone, each hashed as its `/`-joined presentation
+ *      string. It moves when a candidate is named by a different route while its source stays put.
+ *
+ *  Exported for `sweep.test.ts`, which pins what each hash can and cannot see: `collect` needs a
+ *  compiler to build a row's target, and the CI mirror gate has none. */
+export function fanDigests(cands: readonly SweptCandidate[]): {
+  fan: number;
+  fanHash: string;
+  fanSourceHash: string;
+  fanVariationsHash: string;
+} {
+  const both = createHash('sha1');
+  const sources = createHash('sha1');
+  const names = createHash('sha1');
+  for (const c of cands) {
+    // core's `joinVariations` spelling, restated because this file imports nothing from the tree it
+    // drives; never `JSON.stringify`, which would make the hash a fact about serialization
+    const name = c.variations.join('/');
+    both.update(`${name}\0${c.source}\0`);
+    sources.update(`${c.source}\0`);
+    names.update(`${name}\0`);
+  }
+  const hex = (h: ReturnType<typeof createHash>): string => h.digest('hex').slice(0, 12);
+  return { fan: cands.length, fanHash: hex(both), fanSourceHash: hex(sources), fanVariationsHash: hex(names) };
+}
 
 /** A canonical string for an option value: object keys sorted at every depth, `Map` entries sorted,
  *  `Set` members sorted, bytes hashed.
@@ -154,7 +194,7 @@ const canon = (v: unknown, seen: Set<object>): string => {
 /** The canonical rendering of one option value. Exported for the test that pins the `Map` case. */
 export const stable = (v: unknown): string => canon(v, new Set());
 
-/** A digest of the OPTION OBJECT this arm was lifted with — `rankOptionsFor`'s result, which
+/** A digest of the OPTION OBJECT this map mode was lifted with — `rankOptionsFor`'s result, which
  *  carries the row's prototypes, its `asmData` side table, its symbol map and whether a candidate
  *  compiler was attached.
  *
@@ -165,7 +205,7 @@ export const stable = (v: unknown): string => canon(v, new Set());
  *  one string in `dataset/synthetic.ts` and no line of `packages/` moved 6 records. `asm` and
  *  `opts` are what make that readable — a `[moved]` line naming them says the INPUT moved, and a
  *  line naming `src` alone says the decompiler did. This is the field `report/diff.ts` watches per
- *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed).
+ *  side for the same reason (MEMORY #112/#113: the winner's variations unchanged while the program changed).
  *
  *  WHAT IT CAN SEE is decided entirely by `canon` above — a container it cannot render inside
  *  digests the same whatever it holds, so read that header before trusting this digest with a new
@@ -180,49 +220,49 @@ export function optsDigest(opts: Record<string, unknown>): string {
   );
 }
 
-/** One row's two-arm option sets, built through the harness's own `rankOptionsFor` so the
- *  `harness` arm is BY CONSTRUCTION the configuration `bench run` and `bench fan` measure. The
- *  `nomap` arm is the same call with the symbol map withheld — not a hand-assembled object, which
+/** One row's option sets for both map modes, built through the harness's own `rankOptionsFor` so the
+ *  `harness` map mode is BY CONSTRUCTION the configuration `bench run` and `bench fan` measure. The
+ *  `nomap` map mode is the same call with the symbol map withheld — not a hand-assembled object, which
  *  is how a rig ends up comparing two configurations and calling the difference a code change. */
-export type Armed = {
-  arm: string;
-  /** which COMPUTATION this arm asks for. Two arms sharing a key are one lift and one enumeration;
+export type MapModeRun = {
+  mapMode: string;
+  /** which COMPUTATION this map mode asks for. Two map modes sharing a key are one lift and one enumeration;
    *  see `record` below for why that is not a shortcut. */
   key: string;
   opts: Record<string, unknown>;
 };
 
-/** The arms, as the one table both populations read. */
-export const ARMS = ['harness', 'nomap'] as const;
+/** The map modes, as the one table both populations read. */
+export const MAP_MODES = ['harness', 'nomap'] as const;
 
-/** Which computation each selected arm asks for, and the options that compute it.
+/** Which computation each selected map mode asks for, and the options that compute it.
  *
  *  ONE FUNCTION AND NOT TWO SPELLINGS OF THE RULE, because the rule is the command's whole point
- *  and it was written out at three sites: the `harness` arm only differs from `nomap` when the row
+ *  and it was written out at three sites: the `harness` map mode only differs from `nomap` when the row
  *  HAS a symbol map, so a map-less row is one computation reported under both names (rectangular
  *  record set, and a row that GAINS a map between two revisions then shows as a move in the
- *  `harness` arm rather than as a record appearing out of nowhere).
+ *  `harness` map mode rather than as a record appearing out of nowhere).
  *
  *  ABLATED, which is why it is exported and pinned: collapsing this to `key: 'nomap'` makes the
- *  sweep blind to every symbol-map change — half of what the two arms exist for, and the half that
+ *  sweep blind to every symbol-map change — half of what the two map modes exist for, and the half that
  *  covers most naming and global-recovery work. Nothing else in `apps/benchmark/test` fails on that
  *  edit; the one test that does is `sweep.test.ts`'s, so keep the ablation in mind before relaxing
  *  it (`const key = 'nomap'` → 1 failed of 1,152, 2026-09-12). `optsFor` is called once per
- *  distinct computation, never once per arm. */
-export function armsFor(
-  arms: readonly string[],
+ *  distinct computation, never once per map mode. */
+export function mapModesFor(
+  mapModes: readonly string[],
   hasMap: boolean,
   optsFor: (withMap: boolean) => Record<string, unknown>,
-): Armed[] {
+): MapModeRun[] {
   const computed = new Map<string, Record<string, unknown>>();
-  return arms.map((arm) => {
-    const key = arm === 'harness' && hasMap ? 'harness' : 'nomap';
+  return mapModes.map((mapMode) => {
+    const key = mapMode === 'harness' && hasMap ? 'harness' : 'nomap';
     let opts = computed.get(key);
     if (opts === undefined) {
       opts = optsFor(key === 'harness');
       computed.set(key, opts);
     }
-    return { arm, key, opts };
+    return { mapMode, key, opts };
   });
 }
 
@@ -269,7 +309,7 @@ export function asmFilesUnder(dir: string): string[] {
   return out;
 }
 
-/** The whole sweep of one tree. Records come back in a deterministic order (case order, then arm
+/** The whole sweep of one tree. Records come back in a deterministic order (case order, then map mode
  *  order), because `--repeat` compares runs and an order that depends on a scheduler would report
  *  a flake that is the rig's. */
 export async function collect(root: string, sel: SweepSelection): Promise<SweepRecord[]> {
@@ -277,34 +317,34 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
   const out: SweepRecord[] = [];
   const overLimit = sel.overLimit ?? {};
 
-  // ONE COMPUTATION PER DISTINCT CONFIGURATION, one record per selected arm. A row with no symbol
-  // map lifts identically in both arms BY CONSTRUCTION — `rankOptionsFor(..., undefined)` is what
-  // the `nomap` arm asks for and what a map-less row gets anyway — so computing it twice buys
+  // ONE COMPUTATION PER DISTINCT CONFIGURATION, one record per selected map mode. A row with no symbol
+  // map lifts identically in both map modes BY CONSTRUCTION — `rankOptionsFor(..., undefined)` is what
+  // the `nomap` map mode asks for and what a map-less row gets anyway — so computing it twice buys
   // nothing and doubles the only part of this command that is expensive. Measured: the synthetic
   // tier is 810 of the 1,062 rows and almost none of it carries a map, so the naive shape pays
-  // `--fan` twice over for most of the corpus. The record is still emitted under BOTH arm names,
+  // `--fan` twice over for most of the corpus. The record is still emitted under BOTH map mode names,
   // because a rectangular record set is what makes the comparison's row-set arithmetic readable
   // (and because a row that GAINS a symbol map between two revisions must show as a move in the
-  // `harness` arm, not as a record appearing out of nowhere).
+  // `harness` map mode, not as a record appearing out of nowhere).
   const record = (
     id: string,
-    armed: Armed[],
+    runs: MapModeRun[],
     sym: string,
     asm: string,
     targetDesc: unknown,
     fanAllowed: boolean,
   ): void => {
     const computed = new Map<string, SweepRecord>();
-    for (const { arm, key, opts } of armed) {
+    for (const { mapMode, key, opts } of runs) {
       const already = computed.get(key);
       if (already !== undefined) {
-        out.push({ ...already, arm });
+        out.push({ ...already, mapMode });
         continue;
       }
       // THE INPUTS, recorded beside the output: what was lifted (`asm`) and with which options
       // (`opts`). Without them a dataset edit is indistinguishable from a decompiler change — see
       // `optsDigest`'s header for the measurement.
-      const rec: SweepRecord = { id, arm, asm: sha(asm), opts: optsDigest(opts) };
+      const rec: SweepRecord = { id, mapMode, asm: sha(asm), opts: optsDigest(opts) };
       try {
         const d = m.pipeline.decompile(sym, asm, targetDesc, { ...opts, onGap: 'annotate' });
         rec.src = sha(d.source);
@@ -319,13 +359,10 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
           rec.skipped = 'fan-limit';
         } else {
           try {
-            const cands = m.rank.enumerateRanked(sym, asm, targetDesc, { ...opts, onLeverError: () => {} });
-            rec.fan = cands.length;
-            const h = createHash('sha1');
-            for (const c of cands) {
-              h.update(`${c.label}\0${c.source}\0`);
-            }
-            rec.fanHash = h.digest('hex').slice(0, 12);
+            Object.assign(
+              rec,
+              fanDigests(m.rank.enumerateRanked(sym, asm, targetDesc, { ...opts, onEnumerationError: () => {} })),
+            );
           } catch (e) {
             rec.fanThrew = firstLine(e);
           }
@@ -353,10 +390,10 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         .pop()!
         .replace(/\.(s|inc)$/, '');
       const asm = m.scrub.scrubObjectHeader(readFileSync(file, 'utf8'));
-      const armed = armsFor(sel.arms, map !== undefined, (withMap) =>
+      const runs = mapModesFor(sel.mapModes, map !== undefined, (withMap) =>
         withMap ? { symbols: m.symbols.asIfUndecompiled(map, sym) } : {},
       );
-      record(`asm:${relative(sel.asmDir, file)}`, armed, sym, asm, tc.targetDesc, sel.fan === true);
+      record(`asm:${relative(sel.asmDir, file)}`, runs, sym, asm, tc.targetDesc, sel.fan === true);
     }
     return out;
   }
@@ -369,8 +406,8 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
   ];
   for (const c of sel.reverse === true ? [...cases].reverse() : cases) {
     if (!c.toolchain.available()) {
-      for (const arm of sel.arms) {
-        out.push({ id: c.id, arm, skipped: 'toolchain' });
+      for (const mapMode of sel.mapModes) {
+        out.push({ id: c.id, mapMode, skipped: 'toolchain' });
       }
       continue;
     }
@@ -381,17 +418,17 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
       // COUNTED, NOT SWALLOWED, and not fatal: the same discipline `bench gates` states — a census
       // over a truncated prefix must not look complete, and one unbuildable row must not end a
       // 1,062-row sweep.
-      for (const arm of sel.arms) {
-        out.push({ id: c.id, arm, skipped: 'build' });
+      for (const mapMode of sel.mapModes) {
+        out.push({ id: c.id, mapMode, skipped: 'build' });
       }
       continue;
     }
     const asm = m.scrub.scrubObjectHeader(built.asm);
-    const armed = armsFor(sel.arms, c.symbols !== undefined, (withMap) =>
+    const runs = mapModesFor(sel.mapModes, c.symbols !== undefined, (withMap) =>
       m.evalAsmlift.rankOptionsFor(c.toolchain, built.obj, c.proto, c.compile, withMap ? c.symbols : undefined),
     );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;
-    record(c.id, armed, c.sym, asm, c.toolchain.targetDesc, fanAllowed);
+    record(c.id, runs, c.sym, asm, c.toolchain.targetDesc, fanAllowed);
   }
   return out;
 }

@@ -424,8 +424,8 @@ function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: 
   // arm first, loudly), so it is a contract on the next one.
   //
   // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
-  // statement, which a `switch` is not, so it already means what L3 means. What a loop-respelling
-  // pass must preserve is exactly that — the three that can re-spell a loop into one whose
+  // statement, which a `switch` is not, so it already means what L3 means. What a pass that re-spells
+  // a loop must preserve is exactly that — the three that can re-spell a loop into one whose
   // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
   // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
   // before firing, and a fourth must too.
@@ -567,7 +567,7 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
     // pointer declarator to the pointee — the INNERMOST one for a multi-level pointer
     // (`volatile u16 ** p`). An object-volatile POINTER (`u16 *volatile p`) has no inhabitant —
-    // no lever or recognizer produces one.
+    // no variation or recognizer produces one.
     lines.push(`    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cType(l.type)} ${l.name};`);
   }
   for (const s of fn.body) {

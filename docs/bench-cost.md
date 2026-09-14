@@ -24,7 +24,7 @@ run). Corpus: 1,062 rows — 810 synthetic + 252 real. The three `pnpm bench run
 | `pnpm bench baseline <sym>`              | **~2.6 s**, no bench at all                                                                                          | `time pnpm bench baseline CountCollectedGems`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pnpm bench fan <row> --enumerate`       | **~115 candidates/s**                                                                                                | 9,192 candidates in 80.2 s on `kleod:CountCollectedGems:agbcc`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `pnpm bench fan <row>` (scored)          | **60 ms/candidate** synthetic, **85 ms** real, candidate cache OFF                                                   | `SCORE_SECONDS_PER_CANDIDATE` in `apps/benchmark/src/run/fan.ts`, re-read at `8599234d` on 2026-09-12; its docstring carries the three cold runs behind the two constants. A WARM run is several times cheaper per candidate (the same artifact's `rankSeconds` medians are 40 ms synthetic / 35 ms real), so this over-prices the scored path — which is the right way round for a refusal                                                                                                                                                                                                                                                                                                                                                                  |
-| `pnpm bench sweep`                       | **~60 s** warm over all 1,062 rows, both arms — nothing is compiled; **~177 s** with every target built              | `time pnpm bench sweep` → 59.0 s / 61.8 s / 62.8 s across three runs on two worktrees, 2,124 records, 2026-09-12 (the last of them after the input-digest fields, which cost ~2 s); `ASMLIFT_BENCH_CACHE=0` → 176.9 s, same day. A standalone probe of the same build+lift loop prices it at 28.8 s — that probe is not this command, and this row is the command                                                                                                                                                                                                                                                                                                                                                                                            |
+| `pnpm bench sweep`                       | **~60 s** warm over all 1,062 rows, both map modes — nothing is compiled; **~177 s** with every target built         | `time pnpm bench sweep` → 59.0 s / 61.8 s / 62.8 s across three runs on two worktrees, 2,124 records, 2026-09-12 (the last of them after the input-digest fields, which cost ~2 s); `ASMLIFT_BENCH_CACHE=0` → 176.9 s, same day. A standalone probe of the same build+lift loop prices it at 28.8 s — that probe is not this command, and this row is the command                                                                                                                                                                                                                                                                                                                                                                                            |
 | `pnpm bench sweep --repeat 2`            | **~124 s** — the determinism gate is two whole-corpus sweeps, the second in reverse order                            | `time pnpm bench sweep --repeat 2` → 2 min 4 s, 0 disagreements over 2,124 records, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pnpm bench sweep --fan`                 | **~437 s** over the same rows — enumeration is ~120x the lift, which is why it is a flag                             | `time pnpm bench sweep --fan` → 436.8 s, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `pnpm bench sweep --base <ref>`          | **~232 s** whole-corpus lift-only, both sides — and it does NOT get cheaper on the second sweep against the same ref | `time pnpm bench sweep --base 910fd416` → 3 min 52 s (this tree 59.4 s, base tree 170.1 s), 2026-09-12. Re-measured 2026-09-12 on wave 2: `--base HEAD` against a base tree provisioned and swept hours earlier → 234.1 s (base side **173.3 s**), and `--base 5c440d38` including `git worktree add` + `pnpm install` → 231.7 s (base side 169.0 s). This row used to attribute that to "its first target builds are cold"; that is REFUTED — the same base tree sweeping ITSELF is 58.3 s, and on the real tier the base side is 40.0 s against a head side of 35.2 s with not one cache file written. Where the other ~115 s goes on the synthetic tier is not understood; scope the sweep (`--tier real --base-dir` is 75.7 s) rather than budget for it |
@@ -33,7 +33,7 @@ run). Corpus: 1,062 rows — 810 synthetic + 252 real. The three `pnpm bench run
 | `pnpm test:matching`                     | **~67 s** — 42 files, 394 tests, 0 skipped                                                                           | `/usr/bin/time -p pnpm test:matching`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `scripts/check-artifact-provenance.sh`   | under a second                                                                                                       | 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | a ranked run at LoadBGTilemapData scale  | **1,500–8,000 s**, and HARD-RULE forbidden — do not start one                                                        | historical figure, NOT re-measured 2026-09-12; `bench fan --enumerate` prices merely LISTING that fan at ~33 min from the rate above                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `pnpm bench fan <huge row>`, REFUSED     | **the whole enumeration** — ~33 min at LBG scale, and only then the refusal                                          | `FAN_SCORE_LIMIT` is tested on `cands.length` at `apps/benchmark/src/run/fan.ts:914`, i.e. after the pre-count enumeration; read at `3a4fd60f` on 2026-09-12. The 2,000 guard bounds what gets COMPILED, never what gets enumerated, so it is not a cheap shield                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `pnpm bench fan <huge row>`, REFUSED     | **the whole enumeration** — ~33 min at LBG scale, and only then the refusal                                          | `FAN_SCORE_LIMIT` is tested on `cands.length` after the pre-count enumeration (`grep -n "cands.length > FAN_SCORE_LIMIT" apps/benchmark/src/run/fan.ts`); read at `3a4fd60f` on 2026-09-12. The 2,000 guard bounds what gets COMPILED, never what gets enumerated, so it is not a cheap shield                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## 2. The real tier is growing, and nothing else is
 
@@ -60,13 +60,13 @@ This is also why the cheap questions in §3 matter more each month, not less.
 
 ## 3. Answer the cost question without running a bench
 
-Since #192 the committed artifact records, per row, `candidateCount` and `rankSeconds`. Three
+Since #192 the committed artifact records, per row, `fanSize` and `rankSeconds`. Three
 readers, none of which compiles anything:
 
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=376.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=512.9s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -80,13 +80,13 @@ readers, none of which compiles anything:
   cost" but "which rows does my branch decompile differently from that revision". It re-lifts every
   row in both trees, map-ful and map-less, and compiles nothing.
 
-  **Read the arm you asked for.** Measured 2026-09-12 over the same commit pair (`910fd416` →
+  **Read the mode you asked for.** Measured 2026-09-12 over the same commit pair (`910fd416` →
   `bd7ad596`, four PRs apart, one of them a real transform): the default lift-only sweep reported
   **0 rows moved** and two head-only records (the row #191 added), while `--fan --tier synthetic`
   on the same pair reported **28 records moved over 14 rows**, fans 1.3x–2.7x. Most of this
-  project's axes ADD CANDIDATES, and a new candidate is invisible to the default lift. Lift-only
+  project's variations ADD CANDIDATES, and a new candidate is invisible to the default lift. Lift-only
   answers "did I regress the default spelling"; `--fan` answers "did I change what gets ranked",
-  which is the question a match round is asked before it merges an axis.
+  which is the question a match round is asked before it merges a variation.
 
   `--repeat N` asks the same question of this tree against ITSELF, alternating iteration direction:
   2,124 records x 3 runs, 0 disagreements, 2026-09-12. Five rounds rebuilt that check by hand.
@@ -112,17 +112,17 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   25 of them read `src`/`len` ALONE, which is a dataset edit reported as a decompiler change.
 
   **`--fan` refuses when the committed artifact prices none of the rows it selected.** The size
-  guard reads `candidateCount` off `results.json`, so an artifact that parses and prices nothing —
-  `results: []` from a shard that wrote no rows, a schema move under `asmlift.candidateCount`, or a
+  guard reads `fanSize` off `results.json`, so an artifact that parses and prices nothing —
+  `results: []` from a shard that wrote no rows, a schema move under `asmlift.fanSize`, or a
   whole-corpus artifact with no row of the project you selected — bounds nothing, and used to turn
-  the guard off with no output at all (still enumerating the 77,760-spelling row at 25 s, against
+  the guard off with no output at all (still enumerating the 77,760-candidate row at 25 s, against
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-13: the ranked pass alone is **3,920 s over 152
-real rows** and **366 s over 675 synthetic rows**; wall clock is lower because eight shards run in
-parallel. The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,141 s of that real
-total — **55% of the tier in one row.**
+Summed out of the committed artifact of 2026-09-13: the ranked pass alone is **4,913 s over 152
+real rows** and **989 s over 675 synthetic rows**; wall clock is lower because eight shards run in
+parallel. The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,454 s of that real
+total — **50% of the tier in one row.**
 
 ## 4. How many full runs a round gets
 
@@ -180,16 +180,16 @@ until grep -q 'EXIT=' "$LOG"; do
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 2800 s of no growth is ~30% over this corpus's long-pole ROW — the 2,141 s of §3, not the
+  # 3200 s of no growth is ~30% over this corpus's long-pole ROW — the 2,454 s of §3, not the
   # 2,169 s the whole real tier walls at. Below that, a static log is normal, not a hang.
   # Raise it, never lower it, as that row grows.
-  [ "$still" -ge 2800 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
+  [ "$still" -ge 3200 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
 ```
 
 **A log that stopped growing is almost certainly `kleod:PauseMenuScreenHandler:agbcc`** — one row,
-~2,141 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
+~2,454 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
 Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
 spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
 this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven

@@ -6,16 +6,16 @@
 //     where they are declared — the N-at-function-top spelling and the N-block-scoped one
 //     assemble byte-identically.
 //
-// That is why the lever mints N locals at function top and places only their ASSIGNMENTS per
+// That is why the variation mints N locals at function top and places only their ASSIGNMENTS per
 // region, and it is why the round did not build a nested declaration block in the emitter. The
 // fact lived in a scratch directory and in two prose headers, with nothing to run: this repo's own
-// idiom for a load-bearing compiler fact is a pinned test (test/sign-axis.test.ts,
-// test/param-pointee-axis.test.ts, test/addr-placement.test.ts), so here it is, with the flags it
+// idiom for a load-bearing compiler fact is a pinned test (test/signedness-variation.test.ts,
+// test/param-pointee-variation.test.ts, test/addr-placement.test.ts), so here it is, with the flags it
 // was measured under — the klonoa checkout's own `tools.asmlift.compiler` template.
 //
 // BOTH DIRECTIONS. The placement being free is only half the claim; the other half is that the
 // COUNT is not free. A third case collapses the three region locals into one function-scope local
-// and must produce DIFFERENT bytes — otherwise the lever would be re-spelling nothing and the
+// and must produce DIFFERENT bytes — otherwise the variation would be re-spelling nothing and the
 // whole capability would be decoration.
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus
@@ -30,7 +30,11 @@ import { compileFromCommand } from '../../src/compile-command';
 import { loadDecompConfig } from '../../src/config';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
-const HAVE = kleodCheckoutGate('decl-scope-axis', ['decomp.yaml', 'tools/agbcc/bin/agbcc'], ['arm-none-eabi-objcopy']);
+const HAVE = kleodCheckoutGate(
+  'decl-scope-variation',
+  ['decomp.yaml', 'tools/agbcc/bin/agbcc'],
+  ['arm-none-eabi-objcopy'],
+);
 
 /** The dmascope shape: one DMA base spelled inside three disjoint regions. */
 const body = (decls: string, then0: string, else0: string, tail0: string): string => `
@@ -51,7 +55,7 @@ ${tail0}
 }
 `;
 
-// A — three locals, all DECLARED at function top, assigned per region (what the lever emits)
+// A — three locals, all DECLARED at function top, assigned per region (what the variation emits)
 const TOP3 = body(
   '    volatile unsigned int *p0;\n    volatile unsigned int *p1;\n    volatile unsigned int *p2;',
   '        p0 = (volatile unsigned int *)0x040000D4;',
@@ -96,7 +100,7 @@ void f(int n) {
 }
 `;
 
-describe.runIf(HAVE)('the DECLARATION-PLACEMENT axis (checkout-gated)', () => {
+describe.runIf(HAVE)('the DECLARATION-PLACEMENT variation (checkout-gated)', () => {
   const hex = new Map<string, string>();
 
   beforeAll(() => {
@@ -133,7 +137,7 @@ describe.runIf(HAVE)('the DECLARATION-PLACEMENT axis (checkout-gated)', () => {
     expect(hex.get('top3')).toBe(hex.get('block3'));
   });
 
-  test('…while HOW MANY there are does — so the lever re-spells something real', () => {
+  test('…while HOW MANY there are does — so the variation re-spells something real', () => {
     expect(hex.get('top3')).not.toBe(hex.get('one'));
   });
 });

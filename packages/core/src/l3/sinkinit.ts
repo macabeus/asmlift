@@ -1,18 +1,18 @@
-// L3 re-spelling lever: sink each leading pointer-base INIT to the statement that first uses it.
+// L3 respell variation: sink each leading pointer-base INIT to the statement that first uses it.
 //
 // `l3/basecse.ts`'s COMMITTED call emits every base hoist at the head of `sfn.body`, so a base
 // first touched halfway down the function is live across everything above it — a live range the
-// original never had, and agbcc pays for it with a callee-saved register. (Its roster admissions
-// ask for this placement directly, through the same `l3/hoist.ts` mechanism this lever uses; what
-// the lever adds is reaching the run on a tree the roster did not build — one NOTHING re-hoisted,
+// original never had, and agbcc pays for it with a callee-saved register. (Its roster's hoists
+// ask for this placement directly, through the same `l3/hoist.ts` mechanism this variation uses; what
+// the variation adds is reaching the run on a tree the roster did not build — one NOTHING re-hoisted,
 // or one `l3/nearbase.ts` prepended into, which is the `/nearbase/sinkinit` pairing.)
 // Compiled pair on `synthetic:basehome`:
 // assigning at the top adds `push {r4, lr}` / `pop {r4}` / `pop {r0}` / `bx r0` where assigning at
-// the first use keeps a plain `bx lr`. The ladder that row records is the argument for the lever
+// the first use keeps a plain `bx lr`. The ladder that row records is the argument for the variation
 // being a PLACEMENT rather than a wider hoist — top-placed 11, not hoisted at all 9, placed at
 // first use 0. A hoist at the wrong place is worse than no hoist.
 //
-// A LEVER, NOT THE DEFAULT. Which placement the source used is per-function knowledge the asm does
+// A VARIATION, NOT THE DEFAULT. Which placement the source used is per-function knowledge the asm does
 // not carry: moving basecse's own head placement to first use moves 8 benchmark rows, 4 better and
 // 4 worse, two of the losses being matches. The UNSUNK spelling always rides beside this one —
 // head-placed wherever basecse built the run, prepend-placed under `/nearbase` — and the differ
@@ -25,7 +25,7 @@
 // immediately before the first TOP-LEVEL statement mentioning its name and never INTO a nested
 // scope, so it still dominates every use — planning a hoist inside a scope is `l3/scopebase.ts`'s
 // job and it does the domination work. `placeBaseLocals` carries the refusals; a run where none of
-// them moves is this lever declining.
+// them moves is this variation declining.
 //
 // SEMANTICS BY CONSTRUCTION: the moved value is a pure address leaf — it reads nothing, writes its
 // own plain cell and cannot fault — and every statement it crosses mentions the name nowhere, an

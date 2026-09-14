@@ -1,11 +1,12 @@
 // asmlift webapp — ranking UI. Three views over the same Ranking state:
-//  • RankBadge — a one-line strip above the Source view: the best candidate's verdict (byte-exact
+//  • RankBadge — a one-line strip above the Source view: the winner's verdict (byte-exact
 //    at objdiff score 0, or the closest score). Only ever reflects the CURRENT input (the H1
 //    guard in useRanking).
 //  • RankDeclarations — the block the winning candidate was COMPILED WITH, shown under the badge.
 //  • RankCandidates — the Pipeline tab's final card: every scored candidate with its objdiff
-//    score, best first, plus the declarations asmlift refused to synthesize.
+//    score, in rank order, plus the declarations asmlift refused to synthesize.
 import { renderDeclarations } from '@asmlift/core/declare';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 
 import { progressBar, progressLabel } from './progress-view';
 import type { RefusedDeclaration } from './score-wasm';
@@ -14,7 +15,7 @@ import type { Ranking } from './useRanking';
 /** How many of the winning candidate's declarations are HYPOTHESES — names no symbol map knew,
  *  whose type was read out of the same asm the verdict is about (core SymbolRef.synthesized). */
 function synthesizedCount(ranking: Ranking): number {
-  return ranking.status === 'ok' ? (ranking.result.best.symbolRefs ?? []).filter((r) => r.synthesized).length : 0;
+  return ranking.status === 'ok' ? (ranking.result.winner.symbolRefs ?? []).filter((r) => r.synthesized).length : 0;
 }
 
 const REFUSAL_TEXT: Record<RefusedDeclaration['reason'], string> = {
@@ -92,14 +93,15 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
       </div>
     );
   }
-  const best = ranking.result.best;
+  const winner = ranking.result.winner;
   // The verdict is about the TRANSLATION UNIT, not the source alone: where a declaration was
   // synthesized, the block below it is part of what compiled to these bytes, and it was fitted to
   // this very asm. Saying "byte-exact" without saying that is the silent half of a wrong answer.
   const assumed = synthesizedCount(ranking);
-  return best.score.score === 0 ? (
+  return winner.score.score === 0 ? (
     <div className={`${base} border border-emerald-800 bg-emerald-950/40 text-emerald-300`}>
-      ✓ byte-exact match — objdiff score 0 <span className="text-emerald-500/80">({best.label})</span>
+      ✓ byte-exact match — objdiff score 0{' '}
+      <span className="text-emerald-500/80">({joinVariations(winner.variations)})</span>
       {assumed > 0 && (
         <span className="text-emerald-500/80">
           {' '}
@@ -109,7 +111,8 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
     </div>
   ) : (
     <div className={`${base} border border-amber-900/60 bg-amber-950/30 text-amber-300`}>
-      closest candidate — objdiff score {best.score.score} <span className="text-amber-500/80">({best.label})</span>
+      closest candidate — objdiff score {winner.score.score}{' '}
+      <span className="text-amber-500/80">({joinVariations(winner.variations)})</span>
     </div>
   );
 }
@@ -125,7 +128,7 @@ export function RankDeclarations({ ranking }: { ranking: Ranking }) {
   if (ranking.status !== 'ok') {
     return null;
   }
-  const refs = ranking.result.best.symbolRefs ?? [];
+  const refs = ranking.result.winner.symbolRefs ?? [];
   if (refs.length === 0) {
     return null;
   }
@@ -176,7 +179,7 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
     );
   }
 
-  const { candidates, best, dropped, withheld, refused } = ranking.result;
+  const { candidates, winner, dropped, withheld, refused } = ranking.result;
   return (
     <div className="mt-1 rounded-lg border border-slate-700 bg-slate-900/70 p-2.5">
       <p className="mb-2 text-xs font-semibold text-slate-200">
@@ -185,24 +188,24 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
       <table className="w-full text-[11px]">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wide text-slate-500">
-            <th className="pb-1 font-medium">candidate (variant tried)</th>
+            <th className="pb-1 font-medium">candidate</th>
             <th className="pb-1 pl-2 font-medium">objdiff score</th>
             <th className="pb-1 pl-2 font-medium">matched instrs</th>
           </tr>
         </thead>
         <tbody className="font-mono">
           {candidates.map((c) => {
-            const isBest = c === best;
+            const isWinner = c === winner;
             const exact = c.score.score === 0;
             return (
-              <tr key={c.label} className={isBest ? 'text-slate-100' : 'text-slate-400'}>
+              <tr key={joinVariations(c.variations)} className={isWinner ? 'text-slate-100' : 'text-slate-400'}>
                 <td className="py-0.5">
-                  {isBest && (
-                    <span className="mr-1 text-teal-400" title="best (lowest score)">
+                  {isWinner && (
+                    <span className="mr-1 text-teal-400" title="winner (lowest score)">
                       ★
                     </span>
                   )}
-                  {c.label}
+                  {joinVariations(c.variations)}
                 </td>
                 <td className={`py-0.5 pl-2 ${exact ? 'text-emerald-400' : ''}`}>
                   {c.score.score}
@@ -219,9 +222,9 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
       {(withheld.length > 0 || dropped.length > 0) && (
         <p className="mt-2 text-[10px] leading-relaxed text-amber-400/80">
           {withheld.length > 0 &&
-            `${withheld.length} spelling(s) withheld — built and scored, but publication needs a
+            `${withheld.length} candidate(s) withheld — built and scored, but publication needs a
             byte-exact score. `}
-          {dropped.length > 0 && `${dropped.length} spelling(s) failed to build.`}
+          {dropped.length > 0 && `${dropped.length} candidate(s) failed to build.`}
         </p>
       )}
       {/* A name asmlift REFUSED to declare and one it never saw fail identically ("`x' undeclared"),

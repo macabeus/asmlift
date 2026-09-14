@@ -127,11 +127,12 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   WITHHELD_KEY_OVER_LIVEBASE_BLOCK: withholdingKey(LIVEBASE_BLOCK_GATES, 'c:0 4 true') as readonly Gate<never>[],
 };
 
-/** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */
-const titles = readdirSync(__dirname)
-  .filter((f) => f.endsWith('.test.ts'))
-  .map((f) => readFileSync(join(__dirname, f), 'utf8'))
-  .join('\n');
+/** Every core test file's text, by file name, so a guard is looked up in the file it names. */
+const testFiles = new Map(
+  readdirSync(__dirname)
+    .filter((f) => f.endsWith('.test.ts'))
+    .map((f) => [f, readFileSync(join(__dirname, f), 'utf8')] as const),
+);
 
 describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
   test('is well-formed, and nothing calls itself sound without naming a guard', () => {
@@ -139,12 +140,16 @@ describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
   });
 
   test('every named guard is a test that still exists', () => {
-    // `guardedBy` is prose until something reads it. Matching it against the suite's own titles is
-    // what stops it from decaying into a comment that names a test deleted two refactors ago.
+    // `guardedBy` is prose until something reads it: `<file>.test.ts: <title>`. Matching the title
+    // against the text of the FILE it names is what stops it from decaying into a comment that names
+    // a test deleted two refactors ago, or a file that was since renamed.
     const missing = gates
       .filter((g) => g.guardedBy)
-      .map((g) => ({ id: g.id, guard: g.guardedBy!.split(':').pop()!.trim() }))
-      .filter((g) => !titles.includes(g.guard));
+      .map((g) => {
+        const parts = g.guardedBy!.split(':');
+        return { id: g.id, file: parts[0].trim(), guard: parts[parts.length - 1].trim() };
+      })
+      .filter((g) => !testFiles.get(g.file)?.includes(g.guard));
     expect(missing).toEqual([]);
   });
 });

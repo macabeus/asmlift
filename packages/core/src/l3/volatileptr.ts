@@ -1,4 +1,4 @@
-// L3 re-spelling lever: declare a pointer local that holds a NUMERIC address as pointing to
+// L3 respell variation: declare a pointer local that holds a NUMERIC address as pointing to
 // volatile data (`volatile u16 *p = (u16 *)0x3000010;`).
 //
 // A numeric address has no declaration anywhere — the project maps a symbol's volatility, but a
@@ -8,7 +8,7 @@
 // optimizer's pseudos and lands the register allocator on different homes (on the row this was
 // built for, the counter is copied out of r0 so the loaded value can have it — the target's
 // allocation). So the qualified spellings are emitted alongside the plain one — the all-locals
-// form as rank.ts `/volatile`, per-local subsets as its `-name` variants — and the differ
+// form as rank.ts `/volatile`, per-local subsets as its results named by subject — and the differ
 // referees.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION: `volatile` only RESTRICTS what a compiler may do
@@ -25,7 +25,7 @@
 // `p = q` taints `p`; conservatively, `p` assigned ANY expression mentioning a tainted name).
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
-// (null), so the lever never emits a duplicate of the primary.
+// (null), so the variation never emits a duplicate of the default.
 import { addrConst, cellAddress, inRange } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
 
@@ -72,7 +72,7 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
 }
 
 /** How many of this tree's `volatile` claims land on a DEVICE REGISTER — the gate on rank.ts's
- *  volatility tie-break, so it is counted here beside the lever that mints the claims.
+ *  volatility tie-break, so it is counted here beside the variation that mints the claims.
  *
  *  Two spellings assert one: a `volatile` pointer cast over a numeric address (what
  *  l3/inlinebase.ts leaves at each use and what l3/volstore.ts mints at a device store), and a
@@ -119,7 +119,7 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
   return n;
 }
 
-/** The locals the lever would qualify — the per-local SUBSET enumeration's input (below):
+/** The locals the variation would qualify — the per-local SUBSET enumeration's input (below):
  *  which pointers the original declared volatile is per-pointer knowledge the asm does not
  *  carry (an MMIO block and a plain RAM table can sit side by side, and qualifying the table
  *  blocks the read collapse its region wants), so each non-empty subset is its own candidate
@@ -172,10 +172,10 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
     !tainted.has(l.name);
 }
 
-/** The proper non-empty SUBSETS of the qualifying locals (within `within`, when given) as
- *  alternative outputs — one candidate per subset, labeled by its member names. Empty above
+/** The proper non-empty SUBSETS of the qualifying locals (within `within`, when given) as the
+ *  results of a multi-result variation — one candidate per subset, its members named as the subject. Empty above
  *  three qualifiers: the arm is capped at 6 extra spellings, and the all-qualifiers form is the
- *  plain lever's own candidate. */
+ *  plain variation's own candidate. */
 export function volatileSubsetCandidates(sfn: SFn, within?: ReadonlySet<string>): { merged: string; sfn: SFn }[] {
   const elig = volatileEligibleLocals(sfn).filter((n) => within === undefined || within.has(n));
   if (elig.length < 2 || elig.length > 3) {
@@ -193,9 +193,9 @@ export function volatileSubsetCandidates(sfn: SFn, within?: ReadonlySet<string>)
 }
 
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
- *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
- *  PRODUCT (rank.ts) qualifies just the locals its first lever centres on (kept walk bases,
- *  created hoists), so the product never degenerates into a general /volatile composition over
+ *  sharing the (unmodified) body. `only` narrows the variation to the named locals — a /volatile
+ *  composition (rank.ts) qualifies just the locals its first variation centres on (kept walk bases,
+ *  created hoists), so the composition never degenerates into a general /volatile composition over
  *  the function's other locals — and the subset enumeration re-uses the same door. */
 export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
   const eligible = eligibility(sfn);

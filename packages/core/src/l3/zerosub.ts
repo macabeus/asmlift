@@ -1,4 +1,4 @@
-// L3 re-spelling lever: spell a negate of a SHARED subtraction as `0 - x`.
+// L3 respell variation: spell a negate of a SHARED subtraction as `0 - x`.
 //
 // The two C spellings of a negation are not interchangeable in front of gcc 2.9's folder. `-x` is
 // built through build_unary_op and FOLDED, so fold-const.c's "Convert - (a - b) to (b - a)"
@@ -23,20 +23,20 @@
 // local as well — and the differ referees. Semantics are preserved by construction: `-x` and
 // `0 - x` are the same C expression for every integer type.
 //
-// A RE-SPELLING rather than a fourth value-home axis (docs/level-tower.md's third fork). The fold
+// A RESPELL VARIATION rather than a fourth value-home structure variation (docs/level-tower.md's third fork). The fold
 // rule fires at all only because asmlift INLINED a value the source bound to a local, and naming
 // that local reaches the same match by the other route: on `pokeemerald:GetAnchorCoord:agbcc`,
 // `s32 t = a1 - a0;` scores 0 against the row's own target.o where the inlined body with a plain
-// `-` scores 1. asmlift cannot spell it — all three home axes decline on pedigree (`/addr-home`
+// `-` scores 1. asmlift cannot spell it — all three home variations decline on pedigree (`/addr-home`
 // wants an address, `/expr-home` a loop, `/derived-home` a memory read) and this is a bare pure
-// value with three consumers. An axis admitting any such value would reach the use shapes a
+// value with three consumers. A structure variation admitting any such value would reach the use shapes a
 // substitution cannot, and would double the fan wherever it admits; this costs one candidate per
-// distinct tree carrying the shape. Take the axis when a row demands a shape this cannot reach.
+// distinct tree carrying the shape. Take the structure variation when a row demands a shape this cannot reach.
 //
 // SCOPE (decline over approximate). Only a `bin('-')` operand, and only a SHARED one. Neither
 // restriction is caution: over any other operand shape the fold rule does not apply and the two
 // spellings compile identically (verified for `-(a + b)`, `-(a >> 3)`, `-(a * 3)`, `-a`), so
-// firing there could only duplicate the primary. An EFFECTFUL subtraction is out of scope too —
+// firing there could only duplicate the default. An EFFECTFUL subtraction is out of scope too —
 // two textually equal calls are two calls, not one shared value, so the premise fails.
 import { type Expr, type SFn, exprEquals, exprHasEffect, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
 

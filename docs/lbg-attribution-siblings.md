@@ -87,7 +87,7 @@ rows and makes no claim that an unexecuted future fix would match them.
 ## What this does and does not establish
 
 The two largest-category allocation residuals support the published generality finding; they do
-not establish a new declaration-order lever. One passes the strict-majority test in this sample (54/106).
+not establish a new declaration-order variation. One passes the strict-majority test in this sample (54/106).
 The published 41-of-49 generality result remains prior evidence, not a count reproduced here.
 
 Review correction: ~~no sample residual has a register-only majority~~ was falsified after fixing

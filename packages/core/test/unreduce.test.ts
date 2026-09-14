@@ -1,4 +1,4 @@
-// The `/unreduce` lever (l3/unreduce.ts): a loop-carried accumulator is deleted and each read
+// The `/unreduce` variation (l3/unreduce.ts): a loop-carried accumulator is deleted and each read
 // spelled as its closed form in the counter. What these tests pin is the pair of claims the
 // rewrite rests on — that the closed form is RELATED to the counter's own start by the
 // accumulator's stride (checked structurally, in all three accepted shapes), and that every way
@@ -69,7 +69,7 @@ test('a shift-scaled accumulator becomes the closed form in the counter', () => 
 test('a PRODUCT-scaled accumulator relates through an invariant multiplier', () => {
   // klonoa's LoadBGTilemapData (a checkout function, not a benchmark row) has this shape in its
   // SOURCE — the stride is an expression rather than a constant, carried in the init as the
-  // start's multiplier. The lever does not reach it there (every loop in that function is nested,
+  // start's multiplier. The variation does not reach it there (every loop in that function is nested,
   // and this pass walks top-level loops only, instrumented over all 1344 of its trees), so the
   // fixture is the shape and not the row.
   const stride = shl(c(16), v('a1'));
@@ -833,7 +833,7 @@ test('a stride the frontend spelled as a constant expression still relates', () 
 
 test('a zero init leaves the scaled counter standing alone', () => {
   // `0 + (i << 6)` is a spelling no source writes. Reached on synthetic:nestedloop:mwcc_242_81,
-  // whose accumulator starts at 0 — a PPC row, in a lever whose gate census is agbcc-shaped.
+  // whose accumulator starts at 0 — a PPC row, in a variation whose gate census is agbcc-shaped.
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).toContain('*(s32 *)67109080 = i << 6;');
   expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).not.toContain('0 +');
 });

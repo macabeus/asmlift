@@ -1,4 +1,4 @@
-// L3 re-spelling lever: materialize the deref BASES of a call's arguments into locals, before the
+// L3 respell variation: materialize the deref BASES of a call's arguments into locals, before the
 // call.
 //
 // When a call's arguments are each a deref through a different fixed address, the compiler loads
@@ -16,9 +16,9 @@
 // order names the bases first (`vu8 *p = &REG_VCOUNT_L; u8 *e = gEntityArray; f(*p, e[8])`), which
 // is what a decomp author writes and what this pass reproduces.
 //
-// A LEVER, not a rewrite: it is emitted as an ADDITIONAL candidate (rank.ts `/argbase`) and the
+// A VARIATION, not a committed rewrite: it is emitted as an ADDITIONAL candidate (rank.ts `/argbase`) and the
 // differ referees, so the inline spelling is always still there to win. That is what bounds the
-// risk — a lever that replaced the primary could lose a match, this one cannot.
+// risk — a rewrite that replaced the default could lose a match, this one cannot.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION, which matters because on a NONMATCH row the
 // best-scoring candidate is what the user is shown. Only a PURE leaf base is eligible — a global's
@@ -29,7 +29,7 @@
 // KNOWN LIMITATION: the hoisted local is a plain `T *` — `IrType` models no cv-qualifier at all,
 // so naming a VOLATILE cell through it drops the qualifier that macros.ts goes out of its way to
 // carry. Pre-existing and not introduced here (every pointer local in the tower has it), but the
-// two features meet on exactly the MMIO shape this lever targets, so it is written down rather
+// two features meet on exactly the MMIO shape this variation targets, so it is written down rather
 // than left to be rediscovered.
 //
 // GATE: at least TWO arguments of the same call must qualify, with DISTINCT bases. The reordering

@@ -29,6 +29,7 @@ import {
 } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
 
@@ -301,7 +302,9 @@ export async function rankCandidatesInBrowser(
     try {
       const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs) });
       if (!cc.ok) {
-        throw new Error(`agbcc could not compile candidate '${c.label}': ${toolFailureLine(cc.stderr)}`);
+        throw new Error(
+          `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`,
+        );
       }
       const score = await scoreObjectBytes(t.obj, cc.obj, name);
       // The PUBLICATION rule is imported for the same reason the ordering is: `withheldReason` is
@@ -309,13 +312,13 @@ export async function rankCandidatesInBrowser(
       // it would be the playground showing a source the CLI refuses to stand behind.
       const why = withheldReason(c, score);
       if (why !== null) {
-        withheld.push({ label: c.label, score: score.score, rows: score.rows, why });
+        withheld.push({ variations: c.variations, score: score.score, rows: score.rows, why });
         continue;
       }
       results.push({ ...c, order, score });
     } catch (e) {
       lastErr = e;
-      dropped.push({ label: c.label, error: e instanceof Error ? toolFailureLine(e.message) : String(e) });
+      dropped.push({ variations: c.variations, error: e instanceof Error ? toolFailureLine(e.message) : String(e) });
     }
   }
   emit({ phase: 'scoring', done: total, total });
@@ -335,5 +338,5 @@ export async function rankCandidatesInBrowser(
     });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
+  return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
 }

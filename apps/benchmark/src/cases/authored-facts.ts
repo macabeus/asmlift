@@ -14,7 +14,7 @@
 // THE ORACLE IS THE ROW'S COMPILED TEXT — the real tier's vendored preprocessed TU, the synthetic
 // tier's `src` — and what that is worth has a precise limit. The TU is `cpp(project headers +
 // prependC + funcC)` (cases/vendor.ts), so it is NOT independent of `funcC`. What it is independent
-// of is `proto`, which is the axis the seed defect lived on, and the property that keeps `funcC`
+// of is `proto`, which is the field the seed defect lived on, and the property that keeps `funcC`
 // from being the field someone tunes is a different one: the same blob IS the target
 // (compile/real.ts), so moving the reference source to agree with a wrong prototype moves the bytes
 // the row scores against. Against `funcC` this therefore checks two narrower things, both real: a

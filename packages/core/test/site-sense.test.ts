@@ -45,7 +45,7 @@ const TWOJOINED = `fn twojoined {
  *  SOURCE arm the shared block is (`scSharedOnFall`), which SUCCESSOR SLOT it landed in
  *  (`scSharedIsTaken`, the fold's `gIsFall`), and whether a long-branch trampoline sat on either
  *  edge (`scEdgeRelayed`). A bare boolean is the short-branch, unchained layout — shared in the
- *  TAKEN slot, no relay — which is every site of the rows the axis shipped on. */
+ *  TAKEN slot, no relay — which is every site of the rows the variation shipped on. */
 function stamped(...shared: (boolean | undefined | [onFall: boolean, isTaken: boolean, relayed?: boolean])[]): Fn {
   const fn = parse(TWOJOINED);
   verify(fn);
@@ -85,14 +85,14 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
   });
 
   test('an UNSTAMPED site keeps its boolean while its stamped neighbour does not', () => {
-    // A function mixes folded and unfolded `if`s, and the axis must not claim the unfolded one:
-    // there is no evidence there, so the per-function lever is still the only answer.
+    // A function mixes folded and unfolded `if`s, and the variation must not claim the unfolded one:
+    // there is no evidence there, so the per-function variation is still the only answer.
     const half = emit(stamped(true, undefined), { senseFromFoldEvidence: true });
     const ifs = (src: string) => src.split('\n').filter((l) => l.includes('if ('));
     expect(ifs(half)[0]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }))[0]);
     expect(ifs(half)[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: true }))[1]);
     // …and stamping that same site the other way leaves the whole function on the boolean's
-    // spelling, so the stamp is what moved it and not the axis being on.
+    // spelling, so the stamp is what moved it and not the variation being on.
     expect(emit(stamped(false, undefined), { senseFromFoldEvidence: true })).toBe(
       emit(stamped(undefined, undefined), {}),
     );
@@ -119,10 +119,10 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     // POSITIVE, exactly as at the chained quadrant below it.
     //
     // Measured, not assumed: `synthetic:ifand_far` (`if (a && b) {64 stores} else {…}`) stamps
-    // exactly this pair at its single fold, and lifting its own asm with the axis on spells
+    // exactly this pair at its single fold, and lifting its own asm with the variation on spells
     // `a0 != 0 && a1 != 0` — the source. The `foldEvidence !== sharedIsTaken` reading spelled the
     // dual there, `a0 == 0 || a1 == 0`, and nothing in the corpus could see it: the row MATCHES on
-    // `/flip-join` with or without this axis.
+    // `/flip-join` with or without this variation.
     //
     // POSITIVE IS NOT UNIVERSALLY RIGHT HERE, and one committed row says so: the two long-branch
     // sites of `kleod:CheckWorldCompletion:agbcc` want OPPOSITE spellings against its own
@@ -149,7 +149,7 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     // exists — two booleans put these two sites in one cell.
     //
     // Measured on the rows, each lifted from its own compiled asm: `synthetic:ifor_far`
-    // (`if (a || b) {64 stores} else {…}`) stamps `false/true/relayed` and, with the axis on,
+    // (`if (a || b) {64 stores} else {…}`) stamps `false/true/relayed` and, with the variation on,
     // spells `a0 != 0 || a1 != 0` — its source. Without the relay stamp it spelled the dual,
     // `a0 == 0 && a1 == 0`, and no score could see that either: the row MATCHes 0/139 on
     // `/flip-join` exactly as `ifand_far` does at 0/140. `synthetic:ifand_near` stamps

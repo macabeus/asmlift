@@ -4,13 +4,14 @@
 // Pins the derivation's contracts: a map-derived VALUE reference (data global, `(u32)Func`) is
 // recorded with its SymbolInfo; a CALL target is NEVER recorded — not even when the same symbol
 // is also value-referenced (prototyping a called symbol is C89 poison, verified fact 3 of the
-// research doc); the '/raw-globals' lever names nothing so it carries no refs; and INERTNESS —
+// research doc); the '/raw-globals' variation names nothing so it carries no refs; and INERTNESS —
 // no map ⇒ the field is absent everywhere.
 import { describe, expect, test } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const enumerate = (sym: string, body: string, symbols?: SymbolMap) =>
   enumerateCandidates(sym, `${sym}:\n${body}`, ARMV4T_AGBCC, symbols ? { symbols } : {});
@@ -37,8 +38,8 @@ describe('value references are recorded with their SymbolInfo', () => {
         [0x03005678, [{ ...ELSEWHERE }]],
       ]),
     );
-    const named = cands.filter((c) => !c.label.endsWith('/raw-globals'));
-    const raw = cands.filter((c) => c.label.endsWith('/raw-globals'));
+    const named = cands.filter((c) => !hasVariation(c.variations, 'raw-globals'));
+    const raw = cands.filter((c) => hasVariation(c.variations, 'raw-globals'));
     expect(named.length).toBeGreaterThan(0);
     expect(raw.length).toBeGreaterThan(0);
     for (const c of named) {
@@ -73,7 +74,7 @@ describe('value references are recorded with their SymbolInfo', () => {
   test('a value-referenced CODE symbol ((u32)Func) is recorded with kind code', () => {
     const body = '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08001001\n'; // odd Thumb pointer
     const cands = enumerate('f', body, new Map([[0x08001000, [{ name: 'DoThing', kind: 'code' }]]]));
-    const named = cands.filter((c) => !c.label.endsWith('/raw-globals'));
+    const named = cands.filter((c) => !hasVariation(c.variations, 'raw-globals'));
     expect(named.length).toBeGreaterThan(0);
     for (const c of named) {
       expect(c.source).toContain('(u32)DoThing');
@@ -93,7 +94,7 @@ describe('call targets are NEVER recorded', () => {
     for (const c of enumerate('f', body, map)) {
       const names = (c.symbolRefs ?? []).map((r) => r.name);
       expect(names).not.toContain('DoThing'); // called ⇒ excluded
-      if (!c.label.endsWith('/raw-globals')) {
+      if (!hasVariation(c.variations, 'raw-globals')) {
         expect(names).toContain('gCounter'); // the data ref still records
       }
     }

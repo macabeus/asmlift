@@ -4,7 +4,7 @@
 // Each twin structures a fn the primary pass did not: `/shared-ret` the raised fn with the follow
 // on, `/shared-tail` the SUNK fn with it. The structurer can accept either where the primary failed
 // a boundary contract. Both are sound, and that is why only the enumeration can refuse it: each
-// twin's axis point reads the primary pass's dropped set. And each twin keeps its OWN drops apart,
+// shared-tail pass's setting reads the default pass's dropped set. And each keeps its OWN drops apart,
 // so a follow the unsunk fn cannot carry does not take the sunk fn's candidate with it.
 // `structureChecked` is mocked to fail chosen `/defsite` points and to mark every other one, because
 // no committed disassembly makes a contract fail on one of these passes and pass on another — the
@@ -15,11 +15,12 @@ import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Which passes the mock fails at every `/defsite` point. The primary pass is the one without the
  *  follow; the `/shared-ret` pass is the one with the follow on a fn the primary pass also saw. */
-const fail = { primary: false, sharedRet: false };
-const primaryFns = new Set<string>();
+const fail = { default: false, sharedRet: false };
+const defaultFns = new Set<string>();
 
 vi.mock('../src/pipeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/pipeline')>();
@@ -30,12 +31,12 @@ vi.mock('../src/pipeline', async (importOriginal) => {
       const opts = args[1] ?? {};
       const text = print(fn);
       if (!opts.followEarlyReturns) {
-        primaryFns.add(text);
+        defaultFns.add(text);
       }
-      const pass = !opts.followEarlyReturns ? 'primary' : primaryFns.has(text) ? 'sharedRet' : 'sharedTail';
+      const pass = !opts.followEarlyReturns ? 'default' : defaultFns.has(text) ? 'sharedRet' : 'sharedTail';
       if (
         opts.anchorConstCopies &&
-        ((pass === 'primary' && fail.primary) || (pass === 'sharedRet' && fail.sharedRet))
+        ((pass === 'default' && fail.default) || (pass === 'sharedRet' && fail.sharedRet))
       ) {
         throw new Error('mocked contract failure');
       }
@@ -66,11 +67,11 @@ const THUMB_FLAT =
 
 const run = (asm: string, failing: typeof fail) => {
   Object.assign(fail, failing);
-  primaryFns.clear();
-  const errors: string[] = [];
+  defaultFns.clear();
+  const errors: (readonly string[])[] = [];
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (label) => errors.push(label),
+    onEnumerationError: (variations) => errors.push(variations),
   });
   return { errors, cands };
 };
@@ -78,17 +79,23 @@ const run = (asm: string, failing: typeof fail) => {
 test.each([
   ['/shared-tail', THUMB],
   ['/shared-ret', THUMB_LEFT],
-])('the %s twin skips every axis point its primary sibling dropped, and keeps the rest', (suffix, asm) => {
-  const { errors, cands } = run(asm, { primary: true, sharedRet: false });
-  expect(errors.some((l) => l.includes('/defsite') && !l.includes('/shared-'))).toBe(true);
-  const twin = cands.filter((c) => c.label.includes(suffix));
-  expect(twin.length).toBeGreaterThan(0);
-  expect(twin.filter((c) => c.label.includes('/defsite'))).toEqual([]);
+])('the %s alternative skips every setting its default sibling dropped, and keeps the rest', (suffix, asm) => {
+  const { errors, cands } = run(asm, { default: true, sharedRet: false });
+  expect(
+    errors.some((v) => hasVariation(v, 'defsite') && !hasVariation(v, 'shared-ret') && !hasVariation(v, 'shared-tail')),
+  ).toBe(true);
+  const alternative = cands.filter((c) => hasVariation(c.variations, suffix.slice(1)));
+  expect(alternative.length).toBeGreaterThan(0);
+  expect(alternative.filter((c) => hasVariation(c.variations, 'defsite'))).toEqual([]);
 });
 
-test('a point the `/shared-ret` twin drops still ships in the `/shared-tail` twin', () => {
-  const { errors, cands } = run(THUMB_FLAT, { primary: false, sharedRet: true });
-  expect(errors.some((l) => l.includes('/shared-ret') && l.includes('/defsite'))).toBe(true);
-  expect(cands.filter((c) => c.label.includes('/shared-ret') && c.label.includes('/defsite'))).toEqual([]);
-  expect(cands.some((c) => c.label.includes('/shared-tail') && c.label.includes('/defsite'))).toBe(true);
+test('a setting the `/shared-ret` alternative drops still ships in the `/shared-tail` alternative', () => {
+  const { errors, cands } = run(THUMB_FLAT, { default: false, sharedRet: true });
+  expect(errors.some((v) => hasVariation(v, 'shared-ret') && hasVariation(v, 'defsite'))).toBe(true);
+  expect(
+    cands.filter((c) => hasVariation(c.variations, 'shared-ret') && hasVariation(c.variations, 'defsite')),
+  ).toEqual([]);
+  expect(cands.some((c) => hasVariation(c.variations, 'shared-tail') && hasVariation(c.variations, 'defsite'))).toBe(
+    true,
+  );
 });

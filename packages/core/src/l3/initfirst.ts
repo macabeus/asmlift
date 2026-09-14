@@ -1,10 +1,10 @@
-// L3 re-spelling lever: a loop INIT moves above the guard that encloses it, and the guard reads
+// L3 respell variation: a loop INIT moves above the guard that encloses it, and the guard reads
 // the initialized variable.
 //
 // `for (i = 0; i < n; i++)` compiles with the init BEFORE the zero-trip test (`mov r3,#0` then
 // `cmp r3, r5`), while `if (0 < n) { i = 0; do … }` compiles with the init behind the branch.
 // Both source forms lift to the SAME IR — a const has no position — so which the original spelled
-// is not recoverable; this lever emits the init-first sibling and the differ referees:
+// is not recoverable; this variation emits the init-first sibling and the differ referees:
 //
 //     if (0 < n) { v = 0; … }   →   v = 0; if (v < n) { … }
 //
@@ -61,7 +61,7 @@ const stripWideIntCast = (e: Expr): Expr =>
 
 /** Every deref rooted at a var through casts only. The var-root rule is a TWO-WORLD argument, not a
  *  volatility proof: a deref through a plain-declared pointer local may still be MMIO, but the
- *  /volatile axis enumerates the qualified sibling — where this lever refuses — so both worlds reach
+ *  /volatile variation enumerates the qualified sibling — where this variation refuses — so both worlds reach
  *  the differ and collapsing reads here is the plain world's own premise. A raw `*(u16 *)CONST` deref
  *  has NO local for /volatile to qualify, so no sibling carries the volatile world and the collapse
  *  would silently discard it. */

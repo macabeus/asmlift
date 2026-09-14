@@ -23,7 +23,7 @@
 //   base @ aload(index)        -> array  (variable index — untouched)
 //
 // This recovery is USUALLY BYTE-NEUTRAL — `->field_N` and `[idx]` mostly compile identically, so it
-// is a representation upgrade driven by access evidence rather than a scored lever. TWO
+// is a representation upgrade driven by access evidence rather than a scored variation. TWO
 // MEASUREMENTS SAY "USUALLY" IS THE RIGHT WORD, and both were made on agbcc against a real target
 // object, each pair differing in ONE token:
 //   • THE SPELLING. `synthetic:dmanest`'s reference compiles from `((struct Elem0 *)K)[a1].field_4`
@@ -34,9 +34,9 @@
 //     `void *` rather than `s32` changes agbcc's alias set and lets a loop-invariant load leave the
 //     loop: `synthetic:dmaptrsrc` matches with the pointer declaration and diffs by 35 without it
 //     (its own fan: `/vol-store/unreduce/ptr-field` 0, `/vol-store/unreduce` 35).
-//     That is what `l3/ptrfield.ts` offers as a differ-ranked lever.
+//     That is what `l3/ptrfield.ts` offers as a differ-ranked variation.
 // So the neutrality claim is CONDITIONAL, and nothing here says on what. Until it does, read it as
-// "no candidate is enumerated for this axis", not as "the differ could not referee one" — the
+// "no candidate is enumerated for this question", not as "the differ could not referee one" — the
 // second reading is the one both measurements above falsify. GAPS between accessed
 // offsets (unaccessed leading/interior fields) are filled with `u8[N]` PAD fields so the declared
 // struct reproduces the observed offsets byte-for-byte and is self-describing (the same
@@ -64,7 +64,7 @@ interface Access {
 // is a DIFFERENT operation: this pass is ALIGNMENT-AWARE (no explicit pad when C's own inter-field
 // padding already lands the field) and carries NO trailing pad / struct `size` (a recovered struct
 // here is only ever a `struct S *` pointee accessed by named field — never an array element or a
-// by-value param, so sizeof is never taken). If the two are ever unified, PARAMETERIZE those axes
+// by-value param, so sizeof is never taken). If the two are ever unified, PARAMETERIZE those dimensions
 // — a naive merge would break the natural-alignment golden or silently mislay a struct that later
 // becomes an element / ABI value.
 const sizeAlign = (width: number): number => width;

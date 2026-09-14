@@ -123,12 +123,12 @@ export function bareArrayElement(si: SymbolInfo, width: number, signed: boolean)
 // reduce to: `(r<<11) + (i<<1)` and `((r<<10) + i) << 1` differ only in where the element scale
 // sits, which is exactly what the division removes. So this runs on the byte residual and
 // arrayAccess does not call it — see the note at that site for what the two spellings measure.
-// `packages/cli/test/matching/array-rank-axis.test.ts` compiles both halves of that.
+// `packages/cli/test/matching/array-rank-variation.test.ts` compiles both halves of that.
 //
 // The recovered address is the SAME address either way (C scales `[r]` by the declared row size,
 // which is the constant the arithmetic multiplied by), so this is a spelling, not a re-addressing.
 //
-// AND IT IS AN AXIS, NOT A DEFAULT — the evidence above says the residual carries a ROW, and it
+// AND IT IS A VARIATION, NOT A DEFAULT — the evidence above says the residual carries a ROW, and it
 // does not say which of the two spellings that reach it wrote one. The cast form this replaces
 // (`*(T *)((r<<11) + (i<<1) + (u32)&g)`) compiles to the SAME shift structure and differs only in
 // scheduling on agbcc, kmc and mwcc, and is byte-identical on IDO — where the flat sum is
@@ -149,7 +149,7 @@ function addTerms(e: Expr, sign: 1 | -1, into: { e: Expr; sign: 1 | -1 }[]): voi
 
 /** `x` when `t` is the NON-CONSTANT value `x` scaled by exactly `stride` (`x * stride` or
  *  `x << log2(stride)`), else null. A constant term is never a recovered subscript: both
- *  spellings of a constant row index compile identically, so nothing referees the choice. */
+ *  spellings of a constant row index compile identically, so nothing referees the question. */
 function scaledBy(t: Expr, stride: number): Expr | null {
   if (t.k !== 'bin') {
     return null;

@@ -1,10 +1,10 @@
-// `EnumerateOptions.onAxisGated` and `onTreeDeduped` report the enumeration's two SILENT
+// `EnumerateOptions.onVariationGated` and `onTreeDeduped` report the enumeration's two SILENT
 // candidate-deleting sites. Nothing in the shipped pipeline passes either one, so a reporting
 // channel that had stopped firing would look exactly like one whose sites correctly never trip —
 // which is the failure the channels exist to make visible, reproduced one level up.
 //
 // So this pins that they FIRE, over asm the corpus already carries. It asserts the direction and
-// not a count: the counts move with every axis added and with every fixture, and a count is what
+// not a count: the counts move with every variation added and with every fixture, and a count is what
 // would make this test fail for reasons it is not about.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,9 +12,10 @@ import { describe, expect, it } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { variationToken } from '../src/variation-tokens';
 
 describe('the enumeration reports its own silent deletions', () => {
-  it('a gated axis and a deduped tree both reach the caller', () => {
+  it('a gated variation and a deduped tree both reach the caller', () => {
     // A NAMED handful rather than the whole agbcc corpus: two signals are the assertion, and
     // sweeping every fixture only buys wall clock against the suite's own timeout.
     const FIXTURES = ['agbcc-clamp0.s', 'agbcc-gcd.s'];
@@ -29,7 +30,7 @@ describe('the enumeration reports its own silent deletions', () => {
       }
       try {
         enumerateCandidates(m[1], asm, ARMV4T_AGBCC, {
-          onAxisGated: (suffix) => gated.push(suffix),
+          onVariationGated: (variation) => gated.push(variation),
           onTreeDeduped: () => {
             deduped++;
           },
@@ -40,8 +41,12 @@ describe('the enumeration reports its own silent deletions', () => {
       }
     }
     expect(enumerated).toBeGreaterThan(0);
-    // several DISTINCT axes stand down, not one gate firing repeatedly on one function
+    // several DISTINCT variations stand down, not one gate firing repeatedly on one function
     expect(new Set(gated).size).toBeGreaterThan(1);
+    // each report is one registered variation's name, not a `/`-prefixed suffix
+    for (const variation of gated) {
+      expect(variationToken(variation).variationKind).toBe('structure');
+    }
     expect(deduped).toBeGreaterThan(0);
   });
 });

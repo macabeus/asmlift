@@ -7,7 +7,7 @@
 // subscript (the addend form, which is `synthetic:bgbaked`'s shape, declines); each gate is
 // load-bearing under ablation; the synthesized declaration cannot collide with the two passes
 // that already mint struct names; and the respelled tree satisfies the boundary contracts a
-// ranked lever is re-checked against.
+// respell variation is re-checked against.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -21,6 +21,7 @@ import { OFFMEMBER_GATES, offmemberBases, spellOperandMembers } from '../src/l3/
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const lifted = (ir: string): SFn => structureChecked(parse(ir), {});
 
@@ -66,7 +67,7 @@ describe('the displacement is the evidence, and only the displacement', () => {
     expect(cBackend.emit(spellOperandMembers(lifted(OPERAND))!)).toContain('((struct Off0 *)50345064)->m14');
   });
 
-  test('the respelled tree satisfies the boundary contracts a ranked lever is re-checked against', () => {
+  test('the respelled tree satisfies the boundary contracts a respell variation is re-checked against', () => {
     const out = spellOperandMembers(lifted(OPERAND))!;
     expect(() => {
       assertResolved(out);
@@ -281,7 +282,7 @@ describe('the declaration cannot collide with the two passes that already mint s
   });
 });
 
-// The roster wiring, end to end: the axis is offered only where the target declares the fold, and
+// The roster wiring, end to end: the variation is offered only where the target declares the fold, and
 // it produces a candidate on the shape it was built for.
 test('rank offers /offmember on a fold-declaring target', () => {
   const asm =
@@ -291,6 +292,6 @@ test('rank offers /offmember on a fold-declaring target', () => {
     '\tbx\tlr\n' +
     '.L2:\n\t.align\t2, 0\n' +
     '.L1:\n\t.word\t0x3003468\n';
-  const labels = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  expect(labels.some((l) => l.includes('/offmember'))).toBe(true);
+  const names = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.variations);
+  expect(names.some((v) => hasVariation(v, 'offmember'))).toBe(true);
 });

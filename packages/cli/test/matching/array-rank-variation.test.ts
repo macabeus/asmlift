@@ -10,13 +10,13 @@
 //     evidence that a row was computed and not a preference;
 //   • …and so do `g[r][i]` and the byte CAST the recovery displaces, which produces the same
 //     row-stride term — so the residual says nothing about which of THOSE two was written, and a
-//     default would be answering a question the asm does not ask. That pair is why this is an axis;
+//     default would be answering a question the asm does not ask. That pair is why this is a variation;
 //   • where the compiler reassociates the flat sum into the same separate scales, nothing referees
 //     any of it, which is why the recovery refuses the already-divided element index that
 //     `arrayAccess` holds (see the note at that site).
 //
 // All of it lived in commit messages. This repo's idiom for a load-bearing compiler fact is a
-// pinned test (matching/decl-scope-axis.test.ts, core/test/sign-axis.test.ts), so here it is, with
+// pinned test (matching/decl-scope-variation.test.ts, core/test/signedness-variation.test.ts), so here it is, with
 // the flags it was measured under — the klonoa checkout's own `tools.asmlift.compiler` template.
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus
@@ -31,7 +31,11 @@ import { compileFromCommand } from '../../src/compile-command';
 import { loadDecompConfig } from '../../src/config';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
-const HAVE = kleodCheckoutGate('array-rank-axis', ['decomp.yaml', 'tools/agbcc/bin/agbcc'], ['arm-none-eabi-objcopy']);
+const HAVE = kleodCheckoutGate(
+  'array-rank-variation',
+  ['decomp.yaml', 'tools/agbcc/bin/agbcc'],
+  ['arm-none-eabi-objcopy'],
+);
 
 // The klonoa template prepends the project context, which already carries `u16`/`u32` — only the
 // two tables are ours, and both spellings of each pair reference the SAME symbol, so the literal
@@ -91,7 +95,7 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
     expect(hex.get('pow2-two')).not.toBe(hex.get('pow2-flat'));
   });
 
-  // THE PAIR THAT MAKES THE RECOVERY AN AXIS RATHER THAN A DEFAULT, and it is the pair the two
+  // THE PAIR THAT MAKES THE RECOVERY A VARIATION RATHER THAN A DEFAULT, and it is the pair the two
   // tests above do not cover. The evidence the recovery reads is a term at the ROW stride, and the
   // cast spelling produces one too — its agbcc output is
   //

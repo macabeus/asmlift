@@ -157,7 +157,7 @@ describe('bench repro — a broken MACHINE is not a non-matching row', () => {
 
   test('says nothing about a run that merely did not match', () => {
     expect(setupRefusal('')).toBeUndefined();
-    expect(setupRefusal('[ranked] 1 candidate(s) scored, 0 dropped, best unsigned: 5/8')).toBeUndefined();
+    expect(setupRefusal('[ranked] 1 candidate(s) scored, 0 dropped, winner unsigned: 5/8')).toBeUndefined();
     // the words are there but the shape is not: a comment quoting the recovery is not the failure
     expect(
       setupRefusal('# run `pnpm --filter @asmlift/cli build` if node_modules/.bin/asmlift is absent'),

@@ -584,7 +584,7 @@ const table = (tail = '\tb\t.L3\n', defaultAfter = 5, c3 = '\tadd\tr1, r2, #0x4\
 };
 
 test('jump-table arms come back in layout order too, not in TABLE order', () => {
-  // The lever is declared per compiler, not per regime: the fact underneath (bodies expand in source
+  // The compiler behavior is declared per compiler, not per regime: the fact underneath (bodies expand in source
   // order, only the dispatch moves) is the same one, and agbcc's tables carry it — 8 dense arms
   // written 5,2,0,4,1,3,6,7 lay their bodies out in that order under an ascending table.
   expect(armOrder(of(table()))).toEqual([3, 0, 4, 1, 2]);
@@ -801,7 +801,7 @@ test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather
 // and a MATERIALIZED def is the second producer beside the anchored merge copy: its `v = …` is the
 // only place the value is written, while its uses read the bare name.
 
-/** lift + structure with an axis forced on — `decompile` only offers the target's own defaults. */
+/** lift + structure with an option forced on — `decompile` only offers the target's own defaults. */
 const homed = (asm: string, opts: StructureOptions): string => {
   const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, {}, undefined, undefined);
   verify(fn);

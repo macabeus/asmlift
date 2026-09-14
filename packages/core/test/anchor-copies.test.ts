@@ -1,7 +1,7 @@
 // Def-site anchoring of constant merge copies (structure.ts anchorConstCopies): an edge copy
 // `v = K` whose constant the asm materialized EARLIER — `movs r9, #0` at entry ahead of a
 // single-armed overwrite — is emitted at the const op's original position and the edge copy is
-// suppressed. Off by default; rank.ts enumerates it as the `/defsite` axis, and its widening to a
+// suppressed. Off by default; rank.ts enumerates it as the `/defsite` variation, and its widening to a
 // loop header's entry const (`anchorLoopEntryConsts`) as `/defsite/loop-entry`.
 //
 // The refusal conditions are what make it sound, so they are what these tests pin hardest:

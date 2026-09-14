@@ -529,7 +529,7 @@ describe('docs/bench-cost.md', () => {
 
   /** §3 IS DERIVABLE, so it is derived rather than read. Every figure in "Answer the cost question
    *  without running a bench" is a field of the committed artifact — `rankSeconds` and
-   *  `candidateCount`, summed by tier — and `tableRows()` scopes to `## 1.`, so the two tests above
+   *  `fanSize`, summed by tier — and `tableRows()` scopes to `## 1.`, so the two tests above
    *  see none of them. The repo's own rule is that a pass may be half-converted to a table provided
    *  the residue is NAMED: the residue here is the three wall clocks in §1's first rows, which come
    *  from run logs and not from the artifact (`meta` carries `generatedAt`, `counts`, `toolchains`
@@ -550,7 +550,7 @@ describe('docs/bench-cost.md', () => {
         return r.tier === tier && typeof r.asmlift?.rankSeconds === 'number';
       });
     const sum = (rows: { asmlift: { rankSeconds: number } }[]) => rows.reduce((a, r) => a + r.asmlift.rankSeconds, 0);
-    type CostRow = Identifiable & { asmlift: { rankSeconds: number; candidateCount: number } };
+    type CostRow = Identifiable & { asmlift: { rankSeconds: number; fanSize: number } };
     const row = (id: string): CostRow => {
       const r = resolveRow(artifact.results as CostRow[], id);
       expect(r, `docs/bench-cost.md §3 names ${id}, which is not a row of the artifact`).toBeDefined();
@@ -568,7 +568,7 @@ describe('docs/bench-cost.md', () => {
       `${group(sum(synthetic))} s over ${synthetic.length}`,
       `${group(piue.asmlift.rankSeconds)} s`,
       `${Math.round((piue.asmlift.rankSeconds / sum(real)) * 100)}% of the tier`,
-      `fan=${ccg.asmlift.candidateCount} rank=${ccg.asmlift.rankSeconds.toFixed(1)}s`,
+      `fan=${ccg.asmlift.fanSize} rank=${ccg.asmlift.rankSeconds.toFixed(1)}s`,
     ];
     const missing = expected.filter((e) => !text.includes(e));
     expect(

@@ -32,6 +32,7 @@ import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** `.word` pool holding one address, referenced as `_pool`. */
 const pool = (hex: string) => `_pool: .4byte ${hex}\n`;
@@ -105,7 +106,7 @@ test('with a return VALUE to consume it, the read stays in the return', () => {
   expect(src).not.toMatch(/^\s*\*\(s32 \*\)\d+;$/m);
 });
 
-test('ORDINARY RAM refuses on EVIDENCE — a lever CAN qualify it, which is why that is not the test', () => {
+test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is why that is not the test', () => {
   // 0x02000100 is EWRAM — outside `capabilities.deviceRegisters` [0x04000000, 0x04000400).
   expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;', 'return;']);
   // 0x08117BCC is ROM. This is the population the refusal actually protects: a WRONG `returnsVoid`
@@ -267,7 +268,7 @@ test('the `/volatile` candidate carries the read through a qualified pointer loc
     '\tbx\tlr\n' +
     pool('0x040000D4');
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } });
-  const vol = cands.filter((c) => c.label.includes('volatile') && !c.label.includes('vol-store'));
+  const vol = cands.filter((c) => hasVariation(c.variations, 'volatile') && !hasVariation(c.variations, 'vol-store'));
   expect(vol.length).toBeGreaterThan(0);
   for (const c of vol) {
     expect(c.source).toMatch(/volatile s32 \* p0;/);

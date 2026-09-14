@@ -12,7 +12,7 @@ The family's two points are a **conjunction**, priced from both sides. `ereadctl
 `extern struct Bg gReadBgs[];` and subscripts it inside a loop, and scores 2. Drop the array shape
 and keep the loop (`ername`, the same named symbol reached as `&gReadBgsObj` through a pointer
 macro): MATCH. Drop the loop and keep the array shape (`erflat`): MATCH. Spelling the bound
-`gReadBgs[4]` instead of `[]` also scores 2, so the incomplete type is not the axis. The named
+`gReadBgs[4]` instead of `[]` also scores 2, so the incomplete type is not the cause. The named
 data relocation is therefore free — it is what distinguishes this family from the raw
 `reread`/`rereadctl` pair, and it is not what costs anything.
 
@@ -48,7 +48,7 @@ The final captured counts exactly equal each CLI fan count. Every captured funct
 rescored through `packages/cli/src/objdiff.ts:137` (`scoreObjects`); minima equal the canonical
 CLI results stamped `asmlift source a56952a`.
 
-| Row      | Captured candidates | Best score | CLI best label                                  |
+| Row      | Captured candidates | Best score | CLI winner's variations                         |
 | -------- | ------------------: | ---------: | ----------------------------------------------- |
 | ereread  |                   4 |         11 | unsigned                                        |
 | ereadctl |                  72 |          2 | unsigned/fresh-merge/initfirst                  |
@@ -58,7 +58,7 @@ CLI results stamped `asmlift source a56952a`.
 The minima were analyzed as compiled objects with `rowdiff.mjs` and `residual.py`. Each row has
 exactly **one distinct object SHA-256 among all minimum-score captures**. The retained candidate
 assembly reassembles with the exact harness flags (`arm-none-eabi-as -mthumb -mthumb-interwork`)
-to that same SHA-256, so the analyzed object is the CLI winning object even when several labels
+to that same SHA-256, so the analyzed object is the CLI winning object even when several candidates
 tie. Each retained preprocessed candidate was also recompiled with the real compiler and exact
 benchmark flags; all four assembly files reproduced byte-for-byte. CLI stdout is not substituted
 for these compiled units.
@@ -97,17 +97,17 @@ that nomination into a sharper question rather than settling it.** `globalshape.
 candidate cast spelling and the observed load/shift order alone; no guard was watched fire, so it
 was a hypothesis at the time this study was measured.
 
-What the controls add is that the axis **is** admitted in this basin. `erflat` — the array shape
+What the controls add is that the variation **is** admitted in this basin. `erflat` — the array shape
 without the loop — MATCHes carrying `unsigned/orderbase`, while at the time of measurement the loop
 arm's winner was `unsigned/fresh-merge/initfirst` and scored 2. The question that left open — why
 the ordered base stopped winning once the subscript is inside a loop — **has since been answered,
 and the answer was not reach.** The licence reached the loop arm all along; the hoist had only one
 position to offer, the function head, and above the `if` the init is not instruction-identical to
 the target while inside the guard it is. The gap was `HoistPlacement`, which could not leave the
-top-level statement list. `/orderbase/scoped` closes the row (#159), so `ereadctl` MATCHes today.
+top-level statement list. `/orderbase-scoped` closes the row (#159), so `ereadctl` MATCHes today.
 
 None of that carries to LoadBGTilemapData: the `/livebase` roster note in `rank.ts`'s
-`enumerateCandidates` records the licence measured **empty on every lift variant of both symbol-map
+`enumerateCandidates` records the licence measured **empty on every lift setting of both symbol-map
 arms of the target**. What is measured here is a price and its two sides. The site that would pay
 it on the large function is still not identified, and this study does not claim one.
 

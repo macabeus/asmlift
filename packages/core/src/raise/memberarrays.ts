@@ -32,16 +32,16 @@
 // produces no site here. `synthetic:basefold` is that control — its reference IS the cast spelling
 // — and it MATCHES today, untouched.
 //
-// A DEFAULT, NOT A RANKED AXIS, and the reason is a measurement rather than a preference. An axis
+// A DEFAULT, NOT A RANKED VARIATION, and the reason is a measurement rather than a preference. A variation
 // exists where two source spellings collapse onto one asm, so nothing but the differ can separate
 // them. Here the asm separates them itself — line one folds `+K` into the memory operand and
 // produces NO site — so `add(P, K)` feeding an off-0 scaled access is evidence AGAINST the spelling
-// asmlift emits today, not a coin flip. And an axis at this level is a LIFT variant (`/setup-args`'s
+// asmlift emits today, not a coin flip. And a variation at this level is a LIFT variation (`/setup-args`'s
 // position in rank.ts), doubling the whole candidate product for every function with a site: swept
 // over 2288 sa3 and 412 klonoa functions in both symbol-map configurations, the gates below admit
 // two bases, in one function, which declines for an unrelated reason — so the price would be paid
 // to referee a question the corpus never poses. What is NOT settled is line two, and that is a
-// different question: where a base LOCAL goes is the L3 base-local levers' business, taken over
+// different question: where a base LOCAL goes is the L3 base-local variations' business, taken over
 // whatever type the recovery mints, not a second answer to the TYPE this pass decides.
 //
 // WHY THE TRAILING COUNT IS A GATE RATHER THAN A GUESS, and it is the struct's SIZE that makes it
@@ -52,7 +52,7 @@
 // only once the object is big enough. So a count is not a fact to derive but a free parameter with
 // a byte-observable LOWER BOUND, and inventing one invents a size. The count is therefore read off
 // the loop that walks the member — `boundedCount` below — and the whole base DECLINES when no
-// counted loop states one. An INTERIOR member's count is not a choice at all: it is forced by the
+// counted loop states one. An INTERIOR member's count is not an open question at all: it is forced by the
 // member that follows it.
 //
 // THE SIBLING PASSES, and why this is a third one rather than a case inside either.

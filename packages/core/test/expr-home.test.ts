@@ -1,4 +1,4 @@
-// The loop-expression-home axis (structure.ts homeLoopExprs, rank.ts `/expr-home`): a pure
+// The loop-expression-home variation (structure.ts homeLoopExprs, rank.ts `/expr-home`): a pure
 // non-const value defined outside a loop with 2+ distinct consumers, at least one of them inside
 // that loop, materializes into a local carrying the value's recovered type — the register the
 // compiler holds across the iterations — where the default re-derives the expression at each use.
@@ -61,7 +61,7 @@ test('off by default: the same IR re-derives per use', () => {
 });
 
 // The same multi-use value with every consumer in STRAIGHT LINE: the compiler re-materializes
-// cheap arithmetic there, so the axis must stay silent.
+// cheap arithmetic there, so the variation must stay silent.
 const STRAIGHT = `fn straight {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=16}
@@ -79,7 +79,7 @@ test('straight-line multi-use is not homed', () => {
 
 // One consumer inside the loop, one outside — the biased-pointer shape
 // (`synthetic:offhome:agbcc`): the loop is what pins the value in a register, and the second use
-// is what makes the home observable, so ONE of each is the axis's scope.
+// is what makes the home observable, so ONE of each is the variation's scope.
 const ONEIN = `fn onein {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=16}

@@ -34,6 +34,7 @@ import {
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
 const thumb = (name: string, body: string, pool: string): string =>
@@ -807,7 +808,7 @@ describe('every gate: which rule decides, and whether it is uniquely load-bearin
   });
 });
 
-// ── the map always wins, on BOTH symbol-variant arms ─────────────────────────────────────────
+// ── the map always wins, on BOTH symbol-map settings ─────────────────────────────────────────
 
 describe('a name the project map describes is never claimed by the derivation', () => {
   // The hazard is the `/raw-globals` arm, which STRUCTURES with no map and DECLARES with one:
@@ -838,7 +839,7 @@ describe('a name the project map describes is never claimed by the derivation', 
   });
 });
 
-describe('both symbol-variant arms agree about a name the map does NOT know', () => {
+describe('both symbol-map settings agree about a name the map does NOT know', () => {
   // The declaration dictionary is derived ONCE, off the map-ful probe, and used by every
   // candidate — including the `/raw-globals` arm, which structures off its OWN map-less lift. For
   // a symbol the POOL spells (`.word gTbl`) the two lifts see the same `gaddr`, so the two
@@ -1002,7 +1003,7 @@ describe('the assumed declaration is never hidden', () => {
 // ── the spelling and the declaration are never derived from different lifts ───────────────────
 
 describe('sameDerivedShape: what "the declaration will carry this" means', () => {
-  // rank.ts spells from a per-variant derivation and declares from a probe-derived dictionary. The
+  // rank.ts spells from a per-lift derivation and declares from the shared lift's dictionary. The
   // `/raw-globals` arm structures with NO map and declares with one, so the two can be read off
   // different lifts — and a candidate that spells `gTbl[i][j]` beside `extern u32 gTbl[][8];`
   // addresses a different object than the assembly did, compiling either way. This is the
@@ -1027,28 +1028,36 @@ describe('sameDerivedShape: what "the declaration will carry this" means', () =>
   });
 });
 
-// ── the axes the derived rank re-opens ───────────────────────────────────────────────────────
+// ── the variations the derived rank re-opens ─────────────────────────────────────────────────
 
 describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does', () => {
   // `/flat-rank` exists BECAUSE the asm underdetermines the choice between `g[r][i]` and the flat
-  // byte arithmetic (matching/array-rank-axis.test.ts compiles the pair). Its enumeration gate
+  // byte arithmetic (matching/array-rank-variation.test.ts compiles the pair). Its enumeration gate
   // therefore asks the MAP OR THE DERIVED SHAPES, because structure() builds the symbol render
   // context from the union of the two: supplying the rank from a new place does not make the
   // choice determined, and nothing reports a candidate that was never enumerated.
-  test('both arms are enumerated, and they are genuinely different spellings', () => {
+  test('default and alternative are both enumerated, and they are genuinely different spellings', () => {
     const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
-    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);
-    const on = cands.filter((c) => !c.label.includes('flat-rank'));
-    const off = cands.filter((c) => c.label.includes('flat-rank'));
+    expect(cands.map((c) => c.variations)).toEqual([
+      ['unsigned'],
+      ['unsigned', 'flat-rank'],
+      ['signed'],
+      ['signed', 'flat-rank'],
+    ]);
+    const on = cands.filter((c) => !hasVariation(c.variations, 'flat-rank'));
+    const off = cands.filter((c) => hasVariation(c.variations, 'flat-rank'));
     expect(on.every((c) => c.source.includes('gPtrTbl[a0][a1]'))).toBe(true);
     expect(off.every((c) => c.source.includes('(u32)&gPtrTbl'))).toBe(true);
     expect(off.every((c) => !c.source.includes('gPtrTbl[a0]'))).toBe(true);
   });
 
-  test('a rank-1 derivation opens no arm — the axis has nothing to turn off', () => {
+  test('a rank-1 derivation opens no alternative — the variation has nothing to turn off', () => {
     // The gate is asked of the EVIDENCE, not of the derivation's mere existence: a symbol with no
     // declared rank spells the same tree either way, and the pair would be dedup fodder.
-    expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.label)).toEqual(['unsigned', 'signed']);
+    expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.variations)).toEqual([
+      ['unsigned'],
+      ['signed'],
+    ]);
   });
 });
 
@@ -1382,7 +1391,7 @@ describe('the order licence: which rule decides, and whether it is uniquely load
 // HOME), so it travels on the access node — `index.baseOrdered`, stamped once at the structure
 // seam. These pin the route rather than the rule: that the stamp lands where the licence says and
 // nowhere else, and that it is still there after the rewrites `structureChecked` runs on its own
-// output — which is the tree rank hands the lever.
+// output — which is the tree rank hands the respell variations.
 
 /** Every `index` node in the emitted tree, as `<base symbol or shape> ordered=<bool>`. */
 const stamps = (name: string, asm: string): string[] => {

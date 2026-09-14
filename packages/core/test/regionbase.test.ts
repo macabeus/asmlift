@@ -10,7 +10,7 @@
 // the three-block-scoped-declarations spelling assemble to byte-identical code on the row this was
 // built for. So there is no nested declaration block here and none is needed — the locals are
 // declared at function top and only their ASSIGNMENTS are placed per region. This file cannot
-// CHECK that (it is toolchain-free); packages/cli/test/matching/decl-scope-axis.test.ts compiles
+// CHECK that (it is toolchain-free); packages/cli/test/matching/decl-scope-variation.test.ts compiles
 // both spellings and compares the bytes, in BOTH directions — placement free, count not.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,6 +31,7 @@ import {
 } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 const G = [{ name: 'g', type: T.ptr(T.u(16)) }];
 
@@ -285,9 +286,9 @@ describe('a rule the region rule makes VACUOUS is dropped, not left reading as s
   });
 });
 
-describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
+describe('the variation is OFFERED, and it reaches the shape the row needs', () => {
   // The real `synthetic:dmascope` disassembly. Its DMA base 0x040000D4 is spelled in three disjoint
-  // regions — each `if` arm of a loop body, and the post-loop tail — and no lever asmlift ships
+  // regions — each `if` arm of a loop body, and the post-loop tail — and no variation asmlift ships
   // binds it to more than ONE local: `basecse`/`/livebase`/`/scopebase` all place at most one.
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
@@ -301,42 +302,48 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     ).size;
 
   test('`/regionbase` is in the fan', () => {
-    expect(cands.filter((c) => c.label.includes('/regionbase')).length).toBeGreaterThan(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'regionbase')).length).toBeGreaterThan(0);
   });
 
   test('`/regionbase/volatile` is in the fan too — the device base keeps its qualifier', () => {
-    // The lever's own shape is a DEVICE block (0x040000D4). Without this product every region
+    // The variation's own shape is a DEVICE block (0x040000D4). Without this composition every region
     // local it wins with is published UNqualified, and `compareScored`'s deviceVolatile tie-break
     // has no qualified twin to prefer — the qualifier would be given up by an absence in the fan
     // rather than by a measurement.
-    const vol = cands.filter((c) => c.label.includes('/regionbase/volatile'));
+    const vol = cands.filter((c) => hasVariations(c.variations, ['regionbase', 'volatile']));
     expect(vol.length).toBeGreaterThan(0);
     // the qualifier lands on the DECLARATION of the minted locals, not on the cast
     expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
   });
 
-  test('…and the store the lever leaves INLINE keeps its qualifier too', () => {
-    // The lever homes the regions that hold two or more direct uses and leaves every other
+  test('…and the store the variation leaves INLINE keeps its qualifier too', () => {
+    // The variation homes the regions that hold two or more direct uses and leaves every other
     // spelling of the same device address inline — here `((s32 *)67109076)[2] = v1;`, the write to
     // REG_DMA0CNT that starts the transfer. `/volatile` qualifies a pointer LOCAL and cannot reach
     // a store that stays inline; `/vol-store` is the pass that can, and until it was paired with
-    // this lever the winning source dropped a device qualifier the un-hoisted spelling carries.
-    const triple = cands.filter((c) => c.label.includes('/regionbase/volatile/vol-store'));
+    // this variation the winning source dropped a device qualifier the un-hoisted spelling carries.
+    const triple = cands.filter((c) => hasVariations(c.variations, ['regionbase', 'volatile', 'vol-store']));
     expect(triple.length).toBeGreaterThan(0);
     expect(triple.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
     expect(triple.every((c) => /\(\(volatile s32 \*\)67109076\)\[2\] =/.test(c.source))).toBe(true);
     // and no candidate loses one: the pair-less spelling is still in the fan
-    expect(cands.some((c) => c.label.includes('/regionbase/volatile') && !c.label.includes('vol-store'))).toBe(true);
+    expect(
+      cands.some(
+        (c) => hasVariations(c.variations, ['regionbase', 'volatile']) && !hasVariation(c.variations, 'vol-store'),
+      ),
+    ).toBe(true);
   });
 
-  test('and every label that binds the base three times is this pass, or a pipe THROUGH it', () => {
+  test('and every candidate that binds the base three times is this pass, or a pipe THROUGH it', () => {
     // The `/homesplit` pairing (l3/homesplit.ts) pipes a head hoist into this pass with one key
     // withheld, so the region reading it applies is this one — which is why the claim is about the
-    // PASS and not about a label. `dmascope` stopped being a lever-clean control for `/regionbase`
+    // PASS and not about a candidate's variations. `dmascope` stopped being a variation-clean control for `/regionbase`
     // the moment that pairing existed; the dataset block comment predicted exactly this.
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);
-    expect(three.every((c) => /\/regionbase|\/homesplit/.test(c.label))).toBe(true);
+    expect(
+      three.every((c) => hasVariation(c.variations, 'regionbase') || hasVariation(c.variations, 'homesplit')),
+    ).toBe(true);
   });
 });
 

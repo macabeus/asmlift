@@ -1,4 +1,4 @@
-// The `/vol-slot` lever (l3/volatileval.ts): a stack-homed scalar local is re-declared
+// The `/vol-slot` variation (l3/volatileval.ts): a stack-homed scalar local is re-declared
 // `volatile`. The gate conditions are what these tests pin: only a `frame` local (the machine
 // really gave it a slot), only a scalar, never one already carrying a volatility flag, never an
 // address-taken one, and never one whose accesses in the tree are not the machine's — and no
@@ -21,6 +21,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   name: 'f',
@@ -65,7 +66,7 @@ test('`no-frame` is the rule that refuses it, and it is the FIRST one that would
   expect(firstRejection(without(VOL_SLOT_GATES, 'no-frame'), registerHomed)).toBe('access-set');
 });
 
-test('an already-volatile frame local declines rather than duplicating the primary', () => {
+test('an already-volatile frame local declines rather than duplicating the default', () => {
   const s = fn(
     [{ name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 1 }, volatile: true }],
     [{ k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } }],
@@ -142,7 +143,7 @@ test('one machine load rendered as two reads declines — the same rule, other d
 // The counts are the machine's only while every access goes through the address DIRECTLY. Here
 // the second store PUBLISHES the address, so counting direct accesses would report 1 load and 1
 // store for an object reachable from anywhere — the tree can then satisfy the equality and the
-// lever would declare an access set the asm does not have.
+// variation would declare an access set the asm does not have.
 test('a frame object whose address escapes the direct form carries no counts', () => {
   const fn = parse(`fn f {
 ^bb0(%0: s32*):
@@ -161,7 +162,7 @@ test('a frame object whose address escapes the direct form carries no counts', (
   expect(volatileValueLocals(sfn)).toBeNull();
 });
 
-// A halfword spilled to the stack across a call — the shape the lever was built for, and the
+// A halfword spilled to the stack across a call — the shape the variation was built for, and the
 // same fixture frame-base-copy.test.ts uses for the frame-object split.
 const SPILL = `f:
 \tpush\t{r4, lr}
@@ -180,23 +181,25 @@ const SPILL = `f:
 \tbx\tr1
 `;
 
-test('the primary keeps the plain declaration — the slot is a fact, the qualifier is not', () => {
+test('the default keeps the plain declaration — the slot is a fact, the qualifier is not', () => {
   expect(decompile('f', SPILL, ARMV4T_AGBCC).source).toContain('u16 sp4;');
 });
 
 test('/vol-slot is enumerated for the spill, and declares the slot volatile', () => {
   const cands = enumerateCandidates('f', SPILL, ARMV4T_AGBCC);
-  const vol = cands.find((c) => c.label.endsWith('/vol-slot'));
+  const vol = cands.find((c) => hasVariation(c.variations.slice(-1), 'vol-slot'));
   expect(vol).toBeDefined();
   expect(vol!.source).toContain('volatile u16 sp4;');
   // …and only the qualifier moved: the body is the primary's, verbatim
-  const plain = cands.find((c) => c.label === vol!.label.replace('/vol-slot', ''))!;
+  const plain = cands.find((c) => joinVariations(c.variations) === joinVariations(vol!.variations.slice(0, -1)))!;
   expect(vol!.source.replace('volatile u16 sp4;', 'u16 sp4;')).toBe(plain.source);
 });
 
 test('a function with no frame object enumerates no /vol-slot candidate', () => {
   const NOSLOT = `f:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n`;
-  expect(enumerateCandidates('f', NOSLOT, ARMV4T_AGBCC).some((c) => c.label.includes('/vol-slot'))).toBe(false);
+  expect(enumerateCandidates('f', NOSLOT, ARMV4T_AGBCC).some((c) => hasVariation(c.variations, 'vol-slot'))).toBe(
+    false,
+  );
 });
 
 // agbcc's own output for `s32 dv(u32 a0) { volatile u16 sp0; sp0 = 5; sp0 = a0 + 1; g(a0);
@@ -221,9 +224,9 @@ test('a slot whose dead store the readability pass dropped enumerates no /vol-sl
   const opts = { prototypes: { g: { params: 1 } } };
   // the slot IS recovered, so the decline is the access-set rule and not a missing frame object
   expect(decompile('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).source).toContain('u16 sp0;');
-  expect(enumerateCandidates('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
-    false,
-  );
+  expect(
+    enumerateCandidates('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).some((c) => hasVariation(c.variations, 'vol-slot')),
+  ).toBe(false);
 });
 
 // One `ldrh` feeding two uses: the structurer emits one C read per USE, so the tree reads the
@@ -248,7 +251,7 @@ const COLLAPSED_LOAD = `f:
 test('a slot read twice from one machine load enumerates no /vol-slot candidate', () => {
   const opts = { prototypes: { g: { params: 1 }, h: { params: 2 } } };
   expect(decompile('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).source).toContain('h(sp4, sp4)');
-  expect(enumerateCandidates('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
-    false,
-  );
+  expect(
+    enumerateCandidates('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).some((c) => hasVariation(c.variations, 'vol-slot')),
+  ).toBe(false);
 });

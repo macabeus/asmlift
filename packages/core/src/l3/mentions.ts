@@ -1,6 +1,6 @@
 // What one L3 tree does to each of its locals, counted once.
 //
-// Levers ask overlapping versions of the question and would disagree if each walked the tree
+// Respell variations ask overlapping versions of the question and would disagree if each walked the tree
 // its own way: l3/inlinebase.ts needs the SHAPE of every use (only an `index` base is re-spellable,
 // and the single assignment must be a top-level `const` nothing mentions earlier), while
 // l3/volatileval.ts needs the COUNTS, to check the tree still performs every access the machine
@@ -24,7 +24,7 @@ export interface Mentions {
   /** the bare-`const` value that assignment stores, or null if it stores anything else */
   constValue: number | null;
   addrTaken: number;
-  /** uses as the `base` of an `index` node — the only use shape a base lever can re-spell */
+  /** uses as the `base` of an `index` node — the only use shape a base-hoisting variation can re-spell */
   baseUses: number;
   /** every other read */
   otherUses: number;
@@ -53,7 +53,7 @@ function walkExpr(e: Expr, visit: (x: Expr, isIndexBase: boolean) => void, isInd
   if (e.k === 'index') {
     walkExpr(e.base, visit, true);
     // `lead` — a multidimensional global's LEADING subscripts — is an ordinary value position, so
-    // a name mentioned there is a real read. Missing it does not cost a candidate: it lets a lever
+    // a name mentioned there is a real read. Missing it does not cost a candidate: it lets a variation
     // DELETE a local the body still names.
     for (const l of e.lead ?? []) {
       walkExpr(l, visit, false);
@@ -67,7 +67,7 @@ function walkExpr(e: Expr, visit: (x: Expr, isIndexBase: boolean) => void, isInd
 }
 
 /** Every mention of every local, keyed by name. Locals only — a param or a global name is not in
- *  the map, and a lever asking about one gets `undefined` rather than a zeroed record. */
+ *  the map, and a pass asking about one gets `undefined` rather than a zeroed record. */
 export function localMentions(sfn: SFn): Map<string, Mentions> {
   const t = new Map<string, Mentions>(sfn.locals.map((l) => [l.name, blank()]));
   const seen = (name: string, at: number): Mentions | undefined => {
@@ -133,7 +133,7 @@ function scanMentions(stmts: readonly Stmt[], names: ReadonlySet<string>, first:
   // `stmtChildren` (ast.ts), so calling it per statement from inside a recursion that ALSO
   // descends re-walks every nested expression once per enclosing level — quadratic in the nesting
   // depth, 301 `has` calls at depth 24 where one pass needs 25. Small at today's call sites (one
-  // rewritten subtree per un-merge site, one dropped-locals set per lever tree), but this is a
+  // rewritten subtree per un-merge site, one dropped-locals set per respelled tree), but this is a
   // SHARED helper and its cost belongs in its contract.
   const found = new Set<string>();
   const body = [...stmts] as Stmt[];

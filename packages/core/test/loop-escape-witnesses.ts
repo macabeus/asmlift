@@ -1,7 +1,7 @@
 // Frozen IR witnesses shared by two suites — not a `.test.ts`, so vitest never collects it, and
 // importing it runs no test (a test file imported by another re-registers its own tests there).
 //
-// `namecoalesce.test.ts` holds them against the `/merge-names` axis's `loop-escape` gate;
+// `namecoalesce.test.ts` holds them against the `/merge-names` variation's `loop-escape` gate;
 // `nested-carrier.test.ts` against `structure.ts`'s `carriedByBothLoops`, which refuses the same
 // collision when the naming walk's nested-carrier rule, not the coalescing pass, would make it.
 //

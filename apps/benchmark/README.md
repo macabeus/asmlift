@@ -193,7 +193,7 @@ pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for O
                                       #   the winner it published: the `[score]` table, the
                                       #   [dropped]/[withheld] lists, the `[ranked]` line.
                                       #   `--enumerate` lists the fan without compiling anything,
-                                      #   `--show <label>` prints one candidate's C, `--force`
+                                      #   `--show <variations>` prints one candidate's C, `--force`
                                       #   scores a fan over 2,000, `--base <ref>` prints the fan
                                       #   MULTIPLIER against what that artifact recorded for the
                                       #   same row -- and on a declined row, the count that LEFT.
@@ -241,7 +241,7 @@ A SECOND cache sits a level below that one and is **on by default**: it serves t
 objects a previous run of the same toolchain already compiled (`packages/cli/src/candcache.ts`).
 It changes no result — the same rows, the same scores — and on a compile-dominated run it is the
 difference between minutes and tens of minutes. It is not a historical archive: hit rate decays as
-the axes accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
+the variations accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
 `ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
 against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 2% of
 the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a

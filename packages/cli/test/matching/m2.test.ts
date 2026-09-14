@@ -9,7 +9,7 @@
 // the pattern, and it is fixed at the rendering layer — the raw lowering now spells
 // `(s32)(a0 + ((u32)a0 >> 31)) >> 1` and matches on its own. So the pattern's payoff is
 // READABILITY, and the claim under test is that folding it stays byte-exact rather than that it
-// rescues a broken lift. The signedness lever is still pinned on a shape no spelling can hide
+// rescues a broken lift. The signedness variation is still pinned on a shape no spelling can hide
 // (m3.test.ts, division).
 import { SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';

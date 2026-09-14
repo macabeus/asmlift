@@ -208,7 +208,7 @@ function scopeSite(list: Stmt[], name: string): { list: Stmt[]; at: number } | n
  *  different bytes. Where no nested list holds every mention this IS `first-use`, which is what
  *  makes it a placement rather than a second policy.
  *
- *  These three are the axis a roster admission may state (rank.ts) and the only values
+ *  These three are the positions a hoist may state (rank.ts) and the only values
  *  `hoistBaseLocals` accepts. */
 export type HoistPlacement = 'head' | 'first-use' | 'scope';
 

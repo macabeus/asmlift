@@ -1,14 +1,16 @@
-// The `/scopebase` lever (l3/scopebase.ts): name a reused global base at the INNERMOST scope that
+// The `/scopebase` variation (l3/scopebase.ts): name a reused global base at the INNERMOST scope that
 // holds its uses.
 //
 // It exists because `basecse.ts` hoists only to a POSITION IN THE TOP-LEVEL STATEMENT LIST — the
 // function top or an init's first use, never inside a nested scope — and only for an `addr`/`const`
 // base. Both limits cost real bytes: neither of those positions is inside the `if` arm that holds
 // the uses, and the rank-aware bare spelling `gSym[0][i]` has a `var` base basecse cannot see.
-// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The lever is
+// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The variation is
 // differ-refereed, so its risk is spelling quality — except for the placement, where a base local
 // the assignment does not reach is a different variable and the differ REWARDS it.
 // test/regionbase.test.ts carries the second region rule.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { assertHoistsDominate, assertLocalsWritten, assertPlacementSurvives } from '../src/contracts';
@@ -18,7 +20,9 @@ import { without } from '../src/l3/gates';
 import { pollGuards } from '../src/l3/pollguard';
 import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 // `g` stands for an ARRAY-shaped global. `SFn.globals` entries carry a POINTER IrType because that
 // is the type of the decayed base, not because the symbol is a pointer global — a pointer-shaped
@@ -375,17 +379,65 @@ describe('what the cluster rule actually is', () => {
   });
 });
 
-describe('a throwing lever is reported, not swallowed', () => {
-  test('onLeverError fires with the label and the first error line', () => {
-    // `dropped` records only spellings the SCORER refused, so a lever that throws or fails a
-    // boundary contract used to vanish with no trace — indistinguishable from one that correctly
-    // declined — so a lever that always throws looks identical to one that never applies.
+describe('the coalesced results of the hoist are named by both variations it applied', () => {
+  // `corpus/agbcc-scopecoalesce.s` is agbcc's output for
+  //   extern unsigned short gBgTilemapBufs[4][1024];
+  //   void scopecoalesce(int flag, int t){ unsigned int i;
+  //     if (flag != 0) { unsigned short *p = gBgTilemapBufs[0]; p[0x252] = t; p[0x272] = t + 1; p[0x292] = t + 2; }
+  //     for (i = 0; i < *(unsigned short *)0x03001048; i++){ *(unsigned char *)(i + 0x03002000) = *(unsigned char *)(i + 0x03003000); }
+  //     for (i = *(unsigned short *)0x03001048; i < (unsigned int)(16 << t); i++){ *(unsigned char *)(i + 0x03002000) = 0; } }
+  // — `synthetic:sbscope`'s guarded tilemap stores beside `synthetic:ucmp`'s two counter loops, so the
+  // hoist fires on a tree that also has locals to merge. No benchmark row mints this pair, so this is
+  // the one place its name is enumerated at all. The map is `sbscope`'s: the rank-aware `gSym[0][i]`
+  // spelling is the base this pass can see and basecse cannot.
+  const MAP: SymbolMap = new Map([
+    [
+      0x03000900,
+      [
+        {
+          name: 'gBgTilemapBufs',
+          kind: 'data' as const,
+          declared: true,
+          shape: 'array' as const,
+          elemSize: 2,
+          elemSigned: false,
+          size: 8192,
+          dims: [4, 1024],
+        },
+      ],
+    ],
+  ]);
+  const fan = enumerateCandidates(
+    'scopecoalesce',
+    readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-scopecoalesce.s'), 'utf8'),
+    ARMV4T_AGBCC,
+    { prototypes: { scopecoalesce: { returnsVoid: true } }, symbols: MAP },
+  ).map((c) => c.variations);
+
+  test('`/scopebase` followed by a coalesce, as two variations', () => {
+    expect(fan).toContainEqual(['unsigned', 'scopebase']);
+    expect(fan).toContainEqual(['unsigned', 'scopebase', 'coalesce-v0-v1']);
+    expect(fan.filter((v) => hasVariations(v, ['scopebase', 'coalesce'])).length).toBeGreaterThan(0);
+  });
+
+  test('every coalesce on a scoped tree comes directly after its hoist', () => {
+    const scoped = fan.filter((v) => hasVariation(v, 'scopebase') && hasVariation(v, 'coalesce'));
+    expect(scoped.length).toBeGreaterThan(0);
+    expect(scoped.filter((v) => !hasVariations(v, ['scopebase', 'coalesce']))).toEqual([]);
+  });
+});
+
+describe('a throwing variation is reported, not swallowed', () => {
+  test('onEnumerationError fires with the throwing variations and the first error line', () => {
+    // `dropped` records only candidates the SCORER refused, so without this hook a variation that
+    // throws or fails a boundary contract would vanish with no trace — indistinguishable from one
+    // that correctly declined, and one that always throws would look identical to one that never applies.
     const asm = 'f:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgSeed\n';
     const seen: string[] = [];
     enumerateCandidates('f', asm, ARMV4T_AGBCC, {
-      onLeverError: (label, error) => seen.push(`${label}: ${error}`),
+      onEnumerationError: (variations, error) => seen.push(`${variations.join('/')}: ${error}`),
     });
-    // no lever throws on this input, so nothing is reported — the hook exists and is wired
+    // no variation throws on this input, so nothing is reported — the hook exists and is wired
     expect(seen).toEqual([]);
   });
 });
@@ -497,8 +549,8 @@ describe('a structurally SHARED access node refuses ITS KEY, and only its key', 
 
   test('`pollGuards` ALREADY shares a node, so the ordering it relies on is pinned here', () => {
     // `l3/pollguard.ts` returns `{ k: 'if', cond: s.cond, then: [s], else: [] }` — one `cond`
-    // object at two tree positions. It is harmless only because `rank.ts` derives the statement
-    // shapes AFTER this lever, an ordering nothing else pins. Run in the other order, the key in
+    // object at two tree positions. It is harmless only because `rank.ts` derives the stacked
+    // variations AFTER this variation, an ordering nothing else pins. Run in the other order, the key in
     // the shared condition drops out and every other key survives.
     const poll = ix(2, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
     const body: Stmt[] = [
@@ -567,8 +619,8 @@ describe('the dominance POSTCONDITION, checked on the pass`s own output', () => 
 });
 
 describe('a statement SHAPE may not move a placed def below the use it serves', () => {
-  // `rank.ts` derives the statement-shape products (`/initfirst`, `/pollguard`, `/pollread`) onto
-  // EVERY spelling, AFTER a lever has placed its defs — `pollReads` folds a materialized re-read
+  // `rank.ts` derives the stacked variations (`/initfirst`, `/pollguard`, `/pollread`) onto
+  // EVERY source, AFTER a variation has placed its defs — `pollReads` folds a materialized re-read
   // back into a loop condition, which is a move ACROSS the placement this pass computed. The
   // postcondition inside the pass cannot see that; this is the differential that can.
   const pAt = (i: number): Expr => ({

@@ -65,7 +65,7 @@ describe('which runs are checked at all', () => {
   });
 });
 
-// A separate axis from `runIsWholeTier`, which asks only about REWRITING A TIER FILE. Deciding
+// A separate question from `runIsWholeTier`, which asks only about REWRITING A TIER FILE. Deciding
 // the probe by that one silences it in the scoped loop, where TRAP 6 lives, and fires it on a tier
 // that never preprocesses.
 describe('which runs touch the host cpp at all', () => {
@@ -162,7 +162,7 @@ describe('the cpp probe itself', () => {
 });
 
 describe('the whole preflight, against a real throwaway checkout', () => {
-  // These are about the GIT axis, so the probe is injected healthy: a real-tier run now asks the
+  // These are about the GIT question, so the probe is injected healthy: a real-tier run now asks the
   // cpp question too, and none of these assertions is about whichever `cpp` the machine has.
   const ok = () => ({ ok: true, how: 'ok' });
   const repo = () => {
@@ -189,7 +189,7 @@ describe('the whole preflight, against a real throwaway checkout', () => {
     });
   });
 
-  test('an empty checkout refuses nothing on the git axis', () => {
+  test('an empty checkout refuses nothing on the git check', () => {
     expect(
       preflightRefusals({ tiers: ['real'] }, { repoRoot: repo(), probe: ok }).refusals.some((r) =>
         r.includes('differs from HEAD'),

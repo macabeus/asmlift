@@ -23,7 +23,8 @@ import { type CandidateCompiler, MatchScore, NoCandidateCompilerError, scoreSour
 
 export type { StageTrace, PatternEvent, TraceReport } from '@asmlift/core/trace';
 export interface CandidateReport {
-  label: string;
+  /** the variations this candidate applied — its name (`@asmlift/core/rank` `Candidate.variations`) */
+  variations: readonly string[];
   score: number;
   match: boolean;
   source: string;
@@ -97,7 +98,7 @@ export function decompileWithReport(
         compile,
       });
       candidates = ranked.candidates.map((c) => ({
-        label: c.label,
+        variations: c.variations,
         score: c.score.score,
         match: c.score.match,
         source: c.source,

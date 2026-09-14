@@ -113,12 +113,12 @@
 // what survives the pass is exactly what a consumer claimed, and everywhere else the output is the
 // one the lift alone produces.
 //
-// That is a choice of DEFAULT, not a finding that the raw spelling is better: the unclaimed cast
+// That is a decision about the DEFAULT, not a finding that the raw spelling is better: the unclaimed cast
 // has both signs. Over the 55 corpus functions the fold fires on, scored on the benchmark's own
 // path, restoring moves four scores — `SetWorldMapTilePalette` 59/91 → 54/93 and sa3
 // `UnpackSaveSector` 347 → 346 better, sa3 `ClearSave` 189 → 191 and `CompleteSave` 185 → 187
 // worse, all four to what the lift alone scores (and sa3 `ValidateSave`'s denominator, 213/378 →
-// 213/379). A spelling with both signs is the differ's to referee (a ranked axis), and none is
+// 213/379). A spelling with both signs is the differ's to referee (a ranked variation), and none is
 // built; the default is the one that asserts nothing the lift did not.
 import { type Block, type Fn, type Op, type Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS } from '../ir/opcodes';

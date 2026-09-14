@@ -332,13 +332,13 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     6 rows, protects 2 (`pokeemerald:IsStringLengthAtLeast`,
 //     `pokeemerald:TrySetCantSelectMoveBattleScript`), and on the other 4 the published winner
 //     folds THROUGH it — `kleod:CheckWorldCompletion`'s refused site is `v5 == 3 || v5 == 5` on an
-//     ordinary inner-loop counter with no dispatch region near it. It is the axis, not the clause,
+//     ordinary inner-loop counter with no dispatch region near it. It is the variation, not the clause,
 //     that keeps those 4. A structural discriminator is L1-visible and would be strictly better —
 //     is the shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee
 //     defined by the enclosing loop header — and is UNBUILT.
 //     The relayed clause below is a different statement (see its own note: a blunt proxy that
 //     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark, and a
-//     candidate born there would carry a `/connective` label for a fold that answers
+//     candidate born there would carry a `/connective` variation for a fold that answers
 //     no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not
@@ -413,8 +413,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     transfer the number to yet either — instrumenting the value form over the whole benchmark
 //     under both lift configurations counts 6 folds per configuration, every head a single icmp.
 //
-//     The `/connective` LIFT AXIS is a separate question from the default lift, and is unwidened:
-//     `onTreeOwned` below is what tells rank.ts the axis exists for a row, and this check sits ABOVE
+//     The `/connective` LIFT VARIATION is a separate question from the default lift, and is unwidened:
+//     `onTreeOwned` below is what tells rank.ts the variation exists for a row, and this check sits ABOVE
 //     it. Over the whole benchmark under BOTH configurations rank.ts lifts with (`foldTreeOwned`
 //     false and true), against the same rows with the connective case ablated: the recovered IR
 //     moves on the same 2 rows under each, `onTreeOwned` fires on the same rows either way, and
@@ -429,20 +429,20 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // source order, so which was written is recorded in the branch senses. This rewrite keeps ^h's
 // unchanged successor slot, so the connective comes out in the orientation those senses spell, and
 // which of the two that is depends on the branch RANGE below, not on the source. Reaching the
-// other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), and rank.ts's `/flip-join` axis
-// is what asks for it on a RECONVERGING if — the default spells the layout reading and the axis
+// other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), and rank.ts's `/flip-join` variation
+// is what asks for it on a RECONVERGING if — the default spells the layout reading and the variation
 // spells its dual, so both orientations are compiled and the differ picks (synthetic:ifand_near
-// matches at the default, synthetic:ifor_near on the axis).
+// matches at the default, synthetic:ifor_near on the variation).
 //
 // What neither reaches is the MIXED spelling. `negateJoinedBranchSense` is a per-FUNCTION boolean,
-// so the axis negates every joined `if` at once — and of the 28 real rows carrying the
+// so the variation negates every joined `if` at once — and of the 28 real rows carrying the
 // `short-circuit` tag, 16 hold two or more TWO-ARMED ifs (counted by `else`, which is what the
-// axis's own `thenS.length && elseS.length` gate needs) and 12 hold two or more conditions
+// variation's own `thenS.length && elseS.length` gate needs) and 12 hold two or more conditions
 // carrying a connective. TWO-ARMED is the count that matters: both sense booleans exclude a
 // one-armed `if` by construction, so a tally of `if (` of any kind is the wrong denominator.
-// The per-SITE negation is `/site-sense` (rank-axes.ts), which reads the orientation this fold
+// The per-SITE negation is `/site-sense` (rank-variations.ts), which reads the orientation this fold
 // stamps on the fused branch (`scSharedOnFall`, below) instead of the per-function boolean. A gate
-// on whether to ENUMERATE the axis does not reach the mixed spelling and removes one the differ
+// on whether to ENUMERATE the variation does not reach the mixed spelling and removes one the differ
 // would referee.
 //
 // The De Morgan negation below forecloses a third spelling, at a measured price: it DISTRIBUTES, so
@@ -450,7 +450,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // candidate — the IR has no `logic_not` to build one from (ir/opcodes.ts). Compiled both ways on
 // the `a || (b && c)` guard shape at agbcc's default flags, the two source spellings assemble to
 // the same bytes (12/12 rows, score 0), so the foreclosure costs nothing here. A shape that ever
-// separated them would be a new axis, not a bug in this fold.
+// separated them would be a new variation, not a bug in this fold.
 //
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
@@ -509,7 +509,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
 export interface BranchShortCircuitOptions {
   /** Take the fold at a site the PAIRWISE comparison-tree refusal owns, spelling the connective
-   *  where the default leaves the tree for switch-recover.ts. rank.ts's `/connective` axis; see the
+   *  where the default leaves the tree for switch-recover.ts. rank.ts's `/connective` variation; see the
    *  REFUSALS note. It widens the SHAPE the fold accepts and nothing about what the fold may move —
    *  every other refusal still applies, the RELAYED clause included.
    *
@@ -522,11 +522,11 @@ export interface BranchShortCircuitOptions {
    *  boolean, where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
   foldTreeOwned?: boolean;
   /** Called at each site the pairwise tree-ownership refusal is the ONE thing stopping the fold —
-   *  how rank.ts learns the axis has an inhabitant here without re-running the matcher. Asked LAST,
+   *  how rank.ts learns the variation has an inhabitant here without re-running the matcher. Asked LAST,
    *  after `sameArgs` and the negatability check, so a report means a `/connective` candidate that
    *  differs from its sibling: reporting a refusal merely REACHED would double the row's whole
    *  candidate cross for a lift that produces duplicates the dedup collapses. (Its sibling gate
-   *  `hasSetupArgsNarrowing` asks the same question the same way — does the lever CHANGE anything.)
+   *  `hasSetupArgsNarrowing` asks the same question the same way — does the variation CHANGE anything.)
    *  The pass re-scans after every rewrite, so one site can report more than once; read it as a
    *  boolean. */
   onTreeOwned?: () => void;
@@ -775,7 +775,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
  *  a minted count is always ODD: 1, 3, 5, 7, 9. At 8 a FOUR-clause inner conjunct (7 ops) folds and
  *  a FIVE-clause one (9 ops) does not; 7 and 8 are therefore one gate, and so is 9 over everything
  *  measured here, the deepest cone in the 2,047 lifted klonoa+sa3 functions minting 5 (17
- *  connective negations, 0 refused). Clause COUNT is not the axis either: a FLAT `a || b || c || …`
+ *  connective negations, 0 refused). Clause COUNT is not the measure either: a FLAT `a || b || c || …`
  *  chain pays nothing at all, because ^g's condition is never a connective in that shape.
  *
  *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Pinned as such rather
@@ -1179,16 +1179,16 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 //     materialized before the `if` — which judges ^g's own reads rather than this site's
 //     re-derivation, and runs after the table on every fold, escaping or not.
 //   - what `read-behind-effect` does not mirror of analysis.ts, of two kinds that err opposite
-//     ways. (1) `/reread-globals`. Under that STRUCTURING axis analysis.ts lets a store to a
+//     ways. (1) `/reread-globals`. Under that STRUCTURE variation analysis.ts lets a store to a
 //     DIFFERENT named global through (`mayWriteGlobal`, ir/alias.ts), so there the copy inlines —
 //     but this pass runs once per LIFT, and rank.ts structures every `/reread-globals` candidate
-//     from a lift it shares with the others (`liftVariants`), so the verdict cannot follow the
-//     axis without a lift of its own. It errs toward REFUSING, at a measured price:
+//     from a lift it shares with the others (`liftSettings`), so the verdict cannot follow the
+//     variation without a lift of its own. It errs toward REFUSING, at a measured price:
 //     `if (a && (gQ2[1] & 0x7f) == 0x7f) { gK = 1; gQ2[1] &= 0x80; return; } fnB();` keeps a 3/23
-//     nest where the fold matches on that axis (MATCH 0/21 with this rule ablated), and so does the
+//     nest where the fold matches on that variation (MATCH 0/21 with this rule ablated), and so does the
 //     same arm over a struct global's member; no corpus row. (2) the scopes analysis.ts
 //     materializes a read in for reasons OTHER than a barrier — `liveAcrossLoop`, the address-home
-//     axis, a load fed to a `cond_br` edge. They err toward ADMITTING: a local, under the guard,
+//     variation, a load fed to a `cond_br` edge. They err toward ADMITTING: a local, under the guard,
 //     one extra load on agbcc; no inhabitant measured. The DIFFERENTIAL in
 //     packages/cli/test/matching/shortcircuit-branch.test.ts is what notices either one growing.
 //

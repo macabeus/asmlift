@@ -1,7 +1,7 @@
 // Content-keyed caches under apps/benchmark/.cache/ for the benchmark's repeated work: reference
 // builds, the PPC AsmData objdump, and m2c (a frozen, pinned baseline). Each entry is keyed by a
 // sha256 of its declared DATA inputs (source text, symbol, toolchain config, m2c commit,
-// target-object bytes) plus a version lever `v` standing in for the CODE that runs inside the
+// target-object bytes) plus a version knob `v` standing in for the CODE that runs inside the
 // cached computation — data changes miss naturally; code changes require a `v` bump. No TTL.
 // Delete the directory to drop the cache; ASMLIFT_BENCH_CACHE=0 bypasses it.
 // Values are written tmp-then-rename so a concurrent reader never sees a torn file.
@@ -12,7 +12,7 @@
 // philosophy: packages/cli/src/candcache.ts, the cross-run candidate-OBJECT cache. It caches the
 // compiler's output for one candidate TU, which is an input to every objdiff score — so the
 // sentence above is only true of asmlift's own work, not of the compiles underneath it. The
-// boundary: this file caches DATA-keyed results of harness computations with a manual `v` lever
+// boundary: this file caches DATA-keyed results of harness computations with a manual `v` knob
 // for the code inside them; candcache caches one toolchain's object bytes under a namespace that
 // MEASURES the toolchain, and it is ON unless ASMLIFT_CANDCACHE says otherwise. `ASMLIFT_BENCH_CACHE=0`
 // bypasses both (candcache.ts reads it), because "bypass the benchmark's caches" has to mean all

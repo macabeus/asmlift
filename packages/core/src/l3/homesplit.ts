@@ -1,7 +1,7 @@
 // The `/livebase-block × /regionbase` PAIRING (rank.ts `/livebase-block/homesplit`): one base kept
 // at the function head and a SECOND base split into one local per region, in the same function.
 //
-// WHY IT IS NOT REACHABLE FROM EITHER LEVER. Both are whole-FUNCTION policies over the bases they
+// WHY IT IS NOT REACHABLE FROM EITHER VARIATION. Both are whole-FUNCTION policies over the bases they
 // bind: `hoistBaseLocals` homes every key its table admits at one placement, and
 // `hoistScopedBases` splits every key its region rule admits. A function whose two bases want
 // OPPOSITE answers is spelled by neither. `synthetic:dmapoll` is that function and its endpoint is
@@ -19,9 +19,9 @@
 // over ONE input is the shape that would collide, and nothing here does it.
 //
 // WHICH KEY IS WITHHELD IS NOT DERIVABLE, so every admitted key is offered as its own candidate,
-// LABELLED WITH THAT KEY, and the differ referees — the same posture `/scopebase` and `/regionbase`
-// take toward each other. The label carries `homeSplitTag(key)` because a candidate label is an
-// IDENTITY: `bench diff` and docs/ranked-repro.md compare candidates by it, so one label over two
+// NAMED BY THAT KEY, and the differ referees — the same posture `/scopebase` and `/regionbase`
+// take toward each other. The variation carries `homeSplitTag(key)` because a candidate's variations are its
+// IDENTITY: `bench diff` and docs/ranked-repro.md compare candidates by them, so one name over two
 // withholds would hide a program swap from both. The withhold itself is DATA: one rejection
 // prepended to the caller's own admission table, in the `Gate<BaseKey>` type that table already
 // has, so `firstRejection` attributes a refusal to it, `without` ablates it, and the composed table
@@ -30,7 +30,7 @@
 // EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A two-key withhold
 // exists only where the caller's table binds three — `homesplit-fan-cap` admits no more — and there
 // it is the three further pairs, each carrying the three respells rank.ts derives from one pipe:
-// NINE more candidates per axis point on those functions alone, before any shape product, and no
+// NINE more candidates per structure setting on those functions alone, before any stacked variation, and no
 // row asks for one. `l3/volatileptr.ts`'s `volatileSubsetCandidates` enumerates every proper subset
 // under the same cap; it does that because a row demanded each of them. Widen this the same way,
 // on a row.
@@ -59,7 +59,7 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
   ...gates,
 ];
 
-/** The withheld key as a LABEL token: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
+/** The withheld key as a variation's SUBJECT: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
  *  ride because they are part of the key — two keys over one address are two different spellings.
  *
  *  PARSED BY THE KEY'S PRODUCER (`l3/basecse.ts`'s `parseBaseKey`, beside `keyOf`), because a base
@@ -68,9 +68,9 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
  *  separator rather than the type's. Split from the FRONT, the type reads as the width and the
  *  width as the signedness; split from the END, the `a:` form comes out right and the `c:` form
  *  runs `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
- *  collapsing distinct keys onto one label. No shipped table admits a cast base outside
+ *  collapsing distinct keys onto one name. No shipped table admits a cast base outside
  *  `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key reaches this function
- *  today — but a candidate LABEL is an identity (`bench diff` and docs/ranked-repro.md compare
+ *  today — but a candidate's variations are its identity (`bench diff` and docs/ranked-repro.md compare
  *  candidates by it), and one roster line is all that stands between the two. The sibling half of
  *  the same hazard is already guarded in `splitHomeBases`, which translates a cast base to no
  *  region key and declines. */
@@ -79,7 +79,7 @@ export function homeSplitTag(key: string): string {
   const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);
   // The cast's element type stays in the token — it is part of the key's identity, since two casts
   // over one symbol are two locals that stride differently. Whitespace is squeezed defensively
-  // rather than because any type spells one: a label is one whitespace-free word everywhere it is
+  // rather than because any type spells one: a variation is one whitespace-free word everywhere it is
   // read, and that has to hold whatever `typeToString` grows.
   const type = castType === null ? '' : `<${castType}>`;
   return `${`${base}${type}`.replace(/\s+/g, '')}.${width}${signed ? 's' : 'u'}`;
@@ -104,7 +104,7 @@ export const HOMESPLIT_FAN_GATES: readonly Gate<HomeSplitFanCtx>[] = [
   },
   {
     id: 'homesplit-fan-cap',
-    why: 'one candidate per hoistable key, times the volatile products — the whole cost of the axis',
+    why: 'one candidate per hoistable key, times the volatile pairings — the whole cost of the variation',
     sound: false,
     rejects: (c) => c.hoistableKeys > 3,
   },
@@ -143,7 +143,7 @@ export interface HomeSplitCtx {
 export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
   {
     id: 'homesplit-no-region',
-    why: 'a withheld key the region rule declines to split leaves the spelling the primary carries',
+    why: 'a withheld key the region rule declines to split leaves the spelling the default carries',
     sound: false,
     rejects: (c) => !c.withheldSplits,
   },

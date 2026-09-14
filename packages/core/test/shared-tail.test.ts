@@ -24,6 +24,7 @@ import { sinkStoreTails } from '../src/raise/tailsink';
 import { enumerateCandidates } from '../src/rank';
 import { hasDivergentSharedRet, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 import { count, irTraceOf, traceOf } from './helpers';
 
 const emit = (fn: Fn, followEarlyReturns: boolean) =>
@@ -243,7 +244,7 @@ test('the two terms are one capability: sunk without the follow, the tail is wri
   expect(count(emit(fn, true), '[1] = 9;')).toBe(1);
 });
 
-test('with no follow before the sink or after it, neither twin has anything to spell', () => {
+test('with no follow before the sink or after it, neither alternative has anything to spell', () => {
   // `gcsedup`'s shape: both sources hang off the inner `if`, and the outer one's other side
   // returns on its own. No `ret` is reached from both sides of the outer `if`, before the sink or
   // after it — each copy is reached from one side — so rank.ts's gates see no follow for either
@@ -345,11 +346,11 @@ const THUMB_LEFT =
 
 test('rank.ts enumerates `/shared-ret` where an arm the compiler left returning shares the rest', () => {
   const cands = enumerateCandidates('f', THUMB_LEFT, ARMV4T_AGBCC, { prototypes: P });
-  const twin = cands.filter((c) => c.label.includes('/shared-ret'));
-  expect(twin.length).toBeGreaterThan(0);
-  expect(cands.filter((c) => c.label.includes('/shared-tail'))).toEqual([]); // nothing to sink
-  expect(twin.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
-  expect(cands.some((c) => c.label === 'unsigned' && count(c.source, ' = 9;') === 2)).toBe(true);
+  const alternative = cands.filter((c) => hasVariation(c.variations, 'shared-ret'));
+  expect(alternative.length).toBeGreaterThan(0);
+  expect(cands.filter((c) => hasVariation(c.variations, 'shared-tail'))).toEqual([]); // nothing to sink
+  expect(alternative.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned' && count(c.source, ' = 9;') === 2)).toBe(true);
 });
 
 // The cross-jumped tail, which only the sink turns into early returns.
@@ -360,11 +361,11 @@ const THUMB =
 
 test('rank.ts enumerates `/shared-tail` on a cross-jumped tail, beside the unsunk spellings', () => {
   const cands = enumerateCandidates('f', THUMB, ARMV4T_AGBCC, { prototypes: P });
-  const twin = cands.filter((c) => c.label.includes('/shared-tail'));
-  expect(twin.length).toBeGreaterThan(0);
-  expect(twin.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
-  expect(cands.some((c) => c.label === 'unsigned' && c.source.includes('[1] = v0;'))).toBe(true);
-  expect(cands.some((c) => c.label === 'unsigned/unmerge')).toBe(true);
+  const alternative = cands.filter((c) => hasVariation(c.variations, 'shared-tail'));
+  expect(alternative.length).toBeGreaterThan(0);
+  expect(alternative.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned' && c.source.includes('[1] = v0;'))).toBe(true);
+  expect(cands.some((c) => joinVariations(c.variations) === 'unsigned/unmerge')).toBe(true);
 });
 
 // `THUMB_LEFT` with the both-sides tail storing the parameter `r1`: a store tail that is already the
@@ -381,12 +382,12 @@ test('where the sink deletes the follow, rank.ts still enumerates the follow alo
   const errors: string[] = [];
   const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+    onEnumerationError: (v, e) => errors.push(`${v.join('/')}: ${e}`),
   });
   const once = cands.filter((c) => count(c.source, '[1] = a1;') === 1);
   expect(once.length).toBeGreaterThan(0);
-  expect(once.every((c) => c.label.includes('/shared-ret') && /= 7;\s+return;/.test(c.source))).toBe(true);
-  expect(cands.filter((c) => c.label.includes('/shared-tail'))).toEqual([]);
+  expect(once.every((c) => hasVariation(c.variations, 'shared-ret') && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.filter((c) => hasVariation(c.variations, 'shared-tail'))).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -400,8 +401,8 @@ const THUMB_FLAT =
 
 test('where the fn as raised and the sunk fn both have a follow, both twins are enumerated', () => {
   const cands = enumerateCandidates('f', THUMB_FLAT, ARMV4T_AGBCC, { prototypes: P });
-  const ret = cands.filter((c) => c.label.includes('/shared-ret'));
-  const tail = cands.filter((c) => c.label.includes('/shared-tail'));
+  const ret = cands.filter((c) => hasVariation(c.variations, 'shared-ret'));
+  const tail = cands.filter((c) => hasVariation(c.variations, 'shared-tail'));
   expect(ret.length).toBeGreaterThan(0);
   expect(tail.length).toBeGreaterThan(0);
   // the follow alone keeps the merged store; after the sink, the arm `= 7` returns on its own
@@ -434,8 +435,8 @@ test('a tail that reads a forwarder parameter is copied with the value each path
   const errors: string[] = [];
   const cands = enumerateCandidates('f', THUMB_PAD, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+    onEnumerationError: (v, e) => errors.push(`${v.join('/')}: ${e}`),
   });
   expect(errors).toEqual([]);
-  expect(cands.some((c) => c.label.includes('/shared-tail') && count(c.source, ' = 9;') === 1)).toBe(true);
+  expect(cands.some((c) => hasVariation(c.variations, 'shared-tail') && count(c.source, ' = 9;') === 1)).toBe(true);
 });
