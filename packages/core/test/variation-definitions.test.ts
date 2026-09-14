@@ -75,6 +75,17 @@ describe('the definitions are well-formed', () => {
   test('every implementedIn is a file in the repository', () => {
     expect(entries.filter(([, d]) => !existsSync(join(REPO_ROOT, d.implementedIn))).map(([n]) => n)).toEqual([]);
   });
+
+  // A code span renders as a padded chip, so a letter written straight after one detaches from it:
+  // "`if`s" reads "if s". Write "`if` statements" instead.
+  test('no code span runs into a letter', () => {
+    const glued = (s: string) => s.split('`').some((piece, i) => i % 2 === 0 && i > 0 && /^[A-Za-z]/.test(piece));
+    const strings = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : v !== null && typeof v === 'object' ? Object.values(v).flatMap(strings) : [];
+    const all = [READER_WORDS, VARIATION_KIND_DEFINITIONS, VARIATION_DEFINITIONS].flatMap(strings);
+    expect(all.length).toBeGreaterThan(300);
+    expect(all.filter(glued)).toEqual([]);
+  });
 });
 
 describe('the variation kinds', () => {
@@ -114,7 +125,9 @@ describe('docs/vocabulary.md says the same', () => {
   }
 
   test('the six words table', () => {
-    expect(tableRows('The six words a reader needs')).toEqual(READER_WORDS.map((w) => [`**${w.word}**`, w.meaning]));
+    expect(tableRows('The six words a reader needs')).toEqual(
+      READER_WORDS.map((w) => [`**${w.word}**`, w.command ? `${w.meaning} ${w.command}` : w.meaning]),
+    );
   });
 
   test('the variation kinds table', () => {

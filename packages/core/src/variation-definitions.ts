@@ -21,9 +21,16 @@
 // Pure data: this module stays browser-safe.
 import type { VariationKind, VariationName } from './variation-tokens';
 
+export interface ReaderWord {
+  word: string;
+  meaning: string;
+  /** the command that shows it, for a contributor; the table's cell is `meaning` then `command` */
+  command?: string;
+}
+
 /** The words a reader of candidate enumeration needs, as `docs/vocabulary.md` defines them. The
  *  test holds that table to this one, text for text. */
-export const READER_WORDS: readonly { word: string; meaning: string }[] = [
+export const READER_WORDS: readonly ReaderWord[] = [
   {
     word: 'candidate',
     meaning:
@@ -31,13 +38,13 @@ export const READER_WORDS: readonly { word: string; meaning: string }[] = [
   },
   {
     word: 'fan',
-    meaning:
-      'Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.',
+    meaning: 'Every candidate asmlift enumerated for one function, whether it built or not.',
+    command: '`pnpm bench fan <row>` lists it.',
   },
   {
     word: 'winner',
-    meaning:
-      "The best-scoring candidate that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.",
+    meaning: "The best-scoring candidate among those that may be published. Its source is the function's result.",
+    command: '`pnpm bench fan <row> --show winner` prints it.',
   },
   {
     word: 'variation',
@@ -75,8 +82,8 @@ export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: Variat
   structure: {
     title: 'Structure',
     meaning:
-      'How the `if`s and loops are rebuilt from the branches: which way a test reads, where a loop is entered, what reaches a merge (the point where two paths meet).',
-    examples: ['flip-branch', 'defsite', 'loop-entry', 'flip-join', 'uns-cmp'],
+      'How the checked control flow becomes C: which way a test reads, where a loop starts, what reaches a merge (the point where two paths meet), where a value is kept, and how a read or a compare is spelled.',
+    examples: ['flip-branch', 'defsite', 'loop-entry', 'reread-globals', 'uns-cmp'],
   },
   respell: {
     title: 'Respell',
@@ -183,7 +190,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A chain of `x == K` tests on one value can be recovered as a `switch` or folded into a short-circuit ' +
       'condition, and one raise cannot do both: a folded `||` is no longer the comparison a switch is ' +
       'recovered from. This lift lets the short-circuit fold take the chain. It also reaches functions whose ' +
-      'switch recovery declined entirely and came out as nested `if`s.',
+      'switch recovery declined entirely and came out as nested `if` statements.',
     compilerBehavior:
       'With one group of cases and a `default:` the two spellings are one object on agbcc. With a second ' +
       'group they differ: the switch builds a balanced dispatch where the chain tests one value after another.',
@@ -310,7 +317,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'chosen branch-sense sites are spelled the other way, one bit per site',
     detail:
       '`flip-branch` and `flip-join` flip every `if` of a function at once, which cannot spell a function ' +
-      'whose `if`s were written in opposite senses. This measurement crosses the whole fan with every mask ' +
+      'whose `if` statements were written in opposite senses. This measurement crosses the whole fan with every mask ' +
       'over the first sites, which costs a factor of two per site, to price that gap and to learn whether ' +
       "a target's mix is reachable at all.",
     offeredWhen:
@@ -325,7 +332,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       before: 'if (a) { X(); } else { Y(); } if (b) { P(); } else { Q(); }',
       after: 'if (!a) { Y(); } else { X(); } if (b) { P(); } else { Q(); }',
-      note: 'under `sense-1`',
+      note: 'as the variation `sense-1` spells it',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['flip-branch', 'flip-join', 'site-sense'],
@@ -647,7 +654,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: "A pointer local is assigned a numeric address and never a value containing a global's address.",
     subject: {
       meaning:
-        'The locals qualified, `-`-joined: `volatile-p1` qualifies only `p1`. With no subject every eligible ' +
+        'The locals qualified, joined by hyphens: `volatile-p1` qualifies only `p1`. With no subject every eligible ' +
         'local is qualified. Subsets are enumerated up to three eligible locals.',
       examples: ['volatile-p1', 'volatile-p0-p1'],
     },
@@ -817,13 +824,14 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'both re-run by one loop; or two locals first set to constants in opposite arms of an `if` outside ' +
       'any loop.',
     subject: {
-      meaning: 'The pair, `-`-joined: `coalesce-v0-v1` renames `v0` to `v1` and drops the declaration of `v0`.',
+      meaning:
+        'The two locals, joined by a hyphen: `coalesce-v0-v1` renames `v0` to `v1` and drops the declaration of `v0`.',
       examples: ['coalesce-v0-v1', 'coalesce-v2-v3'],
     },
     example: {
       before: 'v0 = a0 + 1; f(v0); v1 = 2; g(v1);',
       after: 'v1 = a0 + 1; f(v1); v1 = 2; g(v1);',
-      note: 'under `coalesce-v0-v1`',
+      note: 'as the variation `coalesce-v0-v1` spells it',
     },
     implementedIn: l3('coalesce'),
     seeAlso: ['merge-names', 'scopebase', 'livebase'],
@@ -849,7 +857,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
   },
   livebase: {
     title: 'Base pointer held across the body',
-    summary: 'a fixed address reused inside a loop or at one offset again and again is still held in a pointer local',
+    summary: 'a fixed address reused inside a loop or at one offset again and again is held in a pointer local',
     detail:
       'The default base hoist refuses a base reused inside a loop or at a repeated constant offset, ' +
       'predicting that the compiler loads the address again. A memory-mapped poll (store, then re-read the ' +
@@ -1075,7 +1083,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       before: 'return a0 * (128 << 9);',
       after: 'w0 = 128 << 9; w1 = a0 * w0; return w1;',
-      note: 'under `regcopy-ret-fresh`',
+      note: 'as the variation `regcopy-ret-fresh` spells it',
     },
     implementedIn: l3('regspell'),
     seeAlso: ['coalesce', 'merge-names'],

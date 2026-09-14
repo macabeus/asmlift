@@ -10,7 +10,7 @@ the dominant one.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **candidate** | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                         |
 | **fan**       | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                     |
-| **winner**    | The best-scoring candidate that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.             |
+| **winner**    | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it. |
 | **variation** | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too. |
 | **dropped**   | A candidate the scorer refused: its source did not build.                                                                                          |
 | **withheld**  | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                  |
@@ -63,13 +63,13 @@ bare "the variations" could be read both ways.
 
 A candidate's variations appear in this order.
 
-| Kind           | What it changes                                                                                                                                                | Examples                                                         |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Signedness** | Whether the function's parameters are read as signed or unsigned. Every candidate carries one, as its first variation.                                         | `unsigned`, `signed`                                             |
-| **Lift**       | How the instructions are read before any C is built: which moves set up a call, how a chain of tests joins, whether paths share a return.                      | `setup-args`, `connective`, `shared-ret`, `shared-tail`          |
-| **Structure**  | How the `if`s and loops are rebuilt from the branches: which way a test reads, where a loop is entered, what reaches a merge (the point where two paths meet). | `flip-branch`, `defsite`, `loop-entry`, `flip-join`, `uns-cmp`   |
-| **Respell**    | A rewrite of the finished C that keeps what it does: where a value lives, whether an address is held in a pointer, how statements are ordered.                 | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile` |
-| **Symbol map** | Globals are written as raw addresses instead of the names the project's symbol map gives them. Always the last variation.                                      | `raw-globals`                                                    |
+| Kind           | What it changes                                                                                                                                                                                            | Examples                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Signedness** | Whether the function's parameters are read as signed or unsigned. Every candidate carries one, as its first variation.                                                                                     | `unsigned`, `signed`                                                |
+| **Lift**       | How the instructions are read before any C is built: which moves set up a call, how a chain of tests joins, whether paths share a return.                                                                  | `setup-args`, `connective`, `shared-ret`, `shared-tail`             |
+| **Structure**  | How the checked control flow becomes C: which way a test reads, where a loop starts, what reaches a merge (the point where two paths meet), where a value is kept, and how a read or a compare is spelled. | `flip-branch`, `defsite`, `loop-entry`, `reread-globals`, `uns-cmp` |
+| **Respell**    | A rewrite of the finished C that keeps what it does: where a value lives, whether an address is held in a pointer, how statements are ordered.                                                             | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile`    |
+| **Symbol map** | Globals are written as raw addresses instead of the names the project's symbol map gives them. Always the last variation.                                                                                  | `raw-globals`                                                       |
 
 For a reader, what happened to one variation on one function is one of two states: it **carried N
 candidates**, or it **threw**. N can be 0: the variation did not apply, or an earlier combination
