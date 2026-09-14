@@ -5,7 +5,7 @@ import { type inferParserType, parseAsArrayOf, parseAsString, parseAsStringLiter
 
 import { hashToSearchParams } from '../../../shared/utils/hash-params';
 
-export const TAB_IDS = ['overview', 'explorer', 'gap', 'methodology'] as const;
+export const TAB_IDS = ['overview', 'explorer', 'fan', 'gap', 'methodology'] as const;
 export type TabId = (typeof TAB_IDS)[number];
 export const tabParser = parseAsStringLiteral(TAB_IDS).withDefault('overview');
 
@@ -67,6 +67,33 @@ export const FEATURE_TERM_KEY = 'about';
 export function featureHref(id: string, hash: string): string {
   const params = hashToSearchParams(hash);
   params.set(FEATURE_TERM_KEY, id);
+  return `#${params.toString()}`;
+}
+
+/** The variation drawer's subject: its own key rather than a reuse of `about`, so a variation and a
+ *  feature can be held open over the same view without one closing the other. */
+export const VARIATION_TERM_PARSER = parseAsString.withDefault('');
+export const VARIATION_TERM_KEY = 'variation';
+
+/** Link that opens the variation drawer for `name` over the view `hash` describes — `featureHref`'s
+ *  twin, and `hash` comes from `useCurrentHash` for the same reason. */
+export function variationHref(name: string, hash: string): string {
+  const params = hashToSearchParams(hash);
+  params.set(VARIATION_TERM_KEY, name);
+  return `#${params.toString()}`;
+}
+
+/** Link to one row's detail in the Function Explorer, over no filter: the row must be in the table
+ *  the link opens, whatever the reader had filtered before. Only the shell's `view` is kept from
+ *  `hash` — without it the shell opens its default view, the Playground. */
+export function rowHref(id: string, hash: string): string {
+  const params = new URLSearchParams();
+  const view = hashToSearchParams(hash).get('view');
+  if (view !== null) {
+    params.set('view', view);
+  }
+  params.set('tab', 'explorer');
+  params.set('fn', id);
   return `#${params.toString()}`;
 }
 
