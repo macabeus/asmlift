@@ -184,7 +184,7 @@ function CatalogueEntry({
         </div>
         <div>
           <div className="font-mono text-sm text-slate-300">{count(s.rows)}</div>
-          <div className="text-[10px] text-slate-500">rows</div>
+          <div className="text-[10px] text-slate-500">rows carried</div>
         </div>
         <div>
           <div className="font-mono text-sm text-slate-300">{count(s.candidates)}</div>

@@ -45,8 +45,19 @@ export function Chip({ children }: { children: React.ReactNode }) {
 /** One published variation, subject and all (`coalesce-v0-v1`), tinted by its kind: hover for the
  *  definition, click for the variation's drawer. Both are real links to that drawer over the
  *  reader's view (`hash`, from `useCurrentHash`), so closing the drawer returns to the view the chip
- *  sat in. */
-export function VariationChip({ part, hash, onOpen }: { part: string; hash: string; onOpen: (name: string) => void }) {
+ *  sat in. `dim` is a variation the winner does not carry: neutral, so it never reads as part of the
+ *  winning spelling. */
+export function VariationChip({
+  part,
+  hash,
+  onOpen,
+  dim = false,
+}: {
+  part: string;
+  hash: string;
+  onOpen: (name: string) => void;
+  dim?: boolean;
+}) {
   const { name, subject } = parseVariation(part);
   const def = VARIATION_DEFINITIONS[name];
   const href = variationHref(name, hash);
@@ -89,8 +100,8 @@ export function VariationChip({ part, hash, onOpen }: { part: string; hash: stri
         <Pill
           mono
           size="xs"
-          tint={VARIATION_KIND_COLOR[variationToken(name).variationKind]}
-          className="hover:brightness-125"
+          tint={dim ? undefined : VARIATION_KIND_COLOR[variationToken(name).variationKind]}
+          className={dim ? 'text-slate-400 hover:text-slate-200' : 'hover:brightness-125'}
         >
           {part}
         </Pill>

@@ -142,7 +142,7 @@ export function WinningSpelling({
                     {g.items.map((v) => (
                       <li key={v.name} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         <span className="shrink-0 sm:w-44">
-                          <VariationChip part={v.name} hash={hash} onOpen={onOpenVariation} />
+                          <VariationChip part={v.name} hash={hash} onOpen={onOpenVariation} dim />
                         </span>
                         <span className="min-w-0 flex-1 text-xs text-slate-300">
                           <InlineCode text={VARIATION_DEFINITIONS[v.name].title} />

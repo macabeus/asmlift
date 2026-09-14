@@ -46,7 +46,7 @@ export function VariationDetail({
   return (
     <div className="fixed inset-0 z-40 flex">
       <div className="flex-1 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div className="scroll-slim w-full max-w-3xl overflow-y-auto border-l border-slate-700 bg-slate-900 shadow-2xl">
+      <div className="scroll-slim w-full max-w-2xl overflow-y-auto border-l border-slate-700 bg-slate-900 shadow-2xl">
         {isVariationName(name) ? (
           <VariationDetailBody
             name={name}
@@ -57,8 +57,8 @@ export function VariationDetail({
           />
         ) : (
           // Only reachable from a hand-edited URL: every published name is registered and defined.
-          <div className="p-6">
-            <p className="text-sm text-slate-300">
+          <div className="flex items-start justify-between gap-4 px-6 py-4">
+            <p className="py-1 text-sm text-slate-300">
               No variation is called <code className="font-mono text-slate-100">{name}</code>.
             </p>
             <CloseButton onClose={onClose} />
@@ -149,7 +149,8 @@ export function VariationDetailBody({
         )}
 
         <div className="space-y-2">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {/* Stacked, as FeatureDetail's are: a one-line example side by side is cut at half width. */}
+          <div className="space-y-2">
             <div className="min-w-0">
               <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">without it</div>
               <CodeBlock code={def.example.before} language="c" className={CODE_PRE} />
@@ -255,6 +256,11 @@ function Figure({ label, value, hint }: { label: string; value: number | string 
   );
 }
 
+/** The row list's columns from `sm` up. Below it a row is two lines: the function, its outcome and its
+ *  candidates, then the winner's variations across the whole width. */
+const ROW_GRID =
+  'grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(0,2.2fr)_minmax(0,1.1fr)_minmax(0,1.2fr)_3.5rem_minmax(0,3fr)]';
+
 /** Every row whose fan carried the variation. Winners first. */
 function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<typeof rowsFor>; hash: string }) {
   const won = rows.filter((r) => r.won).length;
@@ -266,73 +272,72 @@ function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<
       {rows.length === 0 ? (
         <p className="mt-2 text-sm text-slate-500">No row in this benchmark carried it.</p>
       ) : (
-        <div className="scroll-slim mt-2 max-h-96 overflow-auto rounded-lg border border-slate-800">
-          {/* FIXED layout with declared widths: the symbol is the one unbounded column, and left to
-              itself it pushes the winner's variations off the edge. It truncates instead. */}
-          <table className="w-full min-w-[36rem] table-fixed border-collapse text-sm">
-            <thead className="sticky top-0 bg-slate-900/95 text-[10px] uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="w-[28%] px-3 py-1.5 text-left font-medium">Function</th>
-                <th className="w-[16%] px-3 py-1.5 text-left font-medium">Toolchain</th>
-                <th className="w-[16%] px-3 py-1.5 text-left font-medium">asmlift</th>
-                <th
-                  className="w-[10%] px-3 py-1.5 text-right font-medium"
-                  title="candidates in this row's fan carrying it"
+        <div className="scroll-slim mt-2 max-h-96 overflow-y-auto rounded-lg border border-slate-800 text-sm">
+          <div
+            className={`${ROW_GRID} sticky top-0 z-10 hidden gap-x-3 bg-slate-900/95 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:grid`}
+          >
+            <div>Function</div>
+            <div>Toolchain</div>
+            <div>asmlift</div>
+            <div className="text-right" title="candidates in this row's fan carrying it">
+              Cand.
+            </div>
+            <div>Winner&apos;s variations</div>
+          </div>
+          {rows.map(({ row, tally, winner }) => (
+            <div
+              key={row.id}
+              className={`${ROW_GRID} items-center gap-x-3 gap-y-1 border-t border-slate-800/70 px-3 py-1.5 hover:bg-slate-800/40`}
+            >
+              <div className="truncate font-mono text-xs">
+                <a
+                  href={rowHref(row.id, hash)}
+                  title={row.id}
+                  className="text-slate-100 hover:text-teal-300 hover:underline"
                 >
-                  Cand.
-                </th>
-                <th className="w-[30%] px-3 py-1.5 text-left font-medium">Winner&apos;s variations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ row, tally, winner }) => (
-                <tr key={row.id} className="border-t border-slate-800/70 hover:bg-slate-800/40">
-                  <td className="truncate px-3 py-1.5 font-mono text-xs">
-                    <a
-                      href={rowHref(row.id, hash)}
-                      title={row.id}
-                      className="text-slate-100 hover:text-teal-300 hover:underline"
-                    >
-                      {row.sym}
-                    </a>
-                  </td>
-                  <td
-                    className="truncate px-3 py-1.5 text-[11px] text-slate-400"
-                    title={TOOLCHAIN_LABEL[row.toolchain]}
-                  >
-                    {row.toolchain}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5">
-                    <OutcomeBadge outcome={row.asmlift.outcome} />
-                  </td>
-                  <td
-                    className="px-3 py-1.5 text-right font-mono text-xs text-slate-300"
-                    title={
-                      tally.dropped || tally.withheld
-                        ? `${tally.dropped ?? 0} dropped · ${tally.withheld ?? 0} withheld`
-                        : undefined
-                    }
-                  >
-                    {tally.candidates.toLocaleString()}
-                  </td>
-                  {/* THIS variation lit inside the winner's variations: the column answers where it
-                      sits in the spelling that won, or shows it absent from it. */}
-                  <td className="px-3 py-1.5 font-mono text-[11px] leading-relaxed" data-name={name}>
-                    {winner.length === 0 ? (
-                      <span className="text-slate-600">no winner</span>
-                    ) : (
-                      winner.map((p, i) => (
-                        <span key={`${p.part}-${i}`}>
-                          {i > 0 && <span className="text-slate-700">/</span>}
-                          <span className={p.lit ? 'font-semibold text-teal-300' : 'text-slate-500'}>{p.part}</span>
-                        </span>
-                      ))
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  {row.sym}
+                </a>
+                <span className="text-[11px] text-slate-500 sm:hidden"> · {row.toolchain}</span>
+              </div>
+              <div
+                className="hidden truncate text-[11px] text-slate-400 sm:block"
+                title={TOOLCHAIN_LABEL[row.toolchain]}
+              >
+                {row.toolchain}
+              </div>
+              <div className="whitespace-nowrap">
+                <OutcomeBadge outcome={row.asmlift.outcome} />
+              </div>
+              <div
+                className="text-right font-mono text-xs text-slate-300"
+                title={
+                  tally.dropped || tally.withheld
+                    ? `${tally.dropped ?? 0} dropped · ${tally.withheld ?? 0} withheld`
+                    : undefined
+                }
+              >
+                {tally.candidates.toLocaleString()}
+              </div>
+              {/* THIS variation lit inside the winner's variations: the column answers where it sits in
+                  the spelling that won, or shows it absent from it. A name never breaks inside itself
+                  (`setup-args`); a line may break only after a `/`. */}
+              <div className="col-span-full font-mono text-[11px] leading-relaxed sm:col-span-1" data-name={name}>
+                {winner.length === 0 ? (
+                  <span className="text-slate-600">no winner</span>
+                ) : (
+                  winner.map((p, i) => (
+                    <span key={`${p.part}-${i}`}>
+                      <span className="whitespace-nowrap">
+                        <span className={p.lit ? 'font-semibold text-teal-300' : 'text-slate-500'}>{p.part}</span>
+                        {i < winner.length - 1 && <span className="text-slate-700">/</span>}
+                      </span>
+                      <wbr />
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
