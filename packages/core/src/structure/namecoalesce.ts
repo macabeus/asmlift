@@ -176,7 +176,7 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
   },
   {
     id: 'type',
-    why: 'the survivor keeps its own declared type, so the two must agree',
+    why: 'a merged variable has one declared type, so the types of the two names must agree',
     sound: true,
     guardedBy: 'namecoalesce.test.ts: ablating type merges two names the declarations disagree about',
     rejects: (c) => !c.sameType,
@@ -193,7 +193,7 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
   },
   {
     id: 'loop-escape',
-    why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
+    why: 'outside the loop a loop variable’s name holds the value from before the update',
     sound: false,
     // Not required of an unsound gate, and named anyway: the differential fuzz never ablates this
     // one, so the frozen witnesses are its only evidence and `gate-contract` pins their test.

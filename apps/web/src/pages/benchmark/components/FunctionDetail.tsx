@@ -1,5 +1,4 @@
 import type { DecompilerId, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
-import { joinVariations } from '@asmlift/core/variation-tokens';
 import { useMemo, useState } from 'react';
 
 import { CodeBlock, type CodeLanguage } from '../../../shared/components/CodeBlock';
@@ -8,6 +7,7 @@ import type { ShareState } from '../../../shared/utils/permalink';
 import { formatC } from '../lib/format-c';
 import { playgroundShare } from '../lib/playground';
 import { DECOMPILER_COLOR, TOOLCHAIN_LABEL } from '../theme';
+import { WinningSpelling } from './WinningSpelling';
 import { Chip, FeatureChip, GapBadge, OutcomeBadge } from './ui/Badge';
 
 // The Benchmark's code-block chrome (the shared CodeBlock only fixes scroll/whitespace/mono).
@@ -265,8 +265,8 @@ function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolea
 
 /** ALL input provenance for the row, consolidated in one collapsed accordion: the prototype
  *  hints asmlift received, the context m2c received, and the symbol map's state (used /
- *  present-but-unused / none) with the map symbols the winning candidate references
- *  and the candidate spelling that won. Every field is optional — old data carries none.
+ *  present-but-unused / none) with the map symbols the winning candidate references.
+ *  Every field is optional: a row carries only the inputs it was given.
  *  `symbolsUsed` exists exactly when the row was SCORED with a map: a declined/failed map row
  *  has no winning spelling, so it makes no usage claim at all (the "none" state) — never the
  *  false "present, unused" (which asserts a winner that named nothing). */
@@ -277,13 +277,10 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   const symbols = r.symbolsUsed ?? [];
   const protoEntries = Object.entries(fn.proto ?? {});
 
-  // Summary digest: `Provenance — 3 symbols · winner unsigned/raw-globals`.
+  // Summary digest: `Provenance — 3 symbols`.
   const digest: string[] = [];
   if (r.symbolMap && scored) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
-  }
-  if (r.winnerVariations) {
-    digest.push(`winner ${joinVariations(r.winnerVariations)}`);
   }
 
   return (
@@ -347,14 +344,6 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 ))}
               </div>
             )}
-            {r.winnerVariations && (
-              <div
-                className="mt-1.5 font-mono text-slate-500"
-                title="the candidate spelling that won the differ ranking"
-              >
-                winner: {joinVariations(r.winnerVariations)}
-              </div>
-            )}
           </ProvenanceRow>
         </div>
       )}
@@ -368,12 +357,18 @@ export function FunctionDetail({
   onClose,
   onOpenInPlayground,
   onOpenFeature,
+  hash,
+  onOpenVariation,
 }: {
   fn: FunctionResult;
   onClose: () => void;
   onOpenInPlayground: (s: ShareState) => void;
   /** open a tag's definition — stacks the feature drawer over this one (see shared/utils/overlay) */
   onOpenFeature: (id: string) => void;
+  /** the live fragment, which names this row, so a variation's link keeps the detail open under it */
+  hash: string;
+  /** open a variation's drawer — stacks over this one, as a feature's does */
+  onOpenVariation: (name: string) => void;
 }) {
   const share = useMemo(() => playgroundShare(fn), [fn]);
   const [m2cPath, setM2cPath] = usePersistedPath(PATH_STORAGE_KEYS.m2c);
@@ -480,6 +475,8 @@ export function FunctionDetail({
               </p>
             </div>
           )}
+
+          <WinningSpelling fn={fn} hash={hash} onOpenVariation={onOpenVariation} />
 
           {/* Collapsibles: the decompiler input + copyable reproduction scripts */}
           <CollapsibleCode title="Input disassembly" text={fn.targetAsm} language="asm" />

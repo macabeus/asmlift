@@ -1,10 +1,22 @@
 // Central color + label constants. Keep every hue here (not inline) so new charts stay cheap.
 import type { DecompilerId, Outcome, ToolchainId } from '@asmlift/bench-schema';
+import type { VariationKind } from '@asmlift/core/variation-tokens';
 
 /** Per-decompiler brand colors. */
 export const DECOMPILER_COLOR: Record<DecompilerId, string> = {
   asmlift: '#2dd4bf', // teal-400 (brand)
   m2c: '#a855f7', // purple-500
+};
+
+/** One hue per variation kind: the Fan Explorer's scatter, bars and group headings. Teal and the gold
+ *  are the brand pair; the other three sit far enough from both, and from each other, to separate on
+ *  slate. */
+export const VARIATION_KIND_COLOR: Record<VariationKind, string> = {
+  signedness: '#38bdf8', // sky-400
+  lift: '#a78bfa', // violet-400
+  structure: '#2dd4bf', // teal-400
+  respell: '#fbbf24', // amber-400
+  'symbol-map': '#fb7185', // rose-400
 };
 
 /** Outcome status colors. */
@@ -104,4 +116,5 @@ export const CHART = {
   tooltipBg: '#1e293b', // slate-800
   tooltipBorder: '#334155',
   tooltipText: '#e2e8f0',
+  labelHalo: '#0f172a', // slate-900: the outline that keeps a label legible over a mark
 } as const;

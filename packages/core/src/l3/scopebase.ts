@@ -119,7 +119,7 @@ export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
   },
   {
     id: 'shadowed-or-nonarray-base',
-    why: '`&name` on a local or a pointer-shaped global names a different object',
+    why: 'taking `&name` of a local or a pointer-shaped global names a different object',
     sound: true,
     guardedBy: 'addr-placement.test.ts: scopebase declines the shadowed name rather than take its address',
     rejects: (c) => c.base.k === 'var' && !c.addressable.has(c.base.name),
@@ -416,13 +416,13 @@ export interface RegionCtx {
 const COUNTING_RULES: readonly Gate<RegionCtx>[] = [
   {
     id: 'single-use',
-    why: 'one access re-materializes as cheaply as a named local',
+    why: 'a base accessed once is as cheap to load again as to hold in a named local',
     sound: false,
     rejects: (c) => c.uses < 2,
   },
   {
     id: 'repeated-const-offset',
-    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    why: 'a fixed offset read and then written is one scalar update, and the compiler loads its address again for it',
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },
@@ -433,7 +433,7 @@ const COUNTING_RULES: readonly Gate<RegionCtx>[] = [
 const LOOP_RULES: readonly Gate<RegionCtx>[] = [
   {
     id: 'per-iteration-use',
-    why: 'no scope reachable from the use runs at a loop condition or `for` inc cadence',
+    why: 'no scope reachable from the use runs as often as a loop condition or a `for` increment',
     sound: false,
     rejects: (c) => c.perIteration,
   },
@@ -506,7 +506,7 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, .
 const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
   ...g,
   id: `region-${g.id}`,
-  why: `${g.why} — judged over ONE region's direct uses`,
+  why: `counted over one region’s own uses: ${g.why}`,
 });
 
 /** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, MINUS the one
@@ -548,7 +548,7 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
   ...ablateHeuristic(LOOP_RULES, 'nested-loop-use'),
   {
     id: 'regions-degenerate',
-    why: 'one region is the function-top hoist basecse and /livebase already offer',
+    why: 'a single region is the function-top local that the default hoist and `livebase` already offer',
     sound: false,
     rejects: (c) => c.siblingRegions < 2,
   },

@@ -1206,7 +1206,7 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
   {
     id: 'entry-arm',
-    why: 'predecessors() does not see the entry edge, so the copy would also run on function entry',
+    why: 'an arm that is the function’s first block is also reached on entry, where the copy would run too',
     sound: true,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a value the ARM re-reads, when the arm is the entry block',
     rejects: (c) => c.arm === c.fn.blocks[0],
@@ -1314,7 +1314,7 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     // = 1;` among them), scores 8 more worse, and scores none of 249 probes over five toolchains
     // better. What this one does not mirror is the RESIDUE above.
     id: 'read-behind-effect',
-    why: 'a re-read analysis.ts spells as a local costs a second load on a target whose compiler reloads one',
+    why: 'a re-read written as a local costs a second load on a target whose compiler reloads one',
     sound: false,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a READ the arm holds across an effect is not re-derived',
     rejects: (c) => c.targetReloadsLocalReread && readHeldAcrossEffect(c),

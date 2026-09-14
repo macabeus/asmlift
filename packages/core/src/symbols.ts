@@ -268,6 +268,13 @@ export function isBitfieldField(f: SymbolStructField): boolean {
   return f.bitWidth !== undefined;
 }
 
+/** Does the map declare a bitfield member anywhere, in a symbol's own layout or its pointee's? */
+export function declaresBitfields(symbols: SymbolMap): boolean {
+  return [...symbols.values()].some((infos) =>
+    infos.some((i) => [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some(isBitfieldField)),
+  );
+}
+
 /** A layout member that {@link declaredFields} passed: sizable, and seated at an offset no
  *  earlier member already covers. */
 export type DeclaredField = SymbolStructField & { size: number };

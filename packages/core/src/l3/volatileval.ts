@@ -67,7 +67,7 @@ interface SlotCtx {
 export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
   {
     id: 'no-frame',
-    why: 'the frame record is the memory home the qualifier has to force',
+    why: 'without a stack slot in the assembly there is no memory for the qualifier to force the local into',
     sound: false,
     rejects: (c) => !c.hasFrame,
   },
@@ -86,13 +86,13 @@ export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
   },
   {
     id: 'addr-taken',
-    why: 'an address-taken local already has a memory home, so there is none left to force',
+    why: 'an address-taken local already lives in memory, so the qualifier has nothing left to force',
     sound: false,
     rejects: (c) => c.addrTaken > 0,
   },
   {
     id: 'access-set',
-    why: 'the qualifier asserts every access written is performed, so the tree’s must be the machine’s',
+    why: 'the qualifier asserts every access written is performed, so the lifted code must write exactly the accesses the machine performed',
     sound: true,
     guardedBy: 'volatileval.test.ts: a store the tree no longer carries declines',
     rejects: (c) => !c.accessSetKept,

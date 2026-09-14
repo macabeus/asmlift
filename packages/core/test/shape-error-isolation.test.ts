@@ -3,7 +3,8 @@
 // `rank.ts`'s `respell` derives the statement shapes (`/initfirst`, `/pollguard`, `/pollread`, and
 // all of them together) onto every respelled tree. Each subset gets its own try, so two facts hold of
 // that loop: a throw deriving one subset leaves the later ones in the fan, and the report names
-// `name + suffix + shapeSuffix` — the shape that failed, not the respell variation's suffix.
+// the respell variation followed by the shape's variations — the shape that failed, not the respell
+// variation alone.
 //
 // The shapes are mocked because no committed disassembly fires more than `/initfirst`: the fixture
 // that would exercise this naturally is a compiler fact nobody has, and the isolation is a

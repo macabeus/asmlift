@@ -1118,14 +1118,14 @@ export interface FreshMergeCarrier {
 export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
   {
     id: 'redundant-phi',
-    why: 'a merge every edge feeds the same value overwrites nothing, so its own home buys a copy',
+    why: 'a merge every edge feeds the same value overwrites nothing, so a local of its own only adds a copy',
     sound: false,
     guardedBy: 'fresh-merge.test.ts: a redundant phi over one parameter keeps the parameter',
     rejects: (c) => c.allSame,
   },
   {
     id: 'param-rooted',
-    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured variation",
+    why: 'a merge fed by a chain that does not start at a parameter keeps its ordinary local',
     sound: false,
     guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
     rejects: (c) => !c.paramRooted,

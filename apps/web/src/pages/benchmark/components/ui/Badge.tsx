@@ -1,9 +1,14 @@
 // The benchmark's badges: a <Pill> plus the domain rule that picks its color.
 import { FEATURE_BY_ID, type GapSize, type Outcome } from '@asmlift/bench-schema';
+import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
+import { parseVariation, variationToken } from '@asmlift/core/variation-tokens';
 
 import { HoverCard } from '../../../../shared/components/HoverCard';
 import { Pill } from '../../../../shared/components/Pill';
-import { GAP_BUCKETS, GAP_BUCKET_COLOR, OUTCOME_COLOR, OUTCOME_LABEL } from '../../theme';
+import { variationHref } from '../../lib/explorer-url';
+import { GAP_BUCKETS, GAP_BUCKET_COLOR, OUTCOME_COLOR, OUTCOME_LABEL, VARIATION_KIND_COLOR } from '../../theme';
+import { InlineCode } from './InlineCode';
+import { followInPlace } from './follow-in-place';
 
 /** Solid-dot + tinted-pill badge, colored by outcome. */
 export function OutcomeBadge({ outcome }: { outcome: Outcome }) {
@@ -34,6 +39,71 @@ export function Chip({ children }: { children: React.ReactNode }) {
     <Pill mono size="xs">
       {children}
     </Pill>
+  );
+}
+
+/** One published variation, subject and all (`coalesce-v0-v1`), tinted by its kind: hover for the
+ *  definition, click for the variation's drawer. Both are real links to that drawer over the
+ *  reader's view (`hash`, from `useCurrentHash`), so closing the drawer returns to the view the chip
+ *  sat in. `dim` is a variation the winner does not carry: neutral, so it never reads as part of the
+ *  winning spelling. */
+export function VariationChip({
+  part,
+  hash,
+  onOpen,
+  dim = false,
+}: {
+  part: string;
+  hash: string;
+  onOpen: (name: string) => void;
+  dim?: boolean;
+}) {
+  const { name, subject } = parseVariation(part);
+  const def = VARIATION_DEFINITIONS[name];
+  const href = variationHref(name, hash);
+  const follow = (e: React.MouseEvent) => followInPlace(e, () => onOpen(name));
+
+  return (
+    <HoverCard
+      content={
+        <>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-sm font-semibold text-white">
+              <InlineCode text={def.title} />
+            </span>
+            <Pill mono size="xs">
+              {name}
+            </Pill>
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-300 first-letter:uppercase">
+            <InlineCode text={def.summary} />
+          </p>
+          {subject !== undefined && def.subject && (
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <span className="font-mono text-slate-200">{subject}</span>: <InlineCode text={def.subject.meaning} />
+            </p>
+          )}
+          <a
+            href={href}
+            onClick={follow}
+            className="mt-2 inline-block text-[11px] font-medium text-teal-400 hover:text-teal-300"
+          >
+            read more →
+          </a>
+        </>
+      }
+    >
+      <a href={href} onClick={follow} className="rounded focus-visible:outline-1 focus-visible:outline-teal-400">
+        <Pill
+          mono
+          size="xs"
+          tint={dim ? undefined : VARIATION_KIND_COLOR[variationToken(name).variationKind]}
+          className={dim ? 'text-slate-400 hover:text-slate-200' : 'hover:brightness-125'}
+        >
+          {part}
+        </Pill>
+      </a>
+    </HoverCard>
   );
 }
 

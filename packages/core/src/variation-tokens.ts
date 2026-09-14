@@ -8,12 +8,13 @@
 // merges `v0` into `v1`, `volatile-p1` qualifies `p1` — and that trailing `-…` is the variation's
 // SUBJECT.
 //
-// WHY A CLOSED TABLE. The entries are minted as `/`-prefixed suffix strings in `rank.ts` and
-// `rank-variations.ts`, several of them parameterized (`${suffix}-${c.merged}`, `homesplit-${tag}`,
-// `sense-${m}`), so the set of names is open by construction and nothing but this table closes it.
-// Three checks hold the table to the code: a static scan of the mint literals
-// (`packages/core/test/variation-tokens.test.ts`), every name the committed benchmark artifact
-// publishes, and every name the enumerated corpus mints (both in `apps/benchmark/test`).
+// WHY A CLOSED TABLE. Enumeration (`rank.ts`, `rank-variations.ts`) mints a name as a list of
+// `Variation`s: a `VariationName`, or a subject-taking name applied through `withSubject`. So a
+// variation the table does not hold is a type error at its mint site, and a subject that does not
+// fit its pattern throws where it is minted. The other direction — an entry nothing mints any more
+// — is `packages/core/test/variation-mints.test.ts`, which reads the mint sites off the type
+// checker. What each name means to a reader is `variation-definitions.ts`, keyed by
+// `VariationName` below.
 //
 // WHY A TEST PREDICATE GOES THROUGH HERE. A predicate written as a substring —
 // `name.includes('/regcopy-ret')` inside `.toEqual([])` — keeps passing after the variation is
@@ -22,11 +23,27 @@
 // substrings: `hasVariation(v, 'livebase')` is false on `livebase-block`, so a predicate about a
 // family of variations names each member.
 //
+// WHY A TARGET GATE IS HERE TOO. A variation offered only on some compilers is withheld by
+// `offeredOn`, which enumeration asks before it builds a candidate, and the webapp's drawer reads the
+// same entry. What a reader is told about the target is the rule enumeration applies.
+//
 // Pure data and pure functions: this module stays browser-safe.
+import type { TargetDescription } from './target';
 
 /** The variation kinds, in the order their variations appear in a candidate's name. */
 export const VARIATION_KINDS = ['signedness', 'lift', 'structure', 'respell', 'symbol-map'] as const;
 export type VariationKind = (typeof VARIATION_KINDS)[number];
+
+/** The compiler behavior a variation's offer depends on: offered only where the target declares
+ *  `behavior`, or, with `declared: false`, only where it does not. `unlessWith` names the variation
+ *  whose company lifts the restriction; `RegisteredToken` holds it to a registered name. */
+export interface TargetGate<B extends CompilerBehavior = CompilerBehavior, N extends string = string> {
+  behavior: B;
+  declared: boolean;
+  unlessWith?: N;
+}
+
+type CompilerBehavior = keyof TargetDescription['compilerBehaviors'];
 
 export interface VariationToken {
   /** the registered spelling; a `-` inside it is part of the name (`livebase-block`, `vol-slot`) */
@@ -35,6 +52,7 @@ export interface VariationToken {
   /** what may follow `name-` when the variation names what it was applied to; absent for a
    *  variation that takes no subject. Anchored by `parseVariation`, never here. */
   subject?: RegExp;
+  target?: TargetGate;
 }
 
 /** The local names a multi-result variation's subject lists, `-`-joined: `v0-v1`, `p0-p1-p2`. */
@@ -42,7 +60,7 @@ const LOCALS = /[a-z]+\d+(?:-[a-z]+\d+)*/;
 
 /** Every variation, grouped by kind in name order. The order of this table is not published
  *  behaviour: enumeration order is decided in `rank.ts` and `rank-variations.ts`, never here. */
-export const VARIATION_TOKENS: readonly VariationToken[] = [
+const TOKENS = [
   // signedness: always the first part of a name, because both answers are enumerated
   { name: 'unsigned', variationKind: 'signedness' },
   { name: 'signed', variationKind: 'signedness' },
@@ -80,7 +98,7 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'vol-store', variationKind: 'respell' },
   { name: 'unreduce', variationKind: 'respell' },
   { name: 'ptr-field', variationKind: 'respell' },
-  { name: 'offmember', variationKind: 'respell' },
+  { name: 'offmember', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
   { name: 'inlinebase', variationKind: 'respell' },
   { name: 'scopebase', variationKind: 'respell' },
   { name: 'regionbase', variationKind: 'respell' },
@@ -88,14 +106,22 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'indexed', variationKind: 'respell' },
   { name: 'livebase', variationKind: 'respell' },
   { name: 'livebase-block', variationKind: 'respell' },
-  { name: 'basefold', variationKind: 'respell' },
-  { name: 'unfolded', variationKind: 'respell' },
-  { name: 'orderbase', variationKind: 'respell' },
-  { name: 'orderbase-scoped', variationKind: 'respell' },
+  { name: 'basefold', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
+  { name: 'unfolded', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
+  { name: 'orderbase', variationKind: 'respell', target: { behavior: 'arrayShapeFromStride', declared: true } },
+  {
+    name: 'orderbase-scoped',
+    variationKind: 'respell',
+    target: { behavior: 'arrayShapeFromStride', declared: true },
+  },
   { name: 'homesplit', variationKind: 'respell', subject: /[^/,\s]+/ },
   { name: 'mulfirst', variationKind: 'respell' },
-  { name: 'nearbase', variationKind: 'respell' },
-  { name: 'advance', variationKind: 'respell' },
+  { name: 'nearbase', variationKind: 'respell', target: { behavior: 'nearBaseSpan', declared: true } },
+  {
+    name: 'advance',
+    variationKind: 'respell',
+    target: { behavior: 'foldsPointerAdvance', declared: false, unlessWith: 'volatile' },
+  },
   { name: 'parkfirst', variationKind: 'respell' },
   { name: 'sinkinit', variationKind: 'respell' },
   { name: 'regcopy', variationKind: 'respell', subject: /ret|ret-fresh/ },
@@ -104,12 +130,55 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'pollread', variationKind: 'respell' },
   // symbol map: the map's shaped spellings withheld; always the last part
   { name: 'raw-globals', variationKind: 'symbol-map' },
-];
+] as const satisfies readonly VariationToken[];
 
-const BY_NAME = new Map(VARIATION_TOKENS.map((t) => [t.name, t]));
+/** A registered variation's name. `variation-definitions.ts` keys its definitions by this type, so a
+ *  registry entry without a definition, or a definition for a name the registry does not hold, is a
+ *  type error. */
+export type VariationName = (typeof TOKENS)[number]['name'];
+
+/** A registry entry: its name is registered, and its target gate names a behavior some entry gates on
+ *  and, in `unlessWith`, a registered variation. */
+export type RegisteredToken = VariationToken & {
+  name: VariationName;
+  target?: TargetGate<GatingBehavior, VariationName>;
+};
+
+export const VARIATION_TOKENS: readonly RegisteredToken[] = TOKENS;
+
+/** A registered variation that names what it was applied to. */
+export type SubjectVariationName = Extract<(typeof TOKENS)[number], { subject: RegExp }>['name'];
+
+/** A compiler behavior some registered variation's offer depends on. */
+export type GatingBehavior = Extract<(typeof TOKENS)[number], { target: TargetGate }>['target']['behavior'];
+
+declare const subjectFitted: unique symbol;
+
+/** A subject-taking variation applied to a subject, `coalesce-v0-v1`. Only `withSubject` makes one,
+ *  so its subject fits the registered pattern. */
+export type SubjectVariation = `${SubjectVariationName}-${string}` & { readonly [subjectFitted]: true };
+
+/** One part of a candidate's name as enumeration mints it. */
+export type Variation = VariationName | SubjectVariation;
+
+const BY_NAME = new Map<string, RegisteredToken>(VARIATION_TOKENS.map((t) => [t.name, t]));
+
+/** Each subject pattern, anchored. */
+const SUBJECT = new Map<string, RegExp>(
+  VARIATION_TOKENS.flatMap((t) => (t.subject === undefined ? [] : [[t.name, new RegExp(`^(?:${t.subject.source})$`)]])),
+);
+
+/** `name` applied to `subject`: `withSubject('coalesce', 'v0-v1')` is `coalesce-v0-v1`. Throws on a
+ *  subject the registered pattern does not fit. */
+export function withSubject(name: SubjectVariationName, subject: string): SubjectVariation {
+  if (!SUBJECT.get(name)!.test(subject)) {
+    throw new Error(`'${name}' takes no subject '${subject}' (packages/core/src/variation-tokens.ts)`);
+  }
+  return `${name}-${subject}` as SubjectVariation;
+}
 
 /** The registry entry for a name, or a throw naming what is registered. */
-export function variationToken(name: string): VariationToken {
+export function variationToken(name: string): RegisteredToken {
   const t = BY_NAME.get(name);
   if (t === undefined) {
     throw new Error(`'${name}' is not a registered variation (packages/core/src/variation-tokens.ts)`);
@@ -117,23 +186,36 @@ export function variationToken(name: string): VariationToken {
   return t;
 }
 
+/** May enumeration offer a candidate carrying `variations` on `target`? False when one of them has a
+ *  target gate the target's compiler behaviors fail and no variation its `unlessWith` names is among
+ *  them. A behavior is declared when present and not `false`. */
+export function offeredOn(target: TargetDescription, variations: readonly Variation[]): boolean {
+  const names = variations.map((v) => parseVariation(v).name);
+  return names.every((n) => {
+    const gate = variationToken(n).target;
+    if (gate === undefined || (gate.unlessWith !== undefined && names.includes(gate.unlessWith))) {
+      return true;
+    }
+    const value = target.compilerBehaviors[gate.behavior];
+    return (value !== undefined && value !== false) === gate.declared;
+  });
+}
+
 /** One part of a candidate's name, split into the variation it names and that variation's subject.
  *  The longest registered name wins, so `livebase-block` is never `livebase` applied to `block`.
  *  Throws on a part no registered variation spells. */
-export function parseVariation(part: string): { name: string; subject?: string } {
-  if (BY_NAME.has(part)) {
-    return { name: part };
+export function parseVariation(part: string): { name: VariationName; subject?: string } {
+  const exact = BY_NAME.get(part);
+  if (exact !== undefined) {
+    return { name: exact.name };
   }
-  let best: { name: string; subject: string } | undefined;
+  let best: { name: VariationName; subject: string } | undefined;
   for (const t of VARIATION_TOKENS) {
     if (t.subject === undefined || !part.startsWith(`${t.name}-`)) {
       continue;
     }
     const subject = part.slice(t.name.length + 1);
-    if (
-      new RegExp(`^(?:${t.subject.source})$`).test(subject) &&
-      (best === undefined || t.name.length > best.name.length)
-    ) {
+    if (SUBJECT.get(t.name)!.test(subject) && (best === undefined || t.name.length > best.name.length)) {
       best = { name: t.name, subject };
     }
   }
@@ -150,10 +232,7 @@ export function parseVariation(part: string): { name: string; subject?: string }
  *  its pattern, and when any of the candidate's own variations is unregistered. */
 export function hasVariation(variations: readonly string[], name: string, subject?: string | null): boolean {
   const t = variationToken(name);
-  if (
-    typeof subject === 'string' &&
-    (t.subject === undefined || !new RegExp(`^(?:${t.subject.source})$`).test(subject))
-  ) {
+  if (typeof subject === 'string' && !(SUBJECT.get(t.name)?.test(subject) ?? false)) {
     throw new Error(`'${name}' takes no subject '${subject}' (packages/core/src/variation-tokens.ts)`);
   }
   return variations.some((part) => {
@@ -199,4 +278,78 @@ export function splitVariations(name: string): string[] {
   const variations = name.split('/');
   joinVariations(variations);
   return variations;
+}
+
+/** How many of one fan's candidates carry one variation. `candidates` counts the whole fan —
+ *  scored, dropped and withheld alike — and `dropped` and `withheld` are the refused part of that
+ *  count, each absent when 0. */
+export interface VariationTally {
+  candidates: number;
+  dropped?: number;
+  withheld?: number;
+}
+
+interface NamedCandidate {
+  variations: readonly string[];
+}
+
+/** Every variation a fan carried, keyed by its REGISTERED name, with how many of the fan's
+ *  candidates carry it. A variation applied to a subject counts under its registered name
+ *  (`coalesce-v0-v1` and `coalesce-v2-v3` are both `coalesce`), and a candidate counts once under
+ *  each name it carries however many subjects it applies it to.
+ *
+ *  `fan` is ranking's three-way partition, which puts every enumerated candidate in exactly one
+ *  list, so each signedness entry's `candidates` sums with the other's to the fan size.
+ *
+ *  A tally, not a factorisation: enumeration gates prune the fan, so the counts do not multiply to
+ *  its size. Keys run in kind order, then by name, so two tallies of one fan serialize to the same
+ *  bytes whatever order the fan was listed in. Throws on a variation the registry does not hold. */
+export function tallyFanVariations(fan: {
+  candidates: readonly NamedCandidate[];
+  dropped: readonly NamedCandidate[];
+  withheld: readonly NamedCandidate[];
+}): Record<string, VariationTally> {
+  const registeredName = new Map<string, string>();
+  const nameOf = (part: string): string => {
+    let name = registeredName.get(part);
+    if (name === undefined) {
+      name = parseVariation(part).name;
+      registeredName.set(part, name);
+    }
+    return name;
+  };
+  const counts = new Map<string, { candidates: number; dropped: number; withheld: number }>();
+  const add = (list: readonly NamedCandidate[], refusal: 'dropped' | 'withheld' | undefined): void => {
+    for (const c of list) {
+      for (const name of new Set(c.variations.map(nameOf))) {
+        let n = counts.get(name);
+        if (n === undefined) {
+          n = { candidates: 0, dropped: 0, withheld: 0 };
+          counts.set(name, n);
+        }
+        n.candidates++;
+        if (refusal !== undefined) {
+          n[refusal]++;
+        }
+      }
+    }
+  };
+  add(fan.candidates, undefined);
+  add(fan.dropped, 'dropped');
+  add(fan.withheld, 'withheld');
+  const kindIndex = (name: string): number => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
+  const names = [...counts.keys()].sort((a, b) => kindIndex(a) - kindIndex(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return Object.fromEntries(
+    names.map((name) => {
+      const n = counts.get(name)!;
+      return [
+        name,
+        {
+          candidates: n.candidates,
+          ...(n.dropped ? { dropped: n.dropped } : {}),
+          ...(n.withheld ? { withheld: n.withheld } : {}),
+        },
+      ];
+    }),
+  );
 }

@@ -380,13 +380,13 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     // Censused at `decompile()`'s default structuring, map-less, one tree per row over the
     // artifact's 404 agbcc rows: `ORDERBASE_GATES` admits 12 keys on 10 rows, 11 of them cast keys.
     id: 'cast-base',
-    why: 'a struct element’s reinterpret cast is the inline spelling unless the assembly says the base had a home',
+    why: 'a struct element’s reinterpret cast is the inline spelling unless the assembly says the base was held in a local',
     sound: false,
     rejects: (c) => c.castBase,
   },
   {
     id: 'single-use',
-    why: 'one access re-materializes as cheaply as a named local',
+    why: 'a base accessed once is as cheap to load again as to hold in a named local',
     sound: false,
     rejects: reachedOnce,
   },
@@ -417,7 +417,7 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     // gate DOES demote; that subtree's own winner is a `/livebase` candidate, so nothing on the
     // ranked path loses by it. Stated because the demotion is invisible from either file alone.
     id: 'repeated-const-offset',
-    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    why: 'a fixed offset read and then written is one scalar update, and the compiler loads its address again for it',
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },
@@ -446,7 +446,7 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
 export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   {
     id: 'single-use-unfolded',
-    why: 'one access re-materializes as cheaply as a named local, unless its offset survived the fold',
+    why: 'a base accessed once is as cheap to load again as to hold in a named local, unless its offset survived the fold',
     sound: false,
     rejects: (c) => reachedOnce(c) && !c.unfoldedOffset,
   },
@@ -672,7 +672,7 @@ export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'cast-base'), 'single-use'),
   {
     id: 'order-licensed',
-    why: 'nothing in the assembly says this base had a home: the index was scaled first, or the order says nothing',
+    why: 'nothing in the assembly says this base was held in a local: the index was scaled first, or the order says nothing',
     sound: false,
     rejects: (c) => !c.orderLicensed,
   },

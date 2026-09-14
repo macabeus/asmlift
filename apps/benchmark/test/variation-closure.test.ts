@@ -1,21 +1,23 @@
 // The variation registry (`packages/core/src/variation-tokens.ts`) against the names the benchmark
 // actually carries.
 //
-// CLOSURE, POINTS 2 AND 3 OF 3 (point 1, the mint literals, is `packages/core/test/variation-tokens.
-// test.ts`):
+// CLOSURE OVER PUBLISHED AND ENUMERATED NAMES. The mint sites themselves are typed: an unregistered
+// variation is a `pnpm typecheck` error, and `packages/core/test/variation-mints.test.ts` proves
+// every registered variation is still minted. What those two cannot see is data:
 //
-//   2. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
+//   1. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
 //      candidate's — parses, part by part, in kind order. This runs wherever the suite runs, CI
 //      included, and it is the half that reads published data.
-//   3. every name the ENUMERATED synthetic tier mints parses the same way. The artifact stores the
+//   2. every name the ENUMERATED synthetic tier mints parses the same way. The artifact stores the
 //      winner and the refused candidates only, which is a fraction of the variations enumeration
 //      mints, so only an enumeration closes the set. It needs agbcc to build the rows' targets, so
 //      it is SKIPPED where agbcc is absent — CI among them — and reports as skipped, never as
 //      passed.
 //
-// A name that fails here is either a variation minted without a registry entry, or a registry entry
-// spelled differently from its mint site. Both are fixed in `variation-tokens.ts` or at the mint.
+// A name that fails here is one the type gate cannot refuse: its parts out of kind order, or, in the
+// artifact, a name published before the registry changed.
 import { enumerateRanked } from '@asmlift/cli/rank';
+import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {
   VARIATION_KINDS,
   joinVariations,
@@ -63,6 +65,8 @@ describe('closure over the names the committed artifact publishes', () => {
       winnerVariations?: string[];
       droppedCandidates?: { variations: string[] }[];
       withheldCandidates?: { variations: string[] }[];
+      fanSize?: number;
+      fanVariations?: Record<string, unknown>;
     };
   }[];
   const winners = rows.flatMap((r) => (r.asmlift?.winnerVariations === undefined ? [] : [r.asmlift.winnerVariations]));
@@ -98,6 +102,35 @@ describe('closure over the names the committed artifact publishes', () => {
 
   test('no published name uses `winner`, the word `bench fan --show` reserves', () => {
     expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
+  });
+
+  // `tsc` already refuses a registered name without a reader definition; this is the run-time check,
+  // and it names what the artifact would show undefined.
+  test('every published variation, and every fan roster key, has a reader definition', () => {
+    const parts = [...names].flatMap((n) => splitVariations(n));
+    // A roster key is a registered name as it stands, never a variation applied to a subject.
+    const rosterKeys = [...new Set(rows.flatMap((r) => Object.keys(r.asmlift?.fanVariations ?? {})))];
+    expect(rosterKeys.filter((k) => variationToken(k).name !== k)).toEqual([]);
+    const undefinedNames = [...new Set([...parts.map((p) => parseVariation(p).name), ...rosterKeys])].filter(
+      (n) => !Object.hasOwn(VARIATION_DEFINITIONS, n),
+    );
+    expect(undefinedNames).toEqual([]);
+  });
+
+  // The Fan Explorer counts a win only on a row whose fan was counted, so a ranked row without a
+  // roster would vanish from every rate and price without a trace on the page.
+  test('a row carries a fan roster exactly when it carries a fan size, and its winner is inside it', () => {
+    expect(rows.filter((r) => (r.asmlift?.fanSize === undefined) !== (r.asmlift?.fanVariations === undefined))).toEqual(
+      [],
+    );
+    expect(rows.filter((r) => r.asmlift?.fanVariations !== undefined).length).toBeGreaterThanOrEqual(800);
+    const outside = rows.flatMap((r) =>
+      (r.asmlift?.winnerVariations ?? [])
+        .map((p) => parseVariation(p).name)
+        .filter((n) => !Object.hasOwn(r.asmlift?.fanVariations ?? {}, n))
+        .map((n) => `${r.id}: ${n}`),
+    );
+    expect(outside).toEqual([]);
   });
 });
 

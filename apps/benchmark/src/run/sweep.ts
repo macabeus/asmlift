@@ -97,7 +97,7 @@ export interface SweepRecord {
   fanSourceHash?: string;
   /** `--fan` only: sha1/12 over the candidates' variations alone, each as its `/`-joined string,
    *  in enumeration order. */
-  fanVariationsHash?: string;
+  fanNamesHash?: string;
   /** `--fan` only: the first line of what enumeration threw. Not an error — `enumerateRanked` has
    *  no annotate mode, so every row that publishes `declined` throws here (234 of the 1,062 rows
    *  the artifact carries at bd7ad596), and the census must count them rather than stop at the
@@ -123,7 +123,7 @@ export const FIELDS = [
   'fan',
   'fanHash',
   'fanSourceHash',
-  'fanVariationsHash',
+  'fanNamesHash',
   'fanThrew',
   'skipped',
 ] as const;

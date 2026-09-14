@@ -7,10 +7,14 @@
 //
 // `why` is a LABEL, one line. The argument for why the rule is correct belongs in the file header,
 // which has room; duplicating it here is how a table stops paying for itself.
+//
+// A table a variation's definition names (`variation-gates.ts`) shows its `why` to a reader, in the
+// webapp's variation drawer, so there the label is plain prose: no tag, file or function name, or
+// shouted word. `variation-offers.test.ts` holds it to that.
 export interface Gate<Ctx> {
   /** stable, kebab-case; appears in test names and in the contract report */
   readonly id: string;
-  /** one line: the reason the rule exists */
+  /** one line: the reason the rule exists, readable without the code */
   readonly why: string;
   /** Remove it and some candidate is WRONG, not merely worse. Everything else is a codegen
    *  heuristic the differ still referees. This flag is what makes `guardedBy` mandatory. */

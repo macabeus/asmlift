@@ -71,20 +71,20 @@ interface BaseCtx {
 export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   {
     id: 'non-pointer',
-    why: 'the variation re-spells an address; a scalar value home is a different question',
+    why: 'only a local holding an address is substituted; a local holding a scalar value is a different question',
     sound: false,
     rejects: (c) => !c.isPointer,
   },
   {
     id: 'object-volatile',
-    why: 'the substitution carries the POINTEE flag, so an object-volatile pointer would lose its own',
+    why: 'the substitution keeps only the `volatile` of what the pointer points to, so a pointer that is itself volatile would lose its own',
     sound: true,
     guardedBy: 'inlinebase.test.ts: an object-volatile or frame local declines',
     rejects: (c) => c.objectVolatile,
   },
   {
     id: 'frame',
-    why: 'a slot the asm materialized is an asm fact, not a spelling to undo',
+    why: 'a stack slot the assembly used is a fact about the function, not a spelling to undo',
     sound: false,
     rejects: (c) => c.hasFrame,
   },
@@ -104,7 +104,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   },
   {
     id: 'null-base',
-    why: '`0` is NULL, never an address — the sibling qualifier variation (volatileptr.ts) refuses it too',
+    why: 'a base of `0` is a null pointer, never an address, and `volatile` refuses it too',
     sound: false,
     rejects: (c) => c.m.constValue === 0,
   },

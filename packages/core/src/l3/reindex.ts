@@ -227,7 +227,7 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
   },
   {
     id: 'global-counter',
-    why: 'a global counter’s final value is observable to every other caller, ISR and translation unit',
+    why: 'a global counter’s final value is observable to every other caller, interrupt handler and translation unit',
     sound: true,
     guardedBy: 'reindex.test.ts: the counter may not be a GLOBAL',
     rejects: (c) => !c.kIsDeclared,
@@ -255,14 +255,14 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
   },
   {
     id: 'body-exit',
-    why: 'the steps sat in the body tail, which a `continue` skips and a `for`’s inc does not',
+    why: 'the steps sat at the end of the body, which a `continue` skips and a `for`’s increment does not',
     sound: true,
     guardedBy: 'reindex.test.ts: a `break` in the body declines',
     rejects: (c) => c.coreHasExit,
   },
   {
     id: 'walk-base',
-    why: 'the kept init must be a value the rewrite can leave standing — a var, or a rematerializable address',
+    why: 'the kept init must be a value the rewrite can leave standing: a variable, or an address that can be loaded again',
     sound: true,
     guardedBy: 'reindex.test.ts: a walk pointer with no init ahead of the loop declines',
     rejects: (c) => c.badBases.length > 0,
@@ -290,7 +290,7 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
   },
   {
     id: 'leftover-walk',
-    why: 'a leftover outlives the deleted step, and its skip-arm twin reads a pointer that path never set',
+    why: 'a statement left outside the deleted step still reads the walk pointer, which a path that skipped the step never set',
     sound: true,
     guardedBy: 'reindex.test.ts: a leftover mentioning a walk pointer declines',
     rejects: (c) => c.leakyLeftovers > 0,

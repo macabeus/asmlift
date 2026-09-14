@@ -98,13 +98,13 @@ export interface HomeSplitFanCtx {
 export const HOMESPLIT_FAN_GATES: readonly Gate<HomeSplitFanCtx>[] = [
   {
     id: 'homesplit-degenerate',
-    why: 'withholding the only hoistable key is `/regionbase`, and withholding none is `/livebase-block`',
+    why: 'with one hoistable base there is nothing new: withholding it is `regionbase`, and withholding none is `livebase-block`',
     sound: false,
     rejects: (c) => c.hoistableKeys < 2,
   },
   {
     id: 'homesplit-fan-cap',
-    why: 'one candidate per hoistable key, times the volatile pairings — the whole cost of the variation',
+    why: 'more than three hoistable bases would add a candidate for each, times the volatile pairings',
     sound: false,
     rejects: (c) => c.hoistableKeys > 3,
   },
@@ -143,13 +143,13 @@ export interface HomeSplitCtx {
 export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
   {
     id: 'homesplit-no-region',
-    why: 'a withheld key the region rule declines to split leaves the spelling the default carries',
+    why: 'a base held back from the function-top local that no per-region local takes instead leaves the spelling the default carries',
     sound: false,
     rejects: (c) => !c.withheldSplits,
   },
   {
     id: 'homesplit-drops-device-volatile',
-    why: 'a device read left inline is qualified by neither /volatile nor /vol-store',
+    why: 'a device read left inline would carry neither `volatile` nor `vol-store`',
     sound: false,
     rejects: (c) => c.inlineDeviceRead,
   },

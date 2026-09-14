@@ -112,7 +112,7 @@ export type HeadCtx = Omit<MemberCtx, 'prev'>;
 export const ADVANCE_HEAD_GATES: readonly Gate<HeadCtx>[] = [
   {
     id: 'head-second-site',
-    why: 'rewrite matches by address, so a twin elsewhere would read `p` before it is set',
+    why: 'the rewrite finds accesses by address, so another access to the same address would read `p` before it is set',
     sound: true,
     guardedBy: 'advance.test.ts: a chain address reached at a second site declines',
     rejects: (c) => c.twin,
@@ -126,7 +126,7 @@ export const ADVANCE_HEAD_GATES: readonly Gate<HeadCtx>[] = [
   },
   {
     id: 'head-already-advanced',
-    why: 'NARROWING: a stamped site is somebody else’s successor, so starting there spells an absolute init for an address the machine reached by advancing',
+    why: 'an access the machine reached by stepping from an earlier one continues that chain, and starting a chain there would load an address the machine never loaded',
     sound: false,
     guardedBy: 'advance.test.ts: a chain may not START at an advanced site',
     rejects: (c) => c.site.advanced !== undefined,
@@ -138,14 +138,14 @@ export const ADVANCE_HEAD_GATES: readonly Gate<HeadCtx>[] = [
 export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
   {
     id: 'member-no-evidence',
-    why: 'without the stamp the pair is a compiler deriving two addresses from one pool word',
+    why: 'where the lift recorded no step, the pair is the compiler deriving two addresses from one literal',
     sound: false,
     guardedBy: 'advance.test.ts: the same pair with no evidence declines',
     rejects: (c) => c.site.advanced === undefined,
   },
   {
     id: 'member-second-site',
-    why: 'rewrite matches by address, so a twin elsewhere would read `p` at the wrong value',
+    why: 'the rewrite finds accesses by address, so another access to the same address would read `p` at the wrong value',
     sound: true,
     guardedBy: 'advance.test.ts: a chain address reached at a second site declines',
     rejects: (c) => c.twin,
@@ -166,21 +166,21 @@ export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
   },
   {
     id: 'member-width',
-    why: 'the minted local has ONE pointee width, and `*p` at another width names other bytes',
+    why: 'the new pointer has one pointee width, and `*p` at another width names other bytes',
     sound: true,
     guardedBy: 'advance.test.ts: members of different widths decline',
     rejects: (c) => c.site.width !== c.prev.width,
   },
   {
     id: 'member-signedness',
-    why: 'NARROWING: one pointee TYPE, so the second member is not spelled through a reinterpret cast the source did not write',
+    why: 'the new pointer has one pointee type, and a second access of another type would need a cast the source did not write',
     sound: false,
     guardedBy: 'advance.test.ts: members of different signedness decline',
     rejects: (c) => c.site.signed !== c.prev.signed,
   },
   {
     id: 'member-element-grid',
-    why: 'LOUD: off the grid the emitted `p = p + step / width` is fractional (`p0 + 0.5`), which is not C at all',
+    why: 'a step that is not a whole number of elements would be written `p = p + step / width` with a fraction, which is not C',
     sound: false,
     guardedBy: 'advance.test.ts: a step off the element grid declines',
     rejects: (c) => c.site.advanced! % c.prev.width !== 0,
@@ -194,7 +194,7 @@ export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
   },
   {
     id: 'member-negative-step',
-    why: 'NARROWING: `p = p + -1` is valid C and address-correct; the direction is unpinned and has no inhabitant',
+    why: 'a backward step (`p = p + -1`) is correct C, but this variation writes only forward steps',
     sound: false,
     guardedBy: 'advance.test.ts: a NEGATIVE step declines',
     rejects: (c) => c.site.advanced! <= 0,

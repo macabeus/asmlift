@@ -132,7 +132,7 @@ describe('the sweep comparison', () => {
 describe('the three fan hashes', () => {
   // A field outside `FIELDS` is written to `--json` and never compared, so a proof built on it passes
   // whatever the two trees did. Each fan hash must be able to move a record on its own.
-  it.each(['fanHash', 'fanSourceHash', 'fanVariationsHash'] as const)(
+  it.each(['fanHash', 'fanSourceHash', 'fanNamesHash'] as const)(
     'records differing only in %s yield exactly one move naming it',
     (field) => {
       expect(FIELDS).toContain(field);
@@ -157,7 +157,7 @@ describe('the three fan hashes', () => {
     );
     const [was, now] = [fanDigests(fan), fanDigests(renamed)];
     expect(now.fanSourceHash).toBe(was.fanSourceHash);
-    expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
+    expect(now.fanNamesHash).not.toBe(was.fanNamesHash);
     expect(now.fanHash).not.toBe(was.fanHash);
     expect(now.fan).toBe(was.fan);
   });
@@ -166,7 +166,7 @@ describe('the three fan hashes', () => {
     const respelled = fan.map((c) => (joined(c) === 'signed' ? { ...c, source: 'd;' } : c));
     const [was, now] = [fanDigests(fan), fanDigests(respelled)];
     expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
-    expect(now.fanVariationsHash).toBe(was.fanVariationsHash);
+    expect(now.fanNamesHash).toBe(was.fanNamesHash);
     expect(now.fanHash).not.toBe(was.fanHash);
   });
 
@@ -174,22 +174,20 @@ describe('the three fan hashes', () => {
     const reordered = [fan[1], fan[0], fan[2]];
     const [was, now] = [fanDigests(fan), fanDigests(reordered)];
     expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
-    expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
+    expect(now.fanNamesHash).not.toBe(was.fanNamesHash);
     expect(now.fanHash).not.toBe(was.fanHash);
   });
 
   it('the name is hashed as its `/` join, never as the serialized list', () => {
     const sha = (s: string): string => createHash('sha1').update(s).digest('hex').slice(0, 12);
-    expect(fanDigests(fan).fanVariationsHash).toBe(sha(fan.map((c) => `${joined(c)}\0`).join('')));
-    expect(fanDigests(fan).fanVariationsHash).not.toBe(
-      sha(fan.map((c) => `${JSON.stringify(c.variations)}\0`).join('')),
-    );
+    expect(fanDigests(fan).fanNamesHash).toBe(sha(fan.map((c) => `${joined(c)}\0`).join('')));
+    expect(fanDigests(fan).fanNamesHash).not.toBe(sha(fan.map((c) => `${JSON.stringify(c.variations)}\0`).join('')));
   });
 
   it('every fan record carries all three hashes, over an empty fan too', () => {
     for (const d of [fanDigests(fan), fanDigests([])]) {
-      expect(Object.keys(d).sort()).toEqual(['fan', 'fanHash', 'fanSourceHash', 'fanVariationsHash']);
-      for (const h of [d.fanHash, d.fanSourceHash, d.fanVariationsHash]) {
+      expect(Object.keys(d).sort()).toEqual(['fan', 'fanHash', 'fanNamesHash', 'fanSourceHash']);
+      for (const h of [d.fanHash, d.fanSourceHash, d.fanNamesHash]) {
         expect(h).toMatch(/^[0-9a-f]{12}$/);
       }
     }

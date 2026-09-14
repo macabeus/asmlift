@@ -10,7 +10,7 @@ the dominant one.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **candidate** | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                         |
 | **fan**       | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                     |
-| **winner**    | The best-scoring candidate that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.             |
+| **winner**    | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it. |
 | **variation** | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too. |
 | **dropped**   | A candidate the scorer refused: its source did not build.                                                                                          |
 | **withheld**  | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                  |
@@ -50,6 +50,10 @@ bare "the variations" could be read both ways.
   ([`packages/core/src/variation-tokens.ts`](../packages/core/src/variation-tokens.ts)). A test asks
   whether a candidate carries one through `hasVariation` or `hasVariations`, both of which throw on a
   name the registry does not hold.
+- Every registered variation has one reader definition in `VARIATION_DEFINITIONS`
+  ([`packages/core/src/variation-definitions.ts`](../packages/core/src/variation-definitions.ts)),
+  keyed by the registry's names: what it changes in the C, a before/after pair, and what its subject
+  means. The six words and the kinds below are data there too, and a test holds these tables to it.
 - When several combinations of variations produce the same source, only the first combination's
   variations are kept. **A candidate's variations name what was applied, not every route to its
   source, and not a route a deletion must remove.** Price a variation by ablating it, never by
@@ -59,13 +63,13 @@ bare "the variations" could be read both ways.
 
 A candidate's variations appear in this order.
 
-| Kind           | What it changes                                                                                | Examples                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Signedness** | The signedness pinned on the entry parameters before type recovery. Always the first part.     | `unsigned`, `signed`                                             |
-| **Lift**       | The assembly is lifted or raised again under a different reading.                              | `setup-args`, `connective`, `shared-ret`, `shared-tail`          |
-| **Structure**  | `structure()` is run again with different options.                                             | `flip-branch`, `defsite`, `loop-entry`, `flip-join`, `uns-cmp`   |
-| **Respell**    | The tree `structure()` produced is rewritten.                                                  | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile` |
-| **Symbol map** | The symbol map's shaped spellings are withheld, so globals are spelled as raw addresses. Last. | `raw-globals`                                                    |
+| Kind           | What it changes                                                                                                                                                                                            | Examples                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Signedness** | Whether the function's parameters are read as signed or unsigned. Every candidate carries one, as its first variation.                                                                                     | `unsigned`, `signed`                                                |
+| **Lift**       | How the instructions are read before any C is built: which moves set up a call, how a chain of tests joins, whether paths share a return.                                                                  | `setup-args`, `connective`, `shared-ret`, `shared-tail`             |
+| **Structure**  | How the checked control flow becomes C: which way a test reads, where a loop starts, what reaches a merge (the point where two paths meet), where a value is kept, and how a read or a compare is spelled. | `flip-branch`, `defsite`, `loop-entry`, `reread-globals`, `uns-cmp` |
+| **Respell**    | A rewrite of the finished C that keeps what it does: where a value lives, whether an address is held in a pointer, how statements are ordered.                                                             | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile`    |
+| **Symbol map** | Globals are written as raw addresses instead of the names the project's symbol map gives them. Always the last variation.                                                                                  | `raw-globals`                                                       |
 
 For a reader, what happened to one variation on one function is one of two states: it **carried N
 candidates**, or it **threw**. N can be 0: the variation did not apply, or an earlier combination
@@ -74,11 +78,12 @@ already produced every source it made. A variation that threw prints an `asmlift
 
 ## Fields of the benchmark artifact
 
-| Field                                                                               | Meaning                                                                                                  |
-| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner. |
-| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.      |
-| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                             |
+| Field                                                                               | Meaning                                                                                                                                                             |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner.                                                            |
+| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.                                                                 |
+| `asmlift.fanVariations`                                                             | Every variation the fan carried, by registered name, with how many candidates carry it and how many of those were dropped or withheld. Present on every ranked row. |
+| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                                                                                        |
 
 ## Words the enumeration code uses
 
@@ -87,7 +92,6 @@ already produced every source it made. A variation that threw prints an `asmlift
 | **default**                     | No variation of that kind is applied. It adds no part to a candidate's name.                                                                                                                                                                             |
 | **alternative**                 | A variation applied in place of the default.                                                                                                                                                                                                             |
 | **setting**                     | The variations one lift or one `structure()` call is given.                                                                                                                                                                                              |
-| **suffix**                      | Inside enumeration, a name fragment as a `/`-prefixed string (`/defsite`, `/basefold/sinkinit`). It is split into variations once, where a candidate is built.                                                                                           |
 | **compiler behavior**           | A question answered once per target by a `compilerBehaviors` field (`packages/core/src/target.ts`), never enumerated. It is right where the assembly determines the source; a variation is right where it does not ([`level-tower.md`](level-tower.md)). |
 | **tree source**                 | A source emitted from one structured tree before the lift, structure and symbol-map parts of its name are attached. Never compiled or scored, so not a candidate.                                                                                        |
 | **respell set**                 | Every respell variation, run over one structured tree.                                                                                                                                                                                                   |
@@ -104,7 +108,7 @@ already produced every source it made. A variation that threw prints an `asmlift
 | **route**                       | A derivation path that reaches a source. The first route to a source keeps its variations.                                                                                                                                                               |
 | **admission**                   | The row or measurement that justifies enumerating a variation, a hoist or a pairing. An admitted variation is one the enumeration runs.                                                                                                                  |
 | **enumeration order**           | The order candidates are enumerated in. `compareScored` breaks a score tie by it last, so moving where a variation is enumerated can change a published winner.                                                                                          |
-| **fan hashes**                  | `bench sweep --fan`'s three digests of a fan, each in enumeration order: `fanHash` over each candidate's variations and source, `fanSourceHash` over the sources alone, `fanVariationsHash` over the names alone.                                        |
+| **fan hashes**                  | `bench sweep --fan`'s three digests of a fan, each in enumeration order: `fanHash` over each candidate's variations and source, `fanSourceHash` over the sources alone, `fanNamesHash` over the names alone.                                             |
 | **map mode**                    | One of the two ways `bench sweep` lifts a row: `harness`, as the row is configured, or `nomap`, the same without its symbol map. `--map-modes` selects them.                                                                                             |
 | **shards**                      | A tier's run spread across worker processes.                                                                                                                                                                                                             |
 

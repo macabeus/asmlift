@@ -3,14 +3,17 @@
 // renderer/component exactly once and keep the bundle small.
 import type { EChartsOption } from 'echarts';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
-import { BarChart } from 'echarts/charts';
+import { BarChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 
 import { CHART } from '../../theme';
 
-echarts.use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+// A SERIES TYPE NOT REGISTERED HERE DRAWS NOTHING AND REPORTS NOTHING: the grid and its axes still
+// render, so the chart looks live and empty. `apps/web/test/echarts-registration.test.ts` fails when
+// a chart names a series type this list does not register.
+echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 export { echarts, ReactEChartsCore };
 export type { EChartsOption };

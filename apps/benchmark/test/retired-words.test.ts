@@ -57,6 +57,7 @@ const RULES: Rule[] = [
     pattern: retired('axis', 'axes'),
     allow: [
       { path: /^apps\/web\/src\/pages\/benchmark\/components\/charts\//, why: 'ECharts axes' },
+      { path: /^apps\/web\/test\/echarts-registration\.test\.ts$/, why: 'ECharts axes' },
       { path: /^apps\/web\/src\/pages\/benchmark\/theme\.ts$/, why: 'a chart grouping axis' },
       {
         path: /^apps\/web\/src\/pages\/benchmark\/components\/FeaturePicker\.tsx$/,

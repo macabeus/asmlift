@@ -1,22 +1,28 @@
-// The variation registry, held to itself and to the code that mints variations.
+// The variation registry, held to itself and to the shipped targets.
 //
-// The corpus-scale checks — every name the committed artifact publishes and every name the
-// enumerated corpus mints — live in `apps/benchmark/test/variation-closure.test.ts`, because only
-// that tree reads the artifact and the dataset. This file is the one that runs in `test:offline`.
+// Whether the code that mints variations still mints every entry is `variation-mints.test.ts`. The
+// corpus-scale checks — every name the committed artifact publishes and every name the enumerated
+// corpus mints — live in `apps/benchmark/test/variation-closure.test.ts`, because only that tree
+// reads the artifact and the dataset.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { enumerateCandidates } from '../src/rank';
 import { SIGNEDNESS } from '../src/rank-variations';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 import {
   VARIATION_KINDS,
   VARIATION_TOKENS,
   hasVariation,
   hasVariations,
   joinVariations,
+  offeredOn,
   parseVariation,
   splitVariations,
+  tallyFanVariations,
   variationToken,
+  withSubject,
 } from '../src/variation-tokens';
 
 const names = VARIATION_TOKENS.map((t) => t.name);
@@ -44,17 +50,6 @@ describe('the registry is well-formed', () => {
     expect(signedness).toEqual(SIGNEDNESS.map((s) => s.variation));
   });
 
-  // `rank.ts` strips one structure variation out of a structure suffix with a substring `replace`,
-  // which removes the FIRST occurrence: a structure variation spelled inside another would strip
-  // the wrong one.
-  test('no structure variation is spelled inside another', () => {
-    const structure = VARIATION_TOKENS.filter((t) => t.variationKind === 'structure').map((t) => `/${t.name}`);
-    const collisions = structure.flatMap((a) =>
-      structure.filter((b) => a !== b && b.includes(a)).map((b) => `${a} in ${b}`),
-    );
-    expect(collisions).toEqual([]);
-  });
-
   test('every subject-taking name is the longest match for its own subjects', () => {
     const cases: [string, string, string | undefined][] = [
       ['coalesce-v0-v1', 'coalesce', 'v0-v1'],
@@ -75,6 +70,24 @@ describe('the registry is well-formed', () => {
     ];
     for (const [part, name, subject] of cases) {
       expect(parseVariation(part)).toEqual(subject === undefined ? { name } : { name, subject });
+    }
+  });
+
+  test('withSubject mints exactly what parseVariation reads back, and refuses a subject its pattern does not fit', () => {
+    expect(withSubject('coalesce', 'v0-v1')).toBe('coalesce-v0-v1');
+    expect(parseVariation(withSubject('regcopy', 'ret-fresh'))).toEqual({ name: 'regcopy', subject: 'ret-fresh' });
+    expect(parseVariation(withSubject('homesplit', '0x40000d4.4s'))).toEqual({
+      name: 'homesplit',
+      subject: '0x40000d4.4s',
+    });
+    for (const [name, subject] of [
+      ['sense', 'a'],
+      ['coalesce', ''],
+      ['volatile', 'slot'],
+      ['regcopy', 'fresh'],
+      ['homesplit', 'a/b'],
+    ] as const) {
+      expect(() => withSubject(name, subject)).toThrow(/takes no subject/);
     }
   });
 
@@ -164,48 +177,110 @@ describe('the `/` join names exactly one list of variations', () => {
   });
 });
 
-// CLOSURE, POINT 1 OF 3: the mint literals. Every `/`-separated segment a string literal in the two
-// enumeration files spells must be a registered variation, and every registered variation must be
-// spelled by one — so a `respell('/foo', …)` added without a registry entry fails here, in the suite
-// CI runs, and so does an entry for a variation nothing mints any more. A parameterized subject
-// (`/sense-${m}`, `/homesplit-${tag}`, `${suffix}-${c.merged}`) contributes its registered prefix.
-// Blind spot, stated: a mint with no literal segment at all; the enumerated-corpus check sees it.
-describe('closure over the mint literals of rank.ts and rank-variations.ts', () => {
-  const src = ['rank.ts', 'rank-variations.ts']
-    .map((f) => readFileSync(join(import.meta.dirname, '..', 'src', f), 'utf8'))
-    .join('\n')
-    .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join('\n');
-  const segments = [
-    ...new Set(
-      [...src.matchAll(/['`](?:\$\{[a-zA-Z.]+\})?((?:\/[a-z][a-z0-9-]*)+)['`-]/g)].flatMap((m) =>
-        m[1]
-          .split('/')
-          .filter((s) => s !== '')
-          .map((s) => s.replace(/-$/, '')),
-      ),
-    ),
-  ].sort();
+// A row's published `fanVariations` is this tally over ranking's partition of its fan.
+describe('tallyFanVariations counts the candidates carrying each registered variation', () => {
+  type Named = { variations: readonly string[] };
+  /** A real fan with subject-taking variations (`volatile-p0`, `homesplit-…`) and three kinds,
+   *  split three ways the way ranking partitions one. */
+  const fan = enumerateCandidates(
+    'dmapoll',
+    readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmapoll.s'), 'utf8'),
+    ARMV4T_AGBCC,
+  );
+  const third = (r: number): Named[] => fan.filter((_, i) => i % 3 === r);
+  const partition = { candidates: third(0), dropped: third(1), withheld: third(2) };
+  const carrying = (list: readonly Named[], name: string): number =>
+    list.filter((c) => hasVariation(c.variations, name)).length;
 
-  test('the scan sees the whole mint set (non-empty floor)', () => {
-    expect(segments.length).toBeGreaterThanOrEqual(56);
+  test('the fixture exercises subjects, several kinds and all three lists', () => {
+    const parts = fan.flatMap((c) => c.variations);
+    expect(parts.some((p) => parseVariation(p).subject !== undefined)).toBe(true);
+    expect(new Set(parts.map((p) => variationToken(parseVariation(p).name).variationKind)).size).toBeGreaterThan(2);
+    expect(Object.values(partition).every((l) => l.length > 0)).toBe(true);
   });
 
-  test('every minted segment is a registered variation', () => {
-    const unregistered = segments.filter((s) => {
-      try {
-        parseVariation(s);
-        return false;
-      } catch {
-        return true;
-      }
+  test('each count equals a direct count over the enumeration, refusals included', () => {
+    const expected = Object.fromEntries(
+      names
+        .filter((n) => carrying(fan, n) > 0)
+        .map((n) => {
+          const dropped = carrying(partition.dropped, n);
+          const withheld = carrying(partition.withheld, n);
+          return [
+            n,
+            { candidates: carrying(fan, n), ...(dropped ? { dropped } : {}), ...(withheld ? { withheld } : {}) },
+          ];
+        }),
+    );
+    expect(tallyFanVariations(partition)).toEqual(expected);
+  });
+
+  test('the two signedness entries sum to the fan size', () => {
+    const t = tallyFanVariations(partition);
+    expect((t.unsigned?.candidates ?? 0) + (t.signed?.candidates ?? 0)).toBe(fan.length);
+  });
+
+  test('a candidate counts once under each registered name, however many subjects it applies', () => {
+    const t = tallyFanVariations({
+      candidates: [{ variations: ['unsigned', 'coalesce-v0-v1', 'coalesce-v2-v3', 'volatile-p0'] }],
+      dropped: [{ variations: ['signed', 'volatile', 'raw-globals'] }],
+      withheld: [],
     });
-    expect(unregistered).toEqual([]);
+    expect(t).toEqual({
+      unsigned: { candidates: 1 },
+      signed: { candidates: 1, dropped: 1 },
+      coalesce: { candidates: 1 },
+      volatile: { candidates: 2, dropped: 1 },
+      'raw-globals': { candidates: 1, dropped: 1 },
+    });
   });
 
-  test('every registered variation is minted', () => {
-    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGNEDNESS.map((s) => s.variation)]);
-    expect(names.filter((n) => !minted.has(n))).toEqual([]);
+  test('keys run in kind order, then by name, whatever order the fan is listed in', () => {
+    const forward = tallyFanVariations(partition);
+    const reversed = tallyFanVariations({
+      candidates: [...partition.withheld].reverse(),
+      dropped: [...partition.dropped].reverse(),
+      withheld: [...partition.candidates].reverse(),
+    });
+    expect(Object.keys(reversed)).toEqual(Object.keys(forward));
+    const kinds = Object.keys(forward).map((n) => VARIATION_KINDS.indexOf(variationToken(n).variationKind));
+    expect(kinds).toEqual([...kinds].sort((a, b) => a - b));
+    for (const kind of new Set(kinds)) {
+      const inKind = Object.keys(forward).filter(
+        (n) => VARIATION_KINDS.indexOf(variationToken(n).variationKind) === kind,
+      );
+      expect(inKind).toEqual([...inKind].sort());
+    }
+    expect(JSON.stringify(tallyFanVariations({ ...partition, candidates: [...partition.candidates].reverse() }))).toBe(
+      JSON.stringify(forward),
+    );
+  });
+
+  test('an unregistered variation throws', () => {
+    expect(() =>
+      tallyFanVariations({ candidates: [{ variations: ['unsigned', 'nosuch'] }], dropped: [], withheld: [] }),
+    ).toThrow(/names no registered variation/);
+  });
+});
+
+// A registry entry's target gate is the rule enumeration applies (`respell` and the hoist roster ask
+// `offeredOn`), so what each shipped target withholds is stated here once, per target.
+describe('a target gate withholds a variation where its compiler behavior says', () => {
+  const withheld = (target: typeof ARMV4T_AGBCC) =>
+    VARIATION_TOKENS.filter((t) => !offeredOn(target, [t.name])).map((t) => t.name);
+
+  test('each shipped target withholds exactly these variations on their own', () => {
+    expect(withheld(ARMV4T_AGBCC)).toEqual(['advance']);
+    const unfolding = ['offmember', 'basefold', 'unfolded', 'orderbase', 'orderbase-scoped', 'nearbase'];
+    expect(withheld(MIPS_IDO)).toEqual(unfolding);
+    expect(withheld(MIPS_GCC)).toEqual(unfolding);
+    expect(withheld(PPC_MWCC)).toEqual(unfolding);
+  });
+
+  test('the variation a gate names in `unlessWith` lifts it, with or without a subject', () => {
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance'])).toBe(false);
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', 'volatile'])).toBe(true);
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', withSubject('volatile', 'p0')])).toBe(true);
+    expect(offeredOn(MIPS_IDO, ['unsigned', 'basefold', 'sinkinit'])).toBe(false);
   });
 });

@@ -11,6 +11,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
 import { NoScorableCandidateError } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
+import { tallyFanVariations } from '@asmlift/core/variation-tokens';
 
 import { cachedExtractAsmData } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
@@ -112,8 +113,19 @@ export function fanSize(r: { candidates: unknown[]; dropped: unknown[]; withheld
  *  errors, and a 0 published there would read as "this row enumerates nothing" — a claim about the
  *  row, where the truth is that nobody counted. */
 export function fanSizeOfError(e: unknown): number | undefined {
-  return e instanceof NoScorableCandidateError ? e.dropped.length + e.withheld.length : undefined;
+  const fan = refusedFan(e);
+  return fan === undefined ? undefined : fanSize(fan);
 }
+
+/** The whole fan of a row whose every candidate was refused, as ranking's partition with nothing
+ *  scored — `undefined` for any other throw, for the reason `fanSizeOfError` gives. */
+function refusedFan(e: unknown): RankedFan | undefined {
+  return e instanceof NoScorableCandidateError
+    ? { candidates: [], dropped: e.dropped, withheld: e.withheld }
+    : undefined;
+}
+
+type RankedFan = Pick<RankedResult, 'candidates' | 'dropped' | 'withheld'>;
 
 /** Wall seconds since `t0`, at the resolution a cost is read at. Two decimals: the fastest rows
  *  rank in tens of milliseconds and a whole-second field would publish `0` for most of the
@@ -180,55 +192,29 @@ export function runAsmlift(
   // CLOCKED, from here: this is the ranked pass and nothing else — not the target build, not the
   // phase-1 annotate, not m2c. The runner's per-row `(12.3s)` log line is the whole row and is
   // published nowhere; this is the part that scales with the fan.
+  //
+  // ONLY THE RANKING sits inside the `try`, because only its throw is a verdict. The fan tally
+  // parses every candidate's variations and throws on a name the registry does not hold: that is a
+  // harness defect, and caught here it would publish a match as `noncompile`. It propagates instead,
+  // from both paths below, and the runner reports the row as missing.
   const rankT0 = Date.now();
+  let ranked: RankedResult;
   try {
-    const ranked = asmliftFan(tc, sym, asm, obj, opts);
-    const best = ranked.winner;
-    const s = best.score;
-    return {
-      decompiler: 'asmlift',
-      ...(usedSymbols ? { symbolMap: true as const } : {}),
-      // Provenance of the WINNER: which candidate spelling the differ picked, and (map rows)
-      // which map symbols its output references — best.symbolRefs is derived in core from the
-      // exact tree the winning source was emitted from (post-DCE value refs only; call targets
-      // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
-      winnerVariations: best.variations,
-      // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
-      // count is every spelling enumerated (the two refusal lists below are the rest of it); the
-      // seconds are this machine's price for that count, cache state included.
-      fanSize: fanSize(ranked),
-      rankSeconds: secondsSince(rankT0),
-      // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
-      // candidate that compiles — but dropping them SILENTLY published a clean win over a
-      // hidden failure, which is exactly what a scoring harness must not do.
-      ...(ranked.dropped.length ? { droppedCandidates: ranked.dropped } : {}),
-      // Spellings that BUILT and were then withheld for want of a byte-exact proof. Same rule as
-      // above and a different fact: nothing failed, so folding the two would make `[dropped]`
-      // report compile errors that never happened.
-      ...(ranked.withheld.length ? { withheldCandidates: ranked.withheld } : {}),
-      ...(usedSymbols ? { symbolsUsed: symbolsUsedFrom(best.symbolRefs) } : {}),
-      outcome: s.match ? 'match' : 'nonmatch',
-      source: best.source,
-      score: s.score,
-      maxScore: s.rows,
-      compileErrors: null,
-      breakdown: s.breakdown,
-      quality: assessQuality(best.source),
-    };
+    ranked = asmliftFan(tc, sym, asm, obj, opts);
   } catch (e) {
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref
     // family), but this also catches scorer infrastructure errors; the diagnostics say which.
     const msg = (e as Error).message ?? String(e);
-    // The seconds were spent whichever throw this is, so they are recorded either way; the COUNT
-    // is recorded only when the error actually carries the fan (`fanSizeOfError`), which is the
+    // The seconds were spent whichever throw this is, so they are recorded either way; the fan is
+    // recorded only when the error actually carries it (`refusedFan`), which is the
     // every-spelling-refused case and not a scorer that died.
-    const fan = fanSizeOfError(e);
+    const fan = refusedFan(e);
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
-      ...(fan === undefined ? {} : { fanSize: fan }),
+      ...(fan === undefined ? {} : { fanSize: fanSize(fan), fanVariations: tallyFanVariations(fan) }),
       rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,
@@ -238,6 +224,41 @@ export function runAsmlift(
       errorMarkers: compilerErrorLines(msg),
     };
   }
+  const best = ranked.winner;
+  const s = best.score;
+  return {
+    decompiler: 'asmlift',
+    ...(usedSymbols ? { symbolMap: true as const } : {}),
+    // Provenance of the WINNER: which candidate spelling the differ picked, and (map rows)
+    // which map symbols its output references — best.symbolRefs is derived in core from the
+    // exact tree the winning source was emitted from (post-DCE value refs only; call targets
+    // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
+    winnerVariations: best.variations,
+    // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
+    // count is every spelling enumerated (the two refusal lists below are the rest of it); the
+    // seconds are this machine's price for that count, cache state included.
+    fanSize: fanSize(ranked),
+    // …and which variations that count is made of, so the candidates that lost are published as
+    // counts beside the winner that did not.
+    fanVariations: tallyFanVariations(ranked),
+    rankSeconds: secondsSince(rankT0),
+    // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
+    // candidate that compiles — but dropping them SILENTLY published a clean win over a
+    // hidden failure, which is exactly what a scoring harness must not do.
+    ...(ranked.dropped.length ? { droppedCandidates: ranked.dropped } : {}),
+    // Spellings that BUILT and were then withheld for want of a byte-exact proof. Same rule as
+    // above and a different fact: nothing failed, so folding the two would make `[dropped]`
+    // report compile errors that never happened.
+    ...(ranked.withheld.length ? { withheldCandidates: ranked.withheld } : {}),
+    ...(usedSymbols ? { symbolsUsed: symbolsUsedFrom(best.symbolRefs) } : {}),
+    outcome: s.match ? 'match' : 'nonmatch',
+    source: best.source,
+    score: s.score,
+    maxScore: s.rows,
+    compileErrors: null,
+    breakdown: s.breakdown,
+    quality: assessQuality(best.source),
+  };
 }
 
 function firstLine(s: string): string {

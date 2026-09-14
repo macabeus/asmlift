@@ -86,14 +86,16 @@ import {
   sameBases,
 } from './rank-variations';
 import { hasDivergentSharedRet } from './structure/structure';
-import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
+import {
+  type SymbolInfo,
+  type SymbolMap,
+  arrayInnerExtents,
+  declaresBitfields,
+  isPtrField,
+  symbolsByName,
+} from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
-import { splitVariations } from './variation-tokens';
-
-/** The shared-tail variations' suffixes (see their loop in `enumerateCandidates`): the follow alone,
- *  on the fn as raised, and the follow after the store-tail sink. */
-const SHARED_RET_SUFFIX = '/shared-ret';
-const SHARED_TAIL_SUFFIX = '/shared-tail';
+import { type SubjectVariationName, type Variation, offeredOn, withSubject } from './variation-tokens';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -368,10 +370,10 @@ interface TreeSources {
   emit?: { error: unknown };
 }
 
-/** One source emitted from a structured tree: the suffix naming the variations that produced it,
+/** One source emitted from a structured tree: the variations that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
 interface TreeSource {
-  suffix: string;
+  variations: readonly Variation[];
   source: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
@@ -395,10 +397,10 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
-  /** Report a setting that THREW through `onEnumerationError`, as the variations its `/`-prefixed
-   *  suffix names (none for the function's own tree). */
-  const reportThrow = (suffix: string, e: unknown): void =>
-    opts.onEnumerationError?.(suffix === '' ? [] : splitVariations(suffix.slice(1)), firstLine(e));
+  /** Report a setting that THREW through `onEnumerationError`, as the variations it names (none for
+   *  the function's own tree). */
+  const reportThrow = (variations: readonly Variation[], e: unknown): void =>
+    opts.onEnumerationError?.(variations, firstLine(e));
   /** The last refusal from a backend asked to spell a tree — what the empty-enumeration check
    *  below reports, so "this backend can spell nothing here" names its reason. */
   let lastEmitError: unknown = null;
@@ -442,19 +444,25 @@ export function enumerateCandidates(
   // default setting lives in one place instead of six literals that can disagree. Each entry
   // states only what it VARIES — which is the whole content of the chain above.
   const STRUCTURE_DEFAULTS = { anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true };
-  const senseAnchor = [
-    { ...STRUCTURE_DEFAULTS, suffix: '', sense: defSense },
-    { ...STRUCTURE_DEFAULTS, suffix: '/flip-branch', sense: !defSense },
-    { ...STRUCTURE_DEFAULTS, suffix: '/defsite', sense: defSense, anchor: true },
-    { ...STRUCTURE_DEFAULTS, suffix: '/flip-branch/defsite', sense: !defSense, anchor: true },
-    { ...STRUCTURE_DEFAULTS, suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true },
-    { ...STRUCTURE_DEFAULTS, suffix: '/flip-branch/defsite/loop-entry', sense: !defSense, anchor: true, entry: true },
+  const senseAnchor: (typeof STRUCTURE_DEFAULTS & { variations: readonly Variation[]; sense: boolean })[] = [
+    { ...STRUCTURE_DEFAULTS, variations: [], sense: defSense },
+    { ...STRUCTURE_DEFAULTS, variations: ['flip-branch'], sense: !defSense },
+    { ...STRUCTURE_DEFAULTS, variations: ['defsite'], sense: defSense, anchor: true },
+    { ...STRUCTURE_DEFAULTS, variations: ['flip-branch', 'defsite'], sense: !defSense, anchor: true },
+    { ...STRUCTURE_DEFAULTS, variations: ['defsite', 'loop-entry'], sense: defSense, anchor: true, entry: true },
+    {
+      ...STRUCTURE_DEFAULTS,
+      variations: ['flip-branch', 'defsite', 'loop-entry'],
+      sense: !defSense,
+      anchor: true,
+      entry: true,
+    },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
   // layout evidence the divergent case does, so the DEFAULT sense is the divergent one's and
   // this variation emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
-  // `/flip-branch` still moves only divergent ifs and the two variations stay independent. The suffix
+  // `/flip-branch` still moves only divergent ifs and the two variations stay independent. The name
   // therefore names a sense RELATIVE to the target's default: a candidate's variations quoted from a
   // log identify a candidate only together with the tree that produced it, which is what the `[asmlift source
   // <commit>]` stamp on the `[ranked]` line is for (docs/ranked-repro.md).
@@ -473,7 +481,11 @@ export function enumerateCandidates(
   // source and the dedup collapses it before any compile.
   const senseOnly = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
-    ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
+    ...senseAnchor.map((s): typeof s & { join: boolean } => ({
+      ...s,
+      variations: [...s.variations, 'flip-join'],
+      join: true,
+    })),
   ];
   // THE PER-SITE SENSE MEASUREMENT, a structure variation never enumerated by default: every mask
   // over the sense sites, crossed with the whole fan. It exists to price the fork the two booleans above cannot express
@@ -485,7 +497,7 @@ export function enumerateCandidates(
   const baseSense = senseMasks.flatMap((m) =>
     senseOnly.map((s) => ({
       ...s,
-      ...(m === 0 ? {} : { suffix: `${s.suffix}/sense-${m}` }),
+      ...(m === 0 ? {} : { variations: [...s.variations, withSubject('sense', String(m))] }),
       // Always present, `undefined` at mask 0: an optional key added on one arm of a ternary would
       // make the two arms different object TYPES, and the list is what the whole fan spreads from.
       flipSites: m === 0 ? undefined : maskSites(m),
@@ -497,14 +509,13 @@ export function enumerateCandidates(
   // differ referees. Enumerated only when the map carries any bitfield member at all (checked
   // below), so the 2× cross is paid exactly by the functions it can help; the dedup collapses
   // every candidate where no fold fired.
-  const mapHasBitfields =
-    opts.symbols !== undefined &&
-    [...opts.symbols.values()].some((infos) =>
-      infos.some((i) => [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some((f) => f.bitWidth !== undefined)),
-    );
-  const bitfieldSettings = mapHasBitfields
-    ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
-    : baseSense;
+  const bitfieldSettings =
+    opts.symbols !== undefined && declaresBitfields(opts.symbols)
+      ? [
+          ...baseSense,
+          ...baseSense.map((s): typeof s => ({ ...s, variations: [...s.variations, 'no-bitfield'], bitfields: false })),
+        ]
+      : baseSense;
   // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
   // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
   // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report
@@ -683,7 +694,11 @@ export function enumerateCandidates(
   const ptrElemSettings = fnHasSizedPtrFields
     ? [
         ...bitfieldSettings,
-        ...bitfieldSettings.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false })),
+        ...bitfieldSettings.map((s): typeof s => ({
+          ...s,
+          variations: [...s.variations, 'no-ptr-elem'],
+          ptrElems: false,
+        })),
       ]
     : bitfieldSettings;
   // `/flat-rank` — spell a multidimensional global's access as the FLAT byte arithmetic
@@ -724,7 +739,14 @@ export function enumerateCandidates(
     return i !== undefined && i.shape === 'array' && (arrayInnerExtents(i)?.length ?? 0) > 0;
   });
   const declRankSettings = fnNamesMultidimArray
-    ? [...ptrElemSettings, ...ptrElemSettings.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
+    ? [
+        ...ptrElemSettings,
+        ...ptrElemSettings.map((s): typeof s => ({
+          ...s,
+          variations: [...s.variations, 'flat-rank'],
+          declRank: false,
+        })),
+      ]
     : ptrElemSettings;
   // The structure-variation chain, derived from STRUCTURE_VARIATIONS: each admitted variation doubles
   // the list, the settings without it first — order is load-bearing for the dropped-default skip
@@ -749,23 +771,25 @@ export function enumerateCandidates(
   let structureSettings: StructureSetting[] = declRankSettings.map((s) => ({ ...s, ...allStructureVariationsOff }));
   for (const variation of STRUCTURE_VARIATIONS) {
     if (variation.sharedGate !== undefined && !variation.sharedGate(sharedLift, sharedLiftDefs)) {
-      opts.onVariationGated?.(variation.suffix.slice(1));
+      opts.onVariationGated?.(variation.name);
       continue;
     }
     structureSettings = [
       ...structureSettings,
-      ...structureSettings.map(
-        (s) => ({ ...s, suffix: `${s.suffix}${variation.suffix}`, [variation.flag]: true }) as StructureSetting,
-      ),
+      ...structureSettings.map((s) => {
+        const on: StructureSetting = { ...s, variations: [...s.variations, variation.name] };
+        on[variation.flag] = true;
+        return on;
+      }),
     ];
   }
   /** Is this a setting where no structure variation is on, other than `/flip-branch`? The default-setting abort guard's
    *  other half: at the default LIFT setting a failure here aborts the row, because it says the lift
    *  is broken rather than that one variation cannot spell this tree.
    *
-   *  `s.suffix === ''` IS NOT THE SAME TEST, which is why this is a named predicate rather than
-   *  the string compare it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
-   *  default, so both of its senses pass this test: the flipped one carries a suffix, and `sense` is
+   *  `s.variations.length === 0` IS NOT THE SAME TEST, which is why this is a named predicate rather than
+   *  the length check it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
+   *  default, so both of its senses pass this test: the flipped one carries a variation, and `sense` is
    *  not among the flags read here. `/flip-join` does not pass, because `join` is one of the five
    *  hand-carried booleans below. The table's own flags decide, plus those five. */
   const isDefaultSetting = (s: StructureSetting): boolean =>
@@ -839,7 +863,7 @@ export function enumerateCandidates(
   // for its own shape, and it counts for more here: a variation reading `fn` would not misprint a
   // candidate, it would DELETE one,
   // and nothing in the harness reports a candidate that was never enumerated.
-  // `preRespellSuffix` names the tree this call re-spells, and it is a diagnostic argument only: it
+  // `preRespellVariations` names the tree this call re-spells, and it is a diagnostic argument only: it
   // reaches `onEnumerationError` and nothing else, so the invariant the parameter list states above —
   // every source is a pure function of the tree and this call's own constants — is untouched by
   // it. It exists because the pre-respell variations call this on a REWRITTEN tree, where a refusal
@@ -847,12 +871,12 @@ export function enumerateCandidates(
   //
   // IT PREFIXES EVERY `onEnumerationError` IN THIS FUNCTION, not just the default emit's, and that is
   // the whole point rather than a detail: every one of them is reachable from both calls, and the
-  // suffix each already carries names a VARIATION, which on a pre-respell tree is a variation applied
-  // to the rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal
+  // variations each one already carries are, on a pre-respell tree, variations applied to the
+  // rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal
   // of `/volatile` — a candidate that did not fail and is still in the fan. The order
-  // is the candidates' own (`${pf.suffix}${sp.suffix}`), so a reported name and an enumerated
+  // is the candidates' own (`[pf.name, ...sp.variations]`), so a reported name and an enumerated
   // candidate's variations name the same candidate the same way.
-  const respellTree = (sfn: SFn, preRespellSuffix = ''): TreeSources => {
+  const respellTree = (sfn: SFn, preRespellVariations: readonly Variation[] = []): TreeSources => {
     // The walk→index respell variation (l3/reindex.ts) is a THIRD variation on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
     // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
@@ -869,9 +893,9 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
-      reportThrow(preRespellSuffix, e);
+      reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
     }
     // Respell variations — each on the same footing as signedness/branch sense, each guarded:
@@ -949,7 +973,10 @@ export function enumerateCandidates(
     // Widening it for a contract is a defensible change and an argued one — not a silent import.
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
-    const respell = (suffix: string, make: () => RespellResult, alreadyShaped = false): void => {
+    const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
+      if (!offeredOn(target, variations)) {
+        return;
+      }
       try {
         const made = make();
         if (!made) {
@@ -961,7 +988,7 @@ export function enumerateCandidates(
         assertDerefsTyped(alt);
         assertLocalsWritten(alt);
         assertNoOrphanedLocals(sfn, alt);
-        sources.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
+        sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape fact orthogonal to
         // representation; subsets compose in the fixed order below. A stacked variation that
@@ -990,8 +1017,8 @@ export function enumerateCandidates(
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
-            // discard every later one, under a name (that variation's suffix) that names no shape.
-            const shapeSuffix = subset.map((x) => x.suffix).join('');
+            // discard every later one, under that variation's name, which names no shape.
+            const shapeVariations = subset.map((x) => x.name);
             try {
               const shaped = applyStacked(subset, alt);
               if (shaped !== null) {
@@ -1001,7 +1028,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
-                  suffix: `${suffix}${shaped.suffix}`,
+                  variations: [...variations, ...shaped.variations],
                   source: backend.emit(shaped.out),
                   ...refsOf(shaped.out),
                   ...volOf(shaped.out),
@@ -1010,7 +1037,7 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              reportThrow(preRespellSuffix + suffix + shapeSuffix, e);
+              reportThrow([...preRespellVariations, ...variations, ...shapeVariations], e);
             }
           }
         }
@@ -1020,42 +1047,41 @@ export function enumerateCandidates(
         // refused, so without this a variation that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        reportThrow(preRespellSuffix + suffix, e);
+        reportThrow([...preRespellVariations, ...variations], e);
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
     for (const subset of STACKED_SUBSETS) {
-      // the truthful suffix needs the pass to RUN first, so this bypasses respell's
-      // suffix-then-thunk shape: same try posture, suffix from the fired members
+      // the truthful variations need the pass to RUN first, so this bypasses respell's
+      // variations-then-thunk shape: same try posture, variations from the fired members
       try {
         const shaped = applyStacked(subset, sfn);
         if (shaped !== null) {
-          // the ONE call whose suffix already names shapes — say so, rather than making `respell`
-          // read it back out of the suffix it was handed
-          respell(shaped.suffix, () => shaped.out, true);
+          // the ONE call whose variations already name shapes — say so, rather than making `respell`
+          // read them back out of the variations it was handed
+          respell(shaped.variations, () => shaped.out, true);
         }
       } catch (e) {
         // the report names the full subset — the fired set is unknown mid-throw
-        const subsetSuffix = subset.map((x) => x.suffix).join('');
-        reportThrow(preRespellSuffix + subsetSuffix, e);
+        reportThrow([...preRespellVariations, ...subset.map((x) => x.name)], e);
       }
     }
-    respell('/argbase', () => materializeArgBases(sfn));
+    respell(['argbase'], () => materializeArgBases(sfn));
     // `/zerosub` — spell a negate of a SHARED subtraction as `0 - x` (l3/zerosub.ts). gcc 2.9
     // folds `-(a - b)` into `(b - a)` before CSE but leaves `0 - (a - b)` as a negate of the
     // subtraction itself, so over a value the function also uses elsewhere the two spellings are
     // a computation and a register apart — and both are reachable from a real source. The differ
     // referees; its gate keeps it off every shape where the fold rule does not apply, which is
     // every operand but a shared subtraction.
-    respell('/zerosub', () => zeroSubNegates(sfn));
+    respell(['zerosub'], () => zeroSubNegates(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
     // motion, which lands the allocator on different homes). Both spellings are emitted and
     // the differ referees.
-    respell('/volatile', () => volatilePtrLocals(sfn));
+    respell(['volatile'], () => volatilePtrLocals(sfn));
     // `/vol-slot` — declare a STACK-HOMED scalar local volatile (l3/volatileval.ts). The
     // qualifier takes away the allocator's freedom to keep the value in a callee-saved
     // register across a call, and which of the three ways a slot can arise (a volatile local,
@@ -1064,7 +1090,7 @@ export function enumerateCandidates(
     // third fork): it changes nothing structure() decides, so it rides each structured tree as `structure()`
     // produced it, like its `/volatile` sibling, rather than doubling every enumeration, and its frame-flag gate
     // costs nothing on a function with no slot.
-    respell('/vol-slot', () => volatileValueLocals(sfn));
+    respell(['vol-slot'], () => volatileValueLocals(sfn));
     /** `/vol-store`'s pass with the target's device-register window handed over — the window that
      *  keeps it off ordinary memory. Written once because five call sites take it. */
     const volStore = (from: SFn): SFn | null => volatileDeviceStores(from, target.capabilities.deviceRegisters);
@@ -1075,7 +1101,7 @@ export function enumerateCandidates(
     // hoists an unpinned fixed-address store clean out of a loop (gcc/loop.c:8934), so the pinned
     // spelling is the only one that reproduces a device-driving loop body at all. Its window gate
     // is the target's own `deviceRegisters` range, which is what keeps it off ordinary memory.
-    respell('/vol-store', () => volStore(sfn));
+    respell(['vol-store'], () => volStore(sfn));
     /** `/unreduce` with both halves of the device model handed over — the SPELLING range and the
      *  MEMORY-MODEL trigger list (target.ts). Written once because three call sites take it. */
     const unreduced = (from: SFn): UnreduceResult | null =>
@@ -1086,22 +1112,20 @@ export function enumerateCandidates(
     // reaches a preheader slot no C statement can (a compiler-created giv init is inserted after
     // the invariant hoist, gcc/loop.c:1151 then :1173). The scalar-value sibling of `/indexed`,
     // which makes the same argument for a pointer walk.
-    respell('/unreduce', () => unreduced(sfn));
+    respell(['unreduce'], () => unreduced(sfn));
     // `/ptr-field` — declare a recovered WORD field a pointer (l3/ptrfield.ts). raise/structs.ts
     // types a field from the access width alone, and on a 32-bit target `void *` fits that
     // evidence exactly — but not the compiler's alias analysis, which is what lets a pointer
     // field's load leave a loop an `s32` store pins it inside. Both are enumerated.
-    respell('/ptr-field', () => pointerFields(sfn));
+    respell(['ptr-field'], () => pointerFields(sfn));
     // `/offmember` — spell a leaf base's constant subscript as a struct MEMBER (l3/offmember.ts),
     // so the offset stays in the load's displacement instead of folding into the pool literal.
     // The SECOND source of the shape `/basefold` already reads: that row answers the same
     // evidence with a named base, this one with an aggregate member, and the two are different C
-    // and different register pressure. Offered only where the target declares the fold — MIPS and
-    // PPC put the addend in the instruction by construction, so nothing there says a member put
-    // it there, exactly as with BASEFOLD_HOISTS above.
-    if (target.compilerBehaviors.foldsConstAddrOffset) {
-      respell('/offmember', () => spellOperandMembers(sfn));
-    }
+    // and different register pressure. Offered only where the target declares the fold (its registry
+    // entry's target gate, which `respell` asks): MIPS and PPC put the addend in the instruction by
+    // construction, so nothing there says a member put it there, exactly as with BASEFOLD_HOISTS.
+    respell(['offmember'], () => spellOperandMembers(sfn));
     // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
     // spelling is reachable from neither variation alone: pinning the stores keeps three of them in
     // the loop body, which is what makes the loop's register pressure — and so the placement of
@@ -1131,8 +1155,10 @@ export function enumerateCandidates(
     //
     // Both compose through `composeRespellVariations`, which carries `/unreduce`'s proof obligation across
     // the stages after it — hand-writing that carry made dropping it a type-correct edit.
-    respell('/vol-store/unreduce', () => composeRespellVariations(sfn, [volStore, unreduced]));
-    respell('/vol-store/unreduce/ptr-field', () => composeRespellVariations(sfn, [volStore, unreduced, pointerFields]));
+    respell(['vol-store', 'unreduce'], () => composeRespellVariations(sfn, [volStore, unreduced]));
+    respell(['vol-store', 'unreduce', 'ptr-field'], () =>
+      composeRespellVariations(sfn, [volStore, unreduced, pointerFields]),
+    );
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant
@@ -1161,18 +1187,18 @@ export function enumerateCandidates(
       const q = only.size ? volatilePtrLocals(sfn, only) : null;
       return q ? inlineConstBases(q) : null;
     };
-    respell('/inlinebase/volatile', inlineVolatile);
-    respell('/inlinebase', () => inlineConstBases(sfn));
+    respell(['inlinebase', 'volatile'], inlineVolatile);
+    respell(['inlinebase'], () => inlineConstBases(sfn));
     // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
     // reachable from neither variation alone: on pokeemerald:EReader_Reset the default scores 11,
     // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
     // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
     // gives the same spelling — and each of `/inlinebase`'s two outputs carries it.
-    respell('/inlinebase/volatile/vol-slot', () => {
+    respell(['inlinebase', 'volatile', 'vol-slot'], () => {
       const r = inlineVolatile();
       return r ? volatileValueLocals(r) : null;
     });
-    respell('/inlinebase/vol-slot', () => {
+    respell(['inlinebase', 'vol-slot'], () => {
       const r = inlineConstBases(sfn);
       return r ? volatileValueLocals(r) : null;
     });
@@ -1192,19 +1218,19 @@ export function enumerateCandidates(
     // Unlike the `/livebase` × `/coalesce` pairings it takes `coalesceCandidates`' whole merge set,
     // not the arm-disjoint subset. The name lists both variations because both were applied. A
     // candidate's variations name what was applied, not a route a deletion must remove: these
-    // results are minted by their own `respellEach` call, so deleting `respell('/scopebase', …)` does
+    // results are minted by their own `respellEach` call, so deleting `respell(['scopebase'], …)` does
     // not delete them. The un-coalesced `/scopebase` stays in the list, so nothing is lost.
     //
     // EVERY pass invocation stays INSIDE a thunk — see the paragraph above on why a pass that
     // runs outside `respell`'s try is the one way a variation can cost a match. `respellEach` re-runs
     // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
-    respell('/scopebase', () => hoistScopedBases(sfn));
+    respell(['scopebase'], () => hoistScopedBases(sfn));
     // `/regionbase` — the same pass under its second region rule: a base the source spells inside N
     // disjoint regions becomes N locals, one per region, rather than one at function scope. A VARIATION
     // beside `/scopebase`, not a replacement for it: both spellings and the un-hoisted default stay
     // in the list, so the differ settles which allocation the original had.
     const regionbase = (): SFn | null => hoistScopedBases(sfn, { regions: 'per-region' });
-    respell('/regionbase', regionbase);
+    respell(['regionbase'], regionbase);
     // …and its `/volatile` composition, narrowed to exactly the locals this variation mints — the
     // same composition `/livebase` and `/inlinebase` already carry, for the same reason. The shape
     // this variation exists for is a DEVICE base (the DMA block at 0x040000D4), and the project's own
@@ -1216,7 +1242,7 @@ export function enumerateCandidates(
       const r = regionbase();
       return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
     };
-    respell('/regionbase/volatile', regionVolatile);
+    respell(['regionbase', 'volatile'], regionVolatile);
     // …and the `/vol-store` triple, the pairing this variation is the first to inhabit (see
     // l3/volstore.ts, where the two qualifiers' reach over a tree's OWN locals is disjoint).
     // `/volatile` qualifies a pointer LOCAL and `/vol-store` a STORE SITE, and this variation leaves
@@ -1224,29 +1250,38 @@ export function enumerateCandidates(
     // other spelling of the same device address inline. On `synthetic:dmascope` that residue is
     // the write to REG_DMA0CNT that STARTS the transfer, and without the triple it is published
     // bare beside three `volatile s32 *` region locals.
-    respell('/regionbase/volatile/vol-store', () => {
+    respell(['regionbase', 'volatile', 'vol-store'], () => {
       const v = regionVolatile();
       return v ? volStore(v) : null;
     });
+    /** One candidate per result of a multi-result variation, `name` applied to the result's own
+     *  subject after `prefix`. */
     const respellEach = (
-      suffix: string,
+      prefix: readonly Variation[],
+      name: SubjectVariationName,
       from: () => SFn | null | undefined,
       resultsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
     ): void => {
-      let results: { merged: string; sfn: SFn }[] = [];
+      if (!offeredOn(target, [...prefix, name])) {
+        return;
+      }
+      let results: { variations: readonly Variation[]; sfn: SFn }[] = [];
       try {
         const base = from();
-        results = base ? resultsOf(base) : [];
+        results = (base ? resultsOf(base) : []).map((c) => ({
+          variations: [...prefix, withSubject(name, c.merged)],
+          sfn: c.sfn,
+        }));
       } catch (e) {
-        reportThrow(preRespellSuffix + suffix, e);
+        reportThrow([...preRespellVariations, ...prefix, name], e);
         return;
       }
       for (const c of results) {
-        respell(`${suffix}-${c.merged}`, () => c.sfn);
+        respell(c.variations, () => c.sfn);
       }
     };
-    respellEach('/scopebase/coalesce', () => hoistScopedBases(sfn));
-    respellEach('/coalesce', () => sfn);
+    respellEach(['scopebase'], 'coalesce', () => hoistScopedBases(sfn));
+    respellEach([], 'coalesce', () => sfn);
     // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
     // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
     // qualifying the table blocks the read collapse its region wants), so each proper
@@ -1255,12 +1290,13 @@ export function enumerateCandidates(
     // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the `/livebase/volatile`
     // composition's subsets ride below with that composition's own `only` scope.
     respellEach(
-      '/volatile',
+      [],
+      'volatile',
       () => sfn,
       (s) => volatileSubsetCandidates(s),
     );
-    respell('/indexed', () => reindexWalks(sfn));
-    respell('/indexed/volatile', () => {
+    respell(['indexed'], () => reindexWalks(sfn));
+    respell(['indexed', 'volatile'], () => {
       const kept = new Set<string>();
       const r = reindexWalks(sfn, kept);
       return r ? volatilePtrLocals(r, kept) : null;
@@ -1273,18 +1309,17 @@ export function enumerateCandidates(
     // hoist-nothing result means the variation has nothing to add and declines.
     // One family per hoist; a hoist binding exactly what an earlier hoist bound is the same
     // source under different variations, so it declines for that too. `/basefold`'s TWO hoists and
-    // `/unfolded` join the roster where the target declares the fold, and `/orderbase` where it
-    // declares the array-shape fork, so a target with neither is offered the two `/livebase` hoists
-    // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
-    // all of them or none.
+    // `/unfolded` stay on the roster where the target declares the fold, and `/orderbase` where it
+    // declares the array-shape fork (each registry entry's target gate), so a target with neither is
+    // offered the two `/livebase` hoists and nothing else. The array-shape fork is the opt-in
+    // raise/globalshape.ts carries: with it off nothing is stamped, so `order-licensed` would refuse
+    // every key anyway and the filter only saves the census.
     const hoists: readonly BaseHoist[] = [
       ...LIVEBASE_HOISTS,
-      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS] : []),
-      // …and the ORDER hoists where the compiler's subscript expansion forks on the base's array-ness,
-      // which is the same opt-in raise/globalshape.ts carries: with it off nothing is stamped, so
-      // `order-licensed` would refuse every key anyway and this only saves the census.
-      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_HOISTS : []),
-    ];
+      ...BASEFOLD_HOISTS,
+      ...UNFOLDED_HOISTS,
+      ...ORDERBASE_HOISTS,
+    ].filter((h) => offeredOn(target, h.variations));
     // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF WOULD BUY NOTHING, which is worth a paragraph
     // because this hoist is where the next reader will propose it. `orderLicensedGlobals` is decidable
     // on the lifted fn, so the hoist could also be dropped wherever THAT set is empty. It would be
@@ -1356,7 +1391,7 @@ export function enumerateCandidates(
       placement: HoistPlacement,
       bound: readonly string[],
     ): boolean => rows.slice(0, i).some((r) => r.placement === placement && sameBases(bound, census(r.gates)));
-    const livebases = hoists.map(({ suffix, gates, placement, pairings }, i) => {
+    const livebases = hoists.map(({ variations, gates, placement, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
@@ -1368,7 +1403,7 @@ export function enumerateCandidates(
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles, pairings, gates, placement };
+      return { variations, hoist, volatiles, pairings, gates, placement };
     });
     // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a variation's
     // placement across the stacked variations derived onto it; the variation-on-variation
@@ -1395,20 +1430,20 @@ export function enumerateCandidates(
     };
     // Every composition below runs over the hoists a demanding row earned, never the whole roster.
     const paired = livebases.filter((l) => l.pairings);
-    for (const { suffix, hoist, volatiles } of livebases) {
-      respell(suffix, hoist);
-      respell(`${suffix}/volatile`, volatiles);
-      respellEach(`${suffix}/volatile`, hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
+    for (const { variations, hoist, volatiles } of livebases) {
+      respell(variations, hoist);
+      respell([...variations, 'volatile'], volatiles);
+      respellEach(variations, 'volatile', hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
     }
     // The livebase × indexed PAIRINGS (see POLICY): row-demanded, and the joint spelling is
     // reachable from neither variation alone (the
     // frame-copy + DMA shape).
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell(`${suffix}/indexed`, () => {
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'indexed'], () => {
         const r = hoist();
         return r ? survives(r, reindexWalks(r)) : null;
       });
-      respell(`${suffix}/volatile/indexed`, () => {
+      respell([...variations, 'volatile', 'indexed'], () => {
         const r = volatiles();
         return r ? survives(r, reindexWalks(r)) : null;
       });
@@ -1417,12 +1452,12 @@ export function enumerateCandidates(
     // (kleod:DecompressDma, on kl-eod-decomp's source, before 2026-09-13), and the joint spelling is reachable from neither variation alone. The
     // bases whose placement moves the row are the ones only this variation's ablation binds, and
     // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell(`${suffix}/sinkinit`, () => {
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'sinkinit'], () => {
         const r = hoist();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
-      respell(`${suffix}/volatile/sinkinit`, () => {
+      respell([...variations, 'volatile', 'sinkinit'], () => {
         const r = volatiles();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
@@ -1441,7 +1476,7 @@ export function enumerateCandidates(
     // pairing. ADDITIVE, like every variation here: `/livebase-block`, `/regionbase`, `/scopebase`
     // and the un-hoisted default all stay in the list, which is what keeps `synthetic:dmaflat` — where the
     // composed spelling scores 13 against its own 0 — at MATCH.
-    for (const [i, { suffix, gates, placement }] of paired.entries()) {
+    for (const [i, { variations, gates, placement }] of paired.entries()) {
       const bound = census(gates);
       // The ROSTER's dedup, which `hoist` applies to every other composition and this loop has to
       // ask for itself: every pairing piped from a shadowed hoist is that hoist's source under
@@ -1455,7 +1490,7 @@ export function enumerateCandidates(
       // rules read the key count and nothing else, so inside the pipe they would cost that whole
       // pipe to report a fact this loop already holds.
       for (const key of homeSplitWithholds(bound)) {
-        const splitSuffix = `${suffix}/homesplit-${homeSplitTag(key)}`;
+        const homesplitVariations = [...variations, withSubject('homesplit', homeSplitTag(key))];
         const homesplit = (): SFn | null => {
           const p = splitHomeBases(sfn, {
             gates,
@@ -1469,9 +1504,9 @@ export function enumerateCandidates(
           const r = homesplit();
           return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
         };
-        respell(splitSuffix, homesplit);
-        respell(`${splitSuffix}/volatile`, homesplitVolatile);
-        respell(`${splitSuffix}/volatile/vol-store`, () => {
+        respell(homesplitVariations, homesplit);
+        respell([...homesplitVariations, 'volatile'], homesplitVolatile);
+        respell([...homesplitVariations, 'volatile', 'vol-store'], () => {
           const v = homesplitVolatile();
           return v ? volStore(v) : null;
         });
@@ -1480,7 +1515,7 @@ export function enumerateCandidates(
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
     // independent operand's load above the product's mflo/mullw, so def order re-spells a
     // product-first source as load-first. Both orders are emitted; the differ referees.
-    respell('/mulfirst', () => mulFirstSums(sfn));
+    respell(['mulfirst'], () => mulFirstSums(sfn));
     // `/nearbase` — neighbor absolute addresses derive from one shared base local
     // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
     // offsets off its lowest address, within the target's declared derivation reach. Both
@@ -1503,8 +1538,8 @@ export function enumerateCandidates(
       const r = near(base);
       return r ? survives(r, sinkInitsToFirstUse(r)) : null;
     };
-    respell('/nearbase', () => near(sfn));
-    respell('/nearbase/sinkinit', () => nearSunk(sfn));
+    respell(['nearbase'], () => near(sfn));
+    respell(['nearbase', 'sinkinit'], () => nearSunk(sfn));
     // `/advance` — a pointer local the source MOVED between two accesses (l3/advance.ts), read off
     // the `add` the target performed on an address register that already held an address it used.
     //
@@ -1525,14 +1560,13 @@ export function enumerateCandidates(
     // as long as agbcc is the only target that reaches the stamp (the corpus census below), and the
     // day a second one does, `compilerBehaviors` is where this belongs rather than a variation.
     //
-    // THE PLAIN `/advance` IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — a variation keyed
-    // on a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
-    // POLARITY REVERSED: that flag admits a variation where the compiler folds, this one withholds
-    // one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
-    // compiled corners in test/advance.test.ts's header), so the plain spelling is byte-identical
-    // to the indexed one this roster already offers, and it never wins on a row that reaches it:
-    // `/advance` 15/23
-    // against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
+    // THE PLAIN `/advance` IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — its registry entry's
+    // target gate names a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above,
+    // but with the POLARITY REVERSED: that flag admits a variation where the compiler folds, this one
+    // withholds one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
+    // compiled corners in test/advance.test.ts's header), so the plain spelling emits the same stores
+    // as the indexed one this roster already offers, and it never wins on a row that reaches it:
+    // `/advance` 15/23 against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
     // 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs 0/103 ·
     // `volwalk` 5/7 vs 0/7 (2026-09-12).
     //
@@ -1569,10 +1603,8 @@ export function enumerateCandidates(
     // address does not survive the symbol-map direction unless `cellAddress` learns the promoted
     // form; test/advance.test.ts records that at the row it exists for.
     const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
-    if (!target.compilerBehaviors.foldsPointerAdvance) {
-      respell('/advance', advance);
-    }
-    respell('/advance/volatile', () => {
+    respell(['advance'], advance);
+    respell(['advance', 'volatile'], () => {
       const a = advance();
       return a ? volatilePtrLocals(a, createdLocals(sfn, a)) : null;
     });
@@ -1581,11 +1613,11 @@ export function enumerateCandidates(
     // neither variation alone (a neighbor-cell object and a multi-index MMIO block in one
     // function — each variation's constants are invisible to the other's model); the plain
     // sibling rides for symmetry with /livebase/indexed.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell(`${suffix}/nearbase`, () => near(hoist()));
-      respell(`${suffix}/volatile/nearbase`, () => near(volatiles()));
-      respell(`${suffix}/nearbase/sinkinit`, () => nearSunk(hoist()));
-      respell(`${suffix}/volatile/nearbase/sinkinit`, () => nearSunk(volatiles()));
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'nearbase'], () => near(hoist()));
+      respell([...variations, 'volatile', 'nearbase'], () => near(volatiles()));
+      respell([...variations, 'nearbase', 'sinkinit'], () => nearSunk(hoist()));
+      respell([...variations, 'volatile', 'nearbase', 'sinkinit'], () => nearSunk(volatiles()));
     }
     // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
     // row-demanded one, the joint spelling reachable from neither variation alone (an MMIO base
@@ -1594,37 +1626,37 @@ export function enumerateCandidates(
     // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
     // span-model merges already ride the plain /coalesce variation — pairing them too would
     // multiply candidates with no row behind it.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respellEach(`${suffix}/coalesce`, hoist, armDisjointCandidates);
-      respellEach(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
+    for (const { variations, hoist, volatiles } of paired) {
+      respellEach(variations, 'coalesce', hoist, armDisjointCandidates);
+      respellEach([...variations, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
     }
     // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
     // default order is emission's. Both orders are emitted; the differ referees.
-    respell('/parkfirst', () => parkParamsFirst(sfn));
+    respell(['parkfirst'], () => parkParamsFirst(sfn));
     // `/sinkinit` — each leading pointer-base init sinks to its own first use (l3/sinkinit.ts):
     // the base hoist places every init at the head of the body, which keeps the base live across
     // everything above its first use and can cost a callee-saved register the original avoided.
     // Which placement the source used is not derivable from the asm, so both are emitted and the
     // differ referees.
-    respell('/sinkinit', () => sinkInitsToFirstUse(sfn));
+    respell(['sinkinit'], () => sinkInitsToFirstUse(sfn));
     // the register-copy variation (l3/regspell.ts): 0–3 results (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail decision is allocator-
     // ambiguous, so both are ranked).
     //
     // NAMED BY THE TAIL THE RESULT CARRIES, NEVER BY ITS INDEX. The reuse tail exists only
     // where R1 fired, so the list is 1, 2 or 3 long and the fresh tail sits at no fixed position;
-    // an index-keyed suffix table names the fresh spelling `/regcopy-ret` on every R1-less function
+    // an index-keyed table names the fresh spelling `/regcopy-ret` on every R1-less function
     // — the dead-var-reuse name on the one spelling that has no dead var — and `winnerVariations` is
     // what every census in this repo counts, `bench diff` included. The exhaustive record is the
     // pin: a new tail kind is a type error here rather than a silent `/regcopy-3`.
     // `cli/test/matching/regspell-candidate.test.ts` holds the correspondence.
-    const REGCOPY_SUFFIX: Record<RegcopyTail, string> = {
-      none: '/regcopy',
-      reuse: '/regcopy-ret',
-      fresh: '/regcopy-ret-fresh',
+    const REGCOPY_VARIATION: Record<RegcopyTail, Variation> = {
+      none: 'regcopy',
+      reuse: withSubject('regcopy', 'ret'),
+      fresh: withSubject('regcopy', 'ret-fresh'),
     };
-    registerishSpellings(sfn).forEach((alt) => respell(REGCOPY_SUFFIX[alt.tail], () => alt.sfn));
+    registerishSpellings(sfn).forEach((alt) => respell([REGCOPY_VARIATION[alt.tail]], () => alt.sfn));
     return { sources };
   };
   // The SYMBOL-MAP spelling is itself a ranked VARIATION on the same footing as signedness/branch
@@ -1643,12 +1675,12 @@ export function enumerateCandidates(
   const rawDerivesRank = [...sharedLiftShapes].some(
     ([n, i]) => byName?.get(n) === undefined && (arrayInnerExtents(i)?.length ?? 0) > 0,
   );
-  const symbolSettings: { suffix: string; symbols?: typeof opts.symbols }[] = opts.symbols
+  const symbolSettings: { variations: readonly Variation[]; symbols?: typeof opts.symbols }[] = opts.symbols
     ? [
-        { suffix: '', symbols: opts.symbols },
-        { suffix: '/raw-globals', symbols: undefined },
+        { variations: [], symbols: opts.symbols },
+        { variations: ['raw-globals'], symbols: undefined },
       ]
-    : [{ suffix: '' }];
+    : [{ variations: [] }];
   for (const [symbolIndex, symbolSetting] of symbolSettings.entries()) {
     const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
     // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
@@ -1740,29 +1772,30 @@ export function enumerateCandidates(
       // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
       // `/setup-args` rather than nested under it — dropping a call argument and choosing this
       // shape are independent, and the four combinations dedup down to whatever the trees differ on.
-      const connectiveSettings = treeOwnedFold
+      const connectiveSettings: { variations: readonly Variation[]; connective: boolean }[] = treeOwnedFold
         ? [
-            { suffix: '', connective: false },
-            { suffix: '/connective', connective: true },
+            { variations: [], connective: false },
+            { variations: ['connective'], connective: true },
           ]
-        : [{ suffix: '', connective: false }];
-      const liftSettings: { suffix: string; narrow: boolean; connective: boolean }[] = (
-        hasSetupArgsNarrowing(base)
-          ? [
-              { suffix: '', narrow: false },
-              { suffix: '/setup-args', narrow: true },
-            ]
-          : [{ suffix: '', narrow: false }]
-      ).flatMap((l) => connectiveSettings.map((c) => ({ ...l, ...c, suffix: `${l.suffix}${c.suffix}` })));
+        : [{ variations: [], connective: false }];
+      const narrowSettings: { variations: readonly Variation[]; narrow: boolean }[] = hasSetupArgsNarrowing(base)
+        ? [
+            { variations: [], narrow: false },
+            { variations: ['setup-args'], narrow: true },
+          ]
+        : [{ variations: [], narrow: false }];
+      const liftSettings = narrowSettings.flatMap((l) =>
+        connectiveSettings.map((c) => ({ ...l, ...c, variations: [...l.variations, ...c.variations] })),
+      );
       for (const liftSetting of liftSettings) {
         let fn: Fn;
         let inferredSymbols = new Map<string, SymbolInfo>();
         let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
-          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
+          // A SETTING THAT NAMES ANY VARIATION IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth lift variation sharing the default's already-mutated `base`.
           fn =
-            liftSetting.suffix === ''
+            liftSetting.variations.length === 0
               ? base
               : frontend.lift(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
@@ -1819,15 +1852,15 @@ export function enumerateCandidates(
             { shortCircuit: { foldTreeOwned: liftSetting.connective } },
           );
         } catch (e) {
-          // THE DEFAULT IS THE EMPTY SUFFIX, by construction: every lift variation appends a non-empty
-          // one, so `suffix === ''` is the only spelling of "no lift variation is on" that stays correct
+          // THE DEFAULT CARRIES NO VARIATION, by construction: every lift variation appends one, so
+          // `variations.length === 0` is the only spelling of "no lift variation is on" that stays correct
           // when a fourth is added — the same reason the structure half below reads its table
           // instead of naming its flags.
-          if (liftSetting.suffix === '') {
+          if (liftSetting.variations.length === 0) {
             throw e; // the default lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped variation, never an aborted enumeration — the same posture as `respell`.
-          reportThrow(liftSetting.suffix, e);
+          reportThrow(liftSetting.variations, e);
           continue;
         }
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -1883,7 +1916,7 @@ export function enumerateCandidates(
                 verify(fn);
               }
             } catch (e) {
-              reportThrow(liftSetting.suffix + SHARED_TAIL_SUFFIX, e);
+              reportThrow([...liftSetting.variations, 'shared-tail'], e);
               break;
             }
             // Unsunk, this fn is the `/shared-ret` pass's again.
@@ -1893,12 +1926,12 @@ export function enumerateCandidates(
           }
           const alternative = pass !== 'default';
           const dropped = alternative ? new Set(droppedDefault) : droppedDefault;
-          const vsuffix =
+          const liftVariations: readonly Variation[] =
             pass === 'follow'
-              ? liftSetting.suffix + SHARED_RET_SUFFIX
+              ? [...liftSetting.variations, 'shared-ret']
               : pass === 'sink'
-                ? liftSetting.suffix + SHARED_TAIL_SUFFIX
-                : liftSetting.suffix;
+                ? [...liftSetting.variations, 'shared-tail']
+                : liftSetting.variations;
           // the per-lift gates, on THIS lift's fn — see the table doc
           const offForThisLift = STRUCTURE_VARIATIONS.filter(
             (variation) => variation.perLiftGate !== undefined && !variation.perLiftGate(fn),
@@ -1918,20 +1951,23 @@ export function enumerateCandidates(
           // structurer a shape it can accept where the default declined — sound, but the same
           // trade one level up again.
           for (const s of settingsForLift) {
-            if (alternative && droppedDefault.has(s.suffix)) {
+            const key = s.variations.join('/');
+            if (alternative && droppedDefault.has(key)) {
               continue;
             }
             if (
               STRUCTURE_VARIATIONS.some(
                 (variation) =>
-                  variation.strip && s[variation.flag] && dropped.has(s.suffix.replace(variation.suffix, '')),
+                  variation.strip &&
+                  s[variation.flag] &&
+                  dropped.has(s.variations.filter((v) => v !== variation.name).join('/')),
               )
             ) {
               // A SKIPPED setting is recorded exactly like a dropped one, or the closure would not be
               // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
               // X/inplace/merge-names would find neither stripped key and run — shipping a
               // candidate carrying two variations where its ancestor failed the boundary contracts.
-              dropped.add(s.suffix);
+              dropped.add(key);
               continue;
             }
             // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
@@ -1957,15 +1993,15 @@ export function enumerateCandidates(
                 ...(alternative ? { followEarlyReturns: true } : {}),
               });
             } catch (e) {
-              if (vsuffix === '' && isDefaultSetting(s)) {
+              if (liftVariations.length === 0 && isDefaultSetting(s)) {
                 throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
               }
               // Recorded for EVERY dropped setting: a candidate with more variations on looks its siblings
               // up by stripping one variation at a time, and the stripped key can itself carry the other.
-              dropped.add(s.suffix);
+              dropped.add(key);
               // an anchored setting that fails structuring or its contracts is a dropped variation, never
               // an aborted enumeration — same rule as respell below
-              reportThrow(vsuffix + s.suffix, e);
+              reportThrow([...liftVariations, ...s.variations], e);
               continue;
             }
             // A TREE another structure setting already produced. `respellTree` reads the tree and this
@@ -2035,17 +2071,17 @@ export function enumerateCandidates(
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.
                 //
-                // It is reported instead through `onEnumerationError` under `pf.suffix`, which is what
+                // It is reported instead through `onEnumerationError` under `pf.name`, which is what
                 // `respellTree`'s second argument is for: a default emit refusal does not THROW —
                 // `respellTree` returns it — so the `catch` below never sees it, and reported with no
                 // variations it would read as a refusal of the row's default source while the
                 // variation's whole half of the fan was deleted.
-                const respelled = respellTree(made, pf.suffix).sources;
+                const respelled = respellTree(made, [pf.name]).sources;
                 for (const sp of respelled) {
-                  sources.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
+                  sources.push({ ...sp, variations: [pf.name, ...sp.variations] });
                 }
               } catch (e) {
-                reportThrow(pf.suffix, e);
+                reportThrow([pf.name], e);
               }
             }
             for (const sp of sources) {
@@ -2094,10 +2130,21 @@ export function enumerateCandidates(
                 }
                 continue;
               }
+              const variations: readonly Variation[] = [
+                cand.variation,
+                ...liftVariations,
+                ...s.variations,
+                ...sp.variations,
+                ...symbolSetting.variations,
+              ];
+              // `respell`, `respellEach` and the hoist roster ask `offeredOn` before a pass runs; this
+              // asks it of the whole name, so a mint site that skips the question is an enumeration
+              // error and the drawer's target line stays what enumeration does.
+              if (!offeredOn(target, variations)) {
+                throw new Error(`'${variations.join('/')}' is withheld on ${target.compiler} but was enumerated`);
+              }
               const made: Candidate = {
-                variations: splitVariations(
-                  `${cand.variation}${vsuffix}${s.suffix}${sp.suffix}${symbolSetting.suffix}`,
-                ),
+                variations,
                 source,
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),

@@ -40,6 +40,7 @@ import {
   hasMergeFeedHome,
 } from './structure/analysis';
 import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
+import type { VariationName } from './variation-tokens';
 
 /** The STRUCTURE VARIATIONS — the boolean candidate dimensions crossed into every enumeration
  *  (after signedness/branch-sense/defsite/bitfields, which have their own shapes). One entry per
@@ -70,7 +71,7 @@ export interface StructureVariation {
     | 'freshMerge'
     | 'copyDefPos'
     | 'siteSense';
-  suffix: string;
+  name: VariationName;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
@@ -85,7 +86,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // having a load that resolves to a named global at all.
   {
     flag: 'reread',
-    suffix: '/reread-globals',
+    name: 'reread-globals',
     options: (on) => ({ rereadGlobals: on }),
     sharedGate: (sharedLift, defs) =>
       sharedLift.blocks.some((b) =>
@@ -100,7 +101,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // push — and the emptied arm flips the branch sense). Gated on a load-fed cond_br arg.
   {
     flag: 'inplace',
-    suffix: '/inplace',
+    name: 'inplace',
     options: (on) => ({ materializeJoinFeeds: on }),
     sharedGate: (sharedLift, defs) =>
       sharedLift.blocks.some((b) =>
@@ -117,7 +118,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // itself, so which side scores better is per-function. Gated on a merge fed by 2+ edges.
   {
     flag: 'mergeNames',
-    suffix: '/merge-names',
+    name: 'merge-names',
     options: (on) => ({ coalesceMergeNames: on }),
     sharedGate: (sharedLift) =>
       sharedLift.blocks
@@ -135,7 +136,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // SYMBOL-MAP SETTING (see the table doc) on that setting's own lifted fn having a homeable base.
   {
     flag: 'addrHome',
-    suffix: '/addr-home',
+    name: 'addr-home',
     options: (on) => ({ homeSharedAddresses: on }),
     perLiftGate: hasHomeableSharedAddress,
     strip: true,
@@ -148,7 +149,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // (the cone refusal reads the setting's own lift).
   {
     flag: 'exprHome',
-    suffix: '/expr-home',
+    name: 'expr-home',
     options: (on) => ({ homeLoopExprs: on }),
     perLiftGate: hasLoopSharedPureValue,
     strip: true,
@@ -164,7 +165,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `/raw-globals` sibling — so the two settings genuinely answer differently.
   {
     flag: 'derivedHome',
-    suffix: '/derived-home',
+    name: 'derived-home',
     options: (on) => ({ homeDerivedReads: on }),
     perLiftGate: hasDerivedReadHome,
     strip: true,
@@ -197,7 +198,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // recorded here has gone stale once already.
   {
     flag: 'mergeHome',
-    suffix: '/merge-home',
+    name: 'merge-home',
     options: (on) => ({ homeMergeFeeds: on }),
     perLiftGate: hasMergeFeedHome,
     strip: true,
@@ -211,7 +212,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // compiler's. Gated on the function having an unsigned compare at all.
   {
     flag: 'unsCmp',
-    suffix: '/uns-cmp',
+    name: 'uns-cmp',
     options: (on) => ({ unsignedCompareSpelling: on }),
     sharedGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
@@ -238,7 +239,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // so it cannot answer differently per symbol-map setting.
   {
     flag: 'freshMerge',
-    suffix: '/fresh-merge',
+    name: 'fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
     sharedGate: (sharedLift) => hasParamRootedMerge(sharedLift),
     strip: true,
@@ -278,7 +279,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // cannot rescue a spelling whose default sibling failed the boundary contracts.
   {
     flag: 'copyDefPos',
-    suffix: '/copy-defpos',
+    name: 'copy-defpos',
     options: (on) => ({ preferDefPosCopyOrder: on }),
     perLiftGate: edgeCopyOrdersDiffer,
     strip: true,
@@ -330,7 +331,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // an alternative to ride past.
   {
     flag: 'siteSense',
-    suffix: '/site-sense',
+    name: 'site-sense',
     options: (on) => ({ senseFromFoldEvidence: on }),
     // ALL THREE stamps, which is the predicate the consumer admits a site on (structure.ts's
     // `senseFromFoldEvidence` site default): one contract, not two spellings of it in two files.
@@ -356,15 +357,11 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
  *  all of them together in table order — not the full subset lattice; the pairs question is
  *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
  *  all three fire, the match needs exactly two — is what would earn the lattice. */
-export const STACKED_VARIATIONS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
-  { suffix: '/initfirst', apply: initFirstGuards },
-  { suffix: '/pollguard', apply: pollGuards },
-  { suffix: '/pollread', apply: pollReads },
+export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
+  { name: 'initfirst', apply: initFirstGuards },
+  { name: 'pollguard', apply: pollGuards },
+  { name: 'pollread', apply: pollReads },
 ];
-
-/** `/unmerge`'s suffix, exported so a caller that has to find its entry in `PRE_RESPELL_VARIATIONS` reads
- *  the constant the entry is built from instead of a second copy of the string. */
-export const UNMERGE_SUFFIX = '/unmerge';
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
  *  rewrite applied BEFORE the respell set, so the whole set derives from its output instead of
@@ -431,7 +428,7 @@ export const UNMERGE_SUFFIX = '/unmerge';
  *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
  *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
  *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
-export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ suffix: UNMERGE_SUFFIX, apply: unmergeJoins }];
+export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ name: 'unmerge', apply: unmergeJoins }];
 
 export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
   ...STACKED_VARIATIONS.map((x) => [x]),
@@ -440,24 +437,24 @@ export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
 
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
- *  fires", so a pair is reachable whenever the third declines. The suffix is built from the
- *  members that actually FIRED, so a suffix never names a variation that declined; a fired-set that
+ *  fires", so a pair is reachable whenever the third declines. The variations are the members that
+ *  actually FIRED, so they never name a variation that declined; a fired-set that
  *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
  *  nothing fired. */
 export const applyStacked = (
   subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
-): { out: SFn; suffix: string } | null => {
+): { out: SFn; variations: VariationName[] } | null => {
   let cur = from;
-  const fired: string[] = [];
+  const fired: VariationName[] = [];
   for (const sp of subset) {
     const r = sp.apply(cur);
     if (r) {
       cur = r;
-      fired.push(sp.suffix);
+      fired.push(sp.name);
     }
   }
-  return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
+  return fired.length > 0 ? { out: cur, variations: fired } : null;
 };
 
 /** The locals a variation added — a NAME diff rather than a positional slice, so a pass that ever
@@ -491,7 +488,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  is the field, and its own doc says how a hoist earns a `true`.
  *
  *  `/basefold` is the third and fourth hoist and `/unfolded` the fifth; those three are the
- *  conditional set — `enumerateCandidates` appends them where the target declares
+ *  conditional set — their registry entries' target gate offers them only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the default already carry
  *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
  *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
@@ -550,7 +547,8 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  ablation in the note on BASEFOLD_HOISTS, which carries the fan counts that prove it
  *  reached. */
 export interface BaseHoist {
-  suffix: string;
+  /** the variations this hoist's candidates carry, in name order */
+  variations: readonly VariationName[];
   gates: readonly Gate<BaseKey>[];
   /** WHERE the locals this hoist binds are initialized (l3/hoist.ts). Eligibility and placement are
    *  two questions and this roster answers both, so a hoist can offer the same bases in the other
@@ -574,8 +572,8 @@ export interface BaseHoist {
 }
 
 export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
-  { suffix: '/livebase', gates: LIVEBASE_GATES, placement: 'head', pairings: true },
-  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
+  { variations: ['livebase'], gates: LIVEBASE_GATES, placement: 'head', pairings: true },
+  { variations: ['livebase-block'], gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
 ];
 
 /** Narrower than either `/livebase` hoist, so both go last: they keep both placement heuristics and
@@ -628,8 +626,8 @@ export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
  *  hoist expires the next time a hoist is added — re-run it, and if it no longer moves, widen the
  *  ablation until it does before concluding anything from a null. */
 export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
-  { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
-  { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
+  { variations: ['basefold'], gates: BASEFOLD_GATES, placement: 'head', pairings: false },
+  { variations: ['basefold', 'sinkinit'], gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
 ];
 
 /** The fifth hoist: its table requires the fold evidence (l3/basecse.ts, UNFOLDED_GATES), so
@@ -686,7 +684,7 @@ export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
  *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
  *  census when one does. */
 export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
-  { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
+  { variations: ['unfolded'], gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
 ];
 
 /** The sixth hoist, and the only one whose evidence is the INSTRUCTION ORDER rather than the
@@ -730,8 +728,8 @@ export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
  *  `pairings: false` on both for the field's own reason — a pairing is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
 export const ORDERBASE_HOISTS: readonly BaseHoist[] = [
-  { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
-  { suffix: '/orderbase-scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
+  { variations: ['orderbase'], gates: ORDERBASE_GATES, placement: 'head', pairings: false },
+  { variations: ['orderbase-scoped'], gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
 
 export const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -751,7 +749,7 @@ export const sameBases = (a: readonly string[], b: readonly string[]): boolean =
  * reads the base from the observed pool word and the field offset from the observed load
  * displacement, so it reproduces the target's own split by construction. The measurements and the
  * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
-export const SIGNEDNESS = [
+export const SIGNEDNESS: readonly { variation: VariationName; signed: boolean }[] = [
   { variation: 'unsigned', signed: false },
   { variation: 'signed', signed: true },
 ];
