@@ -41,6 +41,10 @@ function tallyText(t: VariationTally): string {
   return parts.join(' · ');
 }
 
+/** A variation's chip, its definition and its tally, as one list entry: side by side from `sm`, the
+ *  chip above the rest on a phone so the text keeps the width. */
+const ENTRY = 'flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3';
+
 export function WinningSpelling({
   fn,
   hash,
@@ -60,19 +64,16 @@ export function WinningSpelling({
     return null;
   }
   const lostCount = lost.reduce((n, g) => n + g.items.length, 0);
+  const candidates = `${fan.toLocaleString()} candidate${fan === 1 ? '' : 's'}`;
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 sm:p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-sm font-semibold text-slate-100">The winning spelling</h3>
-        <span className="text-xs text-slate-500">
-          chosen from <span className="font-mono text-slate-300">{fan.toLocaleString()}</span> candidate
-          {fan === 1 ? '' : 's'}
-        </span>
-      </div>
-
       {spelling.length > 0 ? (
         <>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3 className="text-sm font-semibold text-slate-100">The winning spelling</h3>
+            <span className="text-xs text-slate-500">chosen from {candidates}</span>
+          </div>
           <p className="mt-1 break-all font-mono text-xs text-slate-400">
             {joinVariations(fn.asmlift.winnerVariations ?? [])}
           </p>
@@ -88,7 +89,7 @@ export function WinningSpelling({
                   {g.items.map((p, i) => {
                     const def = VARIATION_DEFINITIONS[p.name];
                     return (
-                      <li key={`${p.part}-${i}`} className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-3">
+                      <li key={`${p.part}-${i}`} className={ENTRY}>
                         <span className="shrink-0 sm:w-44">
                           <VariationChip part={p.part} hash={hash} onOpen={onOpenVariation} />
                         </span>
@@ -99,14 +100,12 @@ export function WinningSpelling({
                           {' — '}
                           <InlineCode text={def.summary} />
                         </span>
-                        {p.tally && (
-                          <span
-                            className="shrink-0 font-mono text-[11px] text-slate-500"
-                            title={`${tallyText(p.tally)} of the ${fan.toLocaleString()} in this row's fan carried it`}
-                          >
-                            {p.tally.candidates.toLocaleString()} / {fan.toLocaleString()}
-                          </span>
-                        )}
+                        <span
+                          className="shrink-0 font-mono text-[11px] text-slate-500"
+                          title={`${tallyText(p.tally)} of the ${fan.toLocaleString()} in this row's fan carried it`}
+                        >
+                          {p.tally.candidates.toLocaleString()} / {fan.toLocaleString()}
+                        </span>
                       </li>
                     );
                   })}
@@ -116,9 +115,15 @@ export function WinningSpelling({
           </div>
         </>
       ) : (
-        <p className="mt-1 text-xs leading-relaxed text-slate-400">
-          No candidate won, so every variation this row&apos;s fan carried is listed below as considered and lost.
-        </p>
+        <>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3 className="text-sm font-semibold text-slate-100">No winning spelling</h3>
+            <span className="text-xs text-slate-500">a fan of {candidates}</span>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+            No candidate won, so every variation this row&apos;s fan carried is listed below as considered and lost.
+          </p>
+        </>
       )}
 
       <div className="mt-4 border-t border-slate-700/70 pt-3">
@@ -139,9 +144,9 @@ export function WinningSpelling({
               {lost.map((g) => (
                 <div key={g.kind}>
                   <KindHeading kind={g.kind} />
-                  <ul className="mt-1.5 space-y-1.5">
+                  <ul className="mt-1.5 space-y-2">
                     {g.items.map((v) => (
-                      <li key={v.name} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <li key={v.name} className={ENTRY}>
                         <span className="shrink-0 sm:w-44">
                           <VariationChip part={v.name} hash={hash} onOpen={onOpenVariation} dim />
                         </span>

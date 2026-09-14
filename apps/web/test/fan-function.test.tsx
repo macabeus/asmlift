@@ -1,6 +1,7 @@
 // The Function Explorer's side of the fan: the sparse fan column, and the function detail's winning
-// spelling with what the row considered and lost. Two samples, as the tab's tests: `FAN_SAMPLE` (ranked
-// rows carrying `fanVariations`, one noncompile row) and the committed artifact the page renders. apps/web has no DOM, so components render through `renderToStaticMarkup`, and the
+// spelling with what the row considered and lost. Two samples, as the tab's tests: `FAN_SAMPLE`
+// (ranked rows carrying `fanVariations`, one noncompile row) and the committed artifact the page
+// renders. apps/web has no DOM, so components render through `renderToStaticMarkup`, and the
 // Explorer's URL state through nuqs's testing adapter.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
@@ -51,7 +52,9 @@ describe.each([
     for (const row of rows) {
       const groups = winningSpelling(row);
       const parts = groups.flatMap((g) => g.items.map((p) => p.part));
-      expect([...parts].sort(), row.id).toEqual([...(row.asmlift.winnerVariations ?? [])].sort());
+      // part of the fan's account: a row whose fan was not counted has none
+      const expected = row.asmlift.fanVariations ? (row.asmlift.winnerVariations ?? []) : [];
+      expect([...parts].sort(), row.id).toEqual([...expected].sort());
       expect(
         groups.map((g) => VARIATION_KINDS.indexOf(g.kind)),
         row.id,
@@ -131,6 +134,10 @@ describe.each([
       const lostCount = lost.reduce((n, g) => n + g.items.length, 0);
       expect(html.includes(NOT_WASTE), row.id).toBe(lostCount > 0);
       expect(html.includes('No candidate won'), row.id).toBe(spelling.length === 0);
+      // a row with no winner is never headed as if one was chosen
+      expect(html.includes('The winning spelling'), row.id).toBe(spelling.length > 0);
+      expect(html.includes('chosen from'), row.id).toBe(spelling.length > 0);
+      expect(html.includes('No winning spelling'), row.id).toBe(spelling.length === 0);
     }
   });
 });

@@ -202,15 +202,20 @@ export interface SpellingPart {
   part: string;
   name: VariationName;
   subject?: string;
-  tally?: VariationTally;
+  tally: VariationTally;
 }
 
 /** The winning spelling: the winner's variations grouped by kind, each kind in the order the winner
- *  applied them. Empty when the row has no winner. */
+ *  applied them. Empty when the row has no winner, or when its fan was not counted: the spelling is
+ *  part of the fan's account, and a winner's names are always keys of its fan's tally. */
 export function winningSpelling(row: FunctionResult): KindGroup<SpellingPart>[] {
+  const roster = row.asmlift.fanVariations;
+  if (!roster) {
+    return [];
+  }
   const parts = (row.asmlift.winnerVariations ?? []).map((part) => {
     const { name, subject } = parseVariation(part);
-    return { part, name, subject, tally: row.asmlift.fanVariations?.[name] };
+    return { part, name, subject, tally: roster[name] };
   });
   return groupByKind(parts);
 }
