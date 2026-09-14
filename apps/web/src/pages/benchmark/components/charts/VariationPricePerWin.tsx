@@ -1,4 +1,5 @@
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
+import { useMemo } from 'react';
 
 import { type VariationStats, pricePerWin } from '../../lib/fan';
 import { VARIATION_KIND_COLOR } from '../../theme';
@@ -27,69 +28,70 @@ export function VariationPricePerWin({
   data: VariationStats[];
   onBarClick?: (name: string) => void;
 }) {
-  const bars = [...data].reverse(); // a category scale draws bottom-up
+  const bars = useMemo(() => [...data].reverse(), [data]); // a category scale draws bottom-up
 
-  const option: EChartsOption = {
-    tooltip: {
-      ...tooltipDefaults,
-      trigger: 'item',
-      formatter: (p) => {
-        const one = Array.isArray(p) ? p[0] : p;
-        const s = bars[(one as { dataIndex: number }).dataIndex];
-        const price = pricePerWin(s);
-        return [
-          `<div style="font-weight:600">${escapeHtml(VARIATION_DEFINITIONS[s.name].title.replace(/`/g, ''))} <span style="opacity:.6;font-family:monospace">${s.name}</span></div>`,
-          `<div>${s.candidates.toLocaleString()} candidates carried it, in ${s.rows} row fan${s.rows === 1 ? '' : 's'}</div>`,
-          `<div>${s.winners} win${s.winners === 1 ? '' : 's'}</div>`,
-          price === null
-            ? '<div style="opacity:.7">no win</div>'
-            : `<div>${Math.round(price).toLocaleString()} candidates per win</div>`,
-        ].join('');
-      },
-    },
-    grid: { left: 8, right: 84, top: 8, bottom: 8, containLabel: true },
-    xAxis: { type: 'value', ...axisCommon },
-    yAxis: {
-      type: 'category',
-      data: bars.map((s) => s.name),
-      ...axisCommon,
-      axisLabel: { ...axisCommon.axisLabel, interval: 0, fontFamily: 'ui-monospace, monospace', fontSize: 11 },
-      splitLine: { show: false },
-    },
-    series: [
-      {
-        type: 'bar',
-        barMaxWidth: 11,
-        data: bars.map((s) => {
+  // MEMOIZED, as `VariationCostGain` explains: a new option under the pointer throws on mouseout.
+  const option = useMemo(
+    (): EChartsOption => ({
+      tooltip: {
+        ...tooltipDefaults,
+        trigger: 'item',
+        formatter: (p) => {
+          const one = Array.isArray(p) ? p[0] : p;
+          const s = bars[(one as { dataIndex: number }).dataIndex];
           const price = pricePerWin(s);
-          return {
-            value: s.candidates,
-            itemStyle: { color: price === null ? NO_WIN : VARIATION_KIND_COLOR[s.kind], borderRadius: 2 },
-            label: {
-              show: true,
-              position: 'right' as const,
-              fontSize: 11,
-              color: price === null ? NO_WIN : '#cbd5e1',
-              formatter: price === null ? 'no win' : `${Math.round(price).toLocaleString()} / win`,
-            },
-          };
-        }),
+          return [
+            `<div style="font-weight:600">${escapeHtml(VARIATION_DEFINITIONS[s.name].title.replace(/`/g, ''))} <span style="opacity:.6;font-family:monospace">${s.name}</span></div>`,
+            `<div>${s.candidates.toLocaleString()} candidates carried it, in ${s.rows} row fan${s.rows === 1 ? '' : 's'}</div>`,
+            `<div>${s.winners} win${s.winners === 1 ? '' : 's'}</div>`,
+            price === null
+              ? '<div style="opacity:.7">no win</div>'
+              : `<div>${Math.round(price).toLocaleString()} candidates per win</div>`,
+          ].join('');
+        },
       },
-    ],
-  };
-
-  return (
-    <EChart
-      option={option}
-      height={Math.max(200, bars.length * 18 + 30)}
-      onEvents={
-        onBarClick
-          ? ({ click: (p: { dataIndex: number }) => onBarClick(bars[p.dataIndex].name) } as Record<
-              string,
-              (params: never) => void
-            >)
-          : undefined
-      }
-    />
+      grid: { left: 8, right: 84, top: 8, bottom: 8, containLabel: true },
+      xAxis: { type: 'value', ...axisCommon },
+      yAxis: {
+        type: 'category',
+        data: bars.map((s) => s.name),
+        ...axisCommon,
+        axisLabel: { ...axisCommon.axisLabel, interval: 0, fontFamily: 'ui-monospace, monospace', fontSize: 11 },
+        splitLine: { show: false },
+      },
+      series: [
+        {
+          type: 'bar',
+          barMaxWidth: 11,
+          data: bars.map((s) => {
+            const price = pricePerWin(s);
+            return {
+              value: s.candidates,
+              itemStyle: { color: price === null ? NO_WIN : VARIATION_KIND_COLOR[s.kind], borderRadius: 2 },
+              label: {
+                show: true,
+                position: 'right' as const,
+                fontSize: 11,
+                color: price === null ? NO_WIN : '#cbd5e1',
+                formatter: price === null ? 'no win' : `${Math.round(price).toLocaleString()} / win`,
+              },
+            };
+          }),
+        },
+      ],
+    }),
+    [bars],
   );
+  const onEvents = useMemo(
+    () =>
+      onBarClick
+        ? ({ click: (p: { dataIndex: number }) => onBarClick(bars[p.dataIndex].name) } as Record<
+            string,
+            (params: never) => void
+          >)
+        : undefined,
+    [bars, onBarClick],
+  );
+
+  return <EChart option={option} height={Math.max(200, bars.length * 18 + 30)} onEvents={onEvents} />;
 }
