@@ -64,6 +64,7 @@ describe('closure over the names the committed artifact publishes', () => {
       winnerVariations?: string[];
       droppedCandidates?: { variations: string[] }[];
       withheldCandidates?: { variations: string[] }[];
+      fanSize?: number;
       fanVariations?: Record<string, unknown>;
     };
   }[];
@@ -113,6 +114,22 @@ describe('closure over the names the committed artifact publishes', () => {
       (n) => !Object.hasOwn(VARIATION_DEFINITIONS, n),
     );
     expect(undefinedNames).toEqual([]);
+  });
+
+  // The Fan Explorer counts a win only on a row whose fan was counted, so a ranked row without a
+  // roster would vanish from every rate and price without a trace on the page.
+  test('a row carries a fan roster exactly when it carries a fan size, and its winner is inside it', () => {
+    expect(rows.filter((r) => (r.asmlift?.fanSize === undefined) !== (r.asmlift?.fanVariations === undefined))).toEqual(
+      [],
+    );
+    expect(rows.filter((r) => r.asmlift?.fanVariations !== undefined).length).toBeGreaterThanOrEqual(800);
+    const outside = rows.flatMap((r) =>
+      (r.asmlift?.winnerVariations ?? [])
+        .map((p) => parseVariation(p).name)
+        .filter((n) => !Object.hasOwn(r.asmlift?.fanVariations ?? {}, n))
+        .map((n) => `${r.id}: ${n}`),
+    );
+    expect(outside).toEqual([]);
   });
 });
 
