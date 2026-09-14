@@ -193,16 +193,33 @@ describe('no definition keeps free-text gate logic', () => {
 describe('a rule a reader sees reads as prose', () => {
   const DEFECTS: readonly [string, (why: string) => boolean][] = [
     ['an unclosed code span', (w) => w.split('`').length % 2 === 0],
+    ['a leading code span, which the drawer would capitalize', (w) => w.startsWith('`')],
     ['a shouted word', (w) => /\b[A-Z]{3,}\b/.test(w)],
     ['a file name', (w) => /\.ts\b/.test(w)],
     ['a function call', (w) => /\w\(\)/.test(w)],
     ['a variation spelled with a slash', (w) => /(^|\s)\/[a-z]/.test(w)],
+    ['an opening pronoun, which names nothing out of its table', (w) => /^(?:it|that|this|there|they)\b/.test(w)],
+    [
+      'a word only the pass’s own code gives a meaning',
+      (w) => /\b(?:rung|ladder|re-materiali[sz]es|home|key|tree’s)\b/.test(w),
+    ],
   ];
 
-  test('its code spans close, and it names no file, function or slash-spelled variation, and shouts no word', () => {
+  test('no rule carries a defect a reader would trip on', () => {
     const rules = readerRules(Object.keys(VARIATION_GATE_TABLES) as GateTableName[]);
     const bad = rules.flatMap(({ id, why }) => DEFECTS.filter(([, has]) => has(why)).map(([what]) => `${id}: ${what}`));
     expect(bad).toEqual([]);
     expect(rules.length).toBeGreaterThan(100);
+  });
+
+  // A drawer lists a reason once, with the first table's badge, so one reason is never both.
+  test('one reason is never both required and a heuristic', () => {
+    const soundness = new Map<string, Set<boolean>>();
+    for (const table of Object.values(VARIATION_GATE_TABLES)) {
+      for (const { why, sound } of table) {
+        soundness.set(why, (soundness.get(why) ?? new Set()).add(sound));
+      }
+    }
+    expect([...soundness].filter(([, s]) => s.size > 1).map(([why]) => why)).toEqual([]);
   });
 });

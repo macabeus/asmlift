@@ -217,7 +217,7 @@ export interface UnmergeSite {
 export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
   {
     id: 'empty-arm',
-    why: 'that path would get no copy of the join at all',
+    why: 'an `if` with an empty arm would leave that path with no copy of the join',
     // Not sound only because it is not the LAST word: an empty arm defines nothing, so the rung
     // table below refuses it a second time. This one is the scope statement, stated where a reader
     // looks for it.
@@ -230,7 +230,7 @@ export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
   },
   {
     id: 'arm-writes-a-name-this-cannot-substitute',
-    why: 'the copy would read that name at the arm’s end, where it holds a different value',
+    why: 'a name an arm writes that the rewrite cannot substitute would be read by the copy at the arm’s end, where it holds a different value',
     sound: true,
     // THE GUARD IS NOT THE TEST THAT NAMES THIS REFUSAL. Ablated alone, `a join reading a local
     // the arms WRITE but this cannot substitute refuses` stays GREEN — that fixture is refused a
@@ -272,7 +272,7 @@ export interface UnmergeArm {
 export const UNMERGE_ARM_GATES: readonly Gate<UnmergeArm>[] = [
   {
     id: 'arm-does-not-define-them-all',
-    why: 'a name with no definition here has nothing to substitute',
+    why: 'a merge name an arm does not define leaves that arm nothing to substitute',
     sound: true,
     // Ablated, `a merge temp assigned in only ONE arm (or three times) refuses` stays green —
     // totality catches that one — and the LADDERS break instead, which is the real cost: this is
@@ -287,7 +287,7 @@ export const UNMERGE_ARM_GATES: readonly Gate<UnmergeArm>[] = [
   // of existentials is the existential of the disjunction, so the split is exact.
   {
     id: 'trailing-run-holds-a-non-assignment',
-    why: 'a store or a call there runs before a value this moves to the arm’s end',
+    why: 'a store or a call between a definition and the arm’s end would run before the value moved past it',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition that is NOT in the arm',
     rejects: (c) => c.trailing.some((s) => s.k !== 'assign'),
@@ -301,14 +301,14 @@ export const UNMERGE_ARM_GATES: readonly Gate<UnmergeArm>[] = [
   },
   {
     id: 'trailing-run-holds-an-effectful-value',
-    why: 'a call on the right-hand side answers a moved load after itself instead of before',
+    why: 'a call assigned between a definition and the arm’s end would run before the load moved past it',
     sound: true,
     guardedBy: 'unmerge.test.ts: an intervening assignment whose VALUE is a CALL refuses',
     rejects: (c) => c.trailing.some((s) => s.k === 'assign' && exprHasEffect(s.value)),
   },
   {
     id: 'intervening-write-to-a-moved-read',
-    why: 'it would change a value this moves past it',
+    why: 'an assignment between a definition and the arm’s end that writes what the definition reads would change the moved value',
     sound: true,
     guardedBy: 'unmerge.test.ts: an intervening assignment that CLOBBERS what a definition reads refuses',
     rejects: (c) => c.clobbersAMovedRead,
@@ -339,7 +339,7 @@ export const UNMERGE_VALUE_GATES: readonly Gate<UnmergeMovedValue>[] = [
   },
   {
     id: 'moved-value-reads-volatile',
-    why: 'the source pinned that access so it would not be moved, and its order is observable',
+    why: 'a moved value that reads a `volatile` access moves a read the source pinned, and its order is observable',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition reading a DEVICE REGISTER refuses',
     rejects: (c) => exprReadsVolatile(c.value, c.sfn),
@@ -369,7 +369,7 @@ export interface UnmergeRung {
 export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
   {
     id: 'empty-arm-has-no-tail',
-    why: 'there is no statement here to recurse into, and nothing defined the names either',
+    why: 'an empty arm has no statement to pass the copy down into, and defines none of the names',
     sound: false,
     // REDUNDANT WITH `tail-is-not-an-if` below (`arm[len - 1]` of an empty arm is `undefined`, whose
     // `?.k` is not `'if'`) — not SHADOWED in `gates.ts`'s sense, which is about an id being ABSENT
@@ -382,7 +382,7 @@ export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
   },
   {
     id: 'tail-is-not-an-if',
-    why: 'the ladder bottoms out only on an `if`; anything else is neither terminal nor a rung',
+    why: 'an arm that does not define every merge name can pass the copy down only into the `if` it ends with',
     sound: false,
     // REDUNDANT WITH the type narrowing in `pushJoin` — which has to stand there whatever this table
     // says, because both gates here are ablatable. Not shadowed in `gates.ts`'s sense either: this
@@ -409,14 +409,14 @@ export interface UnmergeTotality {
 export const UNMERGE_TOTALITY_GATES: readonly Gate<UnmergeTotality>[] = [
   {
     id: 'a-definition-the-rewrite-did-not-consume',
-    why: 'it survives with nothing left to read it, and its local is about to be deleted',
+    why: 'a definition the rewrite did not turn into a copy would survive with nothing left to read it, and its local is deleted',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition OUTSIDE the terminal arms refuses',
     rejects: (c) => [...c.merge].some((n) => c.mentions.get(n)?.assigns !== c.used),
   },
   {
     id: 'merge-name-survives-the-rewrite',
-    why: 'the use counts were taken before the rewrite, so the result itself must read no merge name',
+    why: 'the merge variables are deleted, so the rewritten code must mention none of them, whatever the counts taken before the rewrite said',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition an earlier rewrite duplicated leaves the count agreeing',
     rejects: (c) => mentionsAnyLocal([c.out], c.merge),

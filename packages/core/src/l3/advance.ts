@@ -194,7 +194,7 @@ export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
   },
   {
     id: 'member-negative-step',
-    why: 'a backward step (`p = p + -1`) is correct C, but no function has been seen to need it',
+    why: 'a backward step (`p = p + -1`) is correct C, but this variation writes only forward steps',
     sound: false,
     guardedBy: 'advance.test.ts: a NEGATIVE step declines',
     rejects: (c) => c.site.advanced! <= 0,

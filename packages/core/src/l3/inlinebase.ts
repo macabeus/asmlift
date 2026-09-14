@@ -71,7 +71,7 @@ interface BaseCtx {
 export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   {
     id: 'non-pointer',
-    why: 'this rewrites an address; a local holding a scalar value is a different question',
+    why: 'only a local holding an address is substituted; a local holding a scalar value is a different question',
     sound: false,
     rejects: (c) => !c.isPointer,
   },
@@ -104,7 +104,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   },
   {
     id: 'null-base',
-    why: '`0` is a null pointer, never an address, and `volatile` refuses it too',
+    why: 'a base of `0` is a null pointer, never an address, and `volatile` refuses it too',
     sound: false,
     rejects: (c) => c.m.constValue === 0,
   },

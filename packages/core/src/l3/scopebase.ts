@@ -119,7 +119,7 @@ export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
   },
   {
     id: 'shadowed-or-nonarray-base',
-    why: '`&name` on a local or a pointer-shaped global names a different object',
+    why: 'taking `&name` of a local or a pointer-shaped global names a different object',
     sound: true,
     guardedBy: 'addr-placement.test.ts: scopebase declines the shadowed name rather than take its address',
     rejects: (c) => c.base.k === 'var' && !c.addressable.has(c.base.name),
@@ -416,7 +416,7 @@ export interface RegionCtx {
 const COUNTING_RULES: readonly Gate<RegionCtx>[] = [
   {
     id: 'single-use',
-    why: 'one access re-materializes as cheaply as a named local',
+    why: 'a base accessed once is as cheap to load again as to hold in a named local',
     sound: false,
     rejects: (c) => c.uses < 2,
   },
@@ -506,7 +506,7 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, .
 const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
   ...g,
   id: `region-${g.id}`,
-  why: `${g.why}, counted over one region's own uses`,
+  why: `counted over one region’s own uses: ${g.why}`,
 });
 
 /** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, MINUS the one

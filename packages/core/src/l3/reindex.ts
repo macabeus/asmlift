@@ -290,7 +290,7 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
   },
   {
     id: 'leftover-walk',
-    why: 'a leftover outlives the deleted step, and its skip-arm twin reads a pointer that path never set',
+    why: 'a statement left outside the deleted step still reads the walk pointer, which a path that skipped the step never set',
     sound: true,
     guardedBy: 'reindex.test.ts: a leftover mentioning a walk pointer declines',
     rejects: (c) => c.leakyLeftovers > 0,
