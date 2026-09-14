@@ -99,6 +99,37 @@ export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: Variat
   },
 };
 
+/** A compiler an example is built with, as the benchmark's rows name it. */
+export type ExampleCompiler = 'agbcc' | 'ido' | 'gcc' | 'mwcc';
+
+/** Each example compiler as a reader knows it. */
+export const EXAMPLE_COMPILER_NAMES: { readonly [C in ExampleCompiler]: string } = {
+  agbcc: 'agbcc',
+  ido: 'IDO 7.1',
+  gcc: 'KMC gcc',
+  mwcc: 'CodeWarrior (mwcc)',
+};
+
+/** Where a spelling sits in its example's translation unit. No C token is spelled `@`. */
+export const EXAMPLE_HOLE = '@';
+
+/** The function every example's translation unit defines, and the one its two objects are compared on. */
+export const EXAMPLE_FUNCTION = 'example';
+
+/** A minimal pair the matching suite compiles (`packages/cli/test/matching/variation-examples.test.ts`):
+ *  `unit` with `before` in its hole and with `after` in it must be two different objects under
+ *  `compiler`. The drawer shows the two fragments; the unit is what makes them C. */
+export interface VariationExample {
+  /** the spelling without the variation */
+  before: string;
+  /** the spelling with it */
+  after: string;
+  compiler: ExampleCompiler;
+  /** a complete translation unit defining `EXAMPLE_FUNCTION`, holding `EXAMPLE_HOLE` exactly once */
+  unit: string;
+  note?: string;
+}
+
 export interface VariationDefinition {
   /** a short heading: the catalogue row, the drawer title */
   title: string;
@@ -114,11 +145,15 @@ export interface VariationDefinition {
   /** what the trailing `-…` names. Present exactly when the registry entry takes a subject. */
   subject?: { meaning: string; examples: readonly string[] };
   /** a minimal pair: the spelling without the variation, then with it */
-  example: { before: string; after: string; note?: string };
+  example: VariationExample;
   /** the file holding the rewrite, relative to the repository root */
   implementedIn: string;
   seeAlso?: readonly VariationName[];
 }
+
+/** The callees the examples call. Unprototyped, so each takes whatever its call passes. */
+const CALLS =
+  'void A(); void B(); void C(); void D(); void X(); void Y(); void P(); void Q(); s32 f(); s32 g(); s32 h(); void use();\n';
 
 const RANK = 'packages/core/src/rank.ts';
 const STRUCTURE = 'packages/core/src/structure/structure.ts';
@@ -143,7 +178,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Signedness picks the instruction: an arithmetic or a logical right shift, a signed or an unsigned ' +
       'branch after a compare, a sign or a zero extension of a narrower value.',
     offeredWhen: 'On every function: it is the first variation of every candidate that is not `signed`.',
-    example: { before: 's32 f(s32 a0, s32 a1)', after: 's32 f(u32 a0, u32 a1)' },
+    example: {
+      compiler: 'agbcc',
+      unit: '@ { return a0 >> a1; }',
+      before: 's32 example(s32 a0, s32 a1)',
+      after: 's32 example(u32 a0, u32 a1)',
+    },
     implementedIn: RANK,
     seeAlso: ['signed', 'uns-cmp'],
   },
@@ -158,7 +198,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       'Only where some entry parameter can be pinned. Elsewhere the second pass would re-lift an identical ' +
       'function, so it is not run and the fan carries `unsigned` alone.',
-    example: { before: 's32 f(u32 a0, u32 a1)', after: 's32 f(s32 a0, s32 a1)' },
+    example: {
+      compiler: 'agbcc',
+      unit: '@ { return a0 >> a1; }',
+      before: 's32 example(u32 a0, u32 a1)',
+      after: 's32 example(s32 a0, s32 a1)',
+    },
     implementedIn: RANK,
     seeAlso: ['unsigned'],
   },
@@ -180,7 +225,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       'A call whose arity was guessed admits the shorter reading. A declared prototype records nothing, and ' +
       'no alternative lift is enumerated.',
-    example: { before: 'if (a0 != 0) f(a0);', after: 'if (a0 != 0) f();' },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a0) { @ }',
+      before: 'if (a0 == 5) f(a0);',
+      after: 'if (a0 == 5) f();',
+    },
     implementedIn: 'packages/core/src/frontend/ssa.ts',
   },
   connective: {
@@ -197,6 +247,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       "This lift's short-circuit fold reports a chain it refused only because it reads as a comparison tree.",
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 x) { @ }',
       before: 'switch (x) { case 0: case 2: A(); break; case 5: B(); break; }',
       after: 'if (x == 0 || x == 2) { A(); } else if (x == 5) { B(); }',
     },
@@ -213,6 +265,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'path leaves through an early `return`.',
     offeredWhen: 'Some `if` has arms that reach a common `return` block and no common block before it.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 c, s32 x) { @ }',
       before: 'if (c) { A(); B(); } else { if (x) { C(); return; } B(); }',
       after: 'if (c) { A(); } else { if (x) { C(); return; } } B();',
     },
@@ -234,8 +288,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The sink changed the function and some `if` of the result still shares a `return`. It is kept apart ' +
       'from `shared-ret` because the sink can delete the shared `return` that variation needs.',
     example: {
-      before: 'if (c) { v = fnB; } else if (x) { v = fnA; } else { v = fnB; } gQ.cur = v;',
-      after: 'if (c) { … } else if (x) { gQ.cur = fnA; return; } gQ.cur = fnB;',
+      compiler: 'agbcc',
+      unit:
+        CALLS +
+        'void fnA(void); void fnB(void); struct Q { void (*cur)(void); }; extern struct Q gQ; void example(s32 c, s32 x) { void (*v)(void); @ }',
+      before: 'if (c) { A(); v = fnB; } else if (x) { v = fnA; } else { v = fnB; } gQ.cur = v;',
+      after: 'if (c) { A(); } else if (x) { gQ.cur = fnA; return; } gQ.cur = fnB;',
       note: 'the shape of `synthetic:gcsetail`',
     },
     implementedIn: 'packages/core/src/raise/tailsink.ts',
@@ -256,6 +314,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'layouts and two objects.',
     offeredWhen: 'On every function. Where no divergent `if` exists both senses emit one source.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 c) { @ }',
       before: 'if (c) { A(); return; } B();',
       after: 'if (!c) { B(); return; } A();',
     },
@@ -273,8 +333,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'matches.',
     offeredWhen: 'On every function. Where no constant can move, both placements emit one source.',
     example: {
-      before: 'if (c) { v = a0; } else { v = 0; }',
-      after: 'v = 0; if (c) { v = a0; }',
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(s32 c) { s32 v; @ return v; }',
+      before: 'if (c) { v = f(); } else { v = 0; }',
+      after: 'v = 0; if (c) { v = f(); }',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['loop-entry', 'fresh-merge'],
@@ -289,8 +351,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'a chain (neither, `defsite`, then `defsite/loop-entry`), so this never appears without `defsite`.',
     offeredWhen: 'Together with `defsite`, on every function.',
     example: {
-      before: 'if (0 < n) { s = 0; do { … } while (…); }',
-      after: 's = 0; if (0 < n) { do { … } while (…); }',
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 n) { s32 i = 0; s32 s; @ use(s); }',
+      before: 'if (0 < n) { s = 0; do { s += i; i++; } while (i < n); }',
+      after: 's = 0; if (0 < n) { do { s += i; i++; } while (i < n); }',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['defsite', 'initfirst'],
@@ -306,6 +370,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: 'agbcc emits different bytes for the arms-swapped spelling wherever such an `if` exists.',
     offeredWhen: 'On every function. Where no two-armed rejoining `if` exists both senses emit one source.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 c) { @ }',
       before: 'if (c) { A(); } else { B(); } D();',
       after: 'if (!c) { B(); } else { A(); } D();',
     },
@@ -330,6 +396,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       examples: ['sense-1', 'sense-5'],
     },
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a, s32 b) { @ }',
       before: 'if (a) { X(); } else { Y(); } if (b) { P(); } else { Q(); }',
       after: 'if (!a) { Y(); } else { X(); } if (b) { P(); } else { Q(); }',
       note: 'as the variation `sense-1` spells it',
@@ -348,6 +416,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the assembly loaded, only the shift spelling reproduces the load.',
     offeredWhen: 'The symbol map declares a bitfield member, and only on the candidates that use the map.',
     example: {
+      compiler: 'agbcc',
+      unit: 'struct Packed { u8 hearts : 2; u8 stars : 3; u16 dreamStones : 7; u32 unk4; }; extern struct Packed gPacked; u32 example(void) { @ }',
       before: 'return gPacked.dreamStones;',
       after: 'return (*(u32 *)&gPacked << 20) >> 25;',
       note: '`synthetic:bfwordread`',
@@ -369,6 +439,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The function names a global whose map entry declares a pointer member with a pointee width of 1, 2 ' +
       'or 4 bytes, and only on the candidates that use the map.',
     example: {
+      compiler: 'agbcc',
+      unit: 'struct BgPtrs { u16 *pMap; }; extern struct BgPtrs gBgPtrs; u16 example(s32 i) { @ }',
       before: 'return gBgPtrs.pMap[i + 157];',
       after: 'return *(u16 *)((i << 1) + (u8 *)gBgPtrs.pMap + 314);',
       note: '`synthetic:ptrelem`',
@@ -390,6 +462,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The function names a global that the symbol map, or its own index strides, declares a ' +
       'multidimensional array.',
     example: {
+      compiler: 'agbcc',
+      unit: 'extern u16 gTbl[4][0x400]; s32 example(s32 r, s32 i) { s32 x; @ return x; }',
       before: 'x = gTbl[r][i];',
       after: 'x = *(u16 *)((r << 11) + (i << 1) + (u32)&gTbl);',
       note: 'for `u16 gTbl[4][0x400]`',
@@ -409,6 +483,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'both sides inside a single function.',
     offeredWhen: 'Some load resolves to a named global.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'extern s32 gCount; extern s32 gFlag; void example(void) { @ }',
       before: 's32 v = gCount; gFlag = 0; f(v);',
       after: 'gFlag = 0; f(gCount);',
     },
@@ -426,6 +502,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'flips the branch sense.',
     offeredWhen: "A load feeds an argument of a conditional branch's merge.",
     example: {
+      compiler: 'mwcc',
+      unit: 's32 example(u8 *p) { s32 t; s32 v; @ return v; }',
       before: 't = *p; if (t > 31) { v = 32; } else { v = t; }',
       after: 'v = *p; if (v > 31) v = 32;',
     },
@@ -442,8 +520,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'values share a register.',
     offeredWhen: 'Some merge is fed by two or more edges.',
     example: {
-      before: 'v1 = f(); v2 = v1; if (c) v2 = 0; return v2;',
-      after: 'v1 = f(); if (c) v1 = 0; return v1;',
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(s32 n) { s32 v1; s32 v2; s32 i; @ }',
+      before: 'v1 = f(); for (i = 0; i < n; i++) { v2 = v1; if (g(i)) v2 = 0; v1 = v2 + i; } return v1;',
+      after: 'v1 = f(); for (i = 0; i < n; i++) { if (g(i)) v1 = 0; v1 = v1 + i; } return v1;',
     },
     implementedIn: 'packages/core/src/structure/namecoalesce.ts',
     seeAlso: ['coalesce', 'inplace'],
@@ -458,8 +538,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The lifted function has such an address. Asked separately of each symbol-map setting, because the ' +
       'map changes how the address is lifted.',
     example: {
-      before: '((u8 *)(a0 + 8))[0] = 1; ((u8 *)(a0 + 8))[1] = 2;',
-      after: 'u8 *p = (u8 *)(a0 + 8); p[0] = 1; p[1] = 2;',
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(u32 a0, u32 a1) { @ }',
+      before:
+        'if (((u8 *)((a0 << 2) + a1 + 0x8057acc))[1] == 2) return g(((u8 *)((a0 << 2) + a1 + 0x8057acc))[0]); return 0;',
+      after: 'u8 *p = (u8 *)((a0 << 2) + a1 + 0x8057acc); if (p[1] == 2) return g(p[0]); return 0;',
     },
     implementedIn: ANALYSIS,
     seeAlso: ['expr-home', 'derived-home', 'livebase'],
@@ -473,6 +556,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'default it is derived again at each use.',
     offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 t) { s32 i; @ }',
       before: 'for (i = 0; i < (16 << t); i++) g(i * (16 << t));',
       after: 'u32 size = 16 << t; for (i = 0; i < size; i++) g(i * size);',
     },
@@ -489,6 +574,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: 'Both compile, and agbcc folds the repeated computation back, so only the score separates them.',
     offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + '#define REG_KEYINPUT (*(u16 *)0x4000130)\nvoid example(void) { @ }',
       before: 'u16 k = REG_KEYINPUT; f(0x3FF ^ k); g(0x3FF ^ k);',
       after: 'u16 k = 0x3FF ^ REG_KEYINPUT; f(k); g(k);',
     },
@@ -504,6 +591,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'there is no name to refer to on a path, and each arm computes it again.',
     offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(s32 c, s32 a0) { s32 v; @ return v; }',
       before: 'if (c) { v = a0 << 2; A(); } else { v = a0 << 2; B(); }',
       after: 's32 m = a0 << 2; if (c) { v = m; A(); } else { v = m; B(); }',
     },
@@ -521,7 +610,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'A compiler emits an unsigned branch from a signed compare only where it proved both sides non-negative.',
     offeredWhen: 'The function has an unsigned comparison.',
-    example: { before: 'if (a < b)', after: 'if ((u32)a < b)' },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a, s32 b) { @ A(); }',
+      before: 'if (a < b)',
+      after: 'if ((u32)a < b)',
+    },
     implementedIn: STRUCTURE,
     seeAlso: ['unsigned', 'signed'],
   },
@@ -535,8 +629,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: 'With two arguments the two spellings compile to the same bytes on agbcc and mwcc.',
     offeredWhen: 'Some merge is carried by a parameter.',
     example: {
-      before: 'if (a1 < a0) a1 = a0; return a1;',
-      after: 'if (a1 < a0) { v0 = a0; } else { v0 = a1; } return v0;',
+      compiler: 'mwcc',
+      unit: 'u8 example(s32 a0) { s32 v0; @ }',
+      before: 'if (a0 > 255) a0 = 255; return a0;',
+      after: 'if (a0 > 255) { v0 = 255; } else { v0 = a0; } return v0;',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['defsite', 'merge-home'],
@@ -553,6 +649,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The benchmark answers it both ways inside one compiler: some mwcc rows match only with the record, others score better without it.',
     offeredWhen: "The two orders differ somewhere in the function, asked of each symbol-map setting's own lift.",
     example: {
+      compiler: 'agbcc',
+      unit:
+        CALLS +
+        's32 example(s32 a0, s32 a1, s32 c) { s32 v1; s32 v2; if (c) { v1 = f(); v2 = g(); } else { @ } return h(v1, v2); }',
       before: 'v2 = a1; v1 = a0;',
       after: 'v1 = a0; v2 = a1;',
       note: 'the copies at the end of one path into a merge',
@@ -572,6 +672,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '(gcc inverts the last test and lays the `else` arm first), which is why a relayed edge is never read.',
     offeredWhen: "This lift's raised function carries a short-circuit fold's orientation record.",
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 a, s32 b) { @ }',
       before: 'if (a != 0 && b != 0) { X(); } else { Y(); }',
       after: 'if (a == 0 || b == 0) { Y(); } else { X(); }',
       note: 'at a site whose record puts the shared arm in the taken slot',
@@ -597,8 +699,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'An `if` with two non-empty arms is followed by a store, assignment or call that reads temporaries ' +
       'each arm defines exactly once.',
     example: {
-      before: 'if (c) { v16 = (u16 *)A1; v17 = B1; } else { v16 = (u16 *)A2; v17 = B2; } *v16 = v17;',
-      after: 'if (c) { *(u16 *)A1 = B1; } else { *(u16 *)A2 = B2; }',
+      compiler: 'agbcc',
+      unit: 'void example(s32 c, u16 a, u16 b) { u16 *v16; u16 v17; @ }',
+      before: 'if (c) { v16 = (u16 *)0x3001000; v17 = a; } else { v16 = (u16 *)0x3001008; v17 = b; } *v16 = v17;',
+      after: 'if (c) { *(u16 *)0x3001000 = a; } else { *(u16 *)0x3001008 = b; }',
     },
     implementedIn: l3('unmerge'),
     seeAlso: ['initfirst', 'regionbase'],
@@ -615,6 +719,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'bases it loads both addresses first (`ldr; ldr; ldrb; ldrb`).',
     offeredWhen: 'Two or more arguments of one call read through distinct pure bases.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'extern u8 gEntityArray[]; void example(void) { @ }',
       before: 'f(*(u8 *)0x4000006, gEntityArray[8]);',
       after: 'u8 *p = (u8 *)0x4000006; u8 *e = gEntityArray; f(*p, e[8]);',
     },
@@ -634,6 +740,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'each emit two different functions for the two spellings; mwcc emits one.',
     offeredWhen: 'A negated subtraction whose subtraction also appears elsewhere, with no effect inside it.',
     example: {
+      compiler: 'agbcc',
+      unit: 's32 example(s32 a, s32 b) { @ return 0; }',
       before: 'if (a - b < 0) return -(a - b);',
       after: 'if (a - b < 0) return 0 - (a - b);',
     },
@@ -659,6 +767,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       examples: ['volatile-p1', 'volatile-p0-p1'],
     },
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(void) { @ while (*p == 0) { } *p = 1; }',
       before: 'u16 *p = (u16 *)0x3000010;',
       after: 'volatile u16 *p = (u16 *)0x3000010;',
     },
@@ -675,7 +785,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       'A scalar local the lift recovered as a stack slot, not already volatile, not address-taken, and ' +
       'whose reads and writes are exactly the ones the machine performed.',
-    example: { before: 'u16 sp0;', after: 'volatile u16 sp0;' },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(void) { @ sp0 = f(); g(); h(sp0); }',
+      before: 'u16 sp0;',
+      after: 'volatile u16 sp0;',
+    },
     implementedIn: l3('volatileval'),
     seeAlso: ['volatile', 'inlinebase'],
   },
@@ -692,8 +807,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'register matches without it.',
     offeredWhen: "A store's whole address is a constant inside the target's declared device-register window.",
     example: {
-      before: '*(s32 *)0x40000d4 = x;',
-      after: '*(volatile s32 *)0x40000d4 = x;',
+      compiler: 'agbcc',
+      unit: 'void example(s32 n) { s32 i; for (i = 0; i < n; i++) { @ } }',
+      before: '*(s32 *)0x40000d4 = i;',
+      after: '*(volatile s32 *)0x40000d4 = i;',
     },
     implementedIn: l3('volstore'),
     seeAlso: ['volatile', 'unreduce'],
@@ -712,6 +829,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'statement before the loop can reach.',
     offeredWhen: 'A loop steps an accumulator by a constant alongside a counter stepped by a constant.',
     example: {
+      compiler: 'agbcc',
+      unit: '#define REG 0x40000d4\nvoid example(s32 a0, s32 a1) { s32 v0; s32 v1 = 0; @ }',
       before: 'v0 = (a0 << 6) + a1; while (v1 <= 31) { *(s32 *)REG = v0; v0 = v0 + 64; v1 = v1 + 1; }',
       after: 'while (v1 <= 31) { *(s32 *)REG = (v1 << 6) + a1; v1 = v1 + 1; }',
       note: 'wins only together with `vol-store`',
@@ -731,8 +850,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "field's load past an `s32` store it must otherwise keep behind.",
     offeredWhen: 'A recovered 32-bit integer field that is only read and never dereferenced.',
     example: {
-      before: 'struct S { s32 field_4; };',
-      after: 'struct S { void *field_4; };',
+      compiler: 'agbcc',
+      unit: 'struct S { s32 field_0; @ }; void example(struct S *s, s32 lo) { s32 i; for (i = lo; i < 32; i++) { *(volatile s32 *)0x40000d4 = (s32)s->field_4 + i * 64; } }',
+      before: 's32 field_4;',
+      after: 'void *field_4;',
       note: 'wins only together with `vol-store/unreduce`',
     },
     implementedIn: l3('ptrfield'),
@@ -751,6 +872,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`ldrh r0, [r0, #0xe]`).',
     offeredWhen: 'The target folds constant address offsets, and a leaf base kept its offset in the load.',
     example: {
+      compiler: 'agbcc',
+      unit: 'struct S { u8 pad[14]; u16 m14; }; s32 example(void) { s32 x; @ return x; }',
       before: 'x = ((u16 *)0x3003468)[7];',
       after: 'x = ((struct S *)0x3003468)->m14;',
     },
@@ -773,8 +896,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A pointer local assigned once, at the top level, from a nonzero constant, used only as the base of ' +
       'two or more accesses, never address-taken and not a stack slot.',
     example: {
-      before: 'u16 *p = (u16 *)0x4000208; *p = 0; f(); *p = 1;',
-      after: '*(u16 *)0x4000208 = 0; f(); *(u16 *)0x4000208 = 1;',
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 n) { s32 i; @ }',
+      before: 'u16 *p = (u16 *)0x4000208; for (i = 0; i < n; i++) { *p = i; f(); }',
+      after: 'for (i = 0; i < n; i++) { *(u16 *)0x4000208 = i; f(); }',
     },
     implementedIn: l3('inlinebase'),
     seeAlso: ['vol-slot', 'volatile'],
@@ -789,8 +914,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'produces, which the default hoist does not.',
     offeredWhen: 'A global base reused at two or more sites, all of them inside one nested list.',
     example: {
-      before: 'if (c) { gTbl[4] = a; gTbl[5] = b; }',
-      after: 'if (c) { p = gTbl; p[4] = a; p[5] = b; }',
+      compiler: 'agbcc',
+      unit: CALLS + 'extern u16 gTbl[]; void example(s32 c, u16 a) { u16 *p; @ }',
+      before: 'p = gTbl; f(); if (c) { p[0x252] = a; p[0x272] = a + 1; }',
+      after: 'f(); if (c) { p = gTbl; p[0x252] = a; p[0x272] = a + 1; }',
     },
     implementedIn: l3('scopebase'),
     seeAlso: ['regionbase', 'livebase', 'coalesce'],
@@ -806,7 +933,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'function-top and block-scoped declarations assemble identically, and a count of one does not.',
     offeredWhen: 'A global base used in two or more disjoint regions.',
     example: {
-      before: 'if (c) { gTbl[1] = a; gTbl[2] = b; } else { gTbl[3] = d; gTbl[4] = e; }',
+      compiler: 'agbcc',
+      unit: 'extern u8 gTbl[]; void example(s32 c, u8 a, u8 b, u8 d, u8 e) { u8 *p; u8 *p0; u8 *p1; @ }',
+      before: 'p = gTbl; if (c) { p[1] = a; p[2] = b; } else { p[3] = d; p[4] = e; }',
       after: 'if (c) { p0 = gTbl; p0[1] = a; p0[2] = b; } else { p1 = gTbl; p1[3] = d; p1[4] = e; }',
     },
     implementedIn: l3('scopebase'),
@@ -829,8 +958,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       examples: ['coalesce-v0-v1', 'coalesce-v2-v3'],
     },
     example: {
-      before: 'v0 = a0 + 1; f(v0); v1 = 2; g(v1);',
-      after: 'v1 = a0 + 1; f(v1); v1 = 2; g(v1);',
+      compiler: 'agbcc',
+      unit: 'void example(u8 *a, u8 *b, s32 n) { s32 v0; s32 v1; @ }',
+      before: 'for (v0 = 0; v0 < n; v0++) a[v0] = b[v0]; for (v1 = n; v1 < 16; v1++) a[v1] = 0;',
+      after: 'for (v1 = 0; v1 < n; v1++) a[v1] = b[v1]; for (v1 = n; v1 < 16; v1++) a[v1] = 0;',
       note: 'as the variation `coalesce-v0-v1` spells it',
     },
     implementedIn: l3('coalesce'),
@@ -849,6 +980,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'loop, used only as a subscript base or in the bound test, and not read after the loop; or the ' +
       'counted do-while agbcc emits for such a loop.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(u8 *base, s32 n) { u8 *p = base; s32 i; @ }',
       before: 'while (p < base + n) { use(*p); p = p + 1; }',
       after: 'for (i = 0; i < n; i++) { use(base[i]); }',
     },
@@ -867,6 +1000,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A leaf base reached at two or more sites that the default hoist refused. Its combinations with ' +
       '`indexed`, `sinkinit`, `nearbase`, `coalesce` and `homesplit` are enumerated beside it.',
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(u32 go) { @ }',
       before: '((u32 *)0x40000d4)[2] = go; while (((u32 *)0x40000d4)[2] & 0x80000000) {}',
       after: 'u32 *p = (u32 *)0x40000d4; p[2] = go; while (p[2] & 0x80000000) {}',
     },
@@ -882,6 +1017,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'every base reached at a single fixed offset left inline.',
     offeredWhen: 'Where `livebase` is, and it binds a different set of bases.',
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(u32 src, u32 go) { u32 *p = (u32 *)0x40000d4; u16 *q = (u16 *)0x3001048; @ }',
       before: 'p[0] = src; p[2] = go; q[0] = q[0] + 1;',
       after: 'p[0] = src; p[2] = go; *(u16 *)0x3001048 = *(u16 *)0x3001048 + 1;',
       note: 'with `p` the DMA block and `q` the halfword, both held in pointer locals by `livebase`',
@@ -901,6 +1038,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'instruction.',
     offeredWhen: 'The target folds constant address offsets, and a base kept its offset in the load.',
     example: {
+      compiler: 'agbcc',
+      unit: 's32 example(void) { s32 x; @ return x; }',
       before: 'x = ((u16 *)0x3003468)[7];',
       after: 'u16 *p = (u16 *)0x3003468; x = p[7];',
     },
@@ -916,6 +1055,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'includes renames.',
     offeredWhen: 'The target folds constant address offsets, and such a base exists.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(void) { u16 *p; s32 x; s32 y; @ return x + y; }',
       before: 'f(); x = ((u16 *)0x3003468)[7]; y = ((u16 *)0x3003468)[8];',
       after: 'f(); p = (u16 *)0x3003468; x = p[7]; y = p[8];',
     },
@@ -935,6 +1076,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       "The target's compiler loads a declared array's base before its index (agbcc does), and the assembly loaded this base in that order.",
     example: {
+      compiler: 'agbcc',
+      unit: 'struct S { u16 f; u16 g; }; extern u8 gTbl[]; s32 example(s32 i) { s32 x; s32 y; @ return x + y; }',
       before: 'x = ((struct S *)&gTbl)[i].f; y = ((struct S *)&gTbl)[i].g;',
       after: 'struct S *p = (struct S *)&gTbl; x = p[i].f; y = p[i].g;',
     },
@@ -950,7 +1093,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: 'The same assignment above an `if` and inside its arm compile differently on agbcc.',
     offeredWhen: 'Where `orderbase` is, and a nested list holds every use of the base.',
     example: {
-      before: 'struct S *p = (struct S *)&gTbl; if (c) { x = p[i].f; }',
+      compiler: 'agbcc',
+      unit: 'struct S { u16 f; u16 g; }; extern u8 gTbl[]; s32 example(s32 c, s32 i) { struct S *p; s32 x = 0; @ return x; }',
+      before: 'p = (struct S *)&gTbl; if (c) { x = p[i].f; }',
       after: 'if (c) { p = (struct S *)&gTbl; x = p[i].f; }',
     },
     implementedIn: BASECSE,
@@ -973,6 +1118,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       examples: ['homesplit-0x40000d4.4s', 'homesplit-gFoo<u8*>.1u'],
     },
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(s32 c) { u16 *w0; u16 *w1; @ }',
       before: 'u32 *d = (u32 *)0x40000d4; u16 *w = (u16 *)0x3001048; if (c) { d[2] = w[0]; } else { d[3] = w[1]; }',
       after:
         'u32 *d = (u32 *)0x40000d4; if (c) { w0 = (u16 *)0x3001048; d[2] = w0[0]; } else { w1 = (u16 *)0x3001048; d[3] = w1[1]; }',
@@ -990,7 +1137,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'product-first source the other way round.',
     compilerBehavior: 'IDO and mwcc schedule the load of `c` in `a * b + c` above the multiply.',
     offeredWhen: 'A `+` with exactly one product operand and no effect in either operand.',
-    example: { before: 'x = c + a * b;', after: 'x = a * b + c;' },
+    example: {
+      compiler: 'ido',
+      unit: 'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; }; s32 example(struct Bg *bg) { s32 x; @ return x; }',
+      before: 'x = bg->tiles + bg->w * bg->h;',
+      after: 'x = bg->w * bg->h + bg->tiles;',
+    },
     implementedIn: l3('mulfirst'),
   },
   nearbase: {
@@ -1005,6 +1157,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'second literal.',
     offeredWhen: 'The target declares a derivation reach, and two or more distinct constant addresses fall within it.',
     example: {
+      compiler: 'agbcc',
+      unit: 's32 example(void) { s32 x; s32 y; @ return x + y; }',
       before: 'x = *(u16 *)0x0300104A; y = *(u16 *)0x03001048;',
       after: 'u8 *b = (u8 *)0x03001048; x = *(u16 *)(b + 2); y = *(u16 *)b;',
     },
@@ -1024,6 +1178,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A chain of accesses the target stepped one register between, without a symbol map. The plain form is ' +
       'withheld on a target that folds a pointer advance.',
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(u16 a, u16 b) { @ }',
       before: '*(u16 *)0x04000048 = a; *(u16 *)0x0400004A = b;',
       after: 'u16 *p = (u16 *)0x04000048; *p = a; p = p + 1; *p = b;',
     },
@@ -1040,6 +1196,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'statement that touches what they read or write.',
     offeredWhen: 'The leading run of assignments holds a parameter or constant copy that can move ahead.',
     example: {
+      compiler: 'agbcc',
+      unit: 's32 example(s32 a0, s32 a1) { s32 v0; s32 v1; s32 v2; s32 v3; s32 i; @ v2 = ((u8 *)a0)[4]; v3 = ((u8 *)a0)[5]; for (i = 0; i < a1; i++) { v0 += v1 * v2; v1 += v3; v2 += v0; v3 += v1; } return v0 + v1 + v2 + v3; }',
       before: 'v0 = *(u8 *)a0; v1 = a1;',
       after: 'v1 = a1; v0 = *(u8 *)a0;',
     },
@@ -1059,6 +1217,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'assignment avoids.',
     offeredWhen: 'The body starts with base-pointer assignments whose first use is further down.',
     example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'extern u8 gTbl[]; void example(void) { u8 *p; @ }',
       before: 'p = (u8 *)&gTbl; f(); g(); p[1] = 0;',
       after: 'f(); g(); p = (u8 *)&gTbl; p[1] = 0;',
     },
@@ -1082,8 +1242,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       examples: ['regcopy-ret', 'regcopy-ret-fresh'],
     },
     example: {
-      before: 'return a0 * (128 << 9);',
-      after: 'w0 = 128 << 9; w1 = a0 * w0; return w1;',
+      compiler: 'ido',
+      unit: 's32 example(s32 *p, s32 i) { s32 j; s32 r; j = i; if (j >= 8) j -= 8; @ }',
+      before: 'return p[j] + i;',
+      after: 'r = p[j] + i; return r;',
       note: 'as the variation `regcopy-ret-fresh` spells it',
     },
     implementedIn: l3('regspell'),
@@ -1101,8 +1263,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'An `if` whose arms both start with the same constant assignment, or whose then-arm starts by ' +
       'assigning the value its condition compares.',
     example: {
-      before: 'if (0 < n) { v = 0; … }',
-      after: 'v = 0; if (v < n) { … }',
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(s32 n) { s32 v; @ }',
+      before: 'if (0 < n) { v = 0; do { use(v); v++; } while (v < n); }',
+      after: 'v = 0; if (v < n) { do { use(v); v++; } while (v < n); }',
     },
     implementedIn: l3('initfirst'),
     seeAlso: ['loop-entry', 'defsite'],
@@ -1119,6 +1283,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "allocator's priorities for the whole function.",
     offeredWhen: 'The function has an empty-bodied `do … while`.',
     example: {
+      compiler: 'agbcc',
+      unit: 'void example(volatile u32 *dma, u8 *dst, s32 n) { s32 i; for (i = 0; i < n; i++) { dma[0] = (u32)dst + i; dma[2] = 0x80000020; @ } }',
       before: 'do { } while (dma[2] & 0x80000000);',
       after: 'if (dma[2] & 0x80000000) { do { } while (dma[2] & 0x80000000); }',
     },
@@ -1137,6 +1303,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen:
       "A loop whose only statement re-reads the local its condition tests, into the function's own non-volatile local.",
     example: {
+      compiler: 'agbcc',
+      unit: '#define BUSY 0x80000000\nvoid example(u32 *dma) { u32 v; @ }',
       before: 'v = dma[2]; while ((v & BUSY) != 0) { v = dma[2]; }',
       after: 'while ((dma[2] & BUSY) != 0) {}',
     },
@@ -1155,6 +1323,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior: 'On agbcc a named global changes when the address is loaded.',
     offeredWhen: 'A symbol map was supplied. A row without a map has one symbol-map setting and never carries it.',
     example: {
+      compiler: 'agbcc',
+      unit: 'extern struct { u8 pad[4]; u8 field; } gCounter; s32 example(void) { s32 x; @ return x; }',
       before: 'x = gCounter.field;',
       after: 'x = ((u8 *)0x3003468)[4];',
     },

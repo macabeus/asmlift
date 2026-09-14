@@ -9,7 +9,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { READER_WORDS, VARIATION_DEFINITIONS, VARIATION_KIND_DEFINITIONS } from '../src/variation-definitions';
+import {
+  EXAMPLE_FUNCTION,
+  EXAMPLE_HOLE,
+  READER_WORDS,
+  VARIATION_DEFINITIONS,
+  VARIATION_KIND_DEFINITIONS,
+} from '../src/variation-definitions';
 import { VARIATION_KINDS, VARIATION_TOKENS, parseVariation, variationToken } from '../src/variation-tokens';
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -44,6 +50,26 @@ describe('the definitions are well-formed', () => {
 
   test('an example is a pair of two different spellings', () => {
     expect(entries.filter(([, d]) => d.example.before === d.example.after).map(([n]) => n)).toEqual([]);
+  });
+
+  // What `packages/cli/test/matching/variation-examples.test.ts` compiles. Checked here too, where no
+  // compiler is needed, so a malformed unit fails the fast suite rather than only the toolchain one.
+  test("an example's unit holds its hole exactly once, and neither spelling holds one", () => {
+    const bad = entries.flatMap(([n, { example: e }]) =>
+      e.unit.split(EXAMPLE_HOLE).length !== 2 || e.before.includes(EXAMPLE_HOLE) || e.after.includes(EXAMPLE_HOLE)
+        ? [n]
+        : [],
+    );
+    expect(bad).toEqual([]);
+  });
+
+  test('both spellings of an example define the function the objects are compared on', () => {
+    const defines = (unit: string, spelling: string) =>
+      new RegExp(`\\b${EXAMPLE_FUNCTION}\\s*\\([^;]*\\)\\s*\\{`).test(unit.replace(EXAMPLE_HOLE, spelling));
+    const bad = entries.flatMap(([n, { example: e }]) =>
+      defines(e.unit, e.before) && defines(e.unit, e.after) ? [] : [n],
+    );
+    expect(bad).toEqual([]);
   });
 
   test('a subject is explained exactly where the registry lets the variation take one', () => {
