@@ -116,19 +116,27 @@ export function catalogue(stats: Map<VariationName, VariationStats>): CatalogueG
   }));
 }
 
-/** The variations some fan carried — the only ones a cost can be stated for — dearest win first,
- *  with the never-won after them, largest cost first. */
-export function priced(stats: Map<VariationName, VariationStats>): VariationStats[] {
-  return [...stats.values()]
-    .filter((s) => s.rows > 0)
-    .sort((a, b) => {
-      const pa = pricePerWin(a);
-      const pb = pricePerWin(b);
-      if ((pa === null) !== (pb === null)) {
-        return pa === null ? 1 : -1;
-      }
-      return (pb ?? 0) - (pa ?? 0) || b.candidates - a.candidates || (a.name < b.name ? -1 : 1);
-    });
+/** A variation that won, with its price per win. */
+export interface PricedVariation extends VariationStats {
+  price: number;
+}
+
+/** The variations some fan carried — the only ones a cost can be stated for — split in two: those
+ *  that won, dearest win first, and those that never won, largest cost first, which have no price. */
+export function priced(stats: Map<VariationName, VariationStats>): {
+  won: PricedVariation[];
+  neverWon: VariationStats[];
+} {
+  const carried = [...stats.values()].filter((s) => s.rows > 0);
+  const byName = (a: VariationStats, b: VariationStats) => (a.name < b.name ? -1 : 1);
+  const won = carried
+    .flatMap((s) => {
+      const price = pricePerWin(s);
+      return price === null ? [] : [{ ...s, price }];
+    })
+    .sort((a, b) => b.price - a.price || b.candidates - a.candidates || byName(a, b));
+  const neverWon = carried.filter((s) => s.winners === 0).sort((a, b) => b.candidates - a.candidates || byName(a, b));
+  return { won, neverWon };
 }
 
 /** What the cost views stand on: the rows whose fan was counted, and the candidates in those fans. */

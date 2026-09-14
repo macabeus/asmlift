@@ -12,7 +12,8 @@ import { describe, expect, test } from 'vitest';
 
 import { FanExplorer } from '../src/pages/benchmark/components/FanExplorer';
 import { VariationDetailBody } from '../src/pages/benchmark/components/VariationDetail';
-import { priced, rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
+import { VariationCostGain, bubbleSize } from '../src/pages/benchmark/components/charts/VariationCostGain';
+import { fanCoverage, priced, rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 import { FAN_SAMPLE } from './fan-sample';
 
@@ -24,6 +25,7 @@ const artifact = (
 
 const HASH = '#view=benchmark&tab=fan';
 const NOT_WASTE = 'A losing candidate is not waste.';
+const NO_FAN = 'No fan in this artifact was counted, so there is nothing to price.';
 const noop = () => {};
 
 /** React escapes text; the definitions are compared as the reader sees them. */
@@ -52,6 +54,9 @@ describe.each([
   test('the glossary: the six words and the five kinds', () => {
     for (const w of READER_WORDS) {
       expect(html).toContain(`>${w.word}</dt>`);
+      for (const piece of prose(w.command ?? '')) {
+        expect(html, w.word).toContain(escaped(piece));
+      }
     }
     for (const k of VARIATION_KINDS) {
       expect(html).toContain(VARIATION_KIND_DEFINITIONS[k].title);
@@ -66,15 +71,19 @@ describe.each([
   });
 
   test('the catalogue comes before the cost views, which carry the sentence once, above both charts', () => {
+    const counted = fanCoverage(rows).rows > 0;
     expect(html.indexOf('>Every variation<')).toBeGreaterThan(-1);
-    expect(html.indexOf('>Every variation<')).toBeLessThan(html.indexOf('>Cost against gain<'));
-    expect(count(html, NOT_WASTE)).toBe(1);
-    expect(html.indexOf(NOT_WASTE)).toBeLessThan(html.indexOf('>Cost against gain<'));
+    expect(html.includes(NO_FAN)).toBe(!counted);
+    expect(count(html, NOT_WASTE)).toBe(counted ? 1 : 0);
+    if (counted) {
+      expect(html.indexOf('>Every variation<')).toBeLessThan(html.indexOf('>Cost against gain<'));
+      expect(html.indexOf(NOT_WASTE)).toBeLessThan(html.indexOf('>Cost against gain<'));
+    }
   });
 
   test('a variation some fan carried and that never won is listed beside the price chart, not drawn in it', () => {
     const never = html.slice(html.indexOf('Never won, so no price'));
-    const neverWon = priced(variationStats(rows)).filter((s) => s.winners === 0);
+    const { neverWon } = priced(variationStats(rows));
     const listed = hrefs(never).map((h) => hashToSearchParams(h).get('variation'));
     expect(listed).toEqual(neverWon.map((s) => s.name));
   });
@@ -82,6 +91,40 @@ describe.each([
   test('a toolchain count, never a project count', () => {
     expect(html).toContain('toolchains</div>');
     expect(html).not.toMatch(/>projects?</);
+  });
+});
+
+test('an artifact with no counted fan says so, instead of drawing empty charts', () => {
+  const uncounted = FAN_SAMPLE.map((r) => {
+    const { fanSize: _size, fanVariations: _tally, ...asmlift } = r.asmlift;
+    return { ...r, asmlift };
+  });
+  const html = renderToStaticMarkup(<FanExplorer rows={uncounted} hash={HASH} onOpenVariation={noop} />);
+  expect(html).toContain(NO_FAN);
+  expect(html).not.toContain('>Cost against gain<');
+  expect(html).not.toContain('>Price per win<');
+  expect(html).not.toContain(NOT_WASTE);
+  expect(html).toContain('>Every variation<');
+});
+
+describe('the cost-against-gain chart', () => {
+  test('its key names every kind, in kind order, as page text that wraps', () => {
+    const html = renderToStaticMarkup(
+      <VariationCostGain data={priced(variationStats(FAN_SAMPLE)).neverWon} onPointClick={noop} />,
+    );
+    const key = html.slice(0, html.indexOf('</ul>'));
+    const titles = VARIATION_KINDS.map((k) => VARIATION_KIND_DEFINITIONS[k].title);
+    expect(titles.map((t) => key.indexOf(`>${t}</li>`))).toEqual(
+      titles.map((t) => key.indexOf(`>${t}</li>`)).sort((a, b) => a - b),
+    );
+    expect(titles.every((t) => key.includes(`>${t}</li>`))).toBe(true);
+  });
+
+  test("a bubble's area is proportional to its rows, above the smallest size", () => {
+    const area = (rows: number) => bubbleSize(rows) ** 2;
+    expect(area(680) / area(170)).toBeCloseTo(4);
+    expect(area(100) / area(25)).toBeCloseTo(4);
+    expect(bubbleSize(1)).toBe(bubbleSize(4));
   });
 });
 

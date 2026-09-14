@@ -8,7 +8,15 @@ import { VARIATION_KINDS } from '@asmlift/core/variation-tokens';
 import { useMemo, useState } from 'react';
 
 import { variationHref } from '../lib/explorer-url';
-import { type VariationStats, catalogue, compactCount, fanCoverage, priced, variationStats } from '../lib/fan';
+import {
+  type PricedVariation,
+  type VariationStats,
+  catalogue,
+  compactCount,
+  fanCoverage,
+  priced,
+  variationStats,
+} from '../lib/fan';
 import { VARIATION_KIND_COLOR } from '../theme';
 import { VariationCostGain } from './charts/VariationCostGain';
 import { VariationPricePerWin } from './charts/VariationPricePerWin';
@@ -28,6 +36,12 @@ function Glossary() {
               <dt className="font-medium capitalize text-slate-200">{w.word}</dt>
               <dd className="mt-0.5 leading-relaxed text-slate-400">
                 <InlineCode text={w.meaning} />
+                {w.command && (
+                  <span className="text-slate-500">
+                    {' '}
+                    <InlineCode text={w.command} />
+                  </span>
+                )}
               </dd>
             </div>
           ))}
@@ -49,7 +63,7 @@ function Glossary() {
                   {VARIATION_KIND_DEFINITIONS[k].examples.map((ex, i) => (
                     <span key={ex}>
                       {i > 0 && ', '}
-                      <span className="font-mono text-slate-400">{ex}</span>
+                      <span className="whitespace-nowrap font-mono text-slate-400">{ex}</span>
                     </span>
                   ))}
                 </span>
@@ -66,26 +80,43 @@ function Glossary() {
 const PRICE_BARS = 15;
 
 function Charts({
-  stats,
+  won,
+  neverWon,
   coverage,
   hash,
   onOpenVariation,
 }: {
-  /** the variations some fan carried, dearest win first, then the never-won (`priced`) */
-  stats: VariationStats[];
+  /** the variations some fan carried that won, dearest first, and those that never won (`priced`) */
+  won: PricedVariation[];
+  neverWon: VariationStats[];
   coverage: { rows: number; candidates: number };
   hash: string;
   onOpenVariation: (name: string) => void;
 }) {
   const [allPrices, setAllPrices] = useState(false);
-  const won = useMemo(() => stats.filter((s) => s.winners > 0), [stats]);
   const bars = useMemo(() => (allPrices ? won : won.slice(0, PRICE_BARS)), [won, allPrices]);
-  const neverWon = stats.filter((s) => s.winners === 0);
+  const carried = useMemo(() => [...won, ...neverWon], [won, neverWon]);
+  const heading = (
+    <h2 className="text-base font-semibold text-slate-100">What each variation cost, and what it returned</h2>
+  );
+
+  // A chart frame with nothing plotted looks like a live chart that failed, so an artifact with no
+  // counted fan gets a sentence instead.
+  if (coverage.rows === 0) {
+    return (
+      <div className="space-y-1">
+        {heading}
+        <p className="max-w-3xl text-xs leading-relaxed text-slate-500">
+          No fan in this artifact was counted, so there is nothing to price.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-slate-100">What each variation cost, and what it returned</h2>
+        {heading}
         <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
           Over the {coverage.rows.toLocaleString()} rows whose fan was counted: {coverage.candidates.toLocaleString()}{' '}
           candidates. A candidate counts once under every variation it carries, so the counts overlap and do not add up
@@ -95,9 +126,9 @@ function Charts({
       <NotWaste />
       <Panel
         title="Cost against gain"
-        subtitle="One bubble per variation. Across: candidates that carried it. Up: the share of the rows whose fan carried it that won with it. Area: those rows. Click a bubble for its definition."
+        subtitle="One bubble per variation. Across: candidates that carried it. Up: the share of the rows whose fan carried it that won with it. Area: those rows, with a smallest size so every bubble can be clicked. Click a bubble for its definition."
       >
-        <VariationCostGain data={stats} onPointClick={onOpenVariation} />
+        <VariationCostGain data={carried} onPointClick={onOpenVariation} />
       </Panel>
       <Panel
         title="Price per win"
@@ -121,7 +152,7 @@ function Charts({
                   key={s.name}
                   href={variationHref(s.name, hash)}
                   onClick={(e) => followInPlace(e, () => onOpenVariation(s.name))}
-                  className="rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 hover:bg-teal-900/60 hover:text-teal-200"
+                  className="whitespace-nowrap rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 hover:bg-teal-900/60 hover:text-teal-200"
                 >
                   {s.name} <span className="text-slate-500">· {compactCount(s.candidates)} candidates</span>
                 </a>
@@ -157,7 +188,7 @@ function CatalogueEntry({
           <span className="text-sm font-medium text-slate-100">
             <InlineCode text={def.title} />
           </span>
-          <span className="font-mono text-[11px] text-slate-500">{s.name}</span>
+          <span className="whitespace-nowrap font-mono text-[11px] text-slate-500">{s.name}</span>
         </div>
         <p className="mt-0.5 text-xs leading-relaxed text-slate-400 first-letter:uppercase">
           <InlineCode text={def.summary} />
@@ -207,7 +238,7 @@ export function FanExplorer({
   const stats = useMemo(() => variationStats(rows), [rows]);
   const groups = useMemo(() => catalogue(stats), [stats]);
   const coverage = useMemo(() => fanCoverage(rows), [rows]);
-  const chartStats = useMemo(() => priced(stats), [stats]);
+  const { won, neverWon } = useMemo(() => priced(stats), [stats]);
 
   return (
     <div className="space-y-6">
@@ -259,7 +290,7 @@ export function FanExplorer({
         ))}
       </div>
 
-      <Charts stats={chartStats} coverage={coverage} hash={hash} onOpenVariation={onOpenVariation} />
+      <Charts won={won} neverWon={neverWon} coverage={coverage} hash={hash} onOpenVariation={onOpenVariation} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import { type VariationStats, pricePerWin } from '../../lib/fan';
+import type { PricedVariation } from '../../lib/fan';
 import { tooltipTitle } from '../../lib/variation-text';
 import { VARIATION_KIND_COLOR } from '../../theme';
 import { EChart } from './EChart';
@@ -10,14 +10,15 @@ import type { EChartsOption } from './echarts';
 /** What one win carrying each variation cost, dearest first.
  *
  *  BAR LENGTH IS THE PRICE, so the longest bar is the dearest win: a reader compares lengths
- *  whatever the label says. A variation that never won has no price and is not drawn, since a bar
- *  of its cost would put a second quantity on this scale; the page lists those beside the chart.
- *  `data` holds only variations that won, dearest first (`priced`). */
+ *  whatever the label says. A variation that never won has no price, so it cannot be passed here
+ *  (`priced` keeps it apart); a bar of its cost would put a second quantity on this scale, and the
+ *  page lists those beside the chart. */
 export function VariationPricePerWin({
   data,
   onBarClick,
 }: {
-  data: VariationStats[];
+  /** dearest first */
+  data: readonly PricedVariation[];
   onBarClick?: (name: string) => void;
 }) {
   const bars = useMemo(() => [...data].reverse(), [data]); // a category scale draws bottom-up
@@ -33,7 +34,7 @@ export function VariationPricePerWin({
           const s = bars[(one as { dataIndex: number }).dataIndex];
           return [
             tooltipTitle(s.name),
-            `<div>${Math.round(pricePerWin(s)!).toLocaleString()} candidates per win</div>`,
+            `<div>${Math.round(s.price).toLocaleString()} candidates per win</div>`,
             `<div>${s.candidates.toLocaleString()} candidates carried it, across the fans of ${s.rows} row${s.rows === 1 ? '' : 's'}; ${s.winners} won with it</div>`,
           ].join('');
         },
@@ -59,7 +60,7 @@ export function VariationPricePerWin({
           type: 'bar',
           barMaxWidth: 11,
           data: bars.map((s) => ({
-            value: Math.round(pricePerWin(s)!),
+            value: Math.round(s.price),
             itemStyle: { color: VARIATION_KIND_COLOR[s.kind], borderRadius: 2 },
           })),
           label: { show: true, position: 'right', fontSize: 11, color: '#cbd5e1', formatter: '{c}' },

@@ -76,11 +76,14 @@ describe.each([
     expect(missing).toEqual([]);
   });
 
-  test('the price per win runs dearest first, then the never-won', () => {
-    const prices = priced(stats).map(pricePerWin);
-    const won = prices.filter((p) => p !== null);
-    expect(prices.slice(0, won.length)).toEqual(won);
-    expect(won).toEqual([...won].sort((a, b) => b - a));
+  test('priced splits the carried variations into the won, dearest first, and the never-won', () => {
+    const { won, neverWon } = priced(stats);
+    const prices = won.map((s) => s.price);
+    expect(prices).toEqual(won.map(pricePerWin));
+    expect(prices).toEqual([...prices].sort((a, b) => b - a));
+    expect(neverWon.filter((s) => s.winners !== 0)).toEqual([]);
+    const carried = [...stats.values()].filter((s) => s.rows > 0).map((s) => s.name);
+    expect([...won, ...neverWon].map((s) => s.name).sort()).toEqual(carried.sort());
   });
 });
 

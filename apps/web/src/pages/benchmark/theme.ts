@@ -116,4 +116,5 @@ export const CHART = {
   tooltipBg: '#1e293b', // slate-800
   tooltipBorder: '#334155',
   tooltipText: '#e2e8f0',
+  labelHalo: '#0f172a', // slate-900: the outline that keeps a label legible over a mark
 } as const;
