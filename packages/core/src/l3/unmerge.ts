@@ -230,7 +230,7 @@ export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
   },
   {
     id: 'arm-writes-a-name-this-cannot-substitute',
-    why: 'the copy would read that name at the arm`s end, where it holds a different value',
+    why: 'the copy would read that name at the arm’s end, where it holds a different value',
     sound: true,
     // THE GUARD IS NOT THE TEST THAT NAMES THIS REFUSAL. Ablated alone, `a join reading a local
     // the arms WRITE but this cannot substitute refuses` stays GREEN — that fixture is refused a
@@ -287,14 +287,14 @@ export const UNMERGE_ARM_GATES: readonly Gate<UnmergeArm>[] = [
   // of existentials is the existential of the disjunction, so the split is exact.
   {
     id: 'trailing-run-holds-a-non-assignment',
-    why: 'a store or a call there runs before a value this moves to the arm`s end',
+    why: 'a store or a call there runs before a value this moves to the arm’s end',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition that is NOT in the arm',
     rejects: (c) => c.trailing.some((s) => s.k !== 'assign'),
   },
   {
     id: 'trailing-run-writes-an-undeclared-name',
-    why: 'structure.ts spells a write to a scalar GLOBAL as an `assign`, and that writes memory',
+    why: 'a write to a global scalar is spelled as an assignment, and it writes memory',
     sound: true,
     guardedBy: 'unmerge.test.ts: an intervening assignment to a GLOBAL refuses',
     rejects: (c) => c.trailing.some((s) => s.k === 'assign' && !c.declared.has(s.name)),
@@ -326,7 +326,7 @@ export interface UnmergeMovedValue {
 export const UNMERGE_VALUE_GATES: readonly Gate<UnmergeMovedValue>[] = [
   {
     id: 'moved-value-has-an-effect',
-    why: 'C fixes no order between one statement`s operands, so the backend would choose one',
+    why: 'C fixes no order between one statement’s operands, so the backend would choose one',
     // SHADOWED, not sound — and PROVABLY, not just unwitnessed. Every definition sits at a
     // position in `at`, all of which are `>= first`, so every definition is in the arm ctx's
     // `trailing`; an effectful one is therefore already refused by
@@ -416,7 +416,7 @@ export const UNMERGE_TOTALITY_GATES: readonly Gate<UnmergeTotality>[] = [
   },
   {
     id: 'merge-name-survives-the-rewrite',
-    why: 'the counts are STALE, so totality is asked of the result as well as of the map',
+    why: 'the use counts were taken before the rewrite, so the result itself must read no merge name',
     sound: true,
     guardedBy: 'unmerge.test.ts: a definition an earlier rewrite duplicated leaves the count agreeing',
     rejects: (c) => mentionsAnyLocal([c.out], c.merge),

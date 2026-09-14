@@ -1125,7 +1125,7 @@ export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
   },
   {
     id: 'param-rooted',
-    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured variation",
+    why: 'a chain that does not start at a parameter keeps its ordinary merge home, since no row has measured that case',
     sound: false,
     guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
     rejects: (c) => !c.paramRooted,

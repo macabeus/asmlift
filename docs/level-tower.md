@@ -581,7 +581,7 @@ So a pass whose refusals carry weight declares them as **data** rather than as `
 ```ts
 interface Gate<Ctx> {
   readonly id: string; // stable, kebab-case
-  readonly why: string; // one line: the reason the rule exists
+  readonly why: string; // one line: the reason the rule exists, readable without the code
   readonly sound: boolean; // remove it and some candidate is WRONG, not merely worse
   readonly guardedBy?: string; // required when `sound` — the test that fails without it
   readonly rejects: (c: Ctx) => boolean; // true ⇒ REJECT
@@ -597,6 +597,11 @@ that names no guard, and checks the named guard against the suite's actual test 
 field cannot decay into a reference to a test deleted two refactors ago. Returning _which_ gate
 refused each candidate makes the dual question checkable too: a rule nothing ever reaches is a
 rule no test can be failing on purpose.
+
+A table that a variation's definition names is also read by people who never open the code: the
+webapp's variation drawer lists its `why` strings verbatim as the rules that can refuse the
+variation. So those strings are plain prose, and
+[`test/variation-offers.test.ts`](../packages/core/test/variation-offers.test.ts) holds them to it.
 
 Adopt this when a pass's refusals are load-bearing — not for every `if` in the codebase. The same
 "earn it" discipline applies: `l3/basecse.ts` declares a table in which **no** gate is sound,

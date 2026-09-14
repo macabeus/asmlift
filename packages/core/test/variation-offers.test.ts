@@ -183,3 +183,21 @@ describe('no definition keeps free-text gate logic', () => {
     expect(bad).toEqual([]);
   });
 });
+
+// The drawer lists every rule of a registered table verbatim, so each `why` there is reader copy.
+describe('a rule a reader sees reads as prose', () => {
+  const DEFECTS: readonly [string, (why: string) => boolean][] = [
+    ['an unclosed code span', (w) => w.split('`').length % 2 === 0],
+    ['a shouted word', (w) => /\b[A-Z]{3,}\b/.test(w)],
+    ['a file name', (w) => /\.ts\b/.test(w)],
+    ['a function call', (w) => /\w\(\)/.test(w)],
+    ['a variation spelled with a slash', (w) => /(^|\s)\/[a-z]/.test(w)],
+  ];
+
+  test('its code spans close, and it names no file, function or slash-spelled variation, and shouts no word', () => {
+    const rules = readerRules(Object.keys(VARIATION_GATE_TABLES) as GateTableName[]);
+    const bad = rules.flatMap(({ id, why }) => DEFECTS.filter(([, has]) => has(why)).map(([what]) => `${id}: ${what}`));
+    expect(bad).toEqual([]);
+    expect(rules.length).toBeGreaterThan(100);
+  });
+});

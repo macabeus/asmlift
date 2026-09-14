@@ -67,7 +67,7 @@ interface SlotCtx {
 export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
   {
     id: 'no-frame',
-    why: 'the frame record is the memory home the qualifier has to force',
+    why: 'without a stack slot in the assembly there is no memory home for the qualifier to force',
     sound: false,
     rejects: (c) => !c.hasFrame,
   },

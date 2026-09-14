@@ -264,7 +264,7 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   {
     id: 'acc-pinned',
-    why: 'a declaration that carries an asm fact cannot be deleted without dropping the fact',
+    why: 'a declaration that carries a fact from the assembly cannot be deleted without dropping the fact',
     sound: true,
     guardedBy: 'unreduce.test.ts: a pinned accumulator declines, on every pin a local can carry',
     rejects: (c) => c.pinned,
@@ -344,14 +344,14 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   {
     id: 'nonzero-start',
-    why: 'a counter starting at a nonzero constant leaves a bias term this file does not spell',
+    why: 'a counter starting at a nonzero constant leaves a bias term this rewrite does not write',
     sound: true,
     guardedBy: 'unreduce.test.ts: a counter-free init declines unless its start is the constant 0',
     rejects: (c) => c.declined === 'nonzero-start',
   },
   {
     id: 'step-ratio',
-    why: 'a counter stepping by more than one leaves the ratio K/d, which is not a shift',
+    why: 'a counter stepping by more than one leaves a ratio between the two steps, which is not a shift',
     sound: true,
     guardedBy: 'unreduce.test.ts: a counter-free init declines when the counter does not step by one',
     rejects: (c) => c.declined === 'step-ratio',

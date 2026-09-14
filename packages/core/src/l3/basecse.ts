@@ -417,7 +417,7 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     // gate DOES demote; that subtree's own winner is a `/livebase` candidate, so nothing on the
     // ranked path loses by it. Stated because the demotion is invisible from either file alone.
     id: 'repeated-const-offset',
-    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    why: 'a fixed offset read and then written is one scalar update, and the compiler loads its address again for it',
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },

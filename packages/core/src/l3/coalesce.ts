@@ -234,7 +234,7 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   },
   {
     id: 'volatile',
-    why: 'a volatile qualifier (object or pointee) is observable and typeToString does not spell it — merging strips or adds it',
+    why: 'a `volatile` qualifier, on the variable or on what it points to, is observable, and merging would drop or add it',
     sound: true,
     guardedBy: 'coalesce.test.ts: a volatile pair never merges',
     rejects: (c) => c.eitherIsVolatile,
@@ -252,7 +252,7 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   },
   {
     id: 'const-fed',
-    why: 'a load-fed local — other than a for induction variable, whose feeds are its own — is one the compiler had a reason to keep where it was',
+    why: 'a local set from a memory load, other than a `for` loop counter, is one the compiler had a reason to keep where it was',
     sound: false,
     rejects: (c) => !c.x.constFed || !c.y.constFed,
   },
@@ -265,7 +265,7 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   },
   {
     id: 'first-is-write',
-    why: 'a survivor first MENTIONED by a read would see the absorbed value there',
+    why: 'a survivor whose first mention is a read would see the absorbed value there',
     sound: false,
     rejects: (c) => !c.y.firstIsWrite,
   },
@@ -356,7 +356,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   },
   {
     id: 'volatile',
-    why: 'a volatile qualifier (object or pointee) is observable — merging strips or adds it',
+    why: 'a `volatile` qualifier, on the variable or on what it points to, is observable, and merging would drop or add it',
     sound: true,
     guardedBy: 'coalesce.test.ts: a volatile pair never merges',
     rejects: (c) => c.eitherIsVolatile,
@@ -370,7 +370,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   },
   {
     id: 'arm-init',
-    why: 'a local not const-initialized at its arm’s first mention is one the compiler had a reason to keep — the growth bound const-fed gives the span table',
+    why: 'a local its arm does not first set to a constant is one the compiler had a reason to keep apart',
     sound: false,
     rejects: (c) => !c.bothArmConstInit,
   },
