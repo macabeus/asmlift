@@ -114,7 +114,33 @@ export type VariationName = (typeof TOKENS)[number]['name'];
 
 export const VARIATION_TOKENS: readonly (VariationToken & { name: VariationName })[] = TOKENS;
 
+/** A registered variation that names what it was applied to. */
+export type SubjectVariationName = Extract<(typeof TOKENS)[number], { subject: RegExp }>['name'];
+
+declare const subjectFitted: unique symbol;
+
+/** A subject-taking variation applied to a subject, `coalesce-v0-v1`. Only `withSubject` makes one,
+ *  so its subject fits the registered pattern. */
+export type SubjectVariation = `${SubjectVariationName}-${string}` & { readonly [subjectFitted]: true };
+
+/** One part of a candidate's name as enumeration mints it. */
+export type Variation = VariationName | SubjectVariation;
+
 const BY_NAME = new Map<string, VariationToken & { name: VariationName }>(VARIATION_TOKENS.map((t) => [t.name, t]));
+
+/** Each subject pattern, anchored. */
+const SUBJECT = new Map<string, RegExp>(
+  VARIATION_TOKENS.flatMap((t) => (t.subject === undefined ? [] : [[t.name, new RegExp(`^(?:${t.subject.source})$`)]])),
+);
+
+/** `name` applied to `subject`: `withSubject('coalesce', 'v0-v1')` is `coalesce-v0-v1`. Throws on a
+ *  subject the registered pattern does not fit. */
+export function withSubject(name: SubjectVariationName, subject: string): SubjectVariation {
+  if (!SUBJECT.get(name)!.test(subject)) {
+    throw new Error(`'${name}' takes no subject '${subject}' (packages/core/src/variation-tokens.ts)`);
+  }
+  return `${name}-${subject}` as SubjectVariation;
+}
 
 /** The registry entry for a name, or a throw naming what is registered. */
 export function variationToken(name: string): VariationToken & { name: VariationName } {
@@ -139,10 +165,7 @@ export function parseVariation(part: string): { name: VariationName; subject?: s
       continue;
     }
     const subject = part.slice(t.name.length + 1);
-    if (
-      new RegExp(`^(?:${t.subject.source})$`).test(subject) &&
-      (best === undefined || t.name.length > best.name.length)
-    ) {
+    if (SUBJECT.get(t.name)!.test(subject) && (best === undefined || t.name.length > best.name.length)) {
       best = { name: t.name, subject };
     }
   }
@@ -159,10 +182,7 @@ export function parseVariation(part: string): { name: VariationName; subject?: s
  *  its pattern, and when any of the candidate's own variations is unregistered. */
 export function hasVariation(variations: readonly string[], name: string, subject?: string | null): boolean {
   const t = variationToken(name);
-  if (
-    typeof subject === 'string' &&
-    (t.subject === undefined || !new RegExp(`^(?:${t.subject.source})$`).test(subject))
-  ) {
+  if (typeof subject === 'string' && !(SUBJECT.get(t.name)?.test(subject) ?? false)) {
     throw new Error(`'${name}' takes no subject '${subject}' (packages/core/src/variation-tokens.ts)`);
   }
   return variations.some((part) => {

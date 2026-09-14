@@ -20,6 +20,7 @@ import {
   splitVariations,
   tallyFanVariations,
   variationToken,
+  withSubject,
 } from '../src/variation-tokens';
 
 const names = VARIATION_TOKENS.map((t) => t.name);
@@ -78,6 +79,24 @@ describe('the registry is well-formed', () => {
     ];
     for (const [part, name, subject] of cases) {
       expect(parseVariation(part)).toEqual(subject === undefined ? { name } : { name, subject });
+    }
+  });
+
+  test('withSubject mints exactly what parseVariation reads back, and refuses a subject its pattern does not fit', () => {
+    expect(withSubject('coalesce', 'v0-v1')).toBe('coalesce-v0-v1');
+    expect(parseVariation(withSubject('regcopy', 'ret-fresh'))).toEqual({ name: 'regcopy', subject: 'ret-fresh' });
+    expect(parseVariation(withSubject('homesplit', '0x40000d4.4s'))).toEqual({
+      name: 'homesplit',
+      subject: '0x40000d4.4s',
+    });
+    for (const [name, subject] of [
+      ['sense', 'a'],
+      ['coalesce', ''],
+      ['volatile', 'slot'],
+      ['regcopy', 'fresh'],
+      ['homesplit', 'a/b'],
+    ] as const) {
+      expect(() => withSubject(name, subject)).toThrow(/takes no subject/);
     }
   });
 
