@@ -135,10 +135,14 @@ describe('closure over the names the committed artifact publishes', () => {
 });
 
 describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthetic tier mints', () => {
-  test('every enumerated name parses into registered variations, signedness first, in kind order', () => {
+  test('every enumerated name parses into registered variations, signedness first, in kind order', async () => {
     const names = new Set<string>();
     let fans = 0;
     for (const c of syntheticCases()) {
+      // The whole tier is ~60 s of synchronous work, and vitest's worker answers its runner over an
+      // RPC with a fixed 60 s timeout that the poll phase cannot serve while this loop holds the
+      // thread. Yielding once per row lets the reply be read (`setImmediate` runs after poll).
+      await new Promise<void>((resolve) => setImmediate(resolve));
       if (!c.toolchain.available()) {
         continue;
       }
