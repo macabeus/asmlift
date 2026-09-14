@@ -13,7 +13,12 @@ import {
   VARIATION_KIND_DEFINITIONS,
 } from '@asmlift/core/variation-definitions';
 import { readerRules } from '@asmlift/core/variation-gates';
-import { type VariationName, variationToken } from '@asmlift/core/variation-tokens';
+import {
+  type GatingBehavior,
+  type TargetGate,
+  type VariationName,
+  variationToken,
+} from '@asmlift/core/variation-tokens';
 import { useMemo } from 'react';
 
 import { CodeBlock } from '../../../shared/components/CodeBlock';
@@ -176,7 +181,7 @@ export function VariationDetailBody({
 
         <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
           <Caption>Offered when</Caption>
-          <Offer offer={def.offeredWhen} />
+          <Offer offer={def.offeredWhen} target={variationToken(name).target} />
           {def.subject && (
             <>
               <div className="mt-3">
@@ -254,7 +259,7 @@ const OPEN_RULES = 6;
 
 /** When enumeration offers the variation, in the order a reader asks: the condition, the target it
  *  needs, the rules that can still refuse it (each table's own `why`), and where that is decided. */
-function Offer({ offer }: { offer: OfferedWhen }) {
+function Offer({ offer, target }: { offer: OfferedWhen; target?: TargetGate<GatingBehavior> }) {
   const rules = offer === 'always' ? [] : readerRules(offer.gates ?? []);
   return (
     <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-300">
@@ -269,9 +274,7 @@ function Offer({ offer }: { offer: OfferedWhen }) {
           <InlineCode text={offer.when} />
         )}
       </p>
-      {offer !== 'always' && offer.target && (
-        <p>Only on a target whose compiler {TARGET_BEHAVIOR_READINGS[offer.target]}.</p>
-      )}
+      {target && <TargetLine gate={target} />}
       {rules.length > 0 && (
         <details open={rules.length <= OPEN_RULES}>
           <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">
@@ -316,6 +319,22 @@ function Offer({ offer }: { offer: OfferedWhen }) {
         Where it changes nothing, its candidate repeats an earlier source and is not enumerated.
       </p>
     </div>
+  );
+}
+
+/** The target gate as a sentence: "Only on…" when the compiler must declare the behavior, "Not on…"
+ *  when it must not, with the variation whose company lifts it. */
+function TargetLine({ gate }: { gate: TargetGate<GatingBehavior> }) {
+  return (
+    <p>
+      {gate.declared ? 'Only' : 'Not'} on a target whose compiler {TARGET_BEHAVIOR_READINGS[gate.behavior]}
+      {gate.unlessWith && (
+        <>
+          , unless together with <code className="font-mono text-slate-200">{gate.unlessWith}</code>
+        </>
+      )}
+      .
+    </p>
   );
 }
 

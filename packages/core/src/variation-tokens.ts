@@ -23,11 +23,27 @@
 // substrings: `hasVariation(v, 'livebase')` is false on `livebase-block`, so a predicate about a
 // family of variations names each member.
 //
+// WHY A TARGET GATE IS HERE TOO. A variation offered only on some compilers is withheld by
+// `offeredOn`, which enumeration asks before it builds a candidate, and the webapp's drawer reads the
+// same entry. What a reader is told about the target is the rule enumeration applies.
+//
 // Pure data and pure functions: this module stays browser-safe.
+import type { TargetDescription } from './target';
 
 /** The variation kinds, in the order their variations appear in a candidate's name. */
 export const VARIATION_KINDS = ['signedness', 'lift', 'structure', 'respell', 'symbol-map'] as const;
 export type VariationKind = (typeof VARIATION_KINDS)[number];
+
+/** The compiler behavior a variation's offer depends on: offered only where the target declares
+ *  `behavior`, or, with `declared: false`, only where it does not. `unlessWith` names the variation
+ *  whose company lifts the restriction. */
+export interface TargetGate<B extends CompilerBehavior = CompilerBehavior> {
+  behavior: B;
+  declared: boolean;
+  unlessWith?: string;
+}
+
+type CompilerBehavior = keyof TargetDescription['compilerBehaviors'];
 
 export interface VariationToken {
   /** the registered spelling; a `-` inside it is part of the name (`livebase-block`, `vol-slot`) */
@@ -36,6 +52,7 @@ export interface VariationToken {
   /** what may follow `name-` when the variation names what it was applied to; absent for a
    *  variation that takes no subject. Anchored by `parseVariation`, never here. */
   subject?: RegExp;
+  target?: TargetGate;
 }
 
 /** The local names a multi-result variation's subject lists, `-`-joined: `v0-v1`, `p0-p1-p2`. */
@@ -81,7 +98,7 @@ const TOKENS = [
   { name: 'vol-store', variationKind: 'respell' },
   { name: 'unreduce', variationKind: 'respell' },
   { name: 'ptr-field', variationKind: 'respell' },
-  { name: 'offmember', variationKind: 'respell' },
+  { name: 'offmember', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
   { name: 'inlinebase', variationKind: 'respell' },
   { name: 'scopebase', variationKind: 'respell' },
   { name: 'regionbase', variationKind: 'respell' },
@@ -89,14 +106,22 @@ const TOKENS = [
   { name: 'indexed', variationKind: 'respell' },
   { name: 'livebase', variationKind: 'respell' },
   { name: 'livebase-block', variationKind: 'respell' },
-  { name: 'basefold', variationKind: 'respell' },
-  { name: 'unfolded', variationKind: 'respell' },
-  { name: 'orderbase', variationKind: 'respell' },
-  { name: 'orderbase-scoped', variationKind: 'respell' },
+  { name: 'basefold', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
+  { name: 'unfolded', variationKind: 'respell', target: { behavior: 'foldsConstAddrOffset', declared: true } },
+  { name: 'orderbase', variationKind: 'respell', target: { behavior: 'arrayShapeFromStride', declared: true } },
+  {
+    name: 'orderbase-scoped',
+    variationKind: 'respell',
+    target: { behavior: 'arrayShapeFromStride', declared: true },
+  },
   { name: 'homesplit', variationKind: 'respell', subject: /[^/,\s]+/ },
   { name: 'mulfirst', variationKind: 'respell' },
-  { name: 'nearbase', variationKind: 'respell' },
-  { name: 'advance', variationKind: 'respell' },
+  { name: 'nearbase', variationKind: 'respell', target: { behavior: 'nearBaseSpan', declared: true } },
+  {
+    name: 'advance',
+    variationKind: 'respell',
+    target: { behavior: 'foldsPointerAdvance', declared: false, unlessWith: 'volatile' },
+  },
   { name: 'parkfirst', variationKind: 'respell' },
   { name: 'sinkinit', variationKind: 'respell' },
   { name: 'regcopy', variationKind: 'respell', subject: /ret|ret-fresh/ },
@@ -112,10 +137,16 @@ const TOKENS = [
  *  type error. */
 export type VariationName = (typeof TOKENS)[number]['name'];
 
-export const VARIATION_TOKENS: readonly (VariationToken & { name: VariationName })[] = TOKENS;
+/** A registry entry: its name is registered and its target gate names a behavior some entry gates on. */
+export type RegisteredToken = VariationToken & { name: VariationName; target?: TargetGate<GatingBehavior> };
+
+export const VARIATION_TOKENS: readonly RegisteredToken[] = TOKENS;
 
 /** A registered variation that names what it was applied to. */
 export type SubjectVariationName = Extract<(typeof TOKENS)[number], { subject: RegExp }>['name'];
+
+/** A compiler behavior some registered variation's offer depends on. */
+export type GatingBehavior = Extract<(typeof TOKENS)[number], { target: TargetGate }>['target']['behavior'];
 
 declare const subjectFitted: unique symbol;
 
@@ -126,7 +157,7 @@ export type SubjectVariation = `${SubjectVariationName}-${string}` & { readonly 
 /** One part of a candidate's name as enumeration mints it. */
 export type Variation = VariationName | SubjectVariation;
 
-const BY_NAME = new Map<string, VariationToken & { name: VariationName }>(VARIATION_TOKENS.map((t) => [t.name, t]));
+const BY_NAME = new Map<string, RegisteredToken>(VARIATION_TOKENS.map((t) => [t.name, t]));
 
 /** Each subject pattern, anchored. */
 const SUBJECT = new Map<string, RegExp>(
@@ -143,12 +174,27 @@ export function withSubject(name: SubjectVariationName, subject: string): Subjec
 }
 
 /** The registry entry for a name, or a throw naming what is registered. */
-export function variationToken(name: string): VariationToken & { name: VariationName } {
+export function variationToken(name: string): RegisteredToken {
   const t = BY_NAME.get(name);
   if (t === undefined) {
     throw new Error(`'${name}' is not a registered variation (packages/core/src/variation-tokens.ts)`);
   }
   return t;
+}
+
+/** May enumeration offer a candidate carrying `variations` on `target`? False when one of them has a
+ *  target gate the target's compiler behaviors fail and no variation its `unlessWith` names is among
+ *  them. A behavior is declared when present and not `false`. */
+export function offeredOn(target: TargetDescription, variations: readonly string[]): boolean {
+  const names = variations.map((v) => parseVariation(v).name);
+  return names.every((n) => {
+    const gate = variationToken(n).target;
+    if (gate === undefined || (gate.unlessWith !== undefined && names.includes(variationToken(gate.unlessWith).name))) {
+      return true;
+    }
+    const value = target.compilerBehaviors[gate.behavior];
+    return (value !== undefined && value !== false) === gate.declared;
+  });
 }
 
 /** One part of a candidate's name, split into the variation it names and that variation's subject.

@@ -10,13 +10,14 @@ import { describe, expect, test } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
 import { SIGNEDNESS } from '../src/rank-variations';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 import {
   VARIATION_KINDS,
   VARIATION_TOKENS,
   hasVariation,
   hasVariations,
   joinVariations,
+  offeredOn,
   parseVariation,
   splitVariations,
   tallyFanVariations,
@@ -259,5 +260,33 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
     expect(() =>
       tallyFanVariations({ candidates: [{ variations: ['unsigned', 'nosuch'] }], dropped: [], withheld: [] }),
     ).toThrow(/names no registered variation/);
+  });
+});
+
+// A registry entry's target gate is the rule enumeration applies (`respell` and the hoist roster ask
+// `offeredOn`), so what each shipped target withholds is stated here once, per target.
+describe('a target gate withholds a variation where its compiler behavior says', () => {
+  const withheld = (target: typeof ARMV4T_AGBCC) =>
+    VARIATION_TOKENS.filter((t) => !offeredOn(target, [t.name])).map((t) => t.name);
+
+  test('each shipped target withholds exactly these variations on their own', () => {
+    expect(withheld(ARMV4T_AGBCC)).toEqual(['advance']);
+    const unfolding = ['offmember', 'basefold', 'unfolded', 'orderbase', 'orderbase-scoped', 'nearbase'];
+    expect(withheld(MIPS_IDO)).toEqual(unfolding);
+    expect(withheld(MIPS_GCC)).toEqual(unfolding);
+    expect(withheld(PPC_MWCC)).toEqual(unfolding);
+  });
+
+  test('the variation a gate names in `unlessWith` lifts it, with or without a subject', () => {
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance'])).toBe(false);
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', 'volatile'])).toBe(true);
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', 'volatile-p0'])).toBe(true);
+    expect(offeredOn(MIPS_IDO, ['unsigned', 'basefold', 'sinkinit'])).toBe(false);
+  });
+
+  test('every `unlessWith` names a registered variation', () => {
+    const named = VARIATION_TOKENS.flatMap((t) => (t.target?.unlessWith === undefined ? [] : [t.target.unlessWith]));
+    expect(named.filter((n) => !names.includes(n as (typeof names)[number]))).toEqual([]);
+    expect(named.length).toBeGreaterThan(0);
   });
 });

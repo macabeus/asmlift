@@ -10,7 +10,7 @@ import {
   VARIATION_KIND_DEFINITIONS,
 } from '@asmlift/core/variation-definitions';
 import { readerRules } from '@asmlift/core/variation-gates';
-import { VARIATION_KINDS, VARIATION_TOKENS } from '@asmlift/core/variation-tokens';
+import { VARIATION_KINDS, VARIATION_TOKENS, variationToken } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -181,6 +181,7 @@ describe('the variation drawer', () => {
   test('when it is offered is read from the code: every rule of its tables, its condition, its target', () => {
     for (const { name } of VARIATION_TOKENS) {
       const offer = VARIATION_DEFINITIONS[name].offeredWhen;
+      const gate = variationToken(name).target;
       const html = renderToStaticMarkup(
         <VariationDetailBody name={name} rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
       );
@@ -192,7 +193,7 @@ describe('the variation drawer', () => {
       const text = [
         'judges' in offer ? offer.judges : offer.when,
         ...readerRules(offer.gates ?? []).map((r) => r.why),
-        ...(offer.target ? [TARGET_BEHAVIOR_READINGS[offer.target]] : []),
+        ...(gate ? [TARGET_BEHAVIOR_READINGS[gate.behavior]] : []),
       ];
       for (const piece of text.flatMap(prose)) {
         expect(offered, name).toContain(escaped(piece.trim()));

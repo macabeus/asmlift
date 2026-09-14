@@ -1,12 +1,13 @@
 // When a variation is offered (`VariationDefinition.offeredWhen`), held to the code that decides it.
 //
 // A definition names the admission tables that refuse a candidate, or, where no table decides, one
-// sentence and the export that does. These tests are what keep the names true: a table key is the
-// export of that name in the file the definition is implemented in, a pointer names an export that
-// exists and that enumeration reaches, and a function that consults a table cannot be pointed at
-// with the table left out.
+// sentence and the export that does. What these tests prove, and no more: a table key is the export
+// of that name in the file the definition is implemented in; a pointer names an export that exists
+// and that enumeration's code (comments aside) names; a function that consults a table cannot be
+// pointed at with the table left out. They do not prove that the pointed export is the whole decision.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 
 import { STACKED_VARIATIONS, STRUCTURE_VARIATIONS } from '../src/rank-variations';
@@ -16,9 +17,12 @@ import { type GateTableName, VARIATION_GATE_TABLES, readerRules } from '../src/v
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 const entries = Object.entries(VARIATION_DEFINITIONS);
 const RANK_VARIATIONS = 'packages/core/src/rank-variations.ts';
-const ENUMERATION = ['packages/core/src/rank.ts', RANK_VARIATIONS]
-  .map((f) => readFileSync(join(REPO_ROOT, f), 'utf8'))
-  .join('\n');
+const withoutComments = (file: string): string =>
+  ts
+    .createPrinter({ removeComments: true })
+    .printFile(ts.createSourceFile(file, readFileSync(join(REPO_ROOT, file), 'utf8'), ts.ScriptTarget.Latest));
+/** Enumeration's code with its comments removed: a name only a comment mentions is not reached. */
+const ENUMERATION = ['packages/core/src/rank.ts', RANK_VARIATIONS].map(withoutComments).join('\n');
 /** An exported admission table's name, as `gate-contract.test.ts` registers them. */
 const TABLE_NAME = /\b[A-Z][A-Z0-9_]*(?:_GATES|_ELIGIBILITY)\b/g;
 
@@ -71,13 +75,11 @@ describe('every gate reference resolves', () => {
     expect(uncalled).toEqual([]);
   });
 
-  test('a target behavior is one enumeration reads', () => {
-    const unread = entries.flatMap(([n, { offeredWhen: o }]) =>
-      o !== 'always' && o.target !== undefined && !ENUMERATION.includes(`compilerBehaviors.${o.target}`)
-        ? [`${n}: ${o.target}`]
-        : [],
-    );
-    expect(unread).toEqual([]);
+  // Every other target gate is the registry entry `offeredOn` asks, so what the drawer says about a
+  // target is what enumeration does. A direct read would be a gate the registry does not hold, except
+  // the span `nearbase` computes with, which its entry gates as well.
+  test('enumeration reads no compiler behavior directly but the span it computes with', () => {
+    expect([...new Set(ENUMERATION.match(/\bcompilerBehaviors\.\w+/g))]).toEqual(['compilerBehaviors.nearBaseSpan']);
   });
 
   test('an export that consults a table cannot be pointed at with that table left out', async () => {

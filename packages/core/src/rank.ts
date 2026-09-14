@@ -88,7 +88,7 @@ import {
 import { hasDivergentSharedRet } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
-import { type SubjectVariationName, type Variation, withSubject } from './variation-tokens';
+import { type SubjectVariationName, type Variation, offeredOn, withSubject } from './variation-tokens';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -969,6 +969,9 @@ export function enumerateCandidates(
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
     const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
+      if (!offeredOn(target, variations)) {
+        return;
+      }
       try {
         const made = make();
         if (!made) {
@@ -1114,12 +1117,11 @@ export function enumerateCandidates(
     // so the offset stays in the load's displacement instead of folding into the pool literal.
     // The SECOND source of the shape `/basefold` already reads: that row answers the same
     // evidence with a named base, this one with an aggregate member, and the two are different C
-    // and different register pressure. Offered only where the target declares the fold — MIPS and
+    // and different register pressure. Offered only where the target declares the fold (its registry
+    // entry's target gate, which `respell` asks) — MIPS and
     // PPC put the addend in the instruction by construction, so nothing there says a member put
     // it there, exactly as with BASEFOLD_HOISTS above.
-    if (target.compilerBehaviors.foldsConstAddrOffset) {
-      respell(['offmember'], () => spellOperandMembers(sfn));
-    }
+    respell(['offmember'], () => spellOperandMembers(sfn));
     // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
     // spelling is reachable from neither variation alone: pinning the stores keeps three of them in
     // the loop body, which is what makes the loop's register pressure — and so the placement of
@@ -1256,6 +1258,9 @@ export function enumerateCandidates(
       from: () => SFn | null | undefined,
       resultsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
     ): void => {
+      if (!offeredOn(target, [...prefix, name])) {
+        return;
+      }
       let results: { variations: readonly Variation[]; sfn: SFn }[] = [];
       try {
         const base = from();
@@ -1300,18 +1305,18 @@ export function enumerateCandidates(
     // hoist-nothing result means the variation has nothing to add and declines.
     // One family per hoist; a hoist binding exactly what an earlier hoist bound is the same
     // source under different variations, so it declines for that too. `/basefold`'s TWO hoists and
-    // `/unfolded` join the roster where the target declares the fold, and `/orderbase` where it
-    // declares the array-shape fork, so a target with neither is offered the two `/livebase` hoists
-    // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
-    // all of them or none.
+    // `/unfolded` stay on the roster where the target declares the fold, and `/orderbase` where it
+    // declares the array-shape fork (each registry entry's target gate), so a target with neither is
+    // offered the two `/livebase` hoists and nothing else. The same fact is stated at the POLICY sites
+    // above; a roster change repairs all of them or none. The array-shape fork is the opt-in
+    // raise/globalshape.ts carries: with it off nothing is stamped, so `order-licensed` would refuse
+    // every key anyway and the filter only saves the census.
     const hoists: readonly BaseHoist[] = [
       ...LIVEBASE_HOISTS,
-      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS] : []),
-      // …and the ORDER hoists where the compiler's subscript expansion forks on the base's array-ness,
-      // which is the same opt-in raise/globalshape.ts carries: with it off nothing is stamped, so
-      // `order-licensed` would refuse every key anyway and this only saves the census.
-      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_HOISTS : []),
-    ];
+      ...BASEFOLD_HOISTS,
+      ...UNFOLDED_HOISTS,
+      ...ORDERBASE_HOISTS,
+    ].filter((h) => offeredOn(target, h.variations));
     // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF WOULD BUY NOTHING, which is worth a paragraph
     // because this hoist is where the next reader will propose it. `orderLicensedGlobals` is decidable
     // on the lifted fn, so the hoist could also be dropped wherever THAT set is empty. It would be
@@ -1552,8 +1557,8 @@ export function enumerateCandidates(
     // as long as agbcc is the only target that reaches the stamp (the corpus census below), and the
     // day a second one does, `compilerBehaviors` is where this belongs rather than a variation.
     //
-    // THE PLAIN `/advance` IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — a variation keyed
-    // on a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
+    // THE PLAIN `/advance` IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — its registry entry's
+    // target gate names a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
     // POLARITY REVERSED: that flag admits a variation where the compiler folds, this one withholds
     // one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
     // compiled corners in test/advance.test.ts's header), so the plain spelling is byte-identical
@@ -1596,9 +1601,7 @@ export function enumerateCandidates(
     // address does not survive the symbol-map direction unless `cellAddress` learns the promoted
     // form; test/advance.test.ts records that at the row it exists for.
     const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
-    if (!target.compilerBehaviors.foldsPointerAdvance) {
-      respell(['advance'], advance);
-    }
+    respell(['advance'], advance);
     respell(['advance', 'volatile'], () => {
       const a = advance();
       return a ? volatilePtrLocals(a, createdLocals(sfn, a)) : null;

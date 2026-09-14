@@ -20,9 +20,8 @@
 //
 // Pure data: this module stays browser-safe. `offeredWhen` names admission tables by key; their rules
 // are `variation-gates.ts`, which a reader of a title or a summary never loads.
-import type { TargetDescription } from './target';
 import type { GateTableName } from './variation-gates';
-import type { VariationKind, VariationName } from './variation-tokens';
+import type { GatingBehavior, VariationKind, VariationName } from './variation-tokens';
 
 export interface ReaderWord {
   word: string;
@@ -139,14 +138,14 @@ export interface CodePointer {
   file: string;
 }
 
-/** The target compiler behaviors an offer can require, each as a reader reads it after "a target whose compiler". */
-export const TARGET_BEHAVIOR_READINGS = {
+/** Each compiler behavior a registered variation's target gate names, as a reader reads it after
+ *  "a target whose compiler". The gate itself is the registry entry's `target`. */
+export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: string } = {
   foldsConstAddrOffset: 'folds a constant address offset into the literal it loads',
   arrayShapeFromStride: "loads a declared array's base before it scales the index",
   nearBaseSpan: 'declares how far one base local may reach a neighbouring address',
-} as const satisfies { readonly [B in keyof TargetDescription['compilerBehaviors']]?: string };
-
-export type TargetBehavior = keyof typeof TARGET_BEHAVIOR_READINGS;
+  foldsPointerAdvance: 'folds a stepped pointer back into an offset load',
+};
 
 /** When enumeration offers a variation. Wherever it changes nothing, the candidate it would add
  *  repeats a source an earlier candidate has, and is not enumerated.
@@ -157,11 +156,11 @@ export type TargetBehavior = keyof typeof TARGET_BEHAVIOR_READINGS;
  *  - `when` and `decidedBy`: where no table decides, one sentence and the export that does. `gates`
  *    names a table that export applies to part of the decision.
  *
- *  `target`: offered only on a target whose compiler declares that behavior. */
+ *  A variation offered only on some compilers says so in its registry entry's `target`. */
 export type OfferedWhen =
   | 'always'
-  | { judges: string; gates: readonly GateTableName[]; target?: TargetBehavior }
-  | { when: string; decidedBy: CodePointer; gates?: readonly GateTableName[]; target?: TargetBehavior };
+  | { judges: string; gates: readonly GateTableName[] }
+  | { when: string; decidedBy: CodePointer; gates?: readonly GateTableName[] };
 
 export interface VariationDefinition {
   /** a short heading: the catalogue row, the drawer title */
@@ -970,7 +969,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       judges: 'each fixed-address base a load reads through',
       gates: ['OFFMEMBER_GATES'],
-      target: 'foldsConstAddrOffset',
     },
     example: {
       compiler: 'agbcc',
@@ -1147,7 +1145,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       judges: 'each fixed-address base the default hoist left inline',
       gates: ['BASEFOLD_GATES'],
-      target: 'foldsConstAddrOffset',
     },
     example: {
       compiler: 'agbcc',
@@ -1168,7 +1165,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       judges: 'each fixed-address base the default hoist left inline',
       gates: ['UNFOLDED_GATES'],
-      target: 'foldsConstAddrOffset',
     },
     example: {
       compiler: 'agbcc',
@@ -1192,7 +1188,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       judges: 'each fixed-address base the default hoist left inline',
       gates: ['ORDERBASE_GATES'],
-      target: 'arrayShapeFromStride',
     },
     example: {
       compiler: 'agbcc',
@@ -1213,7 +1208,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       judges: 'each fixed-address base the default hoist left inline, whose uses one nested statement list holds',
       gates: ['ORDERBASE_GATES'],
-      target: 'arrayShapeFromStride',
     },
     example: {
       compiler: 'agbcc',
@@ -1287,7 +1281,6 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       when: "Two or more distinct constant addresses fall within the target's derivation reach.",
       decidedBy: { symbol: 'nearBaseClusters', file: l3('nearbase') },
-      target: 'nearBaseSpan',
     },
     example: {
       compiler: 'agbcc',
