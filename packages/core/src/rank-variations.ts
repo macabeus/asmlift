@@ -437,14 +437,14 @@ export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
 
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
- *  fires", so a pair is reachable whenever the third declines. The suffix is built from the
- *  members that actually FIRED, so a suffix never names a variation that declined; a fired-set that
+ *  fires", so a pair is reachable whenever the third declines. The variations are the members that
+ *  actually FIRED, so they never name a variation that declined; a fired-set that
  *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
  *  nothing fired. */
 export const applyStacked = (
   subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
-): { out: SFn; suffix: VariationName[] } | null => {
+): { out: SFn; variations: VariationName[] } | null => {
   let cur = from;
   const fired: VariationName[] = [];
   for (const sp of subset) {
@@ -454,7 +454,7 @@ export const applyStacked = (
       fired.push(sp.name);
     }
   }
-  return fired.length > 0 ? { out: cur, suffix: fired } : null;
+  return fired.length > 0 ? { out: cur, variations: fired } : null;
 };
 
 /** The locals a variation added — a NAME diff rather than a positional slice, so a pass that ever
@@ -548,7 +548,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  reached. */
 export interface BaseHoist {
   /** the variations this hoist's candidates carry, in name order */
-  suffix: readonly VariationName[];
+  variations: readonly VariationName[];
   gates: readonly Gate<BaseKey>[];
   /** WHERE the locals this hoist binds are initialized (l3/hoist.ts). Eligibility and placement are
    *  two questions and this roster answers both, so a hoist can offer the same bases in the other
@@ -572,8 +572,8 @@ export interface BaseHoist {
 }
 
 export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
-  { suffix: ['livebase'], gates: LIVEBASE_GATES, placement: 'head', pairings: true },
-  { suffix: ['livebase-block'], gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
+  { variations: ['livebase'], gates: LIVEBASE_GATES, placement: 'head', pairings: true },
+  { variations: ['livebase-block'], gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
 ];
 
 /** Narrower than either `/livebase` hoist, so both go last: they keep both placement heuristics and
@@ -626,8 +626,8 @@ export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
  *  hoist expires the next time a hoist is added — re-run it, and if it no longer moves, widen the
  *  ablation until it does before concluding anything from a null. */
 export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
-  { suffix: ['basefold'], gates: BASEFOLD_GATES, placement: 'head', pairings: false },
-  { suffix: ['basefold', 'sinkinit'], gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
+  { variations: ['basefold'], gates: BASEFOLD_GATES, placement: 'head', pairings: false },
+  { variations: ['basefold', 'sinkinit'], gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
 ];
 
 /** The fifth hoist: its table requires the fold evidence (l3/basecse.ts, UNFOLDED_GATES), so
@@ -684,7 +684,7 @@ export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
  *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
  *  census when one does. */
 export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
-  { suffix: ['unfolded'], gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
+  { variations: ['unfolded'], gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
 ];
 
 /** The sixth hoist, and the only one whose evidence is the INSTRUCTION ORDER rather than the
@@ -728,8 +728,8 @@ export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
  *  `pairings: false` on both for the field's own reason — a pairing is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
 export const ORDERBASE_HOISTS: readonly BaseHoist[] = [
-  { suffix: ['orderbase'], gates: ORDERBASE_GATES, placement: 'head', pairings: false },
-  { suffix: ['orderbase-scoped'], gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
+  { variations: ['orderbase'], gates: ORDERBASE_GATES, placement: 'head', pairings: false },
+  { variations: ['orderbase-scoped'], gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
 
 export const sameBases = (a: readonly string[], b: readonly string[]): boolean =>

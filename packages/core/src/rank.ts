@@ -363,10 +363,10 @@ interface TreeSources {
   emit?: { error: unknown };
 }
 
-/** One source emitted from a structured tree: the suffix naming the variations that produced it,
+/** One source emitted from a structured tree: the variations that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
 interface TreeSource {
-  suffix: readonly Variation[];
+  variations: readonly Variation[];
   source: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
@@ -437,15 +437,15 @@ export function enumerateCandidates(
   // default setting lives in one place instead of six literals that can disagree. Each entry
   // states only what it VARIES — which is the whole content of the chain above.
   const STRUCTURE_DEFAULTS = { anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true };
-  const senseAnchor: (typeof STRUCTURE_DEFAULTS & { suffix: readonly Variation[]; sense: boolean })[] = [
-    { ...STRUCTURE_DEFAULTS, suffix: [], sense: defSense },
-    { ...STRUCTURE_DEFAULTS, suffix: ['flip-branch'], sense: !defSense },
-    { ...STRUCTURE_DEFAULTS, suffix: ['defsite'], sense: defSense, anchor: true },
-    { ...STRUCTURE_DEFAULTS, suffix: ['flip-branch', 'defsite'], sense: !defSense, anchor: true },
-    { ...STRUCTURE_DEFAULTS, suffix: ['defsite', 'loop-entry'], sense: defSense, anchor: true, entry: true },
+  const senseAnchor: (typeof STRUCTURE_DEFAULTS & { variations: readonly Variation[]; sense: boolean })[] = [
+    { ...STRUCTURE_DEFAULTS, variations: [], sense: defSense },
+    { ...STRUCTURE_DEFAULTS, variations: ['flip-branch'], sense: !defSense },
+    { ...STRUCTURE_DEFAULTS, variations: ['defsite'], sense: defSense, anchor: true },
+    { ...STRUCTURE_DEFAULTS, variations: ['flip-branch', 'defsite'], sense: !defSense, anchor: true },
+    { ...STRUCTURE_DEFAULTS, variations: ['defsite', 'loop-entry'], sense: defSense, anchor: true, entry: true },
     {
       ...STRUCTURE_DEFAULTS,
-      suffix: ['flip-branch', 'defsite', 'loop-entry'],
+      variations: ['flip-branch', 'defsite', 'loop-entry'],
       sense: !defSense,
       anchor: true,
       entry: true,
@@ -455,7 +455,7 @@ export function enumerateCandidates(
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
   // layout evidence the divergent case does, so the DEFAULT sense is the divergent one's and
   // this variation emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
-  // `/flip-branch` still moves only divergent ifs and the two variations stay independent. The suffix
+  // `/flip-branch` still moves only divergent ifs and the two variations stay independent. The name
   // therefore names a sense RELATIVE to the target's default: a candidate's variations quoted from a
   // log identify a candidate only together with the tree that produced it, which is what the `[asmlift source
   // <commit>]` stamp on the `[ranked]` line is for (docs/ranked-repro.md).
@@ -474,7 +474,11 @@ export function enumerateCandidates(
   // source and the dedup collapses it before any compile.
   const senseOnly = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
-    ...senseAnchor.map((s): typeof s & { join: boolean } => ({ ...s, suffix: [...s.suffix, 'flip-join'], join: true })),
+    ...senseAnchor.map((s): typeof s & { join: boolean } => ({
+      ...s,
+      variations: [...s.variations, 'flip-join'],
+      join: true,
+    })),
   ];
   // THE PER-SITE SENSE MEASUREMENT, a structure variation never enumerated by default: every mask
   // over the sense sites, crossed with the whole fan. It exists to price the fork the two booleans above cannot express
@@ -486,7 +490,7 @@ export function enumerateCandidates(
   const baseSense = senseMasks.flatMap((m) =>
     senseOnly.map((s) => ({
       ...s,
-      ...(m === 0 ? {} : { suffix: [...s.suffix, withSubject('sense', String(m))] }),
+      ...(m === 0 ? {} : { variations: [...s.variations, withSubject('sense', String(m))] }),
       // Always present, `undefined` at mask 0: an optional key added on one arm of a ternary would
       // make the two arms different object TYPES, and the list is what the whole fan spreads from.
       flipSites: m === 0 ? undefined : maskSites(m),
@@ -506,7 +510,7 @@ export function enumerateCandidates(
   const bitfieldSettings = mapHasBitfields
     ? [
         ...baseSense,
-        ...baseSense.map((s): typeof s => ({ ...s, suffix: [...s.suffix, 'no-bitfield'], bitfields: false })),
+        ...baseSense.map((s): typeof s => ({ ...s, variations: [...s.variations, 'no-bitfield'], bitfields: false })),
       ]
     : baseSense;
   // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
@@ -687,7 +691,11 @@ export function enumerateCandidates(
   const ptrElemSettings = fnHasSizedPtrFields
     ? [
         ...bitfieldSettings,
-        ...bitfieldSettings.map((s): typeof s => ({ ...s, suffix: [...s.suffix, 'no-ptr-elem'], ptrElems: false })),
+        ...bitfieldSettings.map((s): typeof s => ({
+          ...s,
+          variations: [...s.variations, 'no-ptr-elem'],
+          ptrElems: false,
+        })),
       ]
     : bitfieldSettings;
   // `/flat-rank` — spell a multidimensional global's access as the FLAT byte arithmetic
@@ -730,7 +738,11 @@ export function enumerateCandidates(
   const declRankSettings = fnNamesMultidimArray
     ? [
         ...ptrElemSettings,
-        ...ptrElemSettings.map((s): typeof s => ({ ...s, suffix: [...s.suffix, 'flat-rank'], declRank: false })),
+        ...ptrElemSettings.map((s): typeof s => ({
+          ...s,
+          variations: [...s.variations, 'flat-rank'],
+          declRank: false,
+        })),
       ]
     : ptrElemSettings;
   // The structure-variation chain, derived from STRUCTURE_VARIATIONS: each admitted variation doubles
@@ -762,7 +774,7 @@ export function enumerateCandidates(
     structureSettings = [
       ...structureSettings,
       ...structureSettings.map(
-        (s) => ({ ...s, suffix: [...s.suffix, variation.name], [variation.flag]: true }) as StructureSetting,
+        (s) => ({ ...s, variations: [...s.variations, variation.name], [variation.flag]: true }) as StructureSetting,
       ),
     ];
   }
@@ -770,9 +782,9 @@ export function enumerateCandidates(
    *  other half: at the default LIFT setting a failure here aborts the row, because it says the lift
    *  is broken rather than that one variation cannot spell this tree.
    *
-   *  `s.suffix.length === 0` IS NOT THE SAME TEST, which is why this is a named predicate rather than
+   *  `s.variations.length === 0` IS NOT THE SAME TEST, which is why this is a named predicate rather than
    *  the string compare it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
-   *  default, so both of its senses pass this test: the flipped one carries a suffix, and `sense` is
+   *  default, so both of its senses pass this test: the flipped one carries a variation, and `sense` is
    *  not among the flags read here. `/flip-join` does not pass, because `join` is one of the five
    *  hand-carried booleans below. The table's own flags decide, plus those five. */
   const isDefaultSetting = (s: StructureSetting): boolean =>
@@ -846,7 +858,7 @@ export function enumerateCandidates(
   // for its own shape, and it counts for more here: a variation reading `fn` would not misprint a
   // candidate, it would DELETE one,
   // and nothing in the harness reports a candidate that was never enumerated.
-  // `preRespellSuffix` names the tree this call re-spells, and it is a diagnostic argument only: it
+  // `preRespellVariations` names the tree this call re-spells, and it is a diagnostic argument only: it
   // reaches `onEnumerationError` and nothing else, so the invariant the parameter list states above —
   // every source is a pure function of the tree and this call's own constants — is untouched by
   // it. It exists because the pre-respell variations call this on a REWRITTEN tree, where a refusal
@@ -854,12 +866,12 @@ export function enumerateCandidates(
   //
   // IT PREFIXES EVERY `onEnumerationError` IN THIS FUNCTION, not just the default emit's, and that is
   // the whole point rather than a detail: every one of them is reachable from both calls, and the
-  // suffix each already carries names a VARIATION, which on a pre-respell tree is a variation applied
-  // to the rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal
+  // variations each one already carries are, on a pre-respell tree, variations applied to the
+  // rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal
   // of `/volatile` — a candidate that did not fail and is still in the fan. The order
-  // is the candidates' own (`[pf.name, ...sp.suffix]`), so a reported name and an enumerated
+  // is the candidates' own (`[pf.name, ...sp.variations]`), so a reported name and an enumerated
   // candidate's variations name the same candidate the same way.
-  const respellTree = (sfn: SFn, preRespellSuffix: readonly Variation[] = []): TreeSources => {
+  const respellTree = (sfn: SFn, preRespellVariations: readonly Variation[] = []): TreeSources => {
     // The walk→index respell variation (l3/reindex.ts) is a THIRD variation on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
     // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
@@ -876,9 +888,9 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ suffix: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
-      reportThrow(preRespellSuffix, e);
+      reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
     }
     // Respell variations — each on the same footing as signedness/branch sense, each guarded:
@@ -956,7 +968,7 @@ export function enumerateCandidates(
     // Widening it for a contract is a defensible change and an argued one — not a silent import.
     // A respell variation returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
-    const respell = (suffix: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
+    const respell = (variations: readonly Variation[], make: () => RespellResult, alreadyShaped = false): void => {
       try {
         const made = make();
         if (!made) {
@@ -968,7 +980,7 @@ export function enumerateCandidates(
         assertDerefsTyped(alt);
         assertLocalsWritten(alt);
         assertNoOrphanedLocals(sfn, alt);
-        sources.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
+        sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape fact orthogonal to
         // representation; subsets compose in the fixed order below. A stacked variation that
@@ -997,8 +1009,8 @@ export function enumerateCandidates(
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
-            // discard every later one, under a name (that variation's suffix) that names no shape.
-            const shapeSuffix = subset.map((x) => x.name);
+            // discard every later one, under that variation's name, which names no shape.
+            const shapeVariations = subset.map((x) => x.name);
             try {
               const shaped = applyStacked(subset, alt);
               if (shaped !== null) {
@@ -1008,7 +1020,7 @@ export function enumerateCandidates(
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
-                  suffix: [...suffix, ...shaped.suffix],
+                  variations: [...variations, ...shaped.variations],
                   source: backend.emit(shaped.out),
                   ...refsOf(shaped.out),
                   ...volOf(shaped.out),
@@ -1017,7 +1029,7 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              reportThrow([...preRespellSuffix, ...suffix, ...shapeSuffix], e);
+              reportThrow([...preRespellVariations, ...variations, ...shapeVariations], e);
             }
           }
         }
@@ -1027,25 +1039,25 @@ export function enumerateCandidates(
         // refused, so without this a variation that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        reportThrow([...preRespellSuffix, ...suffix], e);
+        reportThrow([...preRespellVariations, ...variations], e);
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
     for (const subset of STACKED_SUBSETS) {
-      // the truthful suffix needs the pass to RUN first, so this bypasses respell's
-      // suffix-then-thunk shape: same try posture, suffix from the fired members
+      // the truthful variations need the pass to RUN first, so this bypasses respell's
+      // variations-then-thunk shape: same try posture, variations from the fired members
       try {
         const shaped = applyStacked(subset, sfn);
         if (shaped !== null) {
-          // the ONE call whose suffix already names shapes — say so, rather than making `respell`
-          // read it back out of the suffix it was handed
-          respell(shaped.suffix, () => shaped.out, true);
+          // the ONE call whose variations already name shapes — say so, rather than making `respell`
+          // read them back out of the variations it was handed
+          respell(shaped.variations, () => shaped.out, true);
         }
       } catch (e) {
         // the report names the full subset — the fired set is unknown mid-throw
-        reportThrow([...preRespellSuffix, ...subset.map((x) => x.name)], e);
+        reportThrow([...preRespellVariations, ...subset.map((x) => x.name)], e);
       }
     }
     respell(['argbase'], () => materializeArgBases(sfn));
@@ -1244,19 +1256,19 @@ export function enumerateCandidates(
       from: () => SFn | null | undefined,
       resultsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
     ): void => {
-      let results: { suffix: readonly Variation[]; sfn: SFn }[] = [];
+      let results: { variations: readonly Variation[]; sfn: SFn }[] = [];
       try {
         const base = from();
         results = (base ? resultsOf(base) : []).map((c) => ({
-          suffix: [...prefix, withSubject(name, c.merged)],
+          variations: [...prefix, withSubject(name, c.merged)],
           sfn: c.sfn,
         }));
       } catch (e) {
-        reportThrow([...preRespellSuffix, ...prefix, name], e);
+        reportThrow([...preRespellVariations, ...prefix, name], e);
         return;
       }
       for (const c of results) {
-        respell(c.suffix, () => c.sfn);
+        respell(c.variations, () => c.sfn);
       }
     };
     respellEach(['scopebase'], 'coalesce', () => hoistScopedBases(sfn));
@@ -1371,7 +1383,7 @@ export function enumerateCandidates(
       placement: HoistPlacement,
       bound: readonly string[],
     ): boolean => rows.slice(0, i).some((r) => r.placement === placement && sameBases(bound, census(r.gates)));
-    const livebases = hoists.map(({ suffix, gates, placement, pairings }, i) => {
+    const livebases = hoists.map(({ variations, gates, placement, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
@@ -1383,7 +1395,7 @@ export function enumerateCandidates(
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles, pairings, gates, placement };
+      return { variations, hoist, volatiles, pairings, gates, placement };
     });
     // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a variation's
     // placement across the stacked variations derived onto it; the variation-on-variation
@@ -1410,20 +1422,20 @@ export function enumerateCandidates(
     };
     // Every composition below runs over the hoists a demanding row earned, never the whole roster.
     const paired = livebases.filter((l) => l.pairings);
-    for (const { suffix, hoist, volatiles } of livebases) {
-      respell(suffix, hoist);
-      respell([...suffix, 'volatile'], volatiles);
-      respellEach(suffix, 'volatile', hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
+    for (const { variations, hoist, volatiles } of livebases) {
+      respell(variations, hoist);
+      respell([...variations, 'volatile'], volatiles);
+      respellEach(variations, 'volatile', hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
     }
     // The livebase × indexed PAIRINGS (see POLICY): row-demanded, and the joint spelling is
     // reachable from neither variation alone (the
     // frame-copy + DMA shape).
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell([...suffix, 'indexed'], () => {
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'indexed'], () => {
         const r = hoist();
         return r ? survives(r, reindexWalks(r)) : null;
       });
-      respell([...suffix, 'volatile', 'indexed'], () => {
+      respell([...variations, 'volatile', 'indexed'], () => {
         const r = volatiles();
         return r ? survives(r, reindexWalks(r)) : null;
       });
@@ -1432,12 +1444,12 @@ export function enumerateCandidates(
     // (kleod:DecompressDma, on kl-eod-decomp's source, before 2026-09-13), and the joint spelling is reachable from neither variation alone. The
     // bases whose placement moves the row are the ones only this variation's ablation binds, and
     // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell([...suffix, 'sinkinit'], () => {
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'sinkinit'], () => {
         const r = hoist();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
-      respell([...suffix, 'volatile', 'sinkinit'], () => {
+      respell([...variations, 'volatile', 'sinkinit'], () => {
         const r = volatiles();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
@@ -1456,7 +1468,7 @@ export function enumerateCandidates(
     // pairing. ADDITIVE, like every variation here: `/livebase-block`, `/regionbase`, `/scopebase`
     // and the un-hoisted default all stay in the list, which is what keeps `synthetic:dmaflat` — where the
     // composed spelling scores 13 against its own 0 — at MATCH.
-    for (const [i, { suffix, gates, placement }] of paired.entries()) {
+    for (const [i, { variations, gates, placement }] of paired.entries()) {
       const bound = census(gates);
       // The ROSTER's dedup, which `hoist` applies to every other composition and this loop has to
       // ask for itself: every pairing piped from a shadowed hoist is that hoist's source under
@@ -1470,7 +1482,7 @@ export function enumerateCandidates(
       // rules read the key count and nothing else, so inside the pipe they would cost that whole
       // pipe to report a fact this loop already holds.
       for (const key of homeSplitWithholds(bound)) {
-        const splitSuffix = [...suffix, withSubject('homesplit', homeSplitTag(key))];
+        const homesplitVariations = [...variations, withSubject('homesplit', homeSplitTag(key))];
         const homesplit = (): SFn | null => {
           const p = splitHomeBases(sfn, {
             gates,
@@ -1484,9 +1496,9 @@ export function enumerateCandidates(
           const r = homesplit();
           return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
         };
-        respell(splitSuffix, homesplit);
-        respell([...splitSuffix, 'volatile'], homesplitVolatile);
-        respell([...splitSuffix, 'volatile', 'vol-store'], () => {
+        respell(homesplitVariations, homesplit);
+        respell([...homesplitVariations, 'volatile'], homesplitVolatile);
+        respell([...homesplitVariations, 'volatile', 'vol-store'], () => {
           const v = homesplitVolatile();
           return v ? volStore(v) : null;
         });
@@ -1596,11 +1608,11 @@ export function enumerateCandidates(
     // neither variation alone (a neighbor-cell object and a multi-index MMIO block in one
     // function — each variation's constants are invisible to the other's model); the plain
     // sibling rides for symmetry with /livebase/indexed.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respell([...suffix, 'nearbase'], () => near(hoist()));
-      respell([...suffix, 'volatile', 'nearbase'], () => near(volatiles()));
-      respell([...suffix, 'nearbase', 'sinkinit'], () => nearSunk(hoist()));
-      respell([...suffix, 'volatile', 'nearbase', 'sinkinit'], () => nearSunk(volatiles()));
+    for (const { variations, hoist, volatiles } of paired) {
+      respell([...variations, 'nearbase'], () => near(hoist()));
+      respell([...variations, 'volatile', 'nearbase'], () => near(volatiles()));
+      respell([...variations, 'nearbase', 'sinkinit'], () => nearSunk(hoist()));
+      respell([...variations, 'volatile', 'nearbase', 'sinkinit'], () => nearSunk(volatiles()));
     }
     // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
     // row-demanded one, the joint spelling reachable from neither variation alone (an MMIO base
@@ -1609,9 +1621,9 @@ export function enumerateCandidates(
     // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
     // span-model merges already ride the plain /coalesce variation — pairing them too would
     // multiply candidates with no row behind it.
-    for (const { suffix, hoist, volatiles } of paired) {
-      respellEach(suffix, 'coalesce', hoist, armDisjointCandidates);
-      respellEach([...suffix, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
+    for (const { variations, hoist, volatiles } of paired) {
+      respellEach(variations, 'coalesce', hoist, armDisjointCandidates);
+      respellEach([...variations, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
     }
     // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
@@ -1629,7 +1641,7 @@ export function enumerateCandidates(
     //
     // NAMED BY THE TAIL THE RESULT CARRIES, NEVER BY ITS INDEX. The reuse tail exists only
     // where R1 fired, so the list is 1, 2 or 3 long and the fresh tail sits at no fixed position;
-    // an index-keyed suffix table names the fresh spelling `/regcopy-ret` on every R1-less function
+    // an index-keyed table names the fresh spelling `/regcopy-ret` on every R1-less function
     // — the dead-var-reuse name on the one spelling that has no dead var — and `winnerVariations` is
     // what every census in this repo counts, `bench diff` included. The exhaustive record is the
     // pin: a new tail kind is a type error here rather than a silent `/regcopy-3`.
@@ -1658,12 +1670,12 @@ export function enumerateCandidates(
   const rawDerivesRank = [...sharedLiftShapes].some(
     ([n, i]) => byName?.get(n) === undefined && (arrayInnerExtents(i)?.length ?? 0) > 0,
   );
-  const symbolSettings: { suffix: readonly Variation[]; symbols?: typeof opts.symbols }[] = opts.symbols
+  const symbolSettings: { variations: readonly Variation[]; symbols?: typeof opts.symbols }[] = opts.symbols
     ? [
-        { suffix: [], symbols: opts.symbols },
-        { suffix: ['raw-globals'], symbols: undefined },
+        { variations: [], symbols: opts.symbols },
+        { variations: ['raw-globals'], symbols: undefined },
       ]
-    : [{ suffix: [] }];
+    : [{ variations: [] }];
   for (const [symbolIndex, symbolSetting] of symbolSettings.entries()) {
     const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
     // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
@@ -1755,20 +1767,20 @@ export function enumerateCandidates(
       // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
       // `/setup-args` rather than nested under it — dropping a call argument and choosing this
       // shape are independent, and the four combinations dedup down to whatever the trees differ on.
-      const connectiveSettings: { suffix: readonly Variation[]; connective: boolean }[] = treeOwnedFold
+      const connectiveSettings: { variations: readonly Variation[]; connective: boolean }[] = treeOwnedFold
         ? [
-            { suffix: [], connective: false },
-            { suffix: ['connective'], connective: true },
+            { variations: [], connective: false },
+            { variations: ['connective'], connective: true },
           ]
-        : [{ suffix: [], connective: false }];
-      const narrowSettings: { suffix: readonly Variation[]; narrow: boolean }[] = hasSetupArgsNarrowing(base)
+        : [{ variations: [], connective: false }];
+      const narrowSettings: { variations: readonly Variation[]; narrow: boolean }[] = hasSetupArgsNarrowing(base)
         ? [
-            { suffix: [], narrow: false },
-            { suffix: ['setup-args'], narrow: true },
+            { variations: [], narrow: false },
+            { variations: ['setup-args'], narrow: true },
           ]
-        : [{ suffix: [], narrow: false }];
+        : [{ variations: [], narrow: false }];
       const liftSettings = narrowSettings.flatMap((l) =>
-        connectiveSettings.map((c) => ({ ...l, ...c, suffix: [...l.suffix, ...c.suffix] })),
+        connectiveSettings.map((c) => ({ ...l, ...c, variations: [...l.variations, ...c.variations] })),
       );
       for (const liftSetting of liftSettings) {
         let fn: Fn;
@@ -1778,7 +1790,7 @@ export function enumerateCandidates(
           // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth lift variation sharing the default's already-mutated `base`.
           fn =
-            liftSetting.suffix.length === 0
+            liftSetting.variations.length === 0
               ? base
               : frontend.lift(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
@@ -1835,15 +1847,15 @@ export function enumerateCandidates(
             { shortCircuit: { foldTreeOwned: liftSetting.connective } },
           );
         } catch (e) {
-          // THE DEFAULT IS THE EMPTY SUFFIX, by construction: every lift variation appends a non-empty
-          // one, so `suffix.length === 0` is the only spelling of "no lift variation is on" that stays correct
+          // THE DEFAULT CARRIES NO VARIATION, by construction: every lift variation appends one, so
+          // `variations.length === 0` is the only spelling of "no lift variation is on" that stays correct
           // when a fourth is added — the same reason the structure half below reads its table
           // instead of naming its flags.
-          if (liftSetting.suffix.length === 0) {
+          if (liftSetting.variations.length === 0) {
             throw e; // the default lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped variation, never an aborted enumeration — the same posture as `respell`.
-          reportThrow(liftSetting.suffix, e);
+          reportThrow(liftSetting.variations, e);
           continue;
         }
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -1899,7 +1911,7 @@ export function enumerateCandidates(
                 verify(fn);
               }
             } catch (e) {
-              reportThrow([...liftSetting.suffix, 'shared-tail'], e);
+              reportThrow([...liftSetting.variations, 'shared-tail'], e);
               break;
             }
             // Unsunk, this fn is the `/shared-ret` pass's again.
@@ -1909,12 +1921,12 @@ export function enumerateCandidates(
           }
           const alternative = pass !== 'default';
           const dropped = alternative ? new Set(droppedDefault) : droppedDefault;
-          const vsuffix: readonly Variation[] =
+          const liftVariations: readonly Variation[] =
             pass === 'follow'
-              ? [...liftSetting.suffix, 'shared-ret']
+              ? [...liftSetting.variations, 'shared-ret']
               : pass === 'sink'
-                ? [...liftSetting.suffix, 'shared-tail']
-                : liftSetting.suffix;
+                ? [...liftSetting.variations, 'shared-tail']
+                : liftSetting.variations;
           // the per-lift gates, on THIS lift's fn — see the table doc
           const offForThisLift = STRUCTURE_VARIATIONS.filter(
             (variation) => variation.perLiftGate !== undefined && !variation.perLiftGate(fn),
@@ -1934,7 +1946,7 @@ export function enumerateCandidates(
           // structurer a shape it can accept where the default declined — sound, but the same
           // trade one level up again.
           for (const s of settingsForLift) {
-            const key = s.suffix.join('/');
+            const key = s.variations.join('/');
             if (alternative && droppedDefault.has(key)) {
               continue;
             }
@@ -1943,7 +1955,7 @@ export function enumerateCandidates(
                 (variation) =>
                   variation.strip &&
                   s[variation.flag] &&
-                  dropped.has(s.suffix.filter((v) => v !== variation.name).join('/')),
+                  dropped.has(s.variations.filter((v) => v !== variation.name).join('/')),
               )
             ) {
               // A SKIPPED setting is recorded exactly like a dropped one, or the closure would not be
@@ -1976,7 +1988,7 @@ export function enumerateCandidates(
                 ...(alternative ? { followEarlyReturns: true } : {}),
               });
             } catch (e) {
-              if (vsuffix.length === 0 && isDefaultSetting(s)) {
+              if (liftVariations.length === 0 && isDefaultSetting(s)) {
                 throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
               }
               // Recorded for EVERY dropped setting: a candidate with more variations on looks its siblings
@@ -1984,7 +1996,7 @@ export function enumerateCandidates(
               dropped.add(key);
               // an anchored setting that fails structuring or its contracts is a dropped variation, never
               // an aborted enumeration — same rule as respell below
-              reportThrow([...vsuffix, ...s.suffix], e);
+              reportThrow([...liftVariations, ...s.variations], e);
               continue;
             }
             // A TREE another structure setting already produced. `respellTree` reads the tree and this
@@ -2061,7 +2073,7 @@ export function enumerateCandidates(
                 // variation's whole half of the fan was deleted.
                 const respelled = respellTree(made, [pf.name]).sources;
                 for (const sp of respelled) {
-                  sources.push({ ...sp, suffix: [pf.name, ...sp.suffix] });
+                  sources.push({ ...sp, variations: [pf.name, ...sp.variations] });
                 }
               } catch (e) {
                 reportThrow([pf.name], e);
@@ -2113,8 +2125,15 @@ export function enumerateCandidates(
                 }
                 continue;
               }
+              const variations: readonly Variation[] = [
+                cand.variation,
+                ...liftVariations,
+                ...s.variations,
+                ...sp.variations,
+                ...symbolSetting.variations,
+              ];
               const made: Candidate = {
-                variations: [cand.variation, ...vsuffix, ...s.suffix, ...sp.suffix, ...symbolSetting.suffix],
+                variations,
                 source,
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
