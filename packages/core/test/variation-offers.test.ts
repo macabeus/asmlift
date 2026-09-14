@@ -2,15 +2,23 @@
 //
 // A definition names the admission tables that refuse a candidate, or, where no table decides, one
 // sentence and the export that does. What these tests prove, and no more: a table key is the export
-// of that name in the file the definition is implemented in; a pointer names an export that exists
-// and that enumeration's code (comments aside) names; a function that consults a table cannot be
-// pointed at with the table left out. They do not prove that the pointed export is the whole decision.
+// of that name in the file the definition is implemented in, and a hoist's table is the one its
+// variation's roster entry runs; a pointer names an export that exists and that enumeration's code
+// (comments aside) names; a function that consults a table cannot be pointed at with the table left
+// out. They do not prove that the pointed export is the whole decision.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 
-import { STACKED_VARIATIONS, STRUCTURE_VARIATIONS } from '../src/rank-variations';
+import {
+  BASEFOLD_HOISTS,
+  LIVEBASE_HOISTS,
+  ORDERBASE_HOISTS,
+  STACKED_VARIATIONS,
+  STRUCTURE_VARIATIONS,
+  UNFOLDED_HOISTS,
+} from '../src/rank-variations';
 import { type CodePointer, type OfferedWhen, VARIATION_DEFINITIONS } from '../src/variation-definitions';
 import { type GateTableName, VARIATION_GATE_TABLES, readerRules } from '../src/variation-gates';
 
@@ -23,6 +31,9 @@ const withoutComments = (file: string): string =>
     .printFile(ts.createSourceFile(file, readFileSync(join(REPO_ROOT, file), 'utf8'), ts.ScriptTarget.Latest));
 /** Enumeration's code with its comments removed: a name only a comment mentions is not reached. */
 const ENUMERATION = ['packages/core/src/rank.ts', RANK_VARIATIONS].map(withoutComments).join('\n');
+const HOISTS = [...LIVEBASE_HOISTS, ...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS, ...ORDERBASE_HOISTS];
+const tableName = (table: unknown): GateTableName | undefined =>
+  (Object.keys(VARIATION_GATE_TABLES) as GateTableName[]).find((k) => VARIATION_GATE_TABLES[k] === table);
 /** An exported admission table's name, as `gate-contract.test.ts` registers them. */
 const TABLE_NAME = /\b[A-Z][A-Z0-9_]*(?:_GATES|_ELIGIBILITY)\b/g;
 
@@ -80,6 +91,24 @@ describe('every gate reference resolves', () => {
   // the span `nearbase` computes with, which its entry gates as well.
   test('enumeration reads no compiler behavior directly but the span it computes with', () => {
     expect([...new Set(ENUMERATION.match(/\bcompilerBehaviors\.\w+/g))]).toEqual(['compilerBehaviors.nearBaseSpan']);
+  });
+
+  test("a hoist's table is among its variation's tables, and a hoist table is named only by its variation", () => {
+    const bad = HOISTS.flatMap((h) => {
+      const t = tableName(h.gates);
+      return t !== undefined && gatesOf(VARIATION_DEFINITIONS[h.variations[0]].offeredWhen).includes(t)
+        ? []
+        : [`${h.variations.join('/')} runs ${t ?? 'an unregistered table'}`];
+    });
+    const hoistTables = new Set(HOISTS.map((h) => tableName(h.gates)));
+    for (const [n, d] of entries) {
+      for (const g of gatesOf(d.offeredWhen)) {
+        if (hoistTables.has(g) && !HOISTS.some((h) => h.variations[0] === n && h.gates === VARIATION_GATE_TABLES[g])) {
+          bad.push(`${n} names ${g}, which no hoist of its own runs`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
   });
 
   test('an export that consults a table cannot be pointed at with that table left out', async () => {

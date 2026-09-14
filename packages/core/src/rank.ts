@@ -86,7 +86,14 @@ import {
   sameBases,
 } from './rank-variations';
 import { hasDivergentSharedRet } from './structure/structure';
-import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
+import {
+  type SymbolInfo,
+  type SymbolMap,
+  arrayInnerExtents,
+  declaresBitfields,
+  isPtrField,
+  symbolsByName,
+} from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 import { type SubjectVariationName, type Variation, offeredOn, withSubject } from './variation-tokens';
 
@@ -502,17 +509,13 @@ export function enumerateCandidates(
   // differ referees. Enumerated only when the map carries any bitfield member at all (checked
   // below), so the 2× cross is paid exactly by the functions it can help; the dedup collapses
   // every candidate where no fold fired.
-  const mapHasBitfields =
-    opts.symbols !== undefined &&
-    [...opts.symbols.values()].some((infos) =>
-      infos.some((i) => [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some((f) => f.bitWidth !== undefined)),
-    );
-  const bitfieldSettings = mapHasBitfields
-    ? [
-        ...baseSense,
-        ...baseSense.map((s): typeof s => ({ ...s, variations: [...s.variations, 'no-bitfield'], bitfields: false })),
-      ]
-    : baseSense;
+  const bitfieldSettings =
+    opts.symbols !== undefined && declaresBitfields(opts.symbols)
+      ? [
+          ...baseSense,
+          ...baseSense.map((s): typeof s => ({ ...s, variations: [...s.variations, 'no-bitfield'], bitfields: false })),
+        ]
+      : baseSense;
   // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
   // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
   // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report

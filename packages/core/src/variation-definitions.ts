@@ -281,6 +281,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       when: 'The short-circuit fold refused a chain only because it reads as a comparison tree.',
       decidedBy: { symbol: 'runPreRecovery', file: 'packages/core/src/raise/pre-recovery.ts' },
+      gates: ['ARM_REREAD_GATES'],
     },
     example: {
       compiler: 'agbcc',
@@ -458,7 +459,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'the assembly loaded, only the shift spelling reproduces the load.',
     offeredWhen: {
       when: 'The symbol map declares a bitfield member, and only on the candidates that use the map.',
-      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+      decidedBy: { symbol: 'declaresBitfields', file: SYMBOLS },
     },
     example: {
       compiler: 'agbcc',
@@ -574,6 +575,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     offeredWhen: {
       when: 'Some merge is fed by two or more edges.',
       decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+      gates: ['NAME_COALESCE_GATES'],
     },
     example: {
       compiler: 'agbcc',

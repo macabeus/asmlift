@@ -28,6 +28,8 @@ import {
 import { UNREDUCE_GATES } from './l3/unreduce';
 import { VOL_SLOT_GATES } from './l3/volatileval';
 import { VOL_STORE_GATES } from './l3/volstore';
+import { ARM_REREAD_GATES } from './raise/shortcircuit';
+import { NAME_COALESCE_GATES } from './structure/namecoalesce';
 import { FRESH_MERGE_GATES } from './structure/structure';
 
 /** One rule as a reader sees it: what it refuses and whether removing it would make a candidate wrong. */
@@ -41,6 +43,7 @@ export const VARIATION_GATE_TABLES = {
   ADVANCE_HEAD_GATES,
   ADVANCE_MEMBER_GATES,
   ARM_DISJOINT_GATES,
+  ARM_REREAD_GATES,
   BASEFOLD_GATES,
   COALESCE_GATES,
   COUNTDOWN_GATES,
@@ -50,6 +53,7 @@ export const VARIATION_GATE_TABLES = {
   INLINEBASE_GATES,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  NAME_COALESCE_GATES,
   OFFMEMBER_GATES,
   ORDERBASE_GATES,
   PTR_FIELD_GATES,
