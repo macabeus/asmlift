@@ -55,21 +55,19 @@ export function WinningSpelling({
   const fan = fn.asmlift.fanSize;
 
   // A row that never reached the ranking (declined, failed) has neither a winner nor a fan.
-  if (spelling.length === 0 && lost === null) {
+  if (!fn.asmlift.fanVariations || fan === undefined) {
     return null;
   }
-  const lostCount = lost?.reduce((n, g) => n + g.items.length, 0) ?? 0;
+  const lostCount = lost.reduce((n, g) => n + g.items.length, 0);
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 sm:p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold text-slate-100">The winning spelling</h3>
-        {fan !== undefined && (
-          <span className="text-xs text-slate-500">
-            chosen from <span className="font-mono text-slate-300">{fan.toLocaleString()}</span> candidate
-            {fan === 1 ? '' : 's'}
-          </span>
-        )}
+        <span className="text-xs text-slate-500">
+          chosen from <span className="font-mono text-slate-300">{fan.toLocaleString()}</span> candidate
+          {fan === 1 ? '' : 's'}
+        </span>
       </div>
 
       {spelling.length > 0 ? (
@@ -100,7 +98,7 @@ export function WinningSpelling({
                           {' — '}
                           <InlineCode text={def.summary} />
                         </span>
-                        {p.tally && fan !== undefined && (
+                        {p.tally && (
                           <span
                             className="shrink-0 font-mono text-[11px] text-slate-500"
                             title={`${tallyText(p.tally)} of the ${fan.toLocaleString()} in this row's fan carried it`}
@@ -124,11 +122,7 @@ export function WinningSpelling({
 
       <div className="mt-4 border-t border-slate-700/70 pt-3">
         <h3 className="text-sm font-semibold text-slate-100">Considered and lost</h3>
-        {lost === null ? (
-          <p className="mt-1 text-xs text-slate-500">
-            Which variations the rest of the fan carried is not recorded in this artifact.
-          </p>
-        ) : lostCount === 0 ? (
+        {lostCount === 0 ? (
           <p className="mt-1 text-xs text-slate-500">Every variation the fan carried is in the winning spelling.</p>
         ) : (
           <>

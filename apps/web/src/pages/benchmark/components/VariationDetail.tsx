@@ -13,7 +13,7 @@ import { CodeBlock } from '../../../shared/components/CodeBlock';
 import { Pill } from '../../../shared/components/Pill';
 import { useOverlay } from '../../../shared/utils/overlay';
 import { rowHref, variationHref } from '../lib/explorer-url';
-import { fanCoverage, pricePerWin, rowsFor, variationStats, winRate } from '../lib/fan';
+import { pricePerWin, rowsFor, variationStats, winRate } from '../lib/fan';
 import { TOOLCHAIN_LABEL, VARIATION_KIND_COLOR } from '../theme';
 import { OutcomeBadge } from './ui/Badge';
 import { InlineCode } from './ui/InlineCode';
@@ -101,7 +101,6 @@ export function VariationDetailBody({
   const kind = variationToken(name).variationKind;
   const stats = useMemo(() => variationStats(rows).get(name)!, [rows, name]);
   const touched = useMemo(() => rowsFor(rows, name), [rows, name]);
-  const recorded = useMemo(() => fanCoverage(rows).rows > 0, [rows]);
   const rate = winRate(stats);
   const price = pricePerWin(stats);
 
@@ -195,10 +194,10 @@ export function VariationDetailBody({
           <Caption>In this benchmark</Caption>
           <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
             <Figure label="winners" value={stats.winners} />
-            <Figure label="rows whose fan carried it" value={recorded ? stats.rows : null} />
+            <Figure label="rows whose fan carried it" value={stats.rows} />
             <Figure
               label="candidates carried"
-              value={recorded ? stats.candidates : null}
+              value={stats.candidates}
               hint={
                 stats.dropped || stats.withheld
                   ? `${stats.dropped.toLocaleString()} dropped · ${stats.withheld.toLocaleString()} withheld`
@@ -248,7 +247,7 @@ function Figure({ label, value, hint }: { label: string; value: number | string 
   return (
     <div>
       <dt className="text-[11px] text-slate-500">{label}</dt>
-      <dd className="font-mono text-base text-white" title={value === null ? 'not recorded in this artifact' : hint}>
+      <dd className="font-mono text-base text-white" title={value === null ? 'no fan carried it' : hint}>
         {value === null ? '—' : typeof value === 'number' ? value.toLocaleString() : value}
       </dd>
       {hint && <dd className="text-[11px] text-slate-500">{hint}</dd>}
@@ -256,7 +255,7 @@ function Figure({ label, value, hint }: { label: string; value: number | string 
   );
 }
 
-/** Every row the variation touched: its fan carried it, or its winner carries it. Winners first. */
+/** Every row whose fan carried the variation. Winners first. */
 function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<typeof rowsFor>; hash: string }) {
   const won = rows.filter((r) => r.won).length;
   return (
@@ -309,12 +308,12 @@ function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<
                   <td
                     className="px-3 py-1.5 text-right font-mono text-xs text-slate-300"
                     title={
-                      tally && (tally.dropped || tally.withheld)
+                      tally.dropped || tally.withheld
                         ? `${tally.dropped ?? 0} dropped · ${tally.withheld ?? 0} withheld`
                         : undefined
                     }
                   >
-                    {tally ? tally.candidates.toLocaleString() : ''}
+                    {tally.candidates.toLocaleString()}
                   </td>
                   {/* THIS variation lit inside the winner's variations: the column answers where it
                       sits in the spelling that won, or shows it absent from it. */}

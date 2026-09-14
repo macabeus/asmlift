@@ -1,5 +1,5 @@
 // The Fan Explorer tab and its variation drawer as they actually render, over the committed artifact
-// and over the fixture that carries `fanVariations`. apps/web has no DOM, so this is
+// and over `FAN_SAMPLE`, ranked rows that carry `fanVariations`. apps/web has no DOM, so this is
 // `renderToStaticMarkup`: enough to hold that every entry is on the page with its definition, that
 // every link resolves, and that every cost view carries its sentence.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
@@ -12,12 +12,15 @@ import { describe, expect, test } from 'vitest';
 
 import { FanExplorer } from '../src/pages/benchmark/components/FanExplorer';
 import { VariationDetailBody } from '../src/pages/benchmark/components/VariationDetail';
-import { fanCoverage, rowsFor } from '../src/pages/benchmark/lib/fan';
+import { rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
+import { FAN_SAMPLE } from './fan-sample';
 
-const load = (path: string) => (JSON.parse(readFileSync(path, 'utf8')) as { results: FunctionResult[] }).results;
-const fixture = load(join(import.meta.dirname, 'fixtures/fan-rows.json'));
-const artifact = load(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'));
+const artifact = (
+  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+    results: FunctionResult[];
+  }
+).results;
 
 const HASH = '#view=benchmark&tab=fan';
 const NOT_WASTE = 'A losing candidate is not waste.';
@@ -33,7 +36,7 @@ const count = (html: string, s: string) => html.split(s).length - 1;
 
 describe.each([
   ['the committed artifact', artifact],
-  ['the fixture', fixture],
+  ['the sample', FAN_SAMPLE],
 ])('the tab over %s', (_, rows) => {
   const html = renderToStaticMarkup(<FanExplorer rows={rows} hash={HASH} onOpenVariation={noop} />);
 
@@ -62,13 +65,8 @@ describe.each([
     expect(links.every((p) => p.get('tab') === 'fan')).toBe(true);
   });
 
-  test('every cost view carries the sentence, and without a recorded fan there is no cost view', () => {
-    if (fanCoverage(rows).rows > 0) {
-      expect(count(html, NOT_WASTE)).toBe(2);
-    } else {
-      expect(count(html, NOT_WASTE)).toBe(0);
-      expect(html).toContain('No row in this artifact records the variations its fan carried');
-    }
+  test('every cost view carries the sentence', () => {
+    expect(count(html, NOT_WASTE)).toBe(2);
   });
 
   test('a toolchain count, never a project count', () => {
@@ -80,7 +78,7 @@ describe.each([
 describe('the variation drawer', () => {
   test.each([
     ['the committed artifact', artifact],
-    ['the fixture', fixture],
+    ['the sample', FAN_SAMPLE],
   ])('renders every registered variation over %s, and every row link opens its row', (_, rows) => {
     for (const { name } of VARIATION_TOKENS) {
       const html = renderToStaticMarkup(
@@ -95,6 +93,9 @@ describe('the variation drawer', () => {
         .map(hashToSearchParams)
         .filter((p) => p.has('fn'));
       expect(rowLinks.length, name).toBe(rowsFor(rows, name).length);
+      // the caption counts the rows the table lists, from the population the figures count
+      const s = variationStats(rows).get(name)!;
+      expect(html, name).toContain(`Rows — ${s.winners} won with it, ${s.rows - s.winners} considered it and lost`);
       for (const p of rowLinks) {
         expect(p.get('tab')).toBe('explorer');
         expect(p.get('view')).toBe('benchmark');
@@ -103,21 +104,24 @@ describe('the variation drawer', () => {
     }
   });
 
-  test("the Winner's variations column lights the drawer's variation, subject and all", () => {
-    const html = renderToStaticMarkup(
-      <VariationDetailBody name="volatile" rows={fixture} hash={HASH} onClose={noop} onOpenVariation={noop} />,
-    );
-    expect(html).toContain('Winner&#x27;s variations');
-    const lit = [...html.matchAll(/<span class="font-semibold text-teal-300">([^<]*)<\/span>/g)].map((m) => m[1]);
-    const expected = rowsFor(fixture, 'volatile').flatMap((r) => r.winner.filter((p) => p.lit).map((p) => p.part));
-    expect(lit).toEqual(expected);
-    expect(lit.length).toBeGreaterThan(0);
-  });
+  test.each(['volatile', 'coalesce'] as const)(
+    "the Winner's variations column lights the drawer's variation, subject and all: %s",
+    (name) => {
+      const html = renderToStaticMarkup(
+        <VariationDetailBody name={name} rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
+      );
+      expect(html).toContain('Winner&#x27;s variations');
+      const lit = [...html.matchAll(/<span class="font-semibold text-teal-300">([^<]*)<\/span>/g)].map((m) => m[1]);
+      const expected = rowsFor(FAN_SAMPLE, name).flatMap((r) => r.winner.filter((p) => p.lit).map((p) => p.part));
+      expect(lit).toEqual(expected);
+      expect(lit.length).toBeGreaterThan(0);
+    },
+  );
 
   test('a subject-taking variation explains its subject; one that takes none does not', () => {
     const render = (name: 'coalesce' | 'unmerge') =>
       renderToStaticMarkup(
-        <VariationDetailBody name={name} rows={fixture} hash={HASH} onClose={noop} onOpenVariation={noop} />,
+        <VariationDetailBody name={name} rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
       );
     expect(render('coalesce')).toContain('Its subject');
     expect(render('unmerge')).not.toContain('Its subject');
@@ -128,7 +132,7 @@ describe('the variation drawer', () => {
     const html = renderToStaticMarkup(
       <VariationDetailBody
         name="unsigned"
-        rows={fixture}
+        rows={FAN_SAMPLE}
         hash="#tab=explorer&fn=sa3:sub_803213C:agbcc&variation=unsigned"
         onClose={noop}
         onOpenVariation={noop}

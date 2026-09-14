@@ -9,6 +9,11 @@
 //     cost, and the denominator a win rate needs.
 // A variation the fan carried and the winner does not is one the row considered and lost.
 //
+// ONE POPULATION: the rows whose fan was counted. A win is counted only on a row whose fan carried
+// the variation, so a win rate cannot pass one and a price per win never divides one set of rows'
+// cost by another set's wins. The producer writes `fanVariations` on every row it ranks, and a
+// winner's names are always keys of it (`apps/benchmark/test/fan-price.test.ts`).
+//
 // A TALLY, NEVER A FACTORISATION. Enumeration gates prune the fan, so per-variation counts do not
 // multiply to a fan's size, and nothing here tries to.
 import type { FunctionResult } from '@asmlift/bench-schema';
@@ -25,16 +30,16 @@ import {
 export interface VariationStats {
   name: VariationName;
   kind: VariationKind;
-  /** rows whose winner carries the variation */
-  winners: number;
-  /** rows whose fan carried it */
+  /** rows whose fan carried the variation */
   rows: number;
+  /** those rows whose winner carries it */
+  winners: number;
   /** candidates carrying it, summed over those rows — dropped and withheld included */
   candidates: number;
   /** the refused part of `candidates` */
   dropped: number;
   withheld: number;
-  /** distinct toolchains among the rows that carried it or won with it */
+  /** distinct toolchains among those rows */
   toolchains: number;
 }
 
@@ -63,14 +68,14 @@ export function variationStats(rows: readonly FunctionResult[]): Map<VariationNa
     ]),
   );
   for (const row of rows) {
-    for (const name of winnerNames(row)) {
-      const e = acc.get(name)!;
-      e.winners++;
-      e.toolchainSet.add(row.toolchain);
-    }
+    const won = winnerNames(row);
     for (const [key, tally] of Object.entries(row.asmlift.fanVariations ?? {})) {
-      const e = acc.get(parseVariation(key).name)!;
+      const name = parseVariation(key).name;
+      const e = acc.get(name)!;
       e.rows++;
+      if (won.has(name)) {
+        e.winners++;
+      }
       e.candidates += tally.candidates;
       e.dropped += tally.dropped ?? 0;
       e.withheld += tally.withheld ?? 0;
@@ -80,13 +85,14 @@ export function variationStats(rows: readonly FunctionResult[]): Map<VariationNa
   return new Map([...acc].map(([name, { toolchainSet, ...e }]) => [name, { ...e, toolchains: toolchainSet.size }]));
 }
 
-/** Winners per row whose fan carried the variation; null when no fan carried it. */
+/** The share of the rows whose fan carried the variation that won with it; null when no fan
+ *  carried it. */
 export function winRate(s: VariationStats): number | null {
   return s.rows === 0 ? null : s.winners / s.rows;
 }
 
-/** Candidates carried per win; null when it never won — which is not infinity, and is never drawn
- *  as one. */
+/** Candidates carried per win; null when it never won (no fan carrying it included) — which is not
+ *  infinity, and is never drawn as one. */
 export function pricePerWin(s: VariationStats): number | null {
   return s.winners === 0 ? null : s.candidates / s.winners;
 }
@@ -125,7 +131,7 @@ export function priced(stats: Map<VariationName, VariationStats>): VariationStat
     });
 }
 
-/** What the cost views stand on: the rows that recorded their fan, and the candidates in those fans. */
+/** What the cost views stand on: the rows whose fan was counted, and the candidates in those fans. */
 export function fanCoverage(rows: readonly FunctionResult[]): { rows: number; candidates: number } {
   let n = 0;
   let candidates = 0;
@@ -188,7 +194,6 @@ export interface SpellingPart {
   part: string;
   name: VariationName;
   subject?: string;
-  /** absent when the artifact did not record the row's fan */
   tally?: VariationTally;
 }
 
@@ -210,15 +215,10 @@ export interface LostVariation {
 
 /** What the row considered and lost: every variation its fan carried that the winner does not,
  *  grouped by kind, most candidates first. On a row with no winner that is every variation the fan
- *  carried. Null when the artifact did not record the row's fan, which is not the same as nothing
- *  lost. */
-export function consideredButLost(row: FunctionResult): KindGroup<LostVariation>[] | null {
-  const roster = row.asmlift.fanVariations;
-  if (!roster) {
-    return null;
-  }
+ *  carried. */
+export function consideredButLost(row: FunctionResult): KindGroup<LostVariation>[] {
   const won = winnerNames(row);
-  const lost = Object.entries(roster)
+  const lost = Object.entries(row.asmlift.fanVariations ?? {})
     .map(([key, tally]) => ({ name: parseVariation(key).name, tally }))
     .filter((v) => !won.has(v.name))
     .sort((a, b) => b.tally.candidates - a.tally.candidates || (a.name < b.name ? -1 : 1));
@@ -236,31 +236,29 @@ export interface VariationRow {
   row: FunctionResult;
   /** the winner carries the variation */
   won: boolean;
-  /** this row's fan tally for the variation; absent when its fan did not carry it */
-  tally?: { candidates: number; dropped?: number; withheld?: number };
+  /** this row's fan tally for the variation */
+  tally: VariationTally;
   /** the winner's variations, in order, the looked-at one lit; empty when there is no winner */
   winner: WinnerPart[];
 }
 
-/** The rows a variation touched — its fan carried it, or its winner does — winners first, then by
- *  how many of the fan's candidates carried it. */
+/** The rows whose fan carried a variation — the population `variationStats` counts — winners first,
+ *  then by how many of the fan's candidates carried it. */
 export function rowsFor(rows: readonly FunctionResult[], name: VariationName): VariationRow[] {
   const out: VariationRow[] = [];
   for (const row of rows) {
+    const tally = row.asmlift.fanVariations?.[name];
+    if (!tally) {
+      continue;
+    }
     const winner = (row.asmlift.winnerVariations ?? []).map((part) => {
       const n = parseVariation(part).name;
       return { part, name: n, lit: n === name };
     });
-    const won = winner.some((p) => p.lit);
-    const tally = row.asmlift.fanVariations?.[name];
-    if (won || tally) {
-      out.push({ row, won, tally, winner });
-    }
+    out.push({ row, won: winner.some((p) => p.lit), tally, winner });
   }
   return out.sort(
     (a, b) =>
-      Number(b.won) - Number(a.won) ||
-      (b.tally?.candidates ?? 0) - (a.tally?.candidates ?? 0) ||
-      a.row.id.localeCompare(b.row.id),
+      Number(b.won) - Number(a.won) || b.tally.candidates - a.tally.candidates || a.row.id.localeCompare(b.row.id),
   );
 }

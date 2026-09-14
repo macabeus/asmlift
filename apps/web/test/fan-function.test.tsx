@@ -1,7 +1,6 @@
 // The Function Explorer's side of the fan: the sparse fan column, and the function detail's winning
-// spelling with what the row considered and lost. Two samples, as the tab's tests: the fixture (real
-// producer output carrying `fanVariations`, one noncompile row) and the committed artifact the page
-// renders. apps/web has no DOM, so components render through `renderToStaticMarkup`, and the
+// spelling with what the row considered and lost. Two samples, as the tab's tests: `FAN_SAMPLE` (ranked
+// rows carrying `fanVariations`, one noncompile row) and the committed artifact the page renders. apps/web has no DOM, so components render through `renderToStaticMarkup`, and the
 // Explorer's URL state through nuqs's testing adapter.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
@@ -26,15 +25,18 @@ import {
   winningSpelling,
 } from '../src/pages/benchmark/lib/fan';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
+import { FAN_SAMPLE } from './fan-sample';
 
 // The feature picker reads the live fragment through `useSyncExternalStore` over `window`, which a
 // server render has no snapshot for. The table under test does not depend on it. (`vi.mock` is
 // hoisted above the imports.)
 vi.mock('../src/shared/utils/hash-adapter', () => ({ useCurrentHash: () => '' }));
 
-const load = (path: string) => (JSON.parse(readFileSync(path, 'utf8')) as { results: FunctionResult[] }).results;
-const fixture = load(join(import.meta.dirname, 'fixtures/fan-rows.json'));
-const artifact = load(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'));
+const artifact = (
+  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+    results: FunctionResult[];
+  }
+).results;
 
 const NOT_WASTE = 'A losing candidate is not waste.';
 const noop = () => {};
@@ -42,7 +44,7 @@ const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) =>
 const kindIndex = (name: string) => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
 
 describe.each([
-  ['the fixture', fixture],
+  ['the sample', FAN_SAMPLE],
   ['the committed artifact', artifact],
 ])('the winning spelling and what was lost, over %s', (_, rows) => {
   test("the winning spelling is the winner's variations, every part once, grouped by kind in kind order", () => {
@@ -70,29 +72,25 @@ describe.each([
     }
   });
 
-  test('considered and lost is the fan roster minus the winner, and null only where no roster was recorded', () => {
+  test("considered and lost is the fan's variations minus the winner's", () => {
     for (const row of rows) {
       const lost = consideredButLost(row);
-      const roster = row.asmlift.fanVariations;
-      if (!roster) {
-        expect(lost, row.id).toBeNull();
-        continue;
-      }
+      const roster = row.asmlift.fanVariations ?? {};
       const won = winnerNames(row);
-      const names = lost!.flatMap((g) => g.items.map((v) => v.name));
+      const names = lost.flatMap((g) => g.items.map((v) => v.name));
       expect([...names].sort(), row.id).toEqual(
         Object.keys(roster)
           .filter((k) => !won.has(parseVariation(k).name))
           .sort(),
       );
-      for (const g of lost!) {
+      for (const g of lost) {
         for (const v of g.items) {
           expect(v.tally, `${row.id} ${v.name}`).toEqual(roster[v.name]);
           expect(variationToken(v.name).variationKind).toBe(g.kind);
         }
       }
-      expect(lost!.map((g) => kindIndex(g.items[0].name))).toEqual(
-        lost!.map((g) => kindIndex(g.items[0].name)).sort((a, b) => a - b),
+      expect(lost.map((g) => kindIndex(g.items[0].name))).toEqual(
+        lost.map((g) => kindIndex(g.items[0].name)).sort((a, b) => a - b),
       );
     }
   });
@@ -103,8 +101,8 @@ describe.each([
       const html = renderToStaticMarkup(<WinningSpelling fn={row} hash={hash} onOpenVariation={noop} />);
       const spelling = winningSpelling(row);
       const lost = consideredButLost(row);
-      if (spelling.length === 0 && lost === null) {
-        expect(html, row.id).toBe(''); // never ranked: no winner, no fan
+      if (!row.asmlift.fanVariations) {
+        expect(html, row.id).toBe(''); // its fan was never counted
         continue;
       }
       expect(html, row.id).not.toContain('`');
@@ -112,7 +110,7 @@ describe.each([
       const links = hrefs(html).map(hashToSearchParams);
       const expected = new Set([
         ...spelling.flatMap((g) => g.items.map((p) => p.name)),
-        ...(lost ?? []).flatMap((g) => g.items.map((v) => v.name)),
+        ...lost.flatMap((g) => g.items.map((v) => v.name)),
       ]);
       expect(new Set(links.map((p) => p.get('variation'))), row.id).toEqual(expected);
       for (const p of links) {
@@ -130,23 +128,22 @@ describe.each([
         expect(html, row.id).toContain(`>${part}</span>`);
       }
 
-      const lostCount = (lost ?? []).reduce((n, g) => n + g.items.length, 0);
+      const lostCount = lost.reduce((n, g) => n + g.items.length, 0);
       expect(html.includes(NOT_WASTE), row.id).toBe(lostCount > 0);
-      expect(html.includes('not recorded in this artifact'), row.id).toBe(lost === null);
       expect(html.includes('No candidate won'), row.id).toBe(spelling.length === 0);
     }
   });
 });
 
 test('a row with no winner lists every variation its fan carried as lost', () => {
-  const row = fixture.find((r) => r.asmlift.fanVariations && !r.asmlift.winnerVariations)!;
-  expect(row, 'the fixture keeps a roster-carrying row with no winner').toBeDefined();
-  const names = consideredButLost(row)!.flatMap((g) => g.items.map((v) => v.name));
+  const row = FAN_SAMPLE.find((r) => !r.asmlift.winnerVariations)!;
+  expect(row, 'the sample keeps a ranked row with no winner').toBeDefined();
+  const names = consideredButLost(row).flatMap((g) => g.items.map((v) => v.name));
   expect([...names].sort()).toEqual(Object.keys(row.asmlift.fanVariations!).sort());
 });
 
 test("each winning variation shows its definition's title inline, not only on hover", () => {
-  const row = fixture.find((r) => r.id === 'synthetic:dmafield:agbcc')!;
+  const row = FAN_SAMPLE.find((r) => r.id === 'synthetic:dmafield:agbcc')!;
   const html = renderToStaticMarkup(<WinningSpelling fn={row} hash="#view=benchmark" onOpenVariation={noop} />);
   for (const part of row.asmlift.winnerVariations!) {
     const title = VARIATION_DEFINITIONS[parseVariation(part).name].title.split('`')[0];

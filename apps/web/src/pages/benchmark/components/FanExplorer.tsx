@@ -76,18 +76,9 @@ function Charts({
   coverage: { rows: number; candidates: number };
   onOpenVariation: (name: string) => void;
 }) {
-  if (stats.length === 0) {
-    return (
-      <Panel title="What each variation cost, and what it returned">
-        <p className="text-sm text-slate-400">
-          No row in this artifact records the variations its fan carried, so no cost can be stated.
-        </p>
-      </Panel>
-    );
-  }
   const source = (
     <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-      Over the {coverage.rows.toLocaleString()} rows that recorded their fan: {coverage.candidates.toLocaleString()}{' '}
+      Over the {coverage.rows.toLocaleString()} rows whose fan was counted: {coverage.candidates.toLocaleString()}{' '}
       candidates. A candidate counts once under every variation it carries, so the counts overlap and do not add up to
       the fan.
     </p>
@@ -117,18 +108,15 @@ function Charts({
 function CatalogueEntry({
   s,
   max,
-  recorded,
   hash,
   onOpenVariation,
 }: {
   s: VariationStats;
   max: number;
-  recorded: boolean;
   hash: string;
   onOpenVariation: (name: string) => void;
 }) {
   const def = VARIATION_DEFINITIONS[s.name];
-  const notRecorded = 'not recorded in this artifact';
   return (
     <a
       href={variationHref(s.name, hash)}
@@ -160,12 +148,12 @@ function CatalogueEntry({
             />
           </div>
         </div>
-        <div title={recorded ? undefined : notRecorded}>
-          <div className="font-mono text-sm text-slate-300">{recorded ? count(s.rows) : '—'}</div>
+        <div>
+          <div className="font-mono text-sm text-slate-300">{count(s.rows)}</div>
           <div className="text-[10px] text-slate-500">rows</div>
         </div>
-        <div title={recorded ? undefined : notRecorded}>
-          <div className="font-mono text-sm text-slate-300">{recorded ? count(s.candidates) : '—'}</div>
+        <div>
+          <div className="font-mono text-sm text-slate-300">{count(s.candidates)}</div>
           <div className="text-[10px] text-slate-500">candidates</div>
         </div>
         <div>
@@ -191,7 +179,6 @@ export function FanExplorer({
   const groups = useMemo(() => catalogue(stats), [stats]);
   const coverage = useMemo(() => fanCoverage(rows), [rows]);
   const chartStats = useMemo(() => priced(stats), [stats]);
-  const recorded = coverage.rows > 0;
 
   return (
     <div className="space-y-6">
@@ -213,8 +200,8 @@ export function FanExplorer({
         <div>
           <h2 className="text-base font-semibold text-slate-100">Every variation</h2>
           <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
-            Grouped by kind, ranked by winners: rows whose winner carries the variation. Rows and candidates count the
-            fans that carried it, won or lost. Click an entry for its definition and its rows.
+            Grouped by kind, ranked by winners. Rows and candidates count the fans that carried the variation, won or
+            lost; winners are those rows whose winner carries it. Click an entry for its definition and its rows.
           </p>
         </div>
         {groups.map((g) => (
@@ -236,7 +223,6 @@ export function FanExplorer({
                   key={s.name}
                   s={s}
                   max={g.variations[0].winners}
-                  recorded={recorded}
                   hash={hash}
                   onOpenVariation={onOpenVariation}
                 />
