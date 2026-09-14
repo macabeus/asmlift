@@ -99,6 +99,16 @@ describe.each([
   });
 
   test('the detail renders every part and every lost variation, each a link to its drawer that lists this row', () => {
+    // a drawer's rows are the same for every link to it, so each is listed once, not once per link
+    const listed = new Map<string, Set<FunctionResult>>();
+    const drawerLists = (name: string): Set<FunctionResult> => {
+      let set = listed.get(name);
+      if (!set) {
+        set = new Set(rowsFor(rows, name as never).map((r) => r.row));
+        listed.set(name, set);
+      }
+      return set;
+    };
     for (const row of rows) {
       const hash = rowHref(row.id, '#view=benchmark');
       const html = renderToStaticMarkup(<WinningSpelling fn={row} hash={hash} onOpenVariation={noop} />);
@@ -122,10 +132,7 @@ describe.each([
         expect(p.get('tab'), row.id).toBe('explorer');
         expect(resolveRow(rows, p.get('fn')!), row.id).toBe(row);
         // and the drawer it opens lists this row, whose own link comes back to this detail
-        expect(
-          rowsFor(rows, p.get('variation') as never).some((r) => r.row === row),
-          `${row.id} ${p.get('variation')}`,
-        ).toBe(true);
+        expect(drawerLists(p.get('variation')!).has(row), `${row.id} ${p.get('variation')}`).toBe(true);
       }
       for (const part of row.asmlift.winnerVariations ?? []) {
         expect(html, row.id).toContain(`>${part}</span>`);
