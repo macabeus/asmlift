@@ -5,7 +5,11 @@
 // Split in two so the body renders without a DOM: the shell owns the overlay behaviour (scroll lock,
 // Escape), which needs `window`; the body is a plain function of its props.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { VARIATION_DEFINITIONS, VARIATION_KIND_DEFINITIONS } from '@asmlift/core/variation-definitions';
+import {
+  EXAMPLE_COMPILER_NAMES,
+  VARIATION_DEFINITIONS,
+  VARIATION_KIND_DEFINITIONS,
+} from '@asmlift/core/variation-definitions';
 import { type VariationName, variationToken } from '@asmlift/core/variation-tokens';
 import { useMemo } from 'react';
 
@@ -157,6 +161,9 @@ export function VariationDetailBody({
               <CodeBlock code={def.example.after} language="c" className={CODE_PRE} />
             </div>
           </div>
+          <p className="text-xs leading-relaxed text-slate-500">
+            Compiled with {EXAMPLE_COMPILER_NAMES[def.example.compiler]}, the two are different objects.
+          </p>
           {def.example.note && (
             <p className="text-xs leading-relaxed text-slate-500">
               <InlineCode text={def.example.note} />
