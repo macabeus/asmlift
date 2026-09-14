@@ -211,7 +211,7 @@ export function VariationDetailBody({
               value={price === null ? (stats.rows > 0 ? 'no win' : null) : Math.round(price)}
             />
           </dl>
-          <NotWaste />
+          {stats.candidates > 0 && <NotWaste />}
         </div>
 
         <RowTable name={name} rows={touched} hash={hash} />

@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest';
 
 import { FanExplorer } from '../src/pages/benchmark/components/FanExplorer';
 import { VariationDetailBody } from '../src/pages/benchmark/components/VariationDetail';
-import { rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
+import { priced, rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 import { FAN_SAMPLE } from './fan-sample';
 
@@ -61,12 +61,22 @@ describe.each([
 
   test("every entry links to its own drawer over the reader's view", () => {
     const links = hrefs(html).map(hashToSearchParams);
-    expect(links.map((p) => p.get('variation')).sort()).toEqual(VARIATION_TOKENS.map((t) => t.name).sort());
+    expect(new Set(links.map((p) => p.get('variation')))).toEqual(new Set(VARIATION_TOKENS.map((t) => t.name)));
     expect(links.every((p) => p.get('tab') === 'fan')).toBe(true);
   });
 
-  test('every cost view carries the sentence', () => {
-    expect(count(html, NOT_WASTE)).toBe(2);
+  test('the catalogue comes before the cost views, which carry the sentence once, above both charts', () => {
+    expect(html.indexOf('>Every variation<')).toBeGreaterThan(-1);
+    expect(html.indexOf('>Every variation<')).toBeLessThan(html.indexOf('>Cost against gain<'));
+    expect(count(html, NOT_WASTE)).toBe(1);
+    expect(html.indexOf(NOT_WASTE)).toBeLessThan(html.indexOf('>Cost against gain<'));
+  });
+
+  test('a variation some fan carried and that never won is listed beside the price chart, not drawn in it', () => {
+    const never = html.slice(html.indexOf('Never won, so no price'));
+    const neverWon = priced(variationStats(rows)).filter((s) => s.winners === 0);
+    const listed = hrefs(never).map((h) => hashToSearchParams(h).get('variation'));
+    expect(listed).toEqual(neverWon.map((s) => s.name));
   });
 
   test('a toolchain count, never a project count', () => {
@@ -87,14 +97,15 @@ describe('the variation drawer', () => {
       for (const piece of prose(VARIATION_DEFINITIONS[name].title)) {
         expect(html, name).toContain(escaped(piece));
       }
-      expect(html, name).toContain(NOT_WASTE);
+      // the sentence rides with a cost, and a variation no fan carried has none
+      const s = variationStats(rows).get(name)!;
+      expect(html.includes(NOT_WASTE), name).toBe(s.candidates > 0);
       expect(html, name).not.toContain('`');
       const rowLinks = hrefs(html)
         .map(hashToSearchParams)
         .filter((p) => p.has('fn'));
       expect(rowLinks.length, name).toBe(rowsFor(rows, name).length);
       // the caption counts the rows the table lists, from the population the figures count
-      const s = variationStats(rows).get(name)!;
       expect(html, name).toContain(`Rows — ${s.winners} won with it, ${s.rows - s.winners} considered it and lost`);
       for (const p of rowLinks) {
         expect(p.get('tab')).toBe('explorer');

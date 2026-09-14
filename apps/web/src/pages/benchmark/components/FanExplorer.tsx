@@ -5,7 +5,7 @@
 import type { FunctionResult } from '@asmlift/bench-schema';
 import { READER_WORDS, VARIATION_DEFINITIONS, VARIATION_KIND_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import { VARIATION_KINDS } from '@asmlift/core/variation-tokens';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { variationHref } from '../lib/explorer-url';
 import { type VariationStats, catalogue, fanCoverage, priced, variationStats } from '../lib/fan';
@@ -67,39 +67,73 @@ function Glossary() {
   );
 }
 
+/** The price chart opens on the dearest wins; the rest are one click away. */
+const PRICE_BARS = 15;
+
 function Charts({
   stats,
   coverage,
+  hash,
   onOpenVariation,
 }: {
+  /** the variations some fan carried, dearest win first, then the never-won (`priced`) */
   stats: VariationStats[];
   coverage: { rows: number; candidates: number };
+  hash: string;
   onOpenVariation: (name: string) => void;
 }) {
-  const source = (
-    <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-      Over the {coverage.rows.toLocaleString()} rows whose fan was counted: {coverage.candidates.toLocaleString()}{' '}
-      candidates. A candidate counts once under every variation it carries, so the counts overlap and do not add up to
-      the fan.
-    </p>
-  );
+  const [allPrices, setAllPrices] = useState(false);
+  const won = useMemo(() => stats.filter((s) => s.winners > 0), [stats]);
+  const bars = useMemo(() => (allPrices ? won : won.slice(0, PRICE_BARS)), [won, allPrices]);
+  const neverWon = stats.filter((s) => s.winners === 0);
+
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-slate-100">What each variation cost, and what it returned</h2>
+        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
+          Over the {coverage.rows.toLocaleString()} rows whose fan was counted: {coverage.candidates.toLocaleString()}{' '}
+          candidates. A candidate counts once under every variation it carries, so the counts overlap and do not add up
+          to the fan.
+        </p>
+      </div>
+      <NotWaste />
       <Panel
         title="Cost against gain"
         subtitle="One bubble per variation. Across: candidates that carried it. Up: the share of the rows whose fan carried it that won with it. Area: those rows. Click a bubble for its definition."
       >
-        <NotWaste />
         <VariationCostGain data={stats} onPointClick={onOpenVariation} />
-        {source}
       </Panel>
       <Panel
         title="Price per win"
-        subtitle="Candidates carried per win, dearest first, then the variations that never won. Bar length is the candidates carried; the label is the price."
+        subtitle="Candidates carried per win, dearest first: bar length is the price. Click a bar for its definition."
       >
-        <NotWaste />
-        <VariationPricePerWin data={stats} onBarClick={onOpenVariation} />
-        {source}
+        <VariationPricePerWin data={bars} onBarClick={onOpenVariation} />
+        {won.length > PRICE_BARS && (
+          <button
+            onClick={() => setAllPrices((v) => !v)}
+            className="mt-2 rounded-md px-2 py-1 text-xs text-teal-400 hover:bg-slate-800 hover:text-teal-300"
+          >
+            {allPrices ? `Show the ${PRICE_BARS} dearest` : `Show all ${won.length}`}
+          </button>
+        )}
+        {neverWon.length > 0 && (
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Never won, so no price</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {neverWon.map((s) => (
+                <a
+                  key={s.name}
+                  href={variationHref(s.name, hash)}
+                  onClick={(e) => followInPlace(e, () => onOpenVariation(s.name))}
+                  className="rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 hover:bg-teal-900/60 hover:text-teal-200"
+                >
+                  {s.name} <span className="text-slate-500">· {count(s.candidates)} candidates</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -194,8 +228,6 @@ export function FanExplorer({
 
       <Glossary />
 
-      <Charts stats={chartStats} coverage={coverage} onOpenVariation={onOpenVariation} />
-
       <div className="space-y-5">
         <div>
           <h2 className="text-base font-semibold text-slate-100">Every variation</h2>
@@ -231,6 +263,8 @@ export function FanExplorer({
           </section>
         ))}
       </div>
+
+      <Charts stats={chartStats} coverage={coverage} hash={hash} onOpenVariation={onOpenVariation} />
     </div>
   );
 }

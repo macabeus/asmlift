@@ -10,6 +10,9 @@ import type { EChartsOption } from './echarts';
 
 type Point = [candidates: number, ratePct: number, rows: number, name: string];
 
+/** How many bubbles carry their name on the plot. */
+const LABELLED = 12;
+
 /** A definition's title carries code spans such as `||`; the tooltip is HTML. */
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -30,12 +33,30 @@ export function VariationCostGain({
   data: VariationStats[];
   onPointClick?: (name: string) => void;
 }) {
+  // NAMED ON THE CHART: only the variations the most rows carried. Fifty names over one plot print
+  // over each other and over the bubbles; every bubble's tooltip names it, and the catalogue lists all.
+  const labelled = useMemo(
+    () =>
+      new Set(
+        [...data]
+          .sort((a, b) => b.rows - a.rows)
+          .slice(0, LABELLED)
+          .map((s) => s.name),
+      ),
+    [data],
+  );
   // MEMOIZED, option and events both: a new option under the pointer makes ECharts replace the
   // series the pending mouseout still points at, which throws. The page re-renders on every fragment
   // change, and a bubble click is one.
   const option = useMemo(
     (): EChartsOption => ({
-      legend: { ...legendDefaults, top: 0, data: VARIATION_KINDS.map((k) => VARIATION_KIND_DEFINITIONS[k].title) },
+      // A scrolling legend stays on one line, so at phone width it cannot wrap down into the plot.
+      legend: {
+        ...legendDefaults,
+        type: 'scroll',
+        top: 0,
+        data: VARIATION_KINDS.map((k) => VARIATION_KIND_DEFINITIONS[k].title),
+      },
       tooltip: {
         ...tooltipDefaults,
         trigger: 'item',
@@ -46,7 +67,7 @@ export function VariationCostGain({
           const price = pricePerWin(s);
           return [
             `<div style="font-weight:600">${escapeHtml(VARIATION_DEFINITIONS[s.name].title.replace(/`/g, ''))} <span style="opacity:.6;font-family:monospace">${s.name}</span></div>`,
-            `<div>${s.candidates.toLocaleString()} candidates carried it, in ${s.rows} row fan${s.rows === 1 ? '' : 's'}</div>`,
+            `<div>${s.candidates.toLocaleString()} candidates carried it, across the fans of ${s.rows} row${s.rows === 1 ? '' : 's'}</div>`,
             `<div>won ${s.winners} of those rows (${Math.round((winRate(s) ?? 0) * 100)}%)</div>`,
             price === null
               ? '<div style="opacity:.7">no win</div>'
@@ -54,7 +75,9 @@ export function VariationCostGain({
           ].join('');
         },
       },
-      grid: { left: 14, right: 36, top: 40, bottom: 14, containLabel: true },
+      // `containLabel` makes room for the tick labels only: the bottom holds the axis name below
+      // its `nameGap`, and the right the label of a bubble at the largest cost.
+      grid: { left: 14, right: 72, top: 40, bottom: 40, containLabel: true },
       xAxis: {
         type: 'log',
         ...axisCommon,
@@ -82,21 +105,22 @@ export function VariationCostGain({
         itemStyle: { color: VARIATION_KIND_COLOR[kind], opacity: 0.8 },
         data: data
           .filter((s) => s.kind === kind)
-          .map((s): Point => [s.candidates, Math.round((winRate(s) ?? 0) * 100), s.rows, s.name]),
+          .map((s) => ({
+            value: [s.candidates, Math.round((winRate(s) ?? 0) * 100), s.rows, s.name] satisfies Point,
+            label: { show: labelled.has(s.name) },
+          })),
         symbolSize: (value: Point) => 7 + Math.sqrt(value[2]) * 2.5,
         label: {
-          show: true,
           position: 'right' as const,
           fontSize: 10,
           color: '#94a3b8',
           formatter: (p: { value?: unknown }) => (p.value as Point)[3],
         },
-        // Many variations share a rate band; their names would print on top of each other. The ones
-        // that collide are dropped, and the tooltip is the complete reading either way.
+        // Even the named few can share a rate band; a label that would print over another is dropped.
         labelLayout: { hideOverlap: true },
       })),
     }),
-    [data],
+    [data, labelled],
   );
   const onEvents = useMemo(
     () =>
