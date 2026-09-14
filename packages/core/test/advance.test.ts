@@ -513,7 +513,7 @@ test('the row enumerates the advanced spelling, qualified', () => {
 });
 
 // The PLAIN variation, both ways round. agbcc folds `p = p + 1; *p` back into `strh [r3, #2]` (the four
-// corners in this file's header), so its un-qualified spelling is byte-identical to the indexed one
+// corners in this file's header), so its un-qualified spelling emits the stores of the indexed one
 // the roster already offers and rank.ts withholds it — while a target that has NOT been compiled on
 // that pair keeps it, which is the whole point of gating on a behaviour instead of deleting a variation.
 test('the plain /advance variation follows compilerBehaviors.foldsPointerAdvance', () => {

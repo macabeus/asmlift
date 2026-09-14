@@ -6,14 +6,15 @@
 // "Different" is objdiff's verdict, the scorer's own eye: a relocation is compared by the symbol
 // it names, never by the placeholder bytes in the section, and only the example function's
 // instructions and literal pool are read. A pair that builds one object is a wrong example.
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
 import {
   EXAMPLE_FUNCTION,
   EXAMPLE_HOLE,
   type ExampleCompiler,
+  TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
 } from '@asmlift/core/variation-definitions';
-import { type VariationName, hasVariation } from '@asmlift/core/variation-tokens';
+import { type GatingBehavior, type VariationName, hasVariation } from '@asmlift/core/variation-tokens';
 import {
   assembleTarget,
   compileCandAgbcc,
@@ -55,6 +56,35 @@ describe('every variation example compiles to two different objects', () => {
       const after = compile(spell(example.unit, example.after));
       const score = scoreObjects(before, after, EXAMPLE_FUNCTION);
       expect(score.match, `${name}: both spellings compile to one object`).toBe(false);
+    });
+  }
+});
+
+// THE TARGET LINE, COMPILED. A drawer tells a reader which compilers a variation is withheld on by
+// reading a compiler behavior (`TARGET_BEHAVIOR_READINGS`), so each reading carries a pair that
+// shows it, built by the compiler of every shipped target that declares the behavior. A behavior
+// no pair can show states why, and nothing is skipped.
+const SHIPPED_TARGETS = [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC];
+
+describe('every compiler behavior a target gate reads is shown by a compiled pair, or says why none can', () => {
+  for (const [behavior, { witness }] of Object.entries(TARGET_BEHAVIOR_READINGS)) {
+    test(behavior, () => {
+      const declaring = SHIPPED_TARGETS.filter((t) => {
+        const value = t.compilerBehaviors[behavior as GatingBehavior];
+        return value !== undefined && value !== false;
+      });
+      expect(declaring.length, `${behavior}: no shipped target declares it`).toBeGreaterThan(0);
+      if ('uncompiled' in witness) {
+        return;
+      }
+      expect([...new Set(declaring.map((t) => t.compiler))]).toEqual([witness.compiler]);
+      expect(witness.unit.split(EXAMPLE_HOLE)).toHaveLength(2);
+      const compile = COMPILE[witness.compiler];
+      const [a, b] = witness.spellings.map((s) => compile(spell(witness.unit, s)));
+      expect(
+        scoreObjects(a, b, EXAMPLE_FUNCTION).match,
+        `${behavior}: the pair does not compile ${witness.compiles}`,
+      ).toBe(witness.compiles === 'same');
     });
   }
 });

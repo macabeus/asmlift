@@ -1566,8 +1566,8 @@ export function enumerateCandidates(
     // target gate names a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
     // POLARITY REVERSED: that flag admits a variation where the compiler folds, this one withholds
     // one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
-    // compiled corners in test/advance.test.ts's header), so the plain spelling is byte-identical
-    // to the indexed one this roster already offers, and it never wins on a row that reaches it:
+    // compiled corners in test/advance.test.ts's header), so the plain spelling emits the same
+    // stores as the indexed one this roster already offers, and it never wins on a row that reaches it:
     // `/advance` 15/23
     // against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
     // 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs 0/103 ·

@@ -69,9 +69,9 @@ function reindent(line: string): string {
       push();
       depth = Math.max(0, depth - 1);
       cur = '}';
-      // `} else`, `} while (...)` stay glued to the brace
+      // `} else`, `} while (...)` and a declaration's `};` stay glued to the brace
       const rest = line.slice(i + 1).trimStart();
-      if (!/^(else\b|while\b)/.test(rest)) {
+      if (!/^(else\b|while\b|;)/.test(rest)) {
         push();
       }
       continue;

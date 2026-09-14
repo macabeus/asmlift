@@ -7,7 +7,6 @@
 import type { FunctionResult } from '@asmlift/bench-schema';
 import {
   EXAMPLE_COMPILER_NAMES,
-  EXAMPLE_HOLE,
   type OfferedWhen,
   TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
@@ -25,6 +24,7 @@ import { useMemo } from 'react';
 import { CodeBlock } from '../../../shared/components/CodeBlock';
 import { Pill } from '../../../shared/components/Pill';
 import { useOverlay } from '../../../shared/utils/overlay';
+import { unitForDisplay } from '../lib/example-unit';
 import { rowHref, variationHref } from '../lib/explorer-url';
 import { pricePerWin, rowsFor, variationStats, winRate } from '../lib/fan';
 import { plainText } from '../lib/variation-text';
@@ -183,11 +183,7 @@ export function VariationDetailBody({
               unit, so the reader can compile exactly what the matching suite compiles. */}
           <details>
             <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">The compiled unit</summary>
-            <CodeBlock
-              code={def.example.unit.replace(EXAMPLE_HOLE, '/* the spelling above */')}
-              language="c"
-              className={`mt-2 ${CODE_PRE}`}
-            />
+            <CodeBlock code={unitForDisplay(def.example.unit)} language="c" className={`mt-2 ${CODE_PRE}`} />
           </details>
         </div>
 
@@ -280,7 +276,8 @@ function Offer({ offer, target }: { offer: OfferedWhen; target?: TargetGate<Gati
           'On every function.'
         ) : 'judges' in offer ? (
           <>
-            For <InlineCode text={offer.judges} />, unless a rule below refuses it.
+            For <InlineCode text={offer.judges} />, unless{' '}
+            {rules.length === 1 ? 'the rule' : `one of the ${rules.length} rules`} below refuses it.
           </>
         ) : (
           <InlineCode text={offer.when} />
@@ -334,7 +331,7 @@ function Offer({ offer, target }: { offer: OfferedWhen; target?: TargetGate<Gati
 function TargetLine({ gate }: { gate: TargetGate<GatingBehavior> }) {
   return (
     <p>
-      {gate.declared ? 'Only' : 'Not'} on a target whose compiler {TARGET_BEHAVIOR_READINGS[gate.behavior]}
+      {gate.declared ? 'Only' : 'Not'} on a target whose compiler {TARGET_BEHAVIOR_READINGS[gate.behavior].reads}
       {gate.unlessWith && (
         <>
           , unless together with <code className="font-mono text-slate-200">{gate.unlessWith}</code>

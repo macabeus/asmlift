@@ -138,13 +138,59 @@ export interface CodePointer {
   file: string;
 }
 
-/** Each compiler behavior a registered variation's target gate names, as a reader reads it after
- *  "a target whose compiler". The gate itself is the registry entry's `target`. */
-export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: string } = {
-  foldsConstAddrOffset: 'folds a constant address offset into the literal it loads',
-  arrayShapeFromStride: "loads a declared array's base before it scales the index",
-  nearBaseSpan: 'declares how far one base local may reach a neighbouring address',
-  foldsPointerAdvance: 'folds a stepped pointer back into an offset load',
+/** What holds a reading to the compiler: two spellings in `unit`'s hole, compiled by the compiler of
+ *  every shipped target that declares the behavior, that build one object (`same`) or two. A
+ *  behavior no pair of spellings can show says why instead. */
+export type BehaviorWitness =
+  | { compiler: ExampleCompiler; unit: string; spellings: readonly [string, string]; compiles: 'same' | 'different' }
+  | { uncompiled: string };
+
+/** A compiler behavior as a reader reads it after "a target whose compiler", and its witness. */
+export interface TargetBehaviorReading {
+  reads: string;
+  witness: BehaviorWitness;
+}
+
+/** Each compiler behavior a registered variation's target gate names. The gate itself is the registry
+ *  entry's `target`; the matching suite compiles each witness. */
+export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: TargetBehaviorReading } = {
+  foldsConstAddrOffset: {
+    reads: 'folds a constant address offset into the literal it loads',
+    witness: {
+      compiler: 'agbcc',
+      unit: 'void example(u8 a) { @ }',
+      spellings: ['((u8 *)0x3001100)[3] = a;', '*(u8 *)0x3001103 = a;'],
+      compiles: 'same',
+    },
+  },
+  arrayShapeFromStride: {
+    reads: "loads a declared array's base before it scales the index",
+    witness: {
+      compiler: 'agbcc',
+      unit: 'extern u16 gTbl[]; s32 example(s32 i) { return @; }',
+      spellings: ['gTbl[i]', '((u16 *)&gTbl)[i]'],
+      compiles: 'different',
+    },
+  },
+  nearBaseSpan: {
+    reads: 'declares how far one base local may reach a neighbouring address',
+    witness: {
+      uncompiled:
+        'the span is how far one instruction can add to a base register, a fact of the instruction set that no pair of spellings decides',
+    },
+  },
+  foldsPointerAdvance: {
+    reads: 'folds a stepped pointer back into an offset load',
+    witness: {
+      compiler: 'agbcc',
+      unit: 'void example(s32 a, s32 b) { @ }',
+      spellings: [
+        'u16 *p = (u16 *)0x04000048; *p = a; p[1] = b;',
+        'u16 *p = (u16 *)0x04000048; *p = a; p = p + 1; *p = b;',
+      ],
+      compiles: 'same',
+    },
+  },
 };
 
 /** When enumeration offers a variation. Wherever it changes nothing, the candidate it would add
@@ -1308,9 +1354,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'that pair into two constant addresses and records that it did; this writes the stepped pointer. The ' +
       'chain is read off constant addresses, so a symbol map that names them hides it.',
     compilerBehavior:
-      'Through a `volatile` pointer agbcc keeps the step as an `add` between the two accesses, which the same ' +
-      'accesses through two constant addresses do not compile to. The plain step lost on every agbcc row that ' +
-      'reached it, so on agbcc it is offered only together with `volatile`.',
+      'Through a plain pointer agbcc folds the step into the second access’s offset, so the step compiles to ' +
+      'no instruction. Through a `volatile` pointer it keeps the step as an `add` between the two accesses, ' +
+      'which the same accesses through two constant addresses do not compile to.',
     offeredWhen: {
       judges: 'each chain of accesses the machine made through one stepped register',
       gates: ['ADVANCE_HEAD_GATES', 'ADVANCE_MEMBER_GATES'],
@@ -1320,7 +1366,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       unit: 'void example(u16 a, u16 b) { @ }',
       before: '*(volatile u16 *)0x04000048 = a; *(volatile u16 *)0x0400004A = b;',
       after: 'volatile u16 *p = (volatile u16 *)0x04000048; *p = a; p = p + 1; *p = b;',
-      note: 'shown with `volatile`, the only company it is offered in on agbcc',
+      note: 'shown with `volatile`, the company agbcc offers it in',
     },
     implementedIn: l3('advance'),
     seeAlso: ['volatile', 'nearbase'],

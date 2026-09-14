@@ -193,7 +193,7 @@ describe('the variation drawer', () => {
       const text = [
         'judges' in offer ? offer.judges : offer.when,
         ...readerRules(offer.gates ?? []).map((r) => r.why),
-        ...(gate ? [TARGET_BEHAVIOR_READINGS[gate.behavior]] : []),
+        ...(gate ? [TARGET_BEHAVIOR_READINGS[gate.behavior].reads] : []),
       ];
       for (const piece of text.flatMap(prose)) {
         expect(offered, name).toContain(escaped(piece.trim()));
