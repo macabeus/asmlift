@@ -200,3 +200,77 @@ export function splitVariations(name: string): string[] {
   joinVariations(variations);
   return variations;
 }
+
+/** How many of one fan's candidates carry one variation. `candidates` counts the whole fan —
+ *  scored, dropped and withheld alike — and `dropped` and `withheld` are the refused part of that
+ *  count, each absent when 0. */
+export interface VariationTally {
+  candidates: number;
+  dropped?: number;
+  withheld?: number;
+}
+
+interface NamedCandidate {
+  variations: readonly string[];
+}
+
+/** Every variation a fan carried, keyed by its REGISTERED name, with how many of the fan's
+ *  candidates carry it. A variation applied to a subject counts under its registered name
+ *  (`coalesce-v0-v1` and `coalesce-v2-v3` are both `coalesce`), and a candidate counts once under
+ *  each name it carries however many subjects it applies it to.
+ *
+ *  `fan` is ranking's three-way partition, which puts every enumerated candidate in exactly one
+ *  list, so each signedness entry's `candidates` sums with the other's to the fan size.
+ *
+ *  A tally, not a factorisation: enumeration gates prune the fan, so the counts do not multiply to
+ *  its size. Keys run in kind order, then by name, so two tallies of one fan serialize to the same
+ *  bytes whatever order the fan was listed in. Throws on a variation the registry does not hold. */
+export function tallyFanVariations(fan: {
+  candidates: readonly NamedCandidate[];
+  dropped: readonly NamedCandidate[];
+  withheld: readonly NamedCandidate[];
+}): Record<string, VariationTally> {
+  const registeredName = new Map<string, string>();
+  const nameOf = (part: string): string => {
+    let name = registeredName.get(part);
+    if (name === undefined) {
+      name = parseVariation(part).name;
+      registeredName.set(part, name);
+    }
+    return name;
+  };
+  const counts = new Map<string, { candidates: number; dropped: number; withheld: number }>();
+  const add = (list: readonly NamedCandidate[], refusal: 'dropped' | 'withheld' | undefined): void => {
+    for (const c of list) {
+      for (const name of new Set(c.variations.map(nameOf))) {
+        let n = counts.get(name);
+        if (n === undefined) {
+          n = { candidates: 0, dropped: 0, withheld: 0 };
+          counts.set(name, n);
+        }
+        n.candidates++;
+        if (refusal !== undefined) {
+          n[refusal]++;
+        }
+      }
+    }
+  };
+  add(fan.candidates, undefined);
+  add(fan.dropped, 'dropped');
+  add(fan.withheld, 'withheld');
+  const kindIndex = (name: string): number => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
+  const names = [...counts.keys()].sort((a, b) => kindIndex(a) - kindIndex(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return Object.fromEntries(
+    names.map((name) => {
+      const n = counts.get(name)!;
+      return [
+        name,
+        {
+          candidates: n.candidates,
+          ...(n.dropped ? { dropped: n.dropped } : {}),
+          ...(n.withheld ? { withheld: n.withheld } : {}),
+        },
+      ];
+    }),
+  );
+}

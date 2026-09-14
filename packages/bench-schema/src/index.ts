@@ -107,6 +107,22 @@ export interface DecompilerResult {
    *  which is why `meta.tree` was cut. A cost move is therefore a question for the fan and the run
    *  log, never an attribution on its own. */
   rankSeconds?: number;
+  /** asmlift only, RANKED rows: every variation this row's fan carried, keyed by its registered
+   *  name (`@asmlift/core/variation-tokens` `VARIATION_TOKENS`), with how many of the fan's
+   *  candidates carry it — `candidates` over the whole fan, `dropped` and `withheld` the refused
+   *  part of that count, each absent when 0. A variation applied to a subject counts under its
+   *  registered name, and a candidate counts once under each name it carries.
+   *
+   *  The artifact names only the winner and the refused candidates; this is the rest of the fan,
+   *  as counts. The variations the fan carried and the winner does not are what the row
+   *  considered and lost. Whether the winner carries a variation is read from `winnerVariations`,
+   *  never stored twice.
+   *
+   *  A tally, not a factorisation: enumeration gates prune the fan, so the counts do not multiply
+   *  to `fanSize`. Every candidate carries exactly one signedness, so `unsigned` and `signed` sum
+   *  to it. Keys run in variation-kind order, then by name. Present exactly when `fanSize` is,
+   *  and deterministic under the same conditions. */
+  fanVariations?: Record<string, { candidates: number; dropped?: number; withheld?: number }>;
   /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
    *  the ranking, each named by its variations with the compiler's first diagnostic line. A dropped sibling is a defect
    *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean

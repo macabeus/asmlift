@@ -10,6 +10,7 @@ import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import { NoScorableCandidateError, enumerateCandidates } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { parseVariation } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
 import { fanSize, fanSizeOfError, runAsmlift } from '../src/eval/asmlift';
@@ -48,8 +49,15 @@ function rankInto(nDropped: number, nWithheld: number): void {
     return {
       winner: scored[0],
       candidates: scored,
-      dropped: Array.from({ length: nDropped }, (_, i) => ({ variations: [`d${i}`], error: 'error: boom' })),
-      withheld: Array.from({ length: nWithheld }, (_, i) => ({ variations: [`w${i}`], score: 9, why: 'proof' })),
+      dropped: Array.from({ length: nDropped }, (_, i) => ({
+        variations: [i % 2 ? 'signed' : 'unsigned', 'raw-globals'],
+        error: 'error: boom',
+      })),
+      withheld: Array.from({ length: nWithheld }, () => ({
+        variations: ['signed', 'unreduce'],
+        score: 9,
+        why: 'proof',
+      })),
     };
   });
 }
@@ -115,8 +123,8 @@ describe('the ranked row records its own price', () => {
       throw new NoScorableCandidateError(
         'no scorable candidate',
         [
-          { variations: ['a'], error: 'error: boom' },
-          { variations: ['b'], error: 'error: boom' },
+          { variations: ['unsigned'], error: 'error: boom' },
+          { variations: ['signed', 'raw-globals'], error: 'error: boom' },
         ],
         [],
       );
@@ -124,6 +132,11 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
     expect(r.fanSize).toBe(2);
+    expect(r.fanVariations).toEqual({
+      unsigned: { candidates: 1, dropped: 1 },
+      signed: { candidates: 1, dropped: 1 },
+      'raw-globals': { candidates: 1, dropped: 1 },
+    });
     expect(typeof r.rankSeconds).toBe('number');
   });
 
@@ -135,7 +148,19 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('fanSize');
+    expect(r).not.toHaveProperty('fanVariations');
     expect(typeof r.rankSeconds).toBe('number');
+  });
+
+  test("a scored row's fanVariations tally its whole fan, and hold every variation the winner carries", () => {
+    rankInto(3, 2);
+    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const t = r.fanVariations!;
+    expect((t.unsigned?.candidates ?? 0) + (t.signed?.candidates ?? 0)).toBe(r.fanSize);
+    expect(t['raw-globals']).toEqual({ candidates: 3, dropped: 3 });
+    expect(t.unreduce).toEqual({ candidates: 2, withheld: 2 });
+    const winner = r.winnerVariations!.map((part) => parseVariation(part).name);
+    expect(winner.filter((name) => t[name] === undefined)).toEqual([]);
   });
 
   // A DECLINED row never reached the ranked pass. Absent is the honest answer; a 0 would read as
@@ -144,6 +169,7 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, 'f', GAPPED, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('declined');
     expect(r).not.toHaveProperty('fanSize');
+    expect(r).not.toHaveProperty('fanVariations');
     expect(r).not.toHaveProperty('rankSeconds');
   });
 });

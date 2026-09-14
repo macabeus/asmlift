@@ -82,6 +82,10 @@ import { rowsAddedSince } from './regression';
  *  (`compareCost`) — out of the verdict for the reason above, and not out of the report, because
  *  a number recorded on 828 rows that nothing reads is bookkeeping.
  *
+ *  `fanVariations` is out for `fanSize`'s reason: it is what the fan is made of, a cost, and the
+ *  artifact at `origin/main` predates it. The parts of a fan a verdict rests on — the winner's
+ *  variations and the refused counts — are watched above.
+ *
  *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
  *  chars on any row of the current artifact. It is derived from the winning candidate, which
  *  `source` and `winnerVariations` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;

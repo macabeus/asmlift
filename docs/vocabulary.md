@@ -74,11 +74,12 @@ already produced every source it made. A variation that threw prints an `asmlift
 
 ## Fields of the benchmark artifact
 
-| Field                                                                               | Meaning                                                                                                  |
-| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner. |
-| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.      |
-| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                             |
+| Field                                                                               | Meaning                                                                                                                                                             |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner.                                                            |
+| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.                                                                 |
+| `asmlift.fanVariations`                                                             | Every variation the fan carried, by registered name, with how many candidates carry it and how many of those were dropped or withheld. Present on every ranked row. |
+| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                                                                                        |
 
 ## Words the enumeration code uses
 
