@@ -1,8 +1,9 @@
 // The variation registry (`packages/core/src/variation-tokens.ts`) against the names the benchmark
 // actually carries.
 //
-// CLOSURE, POINTS 2 AND 3 OF 3 (point 1, the mint literals, is `packages/core/test/variation-tokens.
-// test.ts`):
+// CLOSURE OVER PUBLISHED AND ENUMERATED NAMES. The mint sites themselves are typed: an unregistered
+// variation is a `pnpm typecheck` error, and `packages/core/test/variation-mints.test.ts` proves
+// every registered variation is still minted. What those two cannot see is data:
 //
 //   2. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
 //      candidate's — parses, part by part, in kind order. This runs wherever the suite runs, CI
@@ -13,8 +14,8 @@
 //      it is SKIPPED where agbcc is absent — CI among them — and reports as skipped, never as
 //      passed.
 //
-// A name that fails here is either a variation minted without a registry entry, or a registry entry
-// spelled differently from its mint site. Both are fixed in `variation-tokens.ts` or at the mint.
+// A name that fails here was published or minted by a tree the type gate did not check — an artifact
+// regenerated from an older registry, or a subject shape the registry's pattern no longer admits.
 import { enumerateRanked } from '@asmlift/cli/rank';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {

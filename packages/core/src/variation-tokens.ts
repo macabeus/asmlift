@@ -8,13 +8,13 @@
 // merges `v0` into `v1`, `volatile-p1` qualifies `p1` — and that trailing `-…` is the variation's
 // SUBJECT.
 //
-// WHY A CLOSED TABLE. The entries are minted as `/`-prefixed suffix strings in `rank.ts` and
-// `rank-variations.ts`, several of them parameterized (`${suffix}-${c.merged}`, `homesplit-${tag}`,
-// `sense-${m}`), so the set of names is open by construction and nothing but this table closes it.
-// Three checks hold the table to the code: a static scan of the mint literals
-// (`packages/core/test/variation-tokens.test.ts`), every name the committed benchmark artifact
-// publishes, and every name the enumerated corpus mints (both in `apps/benchmark/test`). What each
-// name means to a reader is `variation-definitions.ts`, keyed by `VariationName` below.
+// WHY A CLOSED TABLE. Enumeration (`rank.ts`, `rank-variations.ts`) mints a name as a list of
+// `Variation`s: a `VariationName`, or a subject-taking name applied through `withSubject`. So a
+// variation the table does not hold is a type error at its mint site, and a subject that does not
+// fit its pattern throws where it is minted. The other direction — an entry nothing mints any more
+// — is `packages/core/test/variation-mints.test.ts`, which reads the mint sites off the type
+// checker. What each name means to a reader is `variation-definitions.ts`, keyed by
+// `VariationName` below.
 //
 // WHY A TEST PREDICATE GOES THROUGH HERE. A predicate written as a substring —
 // `name.includes('/regcopy-ret')` inside `.toEqual([])` — keeps passing after the variation is

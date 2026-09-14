@@ -1,8 +1,9 @@
-// The variation registry, held to itself and to the code that mints variations.
+// The variation registry, held to itself.
 //
-// The corpus-scale checks — every name the committed artifact publishes and every name the
-// enumerated corpus mints — live in `apps/benchmark/test/variation-closure.test.ts`, because only
-// that tree reads the artifact and the dataset. This file is the one that runs in `test:offline`.
+// Whether the code that mints variations still mints every entry is `variation-mints.test.ts`. The
+// corpus-scale checks — every name the committed artifact publishes and every name the enumerated
+// corpus mints — live in `apps/benchmark/test/variation-closure.test.ts`, because only that tree
+// reads the artifact and the dataset.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -46,17 +47,6 @@ describe('the registry is well-formed', () => {
   test('the signedness variations are exactly the ones enumeration pins', () => {
     const signedness = VARIATION_TOKENS.filter((t) => t.variationKind === 'signedness').map((t) => t.name);
     expect(signedness).toEqual(SIGNEDNESS.map((s) => s.variation));
-  });
-
-  // `rank.ts` strips one structure variation out of a structure suffix with a substring `replace`,
-  // which removes the FIRST occurrence: a structure variation spelled inside another would strip
-  // the wrong one.
-  test('no structure variation is spelled inside another', () => {
-    const structure = VARIATION_TOKENS.filter((t) => t.variationKind === 'structure').map((t) => `/${t.name}`);
-    const collisions = structure.flatMap((a) =>
-      structure.filter((b) => a !== b && b.includes(a)).map((b) => `${a} in ${b}`),
-    );
-    expect(collisions).toEqual([]);
   });
 
   test('every subject-taking name is the longest match for its own subjects', () => {
@@ -269,51 +259,5 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
     expect(() =>
       tallyFanVariations({ candidates: [{ variations: ['unsigned', 'nosuch'] }], dropped: [], withheld: [] }),
     ).toThrow(/names no registered variation/);
-  });
-});
-
-// CLOSURE, POINT 1 OF 3: the mint literals. Every `/`-separated segment a string literal in the two
-// enumeration files spells must be a registered variation, and every registered variation must be
-// spelled by one — so a `respell('/foo', …)` added without a registry entry fails here, in the suite
-// CI runs, and so does an entry for a variation nothing mints any more. A parameterized subject
-// (`/sense-${m}`, `/homesplit-${tag}`, `${suffix}-${c.merged}`) contributes its registered prefix.
-// Blind spot, stated: a mint with no literal segment at all; the enumerated-corpus check sees it.
-describe('closure over the mint literals of rank.ts and rank-variations.ts', () => {
-  const src = ['rank.ts', 'rank-variations.ts']
-    .map((f) => readFileSync(join(import.meta.dirname, '..', 'src', f), 'utf8'))
-    .join('\n')
-    .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-    .join('\n');
-  const segments = [
-    ...new Set(
-      [...src.matchAll(/['`](?:\$\{[a-zA-Z.]+\})?((?:\/[a-z][a-z0-9-]*)+)['`-]/g)].flatMap((m) =>
-        m[1]
-          .split('/')
-          .filter((s) => s !== '')
-          .map((s) => s.replace(/-$/, '')),
-      ),
-    ),
-  ].sort();
-
-  test('the scan sees the whole mint set (non-empty floor)', () => {
-    expect(segments.length).toBeGreaterThanOrEqual(56);
-  });
-
-  test('every minted segment is a registered variation', () => {
-    const unregistered = segments.filter((s) => {
-      try {
-        parseVariation(s);
-        return false;
-      } catch {
-        return true;
-      }
-    });
-    expect(unregistered).toEqual([]);
-  });
-
-  test('every registered variation is minted', () => {
-    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGNEDNESS.map((s) => s.variation)]);
-    expect(names.filter((n) => !minted.has(n))).toEqual([]);
   });
 });

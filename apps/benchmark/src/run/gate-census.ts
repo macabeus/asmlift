@@ -52,7 +52,7 @@ import {
 } from '@asmlift/core/l3/unmerge';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
-import { PRE_RESPELL_VARIATIONS, UNMERGE_SUFFIX } from '@asmlift/core/rank-variations';
+import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { realCases } from '../cases/real';
@@ -83,12 +83,12 @@ export const PASSES: Record<string, CensusablePass> = {
       ['totality', UNMERGE_TOTALITY_GATES as readonly Gate<never>[]],
     ],
     install: (w) => {
-      // BY SUFFIX, never by index. `PRE_RESPELL_VARIATIONS` holds one entry today, and a census taken
+      // BY NAME, never by index. `PRE_RESPELL_VARIATIONS` holds one entry today, and a census taken
       // through the wrong one enumerates normally and reports an EMPTY table — the silent-zero
       // failure this file's header names, arriving by a second route.
-      const unmergeVariation = PRE_RESPELL_VARIATIONS.find((p) => p.suffix === UNMERGE_SUFFIX);
+      const unmergeVariation = PRE_RESPELL_VARIATIONS.find((p) => p.name === 'unmerge');
       if (!unmergeVariation) {
-        throw new Error(`no PRE_RESPELL_VARIATIONS entry '${UNMERGE_SUFFIX}' — the pass's caller-side seam moved`);
+        throw new Error("no PRE_RESPELL_VARIATIONS entry 'unmerge' — the pass's caller-side seam moved");
       }
       const restore = unmergeVariation.apply;
       const gates: UnmergeGates = {
