@@ -7,9 +7,12 @@
 import type { FunctionResult } from '@asmlift/bench-schema';
 import {
   EXAMPLE_COMPILER_NAMES,
+  type OfferedWhen,
+  TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
   VARIATION_KIND_DEFINITIONS,
 } from '@asmlift/core/variation-definitions';
+import { readerRules } from '@asmlift/core/variation-gates';
 import { type VariationName, variationToken } from '@asmlift/core/variation-tokens';
 import { useMemo } from 'react';
 
@@ -173,9 +176,7 @@ export function VariationDetailBody({
 
         <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
           <Caption>Offered when</Caption>
-          <p className="mt-1.5 text-sm leading-relaxed text-slate-300">
-            <InlineCode text={def.offeredWhen} />
-          </p>
+          <Offer offer={def.offeredWhen} />
           {def.subject && (
             <>
               <div className="mt-3">
@@ -245,6 +246,76 @@ export function VariationDetailBody({
         )}
       </div>
     </>
+  );
+}
+
+/** A list of rules longer than this starts folded: some passes carry twenty. */
+const OPEN_RULES = 6;
+
+/** When enumeration offers the variation, in the order a reader asks: the condition, the target it
+ *  needs, the rules that can still refuse it (each table's own `why`), and where that is decided. */
+function Offer({ offer }: { offer: OfferedWhen }) {
+  const rules = offer === 'always' ? [] : readerRules(offer.gates ?? []);
+  return (
+    <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-300">
+      <p>
+        {offer === 'always' ? (
+          'On every function.'
+        ) : 'judges' in offer ? (
+          <>
+            For <InlineCode text={offer.judges} />, unless a rule below refuses it.
+          </>
+        ) : (
+          <InlineCode text={offer.when} />
+        )}
+      </p>
+      {offer !== 'always' && offer.target && (
+        <p>Only on a target whose compiler {TARGET_BEHAVIOR_READINGS[offer.target]}.</p>
+      )}
+      {rules.length > 0 && (
+        <details open={rules.length <= OPEN_RULES}>
+          <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">
+            {offer !== 'always' && 'judges' in offer
+              ? `The ${rules.length} rules that can refuse it`
+              : `The ${rules.length} rules it also applies`}
+          </summary>
+          <ul className="mt-2 space-y-1.5">
+            {rules.map((r) => (
+              <li
+                key={`${r.id} ${r.why}`}
+                title={r.id}
+                className="flex items-baseline gap-2 text-[13px] text-slate-400"
+              >
+                <span
+                  className={`shrink-0 rounded px-1.5 text-[10px] uppercase tracking-wide ${
+                    r.sound ? 'bg-rose-950/60 text-rose-300' : 'bg-slate-800 text-slate-400'
+                  }`}
+                  title={
+                    r.sound
+                      ? 'without this rule some candidate would be wrong'
+                      : 'a guess about codegen; the scorer still decides'
+                  }
+                >
+                  {r.sound ? 'required' : 'heuristic'}
+                </span>
+                <span className="first-letter:uppercase">
+                  <InlineCode text={r.why} />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {offer !== 'always' && 'decidedBy' in offer && (
+        <p className="text-xs text-slate-500">
+          Decided by <code className="font-mono text-slate-400">{offer.decidedBy.symbol}</code> in{' '}
+          <code className="font-mono text-slate-400">{offer.decidedBy.file}</code>
+        </p>
+      )}
+      <p className="text-xs text-slate-500">
+        Where it changes nothing, its candidate repeats an earlier source and is not enumerated.
+      </p>
+    </div>
   );
 }
 

@@ -3,7 +3,13 @@
 // `renderToStaticMarkup`: enough to hold that every entry is on the page with its definition, that
 // every link resolves, and that every cost view carries its sentence.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
-import { READER_WORDS, VARIATION_DEFINITIONS, VARIATION_KIND_DEFINITIONS } from '@asmlift/core/variation-definitions';
+import {
+  READER_WORDS,
+  TARGET_BEHAVIOR_READINGS,
+  VARIATION_DEFINITIONS,
+  VARIATION_KIND_DEFINITIONS,
+} from '@asmlift/core/variation-definitions';
+import { readerRules } from '@asmlift/core/variation-gates';
 import { VARIATION_KINDS, VARIATION_TOKENS } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -171,6 +177,31 @@ describe('the variation drawer', () => {
       expect(lit.length).toBeGreaterThan(0);
     },
   );
+
+  test('when it is offered is read from the code: every rule of its tables, its condition, its target', () => {
+    for (const { name } of VARIATION_TOKENS) {
+      const offer = VARIATION_DEFINITIONS[name].offeredWhen;
+      const html = renderToStaticMarkup(
+        <VariationDetailBody name={name} rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
+      );
+      const offered = html.slice(html.indexOf('Offered when'), html.indexOf('In this benchmark'));
+      if (offer === 'always') {
+        expect(offered, name).toContain('On every function.');
+        continue;
+      }
+      const text = [
+        'judges' in offer ? offer.judges : offer.when,
+        ...readerRules(offer.gates ?? []).map((r) => r.why),
+        ...(offer.target ? [TARGET_BEHAVIOR_READINGS[offer.target]] : []),
+      ];
+      for (const piece of text.flatMap(prose)) {
+        expect(offered, name).toContain(escaped(piece.trim()));
+      }
+      if ('decidedBy' in offer) {
+        expect(offered, name).toContain(`>${offer.decidedBy.symbol}</code>`);
+      }
+    }
+  });
 
   test('a subject-taking variation explains its subject; one that takes none does not', () => {
     const render = (name: 'coalesce' | 'unmerge') =>
