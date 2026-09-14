@@ -11,9 +11,10 @@
 //   - a mint position in dead code counts as minted;
 //   - a name that reaches a mint position through a non-literal (a value read out of the registry)
 //     does not count, so such a site turns this test red rather than green;
-//   - a cast (`'x' as Variation`) or an `any` would slip a name past the type gate, so no source
-//     file outside the registry may assert a variation type (an `any` is not asserted: the core
-//     tsconfig is `strict`, so one has to be written);
+//   - a cast (`'x' as Variation`, or `{ variations: [...v, 'x'] } as Setting`, which the checker
+//     only asks to be comparable) or an `any` would slip a name past the type gate, so no source
+//     file outside the registry may assert a variation type or an object type with a property that
+//     holds one (an `any` is not asserted: the core tsconfig is `strict`, so one has to be written);
 //   - a mint position outside the two enumeration files — a definition's `seeAlso` is one — would
 //     count as minting, so every file holding one is named below and a new one fails the roster.
 import { join, relative } from 'node:path';
@@ -43,6 +44,16 @@ function readMintPositions(): { mints: Map<string, Set<string>>; casts: string[]
   const typeNamed = (name: string): ts.Type => checker.getDeclaredTypeOfSymbol(exported.find((s) => s.name === name)!);
   const accepted = [typeNamed('VariationName'), typeNamed('SubjectVariationName')];
   const variationTypes = ['Variation', 'VariationName', 'SubjectVariation', 'SubjectVariationName'].map(typeNamed);
+  const isVariation = (t: ts.Type): boolean =>
+    !(t.flags & ts.TypeFlags.Never) && variationTypes.some((v) => checker.isTypeAssignableTo(t, v));
+  /** A variation type, or an object type with a property holding one or a list of them. */
+  const holdsVariation = (t: ts.Type): boolean =>
+    isVariation(t) ||
+    checker.getPropertiesOfType(t).some((p) => {
+      const held = checker.getTypeOfSymbol(p);
+      const element = checker.isArrayLikeType(held) ? checker.getIndexTypeOfType(held, ts.IndexKind.Number) : held;
+      return element !== undefined && isVariation(element);
+    });
   const isMintPosition = (node: ts.Expression): boolean => {
     const contextual = checker.getContextualType(node);
     return (
@@ -65,8 +76,7 @@ function readMintPositions(): { mints: Map<string, Set<string>>; casts: string[]
           mints.set(node.text, (mints.get(node.text) ?? new Set()).add(where));
         }
       } else if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
-        const asserted = checker.getTypeFromTypeNode(node.type);
-        if (variationTypes.some((t) => checker.isTypeAssignableTo(asserted, t))) {
+        if (holdsVariation(checker.getTypeFromTypeNode(node.type))) {
           casts.push(`${where}: ${node.getText(file)}`);
         }
       }

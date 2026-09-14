@@ -776,9 +776,11 @@ export function enumerateCandidates(
     }
     structureSettings = [
       ...structureSettings,
-      ...structureSettings.map(
-        (s) => ({ ...s, variations: [...s.variations, variation.name], [variation.flag]: true }) as StructureSetting,
-      ),
+      ...structureSettings.map((s) => {
+        const on: StructureSetting = { ...s, variations: [...s.variations, variation.name] };
+        on[variation.flag] = true;
+        return on;
+      }),
     ];
   }
   /** Is this a setting where no structure variation is on, other than `/flip-branch`? The default-setting abort guard's
@@ -1793,7 +1795,7 @@ export function enumerateCandidates(
         let inferredSymbols = new Map<string, SymbolInfo>();
         let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
-          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
+          // A SETTING THAT NAMES ANY VARIATION IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth lift variation sharing the default's already-mutated `base`.
           fn =
             liftSetting.variations.length === 0
@@ -2138,6 +2140,12 @@ export function enumerateCandidates(
                 ...sp.variations,
                 ...symbolSetting.variations,
               ];
+              // Every mint site asks `offeredOn` before it builds a tree, so no thunk runs for a
+              // withheld candidate. This is the invariant those checks keep: a mint that forgets to
+              // ask is an enumeration error, and the drawer's target line stays what enumeration does.
+              if (!offeredOn(target, variations)) {
+                throw new Error(`'${variations.join('/')}' is withheld on ${target.compiler} but was enumerated`);
+              }
               const made: Candidate = {
                 variations,
                 source,

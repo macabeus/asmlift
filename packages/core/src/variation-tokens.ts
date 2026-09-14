@@ -36,11 +36,11 @@ export type VariationKind = (typeof VARIATION_KINDS)[number];
 
 /** The compiler behavior a variation's offer depends on: offered only where the target declares
  *  `behavior`, or, with `declared: false`, only where it does not. `unlessWith` names the variation
- *  whose company lifts the restriction. */
-export interface TargetGate<B extends CompilerBehavior = CompilerBehavior> {
+ *  whose company lifts the restriction; `RegisteredToken` holds it to a registered name. */
+export interface TargetGate<B extends CompilerBehavior = CompilerBehavior, N extends string = string> {
   behavior: B;
   declared: boolean;
-  unlessWith?: string;
+  unlessWith?: N;
 }
 
 type CompilerBehavior = keyof TargetDescription['compilerBehaviors'];
@@ -137,8 +137,12 @@ const TOKENS = [
  *  type error. */
 export type VariationName = (typeof TOKENS)[number]['name'];
 
-/** A registry entry: its name is registered and its target gate names a behavior some entry gates on. */
-export type RegisteredToken = VariationToken & { name: VariationName; target?: TargetGate<GatingBehavior> };
+/** A registry entry: its name is registered, and its target gate names a behavior some entry gates on
+ *  and, in `unlessWith`, a registered variation. */
+export type RegisteredToken = VariationToken & {
+  name: VariationName;
+  target?: TargetGate<GatingBehavior, VariationName>;
+};
 
 export const VARIATION_TOKENS: readonly RegisteredToken[] = TOKENS;
 
@@ -185,11 +189,11 @@ export function variationToken(name: string): RegisteredToken {
 /** May enumeration offer a candidate carrying `variations` on `target`? False when one of them has a
  *  target gate the target's compiler behaviors fail and no variation its `unlessWith` names is among
  *  them. A behavior is declared when present and not `false`. */
-export function offeredOn(target: TargetDescription, variations: readonly string[]): boolean {
+export function offeredOn(target: TargetDescription, variations: readonly Variation[]): boolean {
   const names = variations.map((v) => parseVariation(v).name);
   return names.every((n) => {
     const gate = variationToken(n).target;
-    if (gate === undefined || (gate.unlessWith !== undefined && names.includes(variationToken(gate.unlessWith).name))) {
+    if (gate === undefined || (gate.unlessWith !== undefined && names.includes(gate.unlessWith))) {
       return true;
     }
     const value = target.compilerBehaviors[gate.behavior];

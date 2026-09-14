@@ -280,13 +280,7 @@ describe('a target gate withholds a variation where its compiler behavior says',
   test('the variation a gate names in `unlessWith` lifts it, with or without a subject', () => {
     expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance'])).toBe(false);
     expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', 'volatile'])).toBe(true);
-    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', 'volatile-p0'])).toBe(true);
+    expect(offeredOn(ARMV4T_AGBCC, ['unsigned', 'advance', withSubject('volatile', 'p0')])).toBe(true);
     expect(offeredOn(MIPS_IDO, ['unsigned', 'basefold', 'sinkinit'])).toBe(false);
-  });
-
-  test('every `unlessWith` names a registered variation', () => {
-    const named = VARIATION_TOKENS.flatMap((t) => (t.target?.unlessWith === undefined ? [] : [t.target.unlessWith]));
-    expect(named.filter((n) => !names.includes(n as (typeof names)[number]))).toEqual([]);
-    expect(named.length).toBeGreaterThan(0);
   });
 });
