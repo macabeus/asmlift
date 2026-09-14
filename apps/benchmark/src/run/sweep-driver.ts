@@ -98,7 +98,7 @@ export type SweptCandidate = { variations: readonly string[]; source: string };
  *    - `fanSourceHash` covers the sources alone. It holds still under a change that only renames
  *      variations, and it moves under anything that changes, adds, drops or REORDERS a source —
  *      order being what `compareScored` breaks a score tie by.
- *    - `fanVariationsHash` covers the names alone, each hashed as its `/`-joined presentation
+ *    - `fanNamesHash` covers the names alone, each hashed as its `/`-joined presentation
  *      string. It moves when a candidate is named by a different route while its source stays put.
  *
  *  Exported for `sweep.test.ts`, which pins what each hash can and cannot see: `collect` needs a
@@ -107,7 +107,7 @@ export function fanDigests(cands: readonly SweptCandidate[]): {
   fan: number;
   fanHash: string;
   fanSourceHash: string;
-  fanVariationsHash: string;
+  fanNamesHash: string;
 } {
   const both = createHash('sha1');
   const sources = createHash('sha1');
@@ -121,7 +121,7 @@ export function fanDigests(cands: readonly SweptCandidate[]): {
     names.update(`${name}\0`);
   }
   const hex = (h: ReturnType<typeof createHash>): string => h.digest('hex').slice(0, 12);
-  return { fan: cands.length, fanHash: hex(both), fanSourceHash: hex(sources), fanVariationsHash: hex(names) };
+  return { fan: cands.length, fanHash: hex(both), fanSourceHash: hex(sources), fanNamesHash: hex(names) };
 }
 
 /** A canonical string for an option value: object keys sorted at every depth, `Map` entries sorted,
