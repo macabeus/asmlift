@@ -34,11 +34,10 @@ describe('one definition per registered variation', () => {
 });
 
 describe('the definitions are well-formed', () => {
-  test('every definition carries a title, a summary, a detail, when it is offered and an example', () => {
+  // When it is offered is held to the code in `variation-offers.test.ts`.
+  test('every definition carries a title, a summary, a detail and an example', () => {
     const blank = entries.flatMap(([n, d]) =>
-      [d.title, d.summary, d.detail, d.offeredWhen, d.example.before, d.example.after].some((s) => s.trim() === '')
-        ? [n]
-        : [],
+      [d.title, d.summary, d.detail, d.example.before, d.example.after].some((s) => s.trim() === '') ? [n] : [],
     );
     expect(blank).toEqual([]);
   });

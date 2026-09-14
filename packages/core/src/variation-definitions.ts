@@ -18,7 +18,10 @@
 // paraphrases the argument at its mint site in `rank.ts` / `rank-variations.ts` and at the pass
 // `implementedIn` names; where they disagree, the code is right and this entry is the defect.
 //
-// Pure data: this module stays browser-safe.
+// Pure data: this module stays browser-safe. `offeredWhen` names admission tables by key; their rules
+// are `variation-gates.ts`, which a reader of a title or a summary never loads.
+import type { TargetDescription } from './target';
+import type { GateTableName } from './variation-gates';
 import type { VariationKind, VariationName } from './variation-tokens';
 
 export interface ReaderWord {
@@ -130,6 +133,36 @@ export interface VariationExample {
   note?: string;
 }
 
+/** An export of a core source file, relative to the repository root: where a decision is made. */
+export interface CodePointer {
+  symbol: string;
+  file: string;
+}
+
+/** The target compiler behaviors an offer can require, each as a reader reads it after "a target whose compiler". */
+export const TARGET_BEHAVIOR_READINGS = {
+  foldsConstAddrOffset: 'folds a constant address offset into the literal it loads',
+  arrayShapeFromStride: "loads a declared array's base before it scales the index",
+  nearBaseSpan: 'declares how far one base local may reach a neighbouring address',
+} as const satisfies { readonly [B in keyof TargetDescription['compilerBehaviors']]?: string };
+
+export type TargetBehavior = keyof typeof TARGET_BEHAVIOR_READINGS;
+
+/** When enumeration offers a variation. Wherever it changes nothing, the candidate it would add
+ *  repeats a source an earlier candidate has, and is not enumerated.
+ *
+ *  - `'always'`: on every function.
+ *  - `judges` and `gates`: for each thing `judges` names, a noun phrase, that no rule of `gates`
+ *    refuses. The rules are read from the tables themselves.
+ *  - `when` and `decidedBy`: where no table decides, one sentence and the export that does. `gates`
+ *    names a table that export applies to part of the decision.
+ *
+ *  `target`: offered only on a target whose compiler declares that behavior. */
+export type OfferedWhen =
+  | 'always'
+  | { judges: string; gates: readonly GateTableName[]; target?: TargetBehavior }
+  | { when: string; decidedBy: CodePointer; gates?: readonly GateTableName[]; target?: TargetBehavior };
+
 export interface VariationDefinition {
   /** a short heading: the catalogue row, the drawer title */
   title: string;
@@ -139,9 +172,7 @@ export interface VariationDefinition {
   detail: string;
   /** the compiler behavior that makes the two spellings different objects, where one is known */
   compilerBehavior?: string;
-  /** when enumeration offers the variation at all. Wherever it changes nothing, the candidate it
-   *  would add emits a source an earlier candidate already has and is not enumerated. */
-  offeredWhen: string;
+  offeredWhen: OfferedWhen;
   /** what the trailing `-…` names. Present exactly when the registry entry takes a subject. */
   subject?: { meaning: string; examples: readonly string[] };
   /** a minimal pair: the spelling without the variation, then with it */
@@ -156,6 +187,8 @@ const CALLS =
   'void A(); void B(); void C(); void D(); void X(); void Y(); void P(); void Q(); s32 f(); s32 g(); s32 h(); void use();\n';
 
 const RANK = 'packages/core/src/rank.ts';
+const RANK_VARIATIONS = 'packages/core/src/rank-variations.ts';
+const SYMBOLS = 'packages/core/src/symbols.ts';
 const STRUCTURE = 'packages/core/src/structure/structure.ts';
 const ANALYSIS = 'packages/core/src/structure/analysis.ts';
 const BASECSE = 'packages/core/src/l3/basecse.ts';
@@ -177,7 +210,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Signedness picks the instruction: an arithmetic or a logical right shift, a signed or an unsigned ' +
       'branch after a compare, a sign or a zero extension of a narrower value.',
-    offeredWhen: 'On every function: it is the first variation of every candidate that is not `signed`.',
+    offeredWhen: 'always',
     example: {
       compiler: 'agbcc',
       unit: '@ { return a0 >> a1; }',
@@ -195,9 +228,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Every candidate carries exactly one of `unsigned` and `signed`, so the two counts of one fan add up ' +
       'to its size.',
     compilerBehavior: 'The same as `unsigned`: shifts, compare branches and extensions follow the declaration.',
-    offeredWhen:
-      'Only where some entry parameter can be pinned. Elsewhere the second pass would re-lift an identical ' +
-      'function, so it is not run and the fan carries `unsigned` alone.',
+    offeredWhen: {
+      when: 'Some scalar entry parameter is left for the pin to declare.',
+      decidedBy: { symbol: 'NO_PIN_KINDS', file: RANK_VARIATIONS },
+    },
     example: {
       compiler: 'agbcc',
       unit: '@ { return a0 >> a1; }',
@@ -222,9 +256,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'agbcc leaves a value already in `r0` where it is and branches to the call, so `if (x) f(x);` and ' +
       '`if (x) f();` usually compile alike. Under an equality guard the compiler proves the argument ' +
       'constant and has to load it, and a missing load rules the wider reading out.',
-    offeredWhen:
-      'A call whose arity was guessed admits the shorter reading. A declared prototype records nothing, and ' +
-      'no alternative lift is enumerated.',
+    offeredWhen: {
+      when: 'A call whose arity was guessed passes a register its own block did not set.',
+      decidedBy: { symbol: 'hasSetupArgsNarrowing', file: 'packages/core/src/frontend/ssa.ts' },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 a0) { @ }',
@@ -244,8 +279,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'With one group of cases and a `default:` the two spellings are one object on agbcc. With a second ' +
       'group they differ: the switch builds a balanced dispatch where the chain tests one value after another.',
-    offeredWhen:
-      "This lift's short-circuit fold reports a chain it refused only because it reads as a comparison tree.",
+    offeredWhen: {
+      when: 'The short-circuit fold refused a chain only because it reads as a comparison tree.',
+      decidedBy: { symbol: 'runPreRecovery', file: 'packages/core/src/raise/pre-recovery.ts' },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 x) { @ }',
@@ -263,7 +300,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'region both arms reach is written in each of them. This structures the same raised function again ' +
       "with that shared region as the `if`'s follow: it is written once after the `if`, and every other " +
       'path leaves through an early `return`.',
-    offeredWhen: 'Some `if` has arms that reach a common `return` block and no common block before it.',
+    offeredWhen: {
+      when: 'Some `if` has arms that reach a common `return` block and no common block before it.',
+      decidedBy: { symbol: 'hasDivergentSharedRet', file: STRUCTURE },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 c, s32 x) { @ }',
@@ -280,13 +320,15 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "agbcc's global common-subexpression pass can move a trailing store into every predecessor of a join, " +
       'and the paths then jump into one `store; return` tail. This lift copies that tail back into each ' +
       'path that branches to it, and then structures with the shared follow `shared-ret` uses, so the ' +
-      'store the source wrote once is written after the `if` and the others before an early `return`.',
+      'store the source wrote once is written after the `if` and the others before an early `return`. It is ' +
+      'enumerated apart from `shared-ret` because the sink can delete the shared `return` that variation needs.',
     compilerBehavior:
       'Two sources that lift to the same code (one with the store written once, one with it in each arm) ' +
       'compile to different register assignments, so only the differ can tell which one it was.',
-    offeredWhen:
-      'The sink changed the function and some `if` of the result still shares a `return`. It is kept apart ' +
-      'from `shared-ret` because the sink can delete the shared `return` that variation needs.',
+    offeredWhen: {
+      when: 'The sink changed the function and some `if` of the result still shares a `return`.',
+      decidedBy: { symbol: 'sinkStoreTails', file: 'packages/core/src/raise/tailsink.ts' },
+    },
     example: {
       compiler: 'agbcc',
       unit:
@@ -312,7 +354,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'A compiler that keeps source order lays the `then` arm out first, so the two spellings are two ' +
       'layouts and two objects.',
-    offeredWhen: 'On every function. Where no divergent `if` exists both senses emit one source.',
+    offeredWhen: 'always',
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 c) { @ }',
@@ -331,7 +373,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'above the `if`, with the other path overwriting it. Where the source wrote it is still open, so both ' +
       'placements are enumerated, crossed with branch sense, because emptying an arm changes which sense ' +
       'matches.',
-    offeredWhen: 'On every function. Where no constant can move, both placements emit one source.',
+    offeredWhen: 'always',
     example: {
       compiler: 'agbcc',
       unit: CALLS + 's32 example(s32 c) { s32 v; @ return v; }',
@@ -349,7 +391,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'decision rather than a wider `defsite`: a function holding both kinds of constant has three ' +
       'spellings, and one switch for both would make the middle one unreachable. The two are enumerated as ' +
       'a chain (neither, `defsite`, then `defsite/loop-entry`), so this never appears without `defsite`.',
-    offeredWhen: 'Together with `defsite`, on every function.',
+    offeredWhen: 'always',
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 n) { s32 i = 0; s32 s; @ use(s); }',
@@ -368,7 +410,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "short-circuit fold choosing the orientation, a branch relayed past Thumb's branch range, and a " +
       "loop's zero-trip guard, an `if` no source wrote. The name is relative to the target's default sense.",
     compilerBehavior: 'agbcc emits different bytes for the arms-swapped spelling wherever such an `if` exists.',
-    offeredWhen: 'On every function. Where no two-armed rejoining `if` exists both senses emit one source.',
+    offeredWhen: 'always',
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 c) { @ }',
@@ -385,10 +427,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`flip-branch` and `flip-join` flip every `if` of a function at once, which cannot spell a function ' +
       'whose `if` statements were written in opposite senses. This measurement crosses the whole fan with every mask ' +
       'over the first sites, which costs a factor of two per site, to price that gap and to learn whether ' +
-      "a target's mix is reachable at all.",
-    offeredWhen:
-      'Only when a caller asks for per-site sense bits (the CLI reads `ASMLIFT_PERSITE_SENSE`). No default ' +
-      'fan carries it.',
+      "a target's mix is reachable at all. The CLI asks for it through `ASMLIFT_PERSITE_SENSE`.",
+    offeredWhen: {
+      when: 'Only when the caller asks for per-site sense bits; no default fan carries it.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+    },
     subject: {
       meaning:
         'A decimal bitmask over the branch-sense sites in the order structuring first visits them: bit i set ' +
@@ -414,7 +457,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "A named bitfield read compiles at the declaration's access width. Where that differs from the width " +
       'the assembly loaded, only the shift spelling reproduces the load.',
-    offeredWhen: 'The symbol map declares a bitfield member, and only on the candidates that use the map.',
+    offeredWhen: {
+      when: 'The symbol map declares a bitfield member, and only on the candidates that use the map.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+    },
     example: {
       compiler: 'agbcc',
       unit: 'struct Packed { u8 hearts : 2; u8 stars : 3; u16 dreamStones : 7; u32 unk4; }; extern struct Packed gPacked; u32 example(void) { @ }',
@@ -435,9 +481,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Compiled on agbcc the two are the same instruction count and different objects: they differ in ' +
       'which register the `add` targets.',
-    offeredWhen:
-      'The function names a global whose map entry declares a pointer member with a pointee width of 1, 2 ' +
-      'or 4 bytes, and only on the candidates that use the map.',
+    offeredWhen: {
+      when: 'The map declares a pointer member with a 1, 2 or 4-byte pointee on a global the function names.',
+      decidedBy: { symbol: 'isPtrField', file: SYMBOLS },
+    },
     example: {
       compiler: 'agbcc',
       unit: 'struct BgPtrs { u16 *pMap; }; extern struct BgPtrs gBgPtrs; u16 example(s32 i) { @ }',
@@ -458,9 +505,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Under agbcc, KMC gcc and mwcc the two differ only in where the pool load sits; under IDO they are ' +
       'byte-identical.',
-    offeredWhen:
-      'The function names a global that the symbol map, or its own index strides, declares a ' +
-      'multidimensional array.',
+    offeredWhen: {
+      when: 'The function names a global that the symbol map, or its own index strides, declare a multidimensional array.',
+      decidedBy: { symbol: 'arrayInnerExtents', file: SYMBOLS },
+    },
     example: {
       compiler: 'agbcc',
       unit: 'extern u16 gTbl[4][0x400]; s32 example(s32 r, s32 i) { s32 x; @ return x; }',
@@ -481,7 +529,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'The compiler folds the repeated reads back into one load, and agbcc has been measured landing on ' +
       'both sides inside a single function.',
-    offeredWhen: 'Some load resolves to a named global.',
+    offeredWhen: {
+      when: 'Some load resolves to a named global.',
+      decidedBy: { symbol: 'globalCellOf', file: 'packages/core/src/ir/alias.ts' },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'extern s32 gCount; extern s32 gFlag; void example(void) { @ }',
@@ -500,7 +551,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'The two-sided form needs a second register, at the margin a callee-saved push, and the emptied arm ' +
       'flips the branch sense.',
-    offeredWhen: "A load feeds an argument of a conditional branch's merge.",
+    offeredWhen: {
+      when: "A load feeds an argument of a conditional branch's merge.",
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
     example: {
       compiler: 'mwcc',
       unit: 's32 example(u8 *p) { s32 t; s32 v; @ return v; }',
@@ -518,7 +572,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Whether the source had one variable there is not in the naming, and removing a copy is worth less ' +
       'than it looks, because the compiler coalesces most copies itself. What moves the score is which ' +
       'values share a register.',
-    offeredWhen: 'Some merge is fed by two or more edges.',
+    offeredWhen: {
+      when: 'Some merge is fed by two or more edges.',
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 's32 example(s32 n) { s32 v1; s32 v2; s32 i; @ }',
@@ -534,9 +591,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     detail:
       'A pure computed address dereferenced at two or more sites, and the loads through it, get locals: ' +
       "the source's pointer local and scalar temporary. By default the address is derived again at each use.",
-    offeredWhen:
-      'The lifted function has such an address. Asked separately of each symbol-map setting, because the ' +
-      'map changes how the address is lifted.',
+    offeredWhen: {
+      when: "A symbol-map setting's own lift dereferences one computed address at two or more sites.",
+      decidedBy: { symbol: 'hasHomeableSharedAddress', file: ANALYSIS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 's32 example(u32 a0, u32 a1) { @ }',
@@ -554,7 +612,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A pure value defined outside a loop, with two or more consumers of which at least one is inside it, ' +
       'gets a local of its recovered type: the register the compiler holds across the iterations. By ' +
       'default it is derived again at each use.',
-    offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
+    offeredWhen: {
+      when: "A symbol-map setting's own lift uses a value from before a loop two or more times, once inside it.",
+      decidedBy: { symbol: 'hasLoopSharedPureValue', file: ANALYSIS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 t) { s32 i; @ }',
@@ -572,7 +633,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'renders once inside it. By default the read gets the local and the computation is repeated at each ' +
       'use.',
     compilerBehavior: 'Both compile, and agbcc folds the repeated computation back, so only the score separates them.',
-    offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
+    offeredWhen: {
+      when: "A symbol-map setting's own lift has a value computed from a memory read with two or more consumers.",
+      decidedBy: { symbol: 'hasDerivedReadHome', file: ANALYSIS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + '#define REG_KEYINPUT (*(u16 *)0x4000130)\nvoid example(void) { @ }',
@@ -589,7 +653,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A pure value that the paths into one merge hand to the same variable from two or more places gets a ' +
       'local in the block above them, the value the source computed once before branching. By default ' +
       'there is no name to refer to on a path, and each arm computes it again.',
-    offeredWhen: 'The lifted function has such a value, asked separately of each symbol-map setting.',
+    offeredWhen: {
+      when: "A symbol-map setting's own lift hands one merge the same value from two or more places.",
+      decidedBy: { symbol: 'hasMergeFeedHome', file: ANALYSIS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 's32 example(s32 c, s32 a0) { s32 v; @ return v; }',
@@ -609,7 +676,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'non-negative by the compiler, and asmlift can prove less than the compiler can.',
     compilerBehavior:
       'A compiler emits an unsigned branch from a signed compare only where it proved both sides non-negative.',
-    offeredWhen: 'The function has an unsigned comparison.',
+    offeredWhen: {
+      when: 'The function has an unsigned comparison.',
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 a, s32 b) { @ A(); }',
@@ -627,7 +697,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'parameter. Both are ordinary C over the same values. A merge with its own local also lets `defsite` ' +
       "write a constant above the branch, which a merge that adopted the parameter's name refuses.",
     compilerBehavior: 'With two arguments the two spellings compile to the same bytes on agbcc and mwcc.',
-    offeredWhen: 'Some merge is carried by a parameter.',
+    offeredWhen: {
+      when: 'Some merge is fed a parameter on one edge and a different value on another.',
+      decidedBy: { symbol: 'hasParamRootedMerge', file: STRUCTURE },
+      gates: ['FRESH_MERGE_GATES'],
+    },
     example: {
       compiler: 'mwcc',
       unit: 'u8 example(s32 a0) { s32 v0; @ }',
@@ -647,7 +721,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'defined instead; a cyclic set keeps the recorded order either way.',
     compilerBehavior:
       'The benchmark answers it both ways inside one compiler: some mwcc rows match only with the record, others score better without it.',
-    offeredWhen: "The two orders differ somewhere in the function, asked of each symbol-map setting's own lift.",
+    offeredWhen: {
+      when: "The two orders differ somewhere in a symbol-map setting's own lift.",
+      decidedBy: { symbol: 'edgeCopyOrdersDiffer', file: STRUCTURE },
+    },
     example: {
       compiler: 'agbcc',
       unit:
@@ -670,7 +747,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "The reading rests on gcc laying a condition's arms out in source order. A long branch breaks it " +
       '(gcc inverts the last test and lays the `else` arm first), which is why a relayed edge is never read.',
-    offeredWhen: "This lift's raised function carries a short-circuit fold's orientation record.",
+    offeredWhen: {
+      when: "This lift's raised function carries a short-circuit fold's orientation record.",
+      decidedBy: { symbol: 'STRUCTURE_VARIATIONS', file: RANK_VARIATIONS },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 a, s32 b) { @ }',
@@ -695,9 +775,16 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Sometimes the merged and the per-arm spellings are one object; where only the value merges, the ' +
       'per-arm spelling keeps two literal pools and a branch to the join.',
-    offeredWhen:
-      'An `if` with two non-empty arms is followed by a store, assignment or call that reads temporaries ' +
-      'each arm defines exactly once.',
+    offeredWhen: {
+      judges: 'each `if` followed by a statement that reads what its arms define',
+      gates: [
+        'UNMERGE_SITE_GATES',
+        'UNMERGE_ARM_GATES',
+        'UNMERGE_VALUE_GATES',
+        'UNMERGE_RUNG_GATES',
+        'UNMERGE_TOTALITY_GATES',
+      ],
+    },
     example: {
       compiler: 'agbcc',
       unit: 'void example(s32 c, u16 a, u16 b) { u16 *v16; u16 v17; @ }',
@@ -717,7 +804,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Inline, agbcc finishes one argument before starting the next (`ldr; ldrb; ldr; ldrb`); with named ' +
       'bases it loads both addresses first (`ldr; ldr; ldrb; ldrb`).',
-    offeredWhen: 'Two or more arguments of one call read through distinct pure bases.',
+    offeredWhen: {
+      when: 'Two or more arguments of one call read through distinct pure bases.',
+      decidedBy: { symbol: 'materializeArgBases', file: l3('argbase') },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'extern u8 gEntityArray[]; void example(void) { @ }',
@@ -738,7 +828,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "gcc 2.9's fold turns `-(a - b)` into `b - a`. On the shared shape agbcc, IDO, KMC gcc and gcc 2.7.2 " +
       'each emit two different functions for the two spellings; mwcc emits one.',
-    offeredWhen: 'A negated subtraction whose subtraction also appears elsewhere, with no effect inside it.',
+    offeredWhen: {
+      when: 'A negated subtraction whose subtraction also appears elsewhere, with no effect inside it.',
+      decidedBy: { symbol: 'zeroSubNegates', file: l3('zerosub') },
+    },
     example: {
       compiler: 'agbcc',
       unit: 's32 example(s32 a, s32 b) { @ return 0; }',
@@ -759,7 +852,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'A volatile memory reference may not be moved or combined, which reorders the loop optimizer and lands ' +
       'the register allocator on different homes.',
-    offeredWhen: "A pointer local is assigned a numeric address and never a value containing a global's address.",
+    offeredWhen: {
+      when: "A pointer local is assigned a numeric address and never a value containing a global's address.",
+      decidedBy: { symbol: 'volatilePtrLocals', file: l3('volatileptr') },
+    },
     subject: {
       meaning:
         'The locals qualified, joined by hyphens: `volatile-p1` qualifies only `p1`. With no subject every eligible ' +
@@ -782,9 +878,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`volatile` on a scalar local forces its value into memory: without it the allocator may keep the ' +
       'value in a callee-saved register across a call. A value kept in a stack slot can also come from an ' +
       'address-taken local or from register pressure, so the assembly does not say which the source used.',
-    offeredWhen:
-      'A scalar local the lift recovered as a stack slot, not already volatile, not address-taken, and ' +
-      'whose reads and writes are exactly the ones the machine performed.',
+    offeredWhen: { judges: 'each local the lift recovered as a stack slot', gates: ['VOL_SLOT_GATES'] },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(void) { @ sp0 = f(); g(); h(sp0); }',
@@ -805,7 +899,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "agbcc's loop optimizer promotes an unqualified store to a fixed address into a register and writes " +
       'it once after the loop. A qualified store stays in the loop body, so no loop driving a device ' +
       'register matches without it.',
-    offeredWhen: "A store's whole address is a constant inside the target's declared device-register window.",
+    offeredWhen: { judges: 'each store through an address', gates: ['VOL_STORE_GATES'] },
     example: {
       compiler: 'agbcc',
       unit: 'void example(s32 n) { s32 i; for (i = 0; i < n; i++) { @ } }',
@@ -827,7 +921,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "A compiler-created induction value is initialized below the loop's hoisted invariants, a slot no C " +
       'statement before the loop can reach.',
-    offeredWhen: 'A loop steps an accumulator by a constant alongside a counter stepped by a constant.',
+    offeredWhen: {
+      judges: 'each accumulator a loop steps by a constant alongside a counter stepped by a constant',
+      gates: ['UNREDUCE_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: '#define REG 0x40000d4\nvoid example(s32 a0, s32 a1) { s32 v0; s32 v1 = 0; @ }',
@@ -848,7 +945,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'A pointer and an `s32` are different alias sets. At `-O2` the loop optimizer may hoist a pointer ' +
       "field's load past an `s32` store it must otherwise keep behind.",
-    offeredWhen: 'A recovered 32-bit integer field that is only read and never dereferenced.',
+    offeredWhen: { judges: 'each recovered struct field', gates: ['PTR_FIELD_GATES'] },
     example: {
       compiler: 'agbcc',
       unit: 'struct S { s32 field_0; @ }; void example(struct S *s, s32 lo) { s32 i; for (i = lo; i < 32; i++) { *(volatile s32 *)0x40000d4 = (s32)s->field_4 + i * 64; } }',
@@ -870,7 +967,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'On a compiler that folds a constant address offset, a subscript folds into the literal ' +
       '(`.word 0x3003476` + `ldrh r0, [r0]`) while a member stays in the operand (`.word 0x3003468` + ' +
       '`ldrh r0, [r0, #0xe]`).',
-    offeredWhen: 'The target folds constant address offsets, and a leaf base kept its offset in the load.',
+    offeredWhen: {
+      judges: 'each fixed-address base a load reads through',
+      gates: ['OFFMEMBER_GATES'],
+      target: 'foldsConstAddrOffset',
+    },
     example: {
       compiler: 'agbcc',
       unit: 'struct S { u8 pad[14]; u16 m14; }; s32 example(void) { s32 x; @ return x; }',
@@ -892,9 +993,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "The local's assignment is scheduled ahead of the rest of the entry block, so the pool load moves in " +
       'front of the frame address the target materializes first.',
-    offeredWhen:
-      'A pointer local assigned once, at the top level, from a nonzero constant, used only as the base of ' +
-      'two or more accesses, never address-taken and not a stack slot.',
+    offeredWhen: { judges: 'each local holding a constant', gates: ['INLINEBASE_GATES'] },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 n) { s32 i; @ }',
@@ -912,7 +1011,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'everything before an `if` arm that alone uses it. This assigns the local in the innermost statement ' +
       "list holding all of its uses. It also sees the bare `gSym[i]` spelling a map's declared array " +
       'produces, which the default hoist does not.',
-    offeredWhen: 'A global base reused at two or more sites, all of them inside one nested list.',
+    offeredWhen: {
+      judges: 'each global base whose uses all sit inside one nested statement list',
+      gates: ['SCOPEBASE_ELIGIBILITY', 'SCOPEBASE_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'extern u16 gTbl[]; void example(s32 c, u16 a) { u16 *p; @ }',
@@ -931,7 +1033,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'agbcc distinguishes the number of locals with disjoint lifetimes, not where they are declared: the ' +
       'function-top and block-scoped declarations assemble identically, and a count of one does not.',
-    offeredWhen: 'A global base used in two or more disjoint regions.',
+    offeredWhen: {
+      judges: 'each global base, in each region that uses it',
+      gates: ['SCOPEBASE_ELIGIBILITY', 'REGIONBASE_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: 'extern u8 gTbl[]; void example(s32 c, u8 a, u8 b, u8 d, u8 e) { u8 *p; u8 *p0; u8 *p1; @ }',
@@ -948,10 +1053,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Which locals the register allocator gave one register is not in the tree, and picking the first ' +
       'legal merge gets it wrong, so every legal single merge is its own candidate. It is offered in two cases: the ' +
       'lifetimes are disjoint in statement order, or one `if` picks between the two.',
-    offeredWhen:
-      'Two locals of one type, neither a parameter nor volatile, whose lifetimes are disjoint and are not ' +
-      'both re-run by one loop; or two locals first set to constants in opposite arms of an `if` outside ' +
-      'any loop.',
+    offeredWhen: {
+      judges: 'each pair of locals, by statement order and by opposite arms of one `if`',
+      gates: ['COALESCE_GATES', 'ARM_DISJOINT_GATES'],
+    },
     subject: {
       meaning:
         'The two locals, joined by a hyphen: `coalesce-v0-v1` renames `v0` to `v1` and drops the declaration of `v0`.',
@@ -975,10 +1080,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'and recompiling the walk rarely reproduces the bytes the indexed source produced. This writes the ' +
       'indexed loop back.',
     compilerBehavior: 'The two spellings get a different induction variable and a different register allocation.',
-    offeredWhen:
-      'A narrow loop shape: a pointer stepped by one element as the loop step, initialized just before the ' +
-      'loop, used only as a subscript base or in the bound test, and not read after the loop; or the ' +
-      'counted do-while agbcc emits for such a loop.',
+    offeredWhen: {
+      when: 'A loop walks a pointer one element per step, or counts down the do-while agbcc emits for an indexed loop.',
+      decidedBy: { symbol: 'reindexWalks', file: l3('reindex') },
+      gates: ['COUNTDOWN_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(u8 *base, s32 n) { u8 *p = base; s32 i; @ }',
@@ -995,10 +1101,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The default base hoist refuses a base reused inside a loop or at a repeated constant offset, ' +
       'predicting that the compiler loads the address again. A memory-mapped poll (store, then re-read the ' +
       'same register while it spins) is where that prediction is wrong: the compiler holds one register ' +
-      'across the stores, the loop and the read-back. This hoist admits those bases.',
-    offeredWhen:
-      'A leaf base reached at two or more sites that the default hoist refused. Its combinations with ' +
+      'across the stores, the loop and the read-back. This hoist admits those bases. Its combinations with ' +
       '`indexed`, `sinkinit`, `nearbase`, `coalesce` and `homesplit` are enumerated beside it.',
+    offeredWhen: { judges: 'each fixed-address base the default hoist left inline', gates: ['LIVEBASE_GATES'] },
     example: {
       compiler: 'agbcc',
       unit: 'void example(u32 go) { @ }',
@@ -1015,7 +1120,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Which of several numeric bases the source named is per base: a DMA register block wants one register ' +
       'held across the body while the RAM halfword beside it is loaded each time. This is `livebase` with ' +
       'every base reached at a single fixed offset left inline.',
-    offeredWhen: 'Where `livebase` is, and it binds a different set of bases.',
+    offeredWhen: {
+      judges: 'each fixed-address base the default hoist left inline',
+      gates: ['LIVEBASE_BLOCK_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: 'void example(u32 src, u32 go) { u32 *p = (u32 *)0x40000d4; u16 *q = (u16 *)0x3001048; @ }',
@@ -1036,7 +1144,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "agbcc folds a constant subscript into the literal it loads and keeps a named base's offset in the " +
       'instruction.',
-    offeredWhen: 'The target folds constant address offsets, and a base kept its offset in the load.',
+    offeredWhen: {
+      judges: 'each fixed-address base the default hoist left inline',
+      gates: ['BASEFOLD_GATES'],
+      target: 'foldsConstAddrOffset',
+    },
     example: {
       compiler: 'agbcc',
       unit: 's32 example(void) { s32 x; @ return x; }',
@@ -1053,7 +1165,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'Admits a base reached two or more times whose offset survived into the load, and assigns its local ' +
       'at the first use. Where it binds a base another hoist already names it takes the name, so its count ' +
       'includes renames.',
-    offeredWhen: 'The target folds constant address offsets, and such a base exists.',
+    offeredWhen: {
+      judges: 'each fixed-address base the default hoist left inline',
+      gates: ['UNFOLDED_GATES'],
+      target: 'foldsConstAddrOffset',
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 's32 example(void) { u16 *p; s32 x; s32 y; @ return x + y; }',
@@ -1073,8 +1189,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "On agbcc the array subscript expansion loads a declared array's base first and scales the index " +
       'first for the inline cast.',
-    offeredWhen:
-      "The target's compiler loads a declared array's base before its index (agbcc does), and the assembly loaded this base in that order.",
+    offeredWhen: {
+      judges: 'each fixed-address base the default hoist left inline',
+      gates: ['ORDERBASE_GATES'],
+      target: 'arrayShapeFromStride',
+    },
     example: {
       compiler: 'agbcc',
       unit: 'struct S { u16 f; u16 g; }; extern u8 gTbl[]; s32 example(s32 i) { s32 x; s32 y; @ return x + y; }',
@@ -1091,7 +1210,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'The same admission as `orderbase`, with the assignment placed in the nested statement list holding ' +
       'every use. Where no nested list holds them all it declines rather than repeat the flat placement.',
     compilerBehavior: 'The same assignment above an `if` and inside its arm compile differently on agbcc.',
-    offeredWhen: 'Where `orderbase` is, and a nested list holds every use of the base.',
+    offeredWhen: {
+      judges: 'each fixed-address base the default hoist left inline, whose uses one nested statement list holds',
+      gates: ['ORDERBASE_GATES'],
+      target: 'arrayShapeFromStride',
+    },
     example: {
       compiler: 'agbcc',
       unit: 'struct S { u16 f; u16 g; }; extern u8 gTbl[]; s32 example(s32 c, s32 i) { struct S *p; s32 x = 0; @ return x; }',
@@ -1109,7 +1232,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`regionbase` splits every base it admits. A function whose two bases want opposite answers is spelled ' +
       'by neither. This runs the hoist with one base withheld, then splits that base per region. It always ' +
       'follows `livebase` or `livebase-block` in a name.',
-    offeredWhen: '`livebase` or `livebase-block` holds two or three bases in pointer locals.',
+    offeredWhen: {
+      judges: 'each base a `livebase` or `livebase-block` hoist holds in a pointer local',
+      gates: ['HOMESPLIT_FAN_GATES', 'HOMESPLIT_GATES'],
+    },
     subject: {
       meaning:
         'The withheld base, then `.`, its access width in bytes and `s` or `u` for signedness: ' +
@@ -1136,7 +1262,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'gcc. IDO and mwcc load the independent operand above the multiply, so evaluation order spells a ' +
       'product-first source the other way round.',
     compilerBehavior: 'IDO and mwcc schedule the load of `c` in `a * b + c` above the multiply.',
-    offeredWhen: 'A `+` with exactly one product operand and no effect in either operand.',
+    offeredWhen: {
+      when: 'A `+` with exactly one product operand and no effect in either operand.',
+      decidedBy: { symbol: 'mulFirstSums', file: l3('mulfirst') },
+    },
     example: {
       compiler: 'ido',
       unit: 'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; }; s32 example(struct Bg *bg) { s32 x; @ return x; }',
@@ -1155,7 +1284,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'Past the load range the compiler derives a cell with an `add` off one pool word instead of loading a ' +
       'second literal.',
-    offeredWhen: 'The target declares a derivation reach, and two or more distinct constant addresses fall within it.',
+    offeredWhen: {
+      when: "Two or more distinct constant addresses fall within the target's derivation reach.",
+      decidedBy: { symbol: 'nearBaseClusters', file: l3('nearbase') },
+      target: 'nearBaseSpan',
+    },
     example: {
       compiler: 'agbcc',
       unit: 's32 example(void) { s32 x; s32 y; @ return x + y; }',
@@ -1170,13 +1303,15 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'accesses the machine made through one moving register are written through a stepped pointer',
     detail:
       'The assembly held an address in a register, used it, added to it and used it again. The lift folds ' +
-      'that pair into two constant addresses and records that it did; this writes the stepped pointer.',
+      'that pair into two constant addresses and records that it did; this writes the stepped pointer. The ' +
+      'chain is read off constant addresses, so a symbol map that names them hides it.',
     compilerBehavior:
       'agbcc folds `p = p + 1; *p` back into `[r3, #2]`, so the plain spelling is not offered there; ' +
       '`advance/volatile`, which bars the fold, is.',
-    offeredWhen:
-      'A chain of accesses the target stepped one register between, without a symbol map. The plain form is ' +
-      'withheld on a target that folds a pointer advance.',
+    offeredWhen: {
+      judges: 'each chain of accesses the machine made through one stepped register',
+      gates: ['ADVANCE_HEAD_GATES', 'ADVANCE_MEMBER_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: 'void example(u16 a, u16 b) { @ }',
@@ -1194,7 +1329,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'at all, so its position falls out of emission order. The compiler may have parked before anything ' +
       'else ran. Only plain assignments of parameters and constants in the leading run move, never across a ' +
       'statement that touches what they read or write.',
-    offeredWhen: 'The leading run of assignments holds a parameter or constant copy that can move ahead.',
+    offeredWhen: {
+      when: 'The leading run of assignments holds a parameter or constant copy that can move ahead.',
+      decidedBy: { symbol: 'parkParamsFirst', file: l3('parkfirst') },
+    },
     example: {
       compiler: 'agbcc',
       unit: 's32 example(s32 a0, s32 a1) { s32 v0; s32 v1; s32 v2; s32 v3; s32 i; @ v2 = ((u8 *)a0)[4]; v3 = ((u8 *)a0)[5]; for (i = 0; i < a1; i++) { v0 += v1 * v2; v1 += v3; v2 += v0; v3 += v1; } return v0 + v1 + v2 + v3; }',
@@ -1215,7 +1353,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'On `synthetic:basehome` the top assignment costs a callee-saved push and pop that the first-use ' +
       'assignment avoids.',
-    offeredWhen: 'The body starts with base-pointer assignments whose first use is further down.',
+    offeredWhen: {
+      when: 'The body starts with base-pointer assignments whose first use is further down.',
+      decidedBy: { symbol: 'sinkInitsToFirstUse', file: l3('sinkinit') },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'extern u8 gTbl[]; void example(void) { u8 *p; @ }',
@@ -1233,8 +1374,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'plus an in-place update on one arm, a large constant staged in its own register, a return value ' +
       'built in another register. This writes them back, in the top-level statement list only. With no ' +
       'subject it applies the first two; a subject adds a return assignment.',
-    offeredWhen:
-      'A top-level `if` whose arms set one variable from one pure value, or a constant expression used as an operand.',
+    offeredWhen: {
+      when: 'A top-level `if` whose arms set one variable from one pure value, or a constant expression used as an operand.',
+      decidedBy: { symbol: 'registerishSpellings', file: l3('regspell') },
+    },
     subject: {
       meaning:
         'How the returned value is written. `regcopy-ret` assigns it to the variable the copy left unused ' +
@@ -1259,9 +1402,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       '`if (0 < n) { i = 0; do … }` compiles with it behind the branch, and both lift to the same code. It ' +
       "touches private locals only. Applied on top of every other candidate's source, alone and together " +
       'with `pollguard` and `pollread`.',
-    offeredWhen:
-      'An `if` whose arms both start with the same constant assignment, or whose then-arm starts by ' +
-      'assigning the value its condition compares.',
+    offeredWhen: {
+      when: 'An `if` whose arms both start with the same constant assignment, or whose then-arm assigns the value its condition compares.',
+      decidedBy: { symbol: 'initFirstGuards', file: l3('initfirst') },
+    },
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 n) { s32 v; @ }',
@@ -1281,7 +1425,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       'gcc merges the guard into the bottom test late, after flow counted its reads, which reorders the ' +
       "allocator's priorities for the whole function.",
-    offeredWhen: 'The function has an empty-bodied `do … while`.',
+    offeredWhen: {
+      when: 'The function has an empty-bodied `do … while`.',
+      decidedBy: { symbol: 'pollGuards', file: l3('pollguard') },
+    },
     example: {
       compiler: 'agbcc',
       unit: 'void example(volatile u32 *dma, u8 *dst, s32 n) { s32 i; for (i = 0; i < n; i++) { dma[0] = (u32)dst + i; dma[2] = 0x80000020; @ } }',
@@ -1300,8 +1447,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "the number of iterations. Applied on top of every other candidate's source.",
     compilerBehavior:
       'The named spelling materializes an extra register and instruction that the in-condition spelling does not.',
-    offeredWhen:
-      "A loop whose only statement re-reads the local its condition tests, into the function's own non-volatile local.",
+    offeredWhen: {
+      when: "A loop whose only statement re-reads the local its condition tests, into the function's own non-volatile local.",
+      decidedBy: { symbol: 'pollReads', file: l3('pollguard') },
+    },
     example: {
       compiler: 'agbcc',
       unit: '#define BUSY 0x80000000\nvoid example(u32 *dma) { u32 v; @ }',
@@ -1321,7 +1470,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "names globals the literal pool or a relocation spells; it drops only the map's shaped spellings. At " +
       'equal score the named spelling wins, so this is published only where it scores better.',
     compilerBehavior: 'On agbcc a named global changes when the address is loaded.',
-    offeredWhen: 'A symbol map was supplied. A row without a map has one symbol-map setting and never carries it.',
+    offeredWhen: {
+      when: 'A symbol map was supplied; a row without one never carries it.',
+      decidedBy: { symbol: 'enumerateCandidates', file: RANK },
+    },
     example: {
       compiler: 'agbcc',
       unit: 'extern struct { u8 pad[4]; u8 field; } gCounter; s32 example(void) { s32 x; @ return x; }',
