@@ -18,6 +18,7 @@ import { TOOLCHAIN_LABEL, VARIATION_KIND_COLOR } from '../theme';
 import { OutcomeBadge } from './ui/Badge';
 import { InlineCode } from './ui/InlineCode';
 import { NotWaste } from './ui/NotWaste';
+import { followInPlace } from './ui/follow-in-place';
 
 const CODE_PRE = 'rounded-md bg-slate-950/70 p-3 text-[12px] leading-relaxed text-slate-200';
 
@@ -81,15 +82,6 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 
 function Caption({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] uppercase tracking-wide text-slate-500">{children}</div>;
-}
-
-/** A plain left-click is taken over so the drawer swap goes through the URL state; any modified
- *  click keeps the browser's own handling of the real `href`. */
-function followInPlace(e: React.MouseEvent, follow: () => void): void {
-  if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-    e.preventDefault();
-    follow();
-  }
 }
 
 export function VariationDetailBody({

@@ -119,7 +119,13 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
       <main>
         {tab === 'overview' && <Overview rows={results} onExplore={openExplorer} />}
         {tab === 'explorer' && (
-          <Explorer rows={results} onOpenInPlayground={onOpenInPlayground} onOpenFeature={openFeature} />
+          <Explorer
+            rows={results}
+            hash={hash}
+            onOpenInPlayground={onOpenInPlayground}
+            onOpenFeature={openFeature}
+            onOpenVariation={openVariation}
+          />
         )}
         {tab === 'fan' && <FanExplorer rows={results} hash={hash} onOpenVariation={openVariation} />}
         {tab === 'gap' && <GapAnalysis rows={results} onExplore={openExplorer} />}

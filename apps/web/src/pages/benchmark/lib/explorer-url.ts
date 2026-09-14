@@ -9,7 +9,7 @@ export const TAB_IDS = ['overview', 'explorer', 'fan', 'gap', 'methodology'] as 
 export type TabId = (typeof TAB_IDS)[number];
 export const tabParser = parseAsStringLiteral(TAB_IDS).withDefault('overview');
 
-export const SORT_KEYS = ['sym', 'project', 'toolchain', 'asmlift', 'm2c'] as const;
+export const SORT_KEYS = ['sym', 'project', 'toolchain', 'asmlift', 'm2c', 'fan'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export const SORT_PARSERS = {
   sort: parseAsStringLiteral(SORT_KEYS).withDefault('sym'),

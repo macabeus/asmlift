@@ -15,6 +15,7 @@ import { VariationPricePerWin } from './charts/VariationPricePerWin';
 import { InlineCode } from './ui/InlineCode';
 import { NotWaste } from './ui/NotWaste';
 import { Panel } from './ui/Section';
+import { followInPlace } from './ui/follow-in-place';
 
 /** `1,234` below ten thousand, `12k` above: the catalogue's columns are narrow. */
 function count(n: number): string {
@@ -131,12 +132,7 @@ function CatalogueEntry({
   return (
     <a
       href={variationHref(s.name, hash)}
-      onClick={(e) => {
-        if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          onOpenVariation(s.name);
-        }
-      }}
+      onClick={(e) => followInPlace(e, () => onOpenVariation(s.name))}
       className="flex flex-col gap-2 border-t border-slate-800 px-4 py-3 first:border-t-0 hover:bg-slate-800/40 sm:flex-row sm:items-center sm:gap-4"
     >
       <div className="min-w-0 flex-1">

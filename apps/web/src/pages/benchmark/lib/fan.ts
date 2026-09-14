@@ -17,7 +17,9 @@ import {
   VARIATION_TOKENS,
   type VariationKind,
   type VariationName,
+  type VariationTally,
   parseVariation,
+  variationToken,
 } from '@asmlift/core/variation-tokens';
 
 export interface VariationStats {
@@ -134,6 +136,93 @@ export function fanCoverage(rows: readonly FunctionResult[]): { rows: number; ca
     }
   }
   return { rows: n, candidates };
+}
+
+/** Past this many candidates a row's fan size is shown in the Function Explorer; at or below it the
+ *  cell stays blank. The column is sparse on purpose: a few rows hold most of the candidates, and a
+ *  number on every row would read as a ranking of rows that the fan's size is not. */
+export const FAN_CHIP_FLOOR = 100;
+
+/** A row's fan size when the Function Explorer shows it, null when the cell is blank. */
+export function fanChip(row: FunctionResult): number | null {
+  const n = row.asmlift.fanSize;
+  return n !== undefined && n > FAN_CHIP_FLOOR ? n : null;
+}
+
+/** The Function Explorer's fan-column order. Blank cells sort last in BOTH directions, by symbol:
+ *  a sparse column sorted ascending would otherwise open on hundreds of blank rows. */
+export function compareFanChip(a: FunctionResult, b: FunctionResult, dir: 1 | -1): number {
+  const av = fanChip(a);
+  const bv = fanChip(b);
+  if (av === null || bv === null) {
+    return av === bv ? a.sym.localeCompare(b.sym) : av === null ? 1 : -1;
+  }
+  return (av - bv) * dir || a.sym.localeCompare(b.sym);
+}
+
+/** `440`, `8.4k`, `27k`: a table chip has room for about four characters. */
+export function compactCount(n: number): string {
+  if (n < 1000) {
+    return String(n);
+  }
+  return n < 9_950 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${Math.round(n / 1000)}k`;
+}
+
+/** Items of one variation kind, in a list grouped by kind. */
+export interface KindGroup<T> {
+  kind: VariationKind;
+  items: T[];
+}
+
+/** `items` grouped by kind, in `VARIATION_KINDS` order, with no empty group; each group keeps the
+ *  order `items` came in. */
+function groupByKind<T extends { name: VariationName }>(items: readonly T[]): KindGroup<T>[] {
+  return VARIATION_KINDS.map((kind) => ({
+    kind,
+    items: items.filter((it) => variationToken(it.name).variationKind === kind),
+  })).filter((g) => g.items.length > 0);
+}
+
+/** One part of the winner's variations, as published, with this row's fan tally for its name. */
+export interface SpellingPart {
+  part: string;
+  name: VariationName;
+  subject?: string;
+  /** absent when the artifact did not record the row's fan */
+  tally?: VariationTally;
+}
+
+/** The winning spelling: the winner's variations grouped by kind, each kind in the order the winner
+ *  applied them. Empty when the row has no winner. */
+export function winningSpelling(row: FunctionResult): KindGroup<SpellingPart>[] {
+  const parts = (row.asmlift.winnerVariations ?? []).map((part) => {
+    const { name, subject } = parseVariation(part);
+    return { part, name, subject, tally: row.asmlift.fanVariations?.[name] };
+  });
+  return groupByKind(parts);
+}
+
+/** A variation the row's fan carried and its winner does not. */
+export interface LostVariation {
+  name: VariationName;
+  tally: VariationTally;
+}
+
+/** What the row considered and lost: every variation its fan carried that the winner does not,
+ *  grouped by kind, most candidates first. On a row with no winner that is every variation the fan
+ *  carried. Null when the artifact did not record the row's fan, which is not the same as nothing
+ *  lost. */
+export function consideredButLost(row: FunctionResult): KindGroup<LostVariation>[] | null {
+  const roster = row.asmlift.fanVariations;
+  if (!roster) {
+    return null;
+  }
+  const won = winnerNames(row);
+  const lost = Object.entries(roster)
+    .map(([key, tally]) => ({ name: parseVariation(key).name, tally }))
+    .filter((v) => !won.has(v.name))
+    .sort((a, b) => b.tally.candidates - a.tally.candidates || (a.name < b.name ? -1 : 1));
+  return groupByKind(lost);
 }
 
 /** One part of a winner's variations, with whether it is the variation being looked at. */

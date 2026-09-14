@@ -2,9 +2,11 @@ import { type DecompilerId, type FunctionResult, type Outcome, resolveRow } from
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
+import { Pill } from '../../../shared/components/Pill';
 import type { ShareState } from '../../../shared/utils/permalink';
 import { declineClassesOf } from '../lib/declines';
 import { FILTER_PARSERS, FILTER_URL_KEYS, SORT_PARSERS, type SortKey, type Verdict } from '../lib/explorer-url';
+import { FAN_CHIP_FLOOR, compactCount, compareFanChip, fanChip } from '../lib/fan';
 import { canOpenInPlayground, playgroundShare } from '../lib/playground';
 import { distinct, tally } from '../lib/stats';
 import { DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
@@ -65,16 +67,34 @@ function ScoreCell({ result }: { result: FunctionResult['asmlift'] }) {
   );
 }
 
+/** A row's fan size, past `FAN_CHIP_FLOOR` only. Neutral on purpose: a fan's size says nothing about
+ *  the row's outcome, and one of the largest fans in the benchmark belongs to a row that does not
+ *  compile. */
+function FanCell({ row }: { row: FunctionResult }) {
+  const n = fanChip(row);
+  return n === null ? null : (
+    <Pill mono size="xs" title={`${n.toLocaleString()} candidates in this row's fan`}>
+      {compactCount(n)}
+    </Pill>
+  );
+}
+
 export function Explorer({
   rows,
+  hash,
   onOpenInPlayground,
   onOpenFeature,
+  onOpenVariation,
 }: {
   rows: FunctionResult[];
+  /** the live fragment, for links that open a drawer over the current view */
+  hash: string;
   /** hand a row's input to the playground view (the shell switches views + seeds the editor) */
   onOpenInPlayground: (s: ShareState) => void;
   /** open a feature's definition drawer (the "read more →" in the picker, or a tag chip) */
   onOpenFeature: (id: string) => void;
+  /** open a variation's drawer (a variation in the row detail's winning spelling) */
+  onOpenVariation: (name: string) => void;
 }) {
   // All URL state: filters replace history (no spam while narrowing), the selected row pushes
   // (Back closes the detail). Benchmark.tsx writes the same keys for the preset deep links.
@@ -157,6 +177,9 @@ export function Explorer({
 
     const dir = sortDir === 'asc' ? 1 : -1;
     out.sort((a, b) => {
+      if (sortKey === 'fan') {
+        return compareFanChip(a, b, dir); // blank cells last in both directions
+      }
       let cmp = 0;
       switch (sortKey) {
         case 'sym':
@@ -189,7 +212,9 @@ export function Explorer({
     if (sortKey === key) {
       void setSort({ dir: sortDir === 'asc' ? 'desc' : 'asc' });
     } else {
-      void setSort({ sort: key, dir: null }); // null resets dir to its 'asc' default
+      // The fan opens largest first, the question the column answers; every other key reads naturally
+      // ascending, its 'asc' default (null clears it).
+      void setSort({ sort: key, dir: key === 'fan' ? 'desc' : null });
     }
   };
 
@@ -320,6 +345,14 @@ export function Explorer({
               <Th>
                 <span title="best compiling candidate's objdiff diff (differing/total instructions)">Gap</span>
               </Th>
+              <Th onClick={() => toggleSort('fan')}>
+                <span
+                  title={`candidates in the row's fan, shown past ${FAN_CHIP_FLOOR}; a fan's size says nothing about the outcome`}
+                >
+                  Fan
+                </span>
+                {arrow('fan')}
+              </Th>
               <Th> </Th>
             </tr>
           </thead>
@@ -353,6 +386,9 @@ export function Explorer({
                   {r.gapSize ? <GapBadge gap={r.gapSize} /> : <span className="text-xs text-slate-600">—</span>}
                 </td>
                 <td className="px-3 py-2">
+                  <FanCell row={r} />
+                </td>
+                <td className="px-3 py-2">
                   {canOpenInPlayground(r) && (
                     <button
                       title="Open in playground"
@@ -373,7 +409,7 @@ export function Explorer({
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-10 text-center text-slate-500">
+                <td colSpan={9} className="px-3 py-10 text-center text-slate-500">
                   No functions match these filters.
                 </td>
               </tr>
@@ -392,6 +428,8 @@ export function Explorer({
           onClose={() => void setSelectedId(null, { history: 'replace' })}
           onOpenInPlayground={onOpenInPlayground}
           onOpenFeature={onOpenFeature}
+          hash={hash}
+          onOpenVariation={onOpenVariation}
         />
       )}
     </div>
