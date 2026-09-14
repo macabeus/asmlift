@@ -182,14 +182,14 @@ test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, 
 // …AND THE PRE-RESPELL NAME HAS TO REACH THE VARIATION REFUSALS TOO, not just the default emit's. The
 // test above refuses the pre-respell tree's DEFAULT source, which makes `respellTree` report and return
 // before a single re-spelling runs — so it cannot see the four other `onEnumerationError` sites inside
-// that function, each of which is reachable from both fans and each of which already carries a
-// suffix naming a VARIATION. On a pre-respell tree that variation is a variation applied to the REWRITE, so a
+// that function, each of which is reachable from both fans and each of which already carries the
+// VARIATIONS it refused. On a pre-respell tree those are variations applied to the REWRITE, so a
 // refusal of `/unmerge/volatile` reported as `/volatile` sends the reader at a spelling that did
 // not fail and is still in the fan — the same wrong cause, one variation further down.
 //
 // The fixture therefore keeps the pre-respell tree SPELLABLE and refuses only what a variation built on
 // top of it emitted.
-test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-respell suffix too', () => {
+test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-respell variation too', () => {
   // Same cross-jump shape as above, plus a device-block base written at two displacements before
   // the `if` — a numeric-address pointer local that survives `/unmerge`, so the unmerged tree
   // still admits `/volatile` and the fan reaches `unsigned/unmerge/volatile`.

@@ -1,4 +1,4 @@
-// The variation registry, held to itself.
+// The variation registry, held to itself and to the shipped targets.
 //
 // Whether the code that mints variations still mints every entry is `variation-mints.test.ts`. The
 // corpus-scale checks — every name the committed artifact publishes and every name the enumerated

@@ -140,10 +140,10 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
   });
 });
 
-// The `/sinkinit` SUFFIX has two producers in `rank.ts` — `/livebase*/sinkinit` composes a second
+// The `sinkinit` VARIATION has two producers in `rank.ts` — `/livebase*/sinkinit` composes a second
 // pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a name
 // read out of a `[score]` log or an artifact row does not say which. They must therefore be the
-// SAME TRANSFORM, or one suffix names two things in the namespace cross-round attribution greps.
+// SAME TRANSFORM, or one name means two things in the namespace cross-round attribution greps.
 describe('composition and argument are one transform: sink(head(x)) === firstUse(x)', () => {
   // The only place they could disagree is the order of the inits that CANNOT move, which is the
   // half of the run whose order the compiler still reads as pool-load order. `placeBaseLocals`

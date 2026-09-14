@@ -788,7 +788,7 @@ export function enumerateCandidates(
    *  is broken rather than that one variation cannot spell this tree.
    *
    *  `s.variations.length === 0` IS NOT THE SAME TEST, which is why this is a named predicate rather than
-   *  the string compare it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
+   *  the length check it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
    *  default, so both of its senses pass this test: the flipped one carries a variation, and `sense` is
    *  not among the flags read here. `/flip-join` does not pass, because `join` is one of the five
    *  hand-carried booleans below. The table's own flags decide, plus those five. */
@@ -1123,9 +1123,8 @@ export function enumerateCandidates(
     // The SECOND source of the shape `/basefold` already reads: that row answers the same
     // evidence with a named base, this one with an aggregate member, and the two are different C
     // and different register pressure. Offered only where the target declares the fold (its registry
-    // entry's target gate, which `respell` asks) — MIPS and
-    // PPC put the addend in the instruction by construction, so nothing there says a member put
-    // it there, exactly as with BASEFOLD_HOISTS above.
+    // entry's target gate, which `respell` asks): MIPS and PPC put the addend in the instruction by
+    // construction, so nothing there says a member put it there, exactly as with BASEFOLD_HOISTS.
     respell(['offmember'], () => spellOperandMembers(sfn));
     // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
     // spelling is reachable from neither variation alone: pinning the stores keeps three of them in
@@ -1312,8 +1311,7 @@ export function enumerateCandidates(
     // source under different variations, so it declines for that too. `/basefold`'s TWO hoists and
     // `/unfolded` stay on the roster where the target declares the fold, and `/orderbase` where it
     // declares the array-shape fork (each registry entry's target gate), so a target with neither is
-    // offered the two `/livebase` hoists and nothing else. The same fact is stated at the POLICY sites
-    // above; a roster change repairs all of them or none. The array-shape fork is the opt-in
+    // offered the two `/livebase` hoists and nothing else. The array-shape fork is the opt-in
     // raise/globalshape.ts carries: with it off nothing is stamped, so `order-licensed` would refuse
     // every key anyway and the filter only saves the census.
     const hoists: readonly BaseHoist[] = [
@@ -1563,13 +1561,12 @@ export function enumerateCandidates(
     // day a second one does, `compilerBehaviors` is where this belongs rather than a variation.
     //
     // THE PLAIN `/advance` IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — its registry entry's
-    // target gate names a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
-    // POLARITY REVERSED: that flag admits a variation where the compiler folds, this one withholds
-    // one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
-    // compiled corners in test/advance.test.ts's header), so the plain spelling emits the same
-    // stores as the indexed one this roster already offers, and it never wins on a row that reaches it:
-    // `/advance` 15/23
-    // against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
+    // target gate names a `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above,
+    // but with the POLARITY REVERSED: that flag admits a variation where the compiler folds, this one
+    // withholds one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
+    // compiled corners in test/advance.test.ts's header), so the plain spelling emits the same stores
+    // as the indexed one this roster already offers, and it never wins on a row that reaches it:
+    // `/advance` 15/23 against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
     // 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs 0/103 ·
     // `volwalk` 5/7 vs 0/7 (2026-09-12).
     //
@@ -2140,9 +2137,9 @@ export function enumerateCandidates(
                 ...sp.variations,
                 ...symbolSetting.variations,
               ];
-              // Every mint site asks `offeredOn` before it builds a tree, so no thunk runs for a
-              // withheld candidate. This is the invariant those checks keep: a mint that forgets to
-              // ask is an enumeration error, and the drawer's target line stays what enumeration does.
+              // `respell`, `respellEach` and the hoist roster ask `offeredOn` before a pass runs; this
+              // asks it of the whole name, so a mint site that skips the question is an enumeration
+              // error and the drawer's target line stays what enumeration does.
               if (!offeredOn(target, variations)) {
                 throw new Error(`'${variations.join('/')}' is withheld on ${target.compiler} but was enumerated`);
               }

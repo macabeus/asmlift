@@ -5,7 +5,8 @@
 // of that name in the file the definition is implemented in, and a hoist's table is the one its
 // variation's roster entry runs; a pointer names an export that exists and that enumeration's code
 // (comments aside) names; a function that consults a table cannot be pointed at with the table left
-// out. They do not prove that the pointed export is the whole decision.
+// out; enumeration reads a compiler behavior only through a registry entry's target gate. They do not
+// prove that the pointed export is the whole decision.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
@@ -86,9 +87,9 @@ describe('every gate reference resolves', () => {
     expect(uncalled).toEqual([]);
   });
 
-  // Every other target gate is the registry entry `offeredOn` asks, so what the drawer says about a
-  // target is what enumeration does. A direct read would be a gate the registry does not hold, except
-  // the span `nearbase` computes with, which its entry gates as well.
+  // A direct `compilerBehaviors` read would be a gate the registry does not hold, so the drawer's
+  // target line would stop being what enumeration does. The one read allowed is the span `nearbase`
+  // computes with, which its entry gates as well.
   test('enumeration reads no compiler behavior directly but the span it computes with', () => {
     expect([...new Set(ENUMERATION.match(/\bcompilerBehaviors\.\w+/g))]).toEqual(['compilerBehaviors.nearBaseSpan']);
   });

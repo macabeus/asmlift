@@ -16,7 +16,11 @@
 //
 // A READING OF THE CODE, NEVER A SOURCE FOR IT. Nothing here is consulted by enumeration. Each entry
 // paraphrases the argument at its mint site in `rank.ts` / `rank-variations.ts` and at the pass
-// `implementedIn` names; where they disagree, the code is right and this entry is the defect.
+// `implementedIn` names; where they disagree, the code is right and this entry is the defect. Three
+// parts are held to the code rather than trusted: each `example` compiles to two different objects
+// (`packages/cli/test/matching/variation-examples.test.ts`), each `offeredWhen` names the tables and
+// the export that decide it (`packages/core/test/variation-offers.test.ts`), and the drawer's target
+// line is the registry entry's `target`, which enumeration asks.
 //
 // Pure data: this module stays browser-safe. `offeredWhen` names admission tables by key; their rules
 // are `variation-gates.ts`, which a reader of a title or a summary never loads.
@@ -200,7 +204,7 @@ export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: TargetB
  *  - `judges` and `gates`: for each thing `judges` names, a noun phrase, that no rule of `gates`
  *    refuses. The rules are read from the tables themselves.
  *  - `when` and `decidedBy`: where no table decides, one sentence and the export that does. `gates`
- *    names a table that export applies to part of the decision.
+ *    names the tables that export applies for part of the decision.
  *
  *  A variation offered only on some compilers says so in its registry entry's `target`. */
 export type OfferedWhen =

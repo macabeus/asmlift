@@ -301,7 +301,7 @@ export interface TargetDescription {
     // its own compiled evidence: the four corners in test/advance.test.ts's header, each built
     // through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object, and the pair
     // `TARGET_BEHAVIOR_READINGS` compiles to one object in the matching suite. True ⇒
-    // rank.ts withholds the UN-QUALIFIED `/advance` variation, whose spelling this compiler cannot
+    // the `advance` registry entry's target gate withholds the UN-QUALIFIED variation, whose spelling this compiler cannot
     // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
     // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒
     // the plain variation ships, which is the conservative reading for a compiler whose pair nobody has

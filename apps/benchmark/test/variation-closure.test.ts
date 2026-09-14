@@ -5,17 +5,17 @@
 // variation is a `pnpm typecheck` error, and `packages/core/test/variation-mints.test.ts` proves
 // every registered variation is still minted. What those two cannot see is data:
 //
-//   2. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
+//   1. every name the COMMITTED artifact publishes — each winner's and each dropped or withheld
 //      candidate's — parses, part by part, in kind order. This runs wherever the suite runs, CI
 //      included, and it is the half that reads published data.
-//   3. every name the ENUMERATED synthetic tier mints parses the same way. The artifact stores the
+//   2. every name the ENUMERATED synthetic tier mints parses the same way. The artifact stores the
 //      winner and the refused candidates only, which is a fraction of the variations enumeration
 //      mints, so only an enumeration closes the set. It needs agbcc to build the rows' targets, so
 //      it is SKIPPED where agbcc is absent — CI among them — and reports as skipped, never as
 //      passed.
 //
-// A name that fails here was published or minted by a tree the type gate did not check — an artifact
-// regenerated from an older registry, or a subject shape the registry's pattern no longer admits.
+// A name that fails here is one the type gate cannot refuse: its parts out of kind order, or, in the
+// artifact, a name published before the registry changed.
 import { enumerateRanked } from '@asmlift/cli/rank';
 import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {

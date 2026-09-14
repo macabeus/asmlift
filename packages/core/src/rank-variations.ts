@@ -488,7 +488,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  is the field, and its own doc says how a hoist earns a `true`.
  *
  *  `/basefold` is the third and fourth hoist and `/unfolded` the fifth; those three are the
- *  conditional set — `enumerateCandidates` appends them where the target declares
+ *  conditional set — their registry entries' target gate offers them only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the default already carry
  *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
  *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding

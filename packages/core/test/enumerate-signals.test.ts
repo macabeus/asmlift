@@ -43,7 +43,6 @@ describe('the enumeration reports its own silent deletions', () => {
     expect(enumerated).toBeGreaterThan(0);
     // several DISTINCT variations stand down, not one gate firing repeatedly on one function
     expect(new Set(gated).size).toBeGreaterThan(1);
-    // each report is one registered variation's name, not a `/`-prefixed suffix
     for (const variation of gated) {
       expect(variationToken(variation).variationKind).toBe('structure');
     }

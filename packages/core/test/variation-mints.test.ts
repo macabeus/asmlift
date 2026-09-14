@@ -15,8 +15,8 @@
 //     only asks to be comparable) or an `any` would slip a name past the type gate, so no source
 //     file outside the registry may assert a variation type or an object type with a property that
 //     holds one (an `any` is not asserted: the core tsconfig is `strict`, so one has to be written);
-//   - a mint position outside the two enumeration files — a definition's `seeAlso` is one — would
-//     count as minting, so every file holding one is named below and a new one fails the roster.
+//   - a mint position outside the two enumeration files — a definition's `seeAlso` is one — does
+//     not count as minting, and every file holding one is named below, so a new one fails the roster.
 import { join, relative } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
