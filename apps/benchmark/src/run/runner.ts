@@ -111,7 +111,8 @@ export function runCases(
   const results: FunctionResult[] = [];
   const tag = shard.n > 1 ? ` s${shard.idx}` : '';
   let done = 0;
-  const buildFails: string[] = [];
+  /** cases that yielded no row, each with why: the shard finishes, then fails on these */
+  const noRow: string[] = [];
   // A skipped row is a MISSING measurement, not a decompiler outcome — and 40 of them scroll past
   // unnoticed among 800 result lines. Counted here and totalled per tier by the orchestrator.
   const skippedToolchains = new Set<string>();
@@ -145,8 +146,8 @@ export function runCases(
       // couldn't produce the scoring target — a HARNESS defect, not a decompiler outcome.
       // Finish the shard (keep the other rows), then fail loudly below: a case with no row
       // would otherwise vanish from the results without a trace.
-      buildFails.push(c.id);
-      console.log(`[--/${mine.length}] ${c.id}  BUILD-FAIL: ${(e as Error).message.split('\n')[0]}`);
+      noRow.push(`${c.id} (target build failed)`);
+      console.log(`[--/${mine.length}] ${c.id}  BUILD-FAIL: ${firstLine(e)}`);
       continue;
     }
     const spec: EvalSpec = {
@@ -167,7 +168,16 @@ export function runCases(
       symbols: c.symbols,
       note: c.note,
     };
-    const r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
+    let r: FunctionResult;
+    try {
+      r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
+    } catch (e) {
+      // A throw out of evaluation is a HARNESS defect too (a decompiler's own failure is an
+      // outcome and never reaches here), so it is handled the way a build failure is.
+      noRow.push(`${c.id} (evaluation threw)`);
+      console.log(`[--/${mine.length}] ${c.id}  EVAL-FAIL: ${firstLine(e)}`);
+      continue;
+    }
     results.push(r);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(rowLine(++done, mine.length, tag, r, secs));
@@ -180,10 +190,12 @@ export function runCases(
       `SKIPPED ${skips}/${mine.length} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
     );
   }
-  if (buildFails.length > 0) {
-    throw new Error(
-      `${buildFails.length} target build(s) failed — every case must yield a row: ${buildFails.join(', ')}`,
-    );
+  if (noRow.length > 0) {
+    throw new Error(`${noRow.length} case(s) yielded no row — every case must yield a row: ${noRow.join(', ')}`);
   }
   return results;
+}
+
+function firstLine(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).split('\n')[0];
 }

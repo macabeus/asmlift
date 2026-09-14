@@ -163,6 +163,33 @@ describe('the ranked row records its own price', () => {
     expect(winner.filter((name) => t[name] === undefined)).toEqual([]);
   });
 
+  // The tally parses every candidate's variations, and a name the registry does not hold throws. That
+  // is a harness defect: caught with the ranking's throws, it would publish a match as `noncompile`,
+  // and on a fully refused row it escaped the catch anyway. It must throw on both paths, never become
+  // an outcome.
+  test('an unregistered variation in a SCORED fan throws, rather than rewriting the verdict', () => {
+    ranked.mockImplementation((name, asm, target, _obj, opts) => {
+      const scored = enumerateCandidates(name, asm, target, opts).map((c) => ({
+        ...c,
+        score: { ...SCORE, match: true, score: 0 },
+      }));
+      return {
+        winner: scored[0],
+        candidates: scored,
+        dropped: [{ variations: ['unsigned', 'nosuch'], error: 'error: boom' }],
+        withheld: [],
+      };
+    });
+    expect(() => runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
+  });
+
+  test('an unregistered variation in a fully REFUSED fan throws too', () => {
+    ranked.mockImplementation(() => {
+      throw new NoScorableCandidateError('no scorable candidate', [{ variations: ['nosuch'], error: 'x' }], []);
+    });
+    expect(() => runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
+  });
+
   // A DECLINED row never reached the ranked pass. Absent is the honest answer; a 0 would read as
   // "this row enumerates nothing", which is a claim about the row rather than about the run.
   test('a declined row carries NEITHER field — it never ranked', () => {

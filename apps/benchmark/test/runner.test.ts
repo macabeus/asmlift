@@ -4,10 +4,14 @@ import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import type { Case } from '../src/cases/types';
+import { evaluate } from '../src/eval/evaluate';
 import { benchMeta, fmt, inShard, parseShard, runCases } from '../src/run/runner';
+
+// No case below reaches a decompiler; the one that evaluates says what evaluation returns.
+vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
 
 describe('parseShard (pinned)', () => {
   test('parses i/N', () => {
@@ -105,9 +109,41 @@ describe('runCases build failures (pinned)', () => {
       },
     };
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
-    expect(() => runCases([c], outPath)).toThrow(/1 target build\(s\) failed .* synthetic:ghost:mwcc_242_81/);
+    expect(() => runCases([c], outPath)).toThrow(
+      /1 case\(s\) yielded no row .* synthetic:ghost:mwcc_242_81 \(target build failed\)/,
+    );
     // the part file is still written, so surviving rows are never lost to the throw
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
+  });
+
+  // A throw out of evaluation — the fan tally meeting an unregistered variation is one — is a harness
+  // defect, never an outcome. It must not end the shard early and lose the rows after it.
+  test('an evaluation that throws fails the shard loudly, after the rows that follow it are written', () => {
+    const row = { id: 'synthetic:kept:agbcc', asmlift: {}, m2c: {} } as FunctionResult;
+    vi.mocked(evaluate)
+      .mockImplementationOnce(() => {
+        throw new Error("'nosuch' names no registered variation");
+      })
+      .mockImplementationOnce(() => row);
+    const c = (sym: string): Case => ({
+      id: `synthetic:${sym}:agbcc`,
+      tier: 'synthetic',
+      sym,
+      project: 'synthetic',
+      language: 'c',
+      features: [],
+      loc: 1,
+      refSource: `int ${sym};`,
+      toolchain: { available: () => true } as Case['toolchain'],
+      build: () => ({ obj: '/nonexistent.o', asm: '' }),
+    });
+    const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
+    expect(() => runCases([c('broken'), c('kept')], outPath)).toThrow(
+      /1 case\(s\) yielded no row .* synthetic:broken:agbcc \(evaluation threw\)/,
+    );
+    expect(JSON.parse(readFileSync(outPath, 'utf8')).results.map((r: FunctionResult) => r.id)).toEqual([
+      'synthetic:kept:agbcc',
+    ]);
   });
 });
 
