@@ -61,10 +61,7 @@ export function VariationChip({
   const { name, subject } = parseVariation(part);
   const def = VARIATION_DEFINITIONS[name];
   const href = variationHref(name, hash);
-  const follow = (e: React.MouseEvent) => {
-    e.stopPropagation(); // a table row underneath opens the function detail
-    followInPlace(e, () => onOpen(name));
-  };
+  const follow = (e: React.MouseEvent) => followInPlace(e, () => onOpen(name));
 
   return (
     <HoverCard

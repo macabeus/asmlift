@@ -102,8 +102,8 @@ describe('closure over the names the committed artifact publishes', () => {
     expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
   });
 
-  // The reader definitions are keyed by the registry, so a parsed name always has one unless a
-  // definition was removed; this is the check that names what the artifact would show undefined.
+  // `tsc` already refuses a registered name without a reader definition; this is the run-time check,
+  // and it names what the artifact would show undefined.
   test('every published variation, and every fan roster key, has a reader definition', () => {
     const parts = [...names].flatMap((n) => splitVariations(n));
     // A roster key is a registered name as it stands, never a variation applied to a subject.

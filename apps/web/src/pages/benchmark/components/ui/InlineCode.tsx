@@ -1,5 +1,5 @@
-// Prose that carries markdown code spans — the variation definitions and the glossary are written
-// that way, because `docs/vocabulary.md` is held to them text for text. Only the span is rendered:
+// Prose that carries markdown code spans, as the variation definitions and the glossary do (the
+// glossary is held to `docs/vocabulary.md` text for text). Only the span is rendered:
 // the strings use no other markdown, and a backtick must never reach the reader. A span never wraps
 // inside itself: a name such as `raw-globals` would otherwise break at its hyphen.
 export function InlineCode({ text }: { text: string }) {

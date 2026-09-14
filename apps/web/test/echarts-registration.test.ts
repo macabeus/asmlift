@@ -1,7 +1,7 @@
 // ECharts is registered tree-shaken, in `charts/echarts.ts`. A series type missing from that list
 // draws NO series and reports NO error while its grid and axes still render, so the chart looks live
-// and empty — exactly how the Fan Explorer's first scatter shipped. This reads every series type the
-// chart components name and asks ECharts itself whether it is registered.
+// and empty. This reads every series type the chart components name and asks ECharts itself
+// whether it is registered.
 import { ComponentModel } from 'echarts/core';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';

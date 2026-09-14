@@ -10,7 +10,7 @@
 // A variation the fan carried and the winner does not is one the row considered and lost.
 //
 // ONE POPULATION: the rows whose fan was counted. A win is counted only on a row whose fan carried
-// the variation, so a win rate cannot pass one and a price per win never divides one set of rows'
+// the variation, so a win rate cannot exceed one and a price per win never divides one set of rows'
 // cost by another set's wins. The producer writes `fanVariations` on every row it ranks, and a
 // winner's names are always keys of it (`apps/benchmark/test/fan-price.test.ts`).
 //
@@ -97,8 +97,8 @@ export function pricePerWin(s: VariationStats): number | null {
   return s.winners === 0 ? null : s.candidates / s.winners;
 }
 
-/** Ranked by winners, then by reach, then by name, so a kind's list reads as a ranking with no sort
- *  control. */
+/** Ranked by winners, then by rows, then by candidates, then by name, so a kind's list reads as a
+ *  ranking with no sort control. */
 function byWinners(a: VariationStats, b: VariationStats): number {
   return b.winners - a.winners || b.rows - a.rows || b.candidates - a.candidates || (a.name < b.name ? -1 : 1);
 }
@@ -108,7 +108,7 @@ export interface CatalogueGroup {
   variations: VariationStats[];
 }
 
-/** The catalogue: every registered variation, grouped by kind in name order, ranked by winners. */
+/** The catalogue: every registered variation, grouped by kind in kind order, ranked by winners. */
 export function catalogue(stats: Map<VariationName, VariationStats>): CatalogueGroup[] {
   return VARIATION_KINDS.map((kind) => ({
     kind,

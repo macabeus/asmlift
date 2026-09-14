@@ -126,7 +126,7 @@ function Charts({
       <NotWaste />
       <Panel
         title="Cost against gain"
-        subtitle="One bubble per variation. Across: candidates that carried it. Up: the share of the rows whose fan carried it that won with it. Area: those rows, with a smallest size so every bubble can be clicked. Click a bubble for its definition."
+        subtitle="One bubble per variation. Across: candidates that carried it. Up: the share of the rows whose fan carried it that won with it. Area: those rows, with a minimum size so every bubble can be clicked. Click a bubble for its definition."
       >
         <VariationCostGain data={carried} onPointClick={onOpenVariation} />
       </Panel>
@@ -246,9 +246,9 @@ export function FanExplorer({
         <h2 className="text-base font-semibold text-slate-100">The fan, by variation</h2>
         <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-400">
           Assembly leaves some choices open, such as a signedness, a branch sense or where a value lives. asmlift does
-          not guess them: it writes the function every way its gates allow, compiles each candidate, and publishes the
-          one that scores best. Each entry below is one variation. A fan&apos;s size says nothing about its outcome, and
-          a few rows hold most of the candidates.
+          not guess them: it writes the function in each way it knows, compiles each candidate, and publishes the one
+          that scores best. Each entry below is one variation. A fan&apos;s size says nothing about its outcome, and a
+          few rows hold most of the candidates.
         </p>
       </div>
 

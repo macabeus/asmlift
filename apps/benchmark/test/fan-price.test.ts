@@ -164,9 +164,8 @@ describe('the ranked row records its own price', () => {
   });
 
   // The tally parses every candidate's variations, and a name the registry does not hold throws. That
-  // is a harness defect: caught with the ranking's throws, it would publish a match as `noncompile`,
-  // and on a fully refused row it escaped the catch anyway. It must throw on both paths, never become
-  // an outcome.
+  // is a harness defect: caught with the ranking's throws, it would publish a match as `noncompile`.
+  // It must throw on both paths, the scored and the fully refused, and never become an outcome.
   test('an unregistered variation in a SCORED fan throws, rather than rewriting the verdict', () => {
     ranked.mockImplementation((name, asm, target, _obj, opts) => {
       const scored = enumerateCandidates(name, asm, target, opts).map((c) => ({

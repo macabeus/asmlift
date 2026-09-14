@@ -59,7 +59,7 @@ export function WinningSpelling({
   const lost = useMemo(() => consideredButLost(fn), [fn]);
   const fan = fn.asmlift.fanSize;
 
-  // A row that never reached the ranking (declined, failed) has neither a winner nor a fan.
+  // A row whose fan was not counted (it never ranked, or its scorer died) has neither a winner nor a fan.
   if (!fn.asmlift.fanVariations || fan === undefined) {
     return null;
   }

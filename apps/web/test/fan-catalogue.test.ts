@@ -1,5 +1,5 @@
 // The Fan Explorer's numbers, held to a direct count over the rows. Two samples: `FAN_SAMPLE`, ranked
-// rows carrying `fanVariations` over three toolchains (one of them noncompile), and the committed
+// rows carrying `fanVariations` over three toolchains (one row noncompile), and the committed
 // artifact the tab renders.
 import type { FunctionResult } from '@asmlift/bench-schema';
 import { VARIATION_KINDS, VARIATION_TOKENS, hasVariation } from '@asmlift/core/variation-tokens';
@@ -30,7 +30,7 @@ describe.each([
 ])('over %s', (_, rows) => {
   const stats = variationStats(rows);
 
-  test('the catalogue holds every registered variation exactly once, grouped by kind in name order', () => {
+  test('the catalogue holds every registered variation exactly once, grouped by kind in kind order and ranked by winners', () => {
     const groups = catalogue(stats);
     expect(groups.map((g) => g.kind)).toEqual([...VARIATION_KINDS]);
     const names = groups.flatMap((g) => g.variations.map((s) => s.name));

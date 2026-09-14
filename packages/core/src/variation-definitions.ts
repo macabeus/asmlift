@@ -65,7 +65,7 @@ export interface VariationKindDefinition {
   examples: readonly string[];
 }
 
-/** The five variation kinds, as `docs/vocabulary.md`'s kinds table defines them, in name order. */
+/** The five variation kinds, as `docs/vocabulary.md`'s kinds table defines them, in kind order. */
 export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: VariationKindDefinition } = {
   signedness: {
     title: 'Signedness',
@@ -188,7 +188,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'a chain of constant tests on one value is spelled with `||` instead of as a switch',
     detail:
       'A chain of `x == K` tests on one value can be recovered as a `switch` or folded into a short-circuit ' +
-      'condition, and one raise cannot do both: a folded `||` is no longer the comparison a switch is ' +
+      'condition, and one reading of the assembly cannot do both: a folded `||` is no longer the comparison a switch is ' +
       'recovered from. This lift lets the short-circuit fold take the chain. It also reaches functions whose ' +
       'switch recovery declined entirely and came out as nested `if` statements.',
     compilerBehavior:
@@ -228,7 +228,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'path that branches to it, and then structures with the shared follow `shared-ret` uses, so the ' +
       'store the source wrote once is written after the `if` and the others before an early `return`.',
     compilerBehavior:
-      'Two sources that lift to the same IR (one with the store written once, one with it in each arm) ' +
+      'Two sources that lift to the same code (one with the store written once, one with it in each arm) ' +
       'compile to different register assignments, so only the differ can tell which one it was.',
     offeredWhen:
       'The sink changed the function and some `if` of the result still shares a `return`. It is kept apart ' +
@@ -585,7 +585,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     title: 'Merged statement copied back into its arms',
     summary: 'a statement the compiler merged after an `if` is written back inside each arm',
     detail:
-      'agbcc cross-jumps a store the source wrote in both arms into the join, so the lifted tree carries its ' +
+      'agbcc merges a store the source wrote in both arms into one copy at the join (cross-jumping), so the lifted tree carries its ' +
       "address and value on temporaries. This substitutes each arm's own definitions and writes the whole " +
       'statement back into each arm. Unlike the other respell variations it is applied before the rest: ' +
       "the whole respell set then runs again on its output, which is how an arm's own base pointer can " +
@@ -817,7 +817,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'two locals whose lifetimes never overlap are merged into one',
     detail:
       'Which locals the register allocator gave one register is not in the tree, and picking the first ' +
-      'legal merge gets it wrong, so every legal single merge is its own candidate. Two admissions: the ' +
+      'legal merge gets it wrong, so every legal single merge is its own candidate. It is offered in two cases: the ' +
       'lifetimes are disjoint in statement order, or one `if` picks between the two.',
     offeredWhen:
       'Two locals of one type, neither a parameter nor volatile, whose lifetimes are disjoint and are not ' +
@@ -864,8 +864,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'same register while it spins) is where that prediction is wrong: the compiler holds one register ' +
       'across the stores, the loop and the read-back. This hoist admits those bases.',
     offeredWhen:
-      'A leaf base reached at two or more sites that the default hoist refused. It carries the pairings ' +
-      'with `indexed`, `sinkinit`, `nearbase`, `coalesce` and `homesplit`.',
+      'A leaf base reached at two or more sites that the default hoist refused. Its combinations with ' +
+      '`indexed`, `sinkinit`, `nearbase`, `coalesce` and `homesplit` are enumerated beside it.',
     example: {
       before: '((u32 *)0x40000d4)[2] = go; while (((u32 *)0x40000d4)[2] & 0x80000000) {}',
       after: 'u32 *p = (u32 *)0x40000d4; p[2] = go; while (p[2] & 0x80000000) {}',
@@ -884,7 +884,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       before: 'p[0] = src; p[2] = go; q[0] = q[0] + 1;',
       after: 'p[0] = src; p[2] = go; *(u16 *)0x3001048 = *(u16 *)0x3001048 + 1;',
-      note: 'with `p` the DMA block and `q` the halfword, both homed by `livebase`',
+      note: 'with `p` the DMA block and `q` the halfword, both held in pointer locals by `livebase`',
     },
     implementedIn: BASECSE,
     seeAlso: ['livebase', 'homesplit'],
@@ -932,7 +932,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     compilerBehavior:
       "On agbcc the array subscript expansion loads a declared array's base first and scales the index " +
       'first for the inline cast.',
-    offeredWhen: 'The target declares that fork, and a base carries the order licence.',
+    offeredWhen:
+      "The target's compiler loads a declared array's base before its index (agbcc does), and the assembly loaded this base in that order.",
     example: {
       before: 'x = ((struct S *)&gTbl)[i].f; y = ((struct S *)&gTbl)[i].g;',
       after: 'struct S *p = (struct S *)&gTbl; x = p[i].f; y = p[i].g;',
@@ -959,11 +960,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     title: 'One base at the top, one split per region',
     summary: 'after a `livebase` hoist, one withheld base is split into one local per region',
     detail:
-      'Both base policies are whole-function: `livebase` homes every base it admits at the top, and ' +
+      'Both base policies are whole-function: `livebase` holds every base it admits in a local at the top, and ' +
       '`regionbase` splits every base it admits. A function whose two bases want opposite answers is spelled ' +
       'by neither. This runs the hoist with one base withheld, then splits that base per region. It always ' +
       'follows `livebase` or `livebase-block` in a name.',
-    offeredWhen: 'A `livebase` hoist that carries pairings binds two or three bases.',
+    offeredWhen: '`livebase` or `livebase-block` holds two or three bases in pointer locals.',
     subject: {
       meaning:
         'The withheld base, then `.`, its access width in bytes and `s` or `u` for signedness: ' +
@@ -1093,7 +1094,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: "a loop's starting assignment moves above the guard, and the guard reads the variable",
     detail:
       '`for (i = 0; i < n; i++)` compiles with the assignment before the zero-trip test, while ' +
-      '`if (0 < n) { i = 0; do … }` compiles with it behind the branch, and both lift to the same IR. It ' +
+      '`if (0 < n) { i = 0; do … }` compiles with it behind the branch, and both lift to the same code. It ' +
       "touches private locals only. Applied on top of every other candidate's source, alone and together " +
       'with `pollguard` and `pollread`.',
     offeredWhen:
