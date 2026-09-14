@@ -621,7 +621,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 t) { s32 i; @ }',
       before: 'for (i = 0; i < (16 << t); i++) g(i * (16 << t));',
-      after: 'u32 size = 16 << t; for (i = 0; i < size; i++) g(i * size);',
+      after: 's32 size = 16 << t; for (i = 0; i < size; i++) g(i * size);',
     },
     implementedIn: ANALYSIS,
     seeAlso: ['addr-home', 'derived-home'],
@@ -697,7 +697,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A merge whose value lives in a parameter takes its own local where the default assigns back into the ' +
       'parameter. Both are ordinary C over the same values. A merge with its own local also lets `defsite` ' +
       "write a constant above the branch, which a merge that adopted the parameter's name refuses.",
-    compilerBehavior: 'With two arguments the two spellings compile to the same bytes on agbcc and mwcc.',
+    compilerBehavior:
+      'On mwcc a clamp written into the parameter and the same clamp through its own local are different ' +
+      'objects. agbcc compiles that pair alike, and a two-argument max compiles alike on both.',
     offeredWhen: {
       when: 'Some merge is fed a parameter on one edge and a different value on another.',
       decidedBy: { symbol: 'hasParamRootedMerge', file: STRUCTURE },
@@ -929,7 +931,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       compiler: 'agbcc',
       unit: '#define REG 0x40000d4\nvoid example(s32 a0, s32 a1) { s32 v0; s32 v1 = 0; @ }',
-      before: 'v0 = (a0 << 6) + a1; while (v1 <= 31) { *(s32 *)REG = v0; v0 = v0 + 64; v1 = v1 + 1; }',
+      before: 'v0 = (v1 << 6) + a1; while (v1 <= 31) { *(s32 *)REG = v0; v0 = v0 + 64; v1 = v1 + 1; }',
       after: 'while (v1 <= 31) { *(s32 *)REG = (v1 << 6) + a1; v1 = v1 + 1; }',
       note: 'wins only together with `vol-store`',
     },
@@ -1255,9 +1257,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     summary: 'a sum with one product operand puts the product first',
     detail:
       'Operands of a commutative sum are spelled in evaluation order, which recovers the source order on ' +
-      'gcc. IDO and mwcc load the independent operand above the multiply, so evaluation order spells a ' +
+      'gcc. IDO can load the independent operand above the multiply, so evaluation order spells a ' +
       'product-first source the other way round.',
-    compilerBehavior: 'IDO and mwcc schedule the load of `c` in `a * b + c` above the multiply.',
+    compilerBehavior:
+      'IDO loads a struct field `c` in `a * b + c` above the multiply, so the order of the loads does not show ' +
+      'which operand the source wrote first. On mwcc the two orders compile to one object.',
     offeredWhen: {
       when: 'A `+` with exactly one product operand and no effect in either operand.',
       decidedBy: { symbol: 'mulFirstSums', file: l3('mulfirst') },
@@ -1301,8 +1305,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'that pair into two constant addresses and records that it did; this writes the stepped pointer. The ' +
       'chain is read off constant addresses, so a symbol map that names them hides it.',
     compilerBehavior:
-      'agbcc folds `p = p + 1; *p` back into `[r3, #2]`, so the plain spelling is not offered there; ' +
-      '`advance/volatile`, which bars the fold, is.',
+      'Through a `volatile` pointer agbcc keeps the step as an `add` between the two accesses, which the same ' +
+      'accesses through two constant addresses do not compile to. The plain step lost on every agbcc row that ' +
+      'reached it, so on agbcc it is offered only together with `volatile`.',
     offeredWhen: {
       judges: 'each chain of accesses the machine made through one stepped register',
       gates: ['ADVANCE_HEAD_GATES', 'ADVANCE_MEMBER_GATES'],
@@ -1310,8 +1315,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       compiler: 'agbcc',
       unit: 'void example(u16 a, u16 b) { @ }',
-      before: '*(u16 *)0x04000048 = a; *(u16 *)0x0400004A = b;',
-      after: 'u16 *p = (u16 *)0x04000048; *p = a; p = p + 1; *p = b;',
+      before: '*(volatile u16 *)0x04000048 = a; *(volatile u16 *)0x0400004A = b;',
+      after: 'volatile u16 *p = (volatile u16 *)0x04000048; *p = a; p = p + 1; *p = b;',
+      note: 'shown with `volatile`, the only company it is offered in on agbcc',
     },
     implementedIn: l3('advance'),
     seeAlso: ['volatile', 'nearbase'],
