@@ -8,7 +8,7 @@ import { VARIATION_KINDS } from '@asmlift/core/variation-tokens';
 import { useMemo, useState } from 'react';
 
 import { variationHref } from '../lib/explorer-url';
-import { type VariationStats, catalogue, fanCoverage, priced, variationStats } from '../lib/fan';
+import { type VariationStats, catalogue, compactCount, fanCoverage, priced, variationStats } from '../lib/fan';
 import { VARIATION_KIND_COLOR } from '../theme';
 import { VariationCostGain } from './charts/VariationCostGain';
 import { VariationPricePerWin } from './charts/VariationPricePerWin';
@@ -16,11 +16,6 @@ import { InlineCode } from './ui/InlineCode';
 import { NotWaste } from './ui/NotWaste';
 import { Panel } from './ui/Section';
 import { followInPlace } from './ui/follow-in-place';
-
-/** `1,234` below ten thousand, `12k` above: the catalogue's columns are narrow. */
-function count(n: number): string {
-  return n >= 10_000 ? `${Math.round(n / 1000)}k` : n.toLocaleString();
-}
 
 function Glossary() {
   return (
@@ -128,7 +123,7 @@ function Charts({
                   onClick={(e) => followInPlace(e, () => onOpenVariation(s.name))}
                   className="rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 hover:bg-teal-900/60 hover:text-teal-200"
                 >
-                  {s.name} <span className="text-slate-500">· {count(s.candidates)} candidates</span>
+                  {s.name} <span className="text-slate-500">· {compactCount(s.candidates)} candidates</span>
                 </a>
               ))}
             </div>
@@ -170,7 +165,7 @@ function CatalogueEntry({
       </div>
       <div className="grid w-full shrink-0 grid-cols-4 gap-2 text-right sm:w-80">
         <div>
-          <div className="font-mono text-sm text-slate-100">{count(s.winners)}</div>
+          <div className="font-mono text-sm text-slate-100">{compactCount(s.winners)}</div>
           <div className="text-[10px] text-slate-500">winners</div>
           <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-800">
             <div
@@ -183,11 +178,11 @@ function CatalogueEntry({
           </div>
         </div>
         <div>
-          <div className="font-mono text-sm text-slate-300">{count(s.rows)}</div>
+          <div className="font-mono text-sm text-slate-300">{compactCount(s.rows)}</div>
           <div className="text-[10px] text-slate-500">rows carried</div>
         </div>
         <div>
-          <div className="font-mono text-sm text-slate-300">{count(s.candidates)}</div>
+          <div className="font-mono text-sm text-slate-300">{compactCount(s.candidates)}</div>
           <div className="text-[10px] text-slate-500">candidates</div>
         </div>
         <div>

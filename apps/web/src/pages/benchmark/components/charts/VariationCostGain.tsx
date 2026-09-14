@@ -1,8 +1,9 @@
-import { VARIATION_DEFINITIONS, VARIATION_KIND_DEFINITIONS } from '@asmlift/core/variation-definitions';
+import { VARIATION_KIND_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import { VARIATION_KINDS } from '@asmlift/core/variation-tokens';
 import { useMemo } from 'react';
 
 import { type VariationStats, pricePerWin, winRate } from '../../lib/fan';
+import { tooltipTitle } from '../../lib/variation-text';
 import { VARIATION_KIND_COLOR } from '../../theme';
 import { EChart } from './EChart';
 import { axisCommon, legendDefaults, tooltipDefaults } from './echarts';
@@ -12,11 +13,6 @@ type Point = [candidates: number, ratePct: number, rows: number, name: string];
 
 /** How many bubbles carry their name on the plot. */
 const LABELLED = 12;
-
-/** A definition's title carries code spans such as `||`; the tooltip is HTML. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 /** Cost against gain, one bubble per variation some fan carried: candidates carried (log) across,
  *  win RATE up, rows carried as the bubble's area, kind as its colour.
@@ -66,7 +62,7 @@ export function VariationCostGain({
           const s = data.find((d) => d.name === name)!;
           const price = pricePerWin(s);
           return [
-            `<div style="font-weight:600">${escapeHtml(VARIATION_DEFINITIONS[s.name].title.replace(/`/g, ''))} <span style="opacity:.6;font-family:monospace">${s.name}</span></div>`,
+            tooltipTitle(s.name),
             `<div>${s.candidates.toLocaleString()} candidates carried it, across the fans of ${s.rows} row${s.rows === 1 ? '' : 's'}</div>`,
             `<div>won ${s.winners} of those rows (${Math.round((winRate(s) ?? 0) * 100)}%)</div>`,
             price === null

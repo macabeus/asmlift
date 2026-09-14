@@ -10,6 +10,7 @@ import { type VariationKind, type VariationTally, joinVariations } from '@asmlif
 import { useMemo } from 'react';
 
 import { consideredButLost, winningSpelling } from '../lib/fan';
+import { plainText } from '../lib/variation-text';
 import { VARIATION_KIND_COLOR } from '../theme';
 import { VariationChip } from './ui/Badge';
 import { InlineCode } from './ui/InlineCode';
@@ -19,7 +20,7 @@ function KindHeading({ kind }: { kind: VariationKind }) {
   return (
     <div
       className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500"
-      title={VARIATION_KIND_DEFINITIONS[kind].meaning.replace(/`/g, '')}
+      title={plainText(VARIATION_KIND_DEFINITIONS[kind].meaning)}
     >
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: VARIATION_KIND_COLOR[kind] }} />
       {VARIATION_KIND_DEFINITIONS[kind].title}

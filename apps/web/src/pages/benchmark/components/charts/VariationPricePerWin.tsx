@@ -1,16 +1,11 @@
-import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import { useMemo } from 'react';
 
 import { type VariationStats, pricePerWin } from '../../lib/fan';
+import { tooltipTitle } from '../../lib/variation-text';
 import { VARIATION_KIND_COLOR } from '../../theme';
 import { EChart } from './EChart';
 import { axisCommon, tooltipDefaults } from './echarts';
 import type { EChartsOption } from './echarts';
-
-/** A definition's title carries code spans such as `||`; the tooltip is HTML. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 /** What one win carrying each variation cost, dearest first.
  *
@@ -37,7 +32,7 @@ export function VariationPricePerWin({
           const one = Array.isArray(p) ? p[0] : p;
           const s = bars[(one as { dataIndex: number }).dataIndex];
           return [
-            `<div style="font-weight:600">${escapeHtml(VARIATION_DEFINITIONS[s.name].title.replace(/`/g, ''))} <span style="opacity:.6;font-family:monospace">${s.name}</span></div>`,
+            tooltipTitle(s.name),
             `<div>${Math.round(pricePerWin(s)!).toLocaleString()} candidates per win</div>`,
             `<div>${s.candidates.toLocaleString()} candidates carried it, across the fans of ${s.rows} row${s.rows === 1 ? '' : 's'}; ${s.winners} won with it</div>`,
           ].join('');

@@ -14,6 +14,7 @@ import { Pill } from '../../../shared/components/Pill';
 import { useOverlay } from '../../../shared/utils/overlay';
 import { rowHref, variationHref } from '../lib/explorer-url';
 import { pricePerWin, rowsFor, variationStats, winRate } from '../lib/fan';
+import { plainText } from '../lib/variation-text';
 import { TOOLCHAIN_LABEL, VARIATION_KIND_COLOR } from '../theme';
 import { OutcomeBadge } from './ui/Badge';
 import { InlineCode } from './ui/InlineCode';
@@ -117,11 +118,7 @@ export function VariationDetailBody({
             </Pill>
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            <Pill
-              tint={VARIATION_KIND_COLOR[kind]}
-              dot
-              title={VARIATION_KIND_DEFINITIONS[kind].meaning.replace(/`/g, '')}
-            >
+            <Pill tint={VARIATION_KIND_COLOR[kind]} dot title={plainText(VARIATION_KIND_DEFINITIONS[kind].meaning)}>
               {VARIATION_KIND_DEFINITIONS[kind].title}
             </Pill>
           </div>
@@ -230,7 +227,7 @@ export function VariationDetailBody({
                   key={s}
                   href={variationHref(s, hash)}
                   onClick={(e) => followInPlace(e, () => onOpenVariation(s))}
-                  title={VARIATION_DEFINITIONS[s].summary.replace(/`/g, '')}
+                  title={plainText(VARIATION_DEFINITIONS[s].summary)}
                   className="rounded bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 hover:bg-teal-900/60 hover:text-teal-200"
                 >
                   {s}

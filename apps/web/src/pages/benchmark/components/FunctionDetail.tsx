@@ -266,7 +266,7 @@ function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolea
 /** ALL input provenance for the row, consolidated in one collapsed accordion: the prototype
  *  hints asmlift received, the context m2c received, and the symbol map's state (used /
  *  present-but-unused / none) with the map symbols the winning candidate references.
- *  Every field is optional — old data carries none.
+ *  Every field is optional: a row carries only the inputs it was given.
  *  `symbolsUsed` exists exactly when the row was SCORED with a map: a declined/failed map row
  *  has no winning spelling, so it makes no usage claim at all (the "none" state) — never the
  *  false "present, unused" (which asserts a winner that named nothing). */
