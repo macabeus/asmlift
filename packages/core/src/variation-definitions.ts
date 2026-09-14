@@ -62,27 +62,32 @@ export interface VariationKindDefinition {
 export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: VariationKindDefinition } = {
   signedness: {
     title: 'Signedness',
-    meaning: 'The signedness pinned on the entry parameters before type recovery. Always the first part.',
+    meaning:
+      "Whether the function's parameters are read as signed or unsigned. Every candidate carries one, as its first variation.",
     examples: ['unsigned', 'signed'],
   },
   lift: {
     title: 'Lift',
-    meaning: 'The assembly is lifted or raised again under a different reading.',
+    meaning:
+      'How the instructions are read before any C is built: which moves set up a call, how a chain of tests joins, whether paths share a return.',
     examples: ['setup-args', 'connective', 'shared-ret', 'shared-tail'],
   },
   structure: {
     title: 'Structure',
-    meaning: '`structure()` is run again with different options.',
+    meaning:
+      'How the `if`s and loops are rebuilt from the branches: which way a test reads, where a loop is entered, what reaches a merge (the point where two paths meet).',
     examples: ['flip-branch', 'defsite', 'loop-entry', 'flip-join', 'uns-cmp'],
   },
   respell: {
     title: 'Respell',
-    meaning: 'The tree `structure()` produced is rewritten.',
+    meaning:
+      'A rewrite of the finished C that keeps what it does: where a value lives, whether an address is held in a pointer, how statements are ordered.',
     examples: ['unmerge', 'offmember', 'livebase', 'coalesce-v0-v1', 'volatile'],
   },
   'symbol-map': {
     title: 'Symbol map',
-    meaning: "The symbol map's shaped spellings are withheld, so globals are spelled as raw addresses. Last.",
+    meaning:
+      "Globals are written as raw addresses instead of the names the project's symbol map gives them. Always the last variation.",
     examples: ['raw-globals'],
   },
 };
@@ -252,7 +257,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
   },
   defsite: {
     title: 'Constant written where defined',
-    summary: "a merge's constant is written where the assembly loaded it, not on the edge into the merge",
+    summary: "a merge's constant is written where the assembly loaded it, not on the path into the merge",
     detail:
       'When one path into a merge carries a constant, the structurer normally writes it on that edge, as an ' +
       '`else` arm. The assembly shows where the constant was loaded, and this writes it there instead: ' +
@@ -844,7 +849,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
   },
   livebase: {
     title: 'Base pointer held across the body',
-    summary: 'a reused fixed address the default hoist refused is held in a pointer local',
+    summary: 'a fixed address reused inside a loop or at one offset again and again is still held in a pointer local',
     detail:
       'The default base hoist refuses a base reused inside a loop or at a repeated constant offset, ' +
       'predicting that the compiler loads the address again. A memory-mapped poll (store, then re-read the ' +

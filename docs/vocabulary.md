@@ -63,13 +63,13 @@ bare "the variations" could be read both ways.
 
 A candidate's variations appear in this order.
 
-| Kind           | What it changes                                                                                | Examples                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| **Signedness** | The signedness pinned on the entry parameters before type recovery. Always the first part.     | `unsigned`, `signed`                                             |
-| **Lift**       | The assembly is lifted or raised again under a different reading.                              | `setup-args`, `connective`, `shared-ret`, `shared-tail`          |
-| **Structure**  | `structure()` is run again with different options.                                             | `flip-branch`, `defsite`, `loop-entry`, `flip-join`, `uns-cmp`   |
-| **Respell**    | The tree `structure()` produced is rewritten.                                                  | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile` |
-| **Symbol map** | The symbol map's shaped spellings are withheld, so globals are spelled as raw addresses. Last. | `raw-globals`                                                    |
+| Kind           | What it changes                                                                                                                                                | Examples                                                         |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Signedness** | Whether the function's parameters are read as signed or unsigned. Every candidate carries one, as its first variation.                                         | `unsigned`, `signed`                                             |
+| **Lift**       | How the instructions are read before any C is built: which moves set up a call, how a chain of tests joins, whether paths share a return.                      | `setup-args`, `connective`, `shared-ret`, `shared-tail`          |
+| **Structure**  | How the `if`s and loops are rebuilt from the branches: which way a test reads, where a loop is entered, what reaches a merge (the point where two paths meet). | `flip-branch`, `defsite`, `loop-entry`, `flip-join`, `uns-cmp`   |
+| **Respell**    | A rewrite of the finished C that keeps what it does: where a value lives, whether an address is held in a pointer, how statements are ordered.                 | `unmerge`, `offmember`, `livebase`, `coalesce-v0-v1`, `volatile` |
+| **Symbol map** | Globals are written as raw addresses instead of the names the project's symbol map gives them. Always the last variation.                                      | `raw-globals`                                                    |
 
 For a reader, what happened to one variation on one function is one of two states: it **carried N
 candidates**, or it **threw**. N can be 0: the variation did not apply, or an earlier combination
