@@ -174,6 +174,11 @@ describe('no definition keeps free-text gate logic', () => {
     expect(bad).toEqual([]);
   });
 
+  test('no two variations judge the same thing', () => {
+    const judged = entries.flatMap(([, { offeredWhen: o }]) => (o !== 'always' && 'judges' in o ? [o.judges] : []));
+    expect(judged.filter((j, i) => judged.indexOf(j) !== i)).toEqual([]);
+  });
+
   test('what a table judges is a noun phrase, never a sentence', () => {
     const bad = entries.flatMap(([n, { offeredWhen: o }]) =>
       o !== 'always' && 'judges' in o && (!/^each [^.]+[^.]$/.test(o.judges) || o.judges.length > 110 || 'when' in o)

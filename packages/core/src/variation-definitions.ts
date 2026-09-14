@@ -1105,7 +1105,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'same register while it spins) is where that prediction is wrong: the compiler holds one register ' +
       'across the stores, the loop and the read-back. This hoist admits those bases. Its combinations with ' +
       '`indexed`, `sinkinit`, `nearbase`, `coalesce` and `homesplit` are enumerated beside it.',
-    offeredWhen: { judges: 'each fixed-address base the default hoist left inline', gates: ['LIVEBASE_GATES'] },
+    offeredWhen: {
+      judges: 'each fixed-address base reached twice or more, even inside a loop or at one repeated offset',
+      gates: ['LIVEBASE_GATES'],
+    },
     example: {
       compiler: 'agbcc',
       unit: 'void example(u32 go) { @ }',
@@ -1123,7 +1126,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'held across the body while the RAM halfword beside it is loaded each time. This is `livebase` with ' +
       'every base reached at a single fixed offset left inline.',
     offeredWhen: {
-      judges: 'each fixed-address base the default hoist left inline',
+      judges: 'each fixed-address base reached twice or more, at more than one offset',
       gates: ['LIVEBASE_BLOCK_GATES'],
     },
     example: {
@@ -1147,7 +1150,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "agbcc folds a constant subscript into the literal it loads and keeps a named base's offset in the " +
       'instruction.',
     offeredWhen: {
-      judges: 'each fixed-address base the default hoist left inline',
+      judges: 'each fixed-address base whose load kept its constant offset, even one reached once',
       gates: ['BASEFOLD_GATES'],
     },
     example: {
@@ -1167,7 +1170,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'at the first use. Where it binds a base another hoist already names it takes the name, so its count ' +
       'includes renames.',
     offeredWhen: {
-      judges: 'each fixed-address base the default hoist left inline',
+      judges: 'each fixed-address base reached twice or more whose load kept its constant offset',
       gates: ['UNFOLDED_GATES'],
     },
     example: {
@@ -1190,7 +1193,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "On agbcc the array subscript expansion loads a declared array's base first and scales the index " +
       'first for the inline cast.',
     offeredWhen: {
-      judges: 'each fixed-address base the default hoist left inline',
+      judges: 'each fixed-address base the assembly loaded before scaling its index',
       gates: ['ORDERBASE_GATES'],
     },
     example: {
@@ -1210,7 +1213,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'every use. Where no nested list holds them all it declines rather than repeat the flat placement.',
     compilerBehavior: 'The same assignment above an `if` and inside its arm compile differently on agbcc.',
     offeredWhen: {
-      judges: 'each fixed-address base the default hoist left inline, whose uses one nested statement list holds',
+      judges: 'each base the assembly loaded before scaling its index, whose uses one nested statement list holds',
       gates: ['ORDERBASE_GATES'],
     },
     example: {

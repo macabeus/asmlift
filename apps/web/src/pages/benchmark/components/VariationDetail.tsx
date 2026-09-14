@@ -7,6 +7,7 @@
 import type { FunctionResult } from '@asmlift/bench-schema';
 import {
   EXAMPLE_COMPILER_NAMES,
+  EXAMPLE_HOLE,
   type OfferedWhen,
   TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
@@ -170,13 +171,24 @@ export function VariationDetailBody({
             </div>
           </div>
           <p className="text-xs leading-relaxed text-slate-500">
-            Compiled with {EXAMPLE_COMPILER_NAMES[def.example.compiler]}, the two are different objects.
+            Compiled with {EXAMPLE_COMPILER_NAMES[def.example.compiler]} in the unit below, the two are different
+            objects.
           </p>
           {def.example.note && (
             <p className="text-xs leading-relaxed text-slate-500">
               <InlineCode text={def.example.note} />
             </p>
           )}
+          {/* The context that makes the two differ (a loop, register pressure, a declaration) is in the
+              unit, so the reader can compile exactly what the matching suite compiles. */}
+          <details>
+            <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">The compiled unit</summary>
+            <CodeBlock
+              code={def.example.unit.replace(EXAMPLE_HOLE, '/* the spelling above */')}
+              language="c"
+              className={`mt-2 ${CODE_PRE}`}
+            />
+          </details>
         </div>
 
         <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
@@ -278,9 +290,7 @@ function Offer({ offer, target }: { offer: OfferedWhen; target?: TargetGate<Gati
       {rules.length > 0 && (
         <details open={rules.length <= OPEN_RULES}>
           <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">
-            {offer !== 'always' && 'judges' in offer
-              ? `The ${rules.length} rules that can refuse it`
-              : `The ${rules.length} rules it also applies`}
+            The {rules.length} rules that can still refuse it
           </summary>
           <ul className="mt-2 space-y-1.5">
             {rules.map((r) => (
@@ -315,9 +325,6 @@ function Offer({ offer, target }: { offer: OfferedWhen; target?: TargetGate<Gati
           <code className="font-mono text-slate-400">{offer.decidedBy.file}</code>
         </p>
       )}
-      <p className="text-xs text-slate-500">
-        Where it changes nothing, its candidate repeats an earlier source and is not enumerated.
-      </p>
     </div>
   );
 }

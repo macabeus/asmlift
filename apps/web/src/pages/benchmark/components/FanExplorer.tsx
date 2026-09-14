@@ -259,7 +259,8 @@ export function FanExplorer({
           <h2 className="text-base font-semibold text-slate-100">Every variation</h2>
           <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
             Grouped by kind, ranked by winners. Rows and candidates count the fans that carried the variation, won or
-            lost; winners are those rows whose winner carries it. Click an entry for its definition and its rows.
+            lost; winners are those rows whose winner carries it. Where a variation changes nothing, its candidate
+            repeats an earlier source and is not enumerated. Click an entry for its definition and its rows.
           </p>
         </div>
         {groups.map((g) => (
