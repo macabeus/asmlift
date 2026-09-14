@@ -13,7 +13,8 @@
 // `sense-${m}`), so the set of names is open by construction and nothing but this table closes it.
 // Three checks hold the table to the code: a static scan of the mint literals
 // (`packages/core/test/variation-tokens.test.ts`), every name the committed benchmark artifact
-// publishes, and every name the enumerated corpus mints (both in `apps/benchmark/test`).
+// publishes, and every name the enumerated corpus mints (both in `apps/benchmark/test`). What each
+// name means to a reader is `variation-definitions.ts`, keyed by `VariationName` below.
 //
 // WHY A TEST PREDICATE GOES THROUGH HERE. A predicate written as a substring —
 // `name.includes('/regcopy-ret')` inside `.toEqual([])` — keeps passing after the variation is
@@ -42,7 +43,7 @@ const LOCALS = /[a-z]+\d+(?:-[a-z]+\d+)*/;
 
 /** Every variation, grouped by kind in name order. The order of this table is not published
  *  behaviour: enumeration order is decided in `rank.ts` and `rank-variations.ts`, never here. */
-export const VARIATION_TOKENS: readonly VariationToken[] = [
+const TOKENS = [
   // signedness: always the first part of a name, because both answers are enumerated
   { name: 'unsigned', variationKind: 'signedness' },
   { name: 'signed', variationKind: 'signedness' },
@@ -104,12 +105,19 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'pollread', variationKind: 'respell' },
   // symbol map: the map's shaped spellings withheld; always the last part
   { name: 'raw-globals', variationKind: 'symbol-map' },
-];
+] as const satisfies readonly VariationToken[];
 
-const BY_NAME = new Map(VARIATION_TOKENS.map((t) => [t.name, t]));
+/** A registered variation's name. `variation-definitions.ts` keys its definitions by this type, so a
+ *  registry entry without a definition, or a definition for a name the registry does not hold, is a
+ *  type error. */
+export type VariationName = (typeof TOKENS)[number]['name'];
+
+export const VARIATION_TOKENS: readonly (VariationToken & { name: VariationName })[] = TOKENS;
+
+const BY_NAME = new Map<string, VariationToken & { name: VariationName }>(VARIATION_TOKENS.map((t) => [t.name, t]));
 
 /** The registry entry for a name, or a throw naming what is registered. */
-export function variationToken(name: string): VariationToken {
+export function variationToken(name: string): VariationToken & { name: VariationName } {
   const t = BY_NAME.get(name);
   if (t === undefined) {
     throw new Error(`'${name}' is not a registered variation (packages/core/src/variation-tokens.ts)`);
@@ -120,11 +128,12 @@ export function variationToken(name: string): VariationToken {
 /** One part of a candidate's name, split into the variation it names and that variation's subject.
  *  The longest registered name wins, so `livebase-block` is never `livebase` applied to `block`.
  *  Throws on a part no registered variation spells. */
-export function parseVariation(part: string): { name: string; subject?: string } {
-  if (BY_NAME.has(part)) {
-    return { name: part };
+export function parseVariation(part: string): { name: VariationName; subject?: string } {
+  const exact = BY_NAME.get(part);
+  if (exact !== undefined) {
+    return { name: exact.name };
   }
-  let best: { name: string; subject: string } | undefined;
+  let best: { name: VariationName; subject: string } | undefined;
   for (const t of VARIATION_TOKENS) {
     if (t.subject === undefined || !part.startsWith(`${t.name}-`)) {
       continue;

@@ -50,6 +50,10 @@ bare "the variations" could be read both ways.
   ([`packages/core/src/variation-tokens.ts`](../packages/core/src/variation-tokens.ts)). A test asks
   whether a candidate carries one through `hasVariation` or `hasVariations`, both of which throw on a
   name the registry does not hold.
+- Every registered variation has one reader definition in `VARIATION_DEFINITIONS`
+  ([`packages/core/src/variation-definitions.ts`](../packages/core/src/variation-definitions.ts)),
+  keyed by the registry's names: what it changes in the C, a before/after pair, and what its subject
+  means. The six words and the kinds below are data there too, and a test holds these tables to it.
 - When several combinations of variations produce the same source, only the first combination's
   variations are kept. **A candidate's variations name what was applied, not every route to its
   source, and not a route a deletion must remove.** Price a variation by ablating it, never by

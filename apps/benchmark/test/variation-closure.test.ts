@@ -16,6 +16,7 @@
 // A name that fails here is either a variation minted without a registry entry, or a registry entry
 // spelled differently from its mint site. Both are fixed in `variation-tokens.ts` or at the mint.
 import { enumerateRanked } from '@asmlift/cli/rank';
+import { VARIATION_DEFINITIONS } from '@asmlift/core/variation-definitions';
 import {
   VARIATION_KINDS,
   joinVariations,
@@ -63,6 +64,7 @@ describe('closure over the names the committed artifact publishes', () => {
       winnerVariations?: string[];
       droppedCandidates?: { variations: string[] }[];
       withheldCandidates?: { variations: string[] }[];
+      fanVariations?: Record<string, unknown>;
     };
   }[];
   const winners = rows.flatMap((r) => (r.asmlift?.winnerVariations === undefined ? [] : [r.asmlift.winnerVariations]));
@@ -98,6 +100,19 @@ describe('closure over the names the committed artifact publishes', () => {
 
   test('no published name uses `winner`, the word `bench fan --show` reserves', () => {
     expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
+  });
+
+  // The reader definitions are keyed by the registry, so a parsed name always has one unless a
+  // definition was removed; this is the check that names what the artifact would show undefined.
+  test('every published variation, and every fan roster key, has a reader definition', () => {
+    const parts = [...names].flatMap((n) => splitVariations(n));
+    // A roster key is a registered name as it stands, never a variation applied to a subject.
+    const rosterKeys = [...new Set(rows.flatMap((r) => Object.keys(r.asmlift?.fanVariations ?? {})))];
+    expect(rosterKeys.filter((k) => variationToken(k).name !== k)).toEqual([]);
+    const undefinedNames = [...new Set([...parts.map((p) => parseVariation(p).name), ...rosterKeys])].filter(
+      (n) => !Object.hasOwn(VARIATION_DEFINITIONS, n),
+    );
+    expect(undefinedNames).toEqual([]);
   });
 });
 
