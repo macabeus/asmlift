@@ -4,9 +4,11 @@ import { useMemo, useState } from 'react';
 import { CodeBlock, type CodeLanguage } from '../../../shared/components/CodeBlock';
 import { useOverlay } from '../../../shared/utils/overlay';
 import type { ShareState } from '../../../shared/utils/permalink';
+import type { ProjectProfile } from '../lib/flags';
 import { formatC } from '../lib/format-c';
 import { playgroundShare } from '../lib/playground';
 import { DECOMPILER_COLOR, TOOLCHAIN_LABEL } from '../theme';
+import { CompilerFlags } from './CompilerFlags';
 import { WinningSpelling } from './WinningSpelling';
 import { Chip, FeatureChip, GapBadge, OutcomeBadge } from './ui/Badge';
 
@@ -354,6 +356,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
 /** Right-hand detail drawer for a selected function. */
 export function FunctionDetail({
   fn,
+  peer,
   onClose,
   onOpenInPlayground,
   onOpenFeature,
@@ -361,6 +364,8 @@ export function FunctionDetail({
   onOpenVariation,
 }: {
   fn: FunctionResult;
+  /** the profile most of the project's rows of this toolchain share, which the flags strip compares with */
+  peer: ProjectProfile | null;
   onClose: () => void;
   onOpenInPlayground: (s: ShareState) => void;
   /** open a tag's definition — stacks the feature drawer over this one (see shared/utils/overlay) */
@@ -435,6 +440,8 @@ export function FunctionDetail({
               {fn.note}
             </div>
           )}
+
+          <CompilerFlags fn={fn} peer={peer} />
 
           {/* Three columns: reference + both decompilers */}
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

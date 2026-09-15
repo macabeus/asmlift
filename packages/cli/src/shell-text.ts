@@ -107,3 +107,154 @@ export function shellProgramText(text: string): string {
   const stripped = stripShellComments(text);
   return SHELL_HEREDOC.test(stripped) ? text : stripped;
 }
+
+/** One word of a shell command: what the program receives, and where the text spells it. */
+export interface ShellWord {
+  /** the word after quote removal; an expansion (`$VAR`, `$(…)`) is kept as written */
+  value: string;
+  /** where the word's spelling starts and ends in the text, quotes included */
+  start: number;
+  end: number;
+}
+
+/** Where the `(` or `{` at `open` is closed, past any quote or nested group inside it. */
+function groupEnd(text: string, open: number): number {
+  const close = text[open] === '(' ? ')' : '}';
+  let depth = 0;
+  let quote: string | undefined;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (quote !== undefined) {
+      if (c === quote) {
+        quote = undefined;
+      } else if (c === '\\' && quote === '"') {
+        i++;
+      }
+    } else if (c === '\\') {
+      i++;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === text[open]) {
+      depth++;
+    } else if (c === close && --depth === 0) {
+      return i + 1;
+    }
+  }
+  return text.length;
+}
+
+/** The characters a backslash escapes inside double quotes. */
+const DQ_ESCAPED = new Set(['$', '`', '"', '\\', '\n']);
+
+/** The simple commands a shell text runs, in order, each as its words. A newline, `;`, `&&`, `||`,
+ *  `|`, `&` or a parenthesis ends a command; a redirection is dropped with its target; a comment is
+ *  not read; a backslash-newline continues the line. A heredoc body is not recognised. */
+export function shellCommands(text: string): ShellWord[][] {
+  const commands: ShellWord[][] = [];
+  let words: ShellWord[] = [];
+  let word: { value: string; start: number } | undefined;
+  let dropNext = false;
+  const endWord = (end: number): void => {
+    if (word !== undefined) {
+      if (dropNext) {
+        dropNext = false;
+      } else {
+        words.push({ value: word.value, start: word.start, end });
+      }
+      word = undefined;
+    }
+  };
+  const endCommand = (at: number): void => {
+    endWord(at);
+    dropNext = false;
+    if (words.length > 0) {
+      commands.push(words);
+    }
+    words = [];
+  };
+  const begin = (at: number): { value: string; start: number } => (word ??= { value: '', start: at });
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\\' && text[i + 1] === '\n') {
+      i += 2;
+    } else if (c === ' ' || c === '\t') {
+      endWord(i);
+      i++;
+    } else if (c === '#' && word === undefined) {
+      while (i < text.length && text[i] !== '\n') {
+        i++;
+      }
+    } else if (c === '\n' || c === ';' || c === '(' || c === ')') {
+      endCommand(i);
+      i++;
+    } else if (c === '&' && text[i + 1] === '>') {
+      endWord(i);
+      i += text[i + 2] === '>' ? 3 : 2;
+      dropNext = true;
+    } else if (c === '&' || c === '|') {
+      endCommand(i);
+      i += text[i + 1] === c ? 2 : 1;
+    } else if (c === '<' || c === '>') {
+      // A file descriptor spelled right before the operator (`2>`) belongs to the redirection.
+      if (word !== undefined && /^\d+$/.test(text.slice(word.start, i))) {
+        word = undefined;
+      } else {
+        endWord(i);
+      }
+      while (text[i] === '<' || text[i] === '>') {
+        i++;
+      }
+      if (text[i] === '&' && /[\d-]/.test(text[i + 1] ?? '')) {
+        i++;
+        while (/[\d-]/.test(text[i] ?? '')) {
+          i++;
+        }
+      } else {
+        dropNext = true;
+      }
+    } else if (c === "'") {
+      const w = begin(i);
+      const close = text.indexOf("'", i + 1);
+      const end = close === -1 ? text.length : close;
+      w.value += text.slice(i + 1, end);
+      i = end + 1;
+    } else if (c === '"') {
+      const w = begin(i);
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === '\\' && DQ_ESCAPED.has(text[i + 1])) {
+          if (text[i + 1] !== '\n') {
+            w.value += text[i + 1];
+          }
+          i += 2;
+        } else if (text[i] === '$' && text[i + 1] === '(') {
+          const end = groupEnd(text, i + 1);
+          w.value += text.slice(i, end);
+          i = end;
+        } else {
+          w.value += text[i];
+          i++;
+        }
+      }
+      i++;
+    } else if (c === '\\') {
+      begin(i).value += text[i + 1] ?? '';
+      i += 2;
+    } else if (c === '$' && (text[i + 1] === '(' || text[i + 1] === '{')) {
+      const end = groupEnd(text, i + 1);
+      begin(i).value += text.slice(i, end);
+      i = end;
+    } else if (c === '`') {
+      const close = text.indexOf('`', i + 1);
+      const end = close === -1 ? text.length : close + 1;
+      begin(i).value += text.slice(i, end);
+      i = end;
+    } else {
+      begin(i).value += c;
+      i++;
+    }
+  }
+  endCommand(Math.min(i, text.length));
+  return commands;
+}

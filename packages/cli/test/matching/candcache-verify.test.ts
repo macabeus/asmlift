@@ -7,6 +7,7 @@
 //     the two-directory stamp probe rather than assumed;
 //   • do the bytes served warm equal the bytes compiled cold, on real objects;
 //   • does verify mode CATCH a stored object that disagrees — the gate has to be able to fail.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +19,7 @@ type CompileCommandModule = typeof import('../../src/compile-command');
 /** The project's "own toolchain", as a decomp.yaml command template: cpp -> agbcc -> as. */
 const TEMPLATE = [
   `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c`,
-  `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')}`,
+  `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.harnessFlags.join(' ')} ${TOOLCHAIN_TARGETS.agbcc.canonicalFlags.join(' ')}`,
   `${TOOLCHAIN.as} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
 ].join(' && ');
 

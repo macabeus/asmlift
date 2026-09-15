@@ -5,6 +5,7 @@
 // (objdiff score, per-pattern score deltas via the `probeScore` hook, ranked candidates) when a
 // target object is available; the web playground renders the TraceReport as-is.
 import { cBackend } from './backend/c';
+import type { CodegenProfile } from './codegen-flags';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import type { Fn } from './ir/core';
@@ -16,7 +17,7 @@ import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipe
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
-import { type TargetDescription, structureOptionsFor } from './target';
+import { type ResolvedTarget, type TargetDescription, type ToolchainId, structureOptionsFor } from './target';
 
 /** EVERY stage dump carries the write-order record (ir/print.ts `PrintOptions`) — not just
  *  `stage:lift`, even though only the frontend measures it. Two reasons: the raising folds MUTATE
@@ -50,6 +51,11 @@ export interface TraceReport {
   target: {
     isa: string;
     compiler: string;
+    toolchain: ToolchainId;
+    /** the flags the function was compiled with, in the build's order */
+    cflags: readonly string[];
+    /** what those flags make the compiler do */
+    profile: Pick<CodegenProfile, 'slots'>;
     capabilities: TargetDescription['capabilities'];
     compilerBehaviors: TargetDescription['compilerBehaviors'];
   };
@@ -118,19 +124,31 @@ const PRE_RECOVERY_TRACE: Record<string, { stage: string; title: (result: number
   'struct-arrays': { stage: 'stage:struct-arrays', title: () => 'Struct-array recovery (element stride evidence)' },
 };
 
+function reportTarget({ toolchain, cflags, target, profile }: ResolvedTarget): TraceReport['target'] {
+  return {
+    isa: target.id,
+    compiler: target.compiler,
+    toolchain,
+    cflags,
+    profile: { slots: profile.slots },
+    capabilities: target.capabilities,
+    compilerBehaviors: target.compilerBehaviors,
+  };
+}
+
 /** Run the tower while recording a TraceReport. Strict mode throws on any gap (like decompile);
  *  annotate mode never throws — a non-localizable failure degrades to the same stub. */
 export function decompileTraced(
   name: string,
   asm: string,
-  target: TargetDescription,
+  resolved: ResolvedTarget,
   opts: TraceOptions = {},
 ): { source: string; report: TraceReport } {
   if ((opts.onGap ?? 'strict') === 'strict') {
-    return traceTower(name, asm, target, opts);
+    return traceTower(name, asm, resolved, opts);
   }
   try {
-    return traceTower(name, asm, target, opts);
+    return traceTower(name, asm, resolved, opts);
   } catch (e) {
     // Annotate-mode parity with decompile(): a NON-localizable failure degrades to the SAME
     // stub (reason + original asm as comments) instead of a throw.
@@ -141,12 +159,7 @@ export function decompileTraced(
         version: 1,
         type: 'decompile',
         symbol: name,
-        target: {
-          isa: target.id,
-          compiler: target.compiler,
-          capabilities: target.capabilities,
-          compilerBehaviors: target.compilerBehaviors,
-        },
+        target: reportTarget(resolved),
         asm,
         trace: [],
         patternEvents: [],
@@ -161,9 +174,10 @@ export function decompileTraced(
 function traceTower(
   name: string,
   asm: string,
-  target: TargetDescription,
+  resolved: ResolvedTarget,
   opts: TraceOptions,
 ): { source: string; report: TraceReport } {
+  const { target } = resolved;
   const backend = opts.backend ?? cBackend;
   // Merged exactly as pipeline.ts does: the project's own DWARF signatures fill in what the caller
   // did not state. A trace that lifted from a different table would explain a run that never
@@ -307,12 +321,7 @@ function traceTower(
       version: 1,
       type: 'decompile',
       symbol: name,
-      target: {
-        isa: target.id,
-        compiler: target.compiler,
-        capabilities: target.capabilities,
-        compilerBehaviors: target.compilerBehaviors,
-      },
+      target: reportTarget(resolved),
       asm,
       trace,
       patternEvents,

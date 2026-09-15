@@ -10,11 +10,16 @@ import { join } from 'node:path';
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
  *  otherwise `status: null` reaches callers as e.g. "agbcc failed: null". Compile failures
  *  (nonzero status, real stderr) still return for the caller to diagnose. */
-export function run(cmd: string, args: string[], cwd?: string, env?: Record<string, string>) {
+export function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string>; input?: string } = {},
+) {
   const r = spawnSync(cmd, args, {
-    cwd,
+    cwd: opts.cwd,
+    input: opts.input,
     encoding: 'utf8',
-    env: env ? { ...process.env, ...env } : process.env,
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
     timeout: 120_000,
   });
   if (r.error) {
@@ -77,14 +82,18 @@ export function compilerDiagnostics(s: string): string {
     .join('\n');
 }
 
-/** A content-keyed scratch dir for a reference build: same TU ⇒ same path, every run. The scratch
- *  path leaks into the object (preprocessor linemarkers / file symbols), so a random mkdtemp path
- *  would make the object bytes differ run-to-run and churn the m2c cache key (object sha,
- *  cache.ts). Under /tmp so the docker pool can reach it; distinct TUs never collide
- *  (sha-keyed), and cases that share a TU rebuild byte-identical content, so a cross-shard
+/** A content-keyed scratch dir for a reference build: same flags and TU ⇒ same path, every run. The
+ *  scratch path leaks into the object (preprocessor linemarkers / file symbols), so a random mkdtemp
+ *  path would make the object bytes differ run-to-run and churn the m2c cache key (object sha,
+ *  cache.ts). Under /tmp so the docker pool can reach it; distinct TUs and distinct flag sets never
+ *  collide (sha-keyed), and cases that share both rebuild byte-identical content, so a cross-shard
  *  rebuild race is benign. */
-export function contentDir(tag: string, tu: string): string {
-  const d = join('/tmp', `bench-real-${tag}-${createHash('sha256').update(tu).digest('hex').slice(0, 16)}`);
+export function contentDir(tag: string, cflags: readonly string[], tu: string): string {
+  const key = createHash('sha256')
+    .update(JSON.stringify([cflags, tu]))
+    .digest('hex')
+    .slice(0, 16);
+  const d = join('/tmp', `bench-real-${tag}-${key}`);
   mkdirSync(d, { recursive: true });
   return d;
 }

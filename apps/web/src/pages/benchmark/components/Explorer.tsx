@@ -1,4 +1,5 @@
 import { type DecompilerId, type FunctionResult, type Outcome, resolveRow } from '@asmlift/bench-schema';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
@@ -7,6 +8,7 @@ import type { ShareState } from '../../../shared/utils/permalink';
 import { declineClassesOf } from '../lib/declines';
 import { FILTER_PARSERS, FILTER_URL_KEYS, SORT_PARSERS, type SortKey, type Verdict } from '../lib/explorer-url';
 import { FAN_CHIP_FLOOR, compactCount, compareFanChip, fanChip } from '../lib/fan';
+import { type ExplorerFlags, explorerFlags, peerProfile, projectProfiles } from '../lib/flags';
 import { canOpenInPlayground, playgroundShare } from '../lib/playground';
 import { distinct, tally } from '../lib/stats';
 import { DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
@@ -79,6 +81,31 @@ function FanCell({ row }: { row: FunctionResult }) {
   );
 }
 
+/** A row's level, and a marker with what else separates its flags from its project's profile. */
+function FlagsCell({ row, cell }: { row: FunctionResult; cell: ExplorerFlags }) {
+  return (
+    <div className="max-w-[220px] font-mono text-xs">
+      <span className="text-slate-300" title={shellJoinFlags(row.cflags)}>
+        {cell.level ?? '—'}
+      </span>
+      {cell.differs && (
+        <span
+          className="text-amber-300"
+          title={`differs from the profile of most of ${row.project}'s ${row.toolchain} rows: ${cell.changes.join(' · ')}`}
+        >
+          {' ◆'}
+          {cell.delta.map((c, i) => (
+            <span key={c}>
+              {i > 0 ? ' · ' : ' '}
+              <span className="whitespace-nowrap">{c}</span>
+            </span>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function Explorer({
   rows,
   hash,
@@ -114,6 +141,15 @@ export function Explorer({
   const projects = useMemo(() => distinct(rows, (r) => r.project), [rows]);
   const isas = useMemo(() => distinct(rows, (r) => r.isa), [rows]);
   const toolchains = useMemo(() => distinct(rows, (r) => r.toolchain), [rows]);
+  const profiles = useMemo(() => projectProfiles(rows), [rows]);
+  const flagCells = useMemo(
+    () => new Map(rows.map((r) => [r.id, explorerFlags(r, peerProfile(profiles, r))])),
+    [rows, profiles],
+  );
+  const levels = useMemo(
+    () => [...new Set([...flagCells.values()].flatMap((c) => (c.level === null ? [] : [c.level])))].sort(),
+    [flagCells],
+  );
 
   const set = (patch: Partial<typeof filters>) => void setFilters(patch);
 
@@ -127,6 +163,9 @@ export function Explorer({
         return false;
       }
       if (filters.toolchain && r.toolchain !== filters.toolchain) {
+        return false;
+      }
+      if (filters.opt && flagCells.get(r.id)!.level !== filters.opt) {
         return false;
       }
       if (filters.tier && r.tier !== filters.tier) {
@@ -201,7 +240,7 @@ export function Explorer({
       return cmp * dir;
     });
     return out;
-  }, [rows, filters, sortKey, sortDir]);
+  }, [rows, flagCells, filters, sortKey, sortDir]);
 
   // Over the ALREADY-FILTERED rows, so an unselected option reads as "how many rows survive if I
   // AND this in too" — a selection that would empty the table says so before it is clicked.
@@ -256,6 +295,12 @@ export function Explorer({
               label: TOOLCHAIN_LABEL[t as keyof typeof TOOLCHAIN_LABEL] ?? t,
             })),
           ]}
+        />
+        <Select
+          label="Opt level"
+          value={filters.opt}
+          onChange={(v) => set({ opt: v })}
+          options={[{ value: '', label: 'All' }, ...levels.map((l) => ({ value: l, label: l }))]}
         />
         <Select
           label="Tier"
@@ -333,6 +378,11 @@ export function Explorer({
               <Th onClick={() => toggleSort('sym')}>Symbol{arrow('sym')}</Th>
               <Th onClick={() => toggleSort('project')}>Project{arrow('project')}</Th>
               <Th onClick={() => toggleSort('toolchain')}>Toolchain{arrow('toolchain')}</Th>
+              <Th>
+                <span title="the optimisation level the compiler acts on; ◆ marks flags that differ from the profile of most of the project's rows">
+                  Flags
+                </span>
+              </Th>
               <Th>Features</Th>
               <Th onClick={() => toggleSort('asmlift')}>
                 <span style={{ color: DECOMPILER_COLOR.asmlift }}>asmlift</span>
@@ -366,6 +416,9 @@ export function Explorer({
                 <td className="px-3 py-2 font-mono text-slate-100">{r.sym}</td>
                 <td className="px-3 py-2 text-slate-300">{r.project}</td>
                 <td className="px-3 py-2 text-slate-400">{TOOLCHAIN_LABEL[r.toolchain]}</td>
+                <td className="px-3 py-2">
+                  <FlagsCell row={r} cell={flagCells.get(r.id)!} />
+                </td>
                 <td className="px-3 py-2">
                   <div className="flex max-w-[220px] flex-wrap gap-1">
                     {r.features.slice(0, 4).map((f) => (
@@ -409,7 +462,7 @@ export function Explorer({
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-slate-500">
+                <td colSpan={10} className="px-3 py-10 text-center text-slate-500">
                   No functions match these filters.
                 </td>
               </tr>
@@ -424,6 +477,7 @@ export function Explorer({
           // which must re-read its storage key when the selected function changes.
           key={selected.id}
           fn={selected}
+          peer={peerProfile(profiles, selected)}
           // Replace, not push: Back after closing must not reopen the detail.
           onClose={() => void setSelectedId(null, { history: 'replace' })}
           onOpenInPlayground={onOpenInPlayground}

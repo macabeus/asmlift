@@ -446,7 +446,7 @@ function spellablePointee(
  *  materialised — and where the displacement carries it the cast spelling stands.
  *
  *  THAT CHANNEL DOES NOT SAY THE SOURCE NAMED THE MEMBER: a HOISTED BASE LOCAL materialises the
- *  same constant. Compiled at `TOOLCHAIN.agbccFlags` against `u8 unk8[6][8]`, all three of
+ *  same constant. Compiled at agbcc's canonical flags against `u8 unk8[6][8]`, all three of
  *  `gBlob->unk8[0][i]`, `u8 *p = (u8 *)gBlob->unk8; p[i]` and `u8 *p = (u8 *)gBlob + 8; p[i]` emit
  *  the identical `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)`
  *  and `((u8 *)gBlob + i)[8]` take the displacement — and the base-local form is a spelling three
@@ -1406,7 +1406,7 @@ export interface StructureOptions {
   // and a `switch` over the same values produce the SAME candidate and the differ never sees the
   // ladder — there is nothing in the fan for it to prefer.
   //
-  // The two spellings are different objects. Compiled at TOOLCHAIN.agbccFlags the same two-case
+  // The two spellings are different objects. Compiled at agbcc's canonical flags the same two-case
   // body is 20 bytes either way (0x14, ten Thumb instructions — the pair is committed as
   // `corpus/agbcc-sw{frontload,ladder}.s`) and disagrees instruction for instruction: the `switch` emits
   // `cmp #0x1e; beq` then `cmp #0x64; bne` — both tests ahead of both bodies, and sorted ASCENDING,

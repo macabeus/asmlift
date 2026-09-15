@@ -25,14 +25,14 @@
 // (kleod MultiplyQ8/Q4, ReciprocalQ8/Q4, pokeemerald MathUtil_Mul16, see l3/regspell.ts), whose
 // register pressure has no synthetic reproduction here. The benchmark is what covers the win.
 import { enumerateCandidates, rankBy } from '@asmlift/core/rank';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
 
 test('the register-copy candidates are enumerated and ranked through the ranked path', () => {
   const c = 'int recip(int a){ return 0x10000 / a; }';
-  const asm = compileTargetAsm(c);
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
   const cands = enumerateCandidates('recip', asm, ARMV4T_AGBCC, {});
   // The variation fired, and the tail reached the candidate set under the name of the tail it IS.
@@ -46,6 +46,6 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   expect(cands.some((x) => hasVariation(x.variations, 'regcopy', 'ret-fresh'))).toBe(true);
   expect(cands.filter((x) => hasVariation(x.variations, 'regcopy', 'ret'))).toEqual([]);
   // every regcopy candidate is emittable C, not a shape that throws downstream of the seam
-  const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj));
+  const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
   expect(r.winner.score.match).toBe(true);
 });

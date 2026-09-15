@@ -9,7 +9,7 @@
 //    opaque `?`. Function-scoping carries the div's (SSA-global) operands across, so gcc divide
 //    (unsigned AND signed â€” see the signed cases below) MATCHES.
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_GCC, PPC_MWCC } from '@asmlift/core/target';
+import { MIPS_GCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsGccTarget, compilePpcTarget, scoreCMipsGcc, scoreCPpc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -25,9 +25,9 @@ describe.runIf(HAVE_PPC)('T1: PowerPC hardware divide (divw/divwu) â†’ a / b, by
   ];
   for (const { sym, c, op } of CASES) {
     test(`${sym} matches`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym);
+      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
-      const sc = scoreCPpc(r.source, sym, obj);
+      const sc = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       expect(r.source).toContain(op);
       expect(r.source).not.toContain('?'); // no unresolved opaque
       expect(sc.match).toBe(true); // byte-exact on real mwcc
@@ -50,9 +50,9 @@ describe.runIf(HAVE_PPC)('T5: PowerPC synthesized remainder (divw/mullw/subf) â†
   ];
   for (const { sym, c, expect: want } of CASES) {
     test(`${sym} matches`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym);
+      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
-      const sc = scoreCPpc(r.source, sym, obj);
+      const sc = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       expect(r.source).toContain(want);
       expect(r.source).not.toContain('?'); // no unresolved opaque
       expect(sc.match).toBe(true); // byte-exact on real mwcc
@@ -62,9 +62,13 @@ describe.runIf(HAVE_PPC)('T5: PowerPC synthesized remainder (divw/mullw/subf) â†
 
 describe.runIf(HAVE_DOCKER)('T3: GCC-MIPS unsigned divide with cross-block mflo â†’ a / b, byte-exact', () => {
   test('udivg matches (mflo scheduled past the trap branch)', () => {
-    const { obj, asm } = compileMipsGccTarget('unsigned udivg(unsigned a, unsigned b){ return a / b; }', 'udivg');
+    const { obj, asm } = compileMipsGccTarget(
+      'unsigned udivg(unsigned a, unsigned b){ return a / b; }',
+      'udivg',
+      TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
+    );
     const r = decompile('udivg', asm, MIPS_GCC);
-    const sc = scoreCMipsGcc(r.source, 'udivg', obj);
+    const sc = scoreCMipsGcc(r.source, 'udivg', obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
     expect(r.source).toContain('/');
     expect(r.source).not.toContain('?');
     expect(sc.match).toBe(true);
@@ -79,11 +83,11 @@ describe.runIf(HAVE_DOCKER)('T3: GCC-MIPS unsigned divide with cross-block mflo 
     ['modg', 'int modg(int a, int b){ return a % b; }', '%'],
   ] as const) {
     test(`${sym} (signed, F-CONST resolves the overflow const) matches`, () => {
-      const { obj, asm } = compileMipsGccTarget(c, sym);
+      const { obj, asm } = compileMipsGccTarget(c, sym, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_GCC);
       expect(r.source).toContain(op);
       expect(r.source).not.toContain('?');
-      expect(scoreCMipsGcc(r.source, sym, obj).match).toBe(true);
+      expect(scoreCMipsGcc(r.source, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags).match).toBe(true);
     });
   }
 });

@@ -9,7 +9,7 @@ import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import { NoScorableCandidateError, enumerateCandidates } from '@asmlift/core/rank';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { parseVariation } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
@@ -21,7 +21,8 @@ import type { Toolchain } from '../src/toolchains';
 vi.mock('@asmlift/cli/rank', () => ({ decompileRanked: vi.fn() }));
 
 const ranked = vi.mocked(decompileRanked);
-const TC = { id: 'agbcc', targetDesc: ARMV4T_AGBCC } as Toolchain;
+const TC = { id: 'agbcc' } as Toolchain;
+const CODEGEN = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 const noCompile = (() => {
   throw new Error('candidate compile must not run in this suite');
 }) as unknown as CandidateCompiler;
@@ -96,7 +97,7 @@ describe('fanSizeOfError (pure)', () => {
 describe('the ranked row records its own price', () => {
   test('a scored row carries the WHOLE fan, refusals included, and the seconds it cost', () => {
     rankInto(2, 1);
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('nonmatch');
     // the count is the fan, not the published candidate list
     expect(r.fanSize).toBe((r.droppedCandidates?.length ?? 0) + (r.withheldCandidates?.length ?? 0) + 1);
@@ -114,7 +115,7 @@ describe('the ranked row records its own price', () => {
   // against a recorded whole and report a shrink nobody caused.
   test('the count a run records is the count --enumerate would print, over the same enumeration', () => {
     rankInto(0, 0);
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.fanSize).toBe(enumerateCandidates('f', LOADH, ARMV4T_AGBCC, {}).length);
   });
 
@@ -129,7 +130,7 @@ describe('the ranked row records its own price', () => {
         [],
       );
     });
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
     expect(r.fanSize).toBe(2);
     expect(r.fanVariations).toEqual({
@@ -145,7 +146,7 @@ describe('the ranked row records its own price', () => {
     ranked.mockImplementation(() => {
       throw new Error('error: the scorer died');
     });
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('fanSize');
     expect(r).not.toHaveProperty('fanVariations');
@@ -154,7 +155,7 @@ describe('the ranked row records its own price', () => {
 
   test("a scored row's fanVariations tally its whole fan, and hold every variation the winner carries", () => {
     rankInto(3, 2);
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     const t = r.fanVariations!;
     expect((t.unsigned?.candidates ?? 0) + (t.signed?.candidates ?? 0)).toBe(r.fanSize);
     expect(t['raw-globals']).toEqual({ candidates: 3, dropped: 3 });
@@ -179,20 +180,20 @@ describe('the ranked row records its own price', () => {
         withheld: [],
       };
     });
-    expect(() => runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
+    expect(() => runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
   });
 
   test('an unregistered variation in a fully REFUSED fan throws too', () => {
     ranked.mockImplementation(() => {
       throw new NoScorableCandidateError('no scorable candidate', [{ variations: ['nosuch'], error: 'x' }], []);
     });
-    expect(() => runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
+    expect(() => runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
   });
 
   // A DECLINED row never reached the ranked pass. Absent is the honest answer; a 0 would read as
   // "this row enumerates nothing", which is a claim about the row rather than about the run.
   test('a declined row carries NEITHER field — it never ranked', () => {
-    const r = runAsmlift(TC, 'f', GAPPED, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', GAPPED, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('declined');
     expect(r).not.toHaveProperty('fanSize');
     expect(r).not.toHaveProperty('fanVariations');

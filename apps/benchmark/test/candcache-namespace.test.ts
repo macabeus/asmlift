@@ -19,7 +19,7 @@
 //
 // The assertions are on the two exported halves of the namespace rather than on a live compile:
 // `candCacheNamespaceFiles()` is the LIST (a dropped entry is an input the cache stops noticing)
-// and `candCacheStaticStamp(files)` is the digest over it (content, not paths). The pipeline's own
+// and `candCacheStaticStamp(cflags, files)` is the digest over it (content, not paths). The pipeline's own
 // object bytes are the third half, measured by the two-directory probe, which needs agbcc and is
 // exercised by the matching suite.
 //
@@ -29,12 +29,13 @@
 // is absent, which is every hosted runner. What must not be lost there is the dropped-entry guard,
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
 import { toolchainFileChain } from '@asmlift/cli/candcache';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { execSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { SHAPING_SOURCES, candCacheNamespaceFiles, candCacheStaticStamp } from '../src/compile/agbcc';
 
@@ -43,6 +44,7 @@ const HARNESS = join(import.meta.dirname, '../src/compile');
  *  to; where there is no agbcc there is nothing to measure and the module refuses, by design. */
 const HAVE_AGBCC = existsSync(TOOLCHAIN.agbcc);
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'candcache-ns-'));
+const CANONICAL = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
 
 describe('hole 1 — the namespace hashes the harness code that shapes the compiler input', () => {
   test('agbcc.ts and util.ts are shaping sources, and they exist', () => {
@@ -62,14 +64,17 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     const copy = join(dir, 'agbcc.ts');
     copyFileSync(join(HARNESS, 'agbcc.ts'), copy);
 
-    const before = candCacheStaticStamp([copy]);
+    const before = candCacheStaticStamp(CANONICAL, [copy]);
     const src = readFileSync(copy, 'utf8');
     expect(src, 'this test pins the real tail; if the pipeline changed it, re-pin it here').toContain(
       "'\\n.text\\n\\t.align\\t2, 0\\n'",
     );
     writeFileSync(copy, src.replace("'\\n.text\\n\\t.align\\t2, 0\\n'", "'\\n.text\\n\\t.align\\t4, 0\\n'"));
 
-    expect(candCacheStaticStamp([copy]), 'a harness edit that changes the object must re-namespace').not.toBe(before);
+    expect(
+      candCacheStaticStamp(CANONICAL, [copy]),
+      'a harness edit that changes the object must re-namespace',
+    ).not.toBe(before);
   });
 
   test('it is CONTENT, not the path: identical bytes at two paths agree, different bytes do not', () => {
@@ -79,14 +84,14 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     copyFileSync(a, b);
     // The path is in the digest too (it names WHICH input this is), so compare each against
     // itself under an edit rather than against the other.
-    const bBefore = candCacheStaticStamp([b]);
-    expect(candCacheStaticStamp([a])).toBe(candCacheStaticStamp([a]));
+    const bBefore = candCacheStaticStamp(CANONICAL, [b]);
+    expect(candCacheStaticStamp(CANONICAL, [a])).toBe(candCacheStaticStamp(CANONICAL, [a]));
     writeFileSync(b, 'export const tail = 4;\n');
-    expect(candCacheStaticStamp([b])).not.toBe(bBefore);
+    expect(candCacheStaticStamp(CANONICAL, [b])).not.toBe(bBefore);
   });
 
   test('an input that cannot be READ throws — the cache refuses, it never guesses', () => {
-    expect(() => candCacheStaticStamp([join(scratch(), 'absent.ts')])).toThrow(/ENOENT|no such file/i);
+    expect(() => candCacheStaticStamp(CANONICAL, [join(scratch(), 'absent.ts')])).toThrow(/ENOENT|no such file/i);
   });
 });
 
@@ -126,10 +131,10 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     const chain = toolchainFileChain(shim);
     expect(chain, 'the delegate is IN the chain, not merely mentioned by it').toContain(realpathSync(delegate));
 
-    const before = candCacheStaticStamp(chain);
+    const before = candCacheStaticStamp(CANONICAL, chain);
     writeFileSync(delegate, '#!/bin/sh\nexec /usr/bin/true VERSION-TWO\n');
     expect(
-      candCacheStaticStamp(toolchainFileChain(shim)),
+      candCacheStaticStamp(CANONICAL, toolchainFileChain(shim)),
       'editing what the wrapper EXECS must re-namespace, with the wrapper byte-identical',
     ).not.toBe(before);
     expect(readFileSync(shim, 'utf8'), 'the wrapper really did not move').toContain(delegate);
@@ -171,9 +176,11 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     expect(chainA, 'the variable itself is the measurement').toContain(`ENV:ASMLIFT_TEST_DELEGATE=${a}`);
     expect(chainA, 'and the file it names is followed like any other delegate').toContain(realpathSync(a));
 
-    const stampA = candCacheStaticStamp(chainA);
-    expect(candCacheStaticStamp(chainWith(b)), 'repointing the variable re-namespaces').not.toBe(stampA);
-    expect(candCacheStaticStamp(chainWith(a)), 'and pointing it back is the same toolchain again').toBe(stampA);
+    const stampA = candCacheStaticStamp(CANONICAL, chainA);
+    expect(candCacheStaticStamp(CANONICAL, chainWith(b)), 'repointing the variable re-namespaces').not.toBe(stampA);
+    expect(candCacheStaticStamp(CANONICAL, chainWith(a)), 'and pointing it back is the same toolchain again').toBe(
+      stampA,
+    );
     expect(readFileSync(w, 'utf8'), 'the wrapper really did not move').toBe(
       '#!/bin/sh\nexec "$ASMLIFT_TEST_DELEGATE" "$@"\n',
     );
@@ -195,18 +202,20 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     const two = join(scratch(), 'agbcc.ts');
     writeFileSync(one, 'export const x = 1;\n');
     writeFileSync(two, 'export const x = 1;\n');
-    expect(candCacheStaticStamp([two])).toBe(candCacheStaticStamp([one]));
+    expect(candCacheStaticStamp(CANONICAL, [two])).toBe(candCacheStaticStamp(CANONICAL, [one]));
     writeFileSync(two, 'export const x = 2;\n');
-    expect(candCacheStaticStamp([two]), 'content still decides').not.toBe(candCacheStaticStamp([one]));
+    expect(candCacheStaticStamp(CANONICAL, [two]), 'content still decides').not.toBe(
+      candCacheStaticStamp(CANONICAL, [one]),
+    );
   });
 
   test('a same-named binary with different bytes is a different toolchain', () => {
     // What a $PATH wrapper does, without touching $PATH: the same list position, other bytes.
     const p = join(scratch(), 'arm-none-eabi-as');
     writeFileSync(p, '#!/bin/sh\nexec /usr/bin/true "$@"\n');
-    const before = candCacheStaticStamp([p]);
+    const before = candCacheStaticStamp(CANONICAL, [p]);
     writeFileSync(p, '#!/bin/sh\nexec /usr/bin/false "$@"\n');
-    expect(candCacheStaticStamp([p])).not.toBe(before);
+    expect(candCacheStaticStamp(CANONICAL, [p])).not.toBe(before);
   });
 });
 
@@ -231,15 +240,15 @@ describe('hole 5 — the compile environment is an input to every candidate comp
 
   test('CPATH and C_INCLUDE_PATH move the digest — cpp honours them even under -nostdinc', () => {
     for (const v of ['CPATH', 'C_INCLUDE_PATH']) {
-      const bare = withEnv(v, undefined, () => candCacheStaticStamp([]));
-      const set = withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => candCacheStaticStamp([]));
+      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
+      const set = withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => candCacheStaticStamp(CANONICAL, []));
       expect(set, `${v} is an include-path input and must re-namespace`).not.toBe(bare);
     }
   });
 
   test('an unrelated variable does NOT move it — the list is the claim, not "the whole environment"', () => {
-    const bare = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', undefined, () => candCacheStaticStamp([]));
-    const set = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', 'x', () => candCacheStaticStamp([]));
+    const bare = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', undefined, () => candCacheStaticStamp(CANONICAL, []));
+    const set = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', 'x', () => candCacheStaticStamp(CANONICAL, []));
     expect(set).toBe(bare);
   });
 });
@@ -266,9 +275,11 @@ describe("a script's PROSE is not its program", () => {
 
   test('editing that comment STILL re-namespaces — the text is dropped from the scan, not the hash', () => {
     const p = wrapper('#!/bin/sh\n# one\nexec /usr/bin/true "$@"\n');
-    const before = candCacheStaticStamp(toolchainFileChain(p));
+    const before = candCacheStaticStamp(CANONICAL, toolchainFileChain(p));
     writeFileSync(p, '#!/bin/sh\n# two\nexec /usr/bin/true "$@"\n');
-    expect(candCacheStaticStamp(toolchainFileChain(p)), 'the script is hashed by its whole bytes').not.toBe(before);
+    expect(candCacheStaticStamp(CANONICAL, toolchainFileChain(p)), 'the script is hashed by its whole bytes').not.toBe(
+      before,
+    );
   });
 
   test('the SHEBANG survives — it is the one `#` line that names a program', () => {
@@ -287,4 +298,104 @@ describe("a script's PROSE is not its program", () => {
     expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
     expect(chain, 'and the interpreter env goes on to run').toContain(sh);
   });
+});
+
+describe('compiler flags — one namespace per flag set', () => {
+  test('the digest moves with the flags, and only with the flags', () => {
+    const input = join(scratch(), 'shaping.ts');
+    writeFileSync(input, 'export const tail = 2;\n');
+    const o1 = ['-mthumb-interwork', '-O1', '-fhex-asm'];
+    expect(candCacheStaticStamp(CANONICAL, [input])).toBe(candCacheStaticStamp([...CANONICAL], [input]));
+    expect(candCacheStaticStamp(o1, [input])).not.toBe(candCacheStaticStamp(CANONICAL, [input]));
+  });
+
+  // A LIVE compile, cache on: the same TU and symbol at two flag sets must come back as two objects,
+  // each the compiler's own answer at its flags, and a second canonical compile must be served the
+  // canonical object rather than whichever set ran last.
+  test.skipIf(!HAVE_AGBCC)('two flag sets for the same TU and symbol never share a cached object', async () => {
+    const store = scratch();
+    const saved = { mode: process.env.ASMLIFT_CANDCACHE, dir: process.env.ASMLIFT_CANDCACHE_DIR };
+    process.env.ASMLIFT_CANDCACHE = '1';
+    process.env.ASMLIFT_CANDCACHE_DIR = store;
+    vi.resetModules();
+    try {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      const tu = 'int sum(int *p, int n){ int s = 0, i; for (i = 0; i < n; i++) s += p[i]; return s; }\n';
+      const o1 = ['-mthumb-interwork', '-O1', '-fhex-asm'];
+      const at = (cflags: readonly string[]) => readFileSync(agbccReal.compileCandidate(tu, 'sum', cflags));
+      const canonical = at(CANONICAL);
+      const atO1 = at(o1);
+      expect(atO1.equals(canonical), 'the TU must compile differently at -O1, or this test proves nothing').toBe(false);
+      expect(at(CANONICAL).equals(canonical)).toBe(true);
+      expect(at(o1).equals(atO1)).toBe(true);
+      expect(
+        execSync(`find ${store}/ns -mindepth 1 -maxdepth 1 -type d`, { encoding: 'utf8' }).trim().split('\n'),
+      ).toHaveLength(2);
+    } finally {
+      process.env.ASMLIFT_CANDCACHE = saved.mode;
+      process.env.ASMLIFT_CANDCACHE_DIR = saved.dir;
+      vi.resetModules();
+    }
+  });
+});
+
+// agbcc `-g` writes its input's name and working directory into the listing. The harness compiles on
+// stdin in `/`, so the determinism probe's two directories still build one object and the namespace
+// resolves; compiled from a scratch file the probe disagrees and the cache refuses the whole flag set.
+describe('debug-info flags — a `-g` unit keeps its cache and its listing', () => {
+  const G = [...CANONICAL, '-g'];
+  const tu = 'int twice(int x){ return x + x; }\n';
+
+  test.skipIf(!HAVE_AGBCC)('a `-g` flag set resolves a namespace and is served its own object', async () => {
+    const store = scratch();
+    const saved = { mode: process.env.ASMLIFT_CANDCACHE, dir: process.env.ASMLIFT_CANDCACHE_DIR };
+    process.env.ASMLIFT_CANDCACHE = '1';
+    process.env.ASMLIFT_CANDCACHE_DIR = store;
+    vi.resetModules();
+    try {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      const first = readFileSync(agbccReal.compileCandidate(tu, 'twice', G));
+      expect(readFileSync(agbccReal.compileCandidate(tu, 'twice', G)).equals(first)).toBe(true);
+      expect(
+        execSync(`find ${store}/ns -mindepth 1 -maxdepth 1 -type d`, { encoding: 'utf8' }).trim().split('\n'),
+      ).toHaveLength(1);
+    } finally {
+      process.env.ASMLIFT_CANDCACHE = saved.mode;
+      process.env.ASMLIFT_CANDCACHE_DIR = saved.dir;
+      vi.resetModules();
+    }
+  });
+
+  // A rejection is published as the row's `errorMarkers`, so its text must not depend on how the harness
+  // hands cpp the TU.
+  test.skipIf(!HAVE_AGBCC)("a candidate's diagnostics name its translation unit c.c", async () => {
+    const store = scratch();
+    const saved = { mode: process.env.ASMLIFT_CANDCACHE, dir: process.env.ASMLIFT_CANDCACHE_DIR };
+    process.env.ASMLIFT_CANDCACHE = '1';
+    process.env.ASMLIFT_CANDCACHE_DIR = store;
+    vi.resetModules();
+    try {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      expect(() => agbccReal.compileCandidate('int f(void)\n{ return x; }\n', 'f', G)).toThrow(
+        /^agbcc failed: c\.c:2: `x' undeclared/,
+      );
+    } finally {
+      process.env.ASMLIFT_CANDCACHE = saved.mode;
+      process.env.ASMLIFT_CANDCACHE_DIR = saved.dir;
+      vi.resetModules();
+    }
+  });
+
+  test.skipIf(!HAVE_AGBCC)(
+    'the `-g` target listing both decompilers read has no debug section, and names no path',
+    async () => {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, G);
+      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, CANONICAL);
+      expect(debug.asm).not.toMatch(/\.section\s+\.debug/);
+      expect(readFileSync(debug.obj).includes('.debug_info')).toBe(true);
+      expect(readFileSync(debug.obj).toString('latin1')).not.toMatch(/\/tmp\/|\/private\/|\/var\/folders\//);
+      expect(plain.asm).not.toMatch(/\.debug/);
+    },
+  );
 });

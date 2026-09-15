@@ -1,7 +1,7 @@
 // KMC GCC / MIPS (N64, Docker) — real-tier target build + candidate compile. The .i compiles
 // inside the linux/386 container via the pooled helper score.ts uses (a one-shot shell command
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
-// compiler — the registry built-in serves candidate scoring).
+// compiler — @asmlift/toolchains' compiler, bound at the row's flags, serves candidate scoring).
 import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,10 +12,10 @@ import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
 
-/** .i → pooled docker KMC gcc → .o (same helper score.ts uses). */
-function compile(dir: string, iName: string, oName: string): void {
+/** .i → pooled docker KMC gcc at `cflags` → .o (same helper score.ts uses). */
+function compile(dir: string, iName: string, oName: string, cflags: readonly string[]): void {
   try {
-    kmcCompile(dir, iName, oName);
+    kmcCompile(dir, iName, oName, cflags);
   } catch (e) {
     throw new Error(`kmc gcc failed: ${compilerDiagnostics((e as Error).message)}`);
   }
@@ -30,15 +30,15 @@ function disasm(oPath: string): string {
 }
 
 export const kmcReal: RealCompile = {
-  buildTarget(iText): BuiltTarget {
-    const dir = contentDir('gcc', iText);
+  buildTarget(iText, cflags): BuiltTarget {
+    const dir = contentDir('gcc', cflags, iText);
     const iPath = join(dir, 'u.i'),
       oPath = join(dir, 'u.o');
     writeFileSync(iPath, iText);
-    compile(dir, 'u.i', 'u.o');
+    compile(dir, 'u.i', 'u.o', cflags);
     return { obj: oPath, asm: disasm(oPath) };
   },
-  compileCandidate(tu, sym): string {
+  compileCandidate(tu, sym, cflags): string {
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
     // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
     // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
@@ -53,7 +53,7 @@ export const kmcReal: RealCompile = {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
     writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(dir, 'c.i', 'c.o');
+    compile(dir, 'c.i', 'c.o', cflags);
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
@@ -61,7 +61,7 @@ export const kmcReal: RealCompile = {
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
-    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], cfg.root);
+    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], { cwd: cfg.root });
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }

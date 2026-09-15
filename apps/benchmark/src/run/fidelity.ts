@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { enforceCheckoutPin } from '../cases/checkout';
-import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
+import { loadCompleteManifests, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftProvenance, sameMeasuredCode } from '../provenance';
 import { checkTierProvenance } from '../report/merge';
@@ -152,7 +152,7 @@ export function materialize(script: string, projectRoot?: string): string {
 // script runs map-less, the same visible degradation a user without the checkout gets.
 let rootCache: Map<string, string> | null = null;
 function projectRootFor(project: string): string | undefined {
-  rootCache ??= new Map(loadManifestsForVendor().map((m) => [m.project, resolveProjectRoot(m)]));
+  rootCache ??= new Map(loadCompleteManifests().map((m) => [m.project, resolveProjectRoot(m)]));
   return rootCache.get(project);
 }
 
@@ -256,7 +256,7 @@ export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promi
   // scripts run against, but it CAN mean the published pin no longer describes reality — so
   // verify before certifying the scripts. Missing checkouts warn (CI runs checkout-free).
   const realProjects = new Set(rows.filter((r) => r.tier === 'real').map((r) => r.project));
-  for (const man of loadManifestsForVendor().filter((m) => realProjects.has(m.project))) {
+  for (const man of loadCompleteManifests().filter((m) => realProjects.has(m.project))) {
     const st = enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
     // Map-drift: symbol-fed rows are only trustworthy if the vendored map still IS what the
     // checkout's ELF derives. Requires the checkout; without one the pin warning above already

@@ -6,6 +6,7 @@
 // `could not parse objdump output`, the shard exits nonzero, and a row that has been stable for
 // weeks looks like a decompiler regression. One such entry (of 642) cost a session its zero-flip
 // gate before this guard existed.
+import { PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,9 +37,9 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
     const { tc } = fakeToolchain('   \n\n');
     process.env.ASMLIFT_BENCH_CACHE = '0';
     try {
-      expect(() => cachedBuildTarget(tc, 'int poison_a(void){return 0;}', 'poison_a')).toThrow(
-        /poison_a on agbcc produced an empty disassembly/,
-      );
+      expect(() =>
+        cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int poison_a(void){return 0;}', 'poison_a'),
+      ).toThrow(/poison_a on agbcc produced an empty disassembly/);
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
     }
@@ -50,15 +51,15 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
 
     // Populate normally first, so the entry's paths come from the module's own key derivation
     // rather than a second copy of it here.
-    const oPath = cachedBuildTarget(tc, refC, 'poison_b').obj;
+    const oPath = cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, refC, 'poison_b').obj;
     const aPath = oPath.replace(/\.o$/, '.asm');
     written.push(oPath, aPath);
     expect(calls()).toBe(1);
-    expect(cachedBuildTarget(tc, refC, 'poison_b').asm).toContain('bx lr');
+    expect(cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, refC, 'poison_b').asm).toContain('bx lr');
     expect(calls()).toBe(1); // a good entry is read back
 
     writeFileSync(aPath, '');
-    expect(cachedBuildTarget(tc, refC, 'poison_b').asm).toContain('bx lr');
+    expect(cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, refC, 'poison_b').asm).toContain('bx lr');
     expect(calls()).toBe(2); // the empty one is not
     expect(readFileSync(aPath, 'utf8')).toContain('bx lr'); // and it got overwritten
   });
@@ -67,9 +68,9 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
     const { tc } = fakeToolchain('fn:\n  bx lr\n', '');
     process.env.ASMLIFT_BENCH_CACHE = '0';
     try {
-      expect(() => cachedBuildTarget(tc, 'int poison_c(void){return 2;}', 'poison_c')).toThrow(
-        /poison_c on agbcc produced an empty object/,
-      );
+      expect(() =>
+        cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int poison_c(void){return 2;}', 'poison_c'),
+      ).toThrow(/poison_c on agbcc produced an empty object/);
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
     }
@@ -78,12 +79,12 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
   test('an entry whose .o half is empty is a MISS, however good the .asm half looks', () => {
     const refC = 'int poison_d(void){return 3;}';
     const { tc, calls } = fakeToolchain('fn:\n  bx lr\n');
-    const oPath = cachedBuildTarget(tc, refC, 'poison_d').obj;
+    const oPath = cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, refC, 'poison_d').obj;
     written.push(oPath, oPath.replace(/\.o$/, '.asm'));
     expect(calls()).toBe(1);
 
     writeFileSync(oPath, '');
-    expect(cachedBuildTarget(tc, refC, 'poison_d').asm).toContain('bx lr');
+    expect(cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, refC, 'poison_d').asm).toContain('bx lr');
     expect(calls()).toBe(2);
     expect(readFileSync(oPath, 'utf8')).toBe('obj');
   });
@@ -106,10 +107,7 @@ describe('the PPC dump cache does not serve an empty entry', () => {
     // The rebuild needs a PPC objdump this test has no business running, so the assertion is that
     // the empty entry is NOT returned: it either raises on the way to the container or comes back
     // with real content. What must never happen is the silent empty result.
-    for (const call of [
-      () => cachedExtractAsmData(obj, TOOLCHAINS.mwcc_242_81.targetDesc),
-      () => cachedAsmDumpText(obj, 'mwcc_242_81'),
-    ]) {
+    for (const call of [() => cachedExtractAsmData(obj, PPC_MWCC), () => cachedAsmDumpText(obj, 'mwcc_242_81')]) {
       let served: unknown = 'THREW';
       try {
         served = call();
@@ -150,7 +148,9 @@ describe('the BuiltTarget invariant covers the real tier too', () => {
     });
     vi.resetModules();
     const { buildRealTarget: fresh } = await import('../src/compile/real');
-    expect(() => fresh('agbcc', 'int f(void){return 0;}')).toThrow(/agbcc real-tier target produced an empty/);
+    expect(() => fresh('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int f(void){return 0;}')).toThrow(
+      /agbcc real-tier target produced an empty/,
+    );
     vi.doUnmock('../src/compile/agbcc');
     vi.resetModules();
   });
@@ -159,9 +159,9 @@ describe('the BuiltTarget invariant covers the real tier too', () => {
     const { tc } = fakeToolchain('   ');
     process.env.ASMLIFT_BENCH_CACHE = '0';
     try {
-      expect(() => cachedBuildTarget(tc, 'int poison_e(void){return 4;}', 'poison_e')).toThrow(
-        /produced an empty disassembly — refusing it as a scoring target/,
-      );
+      expect(() =>
+        cachedBuildTarget(tc, TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int poison_e(void){return 4;}', 'poison_e'),
+      ).toThrow(/produced an empty disassembly — refusing it as a scoring target/);
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
     }

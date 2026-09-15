@@ -393,7 +393,14 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
       const runs = mapModesFor(sel.mapModes, map !== undefined, (withMap) =>
         withMap ? { symbols: m.symbols.asIfUndecompiled(map, sym) } : {},
       );
-      record(`asm:${relative(sel.asmDir, file)}`, runs, sym, asm, tc.targetDesc, sel.fan === true);
+      record(
+        `asm:${relative(sel.asmDir, file)}`,
+        runs,
+        sym,
+        asm,
+        m.toolchains.canonicalCodegen(tc.id).target,
+        sel.fan === true,
+      );
     }
     return out;
   }
@@ -425,10 +432,17 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
     }
     const asm = m.scrub.scrubObjectHeader(built.asm);
     const runs = mapModesFor(sel.mapModes, c.symbols !== undefined, (withMap) =>
-      m.evalAsmlift.rankOptionsFor(c.toolchain, built.obj, c.proto, c.compile, withMap ? c.symbols : undefined),
+      m.evalAsmlift.rankOptionsFor(
+        c.toolchain,
+        c.codegen,
+        built.obj,
+        c.proto,
+        c.compile,
+        withMap ? c.symbols : undefined,
+      ),
     );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;
-    record(c.id, runs, c.sym, asm, c.toolchain.targetDesc, fanAllowed);
+    record(c.id, runs, c.sym, asm, c.codegen.target, fanAllowed);
   }
   return out;
 }

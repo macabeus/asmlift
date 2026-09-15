@@ -6,7 +6,7 @@
 // function, add a row to FIXTURES — the loop below picks it up automatically. (mwcc fixtures
 // skip with a warning when the Docker toolchain is unavailable.)
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
 import {
   type MatchScore,
   assembleTarget,
@@ -32,20 +32,20 @@ const RUNNERS: Record<FixtureToolchain, ToolchainRunner> = {
   agbcc: {
     target: ARMV4T_AGBCC,
     compile: (c) => {
-      const asm = compileTargetAsm(c);
+      const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       return { asm, obj: assembleTarget(asm) };
     },
-    score: scoreC,
+    score: (source, symbol, obj) => scoreC(source, symbol, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
   },
   ido: {
     target: MIPS_IDO,
-    compile: (c, sym) => compileMipsTarget(c, sym),
-    score: scoreCMips,
+    compile: (c, sym) => compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
+    score: (source, symbol, obj) => scoreCMips(source, symbol, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
   },
   mwcc: {
     target: PPC_MWCC,
-    compile: (c, sym) => compilePpcTarget(c, sym),
-    score: scoreCPpc,
+    compile: (c, sym) => compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
+    score: (source, symbol, obj) => scoreCPpc(source, symbol, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
   },
 };
 

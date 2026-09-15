@@ -1,6 +1,5 @@
 {
   "project": "kleod",
-  "toolchain": "agbcc",
   "repoDir": "kleod",
   "repo": "macabeus/kleod",
   "branch": "asmlift-benchmark",
@@ -43,10 +42,252 @@
     "-DREVISION=0",
     "-DENGLISH"
   ],
+  "units": {
+    "src/math.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/math.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/math.s"
+      }
+    },
+    "src/main.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/main.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/main.s"
+      }
+    },
+    "src/interrupts.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/interrupts.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/interrupts.s"
+      }
+    },
+    "src/code_0804B254.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_0804B254.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_0804B254.s"
+      }
+    },
+    "src/code_08039D8C.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_08039D8C.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08039D8C.s"
+      }
+    },
+    "src/code_08043BA4.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_08043BA4.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08043BA4.s"
+      }
+    },
+    "src/decompress.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/decompress.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/decompress.s"
+      }
+    },
+    "src/code_08014184.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_08014184.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08014184.s"
+      }
+    },
+    "src/code_080070A0.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_080070A0.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_080070A0.s"
+      }
+    },
+    "src/code_08025B78.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_08025B78.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08025B78.s"
+      }
+    },
+    "src/code_08001158.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_08001158.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08001158.s"
+      }
+    },
+    "src/code_080472B0.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_080472B0.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_080472B0.s"
+      }
+    },
+    "src/code_0802688C.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/code_0802688C.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_0802688C.s"
+      }
+    },
+    "src/save.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g",
+        "-fprologue-bugfix"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "file": "Makefile",
+        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "command": "tools/preproc/preproc build/kleod/src/save.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/save.s"
+      }
+    }
+  },
   "functions": [
     {
       "sym": "MultiplyQ8",
       "addr": "0x08000948",
+      "unit": "src/math.c",
+      "romDigest": "a715c4de2f61434b7391cb02ed23a3d305bbf4de81161ee75ab5e62c380ebfe3",
       "features": [
         "arithmetic",
         "fixed-point",
@@ -59,6 +300,8 @@
     {
       "sym": "DivideQ8",
       "addr": "0x08000960",
+      "unit": "src/math.c",
+      "romDigest": "abdf09f006cea914137e13fcb7c456ec46234728c3b172afc969da8daa5f4506",
       "features": [
         "arithmetic"
       ],
@@ -69,6 +312,8 @@
     {
       "sym": "ReciprocalQ8",
       "addr": "0x08000978",
+      "unit": "src/math.c",
+      "romDigest": "0e811870a51e12509e5adc9c353a9083cd0593c47ae25597222660a6cd743b9f",
       "features": [
         "arithmetic"
       ],
@@ -79,6 +324,8 @@
     {
       "sym": "InputHandler_Normal",
       "addr": "0x080006cc",
+      "unit": "src/main.c",
+      "romDigest": "6e2bb8db0a1d36d123189289b2bfdcfe79133846f939dc0a6fff9ae957b790de",
       "features": [
         "global",
         "branch"
@@ -96,6 +343,8 @@
     {
       "sym": "VBlankIntr_CutsceneTransition",
       "addr": "0x08000ab0",
+      "unit": "src/interrupts.c",
+      "romDigest": "dff594aa5a08451da37f87e616ca2437598f6a0020a6b07441581ff902810243",
       "features": [
         "global"
       ],
@@ -111,6 +360,8 @@
     {
       "sym": "sub_0804B270",
       "addr": "0x0804b270",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "83a3e3c1b7381c317d8d56a431e76edc85ffa467f3f05c30a68265c6faedd42a",
       "features": [
         "pointer"
       ],
@@ -122,6 +373,8 @@
     {
       "sym": "sub_0803D140",
       "addr": "0x0803d140",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "2a14a87ad717996e8d58eb52d710f2c21c88ab811882707de2e729215d095dbd",
       "features": [
         "array",
         "global",
@@ -143,6 +396,8 @@
     {
       "sym": "WorldMapScreenDrawUnlockedWorlds",
       "addr": "0x0803b074",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "452e96d0ffb2f0b7cb9194a133b932b95baa0199ec899344ac995efdc1c162a6",
       "features": [
         "branch"
       ],
@@ -159,6 +414,8 @@
     {
       "sym": "sub_08045734",
       "addr": "0x08045734",
+      "unit": "src/code_08043BA4.c",
+      "romDigest": "5eb1cfae9d02540a797bbaf198a713970549b6b6f1091154f726b955c19686b0",
       "features": [
         "branch",
         "global"
@@ -176,6 +433,8 @@
     {
       "sym": "Decompress",
       "addr": "0x08043af4",
+      "unit": "src/decompress.c",
+      "romDigest": "0c9ee3167c0d0bbbab47f0b9a8569457eab2d512f5bffedc9e3490ed73ea9724",
       "features": [
         "branch",
         "cast",
@@ -193,6 +452,8 @@
     {
       "sym": "DecompressDma",
       "addr": "0x08043b34",
+      "unit": "src/decompress.c",
+      "romDigest": "02bfd3b28a0dc4ef3da7436b0a8d7db707fe97ab4517df44689d0c3a90a86cf7",
       "features": [
         "cast",
         "memory"
@@ -209,6 +470,8 @@
     {
       "sym": "sub_08014184",
       "addr": "0x08014184",
+      "unit": "src/code_08014184.c",
+      "romDigest": "8ba641636dca1507fb4c5ac15b83522c71f45ec305f06bc2ea2327064741e907",
       "features": [
         "struct",
         "branch",
@@ -224,6 +487,8 @@
     {
       "sym": "sub_0804DC64",
       "addr": "0x0804dc64",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "73d03b0428403449dfdb78ca8a6689b3364fa9539355c22120cbd4b4101eef96",
       "features": [
         "branch",
         "pointer",
@@ -240,6 +505,8 @@
     {
       "sym": "DecompressAlloc",
       "addr": "0x08043b80",
+      "unit": "src/decompress.c",
+      "romDigest": "fcf28c4043cce69fce01e45b5d8259e604b052999b14cdee8a2cccf7fd5121ce",
       "features": [
         "cast",
         "memory",
@@ -252,6 +519,8 @@
     {
       "sym": "sub_0804C844",
       "addr": "0x0804c844",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "0dd57d116ed87da99e0cfeb626e2814f7dbce514e5a5a33bd28df5350594740e",
       "features": [
         "global",
         "pointer"
@@ -269,6 +538,8 @@
     {
       "sym": "sub_0804B254",
       "addr": "0x0804b254",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "9eb23decd3e07cede7876c7d0c5479a7320afaeccf33fb962f0bd1daa029ca57",
       "features": [
         "pointer"
       ],
@@ -280,6 +551,8 @@
     {
       "sym": "sub_080008DC",
       "addr": "0x080008dc",
+      "unit": "src/main.c",
+      "romDigest": "83d27bba46ecefedc9f2bbf9fccae3ebeb6d809ba52bf10797b1a9abbc138080",
       "features": [
         "global",
         "pointer",
@@ -300,6 +573,8 @@
     {
       "sym": "sub_0804C1C0",
       "addr": "0x0804c1c0",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "635594f6ad66ac44ac98f8e3fe5fe6505f0895e5b605254e6fc3a12d889b0112",
       "features": [
         "pointer",
         "memory",
@@ -320,6 +595,8 @@
     {
       "sym": "sub_0804E708",
       "addr": "0x0804e708",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "c2366b956b7cae4541b3e51d3fd0f4a1890c65c587a5bc4478e789ae3f9ef784",
       "features": [
         "pointer",
         "global"
@@ -337,6 +614,8 @@
     {
       "sym": "sub_0803E8CC",
       "addr": "0x0803e8cc",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "45527f47f59aa4dee182d9b03f6a7fe88ff637dbbf9c06479e100e3ea5c3cdef",
       "features": [
         "arithmetic",
         "global",
@@ -356,6 +635,8 @@
     {
       "sym": "sub_0800A5B8",
       "addr": "0x0800a5b8",
+      "unit": "src/code_080070A0.c",
+      "romDigest": "bb2b78c4c595f35a4b7d8dc51d58c217b842f9db919e88a2d35f3a04476aa75a",
       "features": [
         "global",
         "struct",
@@ -375,6 +656,8 @@
     {
       "sym": "DrawLevelHud_Hearts",
       "addr": "0x08025dd4",
+      "unit": "src/code_08025B78.c",
+      "romDigest": "f007546b6c8b7fe7b80081a27f6442dca135be97179ef24aec5547cbb7756121",
       "features": [
         "global",
         "array",
@@ -393,6 +676,8 @@
     {
       "sym": "DrawLevelHud_DreamStones",
       "addr": "0x08025e68",
+      "unit": "src/code_08025B78.c",
+      "romDigest": "859d0d402ee463a6356ba0ee30584a1f9694a1ad5aecc11893590cd4b816cdf4",
       "features": [
         "global",
         "array",
@@ -406,6 +691,8 @@
     {
       "sym": "WorldMapScreenIsValidPath",
       "addr": "0x0803ac18",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "3672cb775f5f5a7fbc7139be8a196daa4c01f47045f386bee47581643b521256",
       "features": [
         "global",
         "struct",
@@ -419,6 +706,8 @@
     {
       "sym": "WorldMapScreenDrawPath",
       "addr": "0x0803af38",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "37fa13e4db7d13af1cc4574e758cc925f071db8b99eb19360cc35bd39e2393a8",
       "features": [
         "global",
         "array",
@@ -438,6 +727,8 @@
     {
       "sym": "HBlankIntr_DeleteAllSaveDataScreen",
       "addr": "0x08000f70",
+      "unit": "src/interrupts.c",
+      "romDigest": "1733b561a311321e7741b6346a27eb99c8e725f71e673eec88edb251a222cad5",
       "features": [
         "global",
         "struct",
@@ -455,6 +746,8 @@
     {
       "sym": "sub_0804C7FC",
       "addr": "0x0804c7fc",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "f06792d0503e0b00c2964d952c3ca9e1cdf386d34a33189655b7a64697d24424",
       "features": [
         "global",
         "struct",
@@ -475,6 +768,8 @@
     {
       "sym": "PauseMenuScreenHandler",
       "addr": "0x0803a410",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "607dbc951bd0f44ca61fa7c808582c488e0577288725b83b44170bea048f2ca7",
       "features": [
         "array",
         "branch",
@@ -494,6 +789,8 @@
     {
       "sym": "sub_0803F68C",
       "addr": "0x0803f68c",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "769bfbd4975b93b48bca885143cd20b308847a0778199986eaff7e8729200f9f",
       "features": [
         "table",
         "pointer",
@@ -514,6 +811,8 @@
     {
       "sym": "AthleticChallengeScrollUpdate",
       "addr": "0x0800247c",
+      "unit": "src/code_08001158.c",
+      "romDigest": "c623ffa464aa46791b804648ce8950740cd5aec6ecd0414c1711dfca002d5598",
       "features": [
         "struct",
         "branch",
@@ -532,6 +831,8 @@
     {
       "sym": "WorldMapScreenCheckNewWorldUnlocked",
       "addr": "0x0803b0a0",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "9ed446066ec8d036ef1d4c010f3c555a94305d567de77944c3bea6bb6076eeb2",
       "features": [
         "array",
         "branch",
@@ -550,6 +851,8 @@
     {
       "sym": "WorldMapScreenUnlockNewWorld",
       "addr": "0x0803b378",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "dd61fc7980b02b7ab96f991caa462689047fcba9af88c4bb23f3cd843659b3e5",
       "features": [
         "array",
         "global",
@@ -568,6 +871,8 @@
     {
       "sym": "sub_0801F4D0",
       "addr": "0x0801f4d0",
+      "unit": "src/code_08014184.c",
+      "romDigest": "d9e72410732307e1c6d29566f350489072dc311768b2633f157b0f237a68a887",
       "features": [
         "bitfield",
         "array",
@@ -587,6 +892,8 @@
     {
       "sym": "ButtonConfigurationScreenInit",
       "addr": "0x0803a8b8",
+      "unit": "src/code_08039D8C.c",
+      "romDigest": "6ea8eff5b76b5bae71857bd3d31cbce5b4fff2cbba031323baa2aa230f1c639c",
       "features": [
         "array",
         "global",
@@ -605,6 +912,8 @@
     {
       "sym": "sub_0801DE44",
       "addr": "0x0801de44",
+      "unit": "src/code_08014184.c",
+      "romDigest": "27490f5a56a561a6babe7cc80fc80f458cfe156a615b0be0ec80ea5e2d62880d",
       "features": [
         "struct",
         "global",
@@ -624,6 +933,8 @@
     {
       "sym": "HeldUp",
       "addr": "0x080472b0",
+      "unit": "src/code_080472B0.c",
+      "romDigest": "5d4e6fa919a44c3989c7d8e37a3fbafbb2984f54c0de5761f778debc6e39ada9",
       "features": [
         "bool",
         "branch",
@@ -639,6 +950,8 @@
     {
       "sym": "LoadObjects_World2Select",
       "addr": "0x08026f68",
+      "unit": "src/code_0802688C.c",
+      "romDigest": "bb00561db6966e5c807845753c2d89c2311fe0255da1fa13090ba7352cd7d8ef",
       "features": [
         "macro",
         "global",
@@ -660,6 +973,8 @@
     {
       "sym": "UpdateEntityAnimationInfoEntries",
       "addr": "0x08025ba4",
+      "unit": "src/code_08025B78.c",
+      "romDigest": "21645aadb47fd1eeab07f1cfa16f500e15675f1777d82609c701c1006e69cab2",
       "features": [
         "continue",
         "break",
@@ -684,6 +999,8 @@
     {
       "sym": "sub_08045F68",
       "addr": "0x08045f68",
+      "unit": "src/code_08043BA4.c",
+      "romDigest": "46d44f90de6df259354fc35b5dfbb2a2bce19017a51556d29766c5d394cfa8cd",
       "features": [
         "matrix",
         "fixed-point"
@@ -701,6 +1018,8 @@
     {
       "sym": "sub_0804C898",
       "addr": "0x0804c898",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "67546a4ebc0ee5287a6de5c248fe7eefa8d9c8ba154795a511b34483de00eb55",
       "features": [
         "stack-addr"
       ],
@@ -717,6 +1036,8 @@
     {
       "sym": "sub_0804C300",
       "addr": "0x0804c300",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "6b682c2e991056263e6b0cbbb346cc9960329bc9b7dc4d46f9c200bbacdd1e7c",
       "features": [
         "multi-arg",
         "table",
@@ -735,6 +1056,8 @@
     {
       "sym": "DeleteAllSaveData",
       "addr": "0x0804713c",
+      "unit": "src/save.c",
+      "romDigest": "7982be1ef66fcc84260fc39cf692046c6985a0b5505575ddc4b4c29bec123a03",
       "features": [
         "loop-preupdate",
         "cast"

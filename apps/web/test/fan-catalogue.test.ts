@@ -10,6 +10,8 @@ import { describe, expect, test } from 'vitest';
 import {
   catalogue,
   fanCoverage,
+  fanLevel,
+  levelStats,
   pricePerWin,
   priced,
   rowsFor,
@@ -132,5 +134,63 @@ describe('over the sample', () => {
     for (const { name } of VARIATION_TOKENS) {
       expect(rowsFor([...FAN_SAMPLE, row], name)).toEqual(rowsFor(FAN_SAMPLE, name));
     }
+  });
+});
+
+describe('by optimisation level, over the sample', () => {
+  const levels = levelStats(FAN_SAMPLE);
+  const aggregate = variationStats(FAN_SAMPLE);
+
+  test("a level's totals are `variationStats` over that level's counted rows alone", () => {
+    for (const l of levels) {
+      const at = FAN_SAMPLE.filter((r) => r.asmlift.fanVariations && fanLevel(r) === l.level);
+      expect(l.stats, l.level).toEqual(variationStats(at));
+      expect(l.coverage, l.level).toEqual(fanCoverage(at));
+      for (const t of l.toolchainRows) {
+        expect(t.rows, `${l.level} ${t.toolchain}`).toBe(at.filter((r) => r.toolchain === t.toolchain).length);
+      }
+      expect(l.toolchainRows.length, l.level).toBe(new Set(at.map((r) => r.toolchain)).size);
+    }
+    expect(levels.reduce((n, l) => n + l.coverage.rows, 0)).toBe(fanCoverage(FAN_SAMPLE).rows);
+  });
+
+  test('rows, winners and candidates add up over the levels to the totals', () => {
+    for (const { name } of VARIATION_TOKENS) {
+      const sum = (f: 'rows' | 'winners' | 'candidates') => levels.reduce((n, l) => n + l.stats.get(name)![f], 0);
+      expect([sum('rows'), sum('winners'), sum('candidates')], name).toEqual([
+        aggregate.get(name)!.rows,
+        aggregate.get(name)!.winners,
+        aggregate.get(name)!.candidates,
+      ]);
+    }
+  });
+
+  test("a level's price is its own cost over its own wins, which the totals' price is not", () => {
+    const signed = levels.map((l) => pricePerWin(l.stats.get('signed')!));
+    // -O2: dmafield, sizebound and armhomes won with it; dmaptrsrc and func_80038000 carried it and lost
+    expect(signed).toEqual([(50 + 400 + 82 + 8 + 16) / 3, 8]);
+    expect(pricePerWin(aggregate.get('signed')!)).not.toBe(signed[0]);
+  });
+
+  test('the level is the one the compiler acts on, and one spelled alike by two families is one bucket', () => {
+    const ido: FunctionResult = {
+      ...FAN_SAMPLE[0],
+      id: 'synthetic:dmafield:ido7.1',
+      toolchain: 'ido7.1',
+      cflags: ['-O2', '-g'],
+    };
+    expect(fanLevel(ido)).toBe('-O1');
+    expect(levels.find((l) => l.level === '-O2')!.toolchainRows).toHaveLength(2);
+  });
+
+  test('a row whose fan was not counted is in no level', () => {
+    const { fanVariations: _, ...uncounted } = FAN_SAMPLE[0].asmlift;
+    const row: FunctionResult = {
+      ...FAN_SAMPLE[0],
+      id: 'synthetic:uncounted:agbcc',
+      cflags: ['-O0'],
+      asmlift: uncounted,
+    };
+    expect(levelStats([...FAN_SAMPLE, row])).toEqual(levels);
   });
 });

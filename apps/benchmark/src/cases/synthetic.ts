@@ -5,7 +5,7 @@ import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
-import { TOOLCHAINS, type ToolchainId } from '../toolchains';
+import { TOOLCHAINS, type ToolchainId, canonicalCodegen } from '../toolchains';
 import type { Case } from './types';
 
 /** THE MAP, RENDERED FOR THE OTHER DECOMPILER — the synthetic tier's symmetry, made structural.
@@ -60,6 +60,7 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         throw new Error(`${spec.sym}: c++ specs must target mwcc_242_81 only, got ${tcId}`);
       }
       const tc = TOOLCHAINS[tcId];
+      const codegen = canonicalCodegen(tcId);
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',
@@ -74,7 +75,8 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         ...(spec.symbols ? { symbols: spec.symbols } : {}),
         note: spec.note,
         toolchain: tc,
-        build: () => cachedBuildTarget(tc, spec.src, spec.sym, spec.lang),
+        codegen,
+        build: () => cachedBuildTarget(tc, codegen.cflags, spec.src, spec.sym, spec.lang),
       });
     }
   }

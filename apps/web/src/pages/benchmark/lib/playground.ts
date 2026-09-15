@@ -1,5 +1,5 @@
-// "Open in playground" — a benchmark row's exact decompiler input (toolchain, symbol, targetAsm)
-// as a playground ShareState. The Benchmark and Playground are one app, so this is an
+// "Open in playground" — a benchmark row's exact decompiler input (toolchain, flags, symbol,
+// targetAsm) as a playground ShareState. The Benchmark and Playground are one app, so this is an
 // in-memory hand-off (the shell switches views and seeds the editor), not a cross-app URL. The
 // ShareState shape is owned by src/shared/utils/permalink.ts; a contract test
 // (benchmark-link.test.ts) pins it.
@@ -7,6 +7,7 @@
 // Real-tier rows ran with prototypes context the playground cannot carry yet, so their repro is
 // context-free (synthetic rows reproduce faithfully) — the UI labels the hand-off accordingly.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 
 import type { ShareState } from '../../../shared/utils/permalink';
 
@@ -24,5 +25,5 @@ export function playgroundShare(fn: FunctionResult): ShareState | null {
   if (!canOpenInPlayground(fn)) {
     return null;
   }
-  return { target: fn.toolchain, backend: 'c', name: fn.sym, asm: fn.targetAsm };
+  return { target: fn.toolchain, backend: 'c', name: fn.sym, asm: fn.targetAsm, cflags: shellJoinFlags(fn.cflags) };
 }

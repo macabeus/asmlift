@@ -1,13 +1,21 @@
 // The benchmark contract: ONE definition imported by both the producer (apps/benchmark) and the
 // consumer (apps/web) — the result/manifest types here, plus the closed feature vocabulary they
-// range over in ./features. Zero dependencies, no I/O, browser-safe by construction.
+// range over in ./features. No runtime dependencies, no I/O, browser-safe by construction: its one
+// import is a type, the toolchain ids @asmlift/core defines.
+import type { ToolchainId } from '@asmlift/core/target';
 
 export * from './features';
 export * from './identity';
 
-export type ToolchainId = 'agbcc' | 'ido7.1' | 'gcc2.7.2kmc' | 'gcc2.7.2' | 'mwcc_242_81';
+export type { ToolchainId };
 
 export type DecompilerId = 'asmlift' | 'm2c';
+
+/** Where a real unit's compiler flags were copied from, at the project commit its TUs were vendored from:
+ *  the Makefile recipe line that compiles the unit, or the dtk `objdiff.json` unit, with that file's sha256. */
+export type FlagsFrom =
+  | { from: 'makefile'; commit: string; file: string; sha256: string; command: string }
+  | { from: 'objdiff'; commit: string; file: string; sha256: string; unit: string };
 
 /** How a single decompiler fared on one function — ONE classifier, applied identically to both
  *  decompilers (apps/benchmark/src/eval/outcome.ts). */
@@ -33,7 +41,7 @@ export interface QualityScore {
 }
 
 /** objdiff difference-kind tally (structurally mirrors packages/cli/src/objdiff.ts DiffBreakdown
- *  — spelled out here so this package stays dependency-free). */
+ *  — spelled out here so this package does not depend on @asmlift/cli). */
 export interface DiffBreakdown {
   insert: number;
   delete: number;
@@ -148,8 +156,8 @@ export interface GapSize {
   kinds?: DiffBreakdown; // insert/delete/replace/op/arg tally of that candidate
 }
 
-/** One benchmark row: one (function × toolchain) case with both decompilers' outcomes. */
-export interface FunctionResult {
+/** The fields every benchmark row carries, whatever its tier. */
+export interface FunctionRow {
   /** `${project}:${sym}:${toolchain}` — the row's READABLE name, unique within one artifact. It is
    *  what a person reads and cites. It is NOT what joins rows across artifacts: see `rowIdentity`
    *  in ./identity, which keys a real row by `addr`. */
@@ -163,11 +171,14 @@ export interface FunctionResult {
    *  so a citation or a permalink of the old spelling still resolves to it. */
   aliases?: string[];
   project: string; // "synthetic" | "kleod" | "pokeemerald" | ...
-  tier: 'synthetic' | 'real';
   toolchain: ToolchainId;
   isa: 'arm' | 'mips' | 'ppc';
   compiler: string;
   language: 'c' | 'c++';
+  /** The codegen flags the target and every candidate compiled with, as shell words in build order: a
+   *  real row's are its unit's, copied from the project's build; a synthetic row's are its toolchain's
+   *  canonical flags. m2c takes none. */
+  cflags: readonly string[];
   features: string[]; // e.g. ["arithmetic","branch"]
   loc: number; // reference source line count
   refSource: string; // the reference C/C++ (ground truth), for the report
@@ -203,6 +214,18 @@ export interface FunctionResult {
   note?: string; // provenance / caveats (e.g. version mismatch)
   gapSize?: GapSize | null;
 }
+
+/** A row's tier. A real row compiles in a build unit (its source path) whose flags were copied from the
+ *  project's build; a synthetic row has neither, and compiles at its toolchain's canonical flags. */
+export type RowTier = { tier: 'synthetic' } | { tier: 'real'; unit: string; flagsFrom: FlagsFrom };
+
+/** The tier fields of a row, a case or an evaluation, alone. */
+export function rowTier(r: RowTier): RowTier {
+  return r.tier === 'real' ? { tier: 'real', unit: r.unit, flagsFrom: r.flagsFrom } : { tier: 'synthetic' };
+}
+
+/** One benchmark row: one (function × toolchain) case with both decompilers' outcomes. */
+export type FunctionResult = FunctionRow & RowTier;
 
 export interface BenchMeta {
   generatedAt: string;

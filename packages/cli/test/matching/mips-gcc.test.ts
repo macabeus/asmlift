@@ -11,7 +11,7 @@
 import { RewritePattern, SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
-import { MIPS_GCC } from '@asmlift/core/target';
+import { MIPS_GCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsGccTarget, scoreCMipsGcc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -63,10 +63,10 @@ const MATCH_CASES: { sym: string; c: string; proto?: Prototypes; patterns?: Rewr
 describe.runIf(HAVE_DOCKER)('MIPS (KMC GCC) — first-class: compile → disasm → decompile → recompile → objdiff', () => {
   for (const { sym, c, proto, patterns, expect: golden } of MATCH_CASES) {
     test(`${sym} — byte-exact`, () => {
-      const { obj, asm } = compileMipsGccTarget(c, sym);
+      const { obj, asm } = compileMipsGccTarget(c, sym, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_GCC, { prototypes: proto, patterns });
       expect(r.source).toBe(golden);
-      const s = scoreCMipsGcc(r.source, sym, obj);
+      const s = scoreCMipsGcc(r.source, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -87,6 +87,7 @@ describe.runIf(HAVE_DOCKER)('MIPS (KMC GCC) — remaining frontier (documented g
     const { asm } = compileMipsGccTarget(
       'unsigned umax(unsigned a, unsigned b){ if (a < b) a = b; return a; }',
       'umax',
+      TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
     );
     expect(() => decompile('umax', asm, MIPS_GCC)).toThrow(/branch-likely|unmodelled control transfer/);
   }, 60_000);

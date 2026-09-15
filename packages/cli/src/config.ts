@@ -144,6 +144,15 @@ const PLATFORM_TARGETS: Record<string, string[]> = {
   wii: ['mwcc_242_81'],
 };
 
+/** The decomp.yaml setting that makes `targetKey` the target: its platform, where that platform names no
+ *  other compiler, else `tools.asmlift.target`. */
+export function targetSetting(targetKey: string): string {
+  const platform = Object.keys(PLATFORM_TARGETS).find(
+    (p) => PLATFORM_TARGETS[p].length === 1 && PLATFORM_TARGETS[p][0] === targetKey,
+  );
+  return platform === undefined ? `tools.asmlift.target: ${targetKey}` : `platform: ${platform}`;
+}
+
 export type TargetResolution = { targetKey: string; trace: string } | { error: string };
 
 /** Resolve the target key: `--target` flag > `tools.asmlift.target` > platform inference.

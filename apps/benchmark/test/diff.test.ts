@@ -5,12 +5,15 @@ import { describe, expect, test } from 'vitest';
 
 import {
   FAN_ROWS_SHOWN,
+  FLAG_ROWS_SHOWN,
   type FanReport,
   compareCost,
   compareFans,
   compareMeasurements,
   costLines,
   fanLines,
+  flagsLines,
+  groupByFlags,
   notRegenerated,
 } from '../src/report/diff';
 
@@ -478,5 +481,68 @@ describe('the fan section', () => {
     const lines = fanLines(rep({ changed }), 'origin/main', 900);
     expect(lines.filter((l) => l.startsWith('FAN     r'))).toHaveLength(FAN_ROWS_SHOWN);
     expect(lines.some((l) => l.includes('and 3 more row(s) moved'))).toBe(true);
+  });
+});
+
+describe('flags', () => {
+  const flagged = (id: string, toolchain: string, cflags: readonly string[] | undefined, asmlift = {}) =>
+    ({ ...row(id, asmlift), toolchain, ...(cflags === undefined ? {} : { cflags }) }) as FunctionResult;
+
+  test("a row's flags moving is a change, shown in the build's words; the same flags are not", () => {
+    const same = compareMeasurements(
+      out(flagged('a', 'agbcc', ['-O2', '-fhex-asm'])),
+      out(flagged('a', 'agbcc', ['-O2', '-fhex-asm'])),
+    );
+    expect(same.changed).toEqual([]);
+    const moved = compareMeasurements(
+      out(flagged('a', 'agbcc', ['-O2', '-fhex-asm'])),
+      out(flagged('a', 'agbcc', ['-O1', '-mthumb-interwork'])),
+    );
+    expect(moved.ok).toBe(false);
+    expect(moved.changed).toEqual([{ id: 'a', field: 'cflags', from: '-O2 -fhex-asm', to: '-O1 -mthumb-interwork' }]);
+  });
+
+  test('a base row that records no flags reads as undefined, like any field it predates', () => {
+    const r = compareMeasurements(out(flagged('a', 'agbcc', undefined)), out(flagged('a', 'agbcc', ['-O2'])));
+    expect(r.changed).toEqual([{ id: 'a', field: 'cflags', from: 'undefined', to: '-O2' }]);
+  });
+
+  test('FLAGS names each distinct move once, with its rows, and the total', () => {
+    const ids = Array.from({ length: FLAG_ROWS_SHOWN + 2 }, (_, i) => `r${i}`);
+    const base = out(...ids.map((id) => flagged(id, 'agbcc', ['-O2'])), flagged('s', 'agbcc', ['-O2']));
+    const fresh = out(...ids.map((id) => flagged(id, 'agbcc', ['-O2', '-g'])), flagged('s', 'agbcc', ['-O1']));
+    expect(flagsLines(compareMeasurements(base, fresh), 'origin/main')).toEqual([
+      `FLAGS   -O2 → -O2 -g: ${ids.length} row(s): ${ids.slice(0, FLAG_ROWS_SHOWN).join(', ')}, …and 2 more`,
+      'FLAGS   -O2 → -O1: 1 row(s): s',
+      `flags vs origin/main: ${ids.length + 1} row(s) compile with other flags`,
+    ]);
+    expect(flagsLines(compareMeasurements(base, base), 'HEAD')).toEqual([
+      'flags vs HEAD: 0 row(s) compile with other flags',
+    ]);
+  });
+
+  test('moved rows are grouped by their level move, then flags that moved within a level, then unchanged flags', () => {
+    const base = out(
+      flagged('vfs', 'agbcc', ['-mthumb-interwork', '-O2'], { score: 19 }),
+      flagged('mul', 'agbcc', ['-O2'], { maxScore: 12 }),
+      flagged('ido', 'ido7.1', ['-O2'], { score: 3 }),
+      flagged('kept', 'agbcc', ['-O2'], { score: 5 }),
+      flagged('old', 'agbcc', undefined, { score: 7 }),
+    );
+    const fresh = out(
+      flagged('vfs', 'agbcc', ['-O1', '-mthumb-interwork'], { score: 26 }),
+      flagged('mul', 'agbcc', ['-O2', '-g'], { maxScore: 14 }),
+      flagged('ido', 'ido7.1', ['-O2', '-g'], { score: 4 }),
+      flagged('kept', 'agbcc', ['-O2'], { score: 6 }),
+      flagged('old', 'agbcc', ['-O2'], { score: 8 }),
+    );
+    const groups = groupByFlags(base, fresh, compareMeasurements(base, fresh));
+    expect(groups.map((g) => [g.heading, g.changes.map((c) => `${c.id} ${c.field}`)])).toEqual([
+      // ido's `-O2 -g` compiles as -O1, so its row moved level too
+      ['flags changed (-O2 → -O1)', ['vfs asmlift.score', 'ido asmlift.score']],
+      ['flags changed (-O2)', ['mul asmlift.maxScore']],
+      ['flags changed (no level → -O2)', ['old asmlift.score']],
+      ['flags unchanged', ['kept asmlift.score']],
+    ]);
   });
 });

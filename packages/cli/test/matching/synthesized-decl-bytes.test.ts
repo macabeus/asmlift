@@ -24,7 +24,7 @@
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { enumerateCandidates } from '@asmlift/core/rank';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileCandAgbcc } from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +35,8 @@ const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../c
 /** Object bytes of `decls + source` through the harness's own agbcc candidate compiler (which
  *  prepends the typedef prelude), as hex — so the two worlds differ in nothing but the
  *  declaration block. */
-const bytes = (decls: string, source: string): string => readFileSync(compileCandAgbcc(decls + source)).toString('hex');
+const bytes = (decls: string, source: string): string =>
+  readFileSync(compileCandAgbcc(decls + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags)).toString('hex');
 
 test('A — the synthesized block compiles to the same bytes as the project’s own declarations', () => {
   // The reported playground row, enumerated the way the playground enumerates it: no symbol map,

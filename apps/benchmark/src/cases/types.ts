@@ -1,16 +1,20 @@
 // The Case abstraction: ONE shape both tiers produce and the ONE runner consumes — the row's
 // provenance, how to build the scoring target, and (real tier) the context-aware scorer that
 // replaces the adapter default.
+import type { RowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
+import type { ResolvedTarget } from '@asmlift/core/target';
 
 import type { Scorer } from '../eval/asmlift';
 import type { BuiltTarget, Toolchain } from '../toolchains';
 
-export interface Case {
+/** One row as both tiers produce it: its tier, with a real row's unit, and every other field. */
+export type Case = CaseFields & RowTier;
+
+interface CaseFields {
   id: string; // `${project}:${sym}:${toolchain}` — the readable row id (identity: bench-schema `rowIdentity`)
-  tier: 'synthetic' | 'real';
   sym: string;
   addr?: string; // real tier: the function's ELF address — the row's identity
   aliases?: string[]; // real tier: earlier upstream names
@@ -31,6 +35,9 @@ export interface Case {
   proto?: Prototypes; // asmlift prototypes
   note?: string;
   toolchain: Toolchain;
+  /** the flags the target and every candidate compile at, and the description asmlift decompiles
+   *  against, resolved from those flags */
+  codegen: ResolvedTarget;
   /** Compile the reference → scoring target + the disassembly both decompilers consume.
    *  Throws on build failure (the runner logs BUILD-FAIL and moves on). */
   build: () => BuiltTarget;

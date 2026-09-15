@@ -69,6 +69,10 @@
 //   pnpm bench vendor [--project p] [--symbols-only]   # freeze the real tier's preprocessed TUs
 //                                        # (needs checkouts); --symbols-only rewrites just the
 //                                        # ELF-derived symbol maps
+//   pnpm bench flags [--project p] [--only s] [--write] [--toolchain id]
+//                                        # every real unit's flags derived from its project's build
+//                                        # (needs checkouts): stored-flags status, unclassified words,
+//                                        # and whether each row's target is the ROM's function
 //
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
@@ -82,6 +86,7 @@ import {
   cacheSampleNote,
   cacheStats,
 } from '@asmlift/cli/candcache';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { symbolMapToJson } from '@asmlift/core/symbols';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -89,7 +94,7 @@ import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { loadManifests, loadManifestsForVendor, resolveProjectRoot } from './cases/manifests';
+import { loadCompleteManifests, loadManifests, resolveProjectRoot } from './cases/manifests';
 import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
 import { syntheticCases } from './cases/synthetic';
@@ -128,6 +133,8 @@ const { values: opts, positionals } = parseArgs({
     // already committed its own results.json must name its branch point (origin/main), or it
     // compares itself against itself and every gate passes vacuously.
     base: { type: 'string' },
+    // flags only: store the derived units, and each row's unit, in the manifest
+    write: { type: 'boolean', default: false },
     // vendor only: rewrite just the derived symbol maps, leaving the preprocessed TUs, index.json
     // and PROVENANCE.json exactly as committed (see cases/vendor.ts).
     'symbols-only': { type: 'boolean', default: false },
@@ -417,7 +424,7 @@ switch (command) {
     } else if (c.symbols) {
       // the row was MEASURED with the project's symbol map — resolve the checkout's derived
       // symbols ELF so the CLI loads the same map the benchmark fed this function
-      const man = loadManifestsForVendor().find((m) => m.project === c.project);
+      const man = loadCompleteManifests().find((m) => m.project === c.project);
       const root = opts['project-root'] ?? (man ? resolveProjectRoot(man) : undefined);
       const mapless = (why: string): void =>
         console.error(
@@ -458,15 +465,17 @@ switch (command) {
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.
         const picked = source
-          ? resolveScoringPrelude(c.toolchain.id, prependC, ctxI, c.sym, source, macros)
+          ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, macros)
           : { prelude: ladder[ladder.length - 1], rung: ladder.length };
         ctxRung = picked.rung;
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, out, elf, ctxFile, symbolsFile);
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, elf, ctxFile, symbolsFile);
     console.log(
-      `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''}${
+      `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id} ${shellJoinFlags(c.codegen.cflags)}${
+        c.tier === 'real' ? `, the flags of ${c.unit}` : ''
+      }${elf ? ' + symbol-map ELF' : ''}${
         symbolsFile ? ' + authored symbol map' : ''
       }${ctxFile ? ` + scoring context (escalation rung ${ctxRung}: ${RUNG_NAMES[ctxRung - 1]})` : ''})`,
     );
@@ -652,6 +661,17 @@ switch (command) {
     await vendor(opts.project, { symbolsOnly: opts['symbols-only'] });
     break;
   }
+  case 'flags': {
+    const { flagsReport } = await import('./run/flags');
+    const { isToolchainId } = await import('@asmlift/core/target');
+    if (opts.toolchain !== undefined && !isToolchainId(opts.toolchain)) {
+      console.error(`unknown --toolchain ${JSON.stringify(opts.toolchain)}`);
+      process.exit(2);
+    }
+    process.exit(
+      flagsReport({ project: opts.project, only: opts.only, write: opts.write, toolchain: opts.toolchain }) ? 0 : 1,
+    );
+  }
   case 'verify': {
     const manifest = positionals[1];
     if (!manifest) {
@@ -663,7 +683,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|in-flight|repro|target|fan|sweep|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|in-flight|repro|target|fan|sweep|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor|flags> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

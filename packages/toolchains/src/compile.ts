@@ -7,8 +7,8 @@
 // already evaluated this module. (An index-only side effect would be bypassed by subpath
 // imports, silently leaving @asmlift/cli's registry empty — and the benchmark's gcc/mwcc
 // rows would record "noncompile" instead of failing loud.)
-import { registerCandidateCompiler } from '@asmlift/cli/score';
-import { C_TYPEDEFS } from '@asmlift/core/target';
+import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/score';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -126,13 +126,13 @@ function writePreprocessed(dir: string, name: string, text: string): string {
   return ppPath;
 }
 
-/** Compile candidate C with agbcc + assemble; returns the object path. */
-function compileCandAgbcc(cSource: string): string {
+/** Compile candidate C with agbcc at `flags` + assemble; returns the object path. */
+export function compileCandAgbcc(cSource: string, flags: readonly string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-score-'));
   const sPath = join(dir, 'cand.s');
   const oPath = join(dir, 'cand.o');
   const ppPath = writePreprocessed(dir, 'cand', C_TYPEDEFS + cSource);
-  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.harnessFlags, ...flags]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);
   }
@@ -143,18 +143,20 @@ function compileCandAgbcc(cSource: string): string {
   return oPath;
 }
 
-registerCandidateCompiler('agbcc', (source, _symbol, backendId) =>
-  backendId === 'pascal' ? noPascal('agbcc') : compileCandAgbcc(source),
-);
+/** agbcc's candidate compiler at `flags`. The registry holds it at agbcc's canonical flags. */
+export const agbccCandidateCompiler =
+  (flags: readonly string[]): CandidateCompiler =>
+  (source, _symbol, backendId) =>
+    backendId === 'pascal' ? noPascal('agbcc') : compileCandAgbcc(source, flags);
 
-export { compileCandAgbcc };
+registerCandidateCompiler('agbcc', agbccCandidateCompiler(TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
 
-/** Compile reference C with agbcc and return its assembly text (the scoring target). */
-export function compileTargetAsm(cSource: string): string {
+/** Compile reference C with agbcc at `flags` and return its assembly text (the scoring target). */
+export function compileTargetAsm(cSource: string, flags: readonly string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-ref-'));
   const sPath = join(dir, 'ref.s');
   const ppPath = writePreprocessed(dir, 'ref', C_TYPEDEFS + cSource);
-  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.harnessFlags, ...flags]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);
   }
@@ -194,13 +196,17 @@ export function nonEmptyDump(text: string, what: string): string {
   return text;
 }
 
-/** Compile reference C with IDO → {obj (scoring target), asm (disassembly, frontend input)}. */
-export function compileMipsTarget(cSource: string, _symbol: string): { obj: string; asm: string } {
-  const dir = contentShareableDir('asmlift-mips-ref-', cSource);
+/** Compile reference C with IDO at `flags` → {obj (scoring target), asm (disassembly, frontend input)}. */
+export function compileMipsTarget(
+  cSource: string,
+  _symbol: string,
+  flags: readonly string[],
+): { obj: string; asm: string } {
+  const dir = contentShareableDir('asmlift-mips-ref-', flags, cSource);
   const cPath = join(dir, 'ref.c');
   const oPath = join(dir, 'ref.o');
   writeFileSync(cPath, C_TYPEDEFS + cSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, cPath]);
+  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...flags, '-o', oPath, cPath]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
   }
@@ -211,10 +217,10 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   return { obj: oPath, asm: nonEmptyDump(dis.stdout, `ido objdump on ${oPath}`) };
 }
 
-/** Compile one C/`.i` file → object with Mario Party 3's GCC 2.7.2 inside its linux/386 container
- *  (pooled, with a one-shot `docker run` fallback) — the same shape as kmcCompile. `-B` +
+/** Compile one C/`.i` file at `flags` → object with Mario Party 3's GCC 2.7.2 inside its linux/386
+ *  container (pooled, with a one-shot `docker run` fallback) — the same shape as kmcCompile. `-B` +
  *  COMPILER_PATH point the old driver at its bundled `cc1` and binutils under the mounted dir. */
-export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
+export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
   const t = GCC272_TOOLCHAIN;
   const w = hostTmp(dir);
   if (w) {
@@ -229,7 +235,8 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
       '/gcc272/gcc',
       '-B',
       '/gcc272/',
-      ...t.ccFlags,
+      ...t.harnessFlags,
+      ...flags,
       '-c',
       '-o',
       `${w}/${outObj}`,
@@ -259,7 +266,8 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
     '/gcc272/gcc',
     '-B',
     '/gcc272/',
-    ...t.ccFlags,
+    ...t.harnessFlags,
+    ...flags,
     '-c',
     '-o',
     `/work/${outObj}`,
@@ -270,14 +278,18 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
   }
 }
 
-/** GCC 2.7.2 / MIPS — synthetic-tier target build. The C→object step runs in the linux/386
- *  container (gcc272Compile); the object is disassembled + scored on the host, mirroring the KMC
- *  path. */
-export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj: string; asm: string } {
+/** GCC 2.7.2 / MIPS — synthetic-tier target build at `flags`. The C→object step runs in the
+ *  linux/386 container (gcc272Compile); the object is disassembled + scored on the host, mirroring
+ *  the KMC path. */
+export function compileMipsGcc272Target(
+  cSource: string,
+  _symbol: string,
+  flags: readonly string[],
+): { obj: string; asm: string } {
   const { objdump, objdumpFlags } = GCC272_TOOLCHAIN;
-  const dir = contentShareableDir('asmlift-mgcc272-ref-', cSource);
+  const dir = contentShareableDir('asmlift-mgcc272-ref-', flags, cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
-  gcc272Compile(dir, 'ref.c', 'ref.o');
+  gcc272Compile(dir, 'ref.c', 'ref.o', flags);
   const oPath = join(dir, 'ref.o');
   const dis = run(objdump, [...objdumpFlags, oPath]);
   if (dis.status !== 0) {
@@ -286,14 +298,14 @@ export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj
   return { obj: oPath, asm: nonEmptyDump(dis.stdout, `gcc 2.7.2 objdump on ${oPath}`) };
 }
 
-/** Compile candidate IDO Pascal (via `cc`→`upas`, routed by the `.p` extension); returns the
- *  object path. No C typedefs: Pascal source stands alone. */
-export function compileCandIdoPascal(pascalSource: string): string {
+/** Compile candidate IDO Pascal (via `cc`→`upas`, routed by the `.p` extension) at `flags`; returns
+ *  the object path. No C typedefs: Pascal source stands alone. */
+export function compileCandIdoPascal(pascalSource: string, flags: readonly string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-mips-pas-'));
   const pPath = join(dir, 'cand.p'); // `.p` makes IDO's cc select the Pascal frontend
   const oPath = join(dir, 'cand.o');
   writeFileSync(pPath, pascalSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, pPath], {
+  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...flags, '-o', oPath, pPath], {
     USR_LIB: dirname(IDO_TOOLCHAIN.cc),
   });
   if (cc.status !== 0) {
@@ -302,22 +314,26 @@ export function compileCandIdoPascal(pascalSource: string): string {
   return oPath;
 }
 
-/** Compile candidate C with IDO; returns the object path. */
-export function compileCandIdoC(cSource: string): string {
+/** Compile candidate C with IDO at `flags`; returns the object path. */
+export function compileCandIdoC(cSource: string, flags: readonly string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-mips-score-'));
   const cPath = join(dir, 'cand.c');
   const oPath = join(dir, 'cand.o');
   writeFileSync(cPath, C_TYPEDEFS + cSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, cPath]);
+  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...flags, '-o', oPath, cPath]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
   }
   return oPath;
 }
 
-registerCandidateCompiler('ido', (source, _symbol, backendId) =>
-  backendId === 'pascal' ? compileCandIdoPascal(source) : compileCandIdoC(source),
-);
+/** IDO's candidate compiler at `flags`. The registry holds it at ido7.1's canonical flags. */
+export const idoCandidateCompiler =
+  (flags: readonly string[]): CandidateCompiler =>
+  (source, _symbol, backendId) =>
+    backendId === 'pascal' ? compileCandIdoPascal(source, flags) : compileCandIdoC(source, flags);
+
+registerCandidateCompiler('ido', idoCandidateCompiler(TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags));
 
 // ── MIPS / KMC GCC path (Docker) ────────────────────────────────────────────────────────
 // Same ISA as IDO, different compiler (see MIPS_GCC in target.ts). The KMC GCC is a Linux/i386
@@ -351,12 +367,14 @@ export function mkShareableTmp(prefix: string): string {
   return mkdtempSync(join('/tmp', prefix));
 }
 
-/** A DETERMINISTIC shareable scratch dir, content-keyed: same inputs ⇒ same path on every
- *  machine. Reference builds must use this, not mkShareableTmp — compilers bake the build
- *  path into the object (IDO writes it into .mdebug section BYTES), so a random or
- *  machine-specific dir makes the object, its dump and every published artifact embedding
- *  them differ per host. Same-content concurrent rebuilds write identical bytes (benign). */
-export function contentShareableDir(prefix: string, key: string): string {
+/** A DETERMINISTIC shareable scratch dir, keyed by the compile's flags and source: same inputs ⇒
+ *  same path on every machine. Reference builds must use this, not mkShareableTmp — compilers bake
+ *  the build path into the object (IDO writes it into .mdebug section BYTES), so a random or
+ *  machine-specific dir makes the object, its dump and every published artifact embedding them
+ *  differ per host. Same-input concurrent rebuilds write identical bytes (benign); one source at two
+ *  flag sets gets two directories, so neither overwrites the other's object. */
+export function contentShareableDir(prefix: string, flags: readonly string[], source: string): string {
+  const key = JSON.stringify([flags, source]);
   const dir = join('/tmp', `${prefix}${createHash('sha256').update(key).digest('hex').slice(0, 16)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
@@ -434,11 +452,11 @@ export function poolExec(docker: string, image: string, name: string, mounts: st
   return null;
 }
 
-/** Compile `srcC` (a basename in `dir`) to the object `outObj` with KMC GCC inside the
+/** Compile `srcC` (a basename in `dir`) at `flags` to the object `outObj` with KMC GCC inside the
  *  container — pooled `docker exec` when `dir` is under /tmp, single-shot `docker run` otherwise.
  *  Throws on failure. Exported for the benchmark's real-tier compile
  *  (apps/benchmark/src/compile/kmc.ts), so it pools through the same helper. */
-export function kmcCompile(dir: string, srcC: string, outObj: string): void {
+export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
   const t = GCC_KMC_TOOLCHAIN;
   const w = hostTmp(dir);
   if (w) {
@@ -451,7 +469,8 @@ export function kmcCompile(dir: string, srcC: string, outObj: string): void {
       'COMPILER_PATH=/kmc',
       name,
       '/kmc/gcc',
-      ...t.ccFlags,
+      ...t.harnessFlags,
+      ...flags,
       '-c',
       '-o',
       `${w}/${outObj}`,
@@ -479,7 +498,8 @@ export function kmcCompile(dir: string, srcC: string, outObj: string): void {
     'COMPILER_PATH=/kmc',
     t.image,
     '/kmc/gcc',
-    ...t.ccFlags,
+    ...t.harnessFlags,
+    ...flags,
     '-c',
     '-o',
     `/work/${outObj}`,
@@ -490,12 +510,17 @@ export function kmcCompile(dir: string, srcC: string, outObj: string): void {
   }
 }
 
-/** Compile reference C with KMC GCC → {obj (scoring target), asm (disassembly, frontend input)}. */
-export function compileMipsGccTarget(cSource: string, _symbol: string): { obj: string; asm: string } {
+/** Compile reference C with KMC GCC at `flags` → {obj (scoring target), asm (disassembly, frontend
+ *  input)}. */
+export function compileMipsGccTarget(
+  cSource: string,
+  _symbol: string,
+  flags: readonly string[],
+): { obj: string; asm: string } {
   const t = GCC_KMC_TOOLCHAIN;
-  const dir = contentShareableDir('asmlift-mgcc-ref-', cSource);
+  const dir = contentShareableDir('asmlift-mgcc-ref-', flags, cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
-  kmcCompile(dir, 'ref.c', 'ref.o');
+  kmcCompile(dir, 'ref.c', 'ref.o', flags);
   const oPath = join(dir, 'ref.o');
   const dis = run(t.objdump, [...t.objdumpFlags, oPath]);
   if (dis.status !== 0) {
@@ -504,17 +529,21 @@ export function compileMipsGccTarget(cSource: string, _symbol: string): { obj: s
   return { obj: oPath, asm: nonEmptyDump(dis.stdout, `kmc objdump on ${oPath}`) };
 }
 
-/** Compile candidate C with KMC GCC (dockerized); returns the object path. */
-export function compileCandKmc(cSource: string): string {
+/** Compile candidate C with KMC GCC (dockerized) at `flags`; returns the object path. */
+export function compileCandKmc(cSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-mgcc-score-');
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
-  kmcCompile(dir, 'cand.c', 'cand.o');
+  kmcCompile(dir, 'cand.c', 'cand.o', flags);
   return join(dir, 'cand.o');
 }
 
-registerCandidateCompiler('gcc', (source, _symbol, backendId) =>
-  backendId === 'pascal' ? noPascal('gcc') : compileCandKmc(source),
-);
+/** KMC GCC's candidate compiler at `flags`. The registry holds it at gcc2.7.2kmc's canonical flags. */
+export const kmcCandidateCompiler =
+  (flags: readonly string[]): CandidateCompiler =>
+  (source, _symbol, backendId) =>
+    backendId === 'pascal' ? noPascal('gcc') : compileCandKmc(source, flags);
+
+registerCandidateCompiler('gcc', kmcCandidateCompiler(TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags));
 
 // ── PowerPC / CodeWarrior path (Docker) ─────────────────────────────────────────────────────
 // The THIRD ISA, FOURTH compiler (PPC_MWCC in target.ts). CodeWarrior `mwcceppc.exe` is a 32-bit
@@ -550,15 +579,16 @@ export function ppcDockerAvailable(): boolean {
   return existsSync(join(t.dir, 'mwcceppc.exe'));
 }
 
-/** Run one linux/386 container that compiles `srcC` (a basename in `dir`) with mwcceppc-via-wibo
- *  to `outObj`, and — when `disasm` — pipes the object through the PowerPC objdump, returning its
- *  text. The proprietary CodeWarrior dir is mounted read-only at /mwcc; the scratch dir at /work. */
-function ppcContainer(dir: string, srcC: string, outObj: string, disasm: boolean): string {
+/** Run one linux/386 container that compiles `srcC` (a basename in `dir`) with mwcceppc-via-wibo at
+ *  `flags` to `outObj`, and — when `disasm` — pipes the object through the PowerPC objdump, returning
+ *  its text. The proprietary CodeWarrior dir is mounted read-only at /mwcc; the scratch dir at /work. */
+function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly string[], disasm: boolean): string {
   const t = MWCC_PPC_TOOLCHAIN;
   // The script is parameterized by the container-side workdir: `/work` for the single-shot
   // container (per-call mount), the /host-tmp mapping for the pooled one.
   const script = (W: string) => {
-    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${t.ccFlags.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
+    const argv = [...t.harnessFlags, ...flags];
+    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
     return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
   };
   const w = hostTmp(dir);
@@ -599,25 +629,34 @@ function shq(s: string): string {
   return /[^\w/.,=-]/.test(s) ? `'${s.replace(/'/g, "'\\''")}'` : s;
 }
 
-/** Compile reference C with CodeWarrior → {obj (scoring target), asm (disassembly, frontend input)}. */
-export function compilePpcTarget(cSource: string, _symbol: string): { obj: string; asm: string } {
-  const dir = contentShareableDir('asmlift-ppc-ref-', cSource);
+/** Compile reference C with CodeWarrior at `flags` → {obj (scoring target), asm (disassembly,
+ *  frontend input)}. */
+export function compilePpcTarget(
+  cSource: string,
+  _symbol: string,
+  flags: readonly string[],
+): { obj: string; asm: string } {
+  const dir = contentShareableDir('asmlift-ppc-ref-', flags, cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
-  const asm = ppcContainer(dir, 'ref.c', 'ref.o', true);
+  const asm = ppcContainer(dir, 'ref.c', 'ref.o', flags, true);
   return { obj: join(dir, 'ref.o'), asm };
 }
 
-/** Compile candidate C with CodeWarrior (dockerized wibo); returns the object path. */
-export function compileCandPpc(cSource: string): string {
+/** Compile candidate C with CodeWarrior (dockerized wibo) at `flags`; returns the object path. */
+export function compileCandPpc(cSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-score-');
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
-  ppcContainer(dir, 'cand.c', 'cand.o', false);
+  ppcContainer(dir, 'cand.c', 'cand.o', flags, false);
   return join(dir, 'cand.o');
 }
 
-registerCandidateCompiler('mwcc', (source, _symbol, backendId) =>
-  backendId === 'pascal' ? noPascal('mwcc') : compileCandPpc(source),
-);
+/** CodeWarrior's candidate compiler at `flags`. The registry holds it at mwcc_242_81's canonical flags. */
+export const mwccCandidateCompiler =
+  (flags: readonly string[]): CandidateCompiler =>
+  (source, _symbol, backendId) =>
+    backendId === 'pascal' ? noPascal('mwcc') : compileCandPpc(source, flags);
+
+registerCandidateCompiler('mwcc', mwccCandidateCompiler(TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags));
 
 // ── C++ path (mangled-symbol harness) ─────────────────────────────────────────────────────
 // mwcceppc is a C AND C++ compiler: the `.cp` extension selects the C++ frontend. A C++ target's
@@ -626,18 +665,23 @@ registerCandidateCompiler('mwcc', (source, _symbol, backendId) =>
 // same flags — only the source extension differs: the compiler is one binary, the language is a
 // flag (a future `target.language` field).
 
-/** Compile reference C++ (`.cp`) with CodeWarrior → {obj (scoring target), disasm (frontend input)}. */
-export function compilePpcCppTarget(cppSource: string, _symbol: string): { obj: string; asm: string } {
-  const dir = contentShareableDir('asmlift-ppc-cpp-ref-', cppSource);
+/** Compile reference C++ (`.cp`) with CodeWarrior at `flags` → {obj (scoring target), disasm
+ *  (frontend input)}. */
+export function compilePpcCppTarget(
+  cppSource: string,
+  _symbol: string,
+  flags: readonly string[],
+): { obj: string; asm: string } {
+  const dir = contentShareableDir('asmlift-ppc-cpp-ref-', flags, cppSource);
   writeFileSync(join(dir, 'ref.cp'), C_TYPEDEFS + cppSource);
-  const asm = ppcContainer(dir, 'ref.cp', 'ref.o', true);
+  const asm = ppcContainer(dir, 'ref.cp', 'ref.o', flags, true);
   return { obj: join(dir, 'ref.o'), asm };
 }
 
-/** Compile candidate C++ (`.cp`) with CodeWarrior; returns the object path. */
-export function compileCandPpcCpp(cppSource: string): string {
+/** Compile candidate C++ (`.cp`) with CodeWarrior at `flags`; returns the object path. */
+export function compileCandPpcCpp(cppSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-cpp-score-');
   writeFileSync(join(dir, 'cand.cp'), C_TYPEDEFS + cppSource);
-  ppcContainer(dir, 'cand.cp', 'cand.o', false);
+  ppcContainer(dir, 'cand.cp', 'cand.o', flags, false);
   return join(dir, 'cand.o');
 }

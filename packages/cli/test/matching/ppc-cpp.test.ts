@@ -15,7 +15,7 @@
 // recovery INPUT here (a decomp project has them in headers, exactly as it has C prototypes).
 import { type CppFnSpec, cppBackend, cppSymbol } from '@asmlift/core/backend/cpp';
 import { decompile } from '@asmlift/core/pipeline';
-import { PPC_MWCC } from '@asmlift/core/target';
+import { PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compilePpcCppTarget, scoreCPpc, scoreCppPpc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -74,13 +74,13 @@ describe('C++ backend: compile → disasm → decompile (idiomatic C++) → reco
   for (const { cpp, spec, expect: golden, note } of CASES) {
     const sym = cppSymbol(spec);
     test.runIf(HAVE)(`${sym} — ${note}`, () => {
-      const { obj, asm } = compilePpcCppTarget(cpp, sym);
+      const { obj, asm } = compilePpcCppTarget(cpp, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC, {
         backend: cppBackend(spec),
         prototypes: { [sym]: { returnsVoid: spec.retType.base === 'void' } },
       });
       expect(r.source).toBe(golden);
-      const s = scoreCppPpc(r.source, sym, obj);
+      const s = scoreCppPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C++ for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -159,10 +159,11 @@ describe('C++ mangled-C spike: the plain-C backend reaches a C++ target as mangl
     const { obj, asm } = compilePpcCppTarget(
       'struct Vec{int x;int y;int dot(Vec*o);}; int Vec::dot(Vec*o){ return x*o->x + y*o->y; }',
       sym,
+      TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
     );
     const r = decompile(sym, asm, PPC_MWCC); // DEFAULT C backend — mangled-C
     expect(r.source).toBe(`s32 ${sym}(s32 * a0, s32 * a1) {\n    return *a0 * *a1 + a0[1] * a1[1];\n}\n`);
-    const s = scoreCPpc(r.source, sym, obj); // compiled as plain C, scored vs the C++ target
+    const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags); // compiled as plain C, scored vs the C++ target
     expect(s.score).toBe(0);
     expect(s.match).toBe(true);
   });

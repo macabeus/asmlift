@@ -2,9 +2,8 @@
 // unsupported toolchain is a TYPED null in the table (see mwcc.ts), not a default-case throw.
 //
 // Design: the dataset VENDORS each function's preprocessed translation unit (cases/vendor.ts) —
-// the compiler's actual input, frozen — so the runner needs no project checkouts. Targets are
-// asmlift's canonical flags for the ISA (not the project's exact flags): the target is our
-// deterministic re-compile of real game code, not the shipped ROM object.
+// the compiler's actual input, frozen — so the runner needs no project checkouts. The target and every
+// candidate compile at the row's codegen flags (`Case.codegen`).
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { macroDefinesOf } from '@asmlift/core/declare';
 import { C_TYPEDEFS } from '@asmlift/core/target';
@@ -47,8 +46,8 @@ export function realCompilerFor(toolchain: ToolchainId): RealCompile {
  *  `Case.build`, and the only place its `BuiltTarget`s are born — `checkedTarget` is stated here
  *  rather than per compiler for the same reason the synthetic tier states it in `cachedBuildTarget`
  *  and not in each `TOOLCHAINS[*].buildTarget`. */
-export function buildRealTarget(toolchain: ToolchainId, tuI: string): BuiltTarget {
-  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI), `${toolchain} real-tier target`);
+export function buildRealTarget(toolchain: ToolchainId, cflags: readonly string[], tuI: string): BuiltTarget {
+  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI, cflags), `${toolchain} real-tier target`);
 }
 
 // ── context-aware candidate scoring ────────────────────────────────────────────────────────
@@ -88,7 +87,7 @@ export function scoringPreludes(prependC: string, ctxI: string, sym: string): st
  *  prelude that compiles. The context is what lets an emission referencing project types/GLOBALS
  *  compile at all — the same context m2c is scored in, so asmlift's real-tier scoring is
  *  symmetric. Throws if none compile. */
-export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: string) {
+export function makeRealCompile(toolchain: ToolchainId, cflags: readonly string[], prependC: string, ctxI: string) {
   const rc = realCompilerFor(toolchain);
   return (candC: string, sym: string, _backendId?: string, declarations?: string): string => {
     // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
@@ -99,7 +98,7 @@ export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: 
     let lastErr = '';
     for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
       try {
-        return rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym);
+        return rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym, cflags);
       } catch (e) {
         lastErr = (e as Error).message;
       }
@@ -117,6 +116,7 @@ export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: 
  *  the same context today's unconditional materialization would have used. */
 export function resolveScoringPrelude(
   toolchain: ToolchainId,
+  cflags: readonly string[],
   prependC: string,
   ctxI: string,
   sym: string,
@@ -129,7 +129,7 @@ export function resolveScoringPrelude(
   const preludes = scoringPreludes(prependC, ctxI, sym);
   for (const [i, prelude] of preludes.entries()) {
     try {
-      rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym);
+      rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym, cflags);
       return { prelude, rung: i + 1 };
     } catch {
       // next rung
@@ -140,8 +140,8 @@ export function resolveScoringPrelude(
 
 /** A context-aware Scorer (real tier): compile the candidate in project context, then objdiff it
  *  against the target. Shares makeRealCompile so asmlift and m2c compile in the identical context. */
-export function makeRealScorer(toolchain: ToolchainId, prependC: string, ctxI: string) {
-  const compile = makeRealCompile(toolchain, prependC, ctxI);
+export function makeRealScorer(toolchain: ToolchainId, cflags: readonly string[], prependC: string, ctxI: string) {
+  const compile = makeRealCompile(toolchain, cflags, prependC, ctxI);
   return (candC: string, sym: string, targetObj: string): MatchScore =>
     scoreObjects(targetObj, compile(candC, sym), sym);
 }

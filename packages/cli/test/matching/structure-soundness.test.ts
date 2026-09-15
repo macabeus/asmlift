@@ -15,7 +15,7 @@ import { parse } from '@asmlift/core/ir/parse';
 import { T } from '@asmlift/core/ir/types';
 import { decompile } from '@asmlift/core/pipeline';
 import { StructureError, structure } from '@asmlift/core/structure/structure';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -26,13 +26,13 @@ describe("C2 — self-loop guard-fusion keeps the body's side effects", () => {
   // a copies-only loop body silently DELETES the store.
   test('store survives inside the recovered loop body (end-to-end, real asm)', () => {
     const c = 'int fill2(int *p, int n, int v){ while (n != 0) { *p = v; p = p + 2; n = n - 1; } return n; }';
-    const asm = compileTargetAsm(c);
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(asm).toContain('str'); // the shape really has a plain store
     const src = decompile('fill2', asm, ARMV4T_AGBCC).source;
     const loopBody = src.slice(src.search(/for \(|while \(/));
     expect(loopBody).toContain('*v0 = a2;'); // the memory write is IN the loop
     // and the output still compiles + scores (correctness of the harness path)
-    expect(scoreC(src, 'fill2', assembleTarget(asm)).rows).toBeGreaterThan(0);
+    expect(scoreC(src, 'fill2', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).rows).toBeGreaterThan(0);
   });
 });
 
@@ -78,21 +78,21 @@ describe('C3 — coalescing has an interference (liveness) check', () => {
 describe('C4 — inline-at-use has multi-use and memory-ordering barriers', () => {
   test('a call used twice executes ONCE (named temp), byte-exact (end-to-end)', () => {
     const c = 'extern int g(int); int t(int a){ int r = g(a); return r ^ (r >> 1); }';
-    const asm = compileTargetAsm(c);
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const src = decompile('t', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source;
     expect(src.match(/g\(/g)!.length).toBe(1); // miscompile shape: g(a0) ^ (g(a0) >> 1)
-    expect(scoreC(src, 't', assembleTarget(asm)).score).toBe(0);
+    expect(scoreC(src, 't', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
   test('a load never sinks past an aliasing store, byte-exact (end-to-end)', () => {
     const c = 'int xchg0(int *p){ int v = *p; *p = 0; return v; }';
-    const asm = compileTargetAsm(c);
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const src = decompile('xchg0', asm, ARMV4T_AGBCC).source;
     // the read must be materialized BEFORE the store (miscompile shape: `*a0 = 0; return *a0;`)
     expect(src.indexOf('v0 = *a0;')).toBeGreaterThanOrEqual(0);
     expect(src.indexOf('v0 = *a0;')).toBeLessThan(src.indexOf('*a0 = 0;'));
     expect(src).toContain('return v0;');
-    expect(scoreC(src, 'xchg0', assembleTarget(asm)).score).toBe(0);
+    expect(scoreC(src, 'xchg0', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
   test('a store to a provably-disjoint field is NOT a barrier (no spurious temp)', () => {

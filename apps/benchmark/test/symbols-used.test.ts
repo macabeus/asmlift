@@ -9,7 +9,7 @@ import type { MatchScore } from '@asmlift/cli/score';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { hasVariation, joinVariations } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
@@ -26,7 +26,8 @@ vi.mock('@asmlift/core/pipeline', async (importOriginal) => {
 
 const ranked = vi.mocked(decompileRanked);
 
-const TC = { id: 'agbcc', targetDesc: ARMV4T_AGBCC } as Toolchain;
+const TC = { id: 'agbcc' } as Toolchain;
+const CODEGEN = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 // the ranking is mocked, so the candidate compiler must never run
 const noCompile = (() => {
   throw new Error('candidate compile must not run in this suite');
@@ -64,7 +65,7 @@ const MAP: SymbolMap = new Map([[0x03001234, [COUNTER]]]);
 describe('symbolsUsed / winnerVariations capture (pinned)', () => {
   test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the variations', () => {
     rankPicking((v) => !hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([{ name: 'gCounter', shape: 'scalar u16' }]);
@@ -80,7 +81,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
       [0x08001000, [{ name: 'DoThing', kind: 'code' }]],
     ]);
     rankPicking((v) => !hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, 'f', body, '/nonexistent.o', undefined, noCompile, map);
+    const r = runAsmlift(TC, CODEGEN, 'f', body, '/nonexistent.o', undefined, noCompile, map);
     const names = (r.symbolsUsed ?? []).map((s) => s.name);
     expect(names).toContain('gCounter');
     expect(names).not.toContain('DoThing'); // called ⇒ excluded upstream (C89 prototype poison)
@@ -88,7 +89,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
 
   test('a raw-globals winner on a map row ⇒ symbolMap true, symbolsUsed HONESTLY empty', () => {
     rankPicking((v) => hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([]);
     expect(hasVariation(r.winnerVariations!, 'raw-globals')).toBe(true); // the variations say which spelling won
@@ -96,7 +97,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
 
   test('no map ⇒ no symbolsUsed field at all; the variations still record the winner', () => {
     rankPicking(() => true);
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r).not.toHaveProperty('symbolMap');
     expect(r).not.toHaveProperty('symbolsUsed');
     expect(r.winnerVariations).toBeDefined();
@@ -106,7 +107,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
     ranked.mockImplementation(() => {
       throw new Error('error: boom');
     });
-    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('symbolsUsed');
     expect(r).not.toHaveProperty('winnerVariations');
@@ -116,7 +117,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
     // (schema-historical) is never set.
     const gapped = 'f:\n\tclz\tr0, r0\n\tbx\tlr\n';
     vi.mocked(decompile).mockClear();
-    const r = runAsmlift(TC, 'f', gapped, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', gapped, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('declined');
     expect(r.symbolMap).toBe(true);
     expect(decompile).toHaveBeenCalledTimes(1);
@@ -175,7 +176,7 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
         withheld: [],
       };
     });
-    const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.droppedCandidates).toEqual([
       { variations: ['unsigned'], error: "too many arguments to `thunk_sub_080002A0'" },
@@ -184,7 +185,9 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
 
   test('every candidate building ⇒ the field is absent, not an empty array', () => {
     rankPicking(() => true);
-    expect(runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty('droppedCandidates');
+    expect(runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty(
+      'droppedCandidates',
+    );
   });
 });
 
@@ -202,7 +205,7 @@ describe('withheld candidates are recorded too, and are a different fact', () =>
         withheld: [{ variations: ['unsigned', 'unreduce'], score: 35, why: WHY }],
       };
     });
-    const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP);
     // NOT folded into droppedCandidates: nothing failed to build, and reporting one as the other
     // would make the dropped column name compile errors that never happened.
     expect(r.droppedCandidates).toBeUndefined();
@@ -211,6 +214,8 @@ describe('withheld candidates are recorded too, and are a different fact', () =>
 
   test('nothing withheld ⇒ the field is absent, not an empty array', () => {
     rankPicking(() => true);
-    expect(runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty('withheldCandidates');
+    expect(runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty(
+      'withheldCandidates',
+    );
   });
 });

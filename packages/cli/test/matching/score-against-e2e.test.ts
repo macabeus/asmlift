@@ -3,6 +3,7 @@
 // command (decomp.yaml tools.asmlift.compiler) that reproduces the byte-exact match with the
 // project's "own" toolchain. The command template is built at runtime from toolchain.ts (never
 // hardcoded paths).
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -15,7 +16,7 @@ import { runCli } from '../../src/main';
 const REFERENCE_C = 'unsigned ushr(unsigned x){ return x >> 1; }';
 
 function fixture() {
-  const asm = compileTargetAsm(REFERENCE_C);
+  const asm = compileTargetAsm(REFERENCE_C, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-sae2e-'));
   const asmPath = join(dir, 'ushr.s');
@@ -30,7 +31,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     // as a decomp.yaml command template (cpp → agbcc → as, chained under sh).
     const cmd = [
       `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c`,
-      `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')}`,
+      `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.harnessFlags.join(' ')} ${TOOLCHAIN_TARGETS.agbcc.canonicalFlags.join(' ')}`,
       `${TOOLCHAIN.as} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
     ].join(' && ');
     writeFileSync(
@@ -54,7 +55,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     const { dir, asmPath, obj } = fixture();
     const cmd = [
       `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c`,
-      `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')}`,
+      `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.harnessFlags.join(' ')} ${TOOLCHAIN_TARGETS.agbcc.canonicalFlags.join(' ')}`,
       `${TOOLCHAIN.as} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
     ].join(' && ');
     writeFileSync(

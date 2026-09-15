@@ -17,7 +17,7 @@ test('a missing m2c checkout throws a setup error, never an m2c result', { timeo
   vi.resetModules();
   vi.stubEnv('ASMLIFT_M2C_DIR', '/nonexistent/m2c-checkout');
   const { runM2c } = await import('../src/eval/m2c');
-  const tc = { asmKind: 'agbcc-s', isa: 'arm', compiler: 'agbcc' } as Toolchain;
+  const tc = { id: 'agbcc', asmKind: 'agbcc-s', isa: 'arm' } as Toolchain;
   expect(() => runM2c(tc, 'f', '.thumb_func\nf:\n\tbx lr\n')).toThrow(
     /m2c checkout not found at \/nonexistent\/m2c-checkout.*ASMLIFT_M2C_DIR/s,
   );

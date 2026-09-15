@@ -1,7 +1,13 @@
 // The ONE case loop: skip-if-unavailable, build, evaluate both decompilers, log, and flush
 // incrementally so a mid-run failure keeps prior progress. Used identically by the serial path
 // and by every shard child.
-import type { BenchMeta, BenchOutput, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import {
+  type BenchMeta,
+  type BenchOutput,
+  type DecompilerResult,
+  type FunctionResult,
+  rowTier,
+} from '@asmlift/bench-schema';
 import { writeFileSync } from 'node:fs';
 
 import { scrubObjectHeader } from '../asm-scrub';
@@ -155,7 +161,7 @@ export function runCases(
       addr: c.addr,
       aliases: c.aliases,
       project: c.project,
-      tier: c.tier,
+      ...rowTier(c),
       language: c.language,
       features: c.features,
       refSource: c.refSource,
@@ -166,6 +172,7 @@ export function runCases(
       ctxProto: c.ctxProto,
       proto: c.proto,
       symbols: c.symbols,
+      codegen: c.codegen,
       note: c.note,
     };
     let r: FunctionResult;

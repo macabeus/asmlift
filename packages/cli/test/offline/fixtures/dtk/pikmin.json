@@ -1,0 +1,66 @@
+{
+  "min_version": "2.0.0-beta.5",
+  "custom_make": "ninja",
+  "build_target": false,
+  "watch_patterns": ["*.c", "*.cp", "*.cpp", "*.h", "*.hpp", "*.inc", "*.py", "*.yml", "*.txt", "*.json"],
+  "progress_categories": [
+    {
+      "id": "game",
+      "name": "Game Code"
+    },
+    {
+      "id": "sdk",
+      "name": "SDK Code"
+    },
+    {
+      "id": "jaudio",
+      "name": "JAudio Code"
+    },
+    {
+      "id": "hvqm4dec",
+      "name": "HVQM4 Decoder Code"
+    }
+  ],
+  "units": [
+    {
+      "name": "main/sysBootup",
+      "target_path": "build/GPIE01_01/obj/sysBootup.o",
+      "base_path": "build/GPIE01_01/src/sysBootup.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_233_163n",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++",
+        "preset_id": 62,
+        "ctx_path": "build/GPIE01_01/src/sysBootup.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/sysBootup.cpp",
+        "progress_categories": ["game"],
+        "auto_generated": false
+      }
+    },
+    {
+      "name": "main/jaudio/dummyprobe",
+      "target_path": "build/GPIE01_01/obj/jaudio/dummyprobe.o",
+      "base_path": "build/GPIE01_01/src/jaudio/dummyprobe.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_233_163n",
+        "c_flags": "-nodefaults -proc gekko -pragma \"scheduling 7400\" -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,s -inline off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse, readonly -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -common on -func_align 32 -lang c++ -DNDEBUG=1 -w off -use_lmw_stmw on",
+        "preset_id": 62,
+        "ctx_path": "build/GPIE01_01/src/jaudio/dummyprobe.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/jaudio/dummyprobe.c",
+        "progress_categories": ["jaudio"],
+        "auto_generated": false
+      }
+    }
+  ]
+}

@@ -30,9 +30,7 @@ import { describe, expect, test } from 'vitest';
 import { SYNTHETIC } from '../dataset/synthetic';
 import {
   ATTRIBUTE_MACROS,
-  UNVERIFIABLE_CALLEE_PROTOS,
   authoredFactProblems,
-  declarationsOf,
   declaredFunctionNames,
   oracleFor,
   protoFactProblems,
@@ -100,26 +98,6 @@ describe('every authored fact agrees with the function the compiler actually saw
     );
     expect(bare).toEqual([]);
   });
-
-  // The inventory of facts this cannot adjudicate must not rot: a callee the TU now declares is a
-  // fact with an oracle, and leaving it listed would mute a check that works.
-  test('every UNVERIFIABLE_CALLEE_PROTOS entry is still unverifiable, and still exists', () => {
-    const stale: string[] = [];
-    for (const key of UNVERIFIABLE_CALLEE_PROTOS.keys()) {
-      const [project, sym, callee] = key.split(':');
-      const entry = manifests.find(({ man }) => man.project === project);
-      const fn = entry?.man.functions.find((f) => f.sym === sym);
-      if (!fn?.proto?.[callee]) {
-        stale.push(`${key}: no such callee proto any more — drop the entry`);
-        continue;
-      }
-      const tu = vendoredTUs(entry!.man).get(sym)!;
-      if (declarationsOf(tu, callee).length > 0 || declarationsOf(fn.ctx ?? '', callee).length > 0) {
-        stale.push(`${key}: the row now declares it — drop the entry and let the row's own text answer`);
-      }
-    }
-    expect(stale).toEqual([]);
-  }, 30_000);
 });
 
 describe('the prototype line appended to a vendored m2c context', () => {

@@ -1,0 +1,56 @@
+# Cut from Mario Party 4's build.ninja at 147b165a: the header and the compile edge of each unit in objdiff.json.
+ninja_required_version = 1.3
+
+# The arguments passed to configure.py, for rerunning it.
+configure_args = 
+python = "/opt/homebrew/opt/python@3.14/bin/python3.14"
+
+# Variables
+ldflags = -fp hardware -nodefaults
+mw_version = GC/2.6
+objdiff_report_args = 
+
+build build/GMPE01_00/src/game/main.o: mwcc_sjis src/game/main.c | $
+    build/compilers build/tools/sjiswrap.exe tools/transform_dep.py || $
+    pre-compile
+  mw_version = GC/2.6
+  cflags = -nodefaults -proc gekko -align powerpc -enum int -fp hardware $
+      -Cpp_exceptions off -O4,p -inline auto -pragma "cats off" -pragma $
+      "warn_notinlined off" -maxerrors 1 -nosyspath -RTTI off -fp_contract $
+      on -str reuse -i include -i extern/musyx/include -i $
+      build/GMPE01_00/include -multibyte -DVERSION=0 $
+      -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned $
+      -fp_contract off -lang=c
+  basedir = build/GMPE01_00/src/game
+  basefile = build/GMPE01_00/src/game/main
+
+build build/GMPE01_00/src/REL/executor.o: mwcc_sjis src/REL/executor.c | $
+    build/compilers build/tools/sjiswrap.exe tools/transform_dep.py || $
+    pre-compile
+  mw_version = GC/2.6
+  cflags = -nodefaults -proc gekko -align powerpc -enum int -fp hardware $
+      -Cpp_exceptions off -O4,p -inline auto -pragma "cats off" -pragma $
+      "warn_notinlined off" -maxerrors 1 -nosyspath -RTTI off -fp_contract $
+      on -str reuse -i include -i extern/musyx/include -i $
+      build/GMPE01_00/include -multibyte -DVERSION=0 $
+      -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned $
+      -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST $
+      -lang=c
+  basedir = build/GMPE01_00/src/REL
+  basefile = build/GMPE01_00/src/REL/executor
+
+build build/GMPE01_00/src/REL/m427Dll/map.o: mwcc_sjis $
+    src/REL/m427Dll/map.c | build/compilers build/tools/sjiswrap.exe $
+    tools/transform_dep.py || pre-compile
+  mw_version = GC/1.3.2
+  cflags = -nodefaults -proc gekko -align powerpc -enum int -fp hardware $
+      -Cpp_exceptions off -O4,p -inline auto -pragma "cats off" -pragma $
+      "warn_notinlined off" -maxerrors 1 -nosyspath -RTTI off -fp_contract $
+      on -str reuse -i include -i extern/musyx/include -i $
+      build/GMPE01_00/include -multibyte -DVERSION=0 $
+      -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned $
+      -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST $
+      -lang=c
+  basedir = build/GMPE01_00/src/REL/m427Dll
+  basefile = build/GMPE01_00/src/REL/m427Dll/map
+build build/GMPE01_00/src/REL/m427Dll/map.ctx: decompctx $

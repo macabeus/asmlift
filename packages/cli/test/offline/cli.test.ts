@@ -1,5 +1,6 @@
 // CLI surface tests — offline (no toolchain: decompile-only via runCli, no compile/score).
 // The corpus fixtures live in @asmlift/core's test dir; read cross-package by path.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,10 +11,15 @@ import { detectName, runCli, scoreOf } from '../../src/main';
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../core/test/corpus', f), 'utf8');
 const run = (file: string, ...flags: string[]) => runCli([file, ...flags], corpus);
 
+/** The one stderr line of a plain decompile with no flags and no decomp.yaml. */
+const assumed = (id: 'agbcc' | 'ido7.1') =>
+  `asmlift: [flags] none given: decompiling at ${id}'s canonical flags ${TOOLCHAIN_TARGETS[id].canonicalFlags.join(' ')}; ` +
+  'pass --cflags if your build differs\n';
+
 test('decompiles an objdump corpus file end-to-end (name auto-detected)', async () => {
   const r = await run('ido-add1.asm', '--target', 'ido7.1');
   expect(r.code).toBe(0);
-  expect(r.stderr).toBe('');
+  expect(r.stderr).toBe(assumed('ido7.1'));
   expect(r.stdout).toBe('s32 add1(s32 a0) {\n    return a0 + 1;\n}\n');
 });
 
@@ -93,7 +99,7 @@ test('--proto: a well-formed table is accepted in both param spellings', async (
   for (const params of [1, ['u8']]) {
     const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile({ callee: { params } }));
     expect(r.code).toBe(0);
-    expect(r.stderr).toBe('');
+    expect(r.stderr).toBe(assumed('agbcc'));
   }
 });
 
@@ -135,7 +141,7 @@ test('--proto: an inline table is read as JSON, and means exactly what the file 
   const table = { callee: { params: 1 } };
   const inline = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', JSON.stringify(table));
   expect(inline.code).toBe(0);
-  expect(inline.stderr).toBe('');
+  expect(inline.stderr).toBe(assumed('agbcc'));
   const viaFile = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile(table));
   expect(inline.stdout).toBe(viaFile.stdout);
   // leading whitespace is still inline, not a path
@@ -157,7 +163,7 @@ test('--jobs/--progress belong to the ranked path and are refused elsewhere, not
   for (const flag of [['--jobs', '4'], ['--progress']]) {
     const r = await run('agbcc-clamp0.s', '--target', 'agbcc', ...flag);
     expect(r.code).toBe(64);
-    expect(r.stderr).toContain('--jobs/--progress apply to --score-against runs only');
+    expect(r.stderr).toBe('asmlift: --jobs/--progress apply to --score-against runs only\n');
   }
 });
 

@@ -8,15 +8,15 @@
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
 // Lift the same reference C from both toolchains, renaming to a shared symbol so only the
 // body (not the name) is compared.
 function liftBoth(sym: string, thumbC: string, mipsC: string) {
-  const thumbAsm = compileTargetAsm(thumbC);
-  const { asm: mipsAsm } = compileMipsTarget(mipsC, sym);
+  const thumbAsm = compileTargetAsm(thumbC, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  const { asm: mipsAsm } = compileMipsTarget(mipsC, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
   const emit = (backend: typeof cBackend) => ({
     thumb: decompile(sym, thumbAsm, ARMV4T_AGBCC, { backend }).source,
     mips: decompile(sym, mipsAsm, MIPS_IDO, { backend }).source,

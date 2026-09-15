@@ -21,22 +21,27 @@ const env = (key: string, fallback: string) => process.env[key] ?? fallback;
 // overridable via ASMLIFT_MIPS_OBJDUMP.
 const MIPS_OBJDUMP = env('ASMLIFT_MIPS_OBJDUMP', 'mips-linux-gnu-objdump');
 
-/** Toolchain paths + flags for the agbcc/GBA target (used by the scoring harness).
- *  Overridable via ASMLIFT_AGBCC / ASMLIFT_ARM_AS. */
+// Every bag below holds a toolchain's paths and its `harnessFlags`: the words every compile passes
+// whatever the codegen flags, and none of which can change the emitted code. The codegen flags come
+// with each compile; a toolchain's canonical set is `TOOLCHAIN_TARGETS[id].canonicalFlags` in
+// @asmlift/core.
+
+/** The agbcc/GBA toolchain (used by the scoring harness). Overridable via ASMLIFT_AGBCC /
+ *  ASMLIFT_ARM_AS. */
 export const TOOLCHAIN = {
   agbcc: env('ASMLIFT_AGBCC', join(WORKSPACE, 'transmuter/compilers/agbcc/agbcc')),
   as: env('ASMLIFT_ARM_AS', 'arm-none-eabi-as'),
   asFlags: ['-mthumb', '-mthumb-interwork'],
-  agbccFlags: ['-mthumb-interwork', '-Wimplicit', '-O2', '-fhex-asm', '-fprologue-bugfix'],
+  harnessFlags: ['-Wimplicit'],
 };
 
-/** IDO toolchain paths.
- *  Flags mirror real N64 IDO 7.1 projects (oot-style): `-non_shared -G 0` compiles non-PIC —
- *  no `$gp`/`$t9` GOT prologue — and `-Xcpluscomm` accepts `//` comments, both as those
- *  projects' Makefiles do. Overridable via ASMLIFT_IDO_CC / ASMLIFT_MIPS_OBJDUMP. */
+/** The IDO 7.1 toolchain. Its canonical flags mirror real N64 IDO 7.1 projects (oot-style):
+ *  `-non_shared -G 0` compiles non-PIC — no `$gp`/`$t9` GOT prologue. `-Xcpluscomm` accepts `//`
+ *  comments, as those projects' Makefiles do. Overridable via ASMLIFT_IDO_CC /
+ *  ASMLIFT_MIPS_OBJDUMP. */
 export const IDO_TOOLCHAIN = {
   cc: env('ASMLIFT_IDO_CC', join(WORKSPACE, 'transmuter/compilers/ido-static-recomp/build/7.1/out/cc')),
-  ccFlags: ['-c', '-mips2', '-O2', '-32', '-non_shared', '-Xcpluscomm', '-G', '0'],
+  harnessFlags: ['-c', '-Xcpluscomm'],
   objdump: MIPS_OBJDUMP,
   objdumpFlags: ['-d', '--no-show-raw-insn'],
 };
@@ -51,23 +56,7 @@ export const GCC_KMC_TOOLCHAIN = {
   docker: env('ASMLIFT_DOCKER', 'docker'),
   image: env('ASMLIFT_KMC_IMAGE', 'i386/ubuntu:bionic'),
   dir: env('ASMLIFT_KMC_DIR', join(WORKSPACE, 'snowboardkids2-decomp/tools/gcc_kmc')),
-  ccFlags: [
-    '-mabi=32',
-    '-mgp32',
-    '-mfp32',
-    '-mno-abicalls',
-    '-nostdinc',
-    '-fno-PIC',
-    '-G',
-    '0',
-    '-funsigned-char',
-    '-w',
-    '-mips3',
-    '-EB',
-    '-O2',
-    '-fno-builtin',
-    '-fno-asm',
-  ],
+  harnessFlags: ['-nostdinc', '-w'],
   objdump: MIPS_OBJDUMP,
   objdumpFlags: ['-d', '--no-show-raw-insn'],
 };
@@ -84,25 +73,9 @@ export const MWCC_PPC_TOOLCHAIN = {
   image: env('ASMLIFT_PPC_IMAGE', 'asmlift-ppc:latest'),
   dir: env('ASMLIFT_MWCC_DIR', join(WORKSPACE, 'decomp.me/backend/compilers/gc_wii/mwcc_242_81')),
   // decomp.me: `mwcceppc.exe -pragma "msg_show_realref off" -c -proc gekko -nostdinc -stderr`.
-  // -O4,p (opt-4 + peephole) + -enum int + -inline auto are the load-bearing GC matching flags.
-  ccFlags: [
-    '-pragma',
-    'msg_show_realref off',
-    '-c',
-    '-proc',
-    'gekko',
-    '-nostdinc',
-    '-stderr',
-    '-O4,p',
-    '-enum',
-    'int',
-    '-inline',
-    'auto',
-    '-fp',
-    'hard',
-    '-Cpp_exceptions',
-    'off',
-  ],
+  // `-proc gekko` is codegen and belongs to the canonical flags, where -O4,p (opt-4 + peephole),
+  // -enum int and -inline auto are the load-bearing GC matching flags.
+  harnessFlags: ['-pragma', 'msg_show_realref off', '-c', '-nostdinc', '-stderr'],
   // The image runs the Win32 PE via the bundled 32-bit wibo — a Win32 API shim, not a CPU
   // emulator; the linux/386 platform layer supplies any x86 emulation the host needs.
   wibo: env('ASMLIFT_WIBO', 'wibo'),
@@ -135,7 +108,7 @@ export const GCC272_TOOLCHAIN = {
     'ASMLIFT_GCC272_DIR',
     existsSync(BENCH_GCC272_DIR) ? BENCH_GCC272_DIR : join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/linux'),
   ),
-  ccFlags: ['-G0', '-mips3', '-mgp32', '-mfp32', '-O1', '-Wa,--vr4300mul-off', '-nostdinc'],
+  harnessFlags: ['-nostdinc'],
   objdump: MIPS_OBJDUMP,
   objdumpFlags: ['-d', '--no-show-raw-insn'],
 };

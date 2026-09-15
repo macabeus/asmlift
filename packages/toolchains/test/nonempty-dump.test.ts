@@ -5,6 +5,7 @@
 // this one, `nonEmptyDump` and its eight call sites were a mechanism no row could reach.
 // TOOLCHAIN-FREE by construction — the "objdump" and "cc" here are two-line shell scripts, so every
 // case runs on a hosted runner with no Docker, no IDO and no CodeWarrior.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,11 +68,13 @@ describe('the dump steps this package runs', () => {
 
     vi.doMock('../src/toolchain', async () => {
       const real = await vi.importActual<typeof import('../src/toolchain')>('../src/toolchain');
-      return { ...real, IDO_TOOLCHAIN: { ...real.IDO_TOOLCHAIN, cc, ccFlags: [], objdump, objdumpFlags: [] } };
+      return { ...real, IDO_TOOLCHAIN: { ...real.IDO_TOOLCHAIN, cc, harnessFlags: [], objdump, objdumpFlags: [] } };
     });
     vi.resetModules();
     const { compileMipsTarget } = await import('../src/compile');
-    expect(() => compileMipsTarget('int f(void){return 0;}', 'f')).toThrow(/exited 0 but produced NO output/);
+    expect(() => compileMipsTarget('int f(void){return 0;}', 'f', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags)).toThrow(
+      /exited 0 but produced NO output/,
+    );
     vi.doUnmock('../src/toolchain');
     vi.resetModules();
   });

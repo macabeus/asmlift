@@ -14,7 +14,7 @@
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/scoreC use real agbcc).
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -58,11 +58,11 @@ const CASES: { name: string; c: string; signature: RegExp; raw: boolean }[] = [
 describe('scaled-extension fold — real agbcc, byte-exact, through decompile()', () => {
   for (const { name, c, signature, raw } of CASES) {
     test(name, () => {
-      const asm = compileTargetAsm(DECLS + c);
+      const asm = compileTargetAsm(DECLS + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const res = decompile(name, asm, ARMV4T_AGBCC, { prototypes: { [name]: { returnsVoid: true } } });
       expect(res.source).toMatch(signature);
       expect(/<< (24|16)\)? >>/.test(res.source)).toBe(raw);
-      const s = scoreC(DECLS + res.source, name, assembleTarget(asm));
+      const s = scoreC(DECLS + res.source, name, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (!s.match) {
         throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
       }
@@ -103,11 +103,11 @@ describe('the fold beside a sibling, and behind a pool load — real agbcc, byte
     { name: 'xspoolsgn', c: 'u32 xspoolsgn(s16 i) { return gW[i]; }', spelled: 'gW[(s16)a0]', raw: false },
   ]) {
     test(name, () => {
-      const asm = compileTargetAsm(SIB_DECLS + c);
+      const asm = compileTargetAsm(SIB_DECLS + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const res = decompile(name, asm, ARMV4T_AGBCC, { prototypes: { [name]: { returnsVoid: c.startsWith('void') } } });
       expect(res.source).toContain(spelled);
       expect(/<< (24|16)\)? >>/.test(res.source)).toBe(raw);
-      const s = scoreC(SIB_DECLS + res.source, name, assembleTarget(asm));
+      const s = scoreC(SIB_DECLS + res.source, name, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (!s.match) {
         throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
       }
@@ -128,10 +128,10 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
     { name: 'xscast', c: 'u32 xscast(u8 i) { return ((u16 *)gTbl)[i]; }', spelled: '((u16 *)&gTbl)[a0]' },
   ]) {
     test(name, () => {
-      const asm = compileTargetAsm(TBL + c);
+      const asm = compileTargetAsm(TBL + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const res = decompile(name, asm, ARMV4T_AGBCC, {});
       expect(res.source).toContain(spelled);
-      const s = scoreC(TBL + res.source, name, assembleTarget(asm));
+      const s = scoreC(TBL + res.source, name, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (!s.match) {
         throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
       }
@@ -148,10 +148,11 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
     const asm = compileTargetAsm(
       `${decls}void entrylookup(u8 idx) { u8 *flags = gFlags; const u8 *t = gTable; ` +
         'const u8 *e = &t[(u32)idx * 8]; flags[0x11] = e[5]; flags[0x12] = e[6]; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const r = decompileRanked('entrylookup', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       prototypes: { entrylookup: { returnsVoid: true } },
-      compile: (source) => compileCandAgbcc(decls + source),
+      compile: (source) => compileCandAgbcc(decls + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
     });
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'orderbase')).toBe(true);

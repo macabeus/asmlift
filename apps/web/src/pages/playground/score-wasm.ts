@@ -47,6 +47,8 @@ export interface RankRequest {
   name: string;
   asm: string;
   target: TargetDescription;
+  /** the Flags field's words, which every candidate compiles with */
+  flags: readonly string[];
   /** the Symbols pane's parsed address→symbol map — structured-clones fine (a Map of plain
    *  objects); absent ⇒ the plain raw-globals-only enumeration */
   symbols?: SymbolMap;
@@ -215,7 +217,7 @@ export async function scoreObjectBytes(
 
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
  *  spellings (shared @asmlift/core enumeration), assemble the pasted `.s` ONCE as the target, then
- *  compile + objdiff-score each candidate and rank by score (lowest first). Mirrors
+ *  compile each candidate at `flags` + objdiff-score it and rank by score (lowest first). Mirrors
  *  `@asmlift/core/rank`'s `rankBy` semantics — a candidate whose compile/score throws is skipped so
  *  it cannot sink a matching sibling; only if EVERY candidate fails is the failure surfaced.
  *
@@ -245,6 +247,7 @@ export async function rankCandidatesInBrowser(
   name: string,
   asm: string,
   target: TargetDescription,
+  flags: readonly string[],
   symbols?: SymbolMap,
   onProgress?: (p: EmittedProgress) => void,
 ): Promise<BrowserRanking> {
@@ -300,7 +303,7 @@ export async function rankCandidatesInBrowser(
     // here and is announced by the `done === total` tick below.
     emit({ phase: 'scoring', done: order, total });
     try {
-      const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs) });
+      const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs), flags: [...flags] });
       if (!cc.ok) {
         throw new Error(
           `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`,

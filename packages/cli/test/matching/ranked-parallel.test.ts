@@ -7,7 +7,7 @@
 // offline in test/offline/compile-command.test.ts; what THIS suite can pin, with the real
 // toolchain, is the property that matters downstream: identical winner, identical per-candidate
 // scores in identical order, identical drops.
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm } from '@asmlift/toolchains';
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -18,10 +18,10 @@ import { afterAll, describe, expect, test } from 'vitest';
 import { decompileRanked, decompileRankedParallel } from '../../src/rank';
 
 // the registered agbcc candidate compiler, handed to the pool as its per-worker compiler
-const worker = () => async (source: string) => compileCandAgbcc(source);
+const worker = () => async (source: string) => compileCandAgbcc(source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 const bothWays = async (sym: string, src: string) => {
-  const asm = compileTargetAsm(src);
+  const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
   const serial = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
   const pooled = await decompileRankedParallel(sym, asm, ARMV4T_AGBCC, obj, { jobs: 4, worker });
@@ -44,7 +44,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
   });
 
   test('jobs: 1 is the same answer as jobs: 8 — the schedule cannot choose the winner', async () => {
-    const asm = compileTargetAsm('int half(int x){ return x / 2; }');
+    const asm = compileTargetAsm('int half(int x){ return x / 2; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const obj = assembleTarget(asm);
     const one = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 1, worker });
     const many = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 8, worker });
@@ -67,14 +67,17 @@ describe('the pooled ranked run is the serial ranked run', () => {
     const obj = join(dir, 'cand.o');
     return async (source: string) => {
       rmSync(obj, { force: true });
-      copyFileSync(compileCandAgbcc(source), obj);
+      copyFileSync(compileCandAgbcc(source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags), obj);
       return obj;
     };
   };
   afterAll(() => slotDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
   test('a worker whose object is wiped by its NEXT compile still ranks identically', async () => {
-    const asm = compileTargetAsm('int ifor(int a, int b){ if (a || b) return 42; return 7; }');
+    const asm = compileTargetAsm(
+      'int ifor(int a, int b){ if (a || b) return 42; return 7; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
     const obj = assembleTarget(asm);
     const serial = decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
     const pooled = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, { jobs: 3, worker: slotWorker });
@@ -93,9 +96,12 @@ describe('the pooled ranked run is the serial ranked run', () => {
       if (n++ % 2 === 1) {
         throw new Error('synthetic compile failure');
       }
-      return compileCandAgbcc(source);
+      return compileCandAgbcc(source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     };
-    const asm = compileTargetAsm('int ifor(int a, int b){ if (a || b) return 42; return 7; }');
+    const asm = compileTargetAsm(
+      'int ifor(int a, int b){ if (a || b) return 42; return 7; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
     const r = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       jobs: 3,
       worker: flaky,

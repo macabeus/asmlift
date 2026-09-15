@@ -13,10 +13,10 @@ import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
 
-/** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
-function compile(dir: string, iName: string, oName: string): void {
+/** .i → pooled docker GCC 2.7.2 at `cflags` → .o (same helper score.ts uses). */
+function compile(dir: string, iName: string, oName: string, cflags: readonly string[]): void {
   try {
-    gcc272Compile(dir, iName, oName);
+    gcc272Compile(dir, iName, oName, cflags);
   } catch (e) {
     throw new Error(`gcc 2.7.2 failed: ${compilerDiagnostics((e as Error).message)}`);
   }
@@ -31,14 +31,14 @@ function disasm(oPath: string): string {
 }
 
 export const gcc272Real: RealCompile = {
-  buildTarget(iText): BuiltTarget {
-    const dir = contentDir('gcc272', iText);
+  buildTarget(iText, cflags): BuiltTarget {
+    const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');
     writeFileSync(join(dir, 'u.i'), iText);
-    compile(dir, 'u.i', 'u.o');
+    compile(dir, 'u.i', 'u.o', cflags);
     return { obj: oPath, asm: disasm(oPath) };
   },
-  compileCandidate(tu, sym): string {
+  compileCandidate(tu, sym, cflags): string {
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
     // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
     // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
@@ -53,7 +53,7 @@ export const gcc272Real: RealCompile = {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
     writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(dir, 'c.i', 'c.o');
+    compile(dir, 'c.i', 'c.o', cflags);
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
@@ -61,7 +61,7 @@ export const gcc272Real: RealCompile = {
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
-    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], cfg.root);
+    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], { cwd: cfg.root });
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }

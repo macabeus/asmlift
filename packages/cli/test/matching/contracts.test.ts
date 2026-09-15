@@ -8,7 +8,7 @@ import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
 import { recoverTypes } from '@asmlift/core/raise/recover';
 import { StructureError, structure } from '@asmlift/core/structure/structure';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { compileMipsTarget } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -53,7 +53,11 @@ describe('structuring boundary — assertResolved', () => {
 });
 
 describe('all three entry paths run the contracts in production (no false positive)', () => {
-  const { obj, asm } = compileMipsTarget('int cf(int x){ return x + 1; }', 'cf');
+  const { obj, asm } = compileMipsTarget(
+    'int cf(int x){ return x + 1; }',
+    'cf',
+    TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+  );
   test('decompile', () => {
     expect(() => decompile('cf', asm, MIPS_IDO)).not.toThrow();
   });
@@ -61,6 +65,7 @@ describe('all three entry paths run the contracts in production (no false positi
     expect(() => decompileRanked('cf', asm, MIPS_IDO, obj)).not.toThrow();
   });
   test('decompileWithReport', () => {
-    expect(() => decompileWithReport('cf', asm, MIPS_IDO, { targetObj: obj })).not.toThrow();
+    const ido = targetFor('ido7.1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
+    expect(() => decompileWithReport('cf', asm, ido, { targetObj: obj })).not.toThrow();
   });
 });

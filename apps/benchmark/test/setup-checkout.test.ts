@@ -14,16 +14,30 @@ import { WORKSPACE } from '../src/config';
 
 const base: RealManifest = {
   project: 'fakeproj',
-  toolchain: 'agbcc',
   repoDir: 'fakeproj',
   repo: 'macabeus/fakeproj',
   branch: 'asmlift-benchmark',
   cppIncludes: [],
   headers: [],
+  units: {
+    'src/f.c': {
+      toolchain: 'agbcc',
+      cflags: ['-mthumb-interwork', '-O2', '-fhex-asm'],
+      flagsFrom: {
+        from: 'makefile',
+        commit: 'a'.repeat(40),
+        file: 'Makefile',
+        sha256: 'b'.repeat(64),
+        command: 'agbcc -mthumb-interwork -O2 -fhex-asm -o f.s -',
+      },
+    },
+  },
   functions: [
     {
       sym: 'f',
       addr: '0x08000000',
+      unit: 'src/f.c',
+      romDigest: 'c'.repeat(64),
       features: [],
       funcC: 'int f(void) { return 1; }',
       sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.c#L1-L1',
@@ -39,6 +53,8 @@ describe('validateManifest: row identity', () => {
     ({
       sym,
       addr,
+      unit: 'src/f.c',
+      romDigest: 'c'.repeat(64),
       aliases,
       features: [],
       funcC: `int ${sym}(void) { return 1; }`,

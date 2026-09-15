@@ -12,7 +12,7 @@
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/scoreC use real agbcc).
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -72,7 +72,7 @@ const CASES: { name: string; c: string; returnsVoid?: boolean; expect: string }[
 describe('narrow-local recovery — real agbcc, byte-exact, through decompile()', () => {
   for (const { name, c, returnsVoid, expect: golden } of CASES) {
     test(`${name}`, () => {
-      const asm = compileTargetAsm(c);
+      const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const res = decompile(
         name,
         asm,
@@ -80,7 +80,7 @@ describe('narrow-local recovery — real agbcc, byte-exact, through decompile()'
         returnsVoid ? { prototypes: { [name]: { returnsVoid: true } } } : {},
       );
       expect(res.source).toBe(golden);
-      const s = scoreC(res.source, name, assembleTarget(asm));
+      const s = scoreC(res.source, name, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (!s.match) {
         throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
       }

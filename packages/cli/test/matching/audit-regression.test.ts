@@ -5,18 +5,23 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { T } from '@asmlift/core/ir/types';
 import type { SFn, Stmt } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { assembleTarget, compileMipsTarget, compileTargetAsm, scoreC, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
 import { decompileWithReport } from '../../src/report';
+
+const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 describe('soundness regressions — short-circuit hoisting, stack-passed args, report parity', () => {
   // FINDING 1 (shortcircuit.ts): a side effect in a `&&`/`||` RHS arm must NOT be hoisted out of the
   // short-circuit — `a && (*p = x)` must only store when `a` is true. The fold is declined (correct
   // merge-variable spelling) rather than emitting an unconditional `*p = x;`.
   test('short-circuit with a store in the RHS arm keeps the store conditional', () => {
-    const asm = compileTargetAsm('int scb(int a,int *p,int x){ return a && ((*p = x) != 0); }');
+    const asm = compileTargetAsm(
+      'int scb(int a,int *p,int x){ return a && ((*p = x) != 0); }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
     const src = decompile('scb', asm, ARMV4T_AGBCC).source;
     // the store must be guarded (inside an if/else), never a bare top-level statement before the return
     const beforeReturn = src.slice(0, src.indexOf('return'));
@@ -29,7 +34,7 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
 
   // a normal (pure) short-circuit must STILL fold — the purity guard is not over-broad.
   test('pure short-circuit still folds to &&', () => {
-    const asm = compileTargetAsm('int land2(int a,int b){ return a && b; }');
+    const asm = compileTargetAsm('int land2(int a,int b){ return a && b; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(decompile('land2', asm, ARMV4T_AGBCC).source).toContain('&&');
   });
 
@@ -37,13 +42,21 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
   // stack-passed argument (5th+ param) — asmlift must loud-fail, not fabricate a phantom parameter
   // that scrambles the signature and returns the wrong argument.
   test('MIPS load from an unstored stack slot (5th arg) loud-fails', () => {
-    const { asm } = compileMipsTarget('int f5(int a,int b,int c,int d,int e){ return e; }', 'f5');
+    const { asm } = compileMipsTarget(
+      'int f5(int a,int b,int c,int d,int e){ return e; }',
+      'f5',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
     expect(() => decompile('f5', asm, MIPS_IDO)).toThrow(/never stored|stack-passed|not modelled/);
   });
 
   // a 4-arg function (all register args) is unaffected.
   test('MIPS 4-arg function still lifts normally', () => {
-    const { asm } = compileMipsTarget('int f4(int a,int b,int c,int d){ return a+b+c+d; }', 'f4');
+    const { asm } = compileMipsTarget(
+      'int f4(int a,int b,int c,int d){ return a+b+c+d; }',
+      'f4',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
     expect(decompile('f4', asm, MIPS_IDO).source).toContain('a3');
   });
 
@@ -51,9 +64,9 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
   // or its headline source drifts. Byte-identical output required (soft-div exercises a pass that
   // drifted once).
   test('M5 report source matches decompile() (soft-div parity)', () => {
-    const asm = compileTargetAsm('int divv(int a,int b){ return a/b; }');
+    const asm = compileTargetAsm('int divv(int a,int b){ return a/b; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const d = decompile('divv', asm, ARMV4T_AGBCC).source;
-    const r = decompileWithReport('divv', asm, ARMV4T_AGBCC).source;
+    const r = decompileWithReport('divv', asm, AGBCC).source;
     expect(r).toBe(d);
     expect(r).toContain('a0 / a1'); // soft-div folded, not a raw __divsi3(...) call
   });
@@ -74,19 +87,23 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // larger, and `add rD, sp, #k`, still decline loud; the controls for that live in
   // packages/core/test/thumb-frontend.test.ts, with the compiled counterexamples.
   test('an address-taken local handed to a callee lifts, byte-exact', () => {
-    const asm = compileTargetAsm('extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }');
+    const asm = compileTargetAsm(
+      'extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
     const src = decompile('atl', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }).source;
     expect(src).toContain('g(&sp0)');
     expect(src).toContain('return sp0;'); // RELOADED after the call — the callee may have written it
-    expect(scoreC(src, 'atl', assembleTarget(asm)).score).toBe(0);
+    expect(scoreC(src, 'atl', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
     // …and with an intervening call, the shape whose store reaches a `bl` unread
     const across = compileTargetAsm(
       'extern void g(int*); extern int q(int); int atlc(int a){ int local = a; int k = q(a); g(&local); return local + k; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const srcAcross = decompile('atlc', across, ARMV4T_AGBCC, {
       prototypes: { g: { params: 1, returnsVoid: true }, q: { params: 1 } },
     }).source;
-    expect(scoreC(srcAcross, 'atlc', assembleTarget(across)).score).toBe(0);
+    expect(scoreC(srcAcross, 'atlc', assembleTarget(across), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
   // TWO locals, so the second sits above the first and its address is COMPUTED. Same capability,
@@ -95,14 +112,14 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   const twoLocals = 'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }';
 
   test('a COMPUTED stack address declines loud in strict mode', () => {
-    const asm = compileTargetAsm(twoLocals);
+    const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
       /stack pointer used as data/,
     );
   });
 
   test('a COMPUTED stack address stubs with a lift diagnostic in annotate mode', () => {
-    const asm = compileTargetAsm(twoLocals);
+    const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const r = decompile('atl2', asm, ARMV4T_AGBCC, {
       prototypes: { g: { params: 1, returnsVoid: true } },
       onGap: 'annotate',
@@ -114,7 +131,10 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
 
   // the sp guard must not over-fire: a plain push/pop frame (no sp-as-data) stays liftable
   test('push/pop frame without sp-as-data still lifts', () => {
-    const asm = compileTargetAsm('extern int h(int); int keep(int a, int b){ return h(a) + b; }');
+    const asm = compileTargetAsm(
+      'extern int h(int); int keep(int a, int b){ return h(a) + b; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
     const src = decompile('keep', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 1 } } }).source;
     expect(src).toContain('h(a0)');
   });
@@ -124,10 +144,14 @@ describe('M2/M3/M8 — detection gaps stay closed', () => {
   // M2: MIPS 2-source `nor rd, rs, rt` must model ~(rs | rt) — a bare OR is confidently wrong.
   // The round-trip is byte-exact.
   test('M2: MIPS 2-source nor lifts as ~(a|b), byte-exact', () => {
-    const { obj, asm } = compileMipsTarget('int nor2(int a, int b){ return ~(a | b); }', 'nor2');
+    const { obj, asm } = compileMipsTarget(
+      'int nor2(int a, int b){ return ~(a | b); }',
+      'nor2',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
     const src = decompile('nor2', asm, MIPS_IDO).source;
     expect(src).toContain('~(a0 | a1)');
-    expect(scoreCMips(src, 'nor2', obj).score).toBe(0);
+    expect(scoreCMips(src, 'nor2', obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags).score).toBe(0);
   });
 
   // M3: the Pascal backend must fail loud on a bare early `return;` (non-tail) — dropping it lets
@@ -160,13 +184,14 @@ describe('M2/M3/M8 — detection gaps stay closed', () => {
     const { obj, asm } = (() => {
       const a = compileTargetAsm(
         'int fill(int *p, int n, int v){ while (n != 0) { *p = v; p = p + 1; n = n - 1; } return n; }',
+        TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
       );
       return { obj: assembleTarget(a), asm: a };
     })();
     expect(asm).toContain('stmia'); // the shape really lowers to stmia
     const src = decompile('fill', asm, ARMV4T_AGBCC).source;
     expect(src).toMatch(/\*\w+ = |\w+\[\w*\] = /); // the store is in the artifact
-    const s = scoreC(src, 'fill', obj);
+    const s = scoreC(src, 'fill', obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(typeof s.score).toBe('number'); // compiles and scores (exactness is the benchmark's row)
   });
 });
@@ -181,9 +206,9 @@ describe('report path parity with decompile()', () => {
       'int mm(int a){ return a * 10; }', // mul-shift pattern family
       'unsigned char nb(int a){ return (unsigned char)a; }', // cast pattern family
     ]) {
-      const asm = compileTargetAsm(c);
+      const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const sym = c.match(/(\w+)\(int a\)/)![1];
-      expect(decompileWithReport(sym, asm, ARMV4T_AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
+      expect(decompileWithReport(sym, asm, AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
     }
   });
 
@@ -194,23 +219,24 @@ describe('report path parity with decompile()', () => {
     // is modelled now and lifts, which would make this test assert parity on a success path.
     const asm = compileTargetAsm(
       'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const protos = { prototypes: { g: { params: 1, returnsVoid: true } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path
-    const viaReport = decompileWithReport('atl2', asm, ARMV4T_AGBCC, protos);
+    const viaReport = decompileWithReport('atl2', asm, AGBCC, protos);
     expect(viaReport.source).toBe(viaPipeline.source);
     expect(viaReport.report.outcome).toBe('unscored');
   });
 
   test('annotate mode: report threads onGap exactly like decompile', () => {
     // a live unmodelled op (non-#0 rsb → loud opaque) → marker in annotate mode on BOTH paths
-    const asm0 = compileTargetAsm('int rsb(int a){ return 4 - a; }');
+    const asm0 = compileTargetAsm('int rsb(int a){ return 4 - a; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const asm = asm0.replace(/sub\tr0, r0, r1/, 'rsb\tr0, r1, #0x4');
     expect(asm).not.toBe(asm0); // the hostile edit really applied
     const viaPipeline = decompile('rsb', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
     expect(viaPipeline.source).toContain('ASMLIFT_ERROR'); // and really produced a marker
-    const viaReport = decompileWithReport('rsb', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
+    const viaReport = decompileWithReport('rsb', asm, AGBCC, { onGap: 'annotate' });
     expect(viaReport.source).toBe(viaPipeline.source);
   });
 });

@@ -755,6 +755,28 @@ interface Resolved {
   witness: LayoutFact[];
 }
 
+/** A GNU-as listing without its debug and stabs sections: every line from a `.section .debug_*` (or a
+ *  `.stab*` section) up to the next section switch is dropped, and every other line is kept verbatim,
+ *  so a listing with no debug section comes back unchanged. What agbcc `-g` adds to a `.s` beside
+ *  the marker labels in its code (`corpus/agbcc-debug{,-g}.s`). */
+export function withoutDebugSections(asm: string): string {
+  let inDebugSection = false;
+  const kept: string[] = [];
+  for (const rawLine of asm.split('\n')) {
+    const sectionSwitch = rawLine
+      .split('@')[0]
+      .trim()
+      .match(/^\.(?:section\s+([^\s,]+)|text\b|data\b|bss\b)/);
+    if (sectionSwitch) {
+      inDebugSection = sectionSwitch[1] !== undefined && /^\.(debug|stab)/.test(sectionSwitch[1]);
+    }
+    if (!inDebugSection) {
+      kept.push(rawLine);
+    }
+  }
+  return kept.join('\n');
+}
+
 /** The canonical serialisation a witness is compared BY, and the prose it is reported AS. Keeping
  *  them apart is the point: rewording `sayFact` changes a message, never a decision. */
 const factKey = (f: LayoutFact) => JSON.stringify(f);
@@ -806,13 +828,36 @@ function decode(
   let dataLabel: string | null = null;
   let pendingFn = false;
   let pendingArm = false;
-  for (const rawLine of asm.split('\n')) {
-    let rest = rawLine.split('@')[0].trim();
-    if (!rest) {
-      continue;
+  // DEBUG OUTPUT IS NEITHER CODE NOR DATA THE CODE READS. agbcc `-g` leaves `.text` byte-identical
+  // (`corpus/agbcc-debug{,-g}.s`), so the lift reads exactly the function it reads without `-g`, and
+  // two things are dropped:
+  //   • every debug or stabs section (`withoutDebugSections`): the debug rows, their labels, and the
+  //     data a trailing `.Letext0` label would otherwise head;
+  //   • the marker labels `-g` plants in the code stream (`.LFB1`, `.LM3`, `.LBB2`, `.LBE2`, `.LFE1`,
+  //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
+  //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
+  //     an `if` around a `do` instead of a `while`.
+  const codeLines: string[] = [];
+  for (const rawLine of withoutDebugSections(asm).split('\n')) {
+    const line = rawLine.split('@')[0].trim();
+    if (line) {
+      codeLines.push(line);
     }
+  }
+  const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
+  const namedByCode = new Set<string>();
+  for (const line of codeLines) {
+    for (const m of line.replace(/^[A-Za-z_.$][\w.$]*:\s*/, '').matchAll(DEBUG_MARKER)) {
+      namedByCode.add(m[0]);
+    }
+  }
+  const isDebugMarker = (label: string) => /^\.L(?:FB|FE|M|BB|BE|etext)\d+$/.test(label) && !namedByCode.has(label);
+  for (let rest of codeLines) {
     // A label may share the line with what follows it (pret pools: `_08x: .4byte 0x…`) — peel it.
     const lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/);
+    if (lm && isDebugMarker(lm[1]) && lm[2] === '') {
+      continue;
+    }
     if (lm) {
       const lab = lm[1];
       if (pendingFn || pendingArm) {

@@ -51,20 +51,35 @@ const TC_CFG: Record<ToolchainId, unknown> = {
   mwcc_242_81: MWCC_PPC_TOOLCHAIN,
 };
 
-/** `tc.buildTarget`, cached by (toolchain config, reference source, symbol, and — for c++ —
- *  language). The cached object file is returned by path and only ever READ downstream
+/** `tc.buildTarget`, cached by (toolchain config, codegen flags, reference source, symbol, and — for
+ *  c++ — language). The cached object file is returned by path and only ever READ downstream
  *  (objdiff target / objdump input). */
-export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang?: 'c' | 'c++'): BuiltTarget {
+export function cachedBuildTarget(
+  tc: Toolchain,
+  cflags: readonly string[],
+  refC: string,
+  sym: string,
+  lang?: 'c' | 'c++',
+): BuiltTarget {
   // `checkedTarget` (toolchains.ts) states the non-emptiness invariant; what is CACHE-specific is
   // that the tmp-then-rename write makes a bad result a WELL-FORMED entry with no TTL, so the same
   // question has to be asked twice — once on the way in, and once of what is already on disk.
-  const build = (): BuiltTarget => checkedTarget(tc.buildTarget(refC, sym, lang), `${sym} on ${tc.id}`);
+  const build = (): BuiltTarget => checkedTarget(tc.buildTarget(refC, sym, cflags, lang), `${sym} on ${tc.id}`);
   if (!enabled()) {
     return build();
   }
   // lang enters the key only for c++ (see cachedM2cResult for the rationale)
   const key = sha(
-    JSON.stringify({ v: 2, kind: 'ref', tc: tc.id, cfg: TC_CFG[tc.id], refC, sym, ...(lang === 'c++' && { lang }) }),
+    JSON.stringify({
+      v: 2,
+      kind: 'ref',
+      tc: tc.id,
+      cfg: TC_CFG[tc.id],
+      cflags,
+      refC,
+      sym,
+      ...(lang === 'c++' && { lang }),
+    }),
   );
   const oPath = join(CACHE_DIR, `ref-${key}.o`);
   const aPath = join(CACHE_DIR, `ref-${key}.asm`);
@@ -155,6 +170,9 @@ function m2cCommit(): string | null {
 /** The key inputs of one row's m2c half. `lang` selects the m2c target dialect. */
 export interface M2cKeyInputs {
   tcId: ToolchainId;
+  /** the flags m2c's candidate is compiled with: two flag sets can leave the target object
+   *  byte-identical and still score the same candidate differently */
+  cflags: readonly string[];
   sym: string;
   asm: string;
   ctx?: string;
@@ -163,10 +181,10 @@ export interface M2cKeyInputs {
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
- *  (m2c commit, objdiff-wasm version, toolchain, symbol, asm, context, target-object bytes, and
- *  — for c++ — language). */
+ *  (m2c commit, objdiff-wasm version, toolchain, candidate compile flags, symbol, asm, context,
+ *  target-object bytes, and — for c++ — language). */
 export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerResult): DecompilerResult {
-  const { tcId, sym, asm, ctx, obj, lang } = inputs;
+  const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
     return compute();
@@ -195,17 +213,20 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      exact wrong answer the change removes, served out of a warm store and invisible to every
   //      artifact comparison of the day — the incident that put `errorMarkers` into `FIELDS.m2c`.
   //      Caught by reading this list before publishing a run, which is what it is for.
+  // v18: the agbcc candidate compile names its translation unit `c.c`. The name is part of the
+  //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 17,
+      v: 18,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),
       tc: tcId,
+      cflags,
       sym,
       asm,
       ctx: ctx ?? null,

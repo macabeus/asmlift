@@ -3,7 +3,11 @@
 // compilation — so their commands must stay equivalent to the built-in invocations in
 // @asmlift/toolchains (same binaries, same flags, same order). Parity is the contract: the
 // expected strings below are built from the same pins the built-in compile path uses, so a flag
-// edited in only one place fails here loudly.
+// edited in only one place fails here loudly. Every compile passes the harness words first and the
+// row's flags, which fill `{{cflags}}`, after them.
+import { readCompilerCommand } from '@asmlift/cli/flags';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
+import { TOOLCHAIN_TARGETS, type ToolchainId, isToolchainId } from '@asmlift/core/target';
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,44 +19,76 @@ import { scoringPreludes } from '../src/compile/real';
 import { shq } from '../src/compile/util';
 import { materializeScoringContext, renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
+const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
+const canonical = (id: ToolchainId): readonly string[] => TOOLCHAIN_TARGETS[id].canonicalFlags;
+
 describe('committed decomp.yaml configs mirror the built-in toolchain invocations', () => {
   test('agbcc: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
-    expect(renderScoreCommand('agbcc')).toBe(
+    expect(renderScoreCommand('agbcc', canonical('agbcc'))).toBe(
       [
         `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;`,
-        `${shq(TOOLCHAIN.agbcc)} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')} &&`,
+        `${shq(TOOLCHAIN.agbcc)} {{inputPath}}.pp.c -o {{inputPath}}.s`,
+        `${[...TOOLCHAIN.harnessFlags, ...canonical('agbcc')].join(' ')} &&`,
         `${shq(TOOLCHAIN.as)} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
       ].join(' '),
     );
   });
 
   test('ido7.1: IDO cc, built-in flags (compileCandIdoC)', () => {
-    expect(renderScoreCommand('ido7.1')).toBe(
-      `${shq(IDO_TOOLCHAIN.cc)} ${IDO_TOOLCHAIN.ccFlags.join(' ')} -o {{outputPath}} {{inputPath}}`,
+    expect(renderScoreCommand('ido7.1', canonical('ido7.1'))).toBe(
+      [
+        shq(IDO_TOOLCHAIN.cc),
+        ...IDO_TOOLCHAIN.harnessFlags,
+        ...canonical('ido7.1'),
+        '-o {{outputPath}} {{inputPath}}',
+      ].join(' '),
     );
   });
 
   test('gcc2.7.2kmc: one-shot docker run mirroring kmcCompile (image, mounts, flags)', () => {
-    expect(renderScoreCommand('gcc2.7.2kmc')).toBe(
+    expect(renderScoreCommand('gcc2.7.2kmc', canonical('gcc2.7.2kmc'))).toBe(
       [
         `${shq(GCC_KMC_TOOLCHAIN.docker)} run --rm --platform linux/386`,
         `-v ${shq(GCC_KMC_TOOLCHAIN.dir)}:/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc`,
         shq(GCC_KMC_TOOLCHAIN.image),
-        `/kmc/gcc ${GCC_KMC_TOOLCHAIN.ccFlags.join(' ')} -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
+        '/kmc/gcc',
+        ...GCC_KMC_TOOLCHAIN.harnessFlags,
+        ...canonical('gcc2.7.2kmc'),
+        `-c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
       ].join(' '),
     );
   });
 
   test("mwcc_242_81: one-shot docker run mirroring ppcContainer's wibo invocation", () => {
-    expect(renderScoreCommand('mwcc_242_81')).toBe(
+    expect(renderScoreCommand('mwcc_242_81', canonical('mwcc_242_81'))).toBe(
       [
         `${shq(MWCC_PPC_TOOLCHAIN.docker)} run --rm`,
         `-v ${shq(MWCC_PPC_TOOLCHAIN.dir)}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
         shq(MWCC_PPC_TOOLCHAIN.image),
-        `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe ${MWCC_PPC_TOOLCHAIN.ccFlags.map(shq).join(' ')}`,
+        `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe`,
+        MWCC_PPC_TOOLCHAIN.harnessFlags.map(shq).join(' '),
+        shellJoinFlags(canonical('mwcc_242_81')),
         `-o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
       ].join(' '),
     );
+  });
+
+  // The CLI reads a project's flags off its compile command. A command rendered at a row's flags
+  // must read back as exactly those flags, or a reproduction would report a different profile
+  // from the one the row compiled at.
+  test.each(IDS)('%s: the command rendered at a row’s flags reads back as those flags', (id) => {
+    const { family } = TOOLCHAIN_TARGETS[id];
+    const read = (cflags: readonly string[]) =>
+      readCompilerCommand(renderScoreCommand(id, cflags), family)?.flagWords.map((w) => w.value);
+    expect(read(canonical(id))).toEqual(canonical(id));
+    const level = family === 'mwcc' ? '-O0,p' : '-O1';
+    expect(read([...canonical(id), level, '-g'])).toEqual([...canonical(id), level, '-g']);
+  });
+
+  test.each(IDS)('%s: the template spells no codegen flag beside {{cflags}}', (id) => {
+    const reading = readCompilerCommand(renderScoreCommand(id, ['{{cflags}}']), TOOLCHAIN_TARGETS[id].family);
+    expect(reading?.takesCflags).toBe(true);
+    expect(reading?.flagWords).toEqual([]);
   });
 });
 
@@ -60,10 +96,10 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
   interface Doc {
     tools: { asmlift: { target: string; compiler?: string; elf?: string } };
   }
-  const written = (elf?: string): Doc => {
+  const written = (elf?: string, cflags: readonly string[] = canonical('agbcc')): Doc => {
     const dir = mkdtempSync(join(tmpdir(), 'score-config-'));
     try {
-      writeScoreConfig('agbcc', dir, elf);
+      writeScoreConfig('agbcc', cflags, dir, elf);
       return YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -73,12 +109,17 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
   test('symbol-fed rows: the project ELF lands as tools.asmlift.elf beside the compile command', () => {
     const doc = written('/checkouts/pokeemerald/pokeemerald-syms.elf');
     expect(doc.tools.asmlift.elf).toBe('/checkouts/pokeemerald/pokeemerald-syms.elf');
-    expect(doc.tools.asmlift.compiler).toBe(renderScoreCommand('agbcc'));
+    expect(doc.tools.asmlift.compiler).toBe(renderScoreCommand('agbcc', canonical('agbcc')));
     expect(doc.tools.asmlift.target).toBe('agbcc');
   });
 
   test('map-free rows: no elf key at all', () => {
     expect('elf' in written().tools.asmlift).toBe(false);
+  });
+
+  test("the command spells the row's flags", () => {
+    const flags = ['-mthumb-interwork', '-O1'];
+    expect(written(undefined, flags).tools.asmlift.compiler).toBe(renderScoreCommand('agbcc', flags));
   });
 });
 
@@ -147,11 +188,11 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
 
   test('the generated compile command concatenates ctx.i ahead of the candidate', () => {
     inDir((dir) => {
-      writeScoreConfig('agbcc', dir, undefined, 'ctx.i');
+      writeScoreConfig('agbcc', canonical('agbcc'), dir, undefined, 'ctx.i');
       const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
       expect(doc.tools.asmlift.compiler).toBe(
         'cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c && ' +
-          renderScoreCommand('agbcc').replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c'),
+          renderScoreCommand('agbcc', canonical('agbcc')).replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c'),
       );
     });
   });
@@ -159,7 +200,7 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
   test('every toolchain template stays substitutable after the wrap (placeholders intact)', () => {
     inDir((dir) => {
       for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {
-        writeScoreConfig(id, dir, undefined, 'ctx.i');
+        writeScoreConfig(id, canonical(id), dir, undefined, 'ctx.i');
         const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
         expect(doc.tools.asmlift.compiler, id).toContain('{{inputPath}}');
         expect(doc.tools.asmlift.compiler, id).toContain('{{outputPath}}');

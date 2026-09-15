@@ -4,7 +4,7 @@
 // most of a candidate compile. `needsPreprocessing` is what lets a candidate spelling skip it,
 // and the whole safety of that rests on ONE claim: where the predicate says no, `cpp -P
 // -nostdinc` returns the bytes it was given.
-import { C_TYPEDEFS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileCandAgbcc, needsPreprocessing } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -97,6 +97,6 @@ describe('the preprocessor runs where there is something to preprocess', () => {
   test('an all-comment annotate stub still compiles', () => {
     const stub = '/* asmlift could not decompile ‘f’ — lift: no reaching compare */\n';
     expect(needsPreprocessing(C_TYPEDEFS + stub)).toBe(true);
-    expect(() => compileCandAgbcc(stub)).not.toThrow();
+    expect(() => compileCandAgbcc(stub, TOOLCHAIN_TARGETS.agbcc.canonicalFlags)).not.toThrow();
   });
 });

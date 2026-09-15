@@ -19,6 +19,8 @@ export const M2C_PINNED_COMMIT = readFileSync(join(import.meta.dirname, '..', 'M
 
 /** GNU cpp for real-project preprocessing (Apple's /usr/bin/cpp ignores -o). */
 export const CPP = env('ASMLIFT_CPP', 'cpp');
+/** A host C compiler, gcc or clang, for syntax checks of vendored translation units. */
+export const CC = env('ASMLIFT_CC', 'cc');
 
 export const RESULTS_DIR = join(import.meta.dirname, '..', 'results');
 export const CACHE_DIR = join(import.meta.dirname, '..', '.cache');

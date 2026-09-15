@@ -11,22 +11,31 @@
 //                      scorer's richest strategy compiles against it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version).
 //
-// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths — enforced
-// here and by test/real-manifests.test.ts.
+// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU
+// must declare every function it calls — enforced here, and by test/real-manifests.test.ts and
+// test/implicit-declarations.test.ts over the committed blobs.
+//
+// Every row is proved against the ROM before anything is written: its unit's stored flags must be the
+// flags derived from the build at the checkout's HEAD, and its target, compiled at them, must be the
+// function the project's linked ELF holds at the row's address. The proof is stored as the row's
+// `romDigest`, which the runner's `build()` checks; a project with any refused row writes nothing.
 import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 import { sha } from '../cache';
-import { makeTU, realCompilerFor } from '../compile/real';
+import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
-import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot } from './manifests';
+import { flagsStatus, unitDeriver } from './derive-flags';
+import { undeclaredCallees } from './implicit-declarations';
+import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot, rewriteManifest } from './manifests';
 import { resolveProjectElf } from './project-elf';
+import { compareWithRom } from './rom-function';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 
@@ -73,21 +82,44 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       await vendorSymbols(man, root, outDir);
       continue;
     }
-    const cfg: RealProjectCfg = {
-      project: man.project,
-      toolchain: man.toolchain,
-      root,
-      cppIncludes: man.cppIncludes,
-      headers: man.headers,
-      defines: man.defines,
-    };
-    const rc = realCompilerFor(man.toolchain);
+    const elf = resolveProjectElf(man.project, root);
+    if (elf.elf === null) {
+      throw new Error(`${man.project}: no linked ELF to prove its rows against the ROM: ${elf.reason}`);
+    }
+    const linked = readFileSync(elf.elf);
+    const deriver = unitDeriver(man.project, root);
+    const refusals: string[] = [];
+    const flagsWrite = `run \`pnpm bench flags --project ${man.project} --write\``;
+    for (const unit of new Set(man.functions.map((f) => f.unit))) {
+      const stored = unit === undefined ? undefined : man.units?.[unit];
+      if (unit === undefined || stored === undefined) {
+        refusals.push(`${unit ?? 'a row'}: no stored flags — ${flagsWrite}`);
+        continue;
+      }
+      const status = flagsStatus(stored, deriver.derive(unit, stored.toolchain));
+      if (status.kind !== 'ok') {
+        refusals.push(
+          `${unit}: the build's flags at ${deriver.commit.slice(0, 8)} differ (${status.kind === 'DRIFT' ? status.changes.join('; ') : status.kind}) — ${flagsWrite}`,
+        );
+      }
+    }
+    if (refusals.length > 0) {
+      throw new Error(`${man.project}: refused, nothing written:\n  ${refusals.join('\n  ')}`);
+    }
+
     const outDir = join(REAL_DIR, 'tu', man.project);
-    mkdirSync(outDir, { recursive: true });
-    const index: Record<string, { tu: string; ctx: string }> = {};
-    const ctxSeen = new Map<string, string>(); // content sha → file name
-    let done = 0;
+    const prepared: { sym: string; tuI: string; ctxI: string; romDigest: string }[] = [];
     for (const f of man.functions) {
+      const unit = man.units[f.unit];
+      const cfg: RealProjectCfg = {
+        project: man.project,
+        toolchain: unit.toolchain,
+        root,
+        cppIncludes: man.cppIncludes,
+        headers: man.headers,
+        defines: man.defines,
+      };
+      const rc = realCompilerFor(unit.toolchain);
       const tuI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
       const ctxI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', ''));
       for (const [what, text] of [
@@ -98,7 +130,33 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
           throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
         }
       }
-      const tuName = `${f.sym}.i.gz`;
+      const undeclared = undeclaredCallees(tuI);
+      if (undeclared.length > 0) {
+        refusals.push(
+          `${f.sym}: the vendored TU calls ${undeclared.join(', ')} with no declaration in scope — ` +
+            `declare each in the row's prependC as the project's unit does`,
+        );
+        continue;
+      }
+      const target = buildRealTarget(unit.toolchain, unit.cflags, tuI);
+      const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, Number.parseInt(f.addr, 16));
+      if (!rom.equal) {
+        refusals.push(
+          `${f.sym} (unit ${f.unit}, ${unit.cflags.join(' ')}): not the function the ROM holds, ${rom.detail}`,
+        );
+        continue;
+      }
+      prepared.push({ sym: f.sym, tuI, ctxI, romDigest: rom.digest });
+    }
+    if (refusals.length > 0) {
+      throw new Error(`${man.project}: refused, nothing written:\n  ${refusals.join('\n  ')}`);
+    }
+
+    mkdirSync(outDir, { recursive: true });
+    const index: Record<string, { tu: string; ctx: string }> = {};
+    const ctxSeen = new Map<string, string>(); // content sha → file name
+    for (const { sym, tuI, ctxI } of prepared) {
+      const tuName = `${sym}.i.gz`;
       writeFileSync(join(outDir, tuName), gzipSync(tuI));
       const ctxSha = sha(ctxI).slice(0, 12);
       let ctxName = ctxSeen.get(ctxSha);
@@ -107,9 +165,13 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
         ctxSeen.set(ctxSha, ctxName);
       }
-      index[f.sym] = { tu: tuName, ctx: ctxName };
-      done++;
+      index[sym] = { tu: tuName, ctx: ctxName };
     }
+    const romDigests = new Map(prepared.map((p) => [p.sym, p.romDigest]));
+    rewriteManifest(man.project, (m) => ({
+      ...m,
+      functions: m.functions.map((f) => ({ ...f, romDigest: romDigests.get(f.sym) ?? f.romDigest })),
+    }));
     const provenance = {
       project: man.project,
       commit: git(root, ['rev-parse', 'HEAD']),
@@ -119,7 +181,9 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     };
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
-    console.log(`${man.project}: vendored ${done} TUs (${ctxSeen.size} unique context(s)) → ${outDir}`);
+    console.log(
+      `${man.project}: vendored ${prepared.length} TUs (${ctxSeen.size} unique context(s)) → ${outDir}; every row EQ to the ROM`,
+    );
     await vendorSymbols(man, root, outDir);
   }
 }

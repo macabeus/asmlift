@@ -1,15 +1,17 @@
 // Evaluate one function on one toolchain through BOTH decompilers → a FunctionResult. Shared by the
 // synthetic and real-project drivers. `build` yields the scoring target + disassembly; from there
 // each decompiler runs and is scored against the SAME object with the SAME compiler — symmetric.
-import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import { type DecompilerResult, type FunctionResult, type RowTier, rowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
+import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
 import { rowFeatures } from '../cases/features';
+import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
 import { type Scorer, runAsmlift } from './asmlift';
 import { countCompileErrors } from './asmlift';
@@ -17,12 +19,13 @@ import { runM2c } from './m2c';
 import { compilerErrorLines, declineMarkersIn } from './outcome';
 import { assessQuality } from './quality';
 
-export interface EvalSpec {
+export type EvalSpec = EvalSpecFields & RowTier;
+
+interface EvalSpecFields {
   sym: string;
   addr?: string; // real tier: the row's identity, published verbatim (bench-schema rowIdentity)
   aliases?: string[]; // real tier: earlier upstream names, published verbatim
   project: string;
-  tier: 'synthetic' | 'real';
   language: 'c' | 'c++';
   features: string[];
   refSource: string; // ground-truth C/C++ (for the report)
@@ -34,6 +37,8 @@ export interface EvalSpec {
   proto?: Prototypes; // asmlift prototypes
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
+  /** the flags this row's target and candidates compile at, and asmlift's description from them */
+  codegen: ResolvedTarget;
   note?: string;
 }
 
@@ -218,7 +223,7 @@ export function evaluate(
   scorer?: Scorer,
   compile?: CandidateCompiler,
 ): FunctionResult {
-  const score: Scorer = scorer ?? tc.score;
+  const score: Scorer = scorer ?? benchScorer(tc.id, spec.codegen.cflags);
   // the object's data sections feed the m2c normalizer (jump tables, anonymous constants) and
   // are PUBLISHED on the row so the reproduction scripts carry them too; best-effort — without
   // a dump both fall back to text-only
@@ -232,11 +237,13 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
+  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
-  // depends on — m2c commit, toolchain, inputs, target object (cache.ts). asmlift is NEVER cached.
-  const m2c = cachedM2cResult({ tcId: tc.id, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language }, () =>
-    evaluateM2c(tc, spec, obj, asm, score, asmDump),
+  // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
+  // asmlift is NEVER cached.
+  const m2c = cachedM2cResult(
+    { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language },
+    () => evaluateM2c(tc, spec, obj, asm, score, asmDump),
   );
   return {
     id: `${spec.project}:${spec.sym}:${tc.id}`,
@@ -244,11 +251,12 @@ export function evaluate(
     ...(spec.addr === undefined ? {} : { addr: spec.addr }),
     ...(spec.aliases === undefined || spec.aliases.length === 0 ? {} : { aliases: spec.aliases }),
     project: spec.project,
-    tier: spec.tier,
+    ...rowTier(spec),
     toolchain: tc.id,
     isa: tc.isa,
-    compiler: tc.compiler,
+    compiler: TOOLCHAIN_TARGETS[spec.codegen.toolchain].family,
     language: spec.language,
+    cflags: [...spec.codegen.cflags],
     // Source and codegen tags are DERIVED per row; the dataset carries judgement tags only. Codegen
     // because what the compiler did with a constant divide differs per toolchain and one synthetic
     // spec feeds four of them.

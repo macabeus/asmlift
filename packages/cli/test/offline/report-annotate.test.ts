@@ -9,7 +9,7 @@
 //     toolchains register only when @asmlift/toolchains is imported (never in offline suites).
 import { cBackend } from '@asmlift/core/backend/c';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -19,8 +19,10 @@ import { NoCandidateCompilerError, registerCandidateCompiler, scoreSource } from
 const HALF =
   '\t.code\t16\n\t.globl\thalf\n\t.thumb_func\nhalf:\n\tlsr\tr1, r0, #31\n\tadd\tr0, r0, r1\n\tasr\tr0, r0, #1\n\tbx\tlr\n';
 
+const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+
 // A fake compiler id so registration here can't leak into other suites' targets.
-const STUB_DOWN = { ...ARMV4T_AGBCC, compiler: 'stub-down' };
+const STUB_DOWN = { ...AGBCC, target: { ...ARMV4T_AGBCC, compiler: 'stub-down' } };
 registerCandidateCompiler('stub-down', () => {
   throw new Error('toolchain down');
 });
@@ -59,8 +61,9 @@ test('an unregistered compiler: scoreSource throws the typed setup error', () =>
 });
 
 test('a missing compiler propagates EVEN in annotate mode (setup bug, not scoring flakiness)', () => {
+  const unregistered = { ...AGBCC, target: UNREGISTERED };
   expect(() =>
-    decompileWithReport('half', HALF, UNREGISTERED, {
+    decompileWithReport('half', HALF, unregistered, {
       targetObj: '/nonexistent/never-reached.o',
       backend: cBackend,
       onGap: 'annotate',
@@ -95,7 +98,7 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
   };
   let headline = '';
   try {
-    headline = decompileWithReport('f', asm, ARMV4T_AGBCC, {
+    headline = decompileWithReport('f', asm, AGBCC, {
       symbols,
       targetObj: '/nonexistent/never-reached.o',
       backend: cBackend,
@@ -135,7 +138,7 @@ test('…and so does the candidate RANKING beside it, through decompileWithRepor
   ]) as SymbolMap;
 
   const seen: string[] = [];
-  const { report } = decompileWithReport('add_one', asm, ARMV4T_AGBCC, {
+  const { report } = decompileWithReport('add_one', asm, AGBCC, {
     symbols,
     targetObj: target,
     backend: cBackend,

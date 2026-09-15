@@ -6,8 +6,9 @@
 // "Different" is objdiff's verdict, the scorer's own eye: a relocation is compared by the symbol
 // it names, never by the placeholder bytes in the section, and only the example function's
 // instructions and literal pool are read. A pair that builds one object is a wrong example.
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
+  EXAMPLE_COMPILER_TOOLCHAINS,
   EXAMPLE_FUNCTION,
   EXAMPLE_HOLE,
   type ExampleCompiler,
@@ -29,11 +30,14 @@ import { describe, expect, test } from 'vitest';
 import { decompileRanked } from '../../src/rank';
 import { dockerGate, ppcDockerGate } from './docker-gate';
 
+/** The flags an example compiler builds at: its toolchain's canonical flags, the flags every example
+ *  and witness claims its two objects under. */
+const flagsOf = (compiler: ExampleCompiler) => TOOLCHAIN_TARGETS[EXAMPLE_COMPILER_TOOLCHAINS[compiler]].canonicalFlags;
 const COMPILE: { readonly [C in ExampleCompiler]: (source: string) => string } = {
-  agbcc: compileCandAgbcc,
-  ido: compileCandIdoC,
-  gcc: compileCandKmc,
-  mwcc: compileCandPpc,
+  agbcc: (source) => compileCandAgbcc(source, flagsOf('agbcc')),
+  ido: (source) => compileCandIdoC(source, flagsOf('ido')),
+  gcc: (source) => compileCandKmc(source, flagsOf('gcc')),
+  mwcc: (source) => compileCandPpc(source, flagsOf('mwcc')),
 };
 
 const entries = Object.entries(VARIATION_DEFINITIONS);
@@ -113,7 +117,7 @@ describe("asmlift matches an example's `after` only through its variation", () =
     test(name, () => {
       const { example } = VARIATION_DEFINITIONS[name];
       expect(example.compiler).toBe('agbcc');
-      const asm = compileTargetAsm(spell(example.unit, example.after));
+      const asm = compileTargetAsm(spell(example.unit, example.after), flagsOf('agbcc'));
       const matched = decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm)).candidates.filter(
         (c) => c.score.match,
       );

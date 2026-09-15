@@ -1,9 +1,10 @@
 // agbcc / ARM (GBA) — EVERY harness-side spelling of "compile C with agbcc": the real-tier
-// target build, the real-tier candidate compile (same steps, shared). Flags come from
-// @asmlift/toolchains; the decomp.yaml candidate command lives in
-// dataset/toolchains/agbcc/decomp.yaml.
+// target build, the real-tier candidate compile (same steps, shared). Every compile passes the harness
+// words from @asmlift/toolchains, then the row's codegen flags; the decomp.yaml candidate command
+// lives in dataset/toolchains/agbcc/decomp.yaml.
 import {
   COMPILE_ENV,
+  type CandCache,
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
@@ -12,6 +13,7 @@ import {
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -55,9 +57,17 @@ export function stepFailed(
   throw new Error(`${tool} failed: ${d}`);
 }
 
-/** .i → agbcc → .s (asmlift ARM input) with the canonical .text/.align tail → as → .o. */
-function assemble(iPath: string, sPath: string, oPath: string): void {
-  const cc = run(TOOLCHAIN.agbcc, [iPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+/** Preprocessed C → agbcc at `cflags` → .s (asmlift ARM input) with the canonical .text/.align tail →
+ *  as → .o.
+ *
+ *  ONE FIXED COMPILE DIRECTORY. agbcc reads the TU on stdin with `/` as its working directory: under
+ *  `-g` it writes its input's name and the working directory into the `.s`'s debug rows, so a TU
+ *  compiled from a file in a scratch directory is not a function of its own bytes. Measured on one TU
+ *  at agbcc's canonical flags + `-g`: from a file in two directories, two `.s` and two objects; from
+ *  stdin in `/`, one of each, whose `.text` is the file build's. Without `-g` both spellings emit the
+ *  same `.s`. */
+function assemble(iText: string, sPath: string, oPath: string, cflags: readonly string[]): void {
+  const cc = run(TOOLCHAIN.agbcc, ['-o', sPath, ...TOOLCHAIN.harnessFlags, ...cflags], { cwd: '/', input: iText });
   if (cc.status !== 0) {
     stepFailed('agbcc', cc);
   }
@@ -91,21 +101,25 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
+/** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers
+ *  (see `assemble`), under a leading linemarker that names it `c.c`. agbcc's diagnostics, which a row
+ *  publishes as `errorMarkers`, and a `-g` listing's debug rows then name that constant file. */
+function preprocessCandidate(tu: string, iPath: string): ReturnType<typeof run> {
+  return run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, '-', '-o', iPath], { input: `# 1 "c.c"\n${tu}` });
+}
+
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
  *  null if it did not compile. Its OWN directory, never the slot a candidate shares: a probe
  *  compiled into the reused candidate slot overwrites the object the caller is about to store. */
-function stampProbeIn(dir: string): string | null {
-  const cPath = join(dir, 'p.c'),
-    iPath = join(dir, 'p.i'),
+function stampProbeIn(dir: string, cflags: readonly string[]): string | null {
+  const iPath = join(dir, 'p.i'),
     sPath = join(dir, 'p.s'),
     oPath = join(dir, 'p.o');
   try {
-    writeFileSync(cPath, STAMP_PROBE);
-    if (run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, cPath, '-o', iPath]).status !== 0) {
+    if (preprocessCandidate(STAMP_PROBE, iPath).status !== 0) {
       return null;
     }
-    writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), 'asmlift_candcache_stamp'));
-    assemble(iPath, sPath, oPath);
+    assemble(stripPrototype(readFileSync(iPath, 'utf8'), 'asmlift_candcache_stamp'), sPath, oPath, cflags);
     return createHash('sha256').update(readFileSync(oPath)).digest('hex');
   } catch {
     return null;
@@ -141,7 +155,7 @@ export function candCacheNamespaceFiles(): string[] {
 }
 
 /**
- * The namespace's STATIC half: flags, the compile environment, and the content of every file in
+ * The namespace's STATIC half: the flags, the compile environment, and the content of every file in
  * `files`. No compile runs here — the pipeline's own object bytes join the namespace separately
  * (the two-directory probe below), because that half is both the backstop and the purity test.
  *
@@ -150,7 +164,10 @@ export function candCacheNamespaceFiles(): string[] {
  * refusal, which is the only sound answer — a namespace that guesses at an input it cannot read
  * is a namespace that serves stale objects.
  */
-export function candCacheStaticStamp(files: readonly string[] = candCacheNamespaceFiles()): string {
+export function candCacheStaticStamp(
+  cflags: readonly string[],
+  files: readonly string[] = candCacheNamespaceFiles(),
+): string {
   const h = createHash('sha256');
   // 'bench-agbcc/v2' is FORMAT SALT, not a version knob, and it must never be bumped as one:
   // this function lives inside agbcc.ts, whose own bytes it hashes, so a change to the pipeline
@@ -158,7 +175,7 @@ export function candCacheStaticStamp(files: readonly string[] = candCacheNamespa
   // to candCacheNamespaceFiles() is the whole class of bug it hides. Change it only if
   // the digest's LAYOUT changes and old entries must be abandoned wholesale.
   h.update('bench-agbcc/v2');
-  h.update(TOOLCHAIN.agbccFlags.join(' '));
+  h.update([...TOOLCHAIN.harnessFlags, ...cflags].join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
   h.update('cpp ' + CAND_CPP_FLAGS.join(' '));
   for (const v of COMPILE_ENV) {
@@ -181,24 +198,36 @@ export function candCacheStaticStamp(files: readonly string[] = candCacheNamespa
   return h.digest('hex');
 }
 
-const cache = candCache('bench-agbcc', () => {
-  // DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is sound
-  // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
-  // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed
-  // probe TU TWICE, in two DIFFERENT directories, and let the compiler answer.
-  // Two DIFFERENT directories, and REMOVED afterwards: mkdtemp cleans up nothing, and util.ts's
-  // `scratchSlot` exists precisely because that leak "had accumulated into the millions".
-  const dirA = mkdtempSync(join(tmpdir(), 'bench-ccstampA-'));
-  const dirB = mkdtempSync(join(tmpdir(), 'bench-ccstampB-'));
-  const a = stampProbeIn(dirA);
-  const b = stampProbeIn(dirB);
-  rmSync(dirA, { recursive: true, force: true });
-  rmSync(dirB, { recursive: true, force: true });
-  if (a === null || b === null || a !== b) {
-    return NOT_CACHEABLE;
+/** One namespace per flag set: two flag sets compile one TU to two objects, so they never share a
+ *  store, and each namespace's probe compiles at its own flags. */
+const caches = new Map<string, CandCache>();
+function cacheFor(cflags: readonly string[]): CandCache {
+  const key = JSON.stringify(cflags);
+  const known = caches.get(key);
+  if (known !== undefined) {
+    return known;
   }
-  return createHash('sha256').update(candCacheStaticStamp()).update(a).digest('hex');
-});
+  const cache = candCache('bench-agbcc', () => {
+    // DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is sound
+    // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
+    // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed
+    // probe TU TWICE, in two DIFFERENT directories, and let the compiler answer.
+    // Two DIFFERENT directories, and REMOVED afterwards: mkdtemp cleans up nothing, and util.ts's
+    // `scratchSlot` exists precisely because that leak "had accumulated into the millions".
+    const dirA = mkdtempSync(join(tmpdir(), 'bench-ccstampA-'));
+    const dirB = mkdtempSync(join(tmpdir(), 'bench-ccstampB-'));
+    const a = stampProbeIn(dirA, cflags);
+    const b = stampProbeIn(dirB, cflags);
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+    if (a === null || b === null || a !== b) {
+      return NOT_CACHEABLE;
+    }
+    return createHash('sha256').update(candCacheStaticStamp(cflags)).update(a).digest('hex');
+  });
+  caches.set(key, cache);
+  return cache;
+}
 
 /** The message shape a DETERMINISTIC rejection has, and nothing else does. `\\S` is not
  *  decoration: a SIGKILLed compiler produces exactly `"agbcc failed: "`, and `/^(cpp|agbcc|as)
@@ -206,16 +235,16 @@ const cache = candCache('bench-agbcc', () => {
 export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
 export const agbccReal: RealCompile = {
-  buildTarget(iText): BuiltTarget {
-    const dir = contentDir('arm', iText);
-    const iPath = join(dir, 'u.i'),
-      sPath = join(dir, 'u.s'),
+  buildTarget(iText, cflags): BuiltTarget {
+    const dir = contentDir('arm', cflags, iText);
+    const sPath = join(dir, 'u.s'),
       oPath = join(dir, 'u.o');
-    writeFileSync(iPath, iText);
-    assemble(iPath, sPath, oPath);
-    return { obj: oPath, asm: readFileSync(sPath, 'utf8') };
+    assemble(iText, sPath, oPath, cflags);
+    // Both decompilers read the listing without its debug sections; the object keeps them.
+    return { obj: oPath, asm: withoutDebugSections(readFileSync(sPath, 'utf8')) };
   },
-  compileCandidate(tu, sym): string {
+  compileCandidate(tu, sym, cflags): string {
+    const cache = cacheFor(cflags);
     // A candidate TU whose object is not a function of its own bytes is refused PER KEY, and the
     // reason is said once. Two shapes: a TU that reads a file (the path is in the TU, not in any
     // flag, and no probe exercises it — MEASURED: with `CPATH` pointing at a directory, editing
@@ -228,7 +257,7 @@ export const agbccReal: RealCompile = {
       if (cache.mode !== 'off') {
         noteKeyRefused('bench-agbcc', refusal);
       }
-      return compileCandidateRaw(tu, sym);
+      return compileCandidateRaw(tu, sym, cflags);
     }
     if (cache.mode === 'on') {
       const hit = cache.get(tu, sym);
@@ -241,7 +270,7 @@ export const agbccReal: RealCompile = {
     }
     cache.warm();
     try {
-      const o = compileCandidateRaw(tu, sym);
+      const o = compileCandidateRaw(tu, sym, cflags);
       if (cache.mode !== 'off') {
         cache.verify(tu, sym, o);
         return cache.put(tu, sym, o);
@@ -283,11 +312,9 @@ export const agbccReal: RealCompile = {
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
     // -P strips linemarkers: vendored blobs must carry no machine paths
-    const cpp = run(
-      'arm-none-eabi-cpp',
-      ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath],
-      cfg.root,
-    );
+    const cpp = run('arm-none-eabi-cpp', ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], {
+      cwd: cfg.root,
+    });
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
@@ -295,20 +322,17 @@ export const agbccReal: RealCompile = {
   },
 };
 
-function compileCandidateRaw(tu: string, sym: string): string {
+function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
   const dir = candScratch();
-  const cPath = join(dir, 'c.c'),
-    iPath = join(dir, 'c.i'),
+  const iPath = join(dir, 'c.i'),
     sPath = join(dir, 'c.s'),
     oPath = join(dir, 'c.o');
-  writeFileSync(cPath, tu);
-  // candidate TUs are self-contained (typedefs/vendored context inline) — bare -nostdinc cpp
-  const cpp = run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, cPath, '-o', iPath]);
+  // candidate TUs are self-contained (typedefs/vendored context inline): bare -nostdinc cpp
+  const cpp = preprocessCandidate(tu, iPath);
   if (cpp.status !== 0) {
     stepFailed('cpp', cpp);
   }
-  writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-  assemble(iPath, sPath, oPath);
+  assemble(stripPrototype(readFileSync(iPath, 'utf8'), sym), sPath, oPath, cflags);
   return oPath;
 }
 

@@ -11,7 +11,7 @@
 //
 // So what these tests pin is the ranking machinery end-to-end plus the byte-equality itself: a
 // candidate that stops discriminating has to stop by MATCHING, never by losing.
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
@@ -19,7 +19,7 @@ import { expect, test } from 'vitest';
 import { decompileRanked } from '../../src/rank';
 
 const rank = (sym: string, c: string) => {
-  const targetAsm = compileTargetAsm(c);
+  const targetAsm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const ranked = decompileRanked(sym, targetAsm, ARMV4T_AGBCC, assembleTarget(targetAsm));
   for (const cand of ranked.candidates) {
     console.log(`  ${sym} ${joinVariations(cand.variations)}: score ${cand.score.score}  ${cand.source.trim()}`);

@@ -6,8 +6,40 @@
 // was dropped, withheld candidates, a winner carrying a subject (`coalesce-v1-v0`), and fans of 5
 // to 800.
 import type { DecompilerResult, FunctionResult, Outcome, ToolchainId } from '@asmlift/bench-schema';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 type Tally = { candidates: number; dropped?: number; withheld?: number };
+
+/** A real row's flags are its unit's, copied from the committed manifests; a synthetic row's are its
+ *  toolchain's canonical flags. */
+const UNIT_FLAGS: Record<string, string[]> = {
+  sa3: ['-fhex-asm', '-mthumb-interwork', '-O2'],
+  marioparty3: ['-O1', '-G0', '-mips3', '-mgp32', '-mfp32', '-Wa,--vr4300mul-off'],
+  snowboardkids2: [
+    '-x',
+    'c',
+    '-mabi=32',
+    '-mgp32',
+    '-mfp32',
+    '-mno-abicalls',
+    '-fno-PIC',
+    '-G',
+    '0',
+    '-Wa,-force-n64align',
+    '-funsigned-char',
+    '-mips3',
+    '-EB',
+    '-O2',
+    '-fno-builtin',
+    '-fno-asm',
+  ],
+};
+
+/** The build unit every real row of the sample compiles in. */
+const UNIT = {
+  unit: 'src/sample.c',
+  flagsFrom: { from: 'makefile', commit: 'a'.repeat(40), file: 'Makefile', sha256: 'b'.repeat(64), command: 'cc1' },
+} as const;
 
 const ISA: Partial<Record<ToolchainId, FunctionResult['isa']>> = {
   agbcc: 'arm',
@@ -38,11 +70,12 @@ function ranked(
     id,
     sym,
     project,
-    tier: project === 'synthetic' ? 'synthetic' : 'real',
+    ...(project === 'synthetic' ? { tier: 'synthetic' as const } : { tier: 'real' as const, ...UNIT }),
     toolchain,
     isa: ISA[toolchain]!,
     compiler: toolchain,
     language: 'c',
+    cflags: project === 'synthetic' ? [...TOOLCHAIN_TARGETS[toolchain].canonicalFlags!] : UNIT_FLAGS[project],
     features: [],
     loc: 0,
     refSource: '',

@@ -134,7 +134,11 @@ importers:
         specifier: ^6.0.5
         version: 6.4.3(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
 
-  packages/bench-schema: {}
+  packages/bench-schema:
+    dependencies:
+      '@asmlift/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/cli:
     dependencies:

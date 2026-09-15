@@ -23,7 +23,7 @@ import {
   patternApplies,
 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -162,7 +162,11 @@ describe('IDIOM-ENVELOPE widening mechanism', () => {
 // every instruction with no modellable destination mark in place instead of stubbing; it has real
 // inhabitants (`swi`, `syscall`, `sync`, `cache`, `teq`, `mtc0`) and is its own change.
 test('hwDivide gate: a hardware `div` on a no-hw-divide target fails LOUD, not silent', () => {
-  const { asm } = compileMipsTarget('int div3(int a){ return a / 3; }', 'div3');
+  const { asm } = compileMipsTarget(
+    'int div3(int a){ return a / 3; }',
+    'div3',
+    TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+  );
   const noHwDiv = { ...MIPS_IDO, capabilities: { ...MIPS_IDO.capabilities, hwDivide: false } };
   // The divide is refused by name, at the frontend…
   expect(() => mipsFrontend.lift('div3', asm, noHwDiv, {})).toThrow(/unmodelled effect instruction 'div'/);
@@ -252,10 +256,10 @@ const IDO_CASES: { sym: string; c: string; patterns?: RewritePattern[]; expect: 
 describe('DIVMUL — IDO byte-exact: compile → disasm → decompile → recompile → objdiff', () => {
   for (const { sym, c, patterns, expect: golden } of IDO_CASES) {
     test(`${sym}`, () => {
-      const { obj, asm } = compileMipsTarget(c, sym);
+      const { obj, asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_IDO, { patterns });
       expect(r.source).toBe(golden);
-      const s = scoreCMips(r.source, sym, obj);
+      const s = scoreCMips(r.source, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));

@@ -5,6 +5,7 @@
 // alone is unreliable — an undecodable op is a SOFT outcome (exit 0 + an `M2C_ERROR`/`M2C_UNK`
 // DECLINE marker, classified by the caller via outcome.ts); this runner scans only for m2c's
 // hard-failure report.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,7 +63,7 @@ export function runM2c(tc: Toolchain, sym: string, asm: string, opts: M2cOptions
   const dir = m2cScratch();
   const asmPath = join(dir, 'in.s');
   writeFileSync(asmPath, asmText);
-  const args = ['m2c.py', '-t', m2cTarget(tc.compiler, opts.lang), '-f', sym, '--no-cache'];
+  const args = ['m2c.py', '-t', m2cTarget(TOOLCHAIN_TARGETS[tc.id].family, opts.lang), '-f', sym, '--no-cache'];
   if (opts.context) {
     const ctxPath = join(dir, 'ctx.h');
     writeFileSync(ctxPath, opts.context);

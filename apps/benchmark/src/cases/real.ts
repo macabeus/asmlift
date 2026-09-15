@@ -1,8 +1,8 @@
 // Real-project (Tier B) case provider: manifests + their VENDORED preprocessed TUs → Case[].
-// Targets compile from the frozen `.i` blobs (no project checkouts at run time); m2c candidates
-// score with progressively richer context up to the function's own vendored context
-// (makeRealScorer), so an output referencing project globals/structs is never noncompile merely
-// for missing context.
+// Targets compile from the frozen `.i` blobs (no project checkouts at run time) at their unit's flags, and a
+// target that is not the function the ROM holds is refused; m2c candidates score with progressively richer
+// context up to the function's own vendored context (makeRealScorer), so an output referencing project
+// globals/structs is never noncompile merely for missing context.
 //
 // PROVISIONING: both tools read the project's declarations out of the same vendored freeze —
 // asmlift the vendored symbol map (`symbols`), m2c the vendored preprocessed context (`m2cCtx`).
@@ -12,10 +12,12 @@
 import { onlySelects } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
+import { readFileSync } from 'node:fs';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
-import { TOOLCHAINS } from '../toolchains';
-import { loadManifests } from './manifests';
+import { type BuiltTarget, TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
+import { type RealFunction, loadManifests } from './manifests';
+import { targetDigest } from './rom-function';
 import type { Case } from './types';
 
 export interface RealFilter {
@@ -27,12 +29,15 @@ export function realCases(filter: RealFilter = {}): Case[] {
   const manifests = loadManifests().filter((m) => !filter.project || m.project === filter.project);
   const cases: Case[] = [];
   for (const man of manifests) {
-    const tc = TOOLCHAINS[man.toolchain];
     for (const f of man.functions.filter((x) => onlySelects(filter.only, x.sym, x.aliases))) {
+      const unit = man.units[f.unit];
+      const tc = TOOLCHAINS[unit.toolchain];
+      const codegen = codegenFor(unit.toolchain, unit.cflags);
+      const id = `${man.project}:${f.sym}:${unit.toolchain}`;
       const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
       const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
       cases.push({
-        id: `${man.project}:${f.sym}:${man.toolchain}`,
+        id,
         tier: 'real',
         sym: f.sym,
         addr: f.addr,
@@ -59,13 +64,31 @@ export function realCases(filter: RealFilter = {}): Case[] {
         symbols: man.symbols && asIfUndecompiled(man.symbols, f.sym),
         note: f.note,
         toolchain: tc,
-        build: () => buildRealTarget(man.toolchain, man.vendored(f.sym).tuI),
-        scorer: makeRealScorer(man.toolchain, f.prependC ?? '', man.vendored(f.sym).ctxI),
-        compile: makeRealCompile(man.toolchain, f.prependC ?? '', man.vendored(f.sym).ctxI),
+        codegen,
+        unit: f.unit,
+        flagsFrom: unit.flagsFrom,
+        build: () =>
+          romTarget(id, f, unit.toolchain, buildRealTarget(unit.toolchain, codegen.cflags, man.vendored(f.sym).tuI)),
+        scorer: makeRealScorer(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
+        compile: makeRealCompile(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
       });
     }
   }
   return cases;
+}
+
+/** A real row's target, refused unless it holds the function `bench vendor` proved against the ROM: the
+ *  row's `romDigest`. A row that builds anything else publishes nothing. */
+export function romTarget(id: string, f: RealFunction, toolchain: ToolchainId, built: BuiltTarget): BuiltTarget {
+  const digest = targetDigest(readFileSync(built.obj), f.sym);
+  if (digest !== f.romDigest) {
+    throw new Error(
+      `${id}: the target built in unit ${f.unit} by ${toolchain} is not the function the ROM holds ` +
+        `(digest ${digest.slice(0, 12)}, romDigest ${f.romDigest.slice(0, 12)}) — ` +
+        `run \`pnpm bench flags --project ${id.split(':')[0]}\`, then \`pnpm bench vendor\``,
+    );
+  }
+  return built;
 }
 
 /** The m2c `--context` text = the vendored blob, then the prototype line if there is one. ONE

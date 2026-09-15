@@ -900,7 +900,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // WHY BLOCK IDENTITY IS THE KEY, and not a body-equality one like `sameBareExit` above. agbcc
     // MERGES two written-out copies into one block — target.ts's `switchArmsFollowLayout` note
     // says so from agbcc's own sources, SRCS compiling jump.c — and compiling both directions at
-    // TOOLCHAIN.agbccFlags says WHERE the merged block lands: at the last copy's position. So
+    // agbcc's canonical flags says WHERE the merged block lands: at the last copy's position. So
     // `case 0: A break; case 1: … case 2: A break;` and the grouped arm placed THERE are one
     // object (.text md5 555abb1a), while the grouped arm placed at the first value is not
     // (fe4d7d35). That is why the grouped spelling round-trips rather than merely reading shorter:

@@ -31,6 +31,13 @@ test('the symbols JSON rides the same channel: omitted when absent, preserved wh
   expect(bare && 'symbols' in bare).toBe(false);
 });
 
+test("the Flags field's text rides the same channel: omitted when absent, preserved with its quotes", () => {
+  const s = { target: 'mwcc_242_81', backend: 'c', asm: 'blr\n', cflags: "-O4,p -pragma 'scheduling off'" };
+  expect(decodeShare(encodeShare(s))).toEqual(s);
+  const bare = decodeShare(encodeShare({ target: 'agbcc', backend: 'c', asm: 'f:\n\tbx lr\n' }));
+  expect(bare && 'cflags' in bare).toBe(false);
+});
+
 test('garbage payloads decode to null, never throw', () => {
   expect(decodeShare('')).toBeNull();
   expect(decodeShare('not-lz-data-!!!')).toBeNull();

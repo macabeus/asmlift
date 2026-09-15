@@ -9,6 +9,7 @@ export interface ShareState {
   spec?: string; // C++ signature JSON, only when the backend is cpp and the user set one
   symbols?: string; // symbol-map JSON (the Symbols pane's text), only when non-empty
   asm: string;
+  cflags?: string; // the Flags field's text; absent ⇒ the target's canonical flags
 }
 
 export function encodeShare(s: ShareState): string {
@@ -35,6 +36,7 @@ export function decodeShare(hash: string): ShareState | null {
       ...(typeof o.name === 'string' ? { name: o.name } : {}),
       ...(typeof o.spec === 'string' ? { spec: o.spec } : {}),
       ...(typeof o.symbols === 'string' ? { symbols: o.symbols } : {}),
+      ...(typeof o.cflags === 'string' ? { cflags: o.cflags } : {}),
     };
   } catch {
     return null;

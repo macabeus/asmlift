@@ -19,7 +19,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -38,6 +38,8 @@ import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
+import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
+import { type FlagsInput, resolveFlags } from './flags';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -96,14 +98,6 @@ const candCacheLine = (): string => {
 
 export { detectName };
 
-const TARGETS: Record<string, TargetDescription> = {
-  agbcc: ARMV4T_AGBCC,
-  'ido7.1': MIPS_IDO,
-  'gcc2.7.2kmc': MIPS_GCC,
-  'gcc2.7.2': MIPS_GCC,
-  mwcc_242_81: PPC_MWCC,
-};
-
 const BACKENDS: Record<string, LanguageBackend> = {
   c: cBackend,
   pascal: pascalBackend,
@@ -122,13 +116,16 @@ const KNOWN_FLAGS = new Set([
   'proto',
   'jobs',
   'progress',
+  'cflags',
+  'module',
 ]);
 const BOOL_FLAGS = new Set(['strict', 'progress']);
 // The emitted source embeds the name verbatim; a non-identifier would be silently invalid C.
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 
-const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TARGETS).join('|')}>]
+const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TOOLCHAIN_TARGETS).join('|')}>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
+                [--cflags <flags>] [--module <module>]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--jobs <n>] [--progress]
@@ -139,6 +136,12 @@ MIPS/PPC ELF object.
 Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 
   --name           select the function in multi-function input (default: detected)
+  --cflags         the flags your build compiles this function's file with; they
+                   fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
+                   unit that defines the function, else the flags that command already
+                   spells, else the target's canonical flags)
+  --module         with an objdiff.json beside decomp.yaml: look for the function's
+                   unit in this module only (REL code repeats names across modules)
   --strict         fail on any gap instead of annotating
   --config         decomp.yaml to use (default: nearest ancestor of the input)
   --score-against  recompile the output with the project's compiler and objdiff
@@ -406,6 +409,8 @@ export async function runCli(
   progressSink?: (line: string) => void,
 ): Promise<CliResult> {
   const usage = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
+  /** A refusal that names its own fix: the message alone, with no usage block. */
+  const refuse = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n` });
   const parsed = parseFlags(argv);
   if (!parsed.ok) {
     // A named complaint gets `usage(msg)`; the wrong number of operands gets the bare USAGE dump,
@@ -420,6 +425,7 @@ export async function runCli(
   // explicit --config path. Supplies the target when --target is absent, plus the
   // tools.asmlift payload (compile command, objdump override).
   let toolCfg: AsmliftToolConfig | undefined;
+  let configPath: string | undefined;
   let configDir: string | undefined;
   let targetKey: string;
   let targetTrace = '';
@@ -427,6 +433,7 @@ export async function runCli(
     const startDir = input === '-' ? undefined : dirname(resolve(input));
     const loaded = loadDecompConfig(flags.get('config') as string | undefined, startDir);
     toolCfg = loaded?.config.tools?.asmlift;
+    configPath = loaded?.path;
     configDir = loaded ? dirname(loaded.path) : undefined;
     const res = resolveTarget(flags.get('target') as string | undefined, loaded);
     if ('error' in res) {
@@ -439,10 +446,12 @@ export async function runCli(
   } catch (e) {
     return { code: EXIT.unreadable, stdout: '', stderr: `asmlift: ${e instanceof Error ? e.message : e}\n` };
   }
-  const target = TARGETS[targetKey];
-  if (!target) {
-    return usage(`--target must be one of: ${Object.keys(TARGETS).join(', ')} (got '${targetKey}')`);
+  if (!isToolchainId(targetKey)) {
+    return usage(`--target must be one of: ${Object.keys(TOOLCHAIN_TARGETS).join(', ')} (got '${targetKey}')`);
   }
+  // Every flag set of a toolchain decompiles against its description; the flags themselves are
+  // resolved once the function is known.
+  const target = TOOLCHAIN_TARGETS[targetKey].description;
   const backend = BACKENDS[String(flags.get('backend') ?? 'c')];
   if (!backend) {
     return usage(`--backend must be one of: ${Object.keys(BACKENDS).join(', ')}`);
@@ -580,6 +589,61 @@ export async function runCli(
   // target's own withheld signature cannot make the note claim a fact the run did not use.
   const protoNote = guessedArityNote(asm, name, prototypes, symbols);
 
+  // The dtk unit that defines the function, when the project has an objdiff.json and no --cflags
+  // takes its place.
+  const cflagsFlag = flags.get('cflags') as string | undefined;
+  const moduleFlag = flags.get('module') as string | undefined;
+  let dtk: FlagsInput['dtk'];
+  if (cflagsFlag === undefined && configDir !== undefined) {
+    let project: ReturnType<typeof readObjdiffUnits>;
+    try {
+      project = readObjdiffUnits(configDir);
+    } catch (e) {
+      return {
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot read objdiff.json: ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+    if (project !== undefined) {
+      if (moduleFlag !== undefined && !moduleHasUnits(project.units, moduleFlag)) {
+        return {
+          code: EXIT.usage,
+          stdout: '',
+          stderr: `asmlift: --module ${moduleFlag}: ${project.path} has no unit in it\n`,
+        };
+      }
+      dtk = { symbol: name, module: moduleFlag, lookup: unitDefining(configDir, project.units, name, moduleFlag) };
+    }
+  }
+  if (moduleFlag !== undefined && dtk === undefined) {
+    const why =
+      cflagsFlag !== undefined ? '--cflags gives the flags without one' : 'there is no objdiff.json beside decomp.yaml';
+    return {
+      code: EXIT.usage,
+      stdout: '',
+      stderr: `asmlift: --module chooses the objdiff.json unit that gives the flags, and ${why}\n`,
+    };
+  }
+  const flagsResolution = resolveFlags({
+    toolchain: targetKey,
+    cflags: cflagsFlag,
+    command: toolCfg?.compiler,
+    env: process.env,
+    unreadObjdiff:
+      configDir === undefined && cflagsFlag === undefined
+        ? objdiffAbove(input === '-' ? process.cwd() : dirname(resolve(input)))
+        : undefined,
+    configPath,
+    ranked: flags.has('score-against'),
+    dtk,
+  });
+  if (!flagsResolution.ok) {
+    return refuse(flagsResolution.message);
+  }
+  // What the run is about, said on every path after the target it resolved.
+  const runTrace = targetTrace + flagsResolution.lines;
+
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
   // against the given object. Inherently strict: candidates come from the strict tower, so a
@@ -592,13 +656,13 @@ export async function runCli(
   // ranked path alone: accepting them elsewhere would silently discard what the user asked for.
   const jobsFlag = flags.get('jobs') as string | undefined;
   if ((jobsFlag !== undefined || flags.has('progress')) && scoreAgainst === undefined) {
-    return usage('--jobs/--progress apply to --score-against runs only');
+    return refuse('--jobs/--progress apply to --score-against runs only');
   }
   let jobs = 1;
   if (jobsFlag !== undefined) {
     jobs = Number(jobsFlag);
     if (!Number.isInteger(jobs) || jobs < 1) {
-      return usage(`--jobs must be a positive integer (got ${JSON.stringify(jobsFlag)})`);
+      return refuse(`--jobs must be a positive integer (got ${JSON.stringify(jobsFlag)})`);
     }
   }
   // At most one line every few seconds: enough to tell a 20-minute run from a hung one, few
@@ -633,7 +697,7 @@ export async function runCli(
     // own pinned toolchains live in the private @asmlift/toolchains workspace package, serving
     // the benchmark and the matching suite; this npm package carries no compiler at all.)
     if (!toolCfg?.compiler) {
-      return usage(
+      return refuse(
         "--score-against needs tools.asmlift.compiler in decomp.yaml — scoring must use YOUR project's compiler and flags",
       );
     }
@@ -642,9 +706,11 @@ export async function runCli(
       compilers = compilersFromCommand(toolCfg.compiler, {
         cwd: configDir,
         candidateCache: toolCfg.candidateCache,
+        cflags: flagsResolution.fill,
+        cc: flagsResolution.cc,
       });
     } catch (e) {
-      return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
+      return refuse(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
     const compile = compilers.compile;
     try {
@@ -691,7 +757,7 @@ export async function runCli(
         code: rankedExitCode(ranked.winner.score.match),
         stdout: ranked.winner.source,
         stderr: rankedStderr({
-          targetTrace,
+          targetTrace: runTrace,
           warn,
           ranked,
           enumerationErrors,
@@ -702,7 +768,7 @@ export async function runCli(
         }),
       };
     } catch (e) {
-      return failureResult(e, targetTrace, warn, rankedExitCode(false), candCacheLine());
+      return failureResult(e, runTrace, warn, rankedExitCode(false), candCacheLine());
     }
   }
 
@@ -726,14 +792,14 @@ export async function runCli(
           `source spells them BARE, so it is about these declarations; check them against your headers:\n` +
           indentedDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })));
     const stderr =
-      targetTrace +
+      runTrace +
       warn +
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       protoNote;
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {
-    return failureResult(e, targetTrace, warn, EXIT.gaps);
+    return failureResult(e, runTrace, warn, EXIT.gaps);
   }
 }
 

@@ -8,10 +8,29 @@ vi.mock('../src/cases/manifests', () => ({
   loadManifests: () => [
     {
       project: 'kleod',
-      toolchain: 'agbcc',
+      units: {
+        'src/entity.c': {
+          toolchain: 'agbcc',
+          cflags: ['-mthumb-interwork', '-O2', '-fhex-asm', '-g', '-fprologue-bugfix'],
+          flagsFrom: {
+            from: 'makefile',
+            commit: 'a'.repeat(40),
+            file: 'Makefile',
+            sha256: 'b'.repeat(64),
+            command: 'agbcc -mthumb-interwork -O2 -fhex-asm -g -fprologue-bugfix -o entity.s -',
+          },
+        },
+      },
       functions: [
-        { sym: 'EntityLookup', addr: '0x0803d140', aliases: ['sub_0803D140'], features: [], funcC: 'void f(void) {}' },
-        { sym: 'Other', addr: '0x08000100', features: [], funcC: 'void g(void) {}' },
+        {
+          sym: 'EntityLookup',
+          addr: '0x0803d140',
+          unit: 'src/entity.c',
+          aliases: ['sub_0803D140'],
+          features: [],
+          funcC: 'void f(void) {}',
+        },
+        { sym: 'Other', addr: '0x08000100', unit: 'src/entity.c', features: [], funcC: 'void g(void) {}' },
       ],
       vendored: () => ({ tuI: '', ctxI: '' }),
       ctxPath: () => '',

@@ -38,7 +38,7 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
   if (msg.kind === 'supersede') {
     return;
   }
-  const { reqId, name, asm, target, symbols } = msg;
+  const { reqId, name, asm, target, flags, symbols } = msg;
   try {
     // THE THROTTLE LIVES HERE, at the transport boundary it is a policy about: the driver observes
     // every candidate, and this is what bounds how many of those observations become postMessages
@@ -55,7 +55,7 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
         (p) => postMessage({ kind: 'progress', reqId, ...p } satisfies RankMessage),
       ),
     );
-    const result = await rankCandidatesInBrowser(name, asm, target, symbols, post);
+    const result = await rankCandidatesInBrowser(name, asm, target, flags, symbols, post);
     postMessage({ kind: 'result', reqId, ok: true, result } satisfies RankResponse);
   } catch (err) {
     // ONLY A STRING CROSSES THIS BOUNDARY, so the refusal lists a total failure carries

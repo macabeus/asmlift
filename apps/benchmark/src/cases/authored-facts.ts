@@ -49,37 +49,6 @@ export interface CompiledSignature {
  *  token is blanked wherever it appears in a signature, so one may not double as a parameter name. */
 export const ATTRIBUTE_MACROS: ReadonlySet<string> = new Set(['UNUSED']);
 
-/** A callee prototype whose subject the row's own TU never DECLARES: the project declares it in a
- *  `.c` the TU does not include, so the compiler itself saw only an implicit declaration and the
- *  vendored blob holds no oracle. The remedy is not to skip the entry — that silence passed a
- *  `ValidateSave` declared with six parameters — but to move the oracle here: `decl` is the
- *  declaration copied from the pinned checkout at `cite`, and the row's `proto` is then checked
- *  against IT exactly as it would be against a TU. What stays uncovered is one hand-copied line
- *  per entry, and adding one is deliberate. */
-export interface CitedDeclaration {
-  /** the declaration as the project spells it, checkable C */
-  decl: string;
-  /** where it was read from, so the next reader can re-check it */
-  cite: string;
-}
-
-/** Keyed `project:sym:callee`. */
-export const UNVERIFIABLE_CALLEE_PROTOS: ReadonlyMap<string, CitedDeclaration> = new Map([
-  [
-    'sa3:sub_8001FD4:ValidateSave',
-    { decl: 'void ValidateSave(SaveGame *save);', cite: 'macabeus/sa3 src/code_0_0.c:15' },
-  ],
-  [
-    'sa3:sub_8001FD4:PackSaveSector',
-    { decl: 'void PackSaveSector(SaveSectorData *sector, SaveGame *save);', cite: 'macabeus/sa3 src/code_0_0.c:440' },
-  ],
-  [
-    'sa3:sub_8001FD4:WriteSaveSector',
-    { decl: 's32 WriteSaveSector(s16 sectorId, SaveSectorData *sector);', cite: 'macabeus/sa3 src/code_0_0.c:362' },
-  ],
-  ['sa3:sub_8001FD4:sub_8001A90', { decl: 's16 sub_8001A90(void);', cite: 'macabeus/sa3 src/code_0_0.c:672' }],
-]);
-
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Index of the `)` closing the `(` at `open`, or -1 when unbalanced. */
@@ -272,9 +241,8 @@ export function definitionsOf(tu: string, sym: string): CompiledSignature[] {
 }
 
 /** Every DECLARATION or definition of `sym` in a preprocessed TU — used for CALLEE protos, whose
- *  subject is not the row's own function. Returns [] when the TU only ever CALLS the symbol (the
- *  project declares it in a `.c` the TU does not include, so the compiler saw an implicit
- *  declaration too); the caller must not read that as agreement. */
+ *  subject is not the row's own function. Returns [] when the text only ever CALLS the symbol; the
+ *  caller must not read that as agreement. */
 export function declarationsOf(tu: string, sym: string): CompiledSignature[] {
   const found: CompiledSignature[] = [];
   for (const o of occurrences(tu, sym)) {
@@ -475,26 +443,14 @@ export function protoFactProblems(
       );
       continue;
     }
-    let decls = [...declarationsOf(tu, callee), ...(ctx ? declarationsOf(ctx, callee) : [])];
+    const decls = [...declarationsOf(tu, callee), ...(ctx ? declarationsOf(ctx, callee) : [])];
     if (decls.length === 0) {
-      const cited = UNVERIFIABLE_CALLEE_PROTOS.get(`${where}:${callee}`);
-      if (!cited) {
-        problems.push(
-          `${where}: the compiled source CALLS \`${callee}\` and neither it nor this row's \`ctx\` ` +
-            `declares it, so the entry's arity and void-ness have no oracle — declare it in \`ctx\` ` +
-            `(m2c needs it too), or copy the declaration off the pinned checkout into ` +
-            `UNVERIFIABLE_CALLEE_PROTOS, keyed \`${where}:${callee}\` and cited`,
-        );
-        continue;
-      }
-      decls = declarationsOf(cited.decl, callee);
-      if (decls.length !== 1) {
-        problems.push(
-          `${where}: UNVERIFIABLE_CALLEE_PROTOS's \`${callee}\` declaration (${cited.cite}) does not ` +
-            `parse as one declaration of it: ${JSON.stringify(cited.decl)}`,
-        );
-        continue;
-      }
+      problems.push(
+        `${where}: the compiled source CALLS \`${callee}\` and neither it nor this row's \`ctx\` ` +
+          `declares it, so the entry's arity and void-ness have no oracle — declare it where the ` +
+          `project does (m2c needs it too)`,
+      );
+      continue;
     }
     const arities = new Set(decls.map((d) => d.params.length));
     if (entry.params !== undefined && arities.size === 1) {

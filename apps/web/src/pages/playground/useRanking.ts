@@ -81,6 +81,8 @@ export interface RankingInput {
   name: string | undefined;
   targetId: string;
   target: TargetDescription;
+  /** the Flags field's words: every candidate compiles with them; a new identity re-ranks (H1) */
+  flags: readonly string[];
   /** the Symbols pane's parsed map — the worker enumerates+scores the named spellings with it
    *  (self-declared, via core's declaration synthesis); a new map identity re-ranks (H1). */
   symbols?: SymbolMap;
@@ -99,6 +101,7 @@ export function sameRankingInput(a: RankingInput, b: RankingInput): boolean {
     a.name === b.name &&
     a.targetId === b.targetId &&
     a.target === b.target &&
+    a.flags === b.flags &&
     a.symbols === b.symbols
   );
 }
@@ -197,6 +200,7 @@ export function useRanking(input: RankingInput): Ranking {
       name: input.name,
       asm: input.asm,
       target: input.target,
+      flags: input.flags,
       ...(input.symbols ? { symbols: input.symbols } : {}),
     } satisfies RankRequest);
   }, [input]);
