@@ -95,17 +95,23 @@ function expanded(command: string, word: ShellWord, env: CommandEnv): ShellWord[
   return parts.map((part) => ({ ...word, value: part }));
 }
 
-/** A word that runs the family's compiler: a path whose last component is one of its binaries, read
- *  through `env` when the word is a variable. An assignment (`COMPILER_PATH=/kmc/gcc`) and a container
- *  mount (`-v /opt/gcc:/gcc`) only name one. */
-const runsCompiler = (word: string, family: FlagFamily, env: CommandEnv): boolean => {
-  const value = programPath(word, env);
+/** Whether `words[k]` runs the family's compiler: a path whose last component is one of its binaries.
+ *  An assignment (`COMPILER_PATH=/kmc/gcc`), a container mount (`-v /opt/gcc:/gcc`) and the argument of
+ *  an option (`-I tools/agbcc`) only name one. */
+const runsCompiler = (words: readonly ShellWord[], k: number, family: FlagFamily, env: CommandEnv): boolean => {
+  const value = programPath(words[k].value, env);
+  const previous = words[k - 1]?.value;
   return (
     !value.includes('=') &&
     !value.includes(':/') &&
+    !(previous !== undefined && previous.startsWith('-') && !previous.includes('=')) &&
     COMPILER_BINARIES[family].includes(value.split(/[/\\]/).at(-1)!.toLowerCase())
   );
 };
+
+/** A run with one of these words preprocesses or checks its input and compiles nothing, as a Makefile
+ *  recipe does before the compile proper (`gcc -E … | gcc -c …`, a `-fsyntax-only` lint pass). */
+const COMPILES_NOTHING: ReadonlySet<string> = new Set(['-E', '-fsyntax-only']);
 
 /** How many of the units, or modules, that define a function a refusal names before "and N more". */
 const AMBIGUOUS_SHOWN = 5;
@@ -122,23 +128,29 @@ export interface CommandReading {
   takesCflags: boolean;
 }
 
-/** The first command that runs the family's compiler, with its flags: every word after the binary
- *  except `-o` and its argument, a word naming a `{{…}}` path, an operand (the file it compiles)
- *  and an inert word. A variable, naming the compiler or giving it words, is read through `env`.
- *  `undefined` when no command runs the compiler. Throws `UnreadableLevelError` on a level word the
- *  family cannot read. */
+/** The first command that compiles with the family's compiler, with its flags: every word after the
+ *  binary except `-o` and its argument, a word naming a `{{…}}` path, an operand (the file it
+ *  compiles) and an inert word. asm-processor's `<compiler> -- <assembler words> -- <flags>` puts
+ *  the flags after the second `--`. A variable, naming the compiler or giving it words, is read
+ *  through `env`. `undefined` when no command compiles with the compiler. Throws `UnreadableLevelError`
+ *  on a level word the family cannot read. */
 export function readCompilerCommand(
   command: string,
   family: FlagFamily,
   env: CommandEnv = {},
 ): CommandReading | undefined {
   for (const words of shellCommands(command)) {
-    const at = words.findIndex((w) => runsCompiler(w.value, family, env));
-    if (at === -1) {
+    const at = words.findIndex((_, k) => runsCompiler(words, k, family, env));
+    if (at === -1 || words.some((w) => COMPILES_NOTHING.has(w.value))) {
       continue;
     }
+    let from = at + 1;
+    if (words[from]?.value === '--') {
+      const second = words.findIndex((w, k) => k > from && w.value === '--');
+      from = second === -1 ? words.length : second + 1;
+    }
     const assigned = assignedNames(command);
-    const after = words.slice(at + 1);
+    const after = words.slice(from);
     const candidates: ShellWord[] = [];
     const unread: ShellWord[] = [];
     for (let k = 0; k < after.length; k++) {

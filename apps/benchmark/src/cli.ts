@@ -69,6 +69,10 @@
 //   pnpm bench vendor [--project p] [--symbols-only]   # freeze the real tier's preprocessed TUs
 //                                        # (needs checkouts); --symbols-only rewrites just the
 //                                        # ELF-derived symbol maps
+//   pnpm bench flags [--project p] [--only s] [--write] [--toolchain id]
+//                                        # every real unit's flags derived from its project's build
+//                                        # (needs checkouts): stored-flags status, unclassified words,
+//                                        # and whether each row's target is the ROM's function
 //
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
@@ -652,6 +656,10 @@ switch (command) {
     await vendor(opts.project, { symbolsOnly: opts['symbols-only'] });
     break;
   }
+  case 'flags': {
+    const { flagsReport } = await import('./run/flags');
+    process.exit(flagsReport({ project: opts.project, only: opts.only }) ? 0 : 1);
+  }
   case 'verify': {
     const manifest = positionals[1];
     if (!manifest) {
@@ -663,7 +671,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|in-flight|repro|target|fan|sweep|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|in-flight|repro|target|fan|sweep|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor|flags> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

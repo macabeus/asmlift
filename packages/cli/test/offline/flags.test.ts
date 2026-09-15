@@ -54,6 +54,47 @@ describe('reading the flags a compile command spells', () => {
     expect(flagsOf(mwcc, 'mwcc')).toEqual(['-proc', 'gekko', '-O4,p', '-str', 'reuse,readonly']);
   });
 
+  // Recipe lines as `gmake -n` prints them for one unit of five benchmark projects (pokeemerald,
+  // snowboardkids2, marioparty3, af, sa3), include lists shortened.
+  test('a path given as an option argument is not the compiler binary', () => {
+    const pokeemerald =
+      'arm-none-eabi-cpp -iquote include -I tools/agbcc/include -I tools/agbcc -nostdinc -undef src/math_util.c | ' +
+      'tools/preproc/preproc -i src/math_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit ' +
+      '-Wparentheses -Werror -O2 -fhex-asm -g -o - - | arm-none-eabi-as -mcpu=arm7tdmi -o build/emerald/src/math_util.o -';
+    expect(flagsOf(pokeemerald, 'agbcc')).toEqual(['-mthumb-interwork', '-O2', '-fhex-asm', '-g']);
+  });
+
+  test('a run that only preprocesses or only checks compiles nothing', () => {
+    const snowboardkids2 =
+      'COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mips3 -EB -O2 -fno-asm -I include -E src/38C90.c | ' +
+      'COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mips3 -EB -O2 -fno-asm -I ./ -c -o build/src/38C90.o -';
+    expect(readCompilerCommand(snowboardkids2, 'gcc')?.flagWords.map((w) => w.value)).toEqual(
+      readCompilerCommand(snowboardkids2.split(' | ')[1], 'gcc')?.flagWords.map((w) => w.value),
+    );
+    expect(flagsOf(snowboardkids2, 'gcc')).not.toContain('-E');
+    const marioparty3 =
+      'gcc -fcommon -fsyntax-only -fsigned-char -m32 -I include src/sprman.c || true\n' +
+      'export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 ' +
+      '-Wa,--vr4300mul-off -D_LANGUAGE_C -I include -c -o build/src/sprman.c.o src/sprman.c';
+    expect(flagsOf(marioparty3, 'gcc')).toEqual(['-O1', '-G0', '-mips3', '-mgp32', '-mfp32', '-Wa,--vr4300mul-off']);
+  });
+
+  test("asm-processor's assembler words between its two -- are not the compiler's", () => {
+    const af =
+      '.venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --convert-statics=global-with-filename ' +
+      'tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm ' +
+      '-nostdinc -Wab,-r4300_mul -Iinclude -fullwarn -verbose -woff 624,649 -mips2 -EB -O2 -g3 ' +
+      '-o build/src/code/sys_math_atan.o src/code/sys_math_atan.c';
+    expect(flagsOf(af, 'ido')).toEqual(['-G', '0', '-non_shared', '-Wab,-r4300_mul', '-mips2', '-EB', '-O2', '-g3']);
+  });
+
+  test('standard input is an operand, not a flag', () => {
+    const sa3 =
+      'tools/preproc/preproc build/gba/sa3/src/lib/agb_flash/agb_flash.i | tools/agbcc/bin/agbcc  -O1 ' +
+      '-mthumb-interwork -Werror -o build/gba/sa3/src/lib/agb_flash/agb_flash.s -';
+    expect(flagsOf(sa3, 'agbcc')).toEqual(['-O1', '-mthumb-interwork']);
+  });
+
   test('a compiler named by a variable is read through the environment the command runs under', () => {
     const command = '"$AGBCC" {{inputPath}} -o {{outputPath}} -mthumb-interwork -O1 && as {{inputPath}}.s';
     expect(readCompilerCommand(command, 'agbcc')).toBeUndefined();
@@ -63,9 +104,7 @@ describe('reading the flags a compile command spells', () => {
       '-mthumb-interwork',
       '-O1',
     ]);
-    expect(readCompilerCommand('${AGBCC} -O2 -o x.s x.c', 'agbcc', env)?.flagWords.map((w) => w.value)).toEqual([
-      '-O2',
-    ]);
+    expect(readCompilerCommand('${AGBCC} -O2 -o x.s -', 'agbcc', env)?.flagWords.map((w) => w.value)).toEqual(['-O2']);
     expect(resolveFlags(input({ command, env }))).toMatchObject({
       ok: true,
       lines: 'asmlift: [flags] -mthumb-interwork -O1 (compiler command)\n',
@@ -82,7 +121,7 @@ describe('reading the flags a compile command spells', () => {
     ]);
     expect(readCompilerCommand(command, 'agbcc')?.flagWords.map((w) => w.value)).toEqual(['-mthumb-interwork']);
     expect(
-      readCompilerCommand('agbcc "$ONE" -o x.s x.c', 'agbcc', { ONE: '-O1 -fhex-asm' })?.flagWords.map((w) => w.value),
+      readCompilerCommand('agbcc "$ONE" -o x.s -', 'agbcc', { ONE: '-O1 -fhex-asm' })?.flagWords.map((w) => w.value),
     ).toEqual(['-O1 -fhex-asm']);
     expect(resolveFlags(input({ command, env }))).toMatchObject({
       ok: true,

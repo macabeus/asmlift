@@ -305,7 +305,7 @@ export interface CodegenProfile {
   /** argv indices of every inert word and its argument */
   inertAt: readonly number[];
   /** argv indices of every word that is neither an option nor an option's argument, such as the file
-   *  a compile command names; each is also unclassified */
+   *  a compile command names or `-` for standard input; each is also unclassified */
   operandAt: readonly number[];
   /** argv positions by option, in build order: an option with its argument words, a word no table names
    *  with the operand right after it (the table cannot say whether it takes one), every other word alone */
@@ -326,6 +326,9 @@ function specFor(family: FlagFamily, word: string): { spec: OptionSpec; m: Match
   }
   return undefined;
 }
+
+/** A word that is not an option: a file, or `-`, which names standard input. */
+const isOperand = (word: string): boolean => word === '-' || !word.startsWith('-');
 
 /** A `-pragma` whose name only steers diagnostics. */
 const INERT_PRAGMA = /^(cats|warn_\w+|msg_show_realref)\b/;
@@ -518,7 +521,7 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
   }
   const unclassified: string[] = [];
   for (const k of unknown) {
-    if (argv[k].startsWith('-') && lastUnknown.get(argv[k]) !== k) {
+    if (!isOperand(argv[k]) && lastUnknown.get(argv[k]) !== k) {
       overriddenAt.push(k);
     } else {
       unclassified.push(argv[k]);
@@ -532,8 +535,8 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
       previous?.length === 1 &&
       span.length === 1 &&
       unknownAt.has(previous[0]) &&
-      argv[previous[0]].startsWith('-') &&
-      !argv[span[0]].startsWith('-');
+      !isOperand(argv[previous[0]]) &&
+      isOperand(argv[span[0]]);
     if (joinsPrevious) {
       previous.push(span[0]);
     } else {
@@ -547,7 +550,7 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
     unclassified,
     overriddenAt: overriddenAt.sort((a, b) => a - b),
     inertAt,
-    operandAt: unknown.filter((k) => !argv[k].startsWith('-')),
+    operandAt: unknown.filter((k) => isOperand(argv[k])),
     spans: grouped,
     overrides: overrides.sort((a, b) => a.at - b.at).map((o) => o.line),
     implied,

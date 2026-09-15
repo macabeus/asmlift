@@ -240,6 +240,9 @@ describe('parsing', () => {
     const p = parseFlags('gcc', argv);
     expect(p.operandAt).toEqual([2, 4]);
     expect(p.unclassified).toEqual(['in.c', '$PRE_FILE', '-Og']);
+    const stdin = parseFlags('agbcc', ['-O1', '-', '-mthumb-interwork', '-']);
+    expect(stdin.operandAt).toEqual([1, 3]);
+    expect(stdin.overriddenAt).toEqual([]);
   });
 
   test("the gcc driver's program path is inert", () => {
