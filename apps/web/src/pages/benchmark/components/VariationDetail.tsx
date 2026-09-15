@@ -5,8 +5,12 @@
 // Split in two so the body renders without a DOM: the shell owns the overlay behaviour (scroll lock,
 // Escape), which needs `window`; the body is a plain function of its props.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   EXAMPLE_COMPILER_NAMES,
+  EXAMPLE_COMPILER_TOOLCHAINS,
+  type ExampleCompiler,
   type OfferedWhen,
   TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
@@ -26,7 +30,16 @@ import { Pill } from '../../../shared/components/Pill';
 import { useOverlay } from '../../../shared/utils/overlay';
 import { unitForDisplay } from '../lib/example-unit';
 import { rowHref, variationHref } from '../lib/explorer-url';
-import { pricePerWin, rowsFor, variationStats, winRate } from '../lib/fan';
+import {
+  type VariationStats,
+  fanLevel,
+  levelStats,
+  pricePerWin,
+  rowsFor,
+  variationLevels,
+  variationStats,
+  winRate,
+} from '../lib/fan';
 import { plainText } from '../lib/variation-text';
 import { TOOLCHAIN_LABEL, VARIATION_KIND_COLOR } from '../theme';
 import { OutcomeBadge } from './ui/Badge';
@@ -35,6 +48,10 @@ import { NotWaste } from './ui/NotWaste';
 import { followInPlace } from './ui/follow-in-place';
 
 const CODE_PRE = 'rounded-md bg-slate-950/70 p-3 text-[12px] leading-relaxed text-slate-200';
+
+/** The flags an example's two objects are compiled at: its toolchain's canonical flags. */
+const exampleFlags = (compiler: ExampleCompiler) =>
+  shellJoinFlags(TOOLCHAIN_TARGETS[EXAMPLE_COMPILER_TOOLCHAINS[compiler]].canonicalFlags);
 
 function isVariationName(name: string): name is VariationName {
   return Object.hasOwn(VARIATION_DEFINITIONS, name);
@@ -115,8 +132,7 @@ export function VariationDetailBody({
   const kind = variationToken(name).variationKind;
   const stats = useMemo(() => variationStats(rows).get(name)!, [rows, name]);
   const touched = useMemo(() => rowsFor(rows, name), [rows, name]);
-  const rate = winRate(stats);
-  const price = pricePerWin(stats);
+  const levels = useMemo(() => variationLevels(levelStats(rows), name), [rows, name]);
 
   return (
     <>
@@ -171,8 +187,9 @@ export function VariationDetailBody({
             </div>
           </div>
           <p className="text-xs leading-relaxed text-slate-500">
-            Compiled with {EXAMPLE_COMPILER_NAMES[def.example.compiler]} in the unit below, the two are different
-            objects.
+            Compiled with {EXAMPLE_COMPILER_NAMES[def.example.compiler]} at its canonical flags{' '}
+            <code className="font-mono text-slate-400">{exampleFlags(def.example.compiler)}</code> in the unit below,
+            the two are different objects.
           </p>
           {def.example.note && (
             <p className="text-xs leading-relaxed text-slate-500">
@@ -224,12 +241,8 @@ export function VariationDetailBody({
               }
             />
             <Figure label="toolchains" value={stats.toolchains} />
-            <Figure label="win rate" value={rate === null ? null : `${Math.round(rate * 100)}%`} />
-            <Figure
-              label="candidates per win"
-              value={price === null ? (stats.rows > 0 ? 'no win' : null) : Math.round(price)}
-            />
           </dl>
+          {levels.length > 0 && <LevelTable levels={levels} />}
           {stats.candidates > 0 && <NotWaste />}
         </div>
 
@@ -354,6 +367,48 @@ function Figure({ label, value, hint }: { label: string; value: number | string 
   );
 }
 
+/** The variation at each optimisation level whose fans carried it, each level counted over its own rows,
+ *  so a level's win rate and price per win never mix in another level's cost or wins. */
+function LevelTable({ levels }: { levels: { level: string; s: VariationStats }[] }) {
+  return (
+    <div className="scroll-slim overflow-x-auto">
+      <table className="w-full text-right text-xs">
+        <caption className="pb-1.5 text-left text-[11px] text-slate-500">
+          Per optimisation level, each counted over its own rows
+        </caption>
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-slate-500">
+            <th className="py-1 pr-3 text-left font-medium">Level</th>
+            <th className="px-2 py-1 font-medium">Rows</th>
+            <th className="px-2 py-1 font-medium">Toolchains</th>
+            <th className="px-2 py-1 font-medium">Winners</th>
+            <th className="px-2 py-1 font-medium">Candidates</th>
+            <th className="px-2 py-1 font-medium">Win rate</th>
+            <th className="py-1 pl-2 font-medium">Per win</th>
+          </tr>
+        </thead>
+        <tbody className="font-mono text-slate-200">
+          {levels.map(({ level, s }) => {
+            const rate = winRate(s);
+            const price = pricePerWin(s);
+            return (
+              <tr key={level} className="border-t border-slate-800">
+                <td className="py-1 pr-3 text-left">{level}</td>
+                <td className="px-2 py-1">{s.rows.toLocaleString()}</td>
+                <td className="px-2 py-1">{s.toolchains}</td>
+                <td className="px-2 py-1">{s.winners.toLocaleString()}</td>
+                <td className="px-2 py-1">{s.candidates.toLocaleString()}</td>
+                <td className="px-2 py-1">{rate === null ? '—' : `${Math.round(rate * 100)}%`}</td>
+                <td className="py-1 pl-2">{price === null ? 'no win' : Math.round(price).toLocaleString()}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** The row list's columns from `sm` up. Below it a row is two lines: the function, its outcome and its
  *  candidates, then the winner's variations across the whole width. */
 const ROW_GRID =
@@ -375,7 +430,7 @@ function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<
             className={`${ROW_GRID} sticky top-0 z-10 hidden gap-x-3 bg-slate-900/95 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:grid`}
           >
             <div>Function</div>
-            <div>Toolchain</div>
+            <div>Toolchain · level</div>
             <div>asmlift</div>
             <div className="text-right" title="candidates in this row's fan carrying it">
               Cand.
@@ -395,13 +450,16 @@ function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<
                 >
                   {row.sym}
                 </a>
-                <span className="text-[11px] text-slate-500 sm:hidden"> · {row.toolchain}</span>
+                <span className="text-[11px] text-slate-500 sm:hidden">
+                  {' '}
+                  · {row.toolchain} · {fanLevel(row)}
+                </span>
               </div>
               <div
                 className="hidden truncate text-[11px] text-slate-400 sm:block"
                 title={TOOLCHAIN_LABEL[row.toolchain]}
               >
-                {row.toolchain}
+                {row.toolchain} · {fanLevel(row)}
               </div>
               <div className="whitespace-nowrap">
                 <OutcomeBadge outcome={row.asmlift.outcome} />

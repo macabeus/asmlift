@@ -19,6 +19,17 @@ export const VARIATION_KIND_COLOR: Record<VariationKind, string> = {
   'symbol-map': '#fb7185', // rose-400
 };
 
+/** The Fan Explorer's marker for an optimisation level, by the level's rank (most counted rows first).
+ *  A bubble's colour is its variation's kind, so the level takes the shape. */
+export const LEVEL_MARKERS = [
+  { symbol: 'circle', glyph: '●' },
+  { symbol: 'triangle', glyph: '▲' },
+  { symbol: 'rect', glyph: '■' },
+  { symbol: 'diamond', glyph: '◆' },
+] as const;
+export type LevelMarker = (typeof LEVEL_MARKERS)[number];
+export const levelMarker = (rank: number): LevelMarker => LEVEL_MARKERS[rank % LEVEL_MARKERS.length];
+
 /** Outcome status colors. */
 export const OUTCOME_COLOR: Record<Outcome, string> = {
   match: '#22c55e', // emerald-500

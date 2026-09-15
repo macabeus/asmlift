@@ -16,6 +16,11 @@
 //
 // A TALLY, NEVER A FACTORISATION. Enumeration gates prune the fan, so per-variation counts do not
 // multiply to a fan's size, and nothing here tries to.
+//
+// PRICED PER OPTIMISATION LEVEL. A variation that wins at -O2 can cost the same and never win at -O1,
+// so the rows are partitioned by the level the compiler acts on, read off each row's flags through
+// core, and `variationStats` runs on each partition: a level's win rate and price per win never
+// divide one level's cost by another level's wins.
 import type { FunctionResult } from '@asmlift/bench-schema';
 import {
   VARIATION_KINDS,
@@ -26,6 +31,8 @@ import {
   parseVariation,
   variationToken,
 } from '@asmlift/core/variation-tokens';
+
+import { rowLevel } from './flags';
 
 export interface VariationStats {
   name: VariationName;
@@ -150,6 +157,96 @@ export function fanCoverage(rows: readonly FunctionResult[]): { rows: number; ca
     }
   }
   return { rows: n, candidates };
+}
+
+/** The bucket of a row whose flags name no level, in a family with no measured default. */
+export const NO_LEVEL = 'no level';
+
+/** The optimisation level a row's fan is priced at: the one the compiler acts on (IDO `-O2 -g` is
+ *  `-O1`). A level several families spell alike, such as `-O2` on agbcc, IDO and KMC gcc, is one bucket. */
+export function fanLevel(row: FunctionResult): string {
+  return rowLevel(row) ?? NO_LEVEL;
+}
+
+/** One optimisation level's part of the fan. */
+export interface LevelStats {
+  level: string;
+  /** the level's rows whose fan was counted, and the candidates in those fans */
+  coverage: { rows: number; candidates: number };
+  /** those rows per toolchain, most first: one entry per distinct toolchain */
+  toolchainRows: { toolchain: string; rows: number }[];
+  /** `variationStats` over those rows alone */
+  stats: Map<VariationName, VariationStats>;
+}
+
+/** The rows whose fan was counted, partitioned by level: most counted rows first, then by level. */
+export function levelStats(rows: readonly FunctionResult[]): LevelStats[] {
+  const byLevel = new Map<string, FunctionResult[]>();
+  for (const row of rows) {
+    if (!row.asmlift.fanVariations) {
+      continue;
+    }
+    const level = fanLevel(row);
+    const bucket = byLevel.get(level) ?? [];
+    byLevel.set(level, bucket);
+    bucket.push(row);
+  }
+  return [...byLevel]
+    .map(([level, levelRows]) => ({
+      level,
+      coverage: fanCoverage(levelRows),
+      toolchainRows: rowsByToolchain(levelRows),
+      stats: variationStats(levelRows),
+    }))
+    .sort((a, b) => b.coverage.rows - a.coverage.rows || (a.level < b.level ? -1 : 1));
+}
+
+/** Rows per toolchain, most first, then by name. */
+function rowsByToolchain(rows: readonly FunctionResult[]): { toolchain: string; rows: number }[] {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    counts.set(r.toolchain, (counts.get(r.toolchain) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([toolchain, n]) => ({ toolchain, rows: n }))
+    .sort((a, b) => b.rows - a.rows || (a.toolchain < b.toolchain ? -1 : 1));
+}
+
+/** One variation at each level whose fans carried it. */
+export function variationLevels(
+  levels: readonly LevelStats[],
+  name: VariationName,
+): { level: string; s: VariationStats }[] {
+  return levels.flatMap((l) => {
+    const s = l.stats.get(name)!;
+    return s.rows > 0 ? [{ level: l.level, s }] : [];
+  });
+}
+
+/** Up to this many toolchains, a level names each with its rows; past it, it counts them. */
+const NAMED_TOOLCHAINS = 3;
+
+/** A level's toolchains: `gcc2.7.2 ×23, agbcc ×1`, or `4 toolchains`. A level several compilers share is
+ *  read with them named, since a price at one level can be one compiler's price. */
+export function levelToolchains(l: LevelStats): string {
+  return l.toolchainRows.length <= NAMED_TOOLCHAINS
+    ? l.toolchainRows.map((t) => `${t.toolchain} ×${t.rows}`).join(', ')
+    : plural(l.toolchainRows.length, 'toolchain');
+}
+
+/** `1 row`, `3 rows`. */
+export const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
+/** One variation at one level, in a catalogue line: `-O2 · 2 toolchains · 11 wins over 212 rows · 38
+ *  candidates per win`, the price left out when it never won there. */
+export function levelLine(level: string, s: VariationStats): string {
+  const price = pricePerWin(s);
+  return [
+    level,
+    plural(s.toolchains, 'toolchain'),
+    `${plural(s.winners, 'win')} over ${plural(s.rows, 'row')}`,
+    ...(price === null ? [] : [`${Math.round(price).toLocaleString()} candidates per win`]),
+  ].join(' · ');
 }
 
 /** Past this many candidates a row's fan size is shown in the Function Explorer; at or below it the

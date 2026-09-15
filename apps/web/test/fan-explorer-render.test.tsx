@@ -1,9 +1,12 @@
-// The Fan Explorer tab and its variation drawer as they actually render, over the committed artifact
-// and over `FAN_SAMPLE`, ranked rows that carry `fanVariations`. apps/web has no DOM, so this is
-// `renderToStaticMarkup`: enough to hold that every entry is on the page with its definition, that
-// every link resolves, and that every cost view carries its sentence.
+// The Fan Explorer tab and its variation drawer as they actually render, over `FAN_SAMPLE`: ranked rows
+// that carry `fanVariations` and their units' flags, at two optimisation levels. apps/web has no DOM, so
+// this is `renderToStaticMarkup`: enough to hold that every entry is on the page with its definition,
+// that every link resolves, that every cost view carries its sentence, and that every price is a level's.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
+  EXAMPLE_COMPILER_TOOLCHAINS,
   READER_WORDS,
   TARGET_BEHAVIOR_READINGS,
   VARIATION_DEFINITIONS,
@@ -11,23 +14,30 @@ import {
 } from '@asmlift/core/variation-definitions';
 import { readerRules } from '@asmlift/core/variation-gates';
 import { VARIATION_KINDS, VARIATION_TOKENS, variationToken } from '@asmlift/core/variation-tokens';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 
 import { FanExplorer } from '../src/pages/benchmark/components/FanExplorer';
 import { VariationDetailBody } from '../src/pages/benchmark/components/VariationDetail';
-import { VariationCostGain, bubbleSize } from '../src/pages/benchmark/components/charts/VariationCostGain';
-import { fanCoverage, priced, rowsFor, variationStats } from '../src/pages/benchmark/lib/fan';
+import {
+  VariationCostGain,
+  bubbleSize,
+  costGainOption,
+} from '../src/pages/benchmark/components/charts/VariationCostGain';
+import { dearestFirst, pricePerWinOption } from '../src/pages/benchmark/components/charts/VariationPricePerWin';
+import {
+  fanCoverage,
+  fanLevel,
+  levelLine,
+  levelStats,
+  levelToolchains,
+  priced,
+  rowsFor,
+  variationStats,
+} from '../src/pages/benchmark/lib/fan';
+import { levelMarker } from '../src/pages/benchmark/theme';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 import { FAN_SAMPLE } from './fan-sample';
-
-const artifact = (
-  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
-    results: FunctionResult[];
-  }
-).results;
 
 const HASH = '#view=benchmark&tab=fan';
 const NOT_WASTE = 'A losing candidate is not waste.';
@@ -42,10 +52,8 @@ const prose = (s: string) => s.split('`').filter((piece, i) => i % 2 === 0 && pi
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
 const count = (html: string, s: string) => html.split(s).length - 1;
 
-describe.each([
-  ['the committed artifact', artifact],
-  ['the sample', FAN_SAMPLE],
-])('the tab over %s', (_, rows) => {
+describe('the tab', () => {
+  const rows = FAN_SAMPLE;
   const html = renderToStaticMarkup(<FanExplorer rows={rows} hash={HASH} onOpenVariation={noop} />);
 
   test("every registered variation is an entry, with its title and its summary's words", () => {
@@ -89,9 +97,8 @@ describe.each([
 
   test('a variation some fan carried and that never won is listed beside the price chart, not drawn in it', () => {
     const never = html.slice(html.indexOf('Never won, so no price'));
-    const { neverWon } = priced(variationStats(rows));
     const listed = hrefs(never).map((h) => hashToSearchParams(h).get('variation'));
-    expect(listed).toEqual(neverWon.map((s) => s.name));
+    expect(listed).toEqual(levelStats(rows).flatMap((l) => priced(l.stats).neverWon.map((s) => s.name)));
   });
 
   test('a toolchain count, never a project count', () => {
@@ -115,9 +122,7 @@ test('an artifact with no counted fan says so, instead of drawing empty charts',
 
 describe('the cost-against-gain chart', () => {
   test('its key names every kind, in kind order, as page text that wraps', () => {
-    const html = renderToStaticMarkup(
-      <VariationCostGain data={priced(variationStats(FAN_SAMPLE)).neverWon} onPointClick={noop} />,
-    );
+    const html = renderToStaticMarkup(<VariationCostGain series={[]} onPointClick={noop} />);
     const key = html.slice(0, html.indexOf('</ul>'));
     const titles = VARIATION_KINDS.map((k) => VARIATION_KIND_DEFINITIONS[k].title);
     expect(titles.map((t) => key.indexOf(`>${t}</li>`))).toEqual(
@@ -135,10 +140,8 @@ describe('the cost-against-gain chart', () => {
 });
 
 describe('the variation drawer', () => {
-  test.each([
-    ['the committed artifact', artifact],
-    ['the sample', FAN_SAMPLE],
-  ])('renders every registered variation over %s, and every row link opens its row', (_, rows) => {
+  test('renders every registered variation, and every row link opens its row', () => {
+    const rows = FAN_SAMPLE;
     for (const { name } of VARIATION_TOKENS) {
       const html = renderToStaticMarkup(
         <VariationDetailBody name={name} rows={rows} hash={HASH} onClose={noop} onOpenVariation={noop} />,
@@ -230,5 +233,92 @@ describe('the variation drawer', () => {
       .filter((p) => p.has('variation'));
     expect(seeAlso.map((p) => p.get('variation'))).toEqual([...(def.seeAlso ?? [])]);
     expect(seeAlso.every((p) => p.get('tab') === 'explorer' && p.get('fn') === 'sa3:sub_803213C:agbcc')).toBe(true);
+  });
+});
+
+describe('priced per optimisation level', () => {
+  const levels = levelStats(FAN_SAMPLE);
+  const html = renderToStaticMarkup(<FanExplorer rows={FAN_SAMPLE} hash={HASH} onOpenVariation={noop} />);
+
+  test('the sample spans two levels, one of them spelled alike by two families', () => {
+    expect(levels.map((l) => l.level)).toEqual(['-O2', '-O1']);
+    expect(levels.map((l) => l.toolchainRows.length)).toEqual([2, 1]);
+  });
+
+  test('every catalogue entry carries one line per level whose fans carried it', () => {
+    for (const { name } of VARIATION_TOKENS) {
+      for (const l of levels) {
+        const s = l.stats.get(name)!;
+        expect(html.includes(`<li>${escaped(levelLine(l.level, s))}</li>`), `${name} ${l.level}`).toBe(s.rows > 0);
+      }
+    }
+    expect(html).toContain('<li>-O1 · 1 toolchain · 1 win over 1 row · 8 candidates per win</li>');
+  });
+
+  test('one level button per level, pressed, marked with the shape its bubbles take', () => {
+    const buttons = [...html.matchAll(/<button aria-pressed="(true|false)"[^>]*>(.*?)<\/button>/g)];
+    expect(buttons.map((b) => b[1])).toEqual(['true', 'true']);
+    levels.forEach((l, rank) => expect(buttons[rank][2]).toContain(`${levelMarker(rank).glyph} ${l.level}`));
+    // a level shared by few compilers names them, with their rows
+    levels.forEach((l, rank) => expect(buttons[rank][2]).toContain(levelToolchains(l)));
+    expect(levelToolchains(levels[0])).toMatch(/^[\w.]+ ×\d+, [\w.]+ ×\d+$/);
+  });
+
+  test('the cost chart draws one series per level, a bubble per variation that level carried', () => {
+    const series = levels.map((l, rank) => {
+      const p = priced(l.stats);
+      return { level: l.level, marker: levelMarker(rank), variations: [...p.won, ...p.neverWon] };
+    });
+    const drawn = (costGainOption(series).series as { name: string; symbol?: string; data: unknown[] }[]).filter(
+      (s) => s.name !== 'names',
+    );
+    expect(drawn.map((s) => s.name)).toEqual(['-O2', '-O1']);
+    expect(drawn.map((s) => s.data.length)).toEqual(series.map((s) => s.variations.length));
+    expect(new Set(drawn.map((s) => s.symbol)).size).toBe(2);
+  });
+
+  test('the price chart draws one bar series per level, a bar only where that level won', () => {
+    const prices = levels.map((l) => ({ level: l.level, won: priced(l.stats).won }));
+    const names = dearestFirst(prices);
+    const bars = pricePerWinOption(prices, names).series as { name: string; data: unknown[] }[];
+    expect(bars.map((b) => b.name)).toEqual(['-O2', '-O1']);
+    bars.forEach((b, i) => {
+      expect(b.data.length).toBe(names.length);
+      expect(b.data.filter((d) => d !== '-').length).toBe(prices[i].won.length);
+    });
+    expect(new Set(names)).toEqual(new Set(prices.flatMap((p) => p.won.map((v) => v.name))));
+    // a bar says what its price stands on
+    const label = (bars[0] as unknown as { label: { formatter: (p: { dataIndex: number }) => string } }).label;
+    const first = names.findIndex((n) => prices[0].won.some((v) => v.name === n));
+    expect(label.formatter({ dataIndex: first })).toMatch(/^-O2 [\d,]+ · \d+ wins? \/ \d+ rows?$/);
+    // a narrow chart labels the price alone and gives the bars the width
+    const narrow = pricePerWinOption(prices, names, true);
+    const narrowLabel = (
+      narrow.series as unknown as { label: { formatter: (p: { dataIndex: number }) => string } }[]
+    )[0].label;
+    expect(narrowLabel.formatter({ dataIndex: first })).toMatch(/^-O2 [\d,]+$/);
+    expect((narrow.grid as { right: number }).right).toBeLessThan(
+      (pricePerWinOption(prices, names).grid as { right: number }).right,
+    );
+  });
+
+  test('the drawer prices each level over its own rows, and every listed row shows its level', () => {
+    const drawer = renderToStaticMarkup(
+      <VariationDetailBody name="signed" rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
+    ).replaceAll('<!-- -->', '');
+    const table = drawer.slice(drawer.indexOf('Per optimisation level'), drawer.indexOf('</table>'));
+    for (const l of levels) {
+      const s = l.stats.get('signed')!;
+      const price = s.winners === 0 ? 'no win' : Math.round(s.candidates / s.winners).toLocaleString();
+      expect(table).toContain(
+        `<td class="py-1 pr-3 text-left">${l.level}</td><td class="px-2 py-1">${s.rows}</td><td class="px-2 py-1">${s.toolchains}</td><td class="px-2 py-1">${s.winners}</td>`,
+      );
+      expect(table).toContain(`<td class="py-1 pl-2">${price}</td>`);
+    }
+    for (const { row } of rowsFor(FAN_SAMPLE, 'signed')) {
+      expect(drawer, row.id).toContain(`${row.toolchain} · ${fanLevel(row)}`);
+    }
+    const { compiler } = VARIATION_DEFINITIONS.signed.example;
+    expect(drawer).toContain(shellJoinFlags(TOOLCHAIN_TARGETS[EXAMPLE_COMPILER_TOOLCHAINS[compiler]].canonicalFlags));
   });
 });
