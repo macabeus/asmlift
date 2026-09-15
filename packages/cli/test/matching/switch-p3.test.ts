@@ -7,7 +7,7 @@
 import { parseAsmData, readJumpTable, textRelocAt } from '@asmlift/core/frontend/asmdata';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   compileMipsGccTarget,
   compileMipsTarget,
@@ -99,15 +99,15 @@ SYMBOL TABLE:
 describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switch', () => {
   test('8-case dense switch scores 0 with the AsmData side-table', () => {
     const c = dense(8);
-    const { obj, asm } = compileMipsTarget(c, 'sw_jt');
+    const { obj, asm } = compileMipsTarget(c, 'sw_jt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     const asmData = extractMipsAsmData(obj, IDO_TOOLCHAIN.objdump);
     const src = decompile('sw_jt', asm, MIPS_IDO, { asmData }).source;
     expect(src).toContain('switch (');
-    expect(scoreCMips(src, 'sw_jt', obj).score).toBe(0);
+    expect(scoreCMips(src, 'sw_jt', obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags).score).toBe(0);
   });
 
   test('fail-closed: WITHOUT the side-table the same dispatch loud-fails (jr not a return)', () => {
-    const { asm } = compileMipsTarget(dense(8), 'sw_jt');
+    const { asm } = compileMipsTarget(dense(8), 'sw_jt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     expect(() => decompile('sw_jt', asm, MIPS_IDO)).toThrow(FrontendUnsupportedError);
   });
 
@@ -133,11 +133,11 @@ const HAVE_DOCKER = dockerGate('switch-p3');
 describe.runIf(HAVE_DOCKER)('P3 KMC-GCC/MIPS — dense jump-table switch recovers (absolute R_MIPS_32 table)', () => {
   test('8-case dense switch scores 0', () => {
     const c = dense(8);
-    const { obj, asm } = compileMipsGccTarget(c, 'sw_jt');
+    const { obj, asm } = compileMipsGccTarget(c, 'sw_jt', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
     const asmData = extractMipsAsmData(obj, GCC_KMC_TOOLCHAIN.objdump);
     const src = decompile('sw_jt', asm, MIPS_GCC, { asmData }).source;
     expect(src).toContain('switch (');
-    expect(scoreCMipsGcc(src, 'sw_jt', obj).score).toBe(0);
+    expect(scoreCMipsGcc(src, 'sw_jt', obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags).score).toBe(0);
   });
 });
 
@@ -145,15 +145,15 @@ const HAVE_PPC = ppcDockerGate('switch-p3');
 describe.runIf(HAVE_PPC)('P3 mwcc/PPC — dense jump-table switch recovers (R_PPC_ADDR32 table in .data)', () => {
   test('8-case dense switch scores 0', () => {
     const c = dense(8);
-    const { obj, asm } = compilePpcTarget(c, 'sw_jt');
+    const { obj, asm } = compilePpcTarget(c, 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
     const asmData = extractPpcAsmData(obj);
     const src = decompile('sw_jt', asm, PPC_MWCC, { asmData }).source;
     expect(src).toContain('switch (');
-    expect(scoreCPpc(src, 'sw_jt', obj).score).toBe(0);
+    expect(scoreCPpc(src, 'sw_jt', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).score).toBe(0);
   });
 
   test('fail-closed: WITHOUT the side-table the bctr dispatch loud-fails', () => {
-    const { asm } = compilePpcTarget(dense(8), 'sw_jt');
+    const { asm } = compilePpcTarget(dense(8), 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
     expect(() => decompile('sw_jt', asm, PPC_MWCC)).toThrow();
   });
 });

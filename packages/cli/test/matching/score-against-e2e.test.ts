@@ -16,7 +16,7 @@ import { runCli } from '../../src/main';
 const REFERENCE_C = 'unsigned ushr(unsigned x){ return x >> 1; }';
 
 function fixture() {
-  const asm = compileTargetAsm(REFERENCE_C);
+  const asm = compileTargetAsm(REFERENCE_C, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-sae2e-'));
   const asmPath = join(dir, 'ushr.s');

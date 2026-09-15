@@ -12,7 +12,7 @@ import { decompileWithReport } from '../../src/report';
 const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 test('M5: report captures stages, a scored pattern event, candidates, and the score', () => {
-  const asm = compileTargetAsm('int half(int x){ return x / 2; }');
+  const asm = compileTargetAsm('int half(int x){ return x / 2; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
   const { report } = decompileWithReport('half', asm, AGBCC, { patterns: [SDIV_POW2_2], targetObj: obj });
 
@@ -59,7 +59,7 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
 });
 
 test('M5: report is JSON-serializable (consumable by agent + webapp)', () => {
-  const asm = compileTargetAsm('int half(int x){ return x / 2; }');
+  const asm = compileTargetAsm('int half(int x){ return x / 2; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const { report } = decompileWithReport('half', asm, AGBCC, { patterns: [SDIV_POW2_2] });
   const round = JSON.parse(JSON.stringify(report));
   expect(round.symbol).toBe('half');

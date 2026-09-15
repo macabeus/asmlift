@@ -34,7 +34,7 @@
 import { renderDeclarations } from '@asmlift/core/declare';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { join } from 'node:path';
@@ -95,7 +95,7 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
   const ranked = new Map<string, Ranked>();
 
   const rank = (src: string): Ranked => {
-    const targetAsm = compileTargetAsm(DECLS + src);
+    const targetAsm = compileTargetAsm(DECLS + src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const obj = assembleTarget(targetAsm);
     // the ROM-disassembly form asmlift's frontend reads: the container is an absolute pool word,
     // which is what makes the symbol map the authority on what it is.
@@ -109,7 +109,7 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
       // the per-candidate declaration block the CLI's scorer prepends (cli/src/rank.ts
       // `declarationsOf`) — a candidate names the map's symbols and does not declare them itself.
       const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
-      const s = scoreC(decls + c.source, 'f', obj);
+      const s = scoreC(decls + c.source, 'f', obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (s.score < best.score) {
         best = { variations: c.variations, score: s.score, fan: best.fan };
       }

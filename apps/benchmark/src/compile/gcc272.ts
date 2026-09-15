@@ -3,6 +3,7 @@
 // situation: the published binary is `decompals/mips-gcc-2.7.2`, so the .c/.i compiles inside a
 // linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
 // is disassembled + scored with the native host binutils/objdiff.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +17,7 @@ import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './ut
 /** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
   try {
-    gcc272Compile(dir, iName, oName);
+    gcc272Compile(dir, iName, oName, TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
   } catch (e) {
     throw new Error(`gcc 2.7.2 failed: ${compilerDiagnostics((e as Error).message)}`);
   }

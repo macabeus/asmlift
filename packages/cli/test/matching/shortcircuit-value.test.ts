@@ -5,14 +5,14 @@
 // printed `a != 0 && b != 0` — which recompiles to the exact diamond. Scored byte-exact on agbcc
 // through the differ-ranked path.
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
 
 const run = (sym: string, src: string) => {
-  const asm = compileTargetAsm(src);
+  const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   return { r: decompile(sym, asm, ARMV4T_AGBCC), rk: decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm)) };
 };
 

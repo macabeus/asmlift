@@ -6,7 +6,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { T } from '@asmlift/core/ir/types';
 import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileMipsTarget, compileTargetAsm, scoreC, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -25,16 +25,21 @@ describe('P1 match — a recovered `switch` recompiles byte-exact', () => {
   for (const [sym, c] of Object.entries(SW)) {
     const opts = sym === 'sw_void' ? voidOpts : {};
     test(`${sym} — ARM (agbcc) scores 0 and emits a switch`, () => {
-      const obj = assembleTarget(compileTargetAsm(c));
-      const src = decompile(sym, compileTargetAsm(c), ARMV4T_AGBCC, opts).source;
+      const obj = assembleTarget(compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
+      const src = decompile(
+        sym,
+        compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+        ARMV4T_AGBCC,
+        opts,
+      ).source;
       expect(src).toContain('switch (');
-      expect(scoreC(src, sym, obj).score).toBe(0);
+      expect(scoreC(src, sym, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
     });
     test(`${sym} — MIPS (IDO) scores 0 and emits a switch`, () => {
-      const { asm, obj } = compileMipsTarget(c, sym);
+      const { asm, obj } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const src = decompile(sym, asm, MIPS_IDO, opts).source;
       expect(src).toContain('switch (');
-      expect(scoreCMips(src, sym, obj).score).toBe(0);
+      expect(scoreCMips(src, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags).score).toBe(0);
     });
   }
 });
@@ -44,7 +49,7 @@ describe('P1 decline — ambiguous shapes fall back to nested-if (sound, never a
   // silently repoints the fall-through. Declines to behaviourally-identical nested-if (a clean nonmatch).
   test('sw_fall (fall-through) declines — no switch emitted', () => {
     const c = 'int sw_fall(int x){ int r=0; switch(x){case 3:r++;case 2:r++;case 1:r++;} return r; }';
-    const { asm } = compileMipsTarget(c, 'sw_fall');
+    const { asm } = compileMipsTarget(c, 'sw_fall', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     const src = decompile('sw_fall', asm, MIPS_IDO).source;
     expect(src).not.toContain('switch ('); // declined
   });
@@ -53,7 +58,7 @@ describe('P1 decline — ambiguous shapes fall back to nested-if (sound, never a
   // recognizer declines at the root and the chain stays nested-if.
   test('an if-chain testing a==b (non-constant) stays nested-if', () => {
     const c = 'int f(int a,int b){ if(a==b) return 1; if(a==0) return 2; return 3; }';
-    const { asm } = compileMipsTarget(c, 'f');
+    const { asm } = compileMipsTarget(c, 'f', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     const src = decompile('f', asm, MIPS_IDO).source;
     expect(src).not.toContain('switch (');
   });
@@ -61,7 +66,7 @@ describe('P1 decline — ambiguous shapes fall back to nested-if (sound, never a
   // A single comparison (one case) is below the ≥2-case floor — stays an `if`.
   test('a single equality test stays an if (below the 2-case floor)', () => {
     const c = 'int f(int x){ if(x==5) return 1; return 0; }';
-    const { asm } = compileMipsTarget(c, 'f');
+    const { asm } = compileMipsTarget(c, 'f', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     const src = decompile('f', asm, MIPS_IDO).source;
     expect(src).not.toContain('switch (');
   });
@@ -116,7 +121,7 @@ describe('P1 decline — ambiguous shapes fall back to nested-if (sound, never a
   test('IDO: a != rooted if-else chain stays nested-if (no mis-recognized switch)', () => {
     const c =
       'int g1(int x){ if(x!=0){ if(x!=1){ if(x==2) return 30; else return 40; } else return 20; } else return 10; }';
-    const { asm } = compileMipsTarget(c, 'g1');
+    const { asm } = compileMipsTarget(c, 'g1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     const src = decompile('g1', asm, MIPS_IDO).source;
     expect(src).not.toContain('switch (');
   });

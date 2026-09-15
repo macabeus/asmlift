@@ -2,6 +2,7 @@
 // inside the linux/386 container via the pooled helper score.ts uses (a one-shot shell command
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
 // compiler — the registry built-in serves candidate scoring).
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,7 +16,7 @@ import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './ut
 /** .i → pooled docker KMC gcc → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
   try {
-    kmcCompile(dir, iName, oName);
+    kmcCompile(dir, iName, oName, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
   } catch (e) {
     throw new Error(`kmc gcc failed: ${compilerDiagnostics((e as Error).message)}`);
   }

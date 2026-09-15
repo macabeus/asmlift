@@ -15,7 +15,7 @@
 //  • ROLLED SELF-LOOPS — a guard + do-while un-rotates to `while`, and (coalesceLoopInit) the
 //    induction variable stays in its argument register, matching IDO's allocation exactly.
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { compileMipsTarget, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -87,10 +87,10 @@ const CASES: { sym: string; c: string; expect: string }[] = [
 describe('MIPS (IDO) control flow: compile → disasm → decompile → recompile → objdiff', () => {
   for (const { sym, c, expect: golden } of CASES) {
     test(`${sym}`, () => {
-      const { obj, asm } = compileMipsTarget(c, sym);
+      const { obj, asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_IDO);
       expect(r.source).toBe(golden);
-      const s = scoreCMips(r.source, sym, obj);
+      const s = scoreCMips(r.source, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('L1 IR:\n' + r.ir.raw);
@@ -108,7 +108,11 @@ describe('MIPS (IDO) control flow: compile → disasm → decompile → recompil
 // selects the matching type on MIPS.
 describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compiler (F1)', () => {
   test('the differ picks the unsigned candidate for `x >> 1` on MIPS/IDO', () => {
-    const { obj, asm } = compileMipsTarget('unsigned ushr(unsigned x){ return x >> 1; }', 'ushr');
+    const { obj, asm } = compileMipsTarget(
+      'unsigned ushr(unsigned x){ return x >> 1; }',
+      'ushr',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
     const ranked = decompileRanked('ushr', asm, MIPS_IDO, obj);
     expect(joinVariations(ranked.winner.variations)).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
     expect(ranked.winner.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc

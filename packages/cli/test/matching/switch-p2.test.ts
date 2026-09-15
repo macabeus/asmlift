@@ -6,7 +6,7 @@ import { type Block, type Fn, mkOp, mkValue } from '@asmlift/core/ir/core';
 import { T } from '@asmlift/core/ir/types';
 import { VerifyError, verify } from '@asmlift/core/ir/verify';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -18,17 +18,31 @@ const dense = (n: number) => {
 describe('P2 match — agbcc jump-table dispatch recovers to a matching switch', () => {
   test('8-case dense switch scores 0 and emits a switch', () => {
     const c = dense(8);
-    const src = decompile('sw_jt', compileTargetAsm(c), ARMV4T_AGBCC).source;
+    const src = decompile('sw_jt', compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags), ARMV4T_AGBCC).source;
     expect(src).toContain('switch (');
     expect(src).toContain('case 7:');
-    expect(scoreC(src, 'sw_jt', assembleTarget(compileTargetAsm(c))).score).toBe(0);
+    expect(
+      scoreC(
+        src,
+        'sw_jt',
+        assembleTarget(compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags)),
+        TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+      ).score,
+    ).toBe(0);
   });
 
   test('12-case dense switch scores 0', () => {
     const c = dense(12);
-    const src = decompile('sw_jt', compileTargetAsm(c), ARMV4T_AGBCC).source;
+    const src = decompile('sw_jt', compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags), ARMV4T_AGBCC).source;
     expect(src).toContain('switch (');
-    expect(scoreC(src, 'sw_jt', assembleTarget(compileTargetAsm(c))).score).toBe(0);
+    expect(
+      scoreC(
+        src,
+        'sw_jt',
+        assembleTarget(compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags)),
+        TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+      ).score,
+    ).toBe(0);
   });
 });
 

@@ -13,7 +13,7 @@
 // so the recompile has no spill. Hence these tests pin the emitted source only, no objdiff score;
 // closing the gap is narrow-parameter recovery, not B2.
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -33,7 +33,7 @@ const CASES = [
 describe('B2: sp-relative home-slot spill is not a store through a pointer', () => {
   for (const { sym, c, expect: golden } of CASES) {
     test(`${sym} — no spurious pointer param, spill drops`, () => {
-      const { asm } = compileMipsTarget(c, sym);
+      const { asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_IDO);
       // The exact emitted C: one scalar arg, no `sp` pointer, no phantom store.
       expect(r.source).toBe(golden);
@@ -58,7 +58,7 @@ describe('B2: sp-relative home-slot spill is not a store through a pointer', () 
   ];
   for (const { sym, c, sig } of FRAMED) {
     test(`${sym} — framed leaf recovers exact signature, no phantom sp param`, () => {
-      const { asm } = compileMipsTarget(c, sym);
+      const { asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       expect(/addiu\s+sp,sp,-/.test(asm)).toBe(true); // the fixture really allocates a frame
       const r = decompile(sym, asm, MIPS_IDO);
       expect(r.source.startsWith(sig)).toBe(true); // exact params — no leading `sp` pointer
@@ -73,7 +73,7 @@ describe('B2: sp-relative home-slot spill is not a store through a pointer', () 
   // first — either loud-fail satisfies the invariant, hence the message alternation below.
   test('word-store / sub-word-reload of same sp slot loud-fails (no silent miscompile)', () => {
     const c = 'int unionbyte(int a){ union { int i; char c[4]; } u; u.i = a; return u.c[0]; }';
-    const { asm } = compileMipsTarget(c, 'unionbyte');
+    const { asm } = compileMipsTarget(c, 'unionbyte', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     expect(() => decompile('unionbyte', asm, MIPS_IDO)).toThrow(
       /overlapping fields|unions not modelled|stack pointer used as data/,
     );

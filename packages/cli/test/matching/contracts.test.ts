@@ -53,7 +53,11 @@ describe('structuring boundary — assertResolved', () => {
 });
 
 describe('all three entry paths run the contracts in production (no false positive)', () => {
-  const { obj, asm } = compileMipsTarget('int cf(int x){ return x + 1; }', 'cf');
+  const { obj, asm } = compileMipsTarget(
+    'int cf(int x){ return x + 1; }',
+    'cf',
+    TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+  );
   test('decompile', () => {
     expect(() => decompile('cf', asm, MIPS_IDO)).not.toThrow();
   });

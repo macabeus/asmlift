@@ -6,7 +6,7 @@ import { type Block, type Fn, mkOp, mkValue } from '@asmlift/core/ir/core';
 import { T } from '@asmlift/core/ir/types';
 import { decompile } from '@asmlift/core/pipeline';
 import { StructureError, structure } from '@asmlift/core/structure/structure';
-import { ARMV4T_AGBCC, MIPS_IDO } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -20,6 +20,7 @@ describe('P0-a — Thumb computed-PC writes loud-fail; return-form PC writes sti
     const asm = compileTargetAsm(
       'int sw_big(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;' +
         'case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const src = decompile('sw_big', asm, ARMV4T_AGBCC).source;
     expect(src).toContain('switch (');
@@ -88,6 +89,7 @@ describe('P0-c — a dangling branch target loud-fails cleanly, not as an intern
       'int sw_big(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;' +
         'case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }',
       'sw_big',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
     );
     expect(() => decompile('sw_big', asm, MIPS_IDO)).toThrow(/indirect jump|jump tables/);
   });

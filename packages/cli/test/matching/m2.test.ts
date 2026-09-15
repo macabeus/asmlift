@@ -13,14 +13,14 @@
 // (m3.test.ts, division).
 import { SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
 
 const REFERENCE_C = 'int half(int x){ return x / 2; }';
 
 test('M2: the sdiv-pow2 pattern moves the objdiff score to 0', () => {
-  const targetAsm = compileTargetAsm(REFERENCE_C);
+  const targetAsm = compileTargetAsm(REFERENCE_C, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const targetObj = assembleTarget(targetAsm);
 
   // `patterns: []` explicitly opts out of the default idiom bundle to show the naive baseline;
@@ -28,8 +28,8 @@ test('M2: the sdiv-pow2 pattern moves the objdiff score to 0', () => {
   const without = decompile('half', targetAsm, ARMV4T_AGBCC, { patterns: [] });
   const withPat = decompile('half', targetAsm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2] });
 
-  const sWithout = scoreC(without.source, 'half', targetObj);
-  const sWith = scoreC(withPat.source, 'half', targetObj);
+  const sWithout = scoreC(without.source, 'half', targetObj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  const sWith = scoreC(withPat.source, 'half', targetObj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
   console.log('without pattern:', without.source.trim(), '→ score', sWithout.score);
   console.log('with pattern:   ', withPat.source.trim(), '→ score', sWith.score);

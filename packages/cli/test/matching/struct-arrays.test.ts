@@ -5,7 +5,7 @@
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/scoreC use real agbcc).
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -48,7 +48,7 @@ void set_hp(struct Ent *arr, int i, int v){ arr[i].hp = v; }`,
 describe('array-of-struct recovery — real agbcc, byte-exact, through decompile()', () => {
   for (const { name, c, returnsVoid, expect: golden } of CASES) {
     test(`${name}`, () => {
-      const asm = compileTargetAsm(c);
+      const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const res = decompile(
         name,
         asm,
@@ -56,7 +56,7 @@ describe('array-of-struct recovery — real agbcc, byte-exact, through decompile
         returnsVoid ? { prototypes: { [name]: { returnsVoid: true } } } : {},
       );
       expect(res.source).toBe(golden); // the named-field array-of-struct access, recovered in production
-      const s = scoreC(res.source, name, assembleTarget(asm));
+      const s = scoreC(res.source, name, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${name}:\n${res.source}`, JSON.stringify(s));
       }
@@ -72,9 +72,9 @@ describe('array-of-struct recovery — real agbcc, byte-exact, through decompile
 test('self-referential element store stays byte-exact (the pass declines, the walk spelling matches)', () => {
   const c = `struct E { int f; int self; };
 void selfref(struct E *arr, int i){ arr[i].self = (int)&arr[i]; }`;
-  const asm = compileTargetAsm(c);
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const res = decompile('selfref', asm, ARMV4T_AGBCC, { prototypes: { selfref: { returnsVoid: true } } });
   expect(res.source).not.toContain('Elem'); // the recovery declined this shape
-  const s = scoreC(res.source, 'selfref', assembleTarget(asm));
+  const s = scoreC(res.source, 'selfref', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   expect(s.match).toBe(true); // and the walk spelling still matches, as before the wiring
 });

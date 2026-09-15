@@ -19,7 +19,7 @@
 import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget, scoreCMips, scorePascalMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -81,10 +81,10 @@ const C_CASES: { sym: string; c: string; proto?: Prototypes; expect: string }[] 
 describe('MIPS (IDO) memory — C: compile → disasm → decompile → recompile → objdiff', () => {
   for (const { sym, c, proto, expect: golden } of C_CASES) {
     test(`${sym}`, () => {
-      const { obj, asm } = compileMipsTarget(c, sym);
+      const { obj, asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const r = decompile(sym, asm, MIPS_IDO, { prototypes: proto });
       expect(r.source).toBe(golden);
-      const s = scoreCMips(r.source, sym, obj);
+      const s = scoreCMips(r.source, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -99,10 +99,14 @@ describe('MIPS (IDO) memory — C: compile → disasm → decompile → recompil
 describe('MIPS (IDO) memory — Pascal: decompile → upas recompile → objdiff', () => {
   test('mderefp', () => {
     const sym = 'mderefp';
-    const { obj, asm } = compileMipsTarget('int mderefp(int *p){ return *p; }', sym);
+    const { obj, asm } = compileMipsTarget(
+      'int mderefp(int *p){ return *p; }',
+      sym,
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
     const p = decompile(sym, asm, MIPS_IDO, { backend: pascalBackend }).source;
     expect(p).toBe('function mderefp(a0: ^Integer): Integer;\nbegin\n  mderefp := a0^;\nend;\n');
-    const s = scorePascalMips(p, sym, obj);
+    const s = scorePascalMips(p, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     if (!s.match) {
       console.log(`emitted Pascal for ${sym}:\n${p}`);
       console.log('objdiff:', JSON.stringify(s));

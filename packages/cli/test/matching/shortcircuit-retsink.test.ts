@@ -22,7 +22,7 @@
 //
 // All scored byte-exact on agbcc.
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -30,9 +30,9 @@ import { describe, expect, test } from 'vitest';
 import { decompileRanked } from '../../src/rank';
 
 const match = (sym: string, src: string) => {
-  const asm = compileTargetAsm(src);
+  const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const r = decompile(sym, asm, ARMV4T_AGBCC);
-  return { src: r.source, sc: scoreC(r.source, sym, assembleTarget(asm)) };
+  return { src: r.source, sc: scoreC(r.source, sym, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags) };
 };
 
 describe('F-CFG return-sinking: && short-circuit returns match byte-exact', () => {
@@ -77,7 +77,7 @@ describe('F-CFG return-sinking gate: simple value-selects are NOT sunk (kept as 
   // `decompile` emits the if/else merge variable and scores 4 — it is the `/defsite` candidate
   // (`v0 = 0; if (…) v0 = 1;`) that is byte-exact, both before this gate existed and after.
   test('lor (return a || b) keeps its match — a value-merge, not a two-armed diamond', () => {
-    const asm = compileTargetAsm('int lor(int a, int b){ return a || b; }');
+    const asm = compileTargetAsm('int lor(int a, int b){ return a || b; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const r = decompileRanked('lor', asm, ARMV4T_AGBCC, assembleTarget(asm));
     expect(r.winner.score.match).toBe(true);
     expect(r.winner.source).toContain('v0'); // still the merge variable, not sunk to returns
@@ -97,11 +97,11 @@ describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
     ['selc3', 'int selc3(int x){ if (x > 3) return 5; return 3; }'],
     ['selc4', 'int selc4(int x){ if (x == 0) return 1; return 0; }'],
   ])('%s matches through the ranked fan and is sunk to early returns', (sym, src) => {
-    const asm = compileTargetAsm(src);
+    const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const obj = assembleTarget(asm);
     const unranked = decompile(sym, asm, ARMV4T_AGBCC);
     expect(unranked.source).not.toContain('v0'); // sunk: no merge variable
-    expect(scoreC(unranked.source, sym, obj).match).toBe(false); // …but the wrong sense
+    expect(scoreC(unranked.source, sym, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags).match).toBe(false); // …but the wrong sense
     const r = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(true);

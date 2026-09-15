@@ -39,6 +39,6 @@ for (const v of VARIANTS) {
     `@ cc flags  : ${[...AGBCC_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags].join(' ')}\n` +
     `@ read by   : ${READ_BY}\n`;
   const out = join(CORPUS, v.out);
-  writeFileSync(out, header + compileTargetAsm(c));
+  writeFileSync(out, header + compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
   console.log(`wrote ${out}`);
 }

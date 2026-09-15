@@ -9,7 +9,7 @@
 // Also pins rank.ts↔pipeline.ts SYNC: the ranked path must apply the same passes as `decompile`
 // (default idiom patterns, const-fold, soft-div, return-sinking), or candidates silently
 // under-score.
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -17,7 +17,7 @@ import { describe, expect, test } from 'vitest';
 import { decompileRanked } from '../../src/rank';
 
 const ranked = (sym: string, src: string) => {
-  const asm = compileTargetAsm(src);
+  const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   return decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm));
 };
 

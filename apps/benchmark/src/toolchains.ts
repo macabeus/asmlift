@@ -102,11 +102,13 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'agbcc-s',
     available: () => agbccAvailable(),
     buildTarget: (refC, _sym) => {
-      const asm = compileTargetAsm(refC); // agbcc .s text — asmlift ARM frontend input
+      const asm = compileTargetAsm(refC, TOOLCHAIN_TARGETS.agbcc.canonicalFlags); // agbcc .s text — asmlift ARM frontend input
       const obj = assembleTarget(asm); // assemble that .s → scoring target
       return { obj, asm };
     },
-    score: scoreViaBenchConfig('agbcc', scoreC),
+    score: scoreViaBenchConfig('agbcc', (candC, sym, obj) =>
+      scoreC(candC, sym, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+    ),
   },
   'ido7.1': {
     id: 'ido7.1',
@@ -116,8 +118,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     ...atCanonicalFlags('ido7.1'),
     asmKind: 'objdump',
     available: () => idoAvailable(),
-    buildTarget: (refC, sym) => compileMipsTarget(refC, sym),
-    score: scoreViaBenchConfig('ido7.1', scoreCMips),
+    buildTarget: (refC, sym) => compileMipsTarget(refC, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
+    score: scoreViaBenchConfig('ido7.1', (candC, sym, obj) =>
+      scoreCMips(candC, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
+    ),
   },
   'gcc2.7.2kmc': {
     id: 'gcc2.7.2kmc',
@@ -127,8 +131,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     ...atCanonicalFlags('gcc2.7.2kmc'),
     asmKind: 'objdump',
     available: () => dockerAvailable(),
-    buildTarget: (refC, sym) => compileMipsGccTarget(refC, sym),
-    score: scoreViaBenchConfig('gcc2.7.2kmc', scoreCMipsGcc),
+    buildTarget: (refC, sym) => compileMipsGccTarget(refC, sym, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
+    score: scoreViaBenchConfig('gcc2.7.2kmc', (candC, sym, obj) =>
+      scoreCMipsGcc(candC, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
+    ),
   },
   'gcc2.7.2': {
     id: 'gcc2.7.2',
@@ -138,8 +144,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     ...atCanonicalFlags('gcc2.7.2'),
     asmKind: 'objdump',
     available: () => gcc272Available(),
-    buildTarget: (refC, sym) => compileMipsGcc272Target(refC, sym),
-    score: scoreViaBenchConfig('gcc2.7.2', scoreCMipsGcc),
+    buildTarget: (refC, sym) => compileMipsGcc272Target(refC, sym, TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags),
+    score: scoreViaBenchConfig('gcc2.7.2', (candC, sym, obj) =>
+      scoreCMipsGcc(candC, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
+    ),
   },
   mwcc_242_81: {
     id: 'mwcc_242_81',
@@ -149,8 +157,13 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     ...atCanonicalFlags('mwcc_242_81'),
     asmKind: 'objdump',
     available: () => ppcDockerAvailable(),
-    buildTarget: (refC, sym, lang) => (lang === 'c++' ? compilePpcCppTarget(refC, sym) : compilePpcTarget(refC, sym)),
-    score: scoreViaBenchConfig('mwcc_242_81', scoreCPpc),
+    buildTarget: (refC, sym, lang) =>
+      lang === 'c++'
+        ? compilePpcCppTarget(refC, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags)
+        : compilePpcTarget(refC, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
+    score: scoreViaBenchConfig('mwcc_242_81', (candC, sym, obj) =>
+      scoreCPpc(candC, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
+    ),
   },
 };
 

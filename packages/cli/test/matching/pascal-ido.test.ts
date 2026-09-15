@@ -12,7 +12,7 @@ import { T } from '@asmlift/core/ir/types';
 import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
-import { MIPS_IDO } from '@asmlift/core/target';
+import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { compileMipsTarget, scorePascalMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -54,10 +54,10 @@ const CASES: { sym: string; c: string; expect: string }[] = [
 describe('IDO Pascal backend (MIPS): decompile → upas recompile → objdiff', () => {
   for (const { sym, c, expect: golden } of CASES) {
     test(`${sym}`, () => {
-      const { obj, asm } = compileMipsTarget(c, sym);
+      const { obj, asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       const p = decompile(sym, asm, MIPS_IDO, { backend: pascalBackend }).source;
       expect(p).toBe(golden);
-      const s = scorePascalMips(p, sym, obj);
+      const s = scorePascalMips(p, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
       if (!s.match) {
         console.log(`emitted Pascal for ${sym}:\n${p}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -92,7 +92,7 @@ test('Pascal backend fails loud on signed remainder (no faithful `mod` spelling)
 // `else`, which `upas` rejects — a separate gap, and one the recompile fails LOUD on.
 test('a comparison enumerates for Pascal: the unspellable candidates drop, the row survives', () => {
   const c = 'int lt(int a, int b){ if (a < b) { return 1; } return 0; }';
-  const { asm } = compileMipsTarget(c, 'lt');
+  const { asm } = compileMipsTarget(c, 'lt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
   const candidates = enumerateCandidates('lt', asm, MIPS_IDO, { backend: pascalBackend });
   expect(candidates.length).toBeGreaterThan(0);
   // the pin fires only where a param is declared unsigned, so the surviving spellings are signed —
@@ -115,7 +115,7 @@ test('a fall-through switch comes back as the if-recovery for Pascal, not as a s
   // One arm falling into the next, between two closed ones (the `sw_fallmid` row, MATCH on
   // ido7.1), is.
   const c = 'void swf(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p+=2;case 2:*p+=3;break;case 3:*p=7;} }';
-  const { asm } = compileMipsTarget(c, 'swf');
+  const { asm } = compileMipsTarget(c, 'swf', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
   const prototypes = { swf: { params: 2, returnsVoid: true } };
   // THE CONTROL: the same assembly, for C, is one `switch` whose `case 1` runs on into `case 2`
   // with no `break;` between them.

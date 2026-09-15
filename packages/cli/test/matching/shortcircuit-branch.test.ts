@@ -9,7 +9,7 @@ import { type Gate, firstRejection, without } from '@asmlift/core/l3/gates';
 import { decompile } from '@asmlift/core/pipeline';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
-import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import {
   assembleTarget,
@@ -33,7 +33,7 @@ const src = (op: string) =>
   `int f(int a, int b, int *p, int *q){ if (a ${op} b) { ${ARM} } else { p[0] = -1; } return p[1]; }`;
 
 const ranked = (c: string) => {
-  const asm = compileTargetAsm(c);
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   return { rk: decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)), target: assembleTarget(asm) };
 };
 
@@ -46,7 +46,7 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.winner.score.match).toBe(true);
     // the dual spelling is byte-identical evidence of the same fact, stated directly
     const dual = `int f(int a, int b, int *p, int *q){ if (a != 0 && b != 0) { ${ARM} } else { p[0] = -1; } return p[1]; }`;
-    expect(scoreC(dual, 'f', target).match).toBe(true);
+    expect(scoreC(dual, 'f', target, TOOLCHAIN_TARGETS.agbcc.canonicalFlags).match).toBe(true);
   });
 
   test('the same shape written `||` matches, so the fold itself is not the defect', () => {
@@ -81,13 +81,14 @@ describe('the emitted orientation decides the match, and only one orientation is
     // for the divergent shape, so a winner assertion would pass with the variation deleted.
     const divergent = compileTargetAsm(
       `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
     expect(dv.candidates.some((c) => hasVariation(c.variations, 'flip-branch'))).toBe(true);
     expect(dv.winner.score.match).toBe(true);
     // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
     // its flipped spelling is a distinct candidate where the divergent-sense variation never fires
-    const reconverging = compileTargetAsm(src('&&'));
+    const reconverging = compileTargetAsm(src('&&'), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
     expect(rc.candidates.some((c) => hasVariation(c.variations, 'flip-branch'))).toBe(false);
     expect(rc.candidates.some((c) => hasVariation(c.variations, 'flip-join'))).toBe(true);
@@ -104,7 +105,7 @@ describe('the emitted orientation decides the match, and only one orientation is
 // shape scores with `negateCondOps`' connective case ablated.
 describe('a three-clause short-circuit chain folds flat', () => {
   const best = (c: string) => {
-    const asm = compileTargetAsm(c);
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
   };
 
@@ -164,7 +165,7 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
   test('`while (i < n && (p[i] || q[i]))` keeps ONE loop with the connective in its condition', () => {
     const c =
       'int f(int*p,int*q,int n,int*o){ int i=0; while (i<n && (p[i]!=0 || q[i]!=0)) i++; o[0]=i; o[2]=q[1]; return i; }';
-    const asm = compileTargetAsm(c);
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
     expect(best.source).toMatch(/while \(v0 < a2 && \(a0\[v0\] != 0 \|\| a1\[v0\] != 0\)\)/);
     expect(best.source.split('do {').length - 1).toBe(1); // no tail-duplicated loop
@@ -184,7 +185,7 @@ describe('an arm that re-reads what its second test loaded', () => {
   const PROTOS = { fnB: { params: 0, returnsVoid: true }, sink: { params: 1, returnsVoid: true } };
   const X = 'extern void fnB(void); extern void sink(s32);\n';
   const best = (c: string, self: { params: number }) => {
-    const asm = compileTargetAsm(X + c);
+    const asm = compileTargetAsm(X + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       prototypes: { f: { ...self, returnsVoid: true }, ...PROTOS },
     }).winner;
@@ -192,7 +193,10 @@ describe('an arm that re-reads what its second test loaded', () => {
 
   test('the compiler fact: an INLINE re-read is one load, a LOCAL is two', () => {
     const loads = (arm: string) =>
-      compileTargetAsm(`void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { ${arm} } }`)
+      compileTargetAsm(
+        `void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { ${arm} } }`,
+        TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+      )
         .split('\n')
         .filter((l) => /ldrb\s+r\d+,\s*\[r\d+,\s*#0x1\]/.test(l)).length;
     expect(loads('p[1] &= 0x80;')).toBe(1);
@@ -301,7 +305,7 @@ describe('an arm that re-reads what its second test loaded', () => {
     const run = entry.run;
     const seen: { refused: boolean; local: boolean }[] = [];
     for (const c of cases) {
-      const asm = compileTargetAsm(X + H + c);
+      const asm = compileTargetAsm(X + H + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const verdicts: (string | null)[] = [];
       // First in the table and never refusing: it records the FULL table's verdict at each site.
       const probe: Gate<ArmRereadSite> = {
@@ -365,18 +369,28 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
   ];
   const X = 'extern void fnB(void);\n';
   const cases: [string, boolean, (c: string) => string, RegExp][] = [
-    ['ido7.1', idoAvailable(), (c) => compileMipsTarget(c, 'f').asm, /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/],
+    [
+      'ido7.1',
+      idoAvailable(),
+      (c) => compileMipsTarget(c, 'f', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags).asm,
+      /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/,
+    ],
     [
       'gcc2.7.2kmc',
       dockerGate('reread-kmc'),
-      (c) => compileMipsGccTarget(c, 'f').asm,
+      (c) => compileMipsGccTarget(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags).asm,
       /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/,
     ],
-    ['gcc2.7.2', gcc272Available(), (c) => compileMipsGcc272Target(c, 'f').asm, /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/],
+    [
+      'gcc2.7.2',
+      gcc272Available(),
+      (c) => compileMipsGcc272Target(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags).asm,
+      /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/,
+    ],
     [
       'mwcc_242_81',
       ppcDockerGate('reread-mwcc'),
-      (c) => compilePpcTarget(c, 'f').asm,
+      (c) => compilePpcTarget(c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).asm,
       /\blbz\s+r\d+,\s*(0x)?1\(r\d+\)/,
     ],
   ];
@@ -400,7 +414,7 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
     const c =
       'extern void fnA(void); extern void fnB(void);\n' +
       'void f(u8 *p, s32 a){ if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB(); }';
-    const { asm, obj } = compilePpcTarget(c, 'f');
+    const { asm, obj } = compilePpcTarget(c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
     const r = decompile('f', asm, PPC_MWCC, {
       prototypes: {
         f: { params: 2, returnsVoid: true },
@@ -409,6 +423,6 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
       },
     });
     expect(r.source).toContain('&&');
-    expect(scoreCPpc(r.source, 'f', obj).match).toBe(true);
+    expect(scoreCPpc(r.source, 'f', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).match).toBe(true);
   });
 });

@@ -10,12 +10,15 @@ import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, TargetDescription } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, TargetDescription } from '@asmlift/core/target';
 import { compileTargetAsm } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
 
 test('M4a: one L3 AST → two languages (C and Pascal)', () => {
-  const asm = compileTargetAsm('int clamp0(int x){ if (x < 0) return 0; return x; }');
+  const asm = compileTargetAsm(
+    'int clamp0(int x){ if (x < 0) return 0; return x; }',
+    TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+  );
   const c = decompile('clamp0', asm, ARMV4T_AGBCC, { backend: cBackend }).source;
   const p = decompile('clamp0', asm, ARMV4T_AGBCC, { backend: pascalBackend }).source;
   console.log('C:\n' + c + '\nPascal:\n' + p);
@@ -31,7 +34,7 @@ test('M4a: one L3 AST → two languages (C and Pascal)', () => {
 });
 
 test('M4a: the neutral `/` node lowers to C `/` and Pascal `div`', () => {
-  const asm = compileTargetAsm('int half(int x){ return x / 2; }');
+  const asm = compileTargetAsm('int half(int x){ return x / 2; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const c = decompile('half', asm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2], backend: cBackend }).source;
   const p = decompile('half', asm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2], backend: pascalBackend }).source;
   expect(c).toContain('a0 / 2');
@@ -39,7 +42,7 @@ test('M4a: the neutral `/` node lowers to C `/` and Pascal `div`', () => {
 });
 
 test('M4b: flipping target.compiler changes the output (the compiler field is consumed)', () => {
-  const asm = compileTargetAsm('int half(int x){ return x / 2; }');
+  const asm = compileTargetAsm('int half(int x){ return x / 2; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const folds: TargetDescription = ARMV4T_AGBCC; // compiler: "agbcc"
   const other: TargetDescription = { ...ARMV4T_AGBCC, compiler: 'ido' }; // a compiler the idiom isn't tagged for
 
