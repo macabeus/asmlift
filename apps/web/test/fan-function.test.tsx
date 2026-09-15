@@ -192,10 +192,9 @@ describe('the fan column', () => {
     ['desc', -1],
     ['asc', 1],
   ] as const)('renders in the Explorer table, sorted %s from the URL, chips first', (dirKey, dir) => {
-    const rows = [...FAN_SAMPLE];
     const html = renderToStaticMarkup(
       <NuqsTestingAdapter searchParams={`sort=fan&dir=${dirKey}`}>
-        <Explorer rows={rows} hash="" onOpenInPlayground={noop} onOpenFeature={noop} onOpenVariation={noop} />
+        <Explorer rows={artifact} hash="" onOpenInPlayground={noop} onOpenFeature={noop} onOpenVariation={noop} />
       </NuqsTestingAdapter>,
     );
     expect(html).toContain('>Fan<');
@@ -207,8 +206,8 @@ describe('the fan column', () => {
         sym: /<td class="px-3 py-2 font-mono text-slate-100">([^<]*)<\/td>/.exec(tr)![1],
         chip: /title="([\d,]+) candidates in this row&#x27;s fan">([^<]*)</.exec(tr),
       }));
-    expect(cells.length).toBe(rows.length);
-    const expected = [...rows].sort((a, b) => compareFanChip(a, b, dir));
+    expect(cells.length).toBe(artifact.length);
+    const expected = [...artifact].sort((a, b) => compareFanChip(a, b, dir));
     expect(cells.map((c) => c.sym)).toEqual(expected.map((r) => r.sym));
     expect(cells.map((c) => (c.chip ? Number(c.chip[1].replace(/,/g, '')) : null))).toEqual(expected.map(fanChip));
     expect(cells.filter((c) => c.chip).map((c) => c.chip![2])).toEqual(

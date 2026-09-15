@@ -1,7 +1,8 @@
-// The Fan Explorer tab and its variation drawer as they actually render, over `FAN_SAMPLE`: ranked rows
-// that carry `fanVariations` and their units' flags, at two optimisation levels. apps/web has no DOM, so
-// this is `renderToStaticMarkup`: enough to hold that every entry is on the page with its definition,
-// that every link resolves, that every cost view carries its sentence, and that every price is a level's.
+// The Fan Explorer tab and its variation drawer as they actually render, over the committed artifact
+// and over `FAN_SAMPLE`: ranked rows that carry `fanVariations` and their units' flags, at two
+// optimisation levels. apps/web has no DOM, so this is `renderToStaticMarkup`: enough to hold that every
+// entry is on the page with its definition, that every link resolves, that every cost view carries its
+// sentence, and that every price is a level's.
 import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -14,6 +15,8 @@ import {
 } from '@asmlift/core/variation-definitions';
 import { readerRules } from '@asmlift/core/variation-gates';
 import { VARIATION_KINDS, VARIATION_TOKENS, variationToken } from '@asmlift/core/variation-tokens';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 
@@ -39,6 +42,12 @@ import { levelMarker } from '../src/pages/benchmark/theme';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 import { FAN_SAMPLE } from './fan-sample';
 
+const artifact = (
+  JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
+    results: FunctionResult[];
+  }
+).results;
+
 const HASH = '#view=benchmark&tab=fan';
 const NOT_WASTE = 'A losing candidate is not waste.';
 const NO_FAN = 'No fan in this artifact was counted, so there is nothing to price.';
@@ -52,8 +61,10 @@ const prose = (s: string) => s.split('`').filter((piece, i) => i % 2 === 0 && pi
 const hrefs = (html: string) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
 const count = (html: string, s: string) => html.split(s).length - 1;
 
-describe('the tab', () => {
-  const rows = FAN_SAMPLE;
+describe.each([
+  ['the committed artifact', artifact],
+  ['the sample', FAN_SAMPLE],
+])('the tab over %s', (_, rows) => {
   const html = renderToStaticMarkup(<FanExplorer rows={rows} hash={HASH} onOpenVariation={noop} />);
 
   test("every registered variation is an entry, with its title and its summary's words", () => {
@@ -140,8 +151,10 @@ describe('the cost-against-gain chart', () => {
 });
 
 describe('the variation drawer', () => {
-  test('renders every registered variation, and every row link opens its row', () => {
-    const rows = FAN_SAMPLE;
+  test.each([
+    ['the committed artifact', artifact],
+    ['the sample', FAN_SAMPLE],
+  ])('renders every registered variation over %s, and every row link opens its row', (_, rows) => {
     for (const { name } of VARIATION_TOKENS) {
       const html = renderToStaticMarkup(
         <VariationDetailBody name={name} rows={rows} hash={HASH} onClose={noop} onOpenVariation={noop} />,

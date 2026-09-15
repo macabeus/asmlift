@@ -114,13 +114,7 @@ describe('the reported function ranks: kleod:WorldMapScreenDrawPath:agbcc, opene
   const results = JSON.parse(
     readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
   ) as { results: { id: string }[] };
-  // the row, with the flags of its unit as the committed manifest records them
-  const manifest = JSON.parse(
-    readFileSync(join(import.meta.dirname, '../../benchmark/dataset/real/kleod.json'), 'utf8'),
-  ) as { units: Record<string, { cflags: string[] }>; functions: { sym: string; unit: string }[] };
-  const unit = manifest.functions.find((f) => f.sym === 'WorldMapScreenDrawPath')!.unit;
-  const found = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
-  const row = found && { ...found, cflags: manifest.units[unit].cflags };
+  const row = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
 
   test('the row the bug report names is in the shipped dataset', () => {
     // Pinned by id inside a file every bench round regenerates: without this, a dataset change
