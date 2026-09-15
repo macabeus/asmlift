@@ -124,6 +124,27 @@ export interface CompileCommandOptions {
   candidateCache?: 'off';
   /** The flags the command's `{{cflags}}` stands for, required exactly when the command has one. */
   cflags?: readonly string[];
+  /** The compiler name the command's `{{cc}}` stands for (an objdiff.json unit's `scratch.compiler`),
+   *  required exactly when the command has one. */
+  cc?: string;
+}
+
+/** A compiler name that reaches the shell as itself. */
+const COMPILER_NAME = /^[A-Za-z0-9_.+-]+$/;
+
+/** The command with `{{cc}}` rendered as the compiler's name. */
+export function renderCc(command: string, cc: string | undefined): string {
+  const takesCc = command.includes('{{cc}}');
+  if (takesCc && cc === undefined) {
+    throw new Error(`compiler command takes {{cc}}, and no compiler was given — got: ${command}`);
+  }
+  if (!takesCc && cc !== undefined) {
+    throw new Error(`compiler command has no {{cc}} to take the compiler ${cc} — got: ${command}`);
+  }
+  if (cc !== undefined && !COMPILER_NAME.test(cc)) {
+    throw new Error(`compiler name ${JSON.stringify(cc)} is not a plain word, refusing to substitute it`);
+  }
+  return cc === undefined ? command : command.replaceAll('{{cc}}', cc);
 }
 
 /** The command with `{{cflags}}` rendered as shell words. It is rendered before anything else reads
@@ -685,7 +706,7 @@ const unwrap = (r: Verdict): string => {
  *  A non-zero exit or a missing output object throws with the full command + its stderr —
  *  configured means configured, there is no fallback. */
 export function compilersFromCommand(command: string, opts: CompileCommandOptions = {}): CommandCompilers {
-  const template = renderCflags(command, opts.cflags);
+  const template = renderCc(renderCflags(command, opts.cflags), opts.cc);
   if (!template.includes('{{inputPath}}') || !template.includes('{{outputPath}}')) {
     throw new Error(`compiler command must contain {{inputPath}} and {{outputPath}} placeholders — got: ${template}`);
   }
@@ -694,7 +715,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   const unknown = template.replaceAll(/\{\{(inputPath|outputPath|symbol)\}\}/g, '').match(/\{\{\w+\}\}/);
   if (unknown) {
     throw new Error(
-      `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}, {{cflags}}`,
+      `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}, {{cflags}}, {{cc}}`,
     );
   }
   // One template execution, in two halves: `stage` writes the input and builds the command, and

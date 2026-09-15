@@ -1,0 +1,85 @@
+{
+  "min_version": "2.0.0-beta.5",
+  "custom_make": "ninja",
+  "build_target": false,
+  "watch_patterns": [
+    "*.c",
+    "*.cp",
+    "*.cpp",
+    "*.h",
+    "*.hpp",
+    "*.inc",
+    "*.py",
+    "*.yml",
+    "*.txt",
+    "*.json",
+    "*.c_inc",
+    "*.cc"
+  ],
+  "progress_categories": [
+    {
+      "id": "dol",
+      "name": "DOL"
+    },
+    {
+      "id": "modules",
+      "name": "Modules"
+    },
+    {
+      "id": "game",
+      "name": "Game Code"
+    },
+    {
+      "id": "sdk",
+      "name": "SDK Code"
+    },
+    {
+      "id": "jsystem",
+      "name": "JSystem Code"
+    },
+    {
+      "id": "library",
+      "name": "Library Code"
+    }
+  ],
+  "units": [
+    {
+      "name": "static/boot",
+      "target_path": "build/GAFE01_00/obj/boot.o",
+      "base_path": "build/GAFE01_00/src/boot.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_242_81",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -O4,s -sdata 0 -sdata2 0 -inline on -lang=c",
+        "ctx_path": "build/GAFE01_00/src/boot.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/static/boot.c",
+        "progress_categories": ["dol", "game"],
+        "auto_generated": false
+      }
+    },
+    {
+      "name": "foresta/executor",
+      "target_path": "build/GAFE01_00/foresta/obj/executor.o",
+      "base_path": "build/GAFE01_00/src/executor.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_242_81",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c",
+        "ctx_path": "build/GAFE01_00/src/executor.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/executor.c",
+        "progress_categories": ["modules", "game"],
+        "auto_generated": false
+      }
+    }
+  ]
+}

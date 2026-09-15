@@ -163,7 +163,7 @@ test('--jobs/--progress belong to the ranked path and are refused elsewhere, not
   for (const flag of [['--jobs', '4'], ['--progress']]) {
     const r = await run('agbcc-clamp0.s', '--target', 'agbcc', ...flag);
     expect(r.code).toBe(64);
-    expect(r.stderr).toContain('--jobs/--progress apply to --score-against runs only');
+    expect(r.stderr).toBe('asmlift: --jobs/--progress apply to --score-against runs only\n');
   }
 });
 

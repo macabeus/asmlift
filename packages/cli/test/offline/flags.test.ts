@@ -54,6 +54,71 @@ describe('reading the flags a compile command spells', () => {
     expect(flagsOf(mwcc, 'mwcc')).toEqual(['-proc', 'gekko', '-O4,p', '-str', 'reuse,readonly']);
   });
 
+  test('a compiler named by a variable is read through the environment the command runs under', () => {
+    const command = '"$AGBCC" {{inputPath}} -o {{outputPath}} -mthumb-interwork -O1 && as {{inputPath}}.s';
+    expect(readCompilerCommand(command, 'agbcc')).toBeUndefined();
+    expect(flagsOf(command, 'agbcc')).toBeUndefined();
+    const env = { AGBCC: '/opt/agbcc/bin/agbcc' };
+    expect(readCompilerCommand(command, 'agbcc', env)?.flagWords.map((w) => w.value)).toEqual([
+      '-mthumb-interwork',
+      '-O1',
+    ]);
+    expect(readCompilerCommand('${AGBCC} -O2 -o x.s x.c', 'agbcc', env)?.flagWords.map((w) => w.value)).toEqual([
+      '-O2',
+    ]);
+    expect(resolveFlags(input({ command, env }))).toMatchObject({
+      ok: true,
+      lines: 'asmlift: [flags] -mthumb-interwork -O1 (compiler command)\n',
+    });
+  });
+
+  test('a variable among the words is read through the environment, split into words unless quoted', () => {
+    const command = 'agbcc -mthumb-interwork $MYFLAGS {{inputPath}} -o {{outputPath}}';
+    const env = { MYFLAGS: '-O1 -fhex-asm' };
+    expect(readCompilerCommand(command, 'agbcc', env)?.flagWords.map((w) => w.value)).toEqual([
+      '-mthumb-interwork',
+      '-O1',
+      '-fhex-asm',
+    ]);
+    expect(readCompilerCommand(command, 'agbcc')?.flagWords.map((w) => w.value)).toEqual(['-mthumb-interwork']);
+    expect(
+      readCompilerCommand('agbcc "$ONE" -o x.s x.c', 'agbcc', { ONE: '-O1 -fhex-asm' })?.flagWords.map((w) => w.value),
+    ).toEqual(['-O1 -fhex-asm']);
+    expect(resolveFlags(input({ command, env }))).toMatchObject({
+      ok: true,
+      lines: 'asmlift: [flags] -mthumb-interwork -O1 -fhex-asm (compiler command)\n',
+    });
+  });
+
+  test('a variable the command sets itself is unread, and named', () => {
+    const command = 'CFLAGS="-O1 -fhex-asm"; agbcc -mthumb-interwork $CFLAGS {{inputPath}} -o {{outputPath}}';
+    const reading = readCompilerCommand(command, 'agbcc', { CFLAGS: '-O3' });
+    expect(reading?.flagWords.map((w) => w.value)).toEqual(['-mthumb-interwork']);
+    expect(reading?.unread.map((w) => w.value)).toEqual(['$CFLAGS']);
+    expect(resolveFlags(input({ command }))).toMatchObject({
+      ok: true,
+      lines:
+        'asmlift: [flags] -mthumb-interwork (compiler command)\n' +
+        'asmlift: [flags] note: tools.asmlift.compiler sets $CFLAGS itself and passes it to the compiler, so the ' +
+        'flags in it are unread\n',
+    });
+  });
+
+  test('a compiler variable the environment does not set is named', () => {
+    const command = '"$NOT_SET_AGBCC" {{inputPath}} -o {{outputPath}} -O1';
+    const r = resolveFlags(input({ command }));
+    expect(r.ok && r.lines).toBe(
+      CANONICAL_LINE.replace('none given', 'unread (compiler command)') +
+        "asmlift: [flags] note: tools.asmlift.compiler runs $NOT_SET_AGBCC, which asmlift's environment does not " +
+        'set, so its flags are unread\n',
+    );
+    expect(refusal({ command, cflags: '-O1', ranked: true })).toBe(
+      '--cflags gives the flags, and tools.asmlift.compiler has no {{cflags}} to take them. It runs ' +
+        "$NOT_SET_AGBCC, which asmlift's environment does not set: set it, and write {{cflags}} where the command " +
+        'passes the compiler its flags.',
+    );
+  });
+
   test("a command that runs no compiler of the target's family reads nothing", () => {
     expect(readCompilerCommand(SCRIPT, 'ido')).toBeUndefined();
     expect(readCompilerCommand('./build.sh {{inputPath}} {{outputPath}}', 'agbcc')).toBeUndefined();
@@ -87,8 +152,11 @@ const input = (over: Partial<FlagsInput>): FlagsInput => ({
   toolchain: 'agbcc',
   cflags: undefined,
   command: undefined,
+  env: {},
+  unreadObjdiff: undefined,
   configPath: undefined,
   ranked: false,
+  dtk: undefined,
   ...over,
 });
 
@@ -128,6 +196,17 @@ describe('resolving the flags', () => {
     );
   });
 
+  test('a level word the compiler reads as another level is a note', () => {
+    expect(resolveFlags(input({ cflags: '-O9 -mthumb-interwork' }))).toMatchObject({
+      ok: true,
+      lines: 'asmlift: [flags] -O9 -mthumb-interwork (--cflags)\nasmlift: [flags] note: agbcc reads -O9 as -O3\n',
+    });
+    expect(resolveFlags(input({ toolchain: 'mwcc_242_81', cflags: '-proc gekko -O4 -Op' }))).toMatchObject({
+      ok: true,
+      lines: 'asmlift: [flags] -proc gekko -O4 -Op (--cflags)\nasmlift: [flags] note: mwcc reads -O4 -Op as -O4,p\n',
+    });
+  });
+
   test('the compile command spells the flags; --cflags wins over it on a plain decompile', () => {
     const command = 'agbcc {{inputPath}} -o {{outputPath}} -mthumb-interwork -O1';
     expect(resolveFlags(input({ command }))).toMatchObject({
@@ -137,7 +216,23 @@ describe('resolving the flags', () => {
     });
     expect(resolveFlags(input({ command, cflags: '-O0' }))).toMatchObject({
       ok: true,
-      lines: 'asmlift: [flags] -O0 (--cflags)\n',
+      lines:
+        'asmlift: [flags] -O0 (--cflags)\n' +
+        'asmlift: [flags] note: this decompile reads the flags from --cflags, not the -mthumb-interwork -O1 in ' +
+        'tools.asmlift.compiler; write {{cflags}} there before --score-against\n',
+    });
+    // the notes that qualify the head come first, the advice after them
+    expect(resolveFlags(input({ command, cflags: '-O' }))).toMatchObject({
+      ok: true,
+      lines:
+        'asmlift: [flags] -O (--cflags)\n' +
+        'asmlift: [flags] note: agbcc reads -O as -O1\n' +
+        'asmlift: [flags] note: this decompile reads the flags from --cflags, not the -mthumb-interwork -O1 in ' +
+        'tools.asmlift.compiler; write {{cflags}} there before --score-against\n',
+    });
+    expect(resolveFlags(input({ command, cflags: '-mthumb-interwork -Wimplicit -O1' }))).toMatchObject({
+      ok: true,
+      lines: 'asmlift: [flags] -mthumb-interwork -O1 (--cflags)\n',
     });
     expect(resolveFlags(input({ command: 'agbcc {{inputPath}} -o {{outputPath}}' }))).toMatchObject({
       ok: true,
@@ -149,7 +244,7 @@ describe('resolving the flags', () => {
     const r = resolveFlags(input({ command: './build.sh {{inputPath}} {{outputPath}}', ranked: true }));
     expect(r).toMatchObject({ ok: true, fill: undefined });
     expect(r.ok && r.lines).toBe(
-      CANONICAL_LINE +
+      CANONICAL_LINE.replace('none given', 'unread (compiler command)') +
         'asmlift: [flags] note: tools.asmlift.compiler runs no agbcc compiler asmlift can find, so its flags are unread: ' +
         './build.sh {{inputPath}} {{outputPath}}\n',
     );
@@ -206,17 +301,48 @@ describe('refusals', () => {
     expect(resolveFlags(input({ cflags: '-O1', command: SCRIPT })).ok).toBe(true);
   });
 
-  test('a codegen flag spelled beside {{cflags}} is a second source', () => {
-    expect(
-      refusal({
-        cflags: '-O1',
-        ranked: true,
-        command: 'agbcc -Wimplicit -O2 {{cflags}} {{inputPath}} -o {{outputPath}}',
-      }),
-    ).toBe(
-      'tools.asmlift.compiler spells -O2 beside {{cflags}}, a second source of flags: give them in --cflags and ' +
-        'remove them from the command',
+  test('a codegen flag spelled beside {{cflags}} is a second source: a paste-ready command without it', () => {
+    const [first, ...rest] = refusal({
+      cflags: '-O1',
+      ranked: true,
+      command: 'agbcc -Wimplicit -O2 {{cflags}} -mthumb-interwork {{inputPath}} -o {{outputPath}}',
+    }).split('\n');
+    expect(first).toBe(
+      'tools.asmlift.compiler spells -O2 -mthumb-interwork beside {{cflags}}, a second source of flags: give them in ' +
+        '--cflags and remove them from the command:',
     );
+    expect(YAML.parse(rest.join('\n'))).toEqual({
+      compiler: 'agbcc -Wimplicit {{cflags}} {{inputPath}} -o {{outputPath}}',
+    });
+  });
+
+  test('a variable beside {{cflags}} is a second source when it gives flags, and unreadable when the command sets it', () => {
+    const command = 'agbcc -mthumb-interwork $MYFLAGS {{cflags}} {{inputPath}} -o {{outputPath}}';
+    const [first, ...rest] = refusal({
+      cflags: '-O1',
+      ranked: true,
+      command,
+      env: { MYFLAGS: '-O2 -fprologue-bugfix' },
+    }).split('\n');
+    expect(first).toBe(
+      'tools.asmlift.compiler spells -mthumb-interwork -O2 -fprologue-bugfix beside {{cflags}}, a second source of ' +
+        'flags: give them in --cflags and remove them from the command:',
+    );
+    const pasted = (YAML.parse(rest.join('\n')) as { compiler: string }).compiler;
+    expect(pasted).toBe('agbcc {{cflags}} {{inputPath}} -o {{outputPath}}');
+    expect(resolveFlags(input({ cflags: '-O1', ranked: true, command: pasted, env: { MYFLAGS: '-O2' } })).ok).toBe(
+      true,
+    );
+    const [set, ...line] = refusal({
+      cflags: '-O1',
+      ranked: true,
+      command: `EXTRA=-O2; ${pasted.replace('{{cflags}}', '$EXTRA {{cflags}}')}`,
+    }).split('\n');
+    expect(set).toBe(
+      'tools.asmlift.compiler passes $EXTRA beside {{cflags}}, and sets it itself, so asmlift cannot read whether ' +
+        'it is a second source of flags: give the flags in --cflags and remove $EXTRA from the command:',
+    );
+    expect(YAML.parse(line.join('\n'))).toEqual({ compiler: `EXTRA=-O2; ${pasted}` });
   });
 
   test('a ranked run whose command takes {{cflags}} needs flags to give it', () => {
@@ -227,15 +353,15 @@ describe('refusals', () => {
   });
 });
 
+const CLAMP0 =
+  '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tcmp\tr0, #0\n\tbge\t.L4\n\tmov\tr0, #0x0\n.L4:\n\tbx\tlr\n';
+
 describe('at the CLI surface', () => {
   const project = (compiler: string) => {
     const root = mkdtempSync(join(tmpdir(), 'asmlift-flags-'));
     writeFileSync(join(root, 'decomp.yaml'), YAML.stringify({ platform: 'gba', tools: { asmlift: { compiler } } }));
     const file = join(root, 'clamp0.s');
-    writeFileSync(
-      file,
-      '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tcmp\tr0, #0\n\tbge\t.L4\n\tmov\tr0, #0x0\n.L4:\n\tbx\tlr\n',
-    );
+    writeFileSync(file, CLAMP0);
     const target = join(root, 't.o');
     writeFileSync(target, 'placeholder');
     return { root, file, target };
@@ -266,6 +392,29 @@ describe('at the CLI surface', () => {
       ),
     );
     expect(ranked.stderr).not.toContain('usage:');
+  });
+
+  test('--score-against with no compiler command is its message, with no usage block', async () => {
+    const { file, target, root } = project('placeholder');
+    writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
+    const r = await runCli([file, '--score-against', target]);
+    expect(r.code).toBe(64);
+    expect(r.stderr).toMatch(/^asmlift: --score-against needs tools.asmlift.compiler in decomp.yaml/);
+    expect(r.stderr).not.toContain('usage:');
+  });
+
+  test('an objdiff.json with no decomp.yaml beside it is named as unread', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'asmlift-bare-dtk-'));
+    writeFileSync(join(root, 'objdiff.json'), '{"units": []}\n');
+    const file = join(root, 'clamp0.s');
+    writeFileSync(file, CLAMP0);
+    const r = await runCli([file, '--target', 'agbcc']);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain(
+      `asmlift: [flags] note: ${join(root, 'objdiff.json')} is not read: asmlift reads a dtk unit's flags from the ` +
+        'objdiff.json beside decomp.yaml; a decomp.yaml with platform: gba beside it is enough\n',
+    );
+    expect((await runCli([file, '--target', 'agbcc', '--cflags', '-O2'])).stderr).not.toContain('is not read');
   });
 
   test('every canonical flag set reads back through a plain run at its own flags', async () => {

@@ -1,0 +1,98 @@
+{
+  "min_version": "2.0.0-beta.5",
+  "custom_make": "ninja",
+  "build_target": false,
+  "watch_patterns": ["*.c", "*.cp", "*.cpp", "*.h", "*.hpp", "*.inc", "*.py", "*.yml", "*.txt", "*.json"],
+  "progress_categories": [
+    {
+      "id": "dol",
+      "name": "DOL"
+    },
+    {
+      "id": "modules",
+      "name": "Modules"
+    }
+  ],
+  "units": [
+    {
+      "name": "main/game/main",
+      "target_path": "build/GMPE01_00/obj/game/main.o",
+      "base_path": "build/GMPE01_00/src/game/main.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_247_107",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c",
+        "preset_id": 82,
+        "ctx_path": "build/GMPE01_00/src/game/main.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/game/main.c",
+        "progress_categories": ["dol"],
+        "auto_generated": false
+      }
+    },
+    {
+      "name": "m403Dll/REL/executor",
+      "target_path": "build/GMPE01_00/m403Dll/obj/REL/executor.o",
+      "base_path": "build/GMPE01_00/src/REL/executor.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_247_107",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c",
+        "preset_id": 82,
+        "ctx_path": "build/GMPE01_00/src/REL/executor.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/REL/executor.c",
+        "progress_categories": ["modules"],
+        "auto_generated": false
+      }
+    },
+    {
+      "name": "m427Dll/REL/executor",
+      "target_path": "build/GMPE01_00/m427Dll/obj/REL/executor.o",
+      "base_path": "build/GMPE01_00/src/REL/executor.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_247_107",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c",
+        "preset_id": 82,
+        "ctx_path": "build/GMPE01_00/src/REL/executor.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/REL/executor.c",
+        "progress_categories": ["modules"],
+        "auto_generated": false
+      }
+    },
+    {
+      "name": "m427Dll/REL/m427Dll/map",
+      "target_path": "build/GMPE01_00/m427Dll/obj/REL/m427Dll/map.o",
+      "base_path": "build/GMPE01_00/src/REL/m427Dll/map.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_242_81",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c",
+        "preset_id": 115,
+        "ctx_path": "build/GMPE01_00/src/REL/m427Dll/map.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/REL/m427Dll/map.c",
+        "progress_categories": ["modules"],
+        "auto_generated": false
+      }
+    }
+  ]
+}

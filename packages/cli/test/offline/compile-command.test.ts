@@ -5,7 +5,20 @@ import { readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { expect, test } from 'vitest';
 
-import { compileFromCommand, compilersFromCommand, renderCflags } from '../../src/compile-command';
+import { compileFromCommand, compilersFromCommand, renderCc, renderCflags } from '../../src/compile-command';
+
+test("{{cc}} is rendered as the unit's compiler name, which must be a plain word", () => {
+  expect(renderCc('wibo compilers/{{cc}}/mwcceppc.exe {{inputPath}}', 'mwcc_247_107')).toBe(
+    'wibo compilers/mwcc_247_107/mwcceppc.exe {{inputPath}}',
+  );
+  expect(() => compileFromCommand('compilers/{{cc}}/cc {{inputPath}} -o {{outputPath}}')).toThrow(
+    /takes \{\{cc\}\}, and no compiler was given/,
+  );
+  expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}}', { cc: 'mwcc_242_81' })).toThrow(
+    /has no \{\{cc\}\} to take the compiler mwcc_242_81/,
+  );
+  expect(() => renderCc('{{cc}}', 'a;b')).toThrow(/not a plain word/);
+});
 
 test('{{cflags}} is rendered as shell words, and a command and its flags must agree', () => {
   expect(renderCflags('cc {{cflags}} -o {{outputPath}}', ['-pragma', 'cats off', '-O2'])).toBe(

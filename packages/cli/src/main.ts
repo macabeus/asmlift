@@ -38,7 +38,8 @@ import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
-import { resolveFlags } from './flags';
+import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
+import { type FlagsInput, resolveFlags } from './flags';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -116,6 +117,7 @@ const KNOWN_FLAGS = new Set([
   'jobs',
   'progress',
   'cflags',
+  'module',
 ]);
 const BOOL_FLAGS = new Set(['strict', 'progress']);
 // The emitted source embeds the name verbatim; a non-identifier would be silently invalid C.
@@ -123,7 +125,8 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 
 const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TOOLCHAIN_TARGETS).join('|')}>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
-                [--cflags <flags>] [--config <decomp.yaml>] [--score-against <target.o>]
+                [--cflags <flags>] [--module <module>]
+                [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--jobs <n>] [--progress]
 
@@ -134,8 +137,11 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 
   --name           select the function in multi-function input (default: detected)
   --cflags         the flags your build compiles this function's file with; they
-                   fill {{cflags}} in tools.asmlift.compiler (default: the flags that
-                   command already spells, else the target's canonical flags)
+                   fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
+                   unit that defines the function, else the flags that command already
+                   spells, else the target's canonical flags)
+  --module         with an objdiff.json beside decomp.yaml: look for the function's
+                   unit in this module only (REL code repeats names across modules)
   --strict         fail on any gap instead of annotating
   --config         decomp.yaml to use (default: nearest ancestor of the input)
   --score-against  recompile the output with the project's compiler and objdiff
@@ -403,6 +409,8 @@ export async function runCli(
   progressSink?: (line: string) => void,
 ): Promise<CliResult> {
   const usage = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
+  /** A refusal that names its own fix: the message alone, with no usage block. */
+  const refuse = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n` });
   const parsed = parseFlags(argv);
   if (!parsed.ok) {
     // A named complaint gets `usage(msg)`; the wrong number of operands gets the bare USAGE dump,
@@ -581,15 +589,57 @@ export async function runCli(
   // target's own withheld signature cannot make the note claim a fact the run did not use.
   const protoNote = guessedArityNote(asm, name, prototypes, symbols);
 
+  // The dtk unit that defines the function, when the project has an objdiff.json and no --cflags
+  // takes its place.
+  const cflagsFlag = flags.get('cflags') as string | undefined;
+  const moduleFlag = flags.get('module') as string | undefined;
+  let dtk: FlagsInput['dtk'];
+  if (cflagsFlag === undefined && configDir !== undefined) {
+    let project: ReturnType<typeof readObjdiffUnits>;
+    try {
+      project = readObjdiffUnits(configDir);
+    } catch (e) {
+      return {
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot read objdiff.json: ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+    if (project !== undefined) {
+      if (moduleFlag !== undefined && !moduleHasUnits(project.units, moduleFlag)) {
+        return {
+          code: EXIT.usage,
+          stdout: '',
+          stderr: `asmlift: --module ${moduleFlag}: ${project.path} has no unit in it\n`,
+        };
+      }
+      dtk = { symbol: name, module: moduleFlag, lookup: unitDefining(configDir, project.units, name, moduleFlag) };
+    }
+  }
+  if (moduleFlag !== undefined && dtk === undefined) {
+    const why =
+      cflagsFlag !== undefined ? '--cflags gives the flags without one' : 'there is no objdiff.json beside decomp.yaml';
+    return {
+      code: EXIT.usage,
+      stdout: '',
+      stderr: `asmlift: --module chooses the objdiff.json unit that gives the flags, and ${why}\n`,
+    };
+  }
   const flagsResolution = resolveFlags({
     toolchain: targetKey,
-    cflags: flags.get('cflags') as string | undefined,
+    cflags: cflagsFlag,
     command: toolCfg?.compiler,
+    env: process.env,
+    unreadObjdiff:
+      configDir === undefined && cflagsFlag === undefined
+        ? objdiffAbove(input === '-' ? process.cwd() : dirname(resolve(input)))
+        : undefined,
     configPath,
     ranked: flags.has('score-against'),
+    dtk,
   });
   if (!flagsResolution.ok) {
-    return { code: EXIT.usage, stdout: '', stderr: `asmlift: ${flagsResolution.message}\n` };
+    return refuse(flagsResolution.message);
   }
   // What the run is about, said on every path after the target it resolved.
   const runTrace = targetTrace + flagsResolution.lines;
@@ -606,13 +656,13 @@ export async function runCli(
   // ranked path alone: accepting them elsewhere would silently discard what the user asked for.
   const jobsFlag = flags.get('jobs') as string | undefined;
   if ((jobsFlag !== undefined || flags.has('progress')) && scoreAgainst === undefined) {
-    return usage('--jobs/--progress apply to --score-against runs only');
+    return refuse('--jobs/--progress apply to --score-against runs only');
   }
   let jobs = 1;
   if (jobsFlag !== undefined) {
     jobs = Number(jobsFlag);
     if (!Number.isInteger(jobs) || jobs < 1) {
-      return usage(`--jobs must be a positive integer (got ${JSON.stringify(jobsFlag)})`);
+      return refuse(`--jobs must be a positive integer (got ${JSON.stringify(jobsFlag)})`);
     }
   }
   // At most one line every few seconds: enough to tell a 20-minute run from a hung one, few
@@ -647,7 +697,7 @@ export async function runCli(
     // own pinned toolchains live in the private @asmlift/toolchains workspace package, serving
     // the benchmark and the matching suite; this npm package carries no compiler at all.)
     if (!toolCfg?.compiler) {
-      return usage(
+      return refuse(
         "--score-against needs tools.asmlift.compiler in decomp.yaml — scoring must use YOUR project's compiler and flags",
       );
     }
@@ -657,9 +707,10 @@ export async function runCli(
         cwd: configDir,
         candidateCache: toolCfg.candidateCache,
         cflags: flagsResolution.fill,
+        cc: flagsResolution.cc,
       });
     } catch (e) {
-      return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
+      return refuse(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
     const compile = compilers.compile;
     try {
