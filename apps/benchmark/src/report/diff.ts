@@ -17,6 +17,8 @@ import {
   retiredKeySet,
   retirementKeys,
 } from '@asmlift/bench-schema';
+import { optLevel, shellJoinFlags } from '@asmlift/core/codegen-flags';
+import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,6 +94,10 @@ import { rowsAddedSince } from './regression';
  *  `source` and `winnerVariations` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;
  *  a run where a symbol's declared SHAPE moves under an unchanged winner would slip past. */
 const FIELDS = {
+  /** `cflags` is the one ROW field: the flags the row's target and every candidate compile with. A row
+   *  whose flags moved is compiled differently, which is a published claim moving before any score
+   *  does, so it is a change; the `FLAGS` section names the move and groups the rows it moved. */
+  row: ['cflags'],
   asmlift: [
     'outcome',
     'score',
@@ -175,6 +181,9 @@ const show = (field: string, v: unknown, res: Record<string, unknown>): string =
   if (field === 'winnerVariations') {
     return joinVariations(v as readonly string[]);
   }
+  if (field === 'cflags') {
+    return shellJoinFlags(v as readonly string[]);
+  }
   if (field === 'score' && 'maxScore' in res) {
     return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;
   }
@@ -200,6 +209,11 @@ export function compareMeasurements(
     if (!now) {
       (retirementKeys(was).some((k) => retiredKeys.has(k)) ? retired : removed).push(was.id);
       continue;
+    }
+    for (const f of FIELDS.row) {
+      if (stable(was[f]) !== stable(now[f])) {
+        changed.push({ id: now.id, field: f, from: show(f, was[f], {}), to: show(f, now[f], {}) });
+      }
     }
     for (const side of ['asmlift', 'm2c'] as const) {
       const wasSide = was[side] as unknown as Record<string, unknown>;
@@ -236,6 +250,66 @@ export function compareMeasurements(
     freshRows: fresh.results.length,
     ok: changed.length === 0 && added.length === 0 && removed.length === 0 && retired.length === 0,
   };
+}
+
+/** How many rows one `FLAGS` line names before it counts the rest. */
+export const FLAG_ROWS_SHOWN = 10;
+
+/** The `FLAGS` section: one line per distinct move of a row's flags, with the rows that made it, then the
+ *  total. Pure — `diffGate` prints it. */
+export function flagsLines(report: DiffReport, base: string): string[] {
+  const moves = new Map<string, string[]>();
+  for (const c of report.changed.filter((x) => x.field === 'cflags')) {
+    const move = `${c.from} → ${c.to}`;
+    moves.set(move, [...(moves.get(move) ?? []), c.id]);
+  }
+  const lines = [...moves].map(
+    ([move, ids]) =>
+      `FLAGS   ${move}: ${ids.length} row(s): ${ids.slice(0, FLAG_ROWS_SHOWN).join(', ')}` +
+      (ids.length > FLAG_ROWS_SHOWN ? `, …and ${ids.length - FLAG_ROWS_SHOWN} more` : ''),
+  );
+  const rows = [...moves.values()].reduce((n, ids) => n + ids.length, 0);
+  lines.push(`flags vs ${base}: ${rows} row(s) compile with other flags`);
+  return lines;
+}
+
+/** One group of moved rows' field changes, under its heading. */
+export interface FlagsGroup {
+  heading: string;
+  changes: FieldChange[];
+}
+
+/** The optimisation level a row's flags make its compiler act on, or `no level` for a row that records no
+ *  flags or whose flags name none. */
+const levelOf = (r: { toolchain: string; cflags?: readonly string[] }): string =>
+  (r.cflags === undefined || !isToolchainId(r.toolchain)
+    ? null
+    : optLevel(TOOLCHAIN_TARGETS[r.toolchain].family, r.cflags)) ?? 'no level';
+
+/** Every field change but the flags' own, grouped by the row's flags: `flags changed (-O2 → -O1)` for rows
+ *  whose level moved, `flags changed (-O2)` for rows whose flags moved within one level, then
+ *  `flags unchanged`. A move under flags that changed is expected of the round that changed them; one
+ *  under unchanged flags is not. Pure — `diffGate` prints it. */
+export function groupByFlags(base: BenchOutput, fresh: BenchOutput, report: DiffReport): FlagsGroup[] {
+  const join = joinArtifacts(base.results, fresh.results);
+  const baseByKey = new Map(base.results.map((r) => [join.baseKey(r), r]));
+  const freshById = new Map(fresh.results.map((r) => [r.id, r]));
+  const flagsMoved = new Set(report.changed.filter((c) => c.field === 'cflags').map((c) => c.id));
+  const UNCHANGED = 'flags unchanged';
+  const groups = new Map<string, FieldChange[]>();
+  for (const c of report.changed.filter((x) => x.field !== 'cflags')) {
+    let heading = UNCHANGED;
+    const now = freshById.get(c.id);
+    const was = now === undefined ? undefined : baseByKey.get(join.headKey(now));
+    if (flagsMoved.has(c.id) && now !== undefined && was !== undefined) {
+      const [from, to] = [levelOf(was), levelOf(now)];
+      heading = from === to ? `flags changed (${to})` : `flags changed (${from} → ${to})`;
+    }
+    groups.set(heading, [...(groups.get(heading) ?? []), c]);
+  }
+  return [...groups]
+    .sort(([a], [b]) => (a === UNCHANGED ? 1 : b === UNCHANGED ? -1 : a.localeCompare(b)))
+    .map(([heading, changes]) => ({ heading, changes }));
 }
 
 /** WHAT THE FAN DID, between two artifacts.
@@ -575,8 +649,14 @@ export function diffGate(base = 'HEAD'): number {
 
   const report = compareMeasurements(committed, fresh, retiredRows());
 
-  for (const c of report.changed) {
-    console.log(`CHANGED ${c.id} ${c.field}: ${c.from} → ${c.to}`);
+  for (const line of flagsLines(report, base)) {
+    console.log(line);
+  }
+  for (const group of groupByFlags(committed, fresh, report)) {
+    console.log(`${group.heading} — ${new Set(group.changes.map((c) => c.id)).size} row(s)`);
+    for (const c of group.changes) {
+      console.log(`CHANGED ${c.id} ${c.field}: ${c.from} → ${c.to}`);
+    }
   }
   for (const id of report.removed) {
     console.log(`REMOVED ${id} — present at ${base}, absent from the fresh run (toolchain skipped?)`);
