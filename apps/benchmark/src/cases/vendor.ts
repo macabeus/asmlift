@@ -11,8 +11,9 @@
 //                      scorer's richest strategy compiles against it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version).
 //
-// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths — enforced
-// here and by test/real-manifests.test.ts.
+// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU
+// must declare every function it calls — enforced here, and by test/real-manifests.test.ts and
+// test/implicit-declarations.test.ts over the committed blobs.
 import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
@@ -25,6 +26,7 @@ import { makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
+import { undeclaredCallees } from './implicit-declarations';
 import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot } from './manifests';
 import { resolveProjectElf } from './project-elf';
 
@@ -97,6 +99,13 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         if (MACHINE_PATH.test(text)) {
           throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
         }
+      }
+      const undeclared = undeclaredCallees(tuI);
+      if (undeclared.length > 0) {
+        throw new Error(
+          `${man.project}:${f.sym}: the vendored TU calls ${undeclared.join(', ')} with no declaration in scope — ` +
+            `declare each in the row's prependC as the project's unit does`,
+        );
       }
       const tuName = `${f.sym}.i.gz`;
       writeFileSync(join(outDir, tuName), gzipSync(tuI));

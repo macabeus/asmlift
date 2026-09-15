@@ -639,7 +639,7 @@
         "global"
       ],
       "funcC": "s16 HuSprGrpCreate(u16 arg0, u16 arg1) {\n    HuSprGrp *temp_v0_2;\n    HuSprite **var_s2;\n    HuSprite *temp_v0_3;\n    s16 var_s4;\n    s16 i;\n\n    for (i = 0; i < HUSPR_GRP_MAX; i++) {\n        if (HuSprGrpData[i] == NULL) {\n            break;\n        }\n    }\n    if (i == HUSPR_GRP_MAX) {\n        return -1;\n    }\n    var_s4 = i;\n    temp_v0_2 = func_80052468_53068(arg0, arg1);\n    if (temp_v0_2 == NULL) {\n        return -1;\n    }\n    HuSprGrpData[var_s4] = temp_v0_2;\n    temp_v0_2->unk_0A = 0;\n    temp_v0_2->unk_0C = 1;\n    var_s2 = temp_v0_2->members;\n    for (i = 0; i < arg0; i++) {\n        *(var_s2++) = temp_v0_3 = HuMemAlloc(0x210);\n        if (temp_v0_3 == NULL) {\n            HuSprGrpKill(var_s4);\n            return -1;\n        }\n        temp_v0_2->unk_0A++;\n    }\n    func_80052E68_53A68(temp_v0_2, arg0);\n    return var_s4;\n}",
-      "prependC": "#include \"game/sprite.h\"\n#include \"game/hmfman.h\"\n#include \"mallocblock.h\"\n#include \"include_asm.h\"",
+      "prependC": "#include \"game/sprite.h\"\n#include \"game/hmfman.h\"\n#include \"mallocblock.h\"\n#include \"include_asm.h\"\nvoid func_80052E68_53A68(void *arg0, s32 arg1);\nHuSprGrp *func_80052468_53068(s16 arg0, u16 arg1);",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L156-L190",
       "m2cCtx": true
     },
