@@ -36,7 +36,7 @@ tools:
       -v "$ASMLIFT_MWCC_DIR":/mwcc:ro -v "$(dirname {{inputPath}})":/work
       "$ASMLIFT_PPC_IMAGE"
       $ASMLIFT_WIBO /mwcc/mwcceppc.exe
-      '-pragma' 'msg_show_realref off' '-c' '-proc' 'gekko' '-nostdinc'
-      '-stderr' '-O4,p' '-enum' 'int' '-inline' 'auto' '-fp' 'hard'
+      '-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr'
+      '-proc' 'gekko' '-O4,p' '-enum' 'int' '-inline' 'auto' '-fp' 'hard'
       '-Cpp_exceptions' 'off'
       -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

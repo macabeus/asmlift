@@ -142,6 +142,22 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   in both directions: a variation where a compiler behavior belongs doubles every enumeration to referee a question with one answer, and a compiler behavior
   where a variation belongs quietly degrades every function the differ would have rescued.
 
+  **A PROFILE OF A COMPILER INHERITS ITS DECLARATIONS UNTIL A PROBE REFUTES ONE THERE.** One
+  toolchain compiles every flag set its projects' builds use, and `targetFor`
+  ([`target.ts`](../packages/core/src/target.ts)) hands each of them the toolchain's one description.
+  The flags become a **profile** ([`codegen-flags.ts`](../packages/core/src/codegen-flags.ts)) that
+  the reports show and no pass reads: a profile fact a pass needs becomes a `compilerBehaviors`
+  field, for the reason an `arch ==` branch is refused, and a variation is never pruned by profile,
+  because the fan already carries a level's effect to the winner. Withholding a declaration at a
+  profile nobody has probed does not claim nothing. A field's absent value is a reading too, the
+  structurer's default, which is some other compiler's behavior; so an unprobed profile inherits,
+  and the differ referees an inherited value the way it referees any default. A probe pair that
+  refutes a declaration WITH A CONSTANT at a named profile is what earns a per-profile value, and
+  none has yet. A pair that comes out one way at one site and the other way at another, on the same
+  compiler and the same flags, refutes the field as a declared default rather than its value:
+  flipping the constant trades one site for the other, and the field has to be decided from the
+  assembly at each site.
+
   A variation whose SIGN is base-dependent also cannot be a compiler behavior, but that is not a test you can run
   here: settling it needs two bases and therefore two rounds, where the criterion above is one you
   apply before building. It is really a rule about reading a PRICE, so it lives with the other
@@ -156,7 +172,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   itself.
 
   1. THE MAPPING IS A FUNCTION, and three compiled pairs say so rather than a claim. Compiled at
-     `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 20 bytes each (0x14,
+     agbcc's canonical flags the two spellings of the same two-case body are 20 bytes each (0x14,
      ten Thumb instructions) and are DIFFERENT objects — the `switch` front-loads both tests and
      sorts them ascending (`expand_end_case` closes with the `reorder_insns` that moves the dispatch
      in front of the bodies), the ladder emits each test directly above its own body in source
@@ -266,7 +282,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   cannot make it for you — the cheaper spelling was never in the fan to lose. And the compile has a
   second half, which two attempts here got wrong in the same way: **compile the shape you are
   generalizing over, not the first shape that fits in a test file, and record the flags.** The
-  measurements, all at `TOOLCHAIN.agbccFlags` and `IDO_TOOLCHAIN.ccFlags`:
+  measurements, all at agbcc's and ido7.1's canonical flags (`TOOLCHAIN_TARGETS`):
 
   | shape                            | grouped vs `\|\|`                                                        | duplicated body vs grouped                                                                                                                                 |
   | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |

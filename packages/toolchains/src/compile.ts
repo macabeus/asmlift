@@ -8,7 +8,7 @@
 // imports, silently leaving @asmlift/cli's registry empty — and the benchmark's gcc/mwcc
 // rows would record "noncompile" instead of failing loud.)
 import { registerCandidateCompiler } from '@asmlift/cli/score';
-import { C_TYPEDEFS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -132,7 +132,13 @@ function compileCandAgbcc(cSource: string): string {
   const sPath = join(dir, 'cand.s');
   const oPath = join(dir, 'cand.o');
   const ppPath = writePreprocessed(dir, 'cand', C_TYPEDEFS + cSource);
-  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+  const cc = run(TOOLCHAIN.agbcc, [
+    ppPath,
+    '-o',
+    sPath,
+    ...TOOLCHAIN.harnessFlags,
+    ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+  ]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);
   }
@@ -154,7 +160,13 @@ export function compileTargetAsm(cSource: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-ref-'));
   const sPath = join(dir, 'ref.s');
   const ppPath = writePreprocessed(dir, 'ref', C_TYPEDEFS + cSource);
-  const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+  const cc = run(TOOLCHAIN.agbcc, [
+    ppPath,
+    '-o',
+    sPath,
+    ...TOOLCHAIN.harnessFlags,
+    ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+  ]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);
   }
@@ -200,7 +212,13 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   const cPath = join(dir, 'ref.c');
   const oPath = join(dir, 'ref.o');
   writeFileSync(cPath, C_TYPEDEFS + cSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, cPath]);
+  const cc = run(IDO_TOOLCHAIN.cc, [
+    ...IDO_TOOLCHAIN.harnessFlags,
+    ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    '-o',
+    oPath,
+    cPath,
+  ]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
   }
@@ -229,7 +247,8 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
       '/gcc272/gcc',
       '-B',
       '/gcc272/',
-      ...t.ccFlags,
+      ...t.harnessFlags,
+      ...TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags,
       '-c',
       '-o',
       `${w}/${outObj}`,
@@ -259,7 +278,8 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
     '/gcc272/gcc',
     '-B',
     '/gcc272/',
-    ...t.ccFlags,
+    ...t.harnessFlags,
+    ...TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags,
     '-c',
     '-o',
     `/work/${outObj}`,
@@ -293,9 +313,13 @@ export function compileCandIdoPascal(pascalSource: string): string {
   const pPath = join(dir, 'cand.p'); // `.p` makes IDO's cc select the Pascal frontend
   const oPath = join(dir, 'cand.o');
   writeFileSync(pPath, pascalSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, pPath], {
-    USR_LIB: dirname(IDO_TOOLCHAIN.cc),
-  });
+  const cc = run(
+    IDO_TOOLCHAIN.cc,
+    [...IDO_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags, '-o', oPath, pPath],
+    {
+      USR_LIB: dirname(IDO_TOOLCHAIN.cc),
+    },
+  );
   if (cc.status !== 0) {
     throw new Error(`ido pascal (upas) failed: ${cc.stderr || cc.stdout}`);
   }
@@ -308,7 +332,13 @@ export function compileCandIdoC(cSource: string): string {
   const cPath = join(dir, 'cand.c');
   const oPath = join(dir, 'cand.o');
   writeFileSync(cPath, C_TYPEDEFS + cSource);
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, cPath]);
+  const cc = run(IDO_TOOLCHAIN.cc, [
+    ...IDO_TOOLCHAIN.harnessFlags,
+    ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    '-o',
+    oPath,
+    cPath,
+  ]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
   }
@@ -451,7 +481,8 @@ export function kmcCompile(dir: string, srcC: string, outObj: string): void {
       'COMPILER_PATH=/kmc',
       name,
       '/kmc/gcc',
-      ...t.ccFlags,
+      ...t.harnessFlags,
+      ...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
       '-c',
       '-o',
       `${w}/${outObj}`,
@@ -479,7 +510,8 @@ export function kmcCompile(dir: string, srcC: string, outObj: string): void {
     'COMPILER_PATH=/kmc',
     t.image,
     '/kmc/gcc',
-    ...t.ccFlags,
+    ...t.harnessFlags,
+    ...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
     '-c',
     '-o',
     `/work/${outObj}`,
@@ -558,7 +590,8 @@ function ppcContainer(dir: string, srcC: string, outObj: string, disasm: boolean
   // The script is parameterized by the container-side workdir: `/work` for the single-shot
   // container (per-call mount), the /host-tmp mapping for the pooled one.
   const script = (W: string) => {
-    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${t.ccFlags.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
+    const flags = [...t.harnessFlags, ...TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags];
+    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${flags.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
     return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
   };
   const w = hostTmp(dir);

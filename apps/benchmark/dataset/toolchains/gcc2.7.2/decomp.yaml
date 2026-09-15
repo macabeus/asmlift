@@ -31,5 +31,5 @@ tools:
       "$ASMLIFT_DOCKER" run --rm --platform linux/386
       -v "$ASMLIFT_GCC272_DIR":/gcc272:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/gcc272
       "$ASMLIFT_GCC272_IMAGE"
-      /gcc272/gcc -B /gcc272/ -G0 -mips3 -mgp32 -mfp32 -O1 -Wa,--vr4300mul-off -nostdinc
+      /gcc272/gcc -B /gcc272/ -nostdinc -G0 -mips3 -mgp32 -mfp32 -O1 -Wa,--vr4300mul-off
       -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

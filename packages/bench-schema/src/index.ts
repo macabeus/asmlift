@@ -1,11 +1,13 @@
 // The benchmark contract: ONE definition imported by both the producer (apps/benchmark) and the
 // consumer (apps/web) — the result/manifest types here, plus the closed feature vocabulary they
-// range over in ./features. Zero dependencies, no I/O, browser-safe by construction.
+// range over in ./features. No runtime dependencies, no I/O, browser-safe by construction: its one
+// import is a type, the toolchain ids @asmlift/core defines.
+import type { ToolchainId } from '@asmlift/core/target';
 
 export * from './features';
 export * from './identity';
 
-export type ToolchainId = 'agbcc' | 'ido7.1' | 'gcc2.7.2kmc' | 'gcc2.7.2' | 'mwcc_242_81';
+export type { ToolchainId };
 
 export type DecompilerId = 'asmlift' | 'm2c';
 
@@ -33,7 +35,7 @@ export interface QualityScore {
 }
 
 /** objdiff difference-kind tally (structurally mirrors packages/cli/src/objdiff.ts DiffBreakdown
- *  — spelled out here so this package stays dependency-free). */
+ *  — spelled out here so this package does not depend on @asmlift/cli). */
 export interface DiffBreakdown {
   insert: number;
   delete: number;

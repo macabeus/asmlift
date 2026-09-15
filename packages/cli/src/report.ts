@@ -15,7 +15,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
-import { type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
+import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
 
 import { decompileRanked } from './rank';
@@ -46,9 +46,10 @@ export interface ReportOptions extends Omit<TraceOptions, 'probeScore'> {
 export function decompileWithReport(
   name: string,
   asm: string,
-  target: TargetDescription,
+  resolved: ResolvedTarget,
   opts: ReportOptions = {},
 ): { source: string; report: DecompileReport } {
+  const { target } = resolved;
   const { targetObj, compile, ...traceOpts } = opts;
   const backend = opts.backend ?? cBackend;
   const returnsVoid = opts.prototypes?.[name]?.returnsVoid ?? false;
@@ -73,7 +74,7 @@ export function decompileWithReport(
         )
     : undefined;
 
-  const { source, report } = decompileTraced(name, asm, target, { ...traceOpts, probeScore });
+  const { source, report } = decompileTraced(name, asm, resolved, { ...traceOpts, probeScore });
 
   let score: MatchScore | undefined;
   let candidates: CandidateReport[] | undefined;

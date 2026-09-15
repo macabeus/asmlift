@@ -32,6 +32,6 @@ tools:
       "$ASMLIFT_DOCKER" run --rm --platform linux/386
       -v "$ASMLIFT_KMC_DIR":/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc
       "$ASMLIFT_KMC_IMAGE"
-      /kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -funsigned-char
-      -w -mips3 -EB -O2 -fno-builtin -fno-asm
+      /kmc/gcc -nostdinc -w -mabi=32 -mgp32 -mfp32 -mno-abicalls -fno-PIC -G 0 -funsigned-char
+      -mips3 -EB -O2 -fno-builtin -fno-asm
       -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

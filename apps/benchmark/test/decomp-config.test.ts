@@ -3,7 +3,9 @@
 // compilation — so their commands must stay equivalent to the built-in invocations in
 // @asmlift/toolchains (same binaries, same flags, same order). Parity is the contract: the
 // expected strings below are built from the same pins the built-in compile path uses, so a flag
-// edited in only one place fails here loudly.
+// edited in only one place fails here loudly. Every compile passes the harness words first and the
+// toolchain's canonical flags after them.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +22,8 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     expect(renderScoreCommand('agbcc')).toBe(
       [
         `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;`,
-        `${shq(TOOLCHAIN.agbcc)} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')} &&`,
+        `${shq(TOOLCHAIN.agbcc)} {{inputPath}}.pp.c -o {{inputPath}}.s`,
+        `${[...TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags].join(' ')} &&`,
         `${shq(TOOLCHAIN.as)} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
       ].join(' '),
     );
@@ -28,7 +31,12 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
 
   test('ido7.1: IDO cc, built-in flags (compileCandIdoC)', () => {
     expect(renderScoreCommand('ido7.1')).toBe(
-      `${shq(IDO_TOOLCHAIN.cc)} ${IDO_TOOLCHAIN.ccFlags.join(' ')} -o {{outputPath}} {{inputPath}}`,
+      [
+        shq(IDO_TOOLCHAIN.cc),
+        ...IDO_TOOLCHAIN.harnessFlags,
+        ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+        '-o {{outputPath}} {{inputPath}}',
+      ].join(' '),
     );
   });
 
@@ -38,7 +46,10 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
         `${shq(GCC_KMC_TOOLCHAIN.docker)} run --rm --platform linux/386`,
         `-v ${shq(GCC_KMC_TOOLCHAIN.dir)}:/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc`,
         shq(GCC_KMC_TOOLCHAIN.image),
-        `/kmc/gcc ${GCC_KMC_TOOLCHAIN.ccFlags.join(' ')} -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
+        '/kmc/gcc',
+        ...GCC_KMC_TOOLCHAIN.harnessFlags,
+        ...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
+        `-c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
       ].join(' '),
     );
   });
@@ -49,7 +60,8 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
         `${shq(MWCC_PPC_TOOLCHAIN.docker)} run --rm`,
         `-v ${shq(MWCC_PPC_TOOLCHAIN.dir)}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
         shq(MWCC_PPC_TOOLCHAIN.image),
-        `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe ${MWCC_PPC_TOOLCHAIN.ccFlags.map(shq).join(' ')}`,
+        `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe`,
+        [...MWCC_PPC_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags].map(shq).join(' '),
         `-o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
       ].join(' '),
     );

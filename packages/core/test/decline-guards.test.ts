@@ -11,8 +11,10 @@ import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { demangle } from '../src/mangle';
 import { decompile } from '../src/pipeline';
 import { PRE_RECOVERY_PASSES } from '../src/raise/pre-recovery';
-import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
+
+const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 const THUMB_TWO =
   '\t.code\t16\n\t.globl\tone\n\t.thumb_func\none:\n\tmov\tr0, #1\n\tbx\tlr\n' +
@@ -105,7 +107,7 @@ test('decompileTraced survives a pre-recovery pass with no registered trace stri
     run: () => true,
   } as unknown as (typeof PRE_RECOVERY_PASSES)[number]);
   try {
-    const { source, report } = decompileTraced('half', HALF, ARMV4T_AGBCC);
+    const { source, report } = decompileTraced('half', HALF, AGBCC);
     expect(source).toBe(decompile('half', HALF, ARMV4T_AGBCC).source); // headline parity holds
     expect(report.trace.some((s) => s.id === 'stage:future-pass')).toBe(true);
   } finally {
@@ -114,7 +116,7 @@ test('decompileTraced survives a pre-recovery pass with no registered trace stri
 });
 
 test('the annotate stub carries a machine-readable declineReason', () => {
-  const { report } = decompileTraced('mystery', 'not assembly\n', ARMV4T_AGBCC, { onGap: 'annotate' });
+  const { report } = decompileTraced('mystery', 'not assembly\n', AGBCC, { onGap: 'annotate' });
   expect(report.trace).toEqual([]);
   expect(report.declineReason).toBeTruthy();
 });

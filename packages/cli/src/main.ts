@@ -19,7 +19,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, isToolchainId, targetFor } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -96,14 +96,6 @@ const candCacheLine = (): string => {
 
 export { detectName };
 
-const TARGETS: Record<string, TargetDescription> = {
-  agbcc: ARMV4T_AGBCC,
-  'ido7.1': MIPS_IDO,
-  'gcc2.7.2kmc': MIPS_GCC,
-  'gcc2.7.2': MIPS_GCC,
-  mwcc_242_81: PPC_MWCC,
-};
-
 const BACKENDS: Record<string, LanguageBackend> = {
   c: cBackend,
   pascal: pascalBackend,
@@ -127,7 +119,7 @@ const BOOL_FLAGS = new Set(['strict', 'progress']);
 // The emitted source embeds the name verbatim; a non-identifier would be silently invalid C.
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 
-const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TARGETS).join('|')}>]
+const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TOOLCHAIN_TARGETS).join('|')}>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
@@ -439,10 +431,10 @@ export async function runCli(
   } catch (e) {
     return { code: EXIT.unreadable, stdout: '', stderr: `asmlift: ${e instanceof Error ? e.message : e}\n` };
   }
-  const target = TARGETS[targetKey];
-  if (!target) {
-    return usage(`--target must be one of: ${Object.keys(TARGETS).join(', ')} (got '${targetKey}')`);
+  if (!isToolchainId(targetKey)) {
+    return usage(`--target must be one of: ${Object.keys(TOOLCHAIN_TARGETS).join(', ')} (got '${targetKey}')`);
   }
+  const { target } = targetFor(targetKey, TOOLCHAIN_TARGETS[targetKey].canonicalFlags);
   const backend = BACKENDS[String(flags.get('backend') ?? 'c')];
   if (!backend) {
     return usage(`--backend must be one of: ${Object.keys(BACKENDS).join(', ')}`);

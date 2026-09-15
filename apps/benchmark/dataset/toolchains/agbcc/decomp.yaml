@@ -20,5 +20,5 @@ tools:
     compiler: >-
       cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;
       "$ASMLIFT_AGBCC" {{inputPath}}.pp.c -o {{inputPath}}.s
-      -mthumb-interwork -Wimplicit -O2 -fhex-asm -fprologue-bugfix &&
+      -Wimplicit -mthumb-interwork -O2 -fhex-asm -fprologue-bugfix &&
       "$ASMLIFT_ARM_AS" -mthumb -mthumb-interwork {{inputPath}}.s -o {{outputPath}}

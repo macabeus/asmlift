@@ -13,8 +13,8 @@
 // own definitions into the join statement and duplicating it back recovers that spelling.
 //
 // A VARIATION, NOT A DEFAULT, and the reason is the tower's: the LIFTED TREE underdetermines the
-// source. This is a compiler claim, so it was compiled — agbcc `gcc 2.9-arm-000512` at
-// `TOOLCHAIN.agbccFlags`, both spellings, `diff` on the `.s`:
+// source. This is a compiler claim, so it was compiled — agbcc `gcc 2.9-arm-000512` at its
+// canonical flags, both spellings, `diff` on the `.s`:
 //
 //   - the example above (an ADDRESS temp and a VALUE temp, against `*gA1 = gB1;` in one arm and
 //     `*gA2 = gB2;` in the other, `v17` typed as the store's own type) is BYTE-IDENTICAL. There

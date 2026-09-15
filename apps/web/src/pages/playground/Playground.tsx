@@ -5,7 +5,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { detectName } from '@asmlift/core/detect';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type DecompileResult, decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { type ResolvedTarget, TOOLCHAIN_TARGETS, type ToolchainId, targetFor } from '@asmlift/core/target';
 import { decompileTraced } from '@asmlift/core/trace';
 import { StreamLanguage } from '@codemirror/language';
 import { gas } from '@codemirror/legacy-modes/mode/gas';
@@ -23,11 +23,25 @@ import { EXAMPLES } from './examples';
 import { parseSymbolsJson } from './symbols-json';
 import { useRanking } from './useRanking';
 
-const TARGETS: Record<string, { desc: TargetDescription; label: string; format: string }> = {
-  agbcc: { desc: ARMV4T_AGBCC, label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
-  'ido7.1': { desc: MIPS_IDO, label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
-  'gcc2.7.2kmc': { desc: MIPS_GCC, label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
-  mwcc_242_81: { desc: PPC_MWCC, label: 'GC/Wii — mwcc / PPC', format: 'ppc objdump -d -r --no-show-raw-insn' },
+const atCanonicalFlags = (id: ToolchainId): ResolvedTarget => targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
+
+const TARGETS: Record<string, { resolved: ResolvedTarget; label: string; format: string }> = {
+  agbcc: { resolved: atCanonicalFlags('agbcc'), label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
+  'ido7.1': {
+    resolved: atCanonicalFlags('ido7.1'),
+    label: 'N64 — IDO / MIPS',
+    format: 'mips objdump -d --no-show-raw-insn',
+  },
+  'gcc2.7.2kmc': {
+    resolved: atCanonicalFlags('gcc2.7.2kmc'),
+    label: 'N64 — KMC GCC / MIPS',
+    format: 'mips objdump -d --no-show-raw-insn',
+  },
+  mwcc_242_81: {
+    resolved: atCanonicalFlags('mwcc_242_81'),
+    label: 'GC/Wii — mwcc / PPC',
+    format: 'ppc objdump -d -r --no-show-raw-insn',
+  },
 };
 
 // cpp has no static backend: cppBackend(spec) is built per run from the user/derived spec.
@@ -166,7 +180,7 @@ export function Playground({
       return { backend: BACKENDS[debounced.backendId].backend! };
     }
     try {
-      const target = TARGETS[debounced.targetId].desc;
+      const { target } = TARGETS[debounced.targetId].resolved;
       const spec = debounced.specText.trim()
         ? parseSpec(debounced.specText)
         : deriveSpec(
@@ -199,7 +213,7 @@ export function Playground({
       return { error: langBackend.error };
     }
     try {
-      return decompile(fnName, debounced.asm, TARGETS[debounced.targetId].desc, {
+      return decompile(fnName, debounced.asm, TARGETS[debounced.targetId].resolved.target, {
         backend: langBackend.backend,
         onGap: 'annotate',
         ...(symbolMap ? { symbols: symbolMap } : {}),
@@ -224,7 +238,7 @@ export function Playground({
     }
     try {
       return {
-        report: decompileTraced(fnName, debounced.asm, TARGETS[debounced.targetId].desc, {
+        report: decompileTraced(fnName, debounced.asm, TARGETS[debounced.targetId].resolved, {
           backend: langBackend.backend,
           onGap: 'annotate',
           ...(symbolMap ? { symbols: symbolMap } : {}),
@@ -246,7 +260,7 @@ export function Playground({
   // In-browser ranking — agbcc/ARMv4T + C backend only (the one target whose textual `.s` can be
   // reassembled and whose compiler exists as wasm). Async, worker-driven, stale-guarded (H1). For
   // every other target/backend it stays "off" and the view keeps the plain decompile.
-  const rankTarget = TARGETS[debounced.targetId].desc;
+  const rankTarget = TARGETS[debounced.targetId].resolved.target;
   const rankEligible =
     active && // don't run WASM scoring while this view is hidden (e.g. a benchmark deep-link)
     rankTarget.compiler === 'agbcc' &&

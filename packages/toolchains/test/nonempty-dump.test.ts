@@ -67,7 +67,7 @@ describe('the dump steps this package runs', () => {
 
     vi.doMock('../src/toolchain', async () => {
       const real = await vi.importActual<typeof import('../src/toolchain')>('../src/toolchain');
-      return { ...real, IDO_TOOLCHAIN: { ...real.IDO_TOOLCHAIN, cc, ccFlags: [], objdump, objdumpFlags: [] } };
+      return { ...real, IDO_TOOLCHAIN: { ...real.IDO_TOOLCHAIN, cc, harnessFlags: [], objdump, objdumpFlags: [] } };
     });
     vi.resetModules();
     const { compileMipsTarget } = await import('../src/compile');

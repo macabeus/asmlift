@@ -3,16 +3,18 @@
 // candidates, and the final score — the machine-readable surface the self-improve agent
 // and the webapp both consume.
 import { SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
 
 import { decompileWithReport } from '../../src/report';
 
+const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+
 test('M5: report captures stages, a scored pattern event, candidates, and the score', () => {
   const asm = compileTargetAsm('int half(int x){ return x / 2; }');
   const obj = assembleTarget(asm);
-  const { report } = decompileWithReport('half', asm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2], targetObj: obj });
+  const { report } = decompileWithReport('half', asm, AGBCC, { patterns: [SDIV_POW2_2], targetObj: obj });
 
   expect(report.version).toBe(1);
   expect(report.symbol).toBe('half');
@@ -58,7 +60,7 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
 
 test('M5: report is JSON-serializable (consumable by agent + webapp)', () => {
   const asm = compileTargetAsm('int half(int x){ return x / 2; }');
-  const { report } = decompileWithReport('half', asm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2] });
+  const { report } = decompileWithReport('half', asm, AGBCC, { patterns: [SDIV_POW2_2] });
   const round = JSON.parse(JSON.stringify(report));
   expect(round.symbol).toBe('half');
   expect(round.trace.length).toBe(6);

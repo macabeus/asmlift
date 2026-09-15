@@ -7,5 +7,8 @@
   "description": "The asmlift's benchmark contract: result/manifest types + the closed feature vocabulary",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@asmlift/core": "workspace:*"
   }
 }

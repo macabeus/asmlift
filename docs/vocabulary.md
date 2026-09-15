@@ -112,6 +112,18 @@ already produced every source it made. A variation that threw prints an `asmlift
 | **map mode**                    | One of the two ways `bench sweep` lifts a row: `harness`, as the row is configured, or `nomap`, the same without its symbol map. `--map-modes` selects them.                                                                                             |
 | **shards**                      | A tier's run spread across worker processes.                                                                                                                                                                                                             |
 
+## Compiler flags
+
+| Word                | Meaning                                                                                                                                                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **profile**         | What one flag set makes the compiler do, parsed by `parseFlags` (`packages/core/src/codegen-flags.ts`): the value of each slot, the build's own words for it, and the unclassified words. Every profile of a toolchain decompiles against that toolchain's compiler behaviors. |
+| **slot**            | One option of the compiler, holding the value the compiler acts on: `O` holds `1` for agbcc's `-O2 -O1`, and for IDO's `-O2 -g`.                                                                                                                                               |
+| **canonical flags** | The codegen flags a toolchain's committed probes were compiled with (`TOOLCHAIN_TARGETS[id].canonicalFlags`), and the flags a synthetic row compiles at.                                                                                                                       |
+| **unclassified**    | A codegen word no flag table names. The compiler still receives it, and it is never assumed inert.                                                                                                                                                                             |
+| **inert**           | A word that cannot change what the compiler emits for a preprocessed translation unit: an include path, a define, a diagnostic. A flag set in normal form (`storedFlags`) leaves it out.                                                                                       |
+
+A flag is never **withheld**: that word names a refused candidate.
+
 ## Words with more than one sense
 
 | Word         | Dominant sense                                                                                     | Other senses you will meet                                                                                                                                                     |

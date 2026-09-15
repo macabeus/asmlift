@@ -926,7 +926,7 @@ test('…and `default:` still lands where the LAYOUT puts it, counted in arms', 
 
 // ── fall-through arms ────────────────────────────────────────────────────────────────────────────
 // The two fixtures here are agbcc's own output for the C in their comments, compiled at
-// TOOLCHAIN.agbccFlags; the declining shapes further down are hand-built, because no C produces
+// agbcc's canonical flags; the declining shapes further down are hand-built, because no C produces
 // them. A falling arm is spelled by OMITTING the `break;`, which is a positional fact — control
 // drops into whatever arm is emitted NEXT (the l3/ast.ts non-neutrality note) — so recovery is not
 // free to order the arms by layout or by case value where a chain says otherwise.
@@ -1198,7 +1198,7 @@ test('every withholding on the `default:` position, one call each', () => {
 // ── WHICH SPELLING THE SOURCE WROTE (switch-recover.ts PRE5) ─────────────────────────────────────
 // Regime A recovers a `switch` from any comparison tree it can, so an if/else-if LADDER and a
 // `switch` over the same values collapse to ONE candidate and the differ never sees the ladder.
-// They are not one object: compiled at TOOLCHAIN.agbccFlags the two spellings of the body below
+// They are not one object: compiled at agbcc's canonical flags the two spellings of the body below
 // are 20 bytes each (0x14, ten Thumb instructions) and disagree instruction for instruction — the
 // `switch` front-loads both tests and sorts them ascending (0x1e before 0x64, the reverse of source
 // order), the ladder emits each test directly above its own body. `switchRequiresFrontLoadedTests`
@@ -1361,7 +1361,7 @@ test('a front-loaded gcc2.7.2 -O1 dispatch keeps its switch under the same decla
 });
 
 // agbcc's OWN PAIR, on the compiler that owns four of the five rows the reading moves.
-// `corpus/agbcc-sw{frontload,ladder}.s` are agbcc's own text at TOOLCHAIN.agbccFlags for
+// `corpus/agbcc-sw{frontload,ladder}.s` are agbcc's own text at its canonical flags for
 // `corpus/probe-agbcc-sw{frontload,ladder}.c`. agbcc emits assembly rather than an object, so what
 // is committed is the compiler's output itself and the split is read straight off it.
 const armDumpOf = (f: string) =>

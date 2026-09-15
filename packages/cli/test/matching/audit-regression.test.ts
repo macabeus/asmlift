@@ -5,11 +5,13 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { T } from '@asmlift/core/ir/types';
 import type { SFn, Stmt } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { assembleTarget, compileMipsTarget, compileTargetAsm, scoreC, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
 import { decompileWithReport } from '../../src/report';
+
+const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 describe('soundness regressions — short-circuit hoisting, stack-passed args, report parity', () => {
   // FINDING 1 (shortcircuit.ts): a side effect in a `&&`/`||` RHS arm must NOT be hoisted out of the
@@ -53,7 +55,7 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
   test('M5 report source matches decompile() (soft-div parity)', () => {
     const asm = compileTargetAsm('int divv(int a,int b){ return a/b; }');
     const d = decompile('divv', asm, ARMV4T_AGBCC).source;
-    const r = decompileWithReport('divv', asm, ARMV4T_AGBCC).source;
+    const r = decompileWithReport('divv', asm, AGBCC).source;
     expect(r).toBe(d);
     expect(r).toContain('a0 / a1'); // soft-div folded, not a raw __divsi3(...) call
   });
@@ -183,7 +185,7 @@ describe('report path parity with decompile()', () => {
     ]) {
       const asm = compileTargetAsm(c);
       const sym = c.match(/(\w+)\(int a\)/)![1];
-      expect(decompileWithReport(sym, asm, ARMV4T_AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
+      expect(decompileWithReport(sym, asm, AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
     }
   });
 
@@ -198,7 +200,7 @@ describe('report path parity with decompile()', () => {
     const protos = { prototypes: { g: { params: 1, returnsVoid: true } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path
-    const viaReport = decompileWithReport('atl2', asm, ARMV4T_AGBCC, protos);
+    const viaReport = decompileWithReport('atl2', asm, AGBCC, protos);
     expect(viaReport.source).toBe(viaPipeline.source);
     expect(viaReport.report.outcome).toBe('unscored');
   });
@@ -210,7 +212,7 @@ describe('report path parity with decompile()', () => {
     expect(asm).not.toBe(asm0); // the hostile edit really applied
     const viaPipeline = decompile('rsb', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
     expect(viaPipeline.source).toContain('ASMLIFT_ERROR'); // and really produced a marker
-    const viaReport = decompileWithReport('rsb', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
+    const viaReport = decompileWithReport('rsb', asm, AGBCC, { onGap: 'annotate' });
     expect(viaReport.source).toBe(viaPipeline.source);
   });
 });

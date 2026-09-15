@@ -15,5 +15,5 @@ tools:
   asmlift:
     target: ido7.1
     compiler: >-
-      "$ASMLIFT_IDO_CC" -c -mips2 -O2 -32 -non_shared -Xcpluscomm -G 0
+      "$ASMLIFT_IDO_CC" -c -Xcpluscomm -mips2 -O2 -32 -non_shared -G 0
       -o {{outputPath}} {{inputPath}}

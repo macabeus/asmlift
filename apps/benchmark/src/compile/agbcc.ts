@@ -1,7 +1,7 @@
 // agbcc / ARM (GBA) — EVERY harness-side spelling of "compile C with agbcc": the real-tier
-// target build, the real-tier candidate compile (same steps, shared). Flags come from
-// @asmlift/toolchains; the decomp.yaml candidate command lives in
-// dataset/toolchains/agbcc/decomp.yaml.
+// target build, the real-tier candidate compile (same steps, shared). The harness words come from
+// @asmlift/toolchains and the codegen flags are agbcc's canonical set in @asmlift/core; the
+// decomp.yaml candidate command lives in dataset/toolchains/agbcc/decomp.yaml.
 import {
   COMPILE_ENV,
   NOT_CACHEABLE,
@@ -12,6 +12,7 @@ import {
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -55,9 +56,11 @@ export function stepFailed(
   throw new Error(`${tool} failed: ${d}`);
 }
 
+const AGBCC_FLAGS = [...TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS.agbcc.canonicalFlags];
+
 /** .i → agbcc → .s (asmlift ARM input) with the canonical .text/.align tail → as → .o. */
 function assemble(iPath: string, sPath: string, oPath: string): void {
-  const cc = run(TOOLCHAIN.agbcc, [iPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
+  const cc = run(TOOLCHAIN.agbcc, [iPath, '-o', sPath, ...AGBCC_FLAGS]);
   if (cc.status !== 0) {
     stepFailed('agbcc', cc);
   }
@@ -158,7 +161,7 @@ export function candCacheStaticStamp(files: readonly string[] = candCacheNamespa
   // to candCacheNamespaceFiles() is the whole class of bug it hides. Change it only if
   // the digest's LAYOUT changes and old entries must be abandoned wholesale.
   h.update('bench-agbcc/v2');
-  h.update(TOOLCHAIN.agbccFlags.join(' '));
+  h.update(AGBCC_FLAGS.join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
   h.update('cpp ' + CAND_CPP_FLAGS.join(' '));
   for (const v of COMPILE_ENV) {

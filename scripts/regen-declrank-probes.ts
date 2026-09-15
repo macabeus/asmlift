@@ -7,8 +7,8 @@
 // not spill this source at all.) Committing the objdump text made the two re-readable; this makes
 // them re-MEASURABLE. The flags are load-bearing and differ between the two toolchains that share
 // `MIPS_GCC` (Snowboard Kids 2's Kyoto build at -O2 and Mario Party 3's at -O1), so they are taken
-// from `@asmlift/toolchains` rather than retyped — a flag change shows up here as a diff in the
-// regenerated fixtures.
+// from `@asmlift/toolchains` and `@asmlift/core` rather than retyped — a flag change shows up here
+// as a diff in the regenerated fixtures.
 //
 //   ASMLIFT_IDO_CC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… npx tsx scripts/regen-declrank-probes.ts
 //
@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { TOOLCHAIN_TARGETS } from '../packages/core/src/target';
 import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
@@ -34,7 +35,7 @@ const TOOLCHAINS = [
     slug: 'ido71',
     envVar: 'ASMLIFT_IDO_CC',
     description: 'MIPS_IDO (ido7.1)',
-    flags: IDO_TOOLCHAIN.ccFlags,
+    flags: [...IDO_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags],
     objdump: `${IDO_TOOLCHAIN.objdump} ${IDO_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: compileMipsTarget,
   },
@@ -42,7 +43,7 @@ const TOOLCHAINS = [
     slug: 'gcc272kmc',
     envVar: 'ASMLIFT_KMC_DIR',
     description: "MIPS_GCC (gcc2.7.2kmc — Snowboard Kids 2's Kyoto build, -O2)",
-    flags: GCC_KMC_TOOLCHAIN.ccFlags,
+    flags: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags],
     objdump: `${GCC_KMC_TOOLCHAIN.objdump} ${GCC_KMC_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: compileMipsGccTarget,
   },
@@ -50,7 +51,7 @@ const TOOLCHAINS = [
     slug: 'gcc272',
     envVar: 'ASMLIFT_GCC272_DIR',
     description: "MIPS_GCC (gcc2.7.2 — Mario Party 3's build, -O1)",
-    flags: GCC272_TOOLCHAIN.ccFlags,
+    flags: [...GCC272_TOOLCHAIN.harnessFlags, ...TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags],
     objdump: `${GCC272_TOOLCHAIN.objdump} ${GCC272_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: compileMipsGcc272Target,
   },

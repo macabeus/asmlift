@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 
-const CANONICAL = ['-mthumb-interwork', '-Wimplicit', '-O2', '-fhex-asm', '-fprologue-bugfix'];
+const CANONICAL = ['-mthumb-interwork', '-O2', '-fhex-asm', '-fprologue-bugfix'];
 const MATH_C = ['-fhex-asm', '-mthumb-interwork', '-O2'];
 
 const scored = (score: number): DecompilerResult => ({

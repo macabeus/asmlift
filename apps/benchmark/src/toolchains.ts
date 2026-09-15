@@ -15,14 +15,9 @@
 // textual `.s`; its MIPS/PPC frontends parse `objdump -d` output. m2c wants GNU-as text for all.
 // The adapter records which format `asm` is in via `asmKind` so each decompiler runner can adapt.
 import type { ToolchainId } from '@asmlift/bench-schema';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, type TargetDescription, targetFor } from '@asmlift/core/target';
 import {
-  GCC272_TOOLCHAIN,
-  GCC_KMC_TOOLCHAIN,
-  IDO_TOOLCHAIN,
-  MWCC_PPC_TOOLCHAIN,
   type MatchScore,
-  TOOLCHAIN,
   agbccAvailable,
   assembleTarget,
   compileMipsGcc272Target,
@@ -91,14 +86,19 @@ export interface Toolchain {
   score: (candC: string, sym: string, obj: string) => MatchScore;
 }
 
+/** A toolchain at its canonical flags, where every benchmark row compiles and decompiles. */
+function atCanonicalFlags(id: ToolchainId): Pick<Toolchain, 'targetDesc' | 'cflags'> {
+  const cflags = TOOLCHAIN_TARGETS[id].canonicalFlags;
+  return { targetDesc: targetFor(id, cflags).target, cflags };
+}
+
 export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
   agbcc: {
     id: 'agbcc',
     isa: 'arm',
     compiler: 'agbcc',
     label: 'agbcc / ARM (GBA)',
-    targetDesc: ARMV4T_AGBCC,
-    cflags: TOOLCHAIN.agbccFlags,
+    ...atCanonicalFlags('agbcc'),
     asmKind: 'agbcc-s',
     available: () => agbccAvailable(),
     buildTarget: (refC, _sym) => {
@@ -113,8 +113,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'mips',
     compiler: 'ido',
     label: 'IDO / MIPS (N64)',
-    targetDesc: MIPS_IDO,
-    cflags: IDO_TOOLCHAIN.ccFlags,
+    ...atCanonicalFlags('ido7.1'),
     asmKind: 'objdump',
     available: () => idoAvailable(),
     buildTarget: (refC, sym) => compileMipsTarget(refC, sym),
@@ -125,8 +124,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'mips',
     compiler: 'gcc',
     label: 'KMC GCC / MIPS (N64)',
-    targetDesc: MIPS_GCC,
-    cflags: GCC_KMC_TOOLCHAIN.ccFlags,
+    ...atCanonicalFlags('gcc2.7.2kmc'),
     asmKind: 'objdump',
     available: () => dockerAvailable(),
     buildTarget: (refC, sym) => compileMipsGccTarget(refC, sym),
@@ -137,8 +135,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'mips',
     compiler: 'gcc',
     label: 'GCC 2.7.2 / MIPS (N64)',
-    targetDesc: MIPS_GCC,
-    cflags: GCC272_TOOLCHAIN.ccFlags,
+    ...atCanonicalFlags('gcc2.7.2'),
     asmKind: 'objdump',
     available: () => gcc272Available(),
     buildTarget: (refC, sym) => compileMipsGcc272Target(refC, sym),
@@ -149,8 +146,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'ppc',
     compiler: 'mwcc',
     label: 'CodeWarrior / PowerPC (GC)',
-    targetDesc: PPC_MWCC,
-    cflags: MWCC_PPC_TOOLCHAIN.ccFlags,
+    ...atCanonicalFlags('mwcc_242_81'),
     asmKind: 'objdump',
     available: () => ppcDockerAvailable(),
     buildTarget: (refC, sym, lang) => (lang === 'c++' ? compilePpcCppTarget(refC, sym) : compilePpcTarget(refC, sym)),

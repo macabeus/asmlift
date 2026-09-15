@@ -1,5 +1,7 @@
 // IDO / MIPS (N64) — every harness-side spelling of "compile C with IDO": real-tier target
-// build, real-tier candidate compile (shared cc step). Flags come from @asmlift/toolchains.
+// build, real-tier candidate compile (shared cc step). The harness words come from
+// @asmlift/toolchains and the codegen flags are ido7.1's canonical set in @asmlift/core.
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +14,13 @@ import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run, scratchSlot
 
 /** .i → IDO cc → .o. Shared by target and candidate. */
 function compile(iPath: string, oPath: string): void {
-  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.ccFlags, '-o', oPath, iPath]);
+  const cc = run(IDO_TOOLCHAIN.cc, [
+    ...IDO_TOOLCHAIN.harnessFlags,
+    ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    '-o',
+    oPath,
+    iPath,
+  ]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${compilerDiagnostics(cc.stderr || cc.stdout)}`);
   }
