@@ -1,11 +1,11 @@
 // The benchmark scores asmlift THROUGH the same decomp.yaml path a real project uses.
 // The configs themselves are COMMITTED as live documentation —
 // dataset/toolchains/<id>/decomp.yaml, one per toolchain — with machine locations as
-// $ASMLIFT_* placeholders. Materializing a config substitutes those through
-// @asmlift/toolchains (the single source of truth for paths, itself overridable via the same
-// env names), so machine paths land only in the gitignored .cache / repro dirs, never in the
-// tree. The result is loaded with the REAL loader and its compile template drives candidate
-// compilation via compileFromCommand.
+// $ASMLIFT_* placeholders and the codegen flags as `{{cflags}}`. Materializing a config substitutes
+// the placeholders through @asmlift/toolchains (the single source of truth for paths, itself
+// overridable via the same env names), so machine paths land only in the gitignored .cache / repro
+// dirs, never in the tree. The result is loaded with the REAL loader and its compile template,
+// with each row's flags in `{{cflags}}`, drives candidate compilation via compileFromCommand.
 //
 // Deliberate split: the NATIVE toolchains (agbcc, IDO) keep their `tools.asmlift.compiler`
 // template — the benchmark then exercises the user-command path on the majority of rows. For
@@ -14,7 +14,7 @@
 // candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
 // reproduction scripts (`bench target`) get the command intact on every toolchain.
-import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
+import { type CandidateCompiler, compileFromCommand, renderCflags } from '@asmlift/cli/compile-command';
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import {
@@ -26,13 +26,12 @@ import {
   kmcCandidateCompiler,
   mwccCandidateCompiler,
 } from '@asmlift/toolchains';
-import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-import { requireCanonicalFlags, shq } from './compile/util';
+import { shq } from './compile/util';
 import type { ToolchainId } from './toolchains';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -80,52 +79,52 @@ interface BenchDoc {
   tools: { asmlift: { target: string; compiler?: string; elf?: string; symbols?: string; candidateCache?: 'off' } };
 }
 
-/** The committed config for one toolchain, with placeholders materialized. */
+/** The committed config for one toolchain, with placeholders materialized. Its command takes the
+ *  codegen flags through `{{cflags}}`, because every row compiles at its own. */
 function benchDoc(id: ToolchainId, name: string): BenchDoc {
   const doc = YAML.parse(readFileSync(join(DATASET_DIR, id, 'decomp.yaml'), 'utf8')) as BenchDoc;
-  if (doc.tools?.asmlift?.target !== id || typeof doc.tools.asmlift.compiler !== 'string') {
-    throw new Error(`dataset/toolchains/${id}/decomp.yaml must declare tools.asmlift.{target: ${id}, compiler}`);
+  if (
+    doc.tools?.asmlift?.target !== id ||
+    typeof doc.tools.asmlift.compiler !== 'string' ||
+    !doc.tools.asmlift.compiler.includes('{{cflags}}')
+  ) {
+    throw new Error(
+      `dataset/toolchains/${id}/decomp.yaml must declare tools.asmlift.{target: ${id}, compiler} with {{cflags}}`,
+    );
   }
   doc.name = name;
   doc.tools.asmlift.compiler = substitutePlaceholders(doc.tools.asmlift.compiler, id);
   return doc;
 }
 
-/** The materialized candidate-compile command — exported for the parity test. */
-export function renderScoreCommand(id: ToolchainId): string {
-  return benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!;
+/** The materialized candidate-compile command at `cflags` — exported for the parity test. */
+export function renderScoreCommand(id: ToolchainId, cflags: readonly string[]): string {
+  return renderCflags(benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!, cflags);
 }
 
 const memo = new Map<string, CandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
  *  path: materialize the committed decomp.yaml → loadDecompConfig → resolveTarget (asserted) →
- *  compileFromCommand. The pooled (dockerized) targets' command is stripped, and their candidates
- *  compile through @asmlift/toolchains at `cflags`.
- *
- *  One config FILE per (toolchain, flags), so two flag sets never read each other's; one working
- *  DIRECTORY per toolchain, because the command namespace hashes the working directory. The committed
- *  commands spell each toolchain's canonical flags, so a toolchain compiled through its command
- *  refuses any other set. */
+ *  compileFromCommand, with `cflags` filling the command's `{{cflags}}`. The pooled (dockerized)
+ *  targets' command is stripped, and their candidates compile through @asmlift/toolchains at
+ *  `cflags`. One config and one working directory per toolchain: the flags reach the command
+ *  namespace through the rendered command. */
 export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler {
-  const pooled = POOLED[id];
-  if (pooled === undefined) {
-    requireCanonicalFlags(id, cflags);
-  }
-  const flagsKey = JSON.stringify(cflags);
-  const memoKey = `${id}\0${flagsKey}`;
+  const memoKey = `${id}\0${JSON.stringify(cflags)}`;
   const known = memo.get(memoKey);
   if (known !== undefined) {
     return known;
   }
 
+  const pooled = POOLED[id];
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
   if (pooled !== undefined) {
     delete doc.tools.asmlift.compiler;
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, `decomp-${createHash('sha256').update(flagsKey).digest('hex').slice(0, 16)}.yaml`);
+  const file = join(dir, 'decomp.yaml');
   // Atomic write: parallel bench workers may generate concurrently; rename prevents torn reads.
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, YAML.stringify(doc));
@@ -140,7 +139,7 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   const compile =
     pooled !== undefined
       ? pooled(cflags)
-      : compileFromCommand(toolCfg.compiler!, { cwd: dir, candidateCache: toolCfg.candidateCache });
+      : compileFromCommand(toolCfg.compiler!, { cwd: dir, candidateCache: toolCfg.candidateCache, cflags });
   memo.set(memoKey, compile);
   return compile;
 }
@@ -159,8 +158,9 @@ export function benchScorer(
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on
  *  EVERY toolchain (one-shot docker for the pooled pair) — the config `bench target` hands the
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
- *  the benchmark's own toolchain. `elf` (absolute path — symbol-fed rows) lands as
- *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did.
+ *  the benchmark's own toolchain. The command spells the row's `cflags`, which the CLI reads off
+ *  it. `elf` (absolute path — symbol-fed rows) lands as tools.asmlift.elf so the CLI loads the
+ *  project's symbol map exactly as the benchmark did.
  *
  *  Nothing here decides whether a reproduction CACHES. The candidate-object cache needs no
  *  per-project declaration — everything the command reads is measured — and it is on by default,
@@ -169,12 +169,14 @@ export function benchScorer(
  *  indistinguishable in RESULT from no cache at all. */
 export function writeScoreConfig(
   id: ToolchainId,
+  cflags: readonly string[],
   dir: string,
   elf?: string,
   ctxFile?: string,
   symbolsFile?: string,
 ): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
+  doc.tools.asmlift.compiler = renderCflags(doc.tools.asmlift.compiler!, cflags);
   if (elf) {
     doc.tools.asmlift.elf = elf;
   }
@@ -194,7 +196,7 @@ export function writeScoreConfig(
     // its typedefs + synthesized declarations on its own, so no flag says any of this.
     doc.tools.asmlift.compiler =
       `cat ${ctxFile} {{inputPath}} > {{inputPath}}.ctx.c && ` +
-      doc.tools.asmlift.compiler!.replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c');
+      doc.tools.asmlift.compiler.replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c');
   }
   writeFileSync(join(dir, 'decomp.yaml'), YAML.stringify(doc));
 }

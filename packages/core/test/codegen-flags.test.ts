@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'vitest';
 
-import { effectiveFlags, optLevel, parseFlags, profileKey, storedFlags, tokenizeFlags } from '../src/codegen-flags';
+import {
+  type FlagFamily,
+  UnreadableLevelError,
+  effectiveFlags,
+  optLevel,
+  parseFlags,
+  profileKey,
+  shellJoinFlags,
+  storedFlags,
+  tokenizeFlags,
+} from '../src/codegen-flags';
 import {
   ARMV4T_AGBCC,
   MIPS_GCC,
@@ -210,6 +220,36 @@ describe('parsing', () => {
       O: '-O2',
       '-fhex-asm': '-fhex-asm',
     });
+  });
+
+  test('a level word another family spells names that family', () => {
+    const refusal = (family: FlagFamily, argv: string[]) => {
+      try {
+        parseFlags(family, argv);
+      } catch (e) {
+        return e instanceof UnreadableLevelError ? { word: e.word, family: e.family, spelledBy: e.spelledBy } : e;
+      }
+      return undefined;
+    };
+    expect(refusal('agbcc', ['-O4,p'])).toEqual({ word: '-O4,p', family: 'agbcc', spelledBy: 'mwcc' });
+    expect(refusal('mwcc', ['-O+p'])).toEqual({ word: '-O+p', family: 'mwcc', spelledBy: undefined });
+  });
+
+  test('a word that is neither an option nor its argument is an operand', () => {
+    const argv = ['-G', '0', 'in.c', '-O2', '$PRE_FILE', '-Og'];
+    const p = parseFlags('gcc', argv);
+    expect(p.operandAt).toEqual([2, 4]);
+    expect(p.unclassified).toEqual(['in.c', '$PRE_FILE', '-Og']);
+  });
+
+  test("the gcc driver's program path is inert", () => {
+    expect(storedFlags('gcc', ['-B', '/gcc272/', '-B/tools/', '-O1'])).toEqual(['-O1']);
+  });
+
+  test('flags joined as shell words read back as the same flags', () => {
+    const argv = ['-pragma', 'cats off', '-DX="a b"', "-DY='c'", '', '-O4,p', '-str', 'reuse,', 'readonly'];
+    expect(shellJoinFlags(argv)).toBe(`-pragma 'cats off' '-DX="a b"' '-DY='\\''c'\\''' '' -O4,p -str reuse, readonly`);
+    expect(tokenizeFlags(shellJoinFlags(argv))).toEqual(argv);
   });
 
   test('a stored build drops inert words with their arguments and keeps every codegen word', () => {

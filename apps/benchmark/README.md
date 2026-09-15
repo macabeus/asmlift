@@ -54,7 +54,8 @@ measures the exact compilers asmlift is tested against. Candidate compilation ru
 same `decomp.yaml` path a real project uses (`src/decomp-config.ts`): the configs are COMMITTED
 as live documentation — `dataset/toolchains/<id>/decomp.yaml`, one per toolchain, with machine
 locations as `$ASMLIFT_*` placeholders (the same names `@asmlift/toolchains` honors as env
-overrides). The harness materializes them into the gitignored `.cache/decomp-configs/` and loads
+overrides) and the codegen flags as `{{cflags}}`, which each row's flags fill. The harness
+materializes them into the gitignored `.cache/decomp-configs/` and loads
 them with the real loader — the native pair (agbcc, IDO) keeps its `tools.asmlift.compiler`
 command mirroring the built-in invocation (parity enforced by `test/decomp-config.test.ts`),
 while for the dockerized three (KMC GCC, GCC 2.7.2, mwcc) the harness strips the compiler so the registry

@@ -33,7 +33,7 @@ If the file includes multi-functions, pass the `--name` flag.
 ```
 usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
-                [--config <decomp.yaml>] [--score-against <target.o>]
+                [--cflags <flags>] [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--jobs <n>] [--progress]
 ```
@@ -44,6 +44,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--name`          | The function to decompile when the input holds several (default: auto-detected)                                                                                                                                                                                                                                                                                                  |
 | `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                                                                                       |
 | `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                                                                                            |
+| `--cflags`        | The flags your build compiles this function's file with, as the build spells them (`--cflags "-mthumb-interwork -O1"`). They fill `{{cflags}}` in the `compiler` command and win over the flags that command spells. See [Compiler flags](#compiler-flags)                                                                                                                       |
 | `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                                                                                        |
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                                                                                           |
 | `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                                                                                         |
@@ -73,7 +74,8 @@ All asmlift settings live in a spec-compliant `tools.asmlift` block:
 | `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
-`{{outputPath}}` (where the object must land), `{{symbol}}` (the function name). An unknown
+`{{outputPath}}` (where the object must land), `{{symbol}}` (the function name), `{{cflags}}`
+(the flags from `--cflags`, as shell words). An unknown
 `{{…}}` placeholder is a named error. Values substitute **raw** so your template owns its
 quoting (`PRE="{{outputPath}}.i"` works) — each value is verified shell-inert first, and
 anything unsafe (including `$`-bearing symbol names) refuses loudly rather than reaching the
@@ -92,6 +94,30 @@ Scoring rules, in the project's spirit of never guessing:
   template that injects the project's own headers rejects the probe (C89 duplicate typedef)
   and asmlift then drops both its typedefs and its synthesized declarations for every
   candidate; a template that accepts it keeps both. The verdict is cached per run.
+
+## Compiler flags
+
+The flags a function was compiled with compile every candidate, and asmlift reports the profile
+they describe (optimisation level, debug info, the words its flag table does not name). One set
+reaches both, taken from the first of:
+
+| Source                         | How                                                                                                                                                                          | `[flags]` line ends with |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `--cflags "<flags>"`           | fills `{{cflags}}` in `compiler`, word for word                                                                                                                              | `(--cflags)`             |
+| the `compiler` command's words | the words after the compiler binary (`agbcc`, `old_agbcc`, `cc1`, `cc`, `gcc`, `mwcceppc.exe`), through wrappers like `docker run … wibo`, minus `-o`, operands and warnings | `(compiler command)`     |
+| none                           | a plain decompile assumes the target's canonical flags and says so                                                                                                           | `none given: …`          |
+
+```
+asmlift: [flags] -mthumb-interwork -O1 -ansi (--cflags)
+asmlift: [flags] note: -O2 overridden by later -O1
+asmlift: [flags] not in asmlift's flag table, passed to the compiler verbatim: -ansi
+```
+
+A project with one flag set writes them in its `compiler` command and needs nothing else. With
+`--cflags` and `--score-against`, the command must take them through `{{cflags}}`: one that has
+none is refused with a copy of it that does, and a codegen flag spelled beside `{{cflags}}` is
+refused as a second source. A command that runs no compiler asmlift can find is named in a note;
+its candidates still compile as written. Every refusal exits `64` with only its message.
 
 ## The symbol map: `elf`
 

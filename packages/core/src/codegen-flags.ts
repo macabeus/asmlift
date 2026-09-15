@@ -141,6 +141,9 @@ const gccFamily: OptionSpec[] = [
   // `-Os`, where the address load moves above the branch.
   { match: '-Os', slot: 'O', value: () => 's' },
   ...cppAndDiagnostics,
+  // -B tells the driver where its own programs are: which compiler runs is the toolchain, not a flag
+  { match: /^-B(.+)$/ },
+  { match: '-B', takesArg: true },
   // agbcc -g is codegen: over the 181 vendored agbcc translation units `.text` is byte-identical with
   // and without it at -O0, -O2, -O3 and -Os, and differs at -O1 on one (pokeemerald
   // `Cmd_tryconversiontypechange`).
@@ -255,6 +258,22 @@ const EFFECTIVE: Record<FlagFamily, { defaults: Readonly<Record<string, string>>
   mwcc: { defaults: {}, implies: [] },
 };
 
+/** A `-O` word a family cannot read. `spelledBy` is the family whose levels are spelled that way,
+ *  when the word is a toolchain mix-up rather than a typo. */
+export class UnreadableLevelError extends Error {
+  constructor(
+    readonly word: string,
+    readonly family: FlagFamily,
+    readonly spelledBy: FlagFamily | undefined,
+  ) {
+    super(
+      spelledBy === undefined
+        ? `${word} is not an optimisation level ${family} accepts`
+        : `${word} is not an optimisation level ${family} accepts; ${spelledBy} spells its levels that way`,
+    );
+  }
+}
+
 /** A `-O` word the family cannot read: mwcc refuses every level it does not know, and a word another
  *  family spells its levels with (`-O4,p` given to agbcc) is a toolchain mix-up. Any other `-O` word
  *  is left to the compiler. */
@@ -263,11 +282,11 @@ function refuseLevel(family: FlagFamily, word: string): void {
     return;
   }
   if (family === 'mwcc') {
-    throw new Error(`${word} is not an optimisation level mwcc accepts`);
+    throw new UnreadableLevelError(word, family, undefined);
   }
   const other = FAMILIES.find((f) => f !== family && specFor(f, word)?.spec.slot === 'O');
   if (other !== undefined && !/^-O(\d*|s)$/.test(word)) {
-    throw new Error(`${word} is not an optimisation level ${family} accepts; ${other} spells its levels that way`);
+    throw new UnreadableLevelError(word, family, other);
   }
 }
 
@@ -285,6 +304,9 @@ export interface CodegenProfile {
   overriddenAt: readonly number[];
   /** argv indices of every inert word and its argument */
   inertAt: readonly number[];
+  /** argv indices of every word that is neither an option nor an option's argument, such as the file
+   *  a compile command names; each is also unclassified */
+  operandAt: readonly number[];
   /** argv positions by option, in build order: an option with its argument words, a word no table names
    *  with the operand right after it (the table cannot say whether it takes one), every other word alone */
   spans: readonly (readonly number[])[];
@@ -525,10 +547,20 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
     unclassified,
     overriddenAt: overriddenAt.sort((a, b) => a - b),
     inertAt,
+    operandAt: unknown.filter((k) => !argv[k].startsWith('-')),
     spans: grouped,
     overrides: overrides.sort((a, b) => a.at - b.at).map((o) => o.line),
     implied,
   };
+}
+
+/** A word the shell reads back as itself without quotes. */
+const SHELL_BARE = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+/** The flags as shell words, quoted only where the shell needs it (`-pragma 'cats off'`), so that
+ *  `tokenizeFlags(shellJoinFlags(argv))` is `argv`. */
+export function shellJoinFlags(argv: readonly string[]): string {
+  return argv.map((w) => (SHELL_BARE.test(w) ? w : `'${w.replaceAll("'", `'\\''`)}'`)).join(' ');
 }
 
 /** One string per distinct profile: the slots by name, whatever order the build spelled them in, then

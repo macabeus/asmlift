@@ -130,6 +130,27 @@ const CAND = 's32 f(s32 a0) { return a0 + 1; }\n';
 const CAND_K = '/* USES_K */\ns32 f(s32 a0) { return a0 + K; }\n';
 const CAND_INCLUDE = '#include "k.h" /* USES_K */\ns32 f(s32 a0) { return a0 + K; }\n';
 
+describe('the flags a command renders', () => {
+  test('one command at two flag sets never serves one set the other’s object', async () => {
+    const p = project();
+    const template = 'echo x >> runs; { printf "%s " {{cflags}}; cat "{{inputPath}}"; } > "{{outputPath}}"';
+    const seen = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const at = (cflags: string[]) =>
+          readFileSync(compileFromCommand(template, { cwd: p.cwd, cflags })(CAND, 'f', 'c'), 'utf8');
+        const o2 = at(['-O2']);
+        const afterO2 = p.runs();
+        return { o2, o1: at(['-O1']), compiledAgain: p.runs() > afterO2, o2Again: at(['-O2']) };
+      },
+    );
+    expect(seen.o2.startsWith('-O2 ')).toBe(true);
+    expect(seen.o1.startsWith('-O1 '), 'the -O1 compile must not be served the -O2 object').toBe(true);
+    expect(seen.compiledAgain).toBe(true);
+    expect(seen.o2Again).toBe(seen.o2);
+  });
+});
+
 describe('hole 2 — an input reached through a DIRECTORY', () => {
   test('the cache runs, and a hit is an execution that did not happen', async () => {
     const p = project();

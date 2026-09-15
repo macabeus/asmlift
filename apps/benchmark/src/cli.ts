@@ -464,7 +464,7 @@ switch (command) {
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, out, elf, ctxFile, symbolsFile);
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, elf, ctxFile, symbolsFile);
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''}${
         symbolsFile ? ' + authored symbol map' : ''

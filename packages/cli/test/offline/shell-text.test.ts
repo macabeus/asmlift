@@ -7,7 +7,43 @@
 // about a `#` that is NOT a comment, and what `sh` itself does with it is quoted beside it.
 import { describe, expect, test } from 'vitest';
 
-import { shellProgramText, stripShellComments } from '../../src/shell-text';
+import { shellCommands, shellProgramText, stripShellComments } from '../../src/shell-text';
+
+describe('the simple commands a shell text runs', () => {
+  const words = (text: string) => shellCommands(text).map((c) => c.map((w) => w.value));
+
+  test('operators and newlines end a command; quotes are removed and expansions kept', () => {
+    expect(
+      words(
+        `cpp -P "{{inputPath}}" > x 2>/dev/null; cc 'a b' "$(dirname "{{inputPath}}")":/w && as -o o x | cat\nnext`,
+      ),
+    ).toEqual([
+      ['cpp', '-P', '{{inputPath}}'],
+      ['cc', 'a b', '$(dirname "{{inputPath}}"):/w'],
+      ['as', '-o', 'o', 'x'],
+      ['cat'],
+      ['next'],
+    ]);
+  });
+
+  test('a backslash-newline continues the command; a comment is not read', () => {
+    expect(words('cc \\\n  -O2 # the level\n-g')).toEqual([['cc', '-O2'], ['-g']]);
+  });
+
+  test('a redirection is dropped with its target, attached or not', () => {
+    expect(words('cc a >out 2> err b &>log c >&2 d <in')).toEqual([['cc', 'a', 'b', 'c', 'd']]);
+  });
+
+  test('each word knows where the text spells it, quotes included', () => {
+    const text = `cc  '-pragma' "cats off" -O2`;
+    expect(shellCommands(text)[0].map((w) => text.slice(w.start, w.end))).toEqual([
+      'cc',
+      "'-pragma'",
+      '"cats off"',
+      '-O2',
+    ]);
+  });
+});
 
 /** The detector `candcache.ts` runs over the answer. Duplicated deliberately: this file is about
  *  what the READING hands over, and pinning it against a copy of the predicate keeps the two

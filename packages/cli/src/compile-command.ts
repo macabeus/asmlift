@@ -8,6 +8,7 @@
 //
 // This module is deliberately free of score.ts/objdiff imports so the CLI can build a compiler
 // from config without loading the objdiff wasm, and so its tests stay offline.
+import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -121,6 +122,21 @@ export interface CompileCommandOptions {
    *  directory, a compiler behind a runtime `OPAQUE_RUNTIMES` does not name, a `cd` into a
    *  computed path — and it is per PROJECT, where `ASMLIFT_CANDCACHE` is per process. */
   candidateCache?: 'off';
+  /** The flags the command's `{{cflags}}` stands for, required exactly when the command has one. */
+  cflags?: readonly string[];
+}
+
+/** The command with `{{cflags}}` rendered as shell words. It is rendered before anything else reads
+ *  the command, so the candidate-cache namespace hashes the flags a candidate compiles with. */
+export function renderCflags(command: string, cflags: readonly string[] | undefined): string {
+  const takesCflags = command.includes('{{cflags}}');
+  if (takesCflags && cflags === undefined) {
+    throw new Error(`compiler command takes {{cflags}}, and no flags were given — got: ${command}`);
+  }
+  if (!takesCflags && cflags !== undefined) {
+    throw new Error(`compiler command has no {{cflags}} to take the flags given — got: ${command}`);
+  }
+  return cflags === undefined ? command : command.replaceAll('{{cflags}}', shellJoinFlags(cflags));
 }
 
 // Substituted values are injected RAW so the template owns its quoting (a natural template
@@ -668,7 +684,8 @@ const unwrap = (r: Verdict): string => {
  *  TRUNCATED object gets scored (found scoring real 22/28/38 phantoms in the klonoa dogfood).
  *  A non-zero exit or a missing output object throws with the full command + its stderr —
  *  configured means configured, there is no fallback. */
-export function compilersFromCommand(template: string, opts: CompileCommandOptions = {}): CommandCompilers {
+export function compilersFromCommand(command: string, opts: CompileCommandOptions = {}): CommandCompilers {
+  const template = renderCflags(command, opts.cflags);
   if (!template.includes('{{inputPath}}') || !template.includes('{{outputPath}}')) {
     throw new Error(`compiler command must contain {{inputPath}} and {{outputPath}} placeholders — got: ${template}`);
   }
@@ -677,7 +694,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   const unknown = template.replaceAll(/\{\{(inputPath|outputPath|symbol)\}\}/g, '').match(/\{\{\w+\}\}/);
   if (unknown) {
     throw new Error(
-      `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}`,
+      `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}, {{cflags}}`,
     );
   }
   // One template execution, in two halves: `stage` writes the input and builds the command, and

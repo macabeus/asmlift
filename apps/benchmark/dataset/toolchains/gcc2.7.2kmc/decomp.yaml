@@ -3,13 +3,15 @@
 # `docker run`. The candidate's directory is mounted at /work and the file names are rebased
 # into the container with $(dirname)/$(basename) — copy this shape for any dockerized compiler.
 #
-# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce. Flags
-# mirror the Snowboard Kids 2 decomp Makefile.
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce, and
+# {{cflags}} is where the codegen flags go: the benchmark fills it with each function's flags.
 #
 # To use this in your project, replace:
 #   $ASMLIFT_DOCKER    → docker
 #   $ASMLIFT_KMC_DIR   → the directory holding the KMC gcc binaries (e.g. tools/gcc_kmc)
 #   $ASMLIFT_KMC_IMAGE → i386/ubuntu:bionic (any linux/386 image with libc works)
+#   {{cflags}}         → your Makefile's flags (e.g. -mips3 -EB -O2 -G 0), which asmlift reads off
+#                        the command, or keep it and pass --cflags
 # (The variables exist only to keep machine paths out of this repo — the benchmark fills
 # them in when it runs.)
 #
@@ -32,6 +34,5 @@ tools:
       "$ASMLIFT_DOCKER" run --rm --platform linux/386
       -v "$ASMLIFT_KMC_DIR":/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc
       "$ASMLIFT_KMC_IMAGE"
-      /kmc/gcc -nostdinc -w -mabi=32 -mgp32 -mfp32 -mno-abicalls -fno-PIC -G 0 -funsigned-char
-      -mips3 -EB -O2 -fno-builtin -fno-asm
+      /kmc/gcc -nostdinc -w {{cflags}}
       -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

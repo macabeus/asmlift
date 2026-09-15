@@ -19,7 +19,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
-import { TOOLCHAIN_TARGETS, isToolchainId, targetFor } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -38,6 +38,7 @@ import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
+import { resolveFlags } from './flags';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -114,6 +115,7 @@ const KNOWN_FLAGS = new Set([
   'proto',
   'jobs',
   'progress',
+  'cflags',
 ]);
 const BOOL_FLAGS = new Set(['strict', 'progress']);
 // The emitted source embeds the name verbatim; a non-identifier would be silently invalid C.
@@ -121,7 +123,7 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 
 const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TOOLCHAIN_TARGETS).join('|')}>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
-                [--config <decomp.yaml>] [--score-against <target.o>]
+                [--cflags <flags>] [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--jobs <n>] [--progress]
 
@@ -131,6 +133,9 @@ MIPS/PPC ELF object.
 Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 
   --name           select the function in multi-function input (default: detected)
+  --cflags         the flags your build compiles this function's file with; they
+                   fill {{cflags}} in tools.asmlift.compiler (default: the flags that
+                   command already spells, else the target's canonical flags)
   --strict         fail on any gap instead of annotating
   --config         decomp.yaml to use (default: nearest ancestor of the input)
   --score-against  recompile the output with the project's compiler and objdiff
@@ -412,6 +417,7 @@ export async function runCli(
   // explicit --config path. Supplies the target when --target is absent, plus the
   // tools.asmlift payload (compile command, objdump override).
   let toolCfg: AsmliftToolConfig | undefined;
+  let configPath: string | undefined;
   let configDir: string | undefined;
   let targetKey: string;
   let targetTrace = '';
@@ -419,6 +425,7 @@ export async function runCli(
     const startDir = input === '-' ? undefined : dirname(resolve(input));
     const loaded = loadDecompConfig(flags.get('config') as string | undefined, startDir);
     toolCfg = loaded?.config.tools?.asmlift;
+    configPath = loaded?.path;
     configDir = loaded ? dirname(loaded.path) : undefined;
     const res = resolveTarget(flags.get('target') as string | undefined, loaded);
     if ('error' in res) {
@@ -434,7 +441,9 @@ export async function runCli(
   if (!isToolchainId(targetKey)) {
     return usage(`--target must be one of: ${Object.keys(TOOLCHAIN_TARGETS).join(', ')} (got '${targetKey}')`);
   }
-  const { target } = targetFor(targetKey, TOOLCHAIN_TARGETS[targetKey].canonicalFlags);
+  // Every flag set of a toolchain decompiles against its description; the flags themselves are
+  // resolved once the function is known.
+  const target = TOOLCHAIN_TARGETS[targetKey].description;
   const backend = BACKENDS[String(flags.get('backend') ?? 'c')];
   if (!backend) {
     return usage(`--backend must be one of: ${Object.keys(BACKENDS).join(', ')}`);
@@ -572,6 +581,19 @@ export async function runCli(
   // target's own withheld signature cannot make the note claim a fact the run did not use.
   const protoNote = guessedArityNote(asm, name, prototypes, symbols);
 
+  const flagsResolution = resolveFlags({
+    toolchain: targetKey,
+    cflags: flags.get('cflags') as string | undefined,
+    command: toolCfg?.compiler,
+    configPath,
+    ranked: flags.has('score-against'),
+  });
+  if (!flagsResolution.ok) {
+    return { code: EXIT.usage, stdout: '', stderr: `asmlift: ${flagsResolution.message}\n` };
+  }
+  // What the run is about, said on every path after the target it resolved.
+  const runTrace = targetTrace + flagsResolution.lines;
+
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
   // against the given object. Inherently strict: candidates come from the strict tower, so a
@@ -634,6 +656,7 @@ export async function runCli(
       compilers = compilersFromCommand(toolCfg.compiler, {
         cwd: configDir,
         candidateCache: toolCfg.candidateCache,
+        cflags: flagsResolution.fill,
       });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
@@ -683,7 +706,7 @@ export async function runCli(
         code: rankedExitCode(ranked.winner.score.match),
         stdout: ranked.winner.source,
         stderr: rankedStderr({
-          targetTrace,
+          targetTrace: runTrace,
           warn,
           ranked,
           enumerationErrors,
@@ -694,7 +717,7 @@ export async function runCli(
         }),
       };
     } catch (e) {
-      return failureResult(e, targetTrace, warn, rankedExitCode(false), candCacheLine());
+      return failureResult(e, runTrace, warn, rankedExitCode(false), candCacheLine());
     }
   }
 
@@ -718,14 +741,14 @@ export async function runCli(
           `source spells them BARE, so it is about these declarations; check them against your headers:\n` +
           indentedDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })));
     const stderr =
-      targetTrace +
+      runTrace +
       warn +
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       protoNote;
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {
-    return failureResult(e, targetTrace, warn, EXIT.gaps);
+    return failureResult(e, runTrace, warn, EXIT.gaps);
   }
 }
 

@@ -1,22 +1,11 @@
 // Shared helpers for the per-toolchain compile modules.
-import { C_TYPEDEFS, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
+import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-/** Refuse any flag set but `toolchain`'s canonical one, for a compile that spells those flags as
- *  constants and would otherwise compile a row at the wrong set. */
-export function requireCanonicalFlags(toolchain: ToolchainId, cflags: readonly string[]): void {
-  const canonical: readonly string[] = TOOLCHAIN_TARGETS[toolchain].canonicalFlags;
-  if (cflags.length !== canonical.length || cflags.some((flag, i) => flag !== canonical[i])) {
-    throw new Error(
-      `${toolchain} compiles only at its canonical flags (${canonical.join(' ')}); got ${cflags.join(' ')}`,
-    );
-  }
-}
 
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
  *  otherwise `status: null` reaches callers as e.g. "agbcc failed: null". Compile failures
