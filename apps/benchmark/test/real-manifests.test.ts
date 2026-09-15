@@ -112,5 +112,18 @@ describe('committed real-tier manifests', () => {
       const prov = JSON.parse(readFileSync(join(dir, 'PROVENANCE.json'), 'utf8'));
       expect(typeof prov.commit).toBe('string');
     });
+
+    // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that
+    // re-vendors without re-deriving (or the reverse) leaves the two commits apart, and fails here.
+    test(`${f} derives every unit's flags at the commit its TUs were vendored from`, () => {
+      const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
+      const prov = JSON.parse(readFileSync(join(REAL_DIR, 'tu', man.project, 'PROVENANCE.json'), 'utf8')) as {
+        commit: string;
+      };
+      const stale = Object.entries(man.units)
+        .filter(([, u]) => u.flagsFrom.commit !== prov.commit)
+        .map(([path, u]) => `${man.project}:${path} flags from ${u.flagsFrom.commit}, TUs from ${prov.commit}`);
+      expect(stale).toEqual([]);
+    });
   }
 });

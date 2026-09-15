@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { REAL_DIR, type RealManifest, loadManifestsForVendor } from '../cases/manifests';
+import { REAL_DIR, type RealManifest, loadCompleteManifests } from '../cases/manifests';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
 import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 
@@ -19,7 +19,7 @@ import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 // pinned fork/branch and the vendored symbol map without any checkout present.
 let manifestCache: Map<string, RealManifest> | null = null;
 function manifestFor(project: string): RealManifest | null {
-  manifestCache ??= new Map(loadManifestsForVendor().map((m) => [m.project, m]));
+  manifestCache ??= new Map(loadCompleteManifests().map((m) => [m.project, m]));
   return manifestCache.get(project) ?? null;
 }
 
@@ -269,7 +269,9 @@ ASMLIFT_PATH='/path/to/asmlift'${checkoutRecipe(fn)}${symbolsNote(fn)}
 
 # ── Step 1: scoring inputs ───────────────────────────────────────────────────
 # Builds this function's target object (content-cached) and writes a decomp.yaml whose compile
-# command is the benchmark's own toolchain invocation — what --score-against compiles with.${
+# command is the benchmark's own toolchain invocation — what --score-against compiles with. That
+# command carries the flags the target and every candidate compile with, and step 1 prints them:
+# ${fn.tier === 'real' ? "the flags of this function's unit, copied from the project's build" : `${fn.toolchain}'s canonical flags`}.${
     usesSymbolMap(fn)
       ? `
 # --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.`

@@ -18,6 +18,7 @@ import {
   unitObject,
   unitOf,
 } from '../src/cases/derive-flags';
+import type { BuildUnit } from '../src/cases/manifests';
 
 const scratch = mkdtempSync(join(tmpdir(), 'derive-flags-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -120,9 +121,6 @@ describe("a unit's object", () => {
     expect(
       unitOf({
         sym: 'AbsMax',
-        addr: '0x080001f8',
-        features: [],
-        funcC: '',
         sourceUrl: 'https://github.com/macabeus/sa3/blob/a069e81b/src/game/math.c#L10-L20',
       }),
     ).toBe('src/game/math.c');
@@ -181,8 +179,17 @@ describe('a dtk unit', () => {
 
 describe("a unit's stored flags", () => {
   test('are ok, drifted from the derived ones, or missing', () => {
-    expect(flagsStatus(['-O2'], ['-O2'])).toEqual({ kind: 'ok' });
-    expect(flagsStatus(['-O2'], ['-O1'])).toEqual({ kind: 'DRIFT', stored: ['-O2'] });
-    expect(flagsStatus(undefined, ['-O1'])).toEqual({ kind: 'MISSING' });
+    const unit = (cflags: string[], commit = 'a'.repeat(40)): BuildUnit => ({
+      toolchain: 'agbcc',
+      cflags,
+      flagsFrom: { from: 'makefile', commit, file: 'Makefile', sha256: 'b'.repeat(64), command: 'agbcc -O2 src/f.c' },
+    });
+    expect(flagsStatus(unit(['-O2']), unit(['-O2']))).toEqual({ kind: 'ok' });
+    expect(flagsStatus(unit(['-O2']), unit(['-O1']))).toEqual({ kind: 'DRIFT', changes: ['-O2 → -O1'] });
+    expect(flagsStatus(unit(['-O2']), unit(['-O2'], 'c'.repeat(40)))).toEqual({
+      kind: 'DRIFT',
+      changes: ['commit aaaaaaaa → cccccccc'],
+    });
+    expect(flagsStatus(undefined, unit(['-O1']))).toEqual({ kind: 'MISSING' });
   });
 });

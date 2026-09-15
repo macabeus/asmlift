@@ -1,6 +1,5 @@
 {
   "project": "snowboardkids2",
-  "toolchain": "gcc2.7.2kmc",
   "repoDir": "snowboardkids2-decomp",
   "repo": "macabeus/snowboardkids2-decomp",
   "branch": "asmlift-benchmark",
@@ -26,10 +25,826 @@
     "-D_FINALROM",
     "-DM2CTX"
   ],
+  "units": {
+    "src/1DCF60.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1DCF60.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1DCF60.o -"
+      }
+    },
+    "src/19E80.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/19E80.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/19E80.o -"
+      }
+    },
+    "src/38BE0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/38BE0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/38BE0.o -"
+      }
+    },
+    "src/199C0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/199C0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/199C0.o -"
+      }
+    },
+    "src/227D0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/227D0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/227D0.o -"
+      }
+    },
+    "src/22920.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/22920.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/22920.o -"
+      }
+    },
+    "src/76B0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/76B0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/76B0.o -"
+      }
+    },
+    "src/198B0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/198B0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/198B0.o -"
+      }
+    },
+    "src/36B80.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/36B80.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/36B80.o -"
+      }
+    },
+    "src/10AD0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/10AD0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/10AD0.o -"
+      }
+    },
+    "src/2AF90.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/2AF90.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/2AF90.o -"
+      }
+    },
+    "src/1BBA0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1BBA0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1BBA0.o -"
+      }
+    },
+    "src/2C8F0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/2C8F0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/2C8F0.o -"
+      }
+    },
+    "src/3B80.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/3B80.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/3B80.o -"
+      }
+    },
+    "src/16FA0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/16FA0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/16FA0.o -"
+      }
+    },
+    "src/15690.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/15690.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/15690.o -"
+      }
+    },
+    "src/1E1BA0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1E1BA0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1E1BA0.o -"
+      }
+    },
+    "src/1E2BE0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1E2BE0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1E2BE0.o -"
+      }
+    },
+    "src/1E36C0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1E36C0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1E36C0.o -"
+      }
+    },
+    "src/1E64A0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1E64A0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1E64A0.o -"
+      }
+    },
+    "src/297B0.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/297B0.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/297B0.o -"
+      }
+    },
+    "src/52880.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/52880.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/52880.o -"
+      }
+    },
+    "src/5EA60.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/5EA60.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/5EA60.o -"
+      }
+    },
+    "src/1D520.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/1D520.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/1D520.o -"
+      }
+    },
+    "src/5AA90.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/5AA90.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/5AA90.o -"
+      }
+    },
+    "src/9FF70.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/9FF70.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/9FF70.o -"
+      }
+    },
+    "src/38C90.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/38C90.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/38C90.o -"
+      }
+    },
+    "src/6E840.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/6E840.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/6E840.o -"
+      }
+    },
+    "src/title_screen.c": {
+      "toolchain": "gcc2.7.2kmc",
+      "cflags": [
+        "-x",
+        "c",
+        "-mabi=32",
+        "-mgp32",
+        "-mfp32",
+        "-mno-abicalls",
+        "-fno-PIC",
+        "-G",
+        "0",
+        "-Wa,-force-n64align",
+        "-funsigned-char",
+        "-mips3",
+        "-EB",
+        "-O2",
+        "-fno-builtin",
+        "-fno-asm"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "63236cd8dce61b8a1b37765952eb340b66684476",
+        "file": "Makefile",
+        "sha256": "cfe935425297f80971c95c210c861efbf6a55a119750847110d2609964bb5a19",
+        "command": "COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I include -I lib/ultralib/include -I lib/ultralib/include/PR -I lib/libmus/include/PR -I lib/libmus/src -I lib/f3dex2/PR -D_LANGUAGE_C -D_MIPS_SZLONG=32 -D_MIPS_SZINT=32 -D_MIPS_SZLONG=32 -D__USE_ISOC99 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DF3DEX_GBI_2 -I ./ -I src/ -I build/./ -E src/title_screen.c | COMPILER_PATH=tools/gcc_kmc tools/gcc_kmc/gcc -x c -mabi=32 -mgp32 -mfp32 -mno-abicalls -nostdinc -fno-PIC -G 0 -Wa,-force-n64align -funsigned-char -w -mips3 -EB -O2 -fno-builtin -fno-asm -I ./ -c -o build/src/title_screen.o -"
+      }
+    }
+  },
   "functions": [
     {
       "sym": "func_800B0DC0_1DCF60",
       "addr": "0x800b0dc0",
+      "unit": "src/1DCF60.c",
+      "romDigest": "4783f01732bcaa84bc5064314db129b72877a3129853146adbbe7b9b3c60778a",
       "features": [
         "pointer",
         "struct",
@@ -45,6 +860,8 @@
     {
       "sym": "getTableEntryByU16Index",
       "addr": "0x80019280",
+      "unit": "src/19E80.c",
+      "romDigest": "b382e6c6b353c6efc9d6aaa1b115e0c3b11373cccbcc53c1f59632c0ccd1518a",
       "features": [
         "struct",
         "array",
@@ -65,6 +882,8 @@
     {
       "sym": "func_80038000_38C00",
       "addr": "0x80038000",
+      "unit": "src/38BE0.c",
+      "romDigest": "72e32effa1f910c619dbfb553a6b8d561883fd9cfb41942a84616ff9af691fc5",
       "features": [
         "branch",
         "global",
@@ -80,6 +899,8 @@
     {
       "sym": "func_80037FE0_38BE0",
       "addr": "0x80037fe0",
+      "unit": "src/38BE0.c",
+      "romDigest": "d1c4a5b3fddcca2e68b662eac4adcf30b4e808924aa6d8567e75e19f077c9fc6",
       "features": [
         "array",
         "global",
@@ -94,6 +915,8 @@
     {
       "sym": "func_80018DC0_199C0",
       "addr": "0x80018dc0",
+      "unit": "src/199C0.c",
+      "romDigest": "586ee0a00bc4e39977120d8f1f0e0c9dfad19c24496858591d3e63d9eb550447",
       "features": [
         "struct",
         "global",
@@ -113,6 +936,8 @@
     {
       "sym": "func_80021C00_22800",
       "addr": "0x80021c00",
+      "unit": "src/227D0.c",
+      "romDigest": "c5fc2b6497aaacb15932ea91ff7656bc39bb26ce51aee8b71c74aa06a6c24829",
       "features": [
         "branch",
         "compare"
@@ -131,6 +956,8 @@
     {
       "sym": "func_80021D88_22988",
       "addr": "0x80021d88",
+      "unit": "src/22920.c",
+      "romDigest": "1723e2e9651ce5db3b13d15704b5e2421ddf5bb934db54d2dcc4b10c801d395e",
       "features": [
         "branch"
       ],
@@ -148,6 +975,8 @@
     {
       "sym": "initSteppedMatrixController",
       "addr": "0x80006ab0",
+      "unit": "src/76B0.c",
+      "romDigest": "64c848f8989963d08f831b5e85c89613b80ffe8a21c7b77f2c0c8be31cf175e6",
       "features": [
         "struct",
         "memory",
@@ -167,6 +996,8 @@
     {
       "sym": "GenericTriggerInit",
       "addr": "0x80018cb0",
+      "unit": "src/198B0.c",
+      "romDigest": "0a98383d4a01f80ec40e05a3c302bb9d9d734a7b0f454c93af846ed9344a2fba",
       "features": [
         "struct",
         "field",
@@ -186,6 +1017,8 @@
     {
       "sym": "func_80035F80_36B80",
       "addr": "0x80035f80",
+      "unit": "src/36B80.c",
+      "romDigest": "ef1a3b3c4320d3cee8d1f2f6916e92c82021f018e66821d9663897e9ec8bc393",
       "features": [
         "branch",
         "cast"
@@ -199,6 +1032,8 @@
     {
       "sym": "func_80014440_15040",
       "addr": "0x80014440",
+      "unit": "src/10AD0.c",
+      "romDigest": "c537d7f49fb98035ad96a50b65881cb76c74d469640fb11998a74b23b120738e",
       "features": [
         "global",
         "array"
@@ -217,6 +1052,8 @@
     {
       "sym": "func_8002ADB4_2B9B4",
       "addr": "0x8002adb4",
+      "unit": "src/2AF90.c",
+      "romDigest": "ebebafee558b8cb781b2539f08afa8ff9cc143224e0f2c5b9e1af208d4bb3381",
       "features": [
         "fixed-point",
         "branch",
@@ -230,6 +1067,8 @@
     {
       "sym": "func_8002B4B8_2C0B8",
       "addr": "0x8002b4b8",
+      "unit": "src/2AF90.c",
+      "romDigest": "2579c176c23546ba51890f4478a391570e08745067235c2fcb224da4715cbf06",
       "features": [
         "branch",
         "fixed-point"
@@ -242,6 +1081,8 @@
     {
       "sym": "func_8001BD74_1C974",
       "addr": "0x8001bd74",
+      "unit": "src/1BBA0.c",
+      "romDigest": "bf0cc4b656a094875480ceb65785c85870812f792d95d2bbaf91489ddc04cd9f",
       "features": [
         "branch",
         "pointer",
@@ -260,6 +1101,8 @@
     {
       "sym": "func_8001BCDC_1C8DC",
       "addr": "0x8001bcdc",
+      "unit": "src/1BBA0.c",
+      "romDigest": "d858d0c8d7ad5458745dcab11bd2cc14b45b3ffd0e579e9f55a9c94ac8f16ede",
       "features": [
         "struct",
         "field",
@@ -280,6 +1123,8 @@
     {
       "sym": "func_8002BE94_2CA94",
       "addr": "0x8002be94",
+      "unit": "src/2C8F0.c",
+      "romDigest": "daa5752f2269fcd453b24e8c856cd62e3f52d0e0277de5bdc3f37333d78d3a57",
       "features": [
         "struct",
         "array"
@@ -298,6 +1143,8 @@
     {
       "sym": "loadAssetGroupResources",
       "addr": "0x800030b4",
+      "unit": "src/3B80.c",
+      "romDigest": "420afd2f1e234983dd97069a5fdfd4f930d2e5addf3dde09d87935e6695fe546",
       "features": [
         "struct",
         "array"
@@ -316,6 +1163,8 @@
     {
       "sym": "func_800167B0_173B0",
       "addr": "0x800167b0",
+      "unit": "src/16FA0.c",
+      "romDigest": "0d861adab22b59e9070e14affda17a5380048de9d75afe9d8fdde0a683fa35cb",
       "features": [
         "struct",
         "field"
@@ -334,6 +1183,8 @@
     {
       "sym": "func_8002ACFC_2B8FC",
       "addr": "0x8002acfc",
+      "unit": "src/2AF90.c",
+      "romDigest": "53a1d988a771b46e8564534867a86ed03038f0b426e9e37e4a7fbb40a93f5229",
       "features": [
         "fixed-point",
         "branch"
@@ -347,6 +1198,8 @@
     {
       "sym": "func_8002A390_2AF90",
       "addr": "0x8002a390",
+      "unit": "src/2AF90.c",
+      "romDigest": "ece5f54a87d16f90b72522a7a9bc6da16b1b7393546e73bbcd9ad094c89a61af",
       "features": [
         "struct",
         "branch"
@@ -360,6 +1213,8 @@
     {
       "sym": "func_800154A8_160A8",
       "addr": "0x800154a8",
+      "unit": "src/15690.c",
+      "romDigest": "9a7d5f165f5975921169c975db2038da6667c951b0fbb40dda8451f61ec9e8a8",
       "features": [
         "branch"
       ],
@@ -370,6 +1225,8 @@
     {
       "sym": "func_800B4B30_1E1BE0",
       "addr": "0x800b4b30",
+      "unit": "src/1E1BA0.c",
+      "romDigest": "ae67c10c116e24de7848b38002e7c1a779a6c07a99ea3b963008823e3d4e5ce7",
       "features": [
         "branch"
       ],
@@ -381,6 +1238,8 @@
     {
       "sym": "func_800B5B7C_1E2C2C",
       "addr": "0x800b5b7c",
+      "unit": "src/1E2BE0.c",
+      "romDigest": "b24097fde001f723e34d4bc3785f99d99e183625237a748d7c11714d4043aeb9",
       "features": [
         "struct"
       ],
@@ -392,6 +1251,8 @@
     {
       "sym": "func_800B68F4_1E39A4",
       "addr": "0x800b68f4",
+      "unit": "src/1E36C0.c",
+      "romDigest": "faf98f186bbdf6fd864359394330eebff3f2cc218bfc012d5e76b818c87afd11",
       "features": [
         "struct"
       ],
@@ -403,6 +1264,8 @@
     {
       "sym": "func_800B93F0_1E64A0",
       "addr": "0x800b93f0",
+      "unit": "src/1E64A0.c",
+      "romDigest": "709e80c4e370762ab5182fbf02bb2e185b2939744bf8b5058899aa51658410ad",
       "features": [
         "branch"
       ],
@@ -414,6 +1277,8 @@
     {
       "sym": "func_80028BB0_297B0",
       "addr": "0x80028bb0",
+      "unit": "src/297B0.c",
+      "romDigest": "e9597b17fa7e1e46891d0274f47e059630af3145b4153f957106560e1be60979",
       "features": [
         "struct"
       ],
@@ -425,6 +1290,8 @@
     {
       "sym": "func_80028D90_29990",
       "addr": "0x80028d90",
+      "unit": "src/297B0.c",
+      "romDigest": "66be59178acbe3432789585cda228a82f9134c59c5a75b84b963f5cb0cb100e5",
       "features": [
         "struct"
       ],
@@ -436,6 +1303,8 @@
     {
       "sym": "func_800B7620_1E46D0",
       "addr": "0x800b7620",
+      "unit": "src/1E36C0.c",
+      "romDigest": "828ba99ac89a09487cac1c2e94172b3e0ba49bd3717bdac5701aeaf2e91b6abf",
       "features": [
         "struct",
         "branch",
@@ -449,6 +1318,8 @@
     {
       "sym": "func_800B7760_1E4810",
       "addr": "0x800b7760",
+      "unit": "src/1E36C0.c",
+      "romDigest": "2169828c6f01bb123455faeda1f8a422101585063f22b1cd0d1637dbcea56c99",
       "features": [
         "struct",
         "branch"
@@ -461,6 +1332,8 @@
     {
       "sym": "func_800B9C20_1E6CD0",
       "addr": "0x800b9c20",
+      "unit": "src/1E64A0.c",
+      "romDigest": "0ac48d439e0a4ee96f941e815e15584c88016f9a5db32248890ec1e7681281d1",
       "features": [
         "struct"
       ],
@@ -472,6 +1345,8 @@
     {
       "sym": "func_8002A2D0_2AED0",
       "addr": "0x8002a2d0",
+      "unit": "src/297B0.c",
+      "romDigest": "edc54e7cc394d5fc3c5524b999465868b9bc63c1c9a84333d3818a40089b559a",
       "features": [
         "struct",
         "branch"
@@ -484,6 +1359,8 @@
     {
       "sym": "func_80051C80_52880",
       "addr": "0x80051c80",
+      "unit": "src/52880.c",
+      "romDigest": "760b5647f4f104e892bc4275e6288e9e8ac45526dbd9a5e2b77d0389545a6290",
       "features": [
         "branch",
         "array"
@@ -496,6 +1373,8 @@
     {
       "sym": "func_8005DF10_5EB10",
       "addr": "0x8005df10",
+      "unit": "src/5EA60.c",
+      "romDigest": "f418e1f74b5f86cc23844c1872ad5744540814cabc3fad4714d1c787bd1bdb47",
       "features": [
         "pointer",
         "array"
@@ -513,6 +1392,8 @@
     {
       "sym": "func_8001E104_1ED04",
       "addr": "0x8001e104",
+      "unit": "src/1D520.c",
+      "romDigest": "c05d4b7e9b99dba72f2daf8e010cf0ee016ab61b36c236dcc6c2c7eb5701ff29",
       "features": [
         "struct",
         "pointer",
@@ -527,6 +1408,8 @@
     {
       "sym": "func_8005AE8C_5BA8C",
       "addr": "0x8005ae8c",
+      "unit": "src/5AA90.c",
+      "romDigest": "8dd1ab19c551ecfb47e4d257e4089db4068736e587587c49e13507b5d380d4bd",
       "features": [
         "int64",
         "memory",
@@ -545,6 +1428,8 @@
     {
       "sym": "func_800B2C18_A2AC8",
       "addr": "0x800b2c18",
+      "unit": "src/9FF70.c",
+      "romDigest": "163f5b5a1d37f0735f7e06a04cd899cd42c94a2ec1eeb55cffe6b7ef1fe68f72",
       "features": [
         "struct",
         "pointer",
@@ -558,6 +1443,8 @@
     {
       "sym": "func_8005AB58_5B758",
       "addr": "0x8005ab58",
+      "unit": "src/5AA90.c",
+      "romDigest": "55bc6e9908cb81d78f5d8df0526133fe9fc63e51bd5b1629483925499532540f",
       "features": [
         "int64",
         "memory",
@@ -577,6 +1464,8 @@
     {
       "sym": "func_800B3F2C_A3DDC",
       "addr": "0x800b3f2c",
+      "unit": "src/9FF70.c",
+      "romDigest": "dbca6a8bd59d0a6a9c4e97ba70d7e878f25b045388eb406baba4a8bbe10eca04",
       "features": [
         "struct",
         "pointer",
@@ -590,6 +1479,8 @@
     {
       "sym": "func_800B3784_A3634",
       "addr": "0x800b3784",
+      "unit": "src/9FF70.c",
+      "romDigest": "4951b8166f4488f41d96c08497891bac4227246b78f4b12217e756d53f86cedb",
       "features": [
         "struct",
         "pointer",
@@ -608,6 +1499,8 @@
     {
       "sym": "func_80038090_38C90",
       "addr": "0x80038090",
+      "unit": "src/38C90.c",
+      "romDigest": "032b94364e6f00a2d582d2f0db8b2f86046131b07024acb9913a5635f5c65df4",
       "features": [
         "struct",
         "pointer"
@@ -625,6 +1518,8 @@
     {
       "sym": "func_8006FEBC_70ABC",
       "addr": "0x8006febc",
+      "unit": "src/6E840.c",
+      "romDigest": "0112fa048b7ef0a6e0d12a3daba63fbf6d2c908eb0ab599fbb4ed17fe444b355",
       "features": [
         "struct",
         "field",
@@ -651,6 +1546,8 @@
     {
       "sym": "unlockAllContent",
       "addr": "0x80016070",
+      "unit": "src/title_screen.c",
+      "romDigest": "44ea9063912b22d880032c1406ad27b169b2e26155dee4560aa84ca568661db0",
       "features": [
         "array",
         "variable-index",

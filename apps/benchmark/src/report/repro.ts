@@ -25,7 +25,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
+import { loadCompleteManifests, resolveProjectRoot } from '../cases/manifests';
 import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { materialize } from '../run/fidelity';
 import { selectRows } from './baseline';
@@ -49,7 +49,7 @@ function projectRootFor(r: FunctionResult): string | undefined {
   if (r.tier !== 'real' || !r.asmlift.symbolMap) {
     return undefined;
   }
-  const man = loadManifestsForVendor().find((m) => m.project === r.project);
+  const man = loadCompleteManifests().find((m) => m.project === r.project);
   return man ? resolveProjectRoot(man) : undefined;
 }
 

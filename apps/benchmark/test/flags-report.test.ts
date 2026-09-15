@@ -11,8 +11,8 @@ describe('bench flags', () => {
 
   test('a filter that matches no row fails, naming the filter', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(flagsReport({ project: 'pokemerald' })).toBe(false);
-    expect(flagsReport({ project: 'sa3', only: 'NoSuchSym' })).toBe(false);
+    expect(flagsReport({ project: 'pokemerald', write: false })).toBe(false);
+    expect(flagsReport({ project: 'sa3', only: 'NoSuchSym', write: false })).toBe(false);
     expect(log.mock.calls.map((c) => c.join(' '))).toEqual([
       'no real row matches --project pokemerald',
       'no real row matches --project sa3 --only NoSuchSym',

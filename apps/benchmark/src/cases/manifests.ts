@@ -10,10 +10,13 @@
 // Shape is VALIDATED at load time so a typo fails with the
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
-import { ADDR_PATTERN, type Identifiable } from '@asmlift/bench-schema';
+import { ADDR_PATTERN, type FlagsFrom, type Identifiable } from '@asmlift/bench-schema';
+import { commandFlags } from '@asmlift/cli/flags';
+import { parseFlags, storedFlags } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
@@ -29,6 +32,13 @@ export interface RealFunction {
    *  typed from a name: `test/real-manifests.test.ts` holds it equal to the address the
    *  committed `tu/<project>/symbols.json.gz` gives `sym`. */
   addr: string;
+  /** The build unit the function is compiled in: the source file its `sourceUrl` cites, and a key of the
+   *  manifest's `units`. Written by `bench flags --write`. */
+  unit: string;
+  /** The digest of the function's target as `bench vendor` proved it equal to the function the project's
+   *  linked ELF holds at `addr` (cases/rom-function.ts `targetDigest`). A target built with another
+   *  digest is not the game's function, and its row is refused. */
+  romDigest: string;
   /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
    *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
    *  brief that named the old spelling keeps resolving to this row. */
@@ -80,6 +90,16 @@ export interface RealFunction {
   note?: string;
 }
 
+/** One translation unit of the project's build: the compiler that builds it and the codegen flags the
+ *  build passes for it, copied from the build by `bench flags --write` (cases/derive-flags.ts) and never
+ *  typed. The target and every candidate of every row in the unit compile with these flags. */
+export interface BuildUnit {
+  toolchain: ToolchainId;
+  /** the build's flags in core's normal form (`storedFlags`) */
+  cflags: string[];
+  flagsFrom: FlagsFrom;
+}
+
 /** The on-disk manifest shape (portable — no machine paths). */
 export interface RealManifest {
   project: string;
@@ -87,7 +107,6 @@ export interface RealManifest {
    *  structured the way it is — e.g. af's headers:[] + per-function prependC). Never published
    *  to rows; per-function `note` is the user-facing one. */
   note?: string;
-  toolchain: ToolchainId;
   repoDir: string; // project checkout dir name, resolved against WORKSPACE (or ASMLIFT_PROJ_*)
   /** GitHub `owner/name` of the benchmark fork (never a URL) — `bench setup` clones it. */
   repo: string;
@@ -105,6 +124,8 @@ export interface RealManifest {
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
   defines?: string[]; // extra -D macros
+  /** every build unit a row compiles in, keyed by its source path */
+  units: Record<string, BuildUnit>;
   functions: RealFunction[];
 }
 
@@ -145,15 +166,82 @@ export function resolveProjectRoot(m: RealManifest): string {
   return existsSync(owned) ? owned : join(WORKSPACE, m.repoDir);
 }
 
+const COMMIT = /^[0-9a-f]{40}$/;
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** A unit's problems: a known toolchain, flags its family parses and that are already in normal form, and
+ *  a typed `flagsFrom`. */
+function unitProblems(where: string, u: Partial<BuildUnit> | undefined): string[] {
+  const problems: string[] = [];
+  if (typeof u?.toolchain !== 'string' || !(u.toolchain in TOOLCHAINS)) {
+    return [`${where} has unknown toolchain ${JSON.stringify(u?.toolchain)}`];
+  }
+  if (!Array.isArray(u.cflags) || u.cflags.length === 0 || u.cflags.some((w) => typeof w !== 'string' || !w)) {
+    problems.push(`${where} "cflags" must be the build's flag words`);
+  } else {
+    const family = TOOLCHAIN_TARGETS[u.toolchain].family;
+    try {
+      if (storedFlags(family, u.cflags).join('\0') !== u.cflags.join('\0')) {
+        problems.push(`${where} "cflags" are not in normal form: ${storedFlags(family, u.cflags).join(' ')}`);
+      }
+      parseFlags(family, u.cflags);
+    } catch (e) {
+      problems.push(`${where} "cflags": ${(e as Error).message}`);
+    }
+  }
+  const from = u.flagsFrom as Partial<Record<string, unknown>> | undefined;
+  const typed =
+    from !== undefined &&
+    typeof from.commit === 'string' &&
+    COMMIT.test(from.commit) &&
+    typeof from.file === 'string' &&
+    from.file !== '' &&
+    typeof from.sha256 === 'string' &&
+    SHA256.test(from.sha256) &&
+    ((from.from === 'makefile' && typeof from.command === 'string' && from.command !== '') ||
+      (from.from === 'objdiff' && typeof from.unit === 'string' && from.unit !== ''));
+  if (!typed) {
+    problems.push(
+      `${where} "flagsFrom" must be {from: "makefile", commit, file, sha256, command} or {from: "objdiff", commit, file, sha256, unit}`,
+    );
+  } else if (from.from === 'makefile' && problems.length === 0) {
+    // `cflags` are the flags `flagsFrom.command` compiles with, read the way `bench flags` derived them, so
+    // the two fields cannot drift apart: a word edited out of `cflags` alone can leave every target
+    // ROM-equal and still move every candidate. The build itself is re-read only by `bench flags`.
+    const family = TOOLCHAIN_TARGETS[u.toolchain].family;
+    const cflags = u.cflags as string[];
+    try {
+      const recipe = commandFlags(from.command as string, family);
+      if (recipe === undefined) {
+        problems.push(`${where} "flagsFrom.command" runs no ${u.toolchain} compiler`);
+      } else if (recipe.join('\0') !== cflags.join('\0')) {
+        problems.push(`${where} "cflags" are not the flags its flagsFrom.command compiles with: ${recipe.join(' ')}`);
+      }
+    } catch (e) {
+      problems.push(`${where} "flagsFrom.command": ${(e as Error).message}`);
+    }
+  }
+  return problems;
+}
+
+/** The fields `bench flags --write` and `bench vendor` write: a manifest being authored may lack them. */
+export interface ManifestValidation {
+  /** false: a row's `unit`, its `units` entry and its `romDigest` may be absent (each is still checked
+   *  when present) */
+  complete: boolean;
+}
+
 /** Validate one manifest's shape. Returns the problems (empty = valid). */
-export function validateManifest(m: unknown, file: string): string[] {
+export function validateManifest(
+  m: unknown,
+  file: string,
+  { complete }: ManifestValidation = { complete: true },
+): string[] {
   const problems: string[] = [];
   const man = m as Partial<RealManifest>;
   if (typeof man.project !== 'string' || !man.project) {
     problems.push(`${file}: missing "project"`);
-  }
-  if (typeof man.toolchain !== 'string' || !(man.toolchain in TOOLCHAINS)) {
-    problems.push(`${file}: unknown toolchain ${JSON.stringify(man.toolchain)}`);
   }
   if (typeof man.repoDir !== 'string' || !man.repoDir || man.repoDir.startsWith('/')) {
     problems.push(`${file}: "repoDir" must be a workspace-relative directory name (no absolute paths)`);
@@ -170,6 +258,19 @@ export function validateManifest(m: unknown, file: string): string[] {
   }
   if (!Array.isArray(man.cppIncludes) || !Array.isArray(man.headers)) {
     problems.push(`${file}: "cppIncludes"/"headers" must be arrays`);
+  }
+  if (man.units !== undefined && !isRecord(man.units)) {
+    problems.push(`${file}: "units" must map each unit's source path to its toolchain and flags`);
+  } else if (complete && (man.units === undefined || Object.keys(man.units).length === 0)) {
+    problems.push(`${file}: "units" must name every build unit a row compiles in`);
+  } else {
+    const named = new Set((Array.isArray(man.functions) ? man.functions : []).map((f) => f.unit));
+    for (const [path, u] of Object.entries(man.units ?? {})) {
+      problems.push(...unitProblems(`${file}: unit ${path}`, u));
+      if (!named.has(path)) {
+        problems.push(`${file}: unit ${path} is named by no row`);
+      }
+    }
   }
   if (!Array.isArray(man.functions) || man.functions.length === 0) {
     problems.push(`${file}: "functions" must be a non-empty array`);
@@ -209,6 +310,35 @@ export function validateManifest(m: unknown, file: string): string[] {
           `${file}: ${JSON.stringify(f.sym)} "sourceUrl" cites ${cited}, not this manifest's repo ${man.repo}`,
         );
       }
+      // the unit: the file the permalink cites, with its flags in `units`
+      const citedFile =
+        typeof f.sourceUrl === 'string' ? /\/blob\/[0-9a-f]+\/([^#]+)/.exec(f.sourceUrl)?.[1] : undefined;
+      if (f.unit === undefined) {
+        if (complete) {
+          problems.push(
+            `${file}: ${JSON.stringify(f.sym)} names no "unit" — run \`pnpm bench flags --project ${man.project} --write\``,
+          );
+        }
+      } else if (typeof f.unit !== 'string' || f.unit !== citedFile) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "unit" ${JSON.stringify(f.unit)} is not the file its sourceUrl cites`,
+        );
+      } else if (!isRecord(man.units) || !(f.unit in man.units)) {
+        if (complete) {
+          problems.push(
+            `${file}: ${JSON.stringify(f.sym)} "unit" ${f.unit} has no flags in "units" — run \`pnpm bench flags --project ${man.project} --write\``,
+          );
+        }
+      }
+      if (f.romDigest === undefined) {
+        if (complete) {
+          problems.push(
+            `${file}: ${JSON.stringify(f.sym)} has no "romDigest" — run \`pnpm bench vendor --project ${man.project}\``,
+          );
+        }
+      } else if (typeof f.romDigest !== 'string' || !SHA256.test(f.romDigest)) {
+        problems.push(`${file}: ${JSON.stringify(f.sym)} "romDigest" must be a sha256 in lowercase hex`);
+      }
       // a name — current or former — answers to exactly one row, or a citation of it is ambiguous
       if (
         f.aliases !== undefined &&
@@ -231,7 +361,7 @@ export function validateManifest(m: unknown, file: string): string[] {
 
 /** Parse + validate every committed manifest. A malformed manifest throws — a typo must fail
  *  loudly at load, not surface as a mid-run compile error. */
-function loadRaw(): RealManifest[] {
+function loadRaw(validation: ManifestValidation): RealManifest[] {
   let files: string[] = [];
   try {
     files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
@@ -246,7 +376,7 @@ function loadRaw(): RealManifest[] {
     } catch (e) {
       throw new Error(`invalid real-tier manifest ${f}: ${(e as Error).message}`);
     }
-    const problems = validateManifest(man, f);
+    const problems = validateManifest(man, f, validation);
     if (problems.length > 0) {
       throw new Error(`invalid real-tier manifest:\n  ${problems.join('\n  ')}`);
     }
@@ -254,76 +384,95 @@ function loadRaw(): RealManifest[] {
   });
 }
 
-/** RUNTIME loader: manifests paired with their VENDORED compiler inputs — no project checkouts
+/** A manifest with its vendored compiler inputs attached: `vendored` and `ctxPath` throw for a row
+ *  `bench vendor` has not written. */
+export function withVendoredInputs(man: RealManifest): VendoredManifest {
+  const dir = join(REAL_DIR, 'tu', man.project);
+  const indexPath = join(dir, 'index.json');
+  const index = existsSync(indexPath)
+    ? (JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, { tu: string; ctx: string }>)
+    : {};
+  const entryOf = (sym: string) => {
+    const entry = index[sym];
+    if (!entry) {
+      throw new Error(`${man.project}:${sym}: not in the vendored index — re-run \`bench vendor\``);
+    }
+    return entry;
+  };
+  // the project's vendored symbol map (name/shape metadata derived from its ELF at vendor
+  // time) — absent for projects without a tools.asmlift.elf, and rows then run as before
+  const symbolsPath = join(dir, 'symbols.json.gz');
+  const symbols = existsSync(symbolsPath)
+    ? symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(symbolsPath)).toString('utf8')))
+    : undefined;
+  return {
+    ...man,
+    symbols,
+    vendored: (sym) => {
+      const entry = entryOf(sym);
+      return {
+        tuI: gunzipSync(readFileSync(join(dir, entry.tu))).toString('utf8'),
+        ctxI: gunzipSync(readFileSync(join(dir, entry.ctx))).toString('utf8'),
+      };
+    },
+    ctxPath: (sym) => `apps/benchmark/dataset/real/tu/${man.project}/${entryOf(sym).ctx}`,
+  };
+}
+
+/** RUNTIME loader: complete manifests paired with their VENDORED compiler inputs — no project checkouts
  *  involved. A manifest without vendored blobs is skipped with one aggregated warning (run
  *  `bench vendor` where the checkouts live). */
 export function loadManifests(): VendoredManifest[] {
-  const available: VendoredManifest[] = [];
-  const unvendored: string[] = [];
-  const raw = loadRaw();
-  for (const man of raw) {
-    const dir = join(REAL_DIR, 'tu', man.project);
-    const indexPath = join(dir, 'index.json');
-    if (!existsSync(indexPath)) {
-      unvendored.push(man.project);
-      continue;
-    }
-    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, { tu: string; ctx: string }>;
-    // the project's vendored symbol map (name/shape metadata derived from its ELF at vendor
-    // time) — absent for projects without a tools.asmlift.elf, and rows then run as before
-    const symbolsPath = join(dir, 'symbols.json.gz');
-    const symbols = existsSync(symbolsPath)
-      ? symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(symbolsPath)).toString('utf8')))
-      : undefined;
-    available.push({
-      ...man,
-      symbols,
-      vendored: (sym) => {
-        const entry = index[sym];
-        if (!entry) {
-          throw new Error(`${man.project}:${sym}: not in the vendored index — re-run \`bench vendor\``);
-        }
-        return {
-          tuI: gunzipSync(readFileSync(join(dir, entry.tu))).toString('utf8'),
-          ctxI: gunzipSync(readFileSync(join(dir, entry.ctx))).toString('utf8'),
-        };
-      },
-      ctxPath: (sym) => {
-        const entry = index[sym];
-        if (!entry) {
-          throw new Error(`${man.project}:${sym}: not in the vendored index — re-run \`bench vendor\``);
-        }
-        return `apps/benchmark/dataset/real/tu/${man.project}/${entry.ctx}`;
-      },
-    });
-  }
+  const raw = loadRaw({ complete: true });
+  const unvendored = raw.filter((man) => !existsSync(join(REAL_DIR, 'tu', man.project, 'index.json')));
   if (unvendored.length > 0) {
     console.warn(
-      `real tier: ${unvendored.length}/${raw.length} project(s) have no vendored TUs — skipped: ${unvendored.join(', ')} (run \`bench vendor\`)`,
+      `real tier: ${unvendored.length}/${raw.length} project(s) have no vendored TUs — skipped: ${unvendored.map((m) => m.project).join(', ')} (run \`bench vendor\`)`,
     );
   }
-  return available;
+  return raw.filter((man) => !unvendored.includes(man)).map(withVendoredInputs);
 }
 
-/** VENDOR/VERIFY loader: validated manifests, live checkouts required by the caller. */
+/** AUTHORING loader: validated manifests that may lack what `bench flags --write` and `bench vendor` write
+ *  (see `ManifestValidation`), for the commands that run before those fields exist (`bench setup`,
+ *  `bench flags`, `bench vendor`); live checkouts required by the caller. */
 export function loadManifestsForVendor(): RealManifest[] {
-  return loadRaw();
+  return loadRaw({ complete: false });
+}
+
+/** Complete manifests without their vendored inputs: what a reader of published rows needs. */
+export function loadCompleteManifests(): RealManifest[] {
+  return loadRaw({ complete: true });
 }
 
 /** Every real row the dataset carries, as the fields row identity is computed from (bench-schema
  *  `rowIdentity`/`joinArtifacts`) — read off the manifests alone, no vendored TU and no checkout, so
  *  a guard that must join an artifact to the CURRENT rows can afford to ask. */
 export function realRowIdentities(): Identifiable[] {
-  return loadRaw().flatMap((man) =>
+  return loadRaw({ complete: true }).flatMap((man) =>
     man.functions.map((f) => ({
-      id: `${man.project}:${f.sym}:${man.toolchain}`,
+      id: `${man.project}:${f.sym}:${man.units[f.unit].toolchain}`,
       project: man.project,
       sym: f.sym,
-      toolchain: man.toolchain,
+      toolchain: man.units[f.unit].toolchain,
       tier: 'real' as const,
       addr: f.addr,
       ...(f.aliases !== undefined ? { aliases: f.aliases } : {}),
       ...(f.sourceUrl !== undefined ? { sourceUrl: f.sourceUrl } : {}),
     })),
   );
+}
+
+/** Rewrite one project's committed manifest through `edit`, the way `bench flags --write` and `bench vendor`
+ *  store what they derive: `units` right before `functions`, and each row's `unit` and `romDigest` right
+ *  after its `addr`. */
+export function rewriteManifest(project: string, edit: (man: RealManifest) => RealManifest): void {
+  const file = join(REAL_DIR, `${project}.json`);
+  const { units, functions, ...rest } = edit(JSON.parse(readFileSync(file, 'utf8')) as RealManifest);
+  const ordered = {
+    ...rest,
+    units,
+    functions: functions.map(({ sym, addr, unit, romDigest, ...row }) => ({ sym, addr, unit, romDigest, ...row })),
+  };
+  writeFileSync(file, `${JSON.stringify(ordered, null, 2)}\n`);
 }

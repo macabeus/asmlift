@@ -1,6 +1,5 @@
 {
   "project": "af",
-  "toolchain": "ido7.1",
   "repoDir": "af",
   "repo": "macabeus/af",
   "branch": "asmlift-benchmark",
@@ -11,10 +10,254 @@
   "headers": [],
   "defines": [],
   "note": "Animal Forest (Doubutsu no Mori, N64 JP) matched functions. Sources are EUC-JP + asm-processor; only the ASCII C bodies of MATCHED functions are copied verbatim. Project headers do NOT preprocess under host /usr/bin/cpp (Apple clang traditional-mode chokes on include/attributes.h [[...]] attributes), so we use headers:[] and put minimal type/extern decls in each prependC.",
+  "units": {
+    "src/code/gfxalloc.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/gfxalloc.o src/code/gfxalloc.c"
+      }
+    },
+    "src/code/listalloc.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/listalloc.o src/code/listalloc.c"
+      }
+    },
+    "src/code/m_lib.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/m_lib.o src/code/m_lib.c"
+      }
+    },
+    "src/code/lb_reki.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/lb_reki.o src/code/lb_reki.c"
+      }
+    },
+    "src/code/m_olib.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/m_olib.o src/code/m_olib.c"
+      }
+    },
+    "src/code/m_room_type.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/m_room_type.o src/code/m_room_type.c"
+      }
+    },
+    "src/code/m_skin_matrix.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/m_skin_matrix.o src/code/m_skin_matrix.c"
+      }
+    },
+    "src/code/sys_matrix.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/sys_matrix.o src/code/sys_matrix.c"
+      }
+    },
+    "src/code/audio.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/audio.o src/code/audio.c"
+      }
+    },
+    "src/code/sys_math_atan.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/sys_math_atan.o src/code/sys_math_atan.c"
+      }
+    },
+    "src/overlays/gamestates/ovl_play/m_play.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/overlays/gamestates/ovl_play/m_play.o src/overlays/gamestates/ovl_play/m_play.c"
+      }
+    },
+    "src/code/m_view.c": {
+      "toolchain": "ido7.1",
+      "cflags": [
+        "-G",
+        "0",
+        "-non_shared",
+        "-Wab,-r4300_mul",
+        "-mips2",
+        "-EB",
+        "-O2",
+        "-g3"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "4515c15b5848b1ec85e78cb3776e12990cafe004",
+        "file": "Makefile",
+        "sha256": "87b59c4187d6ce62434844487a5b385f7694d1f46eb6c838d2183ca368ca4f2a",
+        "command": ".venv/bin/python3 tools/asm-processor/build.py --input-enc=utf-8 --output-enc=euc-jp --convert-statics=global-with-filename tools/ido/macos/7.1/cc -- mips-linux-gnu-as -march=vr4300 -32 -G0 -- -c -G 0 -non_shared -Xcpluscomm -nostdinc -Wab,-r4300_mul -DVERSION_JP=1 -Iinclude -Isrc -Iassets/jp -I. -Ibuild -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/compiler/ido -fullwarn -verbose -woff 624,649,838,712,516,513,596,564,594 -mips2 -EB -DLANGUAGE_C -D_LANGUAGE_C -D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DNDEBUG -D_FINALROM -DBUILD_VERSION=VERSION_L -O2 -g3 -o build/src/code/m_view.o src/code/m_view.c"
+      }
+    }
+  },
   "functions": [
     {
       "sym": "gfxopen",
       "addr": "0x800d3860",
+      "unit": "src/code/gfxalloc.c",
+      "romDigest": "c0f54e22ff576daf004a10755bea02af5e653194d2252a11305b58c48f9ce968",
       "features": [
         "pointer",
         "arithmetic"
@@ -27,6 +270,8 @@
     {
       "sym": "ListAlloc_Init",
       "addr": "0x800d6390",
+      "unit": "src/code/listalloc.c",
+      "romDigest": "3ed2d649dd57093bc5b7e22bc270a136c0a5f76f1289a68da2e018d2108ca691",
       "features": [
         "struct",
         "field",
@@ -40,6 +285,8 @@
     {
       "sym": "mem_copy",
       "addr": "0x800998c0",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "a7af779b67aa0bf84242a2401424a001e0c825992c9179d2bf1e3a5b3761a15e",
       "features": [
         "pointer",
         "memory"
@@ -57,6 +304,8 @@
     {
       "sym": "mem_clear",
       "addr": "0x8009992c",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "5fefe6eb4c318e89893bb57b8131346d6a9ae60f011724c23370744306f12335",
       "features": [
         "pointer",
         "memory"
@@ -74,6 +323,8 @@
     {
       "sym": "mem_cmp",
       "addr": "0x80099980",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "bdadeba9882681632b7d084bbff0ae17b52aa96ddcc583eb9cf33e8307904a63",
       "features": [
         "pointer",
         "branch"
@@ -86,6 +337,8 @@
     {
       "sym": "chase_s",
       "addr": "0x80099b90",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "8ab249bd403fd370cf008a8cb221a489bda7127055215906d82e62b731f25971",
       "features": [
         "branch",
         "arithmetic",
@@ -99,6 +352,8 @@
     {
       "sym": "chase_s2",
       "addr": "0x80099d14",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "54e53f2dafa34b40ebafcac423ae2bf430cbb9d95644c2d0b22a246cef181784",
       "features": [
         "arithmetic",
         "pointer",
@@ -112,6 +367,8 @@
     {
       "sym": "lbRk_IsLeapMonth",
       "addr": "0x800d5f28",
+      "unit": "src/code/lb_reki.c",
+      "romDigest": "1b0abd7eae67f3ee14595e43a42abeeadcee6099448555e8bde2ffc99dc7bcd3",
       "features": [
         "branch"
       ],
@@ -123,6 +380,8 @@
     {
       "sym": "lbRk_SeirekiDays",
       "addr": "0x800d5e70",
+      "unit": "src/code/lb_reki.c",
+      "romDigest": "5e8a11e633359f9a6a27ccc0526711895af5ed2bc3b17f73e8118ca788d5e57b",
       "features": [
         "array",
         "arithmetic",
@@ -136,6 +395,8 @@
     {
       "sym": "lbRk_IsKyuurekiLeapYear",
       "addr": "0x800d5efc",
+      "unit": "src/code/lb_reki.c",
+      "romDigest": "067dd992107f5877a71dfe39f8935d6686d3ba0c77880c97ab2d5c6bfb500dc1",
       "features": [
         "array",
         "branch",
@@ -149,6 +410,8 @@
     {
       "sym": "chase_s3",
       "addr": "0x80099d74",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "1dbbfbc2085220a763de49140c0a2bf8b604eae6f0753e08d61c188bb04b192e",
       "features": [
         "branch",
         "arithmetic",
@@ -162,6 +425,8 @@
     {
       "sym": "get_percent",
       "addr": "0x8009b160",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "58d37993cb15eff76ff46d928639dea0e648664298a207f964c8eb61bfb9715c",
       "features": [
         "cast",
         "branch",
@@ -175,6 +440,8 @@
     {
       "sym": "check_percent_abs",
       "addr": "0x8009ae60",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "2bfca942767aeaaf1167a2e31a62aeb47d0f3643adb0c68160253522c10f7743",
       "features": [
         "float",
         "branch"
@@ -187,6 +454,8 @@
     {
       "sym": "add_calc2",
       "addr": "0x8009a6b8",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "40e02cc2e3420bd472872f3dd54792a1d429faaa7e47545f7e91617e26e6d2ad",
       "features": [
         "float",
         "branch",
@@ -205,6 +474,8 @@
     {
       "sym": "add_calc0",
       "addr": "0x8009a728",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "60cdd709f982d6b7427a3f02b70408155d980b65ff511a1f90a440c7385c72e2",
       "features": [
         "float",
         "branch",
@@ -223,6 +494,8 @@
     {
       "sym": "adds",
       "addr": "0x8009aba8",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "bcf1186ab642afd59d18d6bd7a5b255062c6e7d878c0453c4ec7f502e1549238",
       "features": [
         "arithmetic",
         "branch",
@@ -241,6 +514,8 @@
     {
       "sym": "add_calc_short_angle3",
       "addr": "0x8009aad8",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "92157ea7b80c283311395c9dac7a3095a8a860301a5aa6ecbe4bdebe12bc83e0",
       "features": [
         "cast",
         "arithmetic",
@@ -254,6 +529,8 @@
     {
       "sym": "xyz_t_sub",
       "addr": "0x8009a140",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "7a5ddce7eb1c50a4c9c83821a8fbc674c847ae12ab345bb2378aa19b57bc87b8",
       "features": [
         "struct",
         "field",
@@ -272,6 +549,8 @@
     {
       "sym": "rgba_t_move",
       "addr": "0x8009ac4c",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "64587cc2d07f15a96ab67305255e0a390f13fea8a58c1698cf22b6f258f731f8",
       "features": [
         "struct",
         "field",
@@ -290,6 +569,8 @@
     {
       "sym": "ValueSet__s_xyz",
       "addr": "0x8009a54c",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "f81689f6436131d98ff24c295ea6e6c52aec5f1c3d014d6a69af35978eade11b",
       "features": [
         "struct",
         "bitfield",
@@ -308,6 +589,8 @@
     {
       "sym": "never_zero",
       "addr": "0x800b0154",
+      "unit": "src/code/m_olib.c",
+      "romDigest": "5ea8fc4c44ce4cfbd8938e3e334197b40892aa700432c048a26fa71ffdb31e14",
       "features": [
         "float",
         "branch",
@@ -321,6 +604,8 @@
     {
       "sym": "limiter",
       "addr": "0x800b01bc",
+      "unit": "src/code/m_olib.c",
+      "romDigest": "9fbd7e0699f29c0438cb55a9a76c2b440dfd67848459672ca201615a13e1259e",
       "features": [
         "float",
         "branch",
@@ -334,6 +619,8 @@
     {
       "sym": "mRmTp_ItemNo2FtrSize",
       "addr": "0x800be69c",
+      "unit": "src/code/m_room_type.c",
+      "romDigest": "caeb9ca0d7a096f22b8052419dddb9047b367ee7d9e831d8e2a45bc14d94b112",
       "features": [
         "array",
         "arithmetic",
@@ -347,6 +634,8 @@
     {
       "sym": "chase_angle",
       "addr": "0x80099ad4",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "9d476ac31dd1190b2e5a84a7054529d578ed8af46cb73ea5c93c681e23a9bc0e",
       "features": [
         "float",
         "branch",
@@ -360,6 +649,8 @@
     {
       "sym": "chase_f",
       "addr": "0x80099c18",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "918ec61db089ebddbcc9a3e15606ecf29ade0fe32f2b1ad00fbb937e99c542d7",
       "features": [
         "float",
         "branch"
@@ -372,6 +663,8 @@
     {
       "sym": "chase_f3",
       "addr": "0x80099e88",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "be85a3cb488d388bc3e20247c2c1b99ea74c82685ff897751e78526096de500f",
       "features": [
         "float",
         "branch"
@@ -384,6 +677,8 @@
     {
       "sym": "inter_float",
       "addr": "0x80099f30",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "556dd07634ce60ffa85dcf1ab1f2e70455ce9435c22ec5f26a0d683836635bcc",
       "features": [
         "float",
         "branch"
@@ -396,6 +691,8 @@
     {
       "sym": "xyz_t_add",
       "addr": "0x8009a108",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "7a17f138470afb83da22d85341059cdab2f62b0821a8e473dab28e89dc2d3086",
       "features": [
         "struct"
       ],
@@ -407,6 +704,8 @@
     {
       "sym": "xyz_t_mult_v",
       "addr": "0x8009a1d4",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "77f967e6e20504b9d5fd9048b9239f9adae254e6f581f1c7178d2d0adee67601",
       "features": [
         "struct",
         "float"
@@ -419,6 +718,8 @@
     {
       "sym": "search_position_angleY",
       "addr": "0x8009a2f8",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "4ab52a566b0d60adacb7b41290c69ae6ec645a49a816132712b935252b0b12ad",
       "features": [
         "struct",
         "float"
@@ -431,6 +732,8 @@
     {
       "sym": "xyz_t_sub_ss",
       "addr": "0x8009a178",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "336a9cca57a34380a35c5e43b15de612769fc23937b9f5b77e2055734389af73",
       "features": [
         "struct"
       ],
@@ -442,6 +745,8 @@
     {
       "sym": "spolar2world",
       "addr": "0x800b02d4",
+      "unit": "src/code/m_olib.c",
+      "romDigest": "a7ae39b7f2dddf6497e0687d513547cbf7590528be0e70c1b015cb489ba54209",
       "features": [
         "struct",
         "float"
@@ -454,6 +759,8 @@
     {
       "sym": "Skin_Matrix_MulMatrix",
       "addr": "0x800c7018",
+      "unit": "src/code/m_skin_matrix.c",
+      "romDigest": "fff39d30b7560721371230ae556b8452f501c0fe0b5b8b7085219e2b4697230c",
       "features": [
         "float",
         "matrix",
@@ -472,6 +779,8 @@
     {
       "sym": "_MtxF_to_Mtx",
       "addr": "0x800e1180",
+      "unit": "src/code/sys_matrix.c",
+      "romDigest": "b3617050b0cf5ad1d94b9610581dfd1d0fbf8050ec4e73cff1d559eb444d488b",
       "features": [
         "union",
         "array",
@@ -487,6 +796,8 @@
     {
       "sym": "suMtxMakeSRT",
       "addr": "0x800e2318",
+      "unit": "src/code/sys_matrix.c",
+      "romDigest": "3558027d6d25748d22ad9ea9536c353439e0df9ea7061160f5378e598ee0a726",
       "features": [
         "float",
         "array",
@@ -505,6 +816,8 @@
     {
       "sym": "sAdo_Get_KokeruLabel",
       "addr": "0x800d2438",
+      "unit": "src/code/audio.c",
+      "romDigest": "db910e58e56f29112b2ecb3cd8c1d1058d6c686d844fa337af92d9c42a8ea146",
       "features": [
         "branch"
       ],
@@ -516,6 +829,8 @@
     {
       "sym": "add_calc_a",
       "addr": "0x8009a77c",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "627e133148c4dd1e8d4425c8c69dd49cb278434b4de0e31e1183a41dc617440b",
       "features": [
         "float",
         "branch",
@@ -530,6 +845,8 @@
     {
       "sym": "get_percent_forAccelBrake",
       "addr": "0x8009af38",
+      "unit": "src/code/m_lib.c",
+      "romDigest": "26f572bdb829b0d63cfbbda1d58926f6a71764e4c6d2a8b3d84a30aba0d23b8a",
       "features": [
         "float",
         "branch",
@@ -543,6 +860,8 @@
     {
       "sym": "Skin_Matrix_SetQuaternion",
       "addr": "0x800c80b0",
+      "unit": "src/code/m_skin_matrix.c",
+      "romDigest": "817cf5e9c0b8ed6c206751577963b790e327934cd47fbb05f624f94d118a32f5",
       "features": [
         "float",
         "matrix",
@@ -561,6 +880,8 @@
     {
       "sym": "atans_table",
       "addr": "0x800e0008",
+      "unit": "src/code/sys_math_atan.c",
+      "romDigest": "4d535411e3652b78c5167b6bbe327c0fe81a85e19e2ae70ed0fdbc0abfbe4d48",
       "features": [
         "float",
         "branch"
@@ -573,6 +894,8 @@
     {
       "sym": "mPl_SceneNo2SoundRoomType",
       "addr": "0x80804240",
+      "unit": "src/overlays/gamestates/ovl_play/m_play.c",
+      "romDigest": "60d3838ff0ab9e81df87a3ba835af98af454c9080f81bd6a38cef4e626d4af39",
       "features": [
         "switch-arms",
         "branch"
@@ -594,6 +917,8 @@
     {
       "sym": "getScissorView",
       "addr": "0x800cab64",
+      "unit": "src/code/m_view.c",
+      "romDigest": "cd6615984d69364f44f4561507b2325c017be9e68b12afdfac926bc662b4cdc5",
       "features": [
         "struct",
         "field",

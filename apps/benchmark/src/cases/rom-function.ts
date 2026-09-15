@@ -3,7 +3,12 @@
 // masked: a relocation's value is only known once the object is linked, and the linked ELF holds it
 // resolved. The rest of the function, instructions and literal pools included, must be byte-equal.
 //
+// A target proved equal is recorded by its digest (a row's `romDigest`): the function's bytes with the
+// relocated bits cleared, and the relocations themselves. A target built later, with no ELF at hand, holds
+// the function the ROM holds exactly when it has that digest (`targetDigest`).
+//
 // ELF32 only, ARM and MIPS: the machines the real tier builds for.
+import { createHash } from 'node:crypto';
 
 const SHT_RELA = 4;
 const SHT_REL = 9;
@@ -133,22 +138,47 @@ function relocationMask(elf: Elf32, shndx: number, start: number, length: number
   return mask;
 }
 
-export type RomComparison = { equal: true; length: number } | { equal: false; detail: string };
+/** A function's bytes, and per byte the bits its relocations leave compared. */
+interface FunctionBytes {
+  bytes: Buffer;
+  mask: number[];
+}
 
-/** Compare function `sym` of a relocatable object with the function at `addr` in the linked ELF. A tail
- *  of up to 3 zero bytes on either side is alignment padding. */
-export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr: number): RomComparison {
+/** The function `sym` defines in a relocatable object. */
+function objectFunction(object: Buffer, sym: string): FunctionBytes | undefined {
   const obj = readElf32(object, 'the object');
-  const rom = readElf32(linked, 'the linked ELF');
   const defined = obj.symbols.find((s) => s.name === sym && isCodeLabel(s));
   if (defined === undefined) {
-    return { equal: false, detail: `the object defines no ${sym}` };
+    return undefined;
   }
   const section = obj.sections[defined.shndx];
   const start = codeAddress(obj, defined.value);
   const end = defined.size > 0 ? start + defined.size : (nextLabel(obj, start, defined.shndx) ?? section.size);
-  const objBytes = obj.bytes.subarray(section.offset + start, section.offset + end);
+  return {
+    bytes: obj.bytes.subarray(section.offset + start, section.offset + end),
+    mask: relocationMask(obj, defined.shndx, start, end - start),
+  };
+}
 
+/** The digest of an object's function: its mask, then its bytes under that mask. */
+function digestOf(fn: FunctionBytes): string {
+  return createHash('sha256')
+    .update(Buffer.from(fn.mask))
+    .update(Buffer.from(fn.bytes.map((b, i) => b & fn.mask[i])))
+    .digest('hex');
+}
+
+export type RomComparison = { equal: true; digest: string } | { equal: false; detail: string };
+
+/** Compare function `sym` of a relocatable object with the function at `addr` in the linked ELF. A tail of up
+ *  to 3 zero bytes on either side is alignment padding. When they are equal, `digest` is the object's
+ *  `targetDigest`. */
+export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr: number): RomComparison {
+  const fn = objectFunction(object, sym);
+  if (fn === undefined) {
+    return { equal: false, detail: `the object defines no ${sym}` };
+  }
+  const rom = readElf32(linked, 'the linked ELF');
   const atAddr = rom.symbols.filter((s) => s.type === STT_FUNC && codeAddress(rom, s.value) === addr);
   const named = atAddr.filter((s) => s.name === sym);
   const candidates = named.length > 0 ? named : atAddr;
@@ -171,10 +201,10 @@ export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr
     romSection.offset + romEnd - romSection.addr,
   );
 
+  const objBytes = fn.bytes;
   const n = Math.min(objBytes.length, romBytes.length);
-  const mask = relocationMask(obj, defined.shndx, start, n);
   for (let i = 0; i < n; i++) {
-    if ((objBytes[i] & mask[i]) !== (romBytes[i] & mask[i])) {
+    if ((objBytes[i] & fn.mask[i]) !== (romBytes[i] & fn.mask[i])) {
       return {
         equal: false,
         detail: `object ${objBytes.length} B, ROM ${romBytes.length} B, first difference at +0x${i.toString(16)}`,
@@ -183,7 +213,17 @@ export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr
   }
   const tail = objBytes.length > n ? objBytes.subarray(n) : romBytes.subarray(n);
   if (tail.length === 0 || (tail.length < 4 && tail.every((b) => b === 0))) {
-    return { equal: true, length: n };
+    return { equal: true, digest: digestOf(fn) };
   }
   return { equal: false, detail: `object ${objBytes.length} B, ROM ${romBytes.length} B, equal over the shorter` };
+}
+
+/** The digest of function `sym` in a relocatable object, the value `compareWithRom` records for a target it
+ *  proves. Throws when the object does not define `sym`. */
+export function targetDigest(object: Buffer, sym: string): string {
+  const fn = objectFunction(object, sym);
+  if (fn === undefined) {
+    throw new Error(`the object defines no ${sym}`);
+  }
+  return digestOf(fn);
 }

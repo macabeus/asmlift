@@ -1,7 +1,7 @@
 // Evaluate one function on one toolchain through BOTH decompilers → a FunctionResult. Shared by the
 // synthetic and real-project drivers. `build` yields the scoring target + disassembly; from there
 // each decompiler runs and is scored against the SAME object with the SAME compiler — symmetric.
-import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import { type DecompilerResult, type FunctionResult, type RowTier, rowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
@@ -19,12 +19,13 @@ import { runM2c } from './m2c';
 import { compilerErrorLines, declineMarkersIn } from './outcome';
 import { assessQuality } from './quality';
 
-export interface EvalSpec {
+export type EvalSpec = EvalSpecFields & RowTier;
+
+interface EvalSpecFields {
   sym: string;
   addr?: string; // real tier: the row's identity, published verbatim (bench-schema rowIdentity)
   aliases?: string[]; // real tier: earlier upstream names, published verbatim
   project: string;
-  tier: 'synthetic' | 'real';
   language: 'c' | 'c++';
   features: string[];
   refSource: string; // ground-truth C/C++ (for the report)
@@ -250,11 +251,12 @@ export function evaluate(
     ...(spec.addr === undefined ? {} : { addr: spec.addr }),
     ...(spec.aliases === undefined || spec.aliases.length === 0 ? {} : { aliases: spec.aliases }),
     project: spec.project,
-    tier: spec.tier,
+    ...rowTier(spec),
     toolchain: tc.id,
     isa: tc.isa,
     compiler: TOOLCHAIN_TARGETS[spec.codegen.toolchain].family,
     language: spec.language,
+    cflags: [...spec.codegen.cflags],
     // Source and codegen tags are DERIVED per row; the dataset carries judgement tags only. Codegen
     // because what the compiler did with a constant divide differs per toolchain and one synthetic
     // spec feeds four of them.

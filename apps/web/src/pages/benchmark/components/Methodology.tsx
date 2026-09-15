@@ -75,14 +75,17 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
       <section>
         <H>How a function is measured</H>
         <P>
-          The reference C is compiled once with the benchmark's pinned toolchain, producing a target object and its
-          assembly text (the compiler's own <span className="font-mono">.s</span> on ARM,{' '}
-          <span className="font-mono">objdump</span> disassembly on MIPS/PPC). Both decompilers work from that same text
-          — asmlift reads it directly; m2c receives it translated to the GNU-as form it parses, with jump-table data
-          recovered from the object. Each decompiler's output is then recompiled with the same toolchain and compared
-          against the target with <span className="font-mono">objdiff</span> — identical inputs in, identical scoring
-          out. Score 0 is a <em>match</em> (byte-exact); a positive score is a <em>non-match</em>; output that claims
-          completeness but will not compile is <em>non-compile</em>; output carrying explicit gap markers (
+          The reference C is compiled with the benchmark's pinned toolchain, producing a target object and its assembly
+          text (the compiler's own <span className="font-mono">.s</span> on ARM,{' '}
+          <span className="font-mono">objdump</span> disassembly on MIPS/PPC). A real function is compiled with the
+          flags of its unit's own build, copied from the project's build files and proved against the ROM: its target is
+          the function the game contains, or the row is not published. A synthetic function is compiled with the
+          toolchain's canonical flags. Both decompilers work from that same text — asmlift reads it directly; m2c
+          receives it translated to the GNU-as form it parses, with jump-table data recovered from the object. Each
+          decompiler's output is then recompiled with the same toolchain and flags and compared against the target with{' '}
+          <span className="font-mono">objdiff</span> — identical inputs in, identical scoring out. Score 0 is a{' '}
+          <em>match</em> (byte-exact); a positive score is a <em>non-match</em>; output that claims completeness but
+          will not compile is <em>non-compile</em>; output carrying explicit gap markers (
           <span className="font-mono">ASMLIFT_ERROR</span>, <span className="font-mono">M2C_ERROR</span>,{' '}
           <span className="font-mono">?</span>) is <em>declined</em>; no usable output is <em>failed</em>. One
           classifier judges both decompilers.

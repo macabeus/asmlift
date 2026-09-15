@@ -1,7 +1,6 @@
 {
   "project": "marioparty3",
   "note": "Mario Party 3 (N64) matched functions, compiled with mainline GCC 2.7.2 at -O1 (the project's own tools/gcc_2.7.2). Project headers preprocess under host cpp, so funcC uses common.h types + per-function extern decls for file-local globals; include_asm.h's top-level `asm(\".include ...\")` (the INCLUDE_ASM machinery) is stripped at preprocess so the vendored object is self-contained.",
-  "toolchain": "gcc2.7.2",
   "repoDir": "marioparty3",
   "repo": "macabeus/marioparty3",
   "branch": "asmlift-benchmark",
@@ -29,10 +28,356 @@
     "-D_LANGUAGE_C",
     "-DOLD_GCC"
   ],
+  "units": {
+    "src/window.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/window.c.o src/window.c"
+      }
+    },
+    "src/pause.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-fno-common"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -D_LANGUAGE_C -fno-common -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/pause.c.o src/pause.c"
+      }
+    },
+    "src/camera.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/camera.c.o src/camera.c"
+      }
+    },
+    "src/graphics.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/graphics.c.o src/graphics.c"
+      }
+    },
+    "src/malloc.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/malloc.c.o src/malloc.c"
+      }
+    },
+    "src/sprman.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/sprman.c.o src/sprman.c"
+      }
+    },
+    "src/hmfman.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/hmfman.c.o src/hmfman.c"
+      }
+    },
+    "src/22EB0.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/22EB0.c.o src/22EB0.c"
+      }
+    },
+    "src/72740.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/72740.c.o src/72740.c"
+      }
+    },
+    "src/objmain.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/objmain.c.o src/objmain.c"
+      }
+    },
+    "src/8ACD0.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O2",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O2 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/8ACD0.c.o src/8ACD0.c"
+      }
+    },
+    "src/save.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/save.c.o src/save.c"
+      }
+    },
+    "src/gamemes.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-fno-common"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -D_LANGUAGE_C -fno-common -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/gamemes.c.o src/gamemes.c"
+      }
+    },
+    "src/process.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/process.c.o src/process.c"
+      }
+    },
+    "src/hmfload.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/hmfload.c.o src/hmfload.c"
+      }
+    },
+    "src/input.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/input.c.o src/input.c"
+      }
+    },
+    "src/decode.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/decode.c.o src/decode.c"
+      }
+    },
+    "src/data.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/data.c.o src/data.c"
+      }
+    },
+    "src/mallocblock.c": {
+      "toolchain": "gcc2.7.2",
+      "cflags": [
+        "-O1",
+        "-G0",
+        "-mips3",
+        "-mgp32",
+        "-mfp32",
+        "-Wa,--vr4300mul-off"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e",
+        "file": "Makefile",
+        "sha256": "8cc14473b9df17fb5f590623d215d057e74a81399e63dd9fbaed8357a24d35aa",
+        "command": "export COMPILER_PATH=tools/gcc_2.7.2/mac && tools/gcc_2.7.2/mac/gcc -O1 -G0 -mips3 -mgp32 -mfp32 -Wa,--vr4300mul-off -D_LANGUAGE_C -DOLD_GCC -I include -I build/include -I src -DF3DEX_GBI_2 -D_LANGUAGE_C -c -o build/src/mallocblock.c.o src/mallocblock.c"
+      }
+    }
+  },
   "functions": [
     {
       "sym": "func_800600C0_60CC0",
       "addr": "0x800600c0",
+      "unit": "src/window.c",
+      "romDigest": "de02a1b14b77f3015b7439bf5ac7950ad1f97c1c600927acc3f823ce2c56937d",
       "features": [
         "struct",
         "pointer",
@@ -53,6 +398,8 @@
     {
       "sym": "func_80045350_45F50",
       "addr": "0x80045350",
+      "unit": "src/pause.c",
+      "romDigest": "8a9049c241e93e6a18750bd4d29b1a80a6a28edefd6d878370c51b6e87ae544c",
       "features": [
         "struct",
         "pointer",
@@ -73,6 +420,8 @@
     {
       "sym": "func_800123F4_12FF4",
       "addr": "0x800123f4",
+      "unit": "src/camera.c",
+      "romDigest": "86e0b90fb534bed6f96ead266f598fb8812213307dc8198d02bcddd456318aa6",
       "features": [
         "global"
       ],
@@ -89,6 +438,8 @@
     {
       "sym": "func_8000F088_FC88",
       "addr": "0x8000f088",
+      "unit": "src/graphics.c",
+      "romDigest": "cf8adcd48ed5a8dd9aae78ad2c2de4fe8fea7756d0b5c502c16a6aabde3b679e",
       "features": [
         "global",
         "pointer"
@@ -106,6 +457,8 @@
     {
       "sym": "HuMemUsedMemorySizeGet",
       "addr": "0x80036310",
+      "unit": "src/malloc.c",
+      "romDigest": "c321f41abc2236044137eb2a4c5a383d82be0b31100fbf652f73c2ea5bb293fe",
       "features": [
         "struct",
         "pointer",
@@ -119,6 +472,8 @@
     {
       "sym": "func_800570A8_57CA8",
       "addr": "0x800570a8",
+      "unit": "src/sprman.c",
+      "romDigest": "f586690f8efd14ba5643281b2c62052f606d2d288547ac1eb1c4187725718a7c",
       "features": [
         "struct",
         "pointer",
@@ -140,6 +495,8 @@
     {
       "sym": "func_8001D330_1DF30",
       "addr": "0x8001d330",
+      "unit": "src/hmfman.c",
+      "romDigest": "8978eb0c4c9cd06bf7eaa010b2722c6ac759840573e43ec43d2041a159a808f4",
       "features": [
         "global"
       ],
@@ -156,6 +513,8 @@
     {
       "sym": "func_8001FBBC_207BC",
       "addr": "0x8001fbbc",
+      "unit": "src/hmfman.c",
+      "romDigest": "1b727381e5561318ebacf448f7e8525d2237937d7630fc36e11e952ea03c2ebf",
       "features": [
         "struct",
         "pointer",
@@ -174,6 +533,8 @@
     {
       "sym": "HuMemUsedMemoryBlockGet",
       "addr": "0x80036344",
+      "unit": "src/malloc.c",
+      "romDigest": "bab2b24eff506070ebca86fd4821d5e6eaee6d869e6e3a26165cb5bb56e97b63",
       "features": [
         "struct",
         "pointer",
@@ -186,6 +547,8 @@
     {
       "sym": "func_80045BF0_467F0",
       "addr": "0x80045bf0",
+      "unit": "src/pause.c",
+      "romDigest": "792c251624d493afb2421f5dd381a477dacaae7b8506115777a1282e4f3384a0",
       "features": [
         "branch",
         "global",
@@ -199,6 +562,8 @@
     {
       "sym": "func_8002FD48_30948",
       "addr": "0x8002fd48",
+      "unit": "src/22EB0.c",
+      "romDigest": "3f7a55d2704e1414c0cd3e8da818ebf830cd1c10af895633863ab145fec23d68",
       "features": [
         "struct",
         "pointer"
@@ -215,6 +580,8 @@
     {
       "sym": "func_80071B40_72740",
       "addr": "0x80071b40",
+      "unit": "src/72740.c",
+      "romDigest": "738385aa27c4528a903fcffa75d67e23c497a152076f6bc8258815a711dc504e",
       "features": [
         "struct",
         "pointer"
@@ -231,6 +598,8 @@
     {
       "sym": "func_8006014C_60D4C",
       "addr": "0x8006014c",
+      "unit": "src/window.c",
+      "romDigest": "9abc1e164cd71aa0d61665c07f8336228a9dcab5d43aefd9a7044f454d1985c7",
       "features": [
         "global"
       ],
@@ -242,6 +611,8 @@
     {
       "sym": "func_8005FA90_60690",
       "addr": "0x8005fa90",
+      "unit": "src/window.c",
+      "romDigest": "71967ae1ee22de70fc64fc48e236fe5a4a769dcdb1ab5ca68ef977653ab49092",
       "features": [
         "pointer",
         "branch",
@@ -256,6 +627,8 @@
     {
       "sym": "func_80047E90_48A90",
       "addr": "0x80047e90",
+      "unit": "src/objmain.c",
+      "romDigest": "4b90725bf5712d57b6465f00b4e5df453debf4565e6a33d7574540b75b401d68",
       "features": [
         "struct",
         "pointer"
@@ -272,6 +645,8 @@
     {
       "sym": "func_80056254_56E54",
       "addr": "0x80056254",
+      "unit": "src/sprman.c",
+      "romDigest": "dacbe51cdf96c0b9b50859b6aa23247cef982c451d24fe04bfec224578c08779",
       "features": [
         "struct",
         "pointer",
@@ -289,6 +664,8 @@
     {
       "sym": "func_800560D8_56CD8",
       "addr": "0x800560d8",
+      "unit": "src/sprman.c",
+      "romDigest": "d75868df2aa45d4220ef6c820f0f9acec778d3b436329e72c8d98c27da53f7d1",
       "features": [
         "struct",
         "pointer",
@@ -302,6 +679,8 @@
     {
       "sym": "func_8008A0D0_8ACD0",
       "addr": "0x8008a0d0",
+      "unit": "src/8ACD0.c",
+      "romDigest": "1f3d656e1a4791139f256dd4db55a4d1f69328e260d8f0aac95c4ca2818acea3",
       "features": [
         "pointer",
         "union",
@@ -320,6 +699,8 @@
     {
       "sym": "func_8004A444_4B044",
       "addr": "0x8004a444",
+      "unit": "src/objmain.c",
+      "romDigest": "3834df0160b82800f15a3f95a33f1557da042fdf9ea5cd15af7205e0ef40075a",
       "features": [
         "global"
       ],
@@ -336,6 +717,8 @@
     {
       "sym": "func_80056260_56E60",
       "addr": "0x80056260",
+      "unit": "src/sprman.c",
+      "romDigest": "11331223d00a07b6460bb01e6b4fab91882b94004ba0ceb632c4d0d391afc9ea",
       "features": [
         "struct",
         "pointer",
@@ -354,6 +737,8 @@
     {
       "sym": "func_8000F04C_FC4C",
       "addr": "0x8000f04c",
+      "unit": "src/graphics.c",
+      "romDigest": "8a37b0d3ff485923a837c80e9f61c3a9080272af2040a62b2ebc762bdc55b703",
       "features": [
         "pointer",
         "global",
@@ -372,6 +757,8 @@
     {
       "sym": "func_8005614C_56D4C",
       "addr": "0x8005614c",
+      "unit": "src/sprman.c",
+      "romDigest": "eeb32880d91b1e796e2425d6d9969ef3cc5512253d182f2378d892b1f7b1018d",
       "features": [
         "struct",
         "pointer",
@@ -391,6 +778,8 @@
     {
       "sym": "GWMgNoSet",
       "addr": "0x80035aa8",
+      "unit": "src/save.c",
+      "romDigest": "ab7b0a2b66b39f8c21ef18d85a39cd9d4c2875291f38931c051cc59f7d8d73c0",
       "features": [
         "global",
         "struct",
@@ -409,6 +798,8 @@
     {
       "sym": "func_8004A468_4B068",
       "addr": "0x8004a468",
+      "unit": "src/objmain.c",
+      "romDigest": "51a7d706eddb9efcd8791ace2df61a706f4f63d5137cb560242ec704648fa7f9",
       "features": [
         "global"
       ],
@@ -425,6 +816,8 @@
     {
       "sym": "CameraScissorSet",
       "addr": "0x800124bc",
+      "unit": "src/camera.c",
+      "romDigest": "53f61950fa96a648aeb4b1b20035f6fb5e43bf08adfd95c0b807e04af836aa09",
       "features": [
         "struct",
         "pointer",
@@ -444,6 +837,8 @@
     {
       "sym": "func_8000F024_FC24",
       "addr": "0x8000f024",
+      "unit": "src/graphics.c",
+      "romDigest": "a35ac91202ac4b58f30ed32bd14fbf003b42bbc8223a2da9323256157416c867",
       "features": [
         "global",
         "store",
@@ -462,6 +857,8 @@
     {
       "sym": "func_80045314_45F14",
       "addr": "0x80045314",
+      "unit": "src/gamemes.c",
+      "romDigest": "49257a28e2779b42282cfc300600936870524cb8d3b218e69706d956aa2bc540",
       "features": [
         "branch",
         "arithmetic"
@@ -474,6 +871,8 @@
     {
       "sym": "func_80056C98_57898",
       "addr": "0x80056c98",
+      "unit": "src/sprman.c",
+      "romDigest": "6085001e16062910d5a650fbd198eef3a0f63b2a39cae3c622aac4f415728d94",
       "features": [
         "pointer",
         "arithmetic"
@@ -485,6 +884,8 @@
     {
       "sym": "UnlinkProcess",
       "addr": "0x8004ebc8",
+      "unit": "src/process.c",
+      "romDigest": "0d3dfc8eb6dedb7d43c6c6d2b14148a03bfb1e5e7d6b0f3365d19fce6bb16bae",
       "features": [
         "struct",
         "pointer",
@@ -503,6 +904,8 @@
     {
       "sym": "func_80011460_12060",
       "addr": "0x80011460",
+      "unit": "src/hmfload.c",
+      "romDigest": "44dd664bf30616f54488e8a8a0100569baf8e861da9167c335e0a7b059476f53",
       "features": [
         "pointer",
         "arithmetic"
@@ -514,6 +917,8 @@
     {
       "sym": "func_80052E14_53A14",
       "addr": "0x80052e14",
+      "unit": "src/sprman.c",
+      "romDigest": "ab4ed81d32405d245ca150e74132b579a18cac17fefebbdb8f697b1b0b39b69b",
       "features": [
         "struct",
         "pointer"
@@ -530,6 +935,8 @@
     {
       "sym": "GWBoardRecordGet",
       "addr": "0x80035c90",
+      "unit": "src/save.c",
+      "romDigest": "34d31ecc02dc41b8cb168543e5a46d22051367c6b92378aa8b2cb66430c9bdd2",
       "features": [
         "pointer",
         "branch",
@@ -542,6 +949,8 @@
     {
       "sym": "ContDataUpdate",
       "addr": "0x800098fc",
+      "unit": "src/input.c",
+      "romDigest": "5153a150d5bc7126912a2386357a32e5219d2cf73cf215b30a8a4d737e8f9405",
       "features": [
         "array",
         "global",
@@ -560,6 +969,8 @@
     {
       "sym": "func_80012B14_13714",
       "addr": "0x80012b14",
+      "unit": "src/camera.c",
+      "romDigest": "5abde3d4dc944567954d2601bd332f330531c4cd57b702e8c76f510e1eddb6d8",
       "features": [
         "float",
         "array",
@@ -579,6 +990,8 @@
     {
       "sym": "Hu3DCam3DToScreen",
       "addr": "0x8001291c",
+      "unit": "src/camera.c",
+      "romDigest": "28c07db9d557b207f2d0ac9dad3217f6c345a50babdfa7974717cb6bf8b301a7",
       "features": [
         "float",
         "array",
@@ -598,6 +1011,8 @@
     {
       "sym": "DecodeData",
       "addr": "0x8000b000",
+      "unit": "src/decode.c",
+      "romDigest": "e64ae53f0b3d685eb57db014418f5547b2fe95481eca428737f99e3dbfca09cf",
       "features": [
         "pointer",
         "branch"
@@ -615,6 +1030,8 @@
     {
       "sym": "func_800230F8_23CF8",
       "addr": "0x800230f8",
+      "unit": "src/22EB0.c",
+      "romDigest": "4f0949abf81ce7aecb3ffb4c651ec19ab62e432954036e854c21c704b9e617cd",
       "features": [
         "struct",
         "pointer",
@@ -633,6 +1050,8 @@
     {
       "sym": "HuSprGrpCreate",
       "addr": "0x8005279c",
+      "unit": "src/sprman.c",
+      "romDigest": "667e3d686df417785421eb41ac7e1a56da19e4c03e1e79fc7c1766118aafd5a0",
       "features": [
         "struct",
         "pointer",
@@ -646,6 +1065,8 @@
     {
       "sym": "FileSeek",
       "addr": "0x8000a150",
+      "unit": "src/data.c",
+      "romDigest": "37081829f2d83704d7cfb4edb9b34a02d216a52214224bac3971bad4bec94623",
       "features": [
         "branch",
         "struct",
@@ -664,6 +1085,8 @@
     {
       "sym": "HuMemAllocTag",
       "addr": "0x80019a14",
+      "unit": "src/mallocblock.c",
+      "romDigest": "487b635924d14bec7e1f5d866239279182c158338df145c406d119d2210a6164",
       "features": [
         "pointer",
         "struct",
@@ -683,6 +1106,8 @@
     {
       "sym": "func_80047D4C_4894C",
       "addr": "0x80047d4c",
+      "unit": "src/objmain.c",
+      "romDigest": "1ff53e0728debc428a1057efa060bbac3eadbbc00d3f02ba6b1f9ad4ac55dfd3",
       "features": [
         "struct",
         "field",
@@ -710,6 +1135,8 @@
     {
       "sym": "HuPrcChildUnlink",
       "addr": "0x8004ed84",
+      "unit": "src/process.c",
+      "romDigest": "7f48b8508c6bae097e6c64a2e7d7cac1be6b9df968489619d9e15eea35d12980",
       "features": [
         "struct",
         "field",

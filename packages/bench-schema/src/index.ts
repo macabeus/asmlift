@@ -156,8 +156,8 @@ export interface GapSize {
   kinds?: DiffBreakdown; // insert/delete/replace/op/arg tally of that candidate
 }
 
-/** One benchmark row: one (function × toolchain) case with both decompilers' outcomes. */
-export interface FunctionResult {
+/** The fields every benchmark row carries, whatever its tier. */
+export interface FunctionRow {
   /** `${project}:${sym}:${toolchain}` — the row's READABLE name, unique within one artifact. It is
    *  what a person reads and cites. It is NOT what joins rows across artifacts: see `rowIdentity`
    *  in ./identity, which keys a real row by `addr`. */
@@ -171,11 +171,14 @@ export interface FunctionResult {
    *  so a citation or a permalink of the old spelling still resolves to it. */
   aliases?: string[];
   project: string; // "synthetic" | "kleod" | "pokeemerald" | ...
-  tier: 'synthetic' | 'real';
   toolchain: ToolchainId;
   isa: 'arm' | 'mips' | 'ppc';
   compiler: string;
   language: 'c' | 'c++';
+  /** The codegen flags the target and every candidate compiled with, as shell words in build order: a
+   *  real row's are its unit's, copied from the project's build; a synthetic row's are its toolchain's
+   *  canonical flags. m2c takes none. */
+  cflags: readonly string[];
   features: string[]; // e.g. ["arithmetic","branch"]
   loc: number; // reference source line count
   refSource: string; // the reference C/C++ (ground truth), for the report
@@ -211,6 +214,18 @@ export interface FunctionResult {
   note?: string; // provenance / caveats (e.g. version mismatch)
   gapSize?: GapSize | null;
 }
+
+/** A row's tier. A real row compiles in a build unit (its source path) whose flags were copied from the
+ *  project's build; a synthetic row has neither, and compiles at its toolchain's canonical flags. */
+export type RowTier = { tier: 'synthetic' } | { tier: 'real'; unit: string; flagsFrom: FlagsFrom };
+
+/** The tier fields of a row, a case or an evaluation, alone. */
+export function rowTier(r: RowTier): RowTier {
+  return r.tier === 'real' ? { tier: 'real', unit: r.unit, flagsFrom: r.flagsFrom } : { tier: 'synthetic' };
+}
+
+/** One benchmark row: one (function × toolchain) case with both decompilers' outcomes. */
+export type FunctionResult = FunctionRow & RowTier;
 
 export interface BenchMeta {
   generatedAt: string;

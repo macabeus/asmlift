@@ -4,7 +4,6 @@
 //
 // A Makefile is read in a clone of the checkout at the vendored commit, never in the checkout itself: pret
 // Makefiles build their tools and scan dependencies while they are parsed, and `-n` does not stop that.
-import type { FlagsFrom } from '@asmlift/bench-schema';
 import { readObjdiffUnits } from '@asmlift/cli/dtk-unit';
 import { commandFlags } from '@asmlift/cli/flags';
 import { storedFlags, tokenizeFlags } from '@asmlift/core/codegen-flags';
@@ -16,18 +15,12 @@ import { dirname, join } from 'node:path';
 
 import { CACHE_DIR } from '../config';
 import { git } from './checkout';
-import type { RealFunction } from './manifests';
+import type { BuildUnit, RealFunction } from './manifests';
 import { gnuMake } from './project-elf';
 import { PROJECT_RECIPES } from './project-setup';
 
-export interface DerivedFlags {
-  toolchain: ToolchainId;
-  cflags: string[];
-  flagsFrom: FlagsFrom;
-}
-
 /** The build unit a row's function is compiled in: the source file its permalink cites. */
-export function unitOf(fn: RealFunction): string {
+export function unitOf(fn: Pick<RealFunction, 'sym' | 'sourceUrl'>): string {
   const path = /^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[0-9a-f]+\/([^#]+)/.exec(fn.sourceUrl ?? '')?.[1];
   if (path === undefined) {
     throw new Error(`${fn.sym}: its sourceUrl names no unit`);
@@ -121,7 +114,7 @@ export function deriveMakefileFlags(opts: {
   unit: string;
   object: string;
   toolchain: ToolchainId;
-}): DerivedFlags {
+}): BuildUnit {
   const { clone, commit, unit, object, toolchain } = opts;
   const family = TOOLCHAIN_TARGETS[toolchain].family;
   // NODEP and SETUP_PREREQS are pret's switches for the dependency scan and the tool builds a parse
@@ -182,7 +175,7 @@ interface ObjdiffSourceUnit {
 /** A dtk unit's flags: the `scratch.c_flags` of the one `objdiff.json` unit compiled from `unit`, which must
  *  agree in normal form with the `cflags` of the build.ninja edge building its object, and its toolchain is
  *  `scratch.compiler`. Throws `UnreadableLevelError` on a level word the compiler family cannot read. */
-export function deriveDtkFlags(root: string, commit: string, unit: string): DerivedFlags {
+export function deriveDtkFlags(root: string, commit: string, unit: string): BuildUnit {
   const objdiff = readObjdiffUnits(root);
   if (objdiff === undefined) {
     throw new Error(`${root} has no objdiff.json`);
@@ -228,12 +221,59 @@ export function deriveDtkFlags(root: string, commit: string, unit: string): Deri
   };
 }
 
-export type FlagsStatus = { kind: 'ok' } | { kind: 'DRIFT'; stored: readonly string[] } | { kind: 'MISSING' };
+/** Every unit of one project, derived at its checkout's HEAD: the build system is read once, and a Makefile
+ *  project is read in one clone, with one walk over the objects its build wrote. A Makefile names no
+ *  compiler asmlift can tell apart (`gcc` is two toolchains), so its unit takes `toolchain`; a dtk unit
+ *  names its own. */
+export function unitDeriver(
+  project: string,
+  root: string,
+): { build: BuildSystem; commit: string; derive: (unit: string, toolchain: ToolchainId | undefined) => BuildUnit } {
+  const build = buildSystemOf(root);
+  const commit = git(root, ['rev-parse', 'HEAD']);
+  if (build === 'dtk') {
+    return { build, commit, derive: (unit) => deriveDtkFlags(root, commit, unit) };
+  }
+  const clone = flagsClone(project, root, commit);
+  const objects = objectFiles(root);
+  return {
+    build,
+    commit,
+    derive: (unit, toolchain) => {
+      if (toolchain === undefined) {
+        throw new Error(`no unit of ${project} names its toolchain yet: pass --toolchain`);
+      }
+      return deriveMakefileFlags({ clone, commit, unit, object: unitObject(unit, objects), toolchain });
+    },
+  };
+}
 
-/** How a unit's stored flags stand against the flags derived from its build. */
-export function flagsStatus(stored: readonly string[] | undefined, derived: readonly string[]): FlagsStatus {
+export type FlagsStatus = { kind: 'ok' } | { kind: 'DRIFT'; changes: string[] } | { kind: 'MISSING' };
+
+/** How a unit as the manifest stores it stands against the unit derived from its build: every difference,
+ *  in the words `bench flags` prints. */
+export function flagsStatus(stored: BuildUnit | undefined, derived: BuildUnit): FlagsStatus {
   if (stored === undefined) {
     return { kind: 'MISSING' };
   }
-  return stored.join('\0') === derived.join('\0') ? { kind: 'ok' } : { kind: 'DRIFT', stored };
+  const changes: string[] = [];
+  const moved = (what: string, from: string, to: string) => {
+    if (from !== to) {
+      changes.push(`${what}${from} → ${to}`);
+    }
+  };
+  moved('', stored.toolchain, derived.toolchain);
+  moved('', stored.cflags.join(' '), derived.cflags.join(' '));
+  const [a, b] = [stored.flagsFrom, derived.flagsFrom];
+  moved('from ', a.from, b.from);
+  moved('commit ', a.commit.slice(0, 8), b.commit.slice(0, 8));
+  moved(`${b.file} sha256 `, a.sha256.slice(0, 12), b.sha256.slice(0, 12));
+  moved('', a.file, b.file);
+  if (a.from === 'makefile' && b.from === 'makefile' && a.command !== b.command) {
+    changes.push('recipe line changed');
+  }
+  if (a.from === 'objdiff' && b.from === 'objdiff') {
+    moved('objdiff unit ', a.unit, b.unit);
+  }
+  return changes.length === 0 ? { kind: 'ok' } : { kind: 'DRIFT', changes };
 }

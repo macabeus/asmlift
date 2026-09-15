@@ -5,7 +5,7 @@
 //   • buildTarget(refC, sym, cflags, lang?) → { obj, asm } : compile the reference at `cflags` to the
 //     scoring-target object AND produce the disassembly text that the decompilers consume as input
 //     ('c++' selects mwcc's .cp frontend; only the mwcc adapter accepts it).
-// What a row compiles and decompiles at is its own resolved target, not the toolchain's.
+// What a row compiles and decompiles at is its own flags (`codegenFor`), not the toolchain's.
 //
 // This deliberately reuses asmlift's own pinned toolchains (@asmlift/toolchains) so the benchmark measures
 // the EXACT toolchains asmlift is tested against — no second, drifting copy of the compile logic.
@@ -62,10 +62,14 @@ export function checkedTarget(built: BuiltTarget, what: string): BuiltTarget {
   return built;
 }
 
-/** A toolchain at its canonical flags: the flags its target and every candidate compile at, and the
- *  description asmlift resolves from them. One value, so the two never come from different flag sets. */
+/** What one row compiles and decompiles at: the flags its target and every candidate compile at, and
+ *  the description asmlift resolves from them. One value, so the two never come from different flag
+ *  sets. Throws on a level word the toolchain's family cannot read. */
+export const codegenFor = (id: ToolchainId, cflags: readonly string[]): ResolvedTarget => targetFor(id, cflags);
+
+/** A toolchain at its canonical flags. */
 export function canonicalCodegen(id: ToolchainId): ResolvedTarget {
-  return targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
+  return codegenFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
 }
 
 export interface Toolchain {

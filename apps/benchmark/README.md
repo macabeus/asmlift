@@ -212,6 +212,12 @@ pnpm bench fan <sym> --asm <f.s> --toolchain <id>
                                       #   `--toolchain` means nothing WITHOUT `--asm` and is
                                       #   refused there: a row names its toolchain in its own id
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
+pnpm bench flags [--project <p>] [--only <s>] [--write]
+                                           # every real unit's flags, derived from the project's
+                                           #   build at the checkout's HEAD, with each row checked
+                                           #   against the ROM; --write stores them in the manifest
+                                           #   (a Makefile project with no unit yet names its
+                                           #   compiler with --toolchain)
 pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
                                            #   TWICE: once against `--base`, then again over the
                                            #   rows THIS BRANCH added since it (which the first
@@ -356,6 +362,15 @@ the round that first ran it.
   The repository is read off `sourceUrl`, which the manifest validator requires on every real row
   and requires to cite the manifest's own `repo`. It is the FORK that is cited, so moving a fork to
   another owner reads as every row removed and added, too.
+- **Flags are the build's, and every target is the ROM's function.** A manifest's `units` hold each
+  build unit's toolchain and flags, copied by `pnpm bench flags --project <p> --write` (a Makefile
+  project through `gmake -n` in a clone of the checkout, a dtk project from `objdiff.json` checked
+  against `build.ninja`) and never typed; each unit's `flagsFrom` names the build file at the commit.
+  `pnpm bench vendor --project <p>` refuses a unit whose stored flags are not the build's at the
+  checkout's HEAD, and any row whose target is not the function the linked ELF holds at its address
+  (relocations masked); it writes each row's `romDigest`, and `bench run` refuses a row whose target
+  has another digest. A pin bump is therefore `bench flags --write`, then `bench vendor`, and
+  `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were vendored from.
 - **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
   identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
   the TU file names are keyed by `sym`, so the alias table alone does not make a rename. A function
@@ -418,8 +433,9 @@ vocabulary every row's `features` is drawn from. The harness's own toolchain-fre
 - **Add a synthetic function**: one entry in `dataset/synthetic.ts` (each entry is one function, run on its assigned toolchains).
 - **Add real functions**: write `dataset/real/<project>.json` (schema + validation in
   `src/cases/manifests.ts`; `repoDir` is a workspace-relative checkout name — no machine paths,
-  enforced by `test/real-manifests.test.ts`) and iterate with `pnpm bench verify <manifest>`
-  until they compile; then `pnpm bench run` + `pnpm bench:merge`.
+  enforced by `test/real-manifests.test.ts`), store each unit's flags with
+  `pnpm bench flags --project <p> --write`, iterate with `pnpm bench verify <manifest>` until they
+  compile, prove them with `pnpm bench vendor --project <p>`; then `pnpm bench run` + `pnpm bench:merge`.
 - **Add a toolchain**: an adapter in `toolchains.ts` + a `compile/<name>.ts` module for the real
   tier (or a typed `null` while unwired — see `compile/mwcc.ts`).
 - **Tag a function**: list only judgement tags (`memory`, `struct`, …) — the source- and
