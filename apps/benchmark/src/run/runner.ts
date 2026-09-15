@@ -166,6 +166,7 @@ export function runCases(
       ctxProto: c.ctxProto,
       proto: c.proto,
       symbols: c.symbols,
+      codegen: c.codegen,
       note: c.note,
     };
     let r: FunctionResult;

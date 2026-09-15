@@ -191,8 +191,8 @@ export function gateCensus(o: GateCensusOptions): number {
         enumerateRanked(
           c.sym,
           scrubObjectHeader(asm),
-          c.toolchain.targetDesc,
-          rankOptionsFor(c.toolchain, obj, c.proto, c.compile, c.symbols),
+          c.codegen.target,
+          rankOptionsFor(c.toolchain, c.codegen, obj, c.proto, c.compile, c.symbols),
         );
       } catch {
         unlifted++;

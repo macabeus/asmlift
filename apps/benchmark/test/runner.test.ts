@@ -1,6 +1,7 @@
 // Pin tests for the runner's pure pieces: the shard math the orchestrator's parent/child
 // contract rides on, the ONE meta builder, and the no-silent-row-loss build-fail contract.
 import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import { TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,8 @@ import { benchMeta, fmt, inShard, parseShard, runCases } from '../src/run/runner
 
 // No case below reaches a decompiler; the one that evaluates says what evaluation returns.
 vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
+
+const CODEGEN: Case['codegen'] = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 describe('parseShard (pinned)', () => {
   test('parses i/N', () => {
@@ -47,6 +50,7 @@ describe('runCases toolchain availability (pinned)', () => {
       loc: 1,
       refSource: 'int ghost;',
       toolchain: { available: () => false } as Case['toolchain'],
+      codegen: CODEGEN,
       build: () => {
         throw new Error('build must never run for an unavailable toolchain');
       },
@@ -74,6 +78,7 @@ describe('runCases toolchain availability (pinned)', () => {
       loc: 1,
       refSource: 'int ghost;',
       toolchain: { available: () => false } as Case['toolchain'],
+      codegen: CODEGEN,
       build: () => {
         throw new Error('build must never run for an unavailable toolchain');
       },
@@ -104,6 +109,7 @@ describe('runCases build failures (pinned)', () => {
       loc: 1,
       refSource: 'int ghost;',
       toolchain: { available: () => true } as Case['toolchain'],
+      codegen: CODEGEN,
       build: () => {
         throw new Error('mwcceppc (docker) failed: syntax error');
       },
@@ -135,6 +141,7 @@ describe('runCases build failures (pinned)', () => {
       loc: 1,
       refSource: `int ${sym};`,
       toolchain: { available: () => true } as Case['toolchain'],
+      codegen: CODEGEN,
       build: () => ({ obj: '/nonexistent.o', asm: '' }),
     });
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');

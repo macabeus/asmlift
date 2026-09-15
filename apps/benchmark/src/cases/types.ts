@@ -4,6 +4,7 @@
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
+import type { ResolvedTarget } from '@asmlift/core/target';
 
 import type { Scorer } from '../eval/asmlift';
 import type { BuiltTarget, Toolchain } from '../toolchains';
@@ -31,6 +32,9 @@ export interface Case {
   proto?: Prototypes; // asmlift prototypes
   note?: string;
   toolchain: Toolchain;
+  /** the flags the target and every candidate compile at, and the description asmlift decompiles
+   *  against, resolved from those flags */
+  codegen: ResolvedTarget;
   /** Compile the reference → scoring target + the disassembly both decompilers consume.
    *  Throws on build failure (the runner logs BUILD-FAIL and moves on). */
   build: () => BuiltTarget;

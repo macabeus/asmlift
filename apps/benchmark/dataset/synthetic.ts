@@ -6033,7 +6033,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //     asm`; its `[ranked]` line reads `2 candidate(s) scored, 0 dropped, 0 withheld,
   //     1 synthesized, winner unsigned: <score>` followed by a source stamp.
   //   • EVERY CANDIDATE'S SCORE — `[ranked]` prints only the WINNER, so this needs a third call:
-  //     `decompileRanked(sym, asm, tc.targetDesc, obj, { compile: benchCompilerFor('agbcc') })`,
+  //     `decompileRanked(sym, asm, c.codegen.target, obj, { compile: benchCompilerFor('agbcc', c.codegen.cflags) })`,
   //     walking `.candidates` (NOT `.results`, which does not exist — `rankBy` returns
   //     `{ best, candidates, dropped, withheld }`). Measured, `unsigned` and `signed` tie on all
   //     six scored rows — 2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls

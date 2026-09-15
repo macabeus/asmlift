@@ -6,6 +6,7 @@ import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
+import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
@@ -34,6 +35,8 @@ export interface EvalSpec {
   proto?: Prototypes; // asmlift prototypes
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
+  /** the flags this row's target and candidates compile at, and asmlift's description from them */
+  codegen: ResolvedTarget;
   note?: string;
 }
 
@@ -232,12 +235,12 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
+  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
   const m2c = cachedM2cResult(
-    { tcId: tc.id, cflags: tc.cflags, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language },
+    { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language },
     () => evaluateM2c(tc, spec, obj, asm, score, asmDump),
   );
   return {
@@ -249,7 +252,7 @@ export function evaluate(
     tier: spec.tier,
     toolchain: tc.id,
     isa: tc.isa,
-    compiler: tc.compiler,
+    compiler: TOOLCHAIN_TARGETS[spec.codegen.toolchain].family,
     language: spec.language,
     // Source and codegen tags are DERIVED per row; the dataset carries judgement tags only. Codegen
     // because what the compiler did with a constant divide differs per toolchain and one synthetic

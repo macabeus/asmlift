@@ -18,12 +18,13 @@ import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-import { shq } from './compile/util';
+import { requireCanonicalFlags, shq } from './compile/util';
 import type { ToolchainId } from './toolchains';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -83,15 +84,22 @@ export function renderScoreCommand(id: ToolchainId): string {
   return benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!;
 }
 
-const memo = new Map<ToolchainId, CandidateCompiler | undefined>();
+const memo = new Map<string, CandidateCompiler | undefined>();
 
-/** The candidate compiler for a benchmark toolchain, built through the real user path:
- *  materialize the committed decomp.yaml → loadDecompConfig → resolveTarget (asserted) →
+/** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
+ *  path: materialize the committed decomp.yaml → loadDecompConfig → resolveTarget (asserted) →
  *  compileFromCommand. `undefined` for the pooled (dockerized) targets, whose compiler is
- *  stripped — callers fall to the registry. */
-export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined {
-  if (memo.has(id)) {
-    return memo.get(id);
+ *  stripped — callers fall to the registry.
+ *
+ *  One config FILE per (toolchain, flags), so two flag sets never read each other's; one working
+ *  DIRECTORY per toolchain, because the command namespace hashes the working directory. The committed
+ *  commands and the registry spell each toolchain's canonical flags, so any other set is refused. */
+export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler | undefined {
+  requireCanonicalFlags(id, cflags);
+  const flagsKey = JSON.stringify(cflags);
+  const memoKey = `${id}\0${flagsKey}`;
+  if (memo.has(memoKey)) {
+    return memo.get(memoKey);
   }
 
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
@@ -100,7 +108,7 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, 'decomp.yaml');
+  const file = join(dir, `decomp-${createHash('sha256').update(flagsKey).digest('hex').slice(0, 16)}.yaml`);
   // Atomic write: parallel bench workers may generate concurrently; rename prevents torn reads.
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, YAML.stringify(doc));
@@ -115,7 +123,7 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
   const compile = toolCfg.compiler
     ? compileFromCommand(toolCfg.compiler, { cwd: dir, candidateCache: toolCfg.candidateCache })
     : undefined;
-  memo.set(id, compile);
+  memo.set(memoKey, compile);
   return compile;
 }
 
@@ -123,10 +131,11 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
  *  and through the built-in registry scorer otherwise — the same either/or a real user gets. */
 export function scoreViaBenchConfig(
   id: ToolchainId,
+  cflags: readonly string[],
   builtin: (candC: string, sym: string, obj: string) => MatchScore,
 ): (candC: string, sym: string, obj: string, declarations?: string) => MatchScore {
   return (candC, sym, obj, declarations) => {
-    const compile = benchCompilerFor(id);
+    const compile = benchCompilerFor(id, cflags);
     // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
     // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`. The
     // builtin fallback has no such slot, so it is called unchanged — it is only reached where no

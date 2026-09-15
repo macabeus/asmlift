@@ -12,7 +12,7 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, requireCanonicalFlags, run } from './util';
 
 /** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
@@ -32,14 +32,16 @@ function disasm(oPath: string): string {
 }
 
 export const gcc272Real: RealCompile = {
-  buildTarget(iText): BuiltTarget {
-    const dir = contentDir('gcc272', iText);
+  buildTarget(iText, cflags): BuiltTarget {
+    requireCanonicalFlags('gcc2.7.2', cflags);
+    const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');
     writeFileSync(join(dir, 'u.i'), iText);
     compile(dir, 'u.i', 'u.o');
     return { obj: oPath, asm: disasm(oPath) };
   },
-  compileCandidate(tu, sym): string {
+  compileCandidate(tu, sym, cflags): string {
+    requireCanonicalFlags('gcc2.7.2', cflags);
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
     // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
     // that shared mount fails ~30% of compiles with `c.o: No such file or directory`

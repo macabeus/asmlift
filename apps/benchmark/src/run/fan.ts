@@ -44,7 +44,7 @@ import { asmliftFan, fanSize, fanSizeOfError, rankOptionsFor } from '../eval/asm
 import { commitsSinceArtifact } from '../report/baseline';
 import { readCommitted } from '../report/committed';
 import { fanMove } from '../report/diff';
-import { TOOLCHAINS, type Toolchain } from '../toolchains';
+import { TOOLCHAINS, type Toolchain, canonicalCodegen } from '../toolchains';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
@@ -721,7 +721,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   // The same phase-1 verdict the row path states first: a gap here is what would make a published
   // row `declined`, and enumeration below throws on it rather than annotating.
   try {
-    const dec = decompile(sym, asm, tc.targetDesc, { onGap: 'annotate' });
+    const dec = decompile(sym, asm, canonicalCodegen(tc.id).target, { onGap: 'annotate' });
     for (const d of dec.diagnostics) {
       note(`asmlift: [declined] ${d.stage}: ${d.reason.split('\n')[0].slice(0, 200)}`);
     }
@@ -732,7 +732,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   const enumerationErrors = new Map<string, string>();
   let cands: Candidate[];
   try {
-    cands = enumerateRanked(sym, asm, tc.targetDesc, {
+    cands = enumerateRanked(sym, asm, canonicalCodegen(tc.id).target, {
       onEnumerationError: (variations: readonly string[], error: string) => {
         const step = threwStep(variations);
         enumerationErrors.set(step, threwLine(sym, step, error.split('\n')[0]));
@@ -838,14 +838,14 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   }
   const { obj, asm: raw } = built;
   const asm = scrubObjectHeader(raw);
-  const opts = rankOptionsFor(c.toolchain, obj, c.proto, c.compile, c.symbols);
+  const opts = rankOptionsFor(c.toolchain, c.codegen, obj, c.proto, c.compile, c.symbols);
   note(`${c.id} — tier ${c.tier}, toolchain ${c.toolchain.id}${c.symbols ? ', symbol map' : ''}`);
 
   // The harness's PHASE 1 verdict, stated before any number: a gapped row is published `declined`
   // and its fan is never scored at all, so a reader handed this table without the warning would be
   // reading candidate scores for a row whose published outcome has no score in it.
   try {
-    const dec = decompile(c.sym, asm, c.toolchain.targetDesc, { ...opts, onGap: 'annotate' });
+    const dec = decompile(c.sym, asm, c.codegen.target, { ...opts, onGap: 'annotate' });
     for (const d of dec.diagnostics) {
       note(`asmlift: [declined] ${d.stage}: ${d.reason.split('\n')[0].slice(0, 200)}`);
     }
@@ -932,7 +932,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     // round here to read.
     let cands: Candidate[];
     try {
-      cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, reportingOpts);
+      cands = enumerateRanked(c.sym, asm, c.codegen.target, reportingOpts);
     } catch (e) {
       printThrows();
       return noFanWithDiff(e);
@@ -974,7 +974,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // row's entire fan, i.e. precisely what a reader came here for.
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(c.toolchain, c.sym, asm, obj, {
+    ranked = asmliftFan(c.codegen, c.sym, asm, obj, {
       ...reportingOpts,
       onProgress: (done, total, bestSoFar) => {
         const every = Math.max(1, Math.floor(total / 10));

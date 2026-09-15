@@ -21,11 +21,12 @@ export interface RealProjectCfg {
 }
 
 export interface RealCompile {
-  /** Compile a PREPROCESSED translation unit → scoring-target obj + the disasm asmlift consumes. */
-  buildTarget(iText: string): BuiltTarget;
-  /** Compile a candidate TU (self-contained — no project includes) → obj path. Throws on
+  /** Compile a PREPROCESSED translation unit at `cflags` → scoring-target obj + the disasm asmlift
+   *  consumes. */
+  buildTarget(iText: string, cflags: readonly string[]): BuiltTarget;
+  /** Compile a candidate TU (self-contained — no project includes) at `cflags` → obj path. Throws on
    *  compile failure (mapped to `noncompile` upstream). */
-  compileCandidate(tu: string, sym: string): string;
+  compileCandidate(tu: string, sym: string, cflags: readonly string[]): string;
   /** Preprocess a raw TU against a live checkout — vendor/verify time only. */
   preprocess(cfg: RealProjectCfg, tu: string): string;
 }

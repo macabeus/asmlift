@@ -1,11 +1,22 @@
 // Shared helpers for the per-toolchain compile modules.
-import { C_TYPEDEFS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+/** Refuse any flag set but `toolchain`'s canonical one, for a compile that spells those flags as
+ *  constants and would otherwise compile a row at the wrong set. */
+export function requireCanonicalFlags(toolchain: ToolchainId, cflags: readonly string[]): void {
+  const canonical: readonly string[] = TOOLCHAIN_TARGETS[toolchain].canonicalFlags;
+  if (cflags.length !== canonical.length || cflags.some((flag, i) => flag !== canonical[i])) {
+    throw new Error(
+      `${toolchain} compiles only at its canonical flags (${canonical.join(' ')}); got ${cflags.join(' ')}`,
+    );
+  }
+}
 
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
  *  otherwise `status: null` reaches callers as e.g. "agbcc failed: null". Compile failures
@@ -77,14 +88,18 @@ export function compilerDiagnostics(s: string): string {
     .join('\n');
 }
 
-/** A content-keyed scratch dir for a reference build: same TU ⇒ same path, every run. The scratch
- *  path leaks into the object (preprocessor linemarkers / file symbols), so a random mkdtemp path
- *  would make the object bytes differ run-to-run and churn the m2c cache key (object sha,
- *  cache.ts). Under /tmp so the docker pool can reach it; distinct TUs never collide
- *  (sha-keyed), and cases that share a TU rebuild byte-identical content, so a cross-shard
+/** A content-keyed scratch dir for a reference build: same flags and TU ⇒ same path, every run. The
+ *  scratch path leaks into the object (preprocessor linemarkers / file symbols), so a random mkdtemp
+ *  path would make the object bytes differ run-to-run and churn the m2c cache key (object sha,
+ *  cache.ts). Under /tmp so the docker pool can reach it; distinct TUs and distinct flag sets never
+ *  collide (sha-keyed), and cases that share both rebuild byte-identical content, so a cross-shard
  *  rebuild race is benign. */
-export function contentDir(tag: string, tu: string): string {
-  const d = join('/tmp', `bench-real-${tag}-${createHash('sha256').update(tu).digest('hex').slice(0, 16)}`);
+export function contentDir(tag: string, cflags: readonly string[], tu: string): string {
+  const key = createHash('sha256')
+    .update(JSON.stringify([cflags, tu]))
+    .digest('hex')
+    .slice(0, 16);
+  const d = join('/tmp', `bench-real-${tag}-${key}`);
   mkdirSync(d, { recursive: true });
   return d;
 }

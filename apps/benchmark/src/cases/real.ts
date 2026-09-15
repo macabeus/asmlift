@@ -14,7 +14,7 @@ import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
-import { TOOLCHAINS } from '../toolchains';
+import { TOOLCHAINS, canonicalCodegen } from '../toolchains';
 import { loadManifests } from './manifests';
 import type { Case } from './types';
 
@@ -28,6 +28,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
   const cases: Case[] = [];
   for (const man of manifests) {
     const tc = TOOLCHAINS[man.toolchain];
+    const codegen = canonicalCodegen(man.toolchain);
     for (const f of man.functions.filter((x) => onlySelects(filter.only, x.sym, x.aliases))) {
       const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
       const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
@@ -59,9 +60,10 @@ export function realCases(filter: RealFilter = {}): Case[] {
         symbols: man.symbols && asIfUndecompiled(man.symbols, f.sym),
         note: f.note,
         toolchain: tc,
-        build: () => buildRealTarget(man.toolchain, man.vendored(f.sym).tuI),
-        scorer: makeRealScorer(man.toolchain, f.prependC ?? '', man.vendored(f.sym).ctxI),
-        compile: makeRealCompile(man.toolchain, f.prependC ?? '', man.vendored(f.sym).ctxI),
+        codegen,
+        build: () => buildRealTarget(man.toolchain, codegen.cflags, man.vendored(f.sym).tuI),
+        scorer: makeRealScorer(man.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
+        compile: makeRealCompile(man.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
       });
     }
   }

@@ -11,6 +11,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
 import { NoScorableCandidateError } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
+import type { ResolvedTarget } from '@asmlift/core/target';
 import { tallyFanVariations } from '@asmlift/core/variation-tokens';
 
 import { cachedExtractAsmData } from '../cache';
@@ -44,6 +45,7 @@ export type Scorer = (candC: string, sym: string, obj: string, declarations?: st
  *  exist in type 'RankOptions'. Did you mean to write 'symbols'?". */
 export function rankOptionsFor(
   tc: Toolchain,
+  codegen: ResolvedTarget,
   obj: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
@@ -54,7 +56,7 @@ export function rankOptionsFor(
   // table is inline) yields `undefined`.
   let asmData;
   try {
-    asmData = cachedExtractAsmData(obj, tc.targetDesc);
+    asmData = cachedExtractAsmData(obj, codegen.target);
   } catch {
     asmData = undefined;
   }
@@ -63,7 +65,7 @@ export function rankOptionsFor(
   // symmetric, and exactly how a user's own project would recompile the decompiled function.
   // On the synthetic tier (no context), the generated decomp.yaml compiler (the unconfigured
   // user path). This is what lets recovered GLOBALS (a bare `gSym`) compile at all.
-  const compile = contextCompile ?? benchCompilerFor(tc.id);
+  const compile = contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
   return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
@@ -83,13 +85,13 @@ export function rankOptionsFor(
  *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
  *  and a published measurement must not depend on a scheduler. */
 export function asmliftFan(
-  tc: Toolchain,
+  codegen: ResolvedTarget,
   sym: string,
   asm: string,
   obj: string,
   opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
 ): RankedResult {
-  return decompileRanked(sym, asm, tc.targetDesc, obj, opts);
+  return decompileRanked(sym, asm, codegen.target, obj, opts);
 }
 
 /** HOW BIG THIS ROW'S FAN WAS — every spelling enumeration emitted.
@@ -138,6 +140,7 @@ const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).t
 // scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
 export function runAsmlift(
   tc: Toolchain,
+  codegen: ResolvedTarget,
   sym: string,
   asm: string,
   obj: string,
@@ -145,7 +148,7 @@ export function runAsmlift(
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
 ): DecompilerResult {
-  const opts = rankOptionsFor(tc, obj, prototypes, contextCompile, symbols);
+  const opts = rankOptionsFor(tc, codegen, obj, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).
@@ -156,7 +159,7 @@ export function runAsmlift(
   let annotated: string;
   const usedSymbols = Boolean(symbols);
   try {
-    const dec = decompile(sym, asm, tc.targetDesc, { ...opts, onGap: 'annotate' });
+    const dec = decompile(sym, asm, codegen.target, { ...opts, onGap: 'annotate' });
     if (dec.diagnostics.length > 0) {
       return {
         decompiler: 'asmlift',
@@ -200,7 +203,7 @@ export function runAsmlift(
   const rankT0 = Date.now();
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(tc, sym, asm, obj, opts);
+    ranked = asmliftFan(codegen, sym, asm, obj, opts);
   } catch (e) {
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref

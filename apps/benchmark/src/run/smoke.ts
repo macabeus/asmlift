@@ -2,7 +2,7 @@
 // toolchain, validating the toolchain adapters + asmlift import path.
 import { decompile } from '@asmlift/core/pipeline';
 
-import { availableToolchains } from '../toolchains';
+import { availableToolchains, canonicalCodegen } from '../toolchains';
 
 const REF = 'int add(int a, int b){ return a + b; }';
 const SYM = 'add';
@@ -10,8 +10,9 @@ const SYM = 'add';
 export function smoke(): void {
   for (const tc of availableToolchains()) {
     try {
-      const { obj, asm } = tc.buildTarget(REF, SYM);
-      const r = decompile(SYM, asm, tc.targetDesc);
+      const codegen = canonicalCodegen(tc.id);
+      const { obj, asm } = tc.buildTarget(REF, SYM, codegen.cflags);
+      const r = decompile(SYM, asm, codegen.target);
       const s = tc.score(r.source, SYM, obj);
       console.log(`[${tc.id}] asmlift → score=${s.score}/${s.rows} match=${s.match}`);
       console.log(

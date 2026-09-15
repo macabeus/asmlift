@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { type RealManifest, resolveProjectRoot, validateManifest } from '../cases/manifests';
 import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
-import { TOOLCHAINS } from '../toolchains';
+import { canonicalCodegen } from '../toolchains';
 
 export function verify(manifestPath: string): void {
   const m = JSON.parse(readFileSync(manifestPath, 'utf8')) as RealManifest;
@@ -26,21 +26,25 @@ export function verify(manifestPath: string): void {
     defines: m.defines,
   };
   const rc = realCompilerFor(m.toolchain);
-  const tc = TOOLCHAINS[m.toolchain];
+  const codegen = canonicalCodegen(m.toolchain);
 
   let compiled = 0,
     asmliftOk = 0;
   for (const f of m.functions) {
     let asm: string;
     try {
-      asm = buildRealTarget(m.toolchain, rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC))).asm;
+      asm = buildRealTarget(
+        m.toolchain,
+        codegen.cflags,
+        rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC)),
+      ).asm;
     } catch (e) {
       console.log(`✗ COMPILE ${f.sym}: ${(e as Error).message.split('\n')[0]}`);
       continue;
     }
     compiled++;
     try {
-      const r = decompile(f.sym, asm, tc.targetDesc, f.proto ? { prototypes: f.proto } : {});
+      const r = decompile(f.sym, asm, codegen.target, f.proto ? { prototypes: f.proto } : {});
       asmliftOk++;
       console.log(`✓ ${f.sym}  (compiled, asmlift emitted ${r.source.split('\n').length} lines)`);
     } catch (e) {

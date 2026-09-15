@@ -10,7 +10,7 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, requireCanonicalFlags, run, scratchSlot } from './util';
 
 /** .i → IDO cc → .o. Shared by target and candidate. */
 function compile(iPath: string, oPath: string): void {
@@ -40,15 +40,17 @@ const candScratch = scratchSlot('bench-cand-');
 const vendorScratch = scratchSlot('bench-vendor-');
 
 export const idoReal: RealCompile = {
-  buildTarget(iText): BuiltTarget {
-    const dir = contentDir('ido', iText);
+  buildTarget(iText, cflags): BuiltTarget {
+    requireCanonicalFlags('ido7.1', cflags);
+    const dir = contentDir('ido', cflags, iText);
     const iPath = join(dir, 'u.i'),
       oPath = join(dir, 'u.o');
     writeFileSync(iPath, iText);
     compile(iPath, oPath);
     return { obj: oPath, asm: disasm(oPath) };
   },
-  compileCandidate(tu, sym): string {
+  compileCandidate(tu, sym, cflags): string {
+    requireCanonicalFlags('ido7.1', cflags);
     const dir = candScratch();
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),

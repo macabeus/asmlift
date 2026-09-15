@@ -51,20 +51,35 @@ const TC_CFG: Record<ToolchainId, unknown> = {
   mwcc_242_81: MWCC_PPC_TOOLCHAIN,
 };
 
-/** `tc.buildTarget`, cached by (toolchain config, reference source, symbol, and — for c++ —
- *  language). The cached object file is returned by path and only ever READ downstream
+/** `tc.buildTarget`, cached by (toolchain config, codegen flags, reference source, symbol, and — for
+ *  c++ — language). The cached object file is returned by path and only ever READ downstream
  *  (objdiff target / objdump input). */
-export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang?: 'c' | 'c++'): BuiltTarget {
+export function cachedBuildTarget(
+  tc: Toolchain,
+  cflags: readonly string[],
+  refC: string,
+  sym: string,
+  lang?: 'c' | 'c++',
+): BuiltTarget {
   // `checkedTarget` (toolchains.ts) states the non-emptiness invariant; what is CACHE-specific is
   // that the tmp-then-rename write makes a bad result a WELL-FORMED entry with no TTL, so the same
   // question has to be asked twice — once on the way in, and once of what is already on disk.
-  const build = (): BuiltTarget => checkedTarget(tc.buildTarget(refC, sym, lang), `${sym} on ${tc.id}`);
+  const build = (): BuiltTarget => checkedTarget(tc.buildTarget(refC, sym, cflags, lang), `${sym} on ${tc.id}`);
   if (!enabled()) {
     return build();
   }
   // lang enters the key only for c++ (see cachedM2cResult for the rationale)
   const key = sha(
-    JSON.stringify({ v: 2, kind: 'ref', tc: tc.id, cfg: TC_CFG[tc.id], refC, sym, ...(lang === 'c++' && { lang }) }),
+    JSON.stringify({
+      v: 2,
+      kind: 'ref',
+      tc: tc.id,
+      cfg: TC_CFG[tc.id],
+      cflags,
+      refC,
+      sym,
+      ...(lang === 'c++' && { lang }),
+    }),
   );
   const oPath = join(CACHE_DIR, `ref-${key}.o`);
   const aPath = join(CACHE_DIR, `ref-${key}.asm`);

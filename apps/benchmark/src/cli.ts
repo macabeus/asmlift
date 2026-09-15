@@ -458,7 +458,7 @@ switch (command) {
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.
         const picked = source
-          ? resolveScoringPrelude(c.toolchain.id, prependC, ctxI, c.sym, source, macros)
+          ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, macros)
           : { prelude: ladder[ladder.length - 1], rung: ladder.length };
         ctxRung = picked.rung;
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
