@@ -38,7 +38,8 @@ function useTopmost(): boolean {
       emit();
     };
   }, [self]);
-  return useSyncExternalStore(subscribe, topOfStack) === self;
+  // a server render has no stack, so nothing is on top of it
+  return useSyncExternalStore(subscribe, topOfStack, topOfStack) === self;
 }
 
 // ── the pieces ──────────────────────────────────────────────────────────────────────────────────
