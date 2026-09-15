@@ -61,7 +61,7 @@ export const kmcReal: RealCompile = {
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
-    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], cfg.root);
+    const cpp = run(CPP, ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], { cwd: cfg.root });
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }

@@ -21,11 +21,16 @@ export function requireCanonicalFlags(toolchain: ToolchainId, cflags: readonly s
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
  *  otherwise `status: null` reaches callers as e.g. "agbcc failed: null". Compile failures
  *  (nonzero status, real stderr) still return for the caller to diagnose. */
-export function run(cmd: string, args: string[], cwd?: string, env?: Record<string, string>) {
+export function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string>; input?: string } = {},
+) {
   const r = spawnSync(cmd, args, {
-    cwd,
+    cwd: opts.cwd,
+    input: opts.input,
     encoding: 'utf8',
-    env: env ? { ...process.env, ...env } : process.env,
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
     timeout: 120_000,
   });
   if (r.error) {

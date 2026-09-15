@@ -14,6 +14,7 @@
 // textual `.s`; its MIPS/PPC frontends parse `objdump -d` output. m2c wants GNU-as text for all.
 // The adapter records which format `asm` is in via `asmKind` so each decompiler runner can adapt.
 import type { ToolchainId } from '@asmlift/bench-schema';
+import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { type ResolvedTarget, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
   agbccAvailable,
@@ -87,9 +88,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'agbcc-s',
     available: () => agbccAvailable(),
     buildTarget: (refC, _sym, cflags) => {
-      const asm = compileTargetAsm(refC, cflags); // agbcc .s text — asmlift ARM frontend input
-      const obj = assembleTarget(asm); // assemble that .s → scoring target
-      return { obj, asm };
+      const listing = compileTargetAsm(refC, cflags); // agbcc .s text
+      const obj = assembleTarget(listing); // assemble that .s → scoring target
+      // both decompilers read the listing without its debug sections; the object keeps them
+      return { obj, asm: withoutDebugSections(listing) };
     },
   },
   'ido7.1': {

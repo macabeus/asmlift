@@ -338,3 +338,64 @@ describe('compiler flags — one namespace per flag set', () => {
     }
   });
 });
+
+// agbcc `-g` writes its input's name and working directory into the listing. The harness compiles on
+// stdin in `/`, so the determinism probe's two directories still build one object and the namespace
+// resolves; compiled from a scratch file the probe disagrees and the cache refuses the whole flag set.
+describe('debug-info flags — a `-g` unit keeps its cache and its listing', () => {
+  const G = [...CANONICAL, '-g'];
+  const tu = 'int twice(int x){ return x + x; }\n';
+
+  test.skipIf(!HAVE_AGBCC)('a `-g` flag set resolves a namespace and is served its own object', async () => {
+    const store = scratch();
+    const saved = { mode: process.env.ASMLIFT_CANDCACHE, dir: process.env.ASMLIFT_CANDCACHE_DIR };
+    process.env.ASMLIFT_CANDCACHE = '1';
+    process.env.ASMLIFT_CANDCACHE_DIR = store;
+    vi.resetModules();
+    try {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      const first = readFileSync(agbccReal.compileCandidate(tu, 'twice', G));
+      expect(readFileSync(agbccReal.compileCandidate(tu, 'twice', G)).equals(first)).toBe(true);
+      expect(
+        execSync(`find ${store}/ns -mindepth 1 -maxdepth 1 -type d`, { encoding: 'utf8' }).trim().split('\n'),
+      ).toHaveLength(1);
+    } finally {
+      process.env.ASMLIFT_CANDCACHE = saved.mode;
+      process.env.ASMLIFT_CANDCACHE_DIR = saved.dir;
+      vi.resetModules();
+    }
+  });
+
+  // A rejection is published as the row's `errorMarkers`, so its text must not depend on how the harness
+  // hands cpp the TU.
+  test.skipIf(!HAVE_AGBCC)("a candidate's diagnostics name its translation unit c.c", async () => {
+    const store = scratch();
+    const saved = { mode: process.env.ASMLIFT_CANDCACHE, dir: process.env.ASMLIFT_CANDCACHE_DIR };
+    process.env.ASMLIFT_CANDCACHE = '1';
+    process.env.ASMLIFT_CANDCACHE_DIR = store;
+    vi.resetModules();
+    try {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      expect(() => agbccReal.compileCandidate('int f(void)\n{ return x; }\n', 'f', G)).toThrow(
+        /^agbcc failed: c\.c:2: `x' undeclared/,
+      );
+    } finally {
+      process.env.ASMLIFT_CANDCACHE = saved.mode;
+      process.env.ASMLIFT_CANDCACHE_DIR = saved.dir;
+      vi.resetModules();
+    }
+  });
+
+  test.skipIf(!HAVE_AGBCC)(
+    'the `-g` target listing both decompilers read has no debug section, and names no path',
+    async () => {
+      const { agbccReal } = await import('../src/compile/agbcc');
+      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, G);
+      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, CANONICAL);
+      expect(debug.asm).not.toMatch(/\.section\s+\.debug/);
+      expect(readFileSync(debug.obj).includes('.debug_info')).toBe(true);
+      expect(readFileSync(debug.obj).toString('latin1')).not.toMatch(/\/tmp\/|\/private\/|\/var\/folders\//);
+      expect(plain.asm).not.toMatch(/\.debug/);
+    },
+  );
+});

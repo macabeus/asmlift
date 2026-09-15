@@ -755,6 +755,28 @@ interface Resolved {
   witness: LayoutFact[];
 }
 
+/** A GNU-as listing without its debug and stabs sections: every line from a `.section .debug_*` (or a
+ *  `.stab*` section) up to the next section switch is dropped, and every other line is kept verbatim,
+ *  so a listing with no debug section comes back unchanged. What agbcc `-g` adds to a `.s` beside
+ *  the marker labels in its code (`corpus/agbcc-debug{,-g}.s`). */
+export function withoutDebugSections(asm: string): string {
+  let inDebugSection = false;
+  const kept: string[] = [];
+  for (const rawLine of asm.split('\n')) {
+    const sectionSwitch = rawLine
+      .split('@')[0]
+      .trim()
+      .match(/^\.(?:section\s+([^\s,]+)|text\b|data\b|bss\b)/);
+    if (sectionSwitch) {
+      inDebugSection = sectionSwitch[1] !== undefined && /^\.(debug|stab)/.test(sectionSwitch[1]);
+    }
+    if (!inDebugSection) {
+      kept.push(rawLine);
+    }
+  }
+  return kept.join('\n');
+}
+
 /** The canonical serialisation a witness is compared BY, and the prose it is reported AS. Keeping
  *  them apart is the point: rewording `sayFact` changes a message, never a decision. */
 const factKey = (f: LayoutFact) => JSON.stringify(f);
@@ -809,24 +831,16 @@ function decode(
   // DEBUG OUTPUT IS NEITHER CODE NOR DATA THE CODE READS. agbcc `-g` leaves `.text` byte-identical
   // (`corpus/agbcc-debug{,-g}.s`), so the lift reads exactly the function it reads without `-g`, and
   // two things are dropped:
-  //   • every line from a `.section .debug_*` (or a stabs section) to the next section switch: the
-  //     debug rows, their labels, and the data a trailing `.Letext0` label would otherwise head;
+  //   • every debug or stabs section (`withoutDebugSections`): the debug rows, their labels, and the
+  //     data a trailing `.Letext0` label would otherwise head;
   //   • the marker labels `-g` plants in the code stream (`.LFB1`, `.LM3`, `.LBB2`, `.LBE2`, `.LFE1`,
   //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
   //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
   //     an `if` around a `do` instead of a `while`.
   const codeLines: string[] = [];
-  let inDebugSection = false;
-  for (const rawLine of asm.split('\n')) {
+  for (const rawLine of withoutDebugSections(asm).split('\n')) {
     const line = rawLine.split('@')[0].trim();
-    if (!line) {
-      continue;
-    }
-    const sectionSwitch = line.match(/^\.(?:section\s+([^\s,]+)|text\b|data\b|bss\b)/);
-    if (sectionSwitch) {
-      inDebugSection = sectionSwitch[1] !== undefined && /^\.(debug|stab)/.test(sectionSwitch[1]);
-    }
-    if (!inDebugSection) {
+    if (line) {
       codeLines.push(line);
     }
   }

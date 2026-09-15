@@ -13,6 +13,7 @@ import {
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -56,9 +57,17 @@ export function stepFailed(
   throw new Error(`${tool} failed: ${d}`);
 }
 
-/** .i → agbcc at `cflags` → .s (asmlift ARM input) with the canonical .text/.align tail → as → .o. */
-function assemble(iPath: string, sPath: string, oPath: string, cflags: readonly string[]): void {
-  const cc = run(TOOLCHAIN.agbcc, [iPath, '-o', sPath, ...TOOLCHAIN.harnessFlags, ...cflags]);
+/** Preprocessed C → agbcc at `cflags` → .s (asmlift ARM input) with the canonical .text/.align tail →
+ *  as → .o.
+ *
+ *  ONE FIXED COMPILE DIRECTORY. agbcc reads the TU on stdin with `/` as its working directory: under
+ *  `-g` it writes its input's name and the working directory into the `.s`'s debug rows, so a TU
+ *  compiled from a file in a scratch directory is not a function of its own bytes. Measured on one TU
+ *  at agbcc's canonical flags + `-g`: from a file in two directories, two `.s` and two objects; from
+ *  stdin in `/`, one of each, whose `.text` is the file build's. Without `-g` both spellings emit the
+ *  same `.s`. */
+function assemble(iText: string, sPath: string, oPath: string, cflags: readonly string[]): void {
+  const cc = run(TOOLCHAIN.agbcc, ['-o', sPath, ...TOOLCHAIN.harnessFlags, ...cflags], { cwd: '/', input: iText });
   if (cc.status !== 0) {
     stepFailed('agbcc', cc);
   }
@@ -92,21 +101,25 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
+/** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers
+ *  (see `assemble`), under a leading linemarker that names it `c.c`. agbcc's diagnostics, which a row
+ *  publishes as `errorMarkers`, and a `-g` listing's debug rows then name that constant file. */
+function preprocessCandidate(tu: string, iPath: string): ReturnType<typeof run> {
+  return run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, '-', '-o', iPath], { input: `# 1 "c.c"\n${tu}` });
+}
+
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
  *  null if it did not compile. Its OWN directory, never the slot a candidate shares: a probe
  *  compiled into the reused candidate slot overwrites the object the caller is about to store. */
 function stampProbeIn(dir: string, cflags: readonly string[]): string | null {
-  const cPath = join(dir, 'p.c'),
-    iPath = join(dir, 'p.i'),
+  const iPath = join(dir, 'p.i'),
     sPath = join(dir, 'p.s'),
     oPath = join(dir, 'p.o');
   try {
-    writeFileSync(cPath, STAMP_PROBE);
-    if (run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, cPath, '-o', iPath]).status !== 0) {
+    if (preprocessCandidate(STAMP_PROBE, iPath).status !== 0) {
       return null;
     }
-    writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), 'asmlift_candcache_stamp'));
-    assemble(iPath, sPath, oPath, cflags);
+    assemble(stripPrototype(readFileSync(iPath, 'utf8'), 'asmlift_candcache_stamp'), sPath, oPath, cflags);
     return createHash('sha256').update(readFileSync(oPath)).digest('hex');
   } catch {
     return null;
@@ -224,12 +237,11 @@ export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 export const agbccReal: RealCompile = {
   buildTarget(iText, cflags): BuiltTarget {
     const dir = contentDir('arm', cflags, iText);
-    const iPath = join(dir, 'u.i'),
-      sPath = join(dir, 'u.s'),
+    const sPath = join(dir, 'u.s'),
       oPath = join(dir, 'u.o');
-    writeFileSync(iPath, iText);
-    assemble(iPath, sPath, oPath, cflags);
-    return { obj: oPath, asm: readFileSync(sPath, 'utf8') };
+    assemble(iText, sPath, oPath, cflags);
+    // Both decompilers read the listing without its debug sections; the object keeps them.
+    return { obj: oPath, asm: withoutDebugSections(readFileSync(sPath, 'utf8')) };
   },
   compileCandidate(tu, sym, cflags): string {
     const cache = cacheFor(cflags);
@@ -300,11 +312,9 @@ export const agbccReal: RealCompile = {
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
     // -P strips linemarkers: vendored blobs must carry no machine paths
-    const cpp = run(
-      'arm-none-eabi-cpp',
-      ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath],
-      cfg.root,
-    );
+    const cpp = run('arm-none-eabi-cpp', ['-P', ...cfg.cppIncludes, ...(cfg.defines ?? []), cPath, '-o', iPath], {
+      cwd: cfg.root,
+    });
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
@@ -314,18 +324,15 @@ export const agbccReal: RealCompile = {
 
 function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
   const dir = candScratch();
-  const cPath = join(dir, 'c.c'),
-    iPath = join(dir, 'c.i'),
+  const iPath = join(dir, 'c.i'),
     sPath = join(dir, 'c.s'),
     oPath = join(dir, 'c.o');
-  writeFileSync(cPath, tu);
-  // candidate TUs are self-contained (typedefs/vendored context inline) — bare -nostdinc cpp
-  const cpp = run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, cPath, '-o', iPath]);
+  // candidate TUs are self-contained (typedefs/vendored context inline): bare -nostdinc cpp
+  const cpp = preprocessCandidate(tu, iPath);
   if (cpp.status !== 0) {
     stepFailed('cpp', cpp);
   }
-  writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-  assemble(iPath, sPath, oPath, cflags);
+  assemble(stripPrototype(readFileSync(iPath, 'utf8'), sym), sPath, oPath, cflags);
   return oPath;
 }
 

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
+import { withoutDebugSections } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -28,4 +29,17 @@ test.each(['gcd', 'pick'])('%s: the -g build lifts to the same C as the plain bu
   expect(plain.diagnostics).toEqual([]);
   expect(debug.diagnostics).toEqual([]);
   expect(debug.source).toBe(plain.source);
+});
+
+// The same definition is what the benchmark hands both decompilers from a `-g` unit.
+test('withoutDebugSections drops the debug sections and returns a listing without any unchanged', () => {
+  const plain = read('agbcc-debug.s');
+  const debug = read('agbcc-debug-g.s');
+  expect(withoutDebugSections(plain)).toBe(plain);
+  const stripped = withoutDebugSections(debug);
+  expect(stripped).not.toMatch(/\.section\s+\.debug/);
+  expect(stripped.length).toBeLessThan(debug.length);
+  for (const sym of ['gcd', 'pick']) {
+    expect(decompile(sym, stripped, ARMV4T_AGBCC).source).toBe(decompile(sym, plain, ARMV4T_AGBCC).source);
+  }
 });

@@ -213,13 +213,15 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      exact wrong answer the change removes, served out of a warm store and invisible to every
   //      artifact comparison of the day — the incident that put `errorMarkers` into `FIELDS.m2c`.
   //      Caught by reading this list before publishing a run, which is what it is for.
+  // v18: the agbcc candidate compile names its translation unit `c.c`. The name is part of the
+  //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 17,
+      v: 18,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),
