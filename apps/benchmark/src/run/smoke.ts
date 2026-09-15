@@ -2,6 +2,7 @@
 // toolchain, validating the toolchain adapters + asmlift import path.
 import { decompile } from '@asmlift/core/pipeline';
 
+import { benchScorer } from '../decomp-config';
 import { availableToolchains, canonicalCodegen } from '../toolchains';
 
 const REF = 'int add(int a, int b){ return a + b; }';
@@ -13,7 +14,7 @@ export function smoke(): void {
       const codegen = canonicalCodegen(tc.id);
       const { obj, asm } = tc.buildTarget(REF, SYM, codegen.cflags);
       const r = decompile(SYM, asm, codegen.target);
-      const s = tc.score(r.source, SYM, obj);
+      const s = benchScorer(tc.id, codegen.cflags)(r.source, SYM, obj);
       console.log(`[${tc.id}] asmlift → score=${s.score}/${s.rows} match=${s.match}`);
       console.log(
         r.source

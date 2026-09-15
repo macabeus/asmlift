@@ -11,13 +11,21 @@
 // template — the benchmark then exercises the user-command path on the majority of rows. For
 // the DOCKERIZED pair (KMC GCC, mwcc) the harness STRIPS the compiler before loading: their
 // configs still load and resolve the target (the same "no compile command" user path), while
-// candidate compilation falls to the built-in registry — which pools Docker containers, an
-// optimization the one-shot `docker run` template cannot express. The reproduction scripts
-// (`bench target`) get the command intact on every toolchain.
+// candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
+// pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
+// reproduction scripts (`bench target`) get the command intact on every toolchain.
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import {
+  GCC272_TOOLCHAIN,
+  GCC_KMC_TOOLCHAIN,
+  IDO_TOOLCHAIN,
+  MWCC_PPC_TOOLCHAIN,
+  TOOLCHAIN,
+  kmcCandidateCompiler,
+  mwccCandidateCompiler,
+} from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -47,8 +55,12 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_WIBO: MWCC_PPC_TOOLCHAIN.wibo,
 };
 
-/** The pooled pair: scoring compiles through the built-in registry (long-lived containers). */
-const POOLED: ReadonlySet<ToolchainId> = new Set(['gcc2.7.2kmc', 'mwcc_242_81']);
+/** The pooled pair: candidates compile through @asmlift/toolchains' own compiler (long-lived
+ *  containers), bound at the row's flags. */
+const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => CandidateCompiler>> = {
+  'gcc2.7.2kmc': kmcCandidateCompiler,
+  mwcc_242_81: mwccCandidateCompiler,
+};
 
 /** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.
  *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */
@@ -84,26 +96,31 @@ export function renderScoreCommand(id: ToolchainId): string {
   return benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!;
 }
 
-const memo = new Map<string, CandidateCompiler | undefined>();
+const memo = new Map<string, CandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
  *  path: materialize the committed decomp.yaml → loadDecompConfig → resolveTarget (asserted) →
- *  compileFromCommand. `undefined` for the pooled (dockerized) targets, whose compiler is
- *  stripped — callers fall to the registry.
+ *  compileFromCommand. The pooled (dockerized) targets' command is stripped, and their candidates
+ *  compile through @asmlift/toolchains at `cflags`.
  *
  *  One config FILE per (toolchain, flags), so two flag sets never read each other's; one working
  *  DIRECTORY per toolchain, because the command namespace hashes the working directory. The committed
- *  commands and the registry spell each toolchain's canonical flags, so any other set is refused. */
-export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler | undefined {
-  requireCanonicalFlags(id, cflags);
+ *  commands spell each toolchain's canonical flags, so a toolchain compiled through its command
+ *  refuses any other set. */
+export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler {
+  const pooled = POOLED[id];
+  if (pooled === undefined) {
+    requireCanonicalFlags(id, cflags);
+  }
   const flagsKey = JSON.stringify(cflags);
   const memoKey = `${id}\0${flagsKey}`;
-  if (memo.has(memoKey)) {
-    return memo.get(memoKey);
+  const known = memo.get(memoKey);
+  if (known !== undefined) {
+    return known;
   }
 
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
-  if (POOLED.has(id)) {
+  if (pooled !== undefined) {
     delete doc.tools.asmlift.compiler;
   }
   const dir = join(CONFIG_ROOT, id);
@@ -120,28 +137,23 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
   const toolCfg = loaded!.config.tools!.asmlift!;
-  const compile = toolCfg.compiler
-    ? compileFromCommand(toolCfg.compiler, { cwd: dir, candidateCache: toolCfg.candidateCache })
-    : undefined;
+  const compile =
+    pooled !== undefined
+      ? pooled(cflags)
+      : compileFromCommand(toolCfg.compiler!, { cwd: dir, candidateCache: toolCfg.candidateCache });
   memo.set(memoKey, compile);
   return compile;
 }
 
-/** A benchmark Scorer that compiles through the decomp.yaml command when the target has one,
- *  and through the built-in registry scorer otherwise — the same either/or a real user gets. */
-export function scoreViaBenchConfig(
+/** A benchmark Scorer at one flag set: compile through `benchCompilerFor`, objdiff against the target. */
+export function benchScorer(
   id: ToolchainId,
   cflags: readonly string[],
-  builtin: (candC: string, sym: string, obj: string) => MatchScore,
 ): (candC: string, sym: string, obj: string, declarations?: string) => MatchScore {
-  return (candC, sym, obj, declarations) => {
-    const compile = benchCompilerFor(id, cflags);
-    // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
-    // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`. The
-    // builtin fallback has no such slot, so it is called unchanged — it is only reached where no
-    // decomp.yaml command exists, which is not a configuration any row with a map runs in.
-    return compile ? scoreObjects(obj, compile(candC, sym, 'c', declarations), sym) : builtin(candC, sym, obj);
-  };
+  const compile = benchCompilerFor(id, cflags);
+  // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
+  // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`.
+  return (candC, sym, obj, declarations) => scoreObjects(obj, compile(candC, sym, 'c', declarations), sym);
 }
 
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on

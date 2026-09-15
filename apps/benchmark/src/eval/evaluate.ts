@@ -11,6 +11,7 @@ import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
 import { rowFeatures } from '../cases/features';
+import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
 import { type Scorer, runAsmlift } from './asmlift';
 import { countCompileErrors } from './asmlift';
@@ -221,7 +222,7 @@ export function evaluate(
   scorer?: Scorer,
   compile?: CandidateCompiler,
 ): FunctionResult {
-  const score: Scorer = scorer ?? tc.score;
+  const score: Scorer = scorer ?? benchScorer(tc.id, spec.codegen.cflags);
   // the object's data sections feed the m2c normalizer (jump tables, anonymous constants) and
   // are PUBLISHED on the row so the reproduction scripts carry them too; best-effort — without
   // a dump both fall back to text-only

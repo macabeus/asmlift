@@ -3,7 +3,6 @@
 // situation: the published binary is `decompals/mips-gcc-2.7.2`, so the .c/.i compiles inside a
 // linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
 // is disassembled + scored with the native host binutils/objdiff.
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,12 +11,12 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, requireCanonicalFlags, run } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
 
-/** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
-function compile(dir: string, iName: string, oName: string): void {
+/** .i → pooled docker GCC 2.7.2 at `cflags` → .o (same helper score.ts uses). */
+function compile(dir: string, iName: string, oName: string, cflags: readonly string[]): void {
   try {
-    gcc272Compile(dir, iName, oName, TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
+    gcc272Compile(dir, iName, oName, cflags);
   } catch (e) {
     throw new Error(`gcc 2.7.2 failed: ${compilerDiagnostics((e as Error).message)}`);
   }
@@ -33,15 +32,13 @@ function disasm(oPath: string): string {
 
 export const gcc272Real: RealCompile = {
   buildTarget(iText, cflags): BuiltTarget {
-    requireCanonicalFlags('gcc2.7.2', cflags);
     const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');
     writeFileSync(join(dir, 'u.i'), iText);
-    compile(dir, 'u.i', 'u.o');
+    compile(dir, 'u.i', 'u.o', cflags);
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym, cflags): string {
-    requireCanonicalFlags('gcc2.7.2', cflags);
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
     // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
     // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
@@ -56,7 +53,7 @@ export const gcc272Real: RealCompile = {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
     writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(dir, 'c.i', 'c.o');
+    compile(dir, 'c.i', 'c.o', cflags);
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {

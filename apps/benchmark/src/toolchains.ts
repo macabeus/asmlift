@@ -5,8 +5,6 @@
 //   • buildTarget(refC, sym, cflags, lang?) → { obj, asm } : compile the reference at `cflags` to the
 //     scoring-target object AND produce the disassembly text that the decompilers consume as input
 //     ('c++' selects mwcc's .cp frontend; only the mwcc adapter accepts it).
-//   • score(candC, sym, obj)                : compile a candidate C at the toolchain's canonical flags,
-//     objdiff it against the target.
 // What a row compiles and decompiles at is its own resolved target, not the toolchain's.
 //
 // This deliberately reuses asmlift's own pinned toolchains (@asmlift/toolchains) so the benchmark measures
@@ -18,7 +16,6 @@
 import type { ToolchainId } from '@asmlift/bench-schema';
 import { type ResolvedTarget, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
-  type MatchScore,
   agbccAvailable,
   assembleTarget,
   compileMipsGcc272Target,
@@ -31,14 +28,8 @@ import {
   gcc272Available,
   idoAvailable,
   ppcDockerAvailable,
-  scoreC,
-  scoreCMips,
-  scoreCMipsGcc,
-  scoreCPpc,
 } from '@asmlift/toolchains';
 import { statSync } from 'node:fs';
-
-import { scoreViaBenchConfig } from './decomp-config';
 
 export type { ToolchainId } from '@asmlift/bench-schema';
 
@@ -86,7 +77,6 @@ export interface Toolchain {
    *  and stale-check's coverage guard keeps a skipping run from ever clobbering the dataset). */
   available: () => boolean;
   buildTarget: (refC: string, sym: string, cflags: readonly string[], lang?: 'c' | 'c++') => BuiltTarget;
-  score: (candC: string, sym: string, obj: string) => MatchScore;
 }
 
 export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
@@ -101,9 +91,6 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
       const obj = assembleTarget(asm); // assemble that .s → scoring target
       return { obj, asm };
     },
-    score: scoreViaBenchConfig('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags, (candC, sym, obj) =>
-      scoreC(candC, sym, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
-    ),
   },
   'ido7.1': {
     id: 'ido7.1',
@@ -112,9 +99,6 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => idoAvailable(),
     buildTarget: (refC, sym, cflags) => compileMipsTarget(refC, sym, cflags),
-    score: scoreViaBenchConfig('ido7.1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags, (candC, sym, obj) =>
-      scoreCMips(candC, sym, obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
-    ),
   },
   'gcc2.7.2kmc': {
     id: 'gcc2.7.2kmc',
@@ -123,9 +107,6 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => dockerAvailable(),
     buildTarget: (refC, sym, cflags) => compileMipsGccTarget(refC, sym, cflags),
-    score: scoreViaBenchConfig('gcc2.7.2kmc', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags, (candC, sym, obj) =>
-      scoreCMipsGcc(candC, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
-    ),
   },
   'gcc2.7.2': {
     id: 'gcc2.7.2',
@@ -134,9 +115,6 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => gcc272Available(),
     buildTarget: (refC, sym, cflags) => compileMipsGcc272Target(refC, sym, cflags),
-    score: scoreViaBenchConfig('gcc2.7.2', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags, (candC, sym, obj) =>
-      scoreCMipsGcc(candC, sym, obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
-    ),
   },
   mwcc_242_81: {
     id: 'mwcc_242_81',
@@ -146,9 +124,6 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     available: () => ppcDockerAvailable(),
     buildTarget: (refC, sym, cflags, lang) =>
       lang === 'c++' ? compilePpcCppTarget(refC, sym, cflags) : compilePpcTarget(refC, sym, cflags),
-    score: scoreViaBenchConfig('mwcc_242_81', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags, (candC, sym, obj) =>
-      scoreCPpc(candC, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
-    ),
   },
 };
 

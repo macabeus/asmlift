@@ -1,7 +1,6 @@
 // IDO / MIPS (N64) — every harness-side spelling of "compile C with IDO": real-tier target
-// build, real-tier candidate compile (shared cc step). The harness words come from
-// @asmlift/toolchains and the codegen flags are ido7.1's canonical set in @asmlift/core.
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+// build, real-tier candidate compile (shared cc step). Every compile passes the harness words from
+// @asmlift/toolchains, then the row's codegen flags.
 import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,17 +9,11 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, requireCanonicalFlags, run, scratchSlot } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
-/** .i → IDO cc → .o. Shared by target and candidate. */
-function compile(iPath: string, oPath: string): void {
-  const cc = run(IDO_TOOLCHAIN.cc, [
-    ...IDO_TOOLCHAIN.harnessFlags,
-    ...TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
-    '-o',
-    oPath,
-    iPath,
-  ]);
+/** .i → IDO cc at `cflags` → .o. Shared by target and candidate. */
+function compile(iPath: string, oPath: string, cflags: readonly string[]): void {
+  const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...cflags, '-o', oPath, iPath]);
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${compilerDiagnostics(cc.stderr || cc.stdout)}`);
   }
@@ -41,16 +34,14 @@ const vendorScratch = scratchSlot('bench-vendor-');
 
 export const idoReal: RealCompile = {
   buildTarget(iText, cflags): BuiltTarget {
-    requireCanonicalFlags('ido7.1', cflags);
     const dir = contentDir('ido', cflags, iText);
     const iPath = join(dir, 'u.i'),
       oPath = join(dir, 'u.o');
     writeFileSync(iPath, iText);
-    compile(iPath, oPath);
+    compile(iPath, oPath, cflags);
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym, cflags): string {
-    requireCanonicalFlags('ido7.1', cflags);
     const dir = candScratch();
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
@@ -61,7 +52,7 @@ export const idoReal: RealCompile = {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
     writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(iPath, oPath);
+    compile(iPath, oPath, cflags);
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {

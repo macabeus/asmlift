@@ -64,12 +64,13 @@ export function rankOptionsFor(
   // globals) so an emission referencing them scores in the same context m2c is scored in —
   // symmetric, and exactly how a user's own project would recompile the decompiled function.
   // On the synthetic tier (no context), the generated decomp.yaml compiler (the unconfigured
-  // user path). This is what lets recovered GLOBALS (a bare `gSym`) compile at all.
+  // user path; the pooled pair's is @asmlift/toolchains' own), at the row's flags. This is what lets
+  // recovered GLOBALS (a bare `gSym`) compile at all.
   const compile = contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
   return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
-    ...(compile ? { compile } : {}),
+    compile,
     // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
     // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
