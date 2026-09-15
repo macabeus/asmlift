@@ -155,6 +155,9 @@ function m2cCommit(): string | null {
 /** The key inputs of one row's m2c half. `lang` selects the m2c target dialect. */
 export interface M2cKeyInputs {
   tcId: ToolchainId;
+  /** the flags m2c's candidate is compiled with: two flag sets can leave the target object
+   *  byte-identical and still score the same candidate differently */
+  cflags: readonly string[];
   sym: string;
   asm: string;
   ctx?: string;
@@ -163,10 +166,10 @@ export interface M2cKeyInputs {
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
- *  (m2c commit, objdiff-wasm version, toolchain, symbol, asm, context, target-object bytes, and
- *  — for c++ — language). */
+ *  (m2c commit, objdiff-wasm version, toolchain, candidate compile flags, symbol, asm, context,
+ *  target-object bytes, and — for c++ — language). */
 export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerResult): DecompilerResult {
-  const { tcId, sym, asm, ctx, obj, lang } = inputs;
+  const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
     return compute();
@@ -206,6 +209,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       commit,
       objdiff: objdiffVersion(),
       tc: tcId,
+      cflags,
       sym,
       asm,
       ctx: ctx ?? null,

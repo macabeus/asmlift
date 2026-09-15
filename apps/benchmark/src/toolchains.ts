@@ -17,7 +17,12 @@
 import type { ToolchainId } from '@asmlift/bench-schema';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import {
+  GCC272_TOOLCHAIN,
+  GCC_KMC_TOOLCHAIN,
+  IDO_TOOLCHAIN,
+  MWCC_PPC_TOOLCHAIN,
   type MatchScore,
+  TOOLCHAIN,
   agbccAvailable,
   assembleTarget,
   compileMipsGcc272Target,
@@ -75,6 +80,8 @@ export interface Toolchain {
   compiler: 'agbcc' | 'ido' | 'gcc' | 'mwcc';
   label: string; // human label for the report
   targetDesc: TargetDescription;
+  /** the flags every target and candidate of this toolchain is compiled with */
+  cflags: readonly string[];
   asmKind: 'agbcc-s' | 'objdump'; // what format `asm` is in
   /** Reachability gate: the Docker pair probes the daemon/image; the native pair probes the
    *  pinned binary path. An unavailable toolchain SKIPS its rows (the runner logs each skip,
@@ -91,6 +98,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     compiler: 'agbcc',
     label: 'agbcc / ARM (GBA)',
     targetDesc: ARMV4T_AGBCC,
+    cflags: TOOLCHAIN.agbccFlags,
     asmKind: 'agbcc-s',
     available: () => agbccAvailable(),
     buildTarget: (refC, _sym) => {
@@ -106,6 +114,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     compiler: 'ido',
     label: 'IDO / MIPS (N64)',
     targetDesc: MIPS_IDO,
+    cflags: IDO_TOOLCHAIN.ccFlags,
     asmKind: 'objdump',
     available: () => idoAvailable(),
     buildTarget: (refC, sym) => compileMipsTarget(refC, sym),
@@ -117,6 +126,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     compiler: 'gcc',
     label: 'KMC GCC / MIPS (N64)',
     targetDesc: MIPS_GCC,
+    cflags: GCC_KMC_TOOLCHAIN.ccFlags,
     asmKind: 'objdump',
     available: () => dockerAvailable(),
     buildTarget: (refC, sym) => compileMipsGccTarget(refC, sym),
@@ -128,6 +138,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     compiler: 'gcc',
     label: 'GCC 2.7.2 / MIPS (N64)',
     targetDesc: MIPS_GCC,
+    cflags: GCC272_TOOLCHAIN.ccFlags,
     asmKind: 'objdump',
     available: () => gcc272Available(),
     buildTarget: (refC, sym) => compileMipsGcc272Target(refC, sym),
@@ -139,6 +150,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     compiler: 'mwcc',
     label: 'CodeWarrior / PowerPC (GC)',
     targetDesc: PPC_MWCC,
+    cflags: MWCC_PPC_TOOLCHAIN.ccFlags,
     asmKind: 'objdump',
     available: () => ppcDockerAvailable(),
     buildTarget: (refC, sym, lang) => (lang === 'c++' ? compilePpcCppTarget(refC, sym) : compilePpcTarget(refC, sym)),

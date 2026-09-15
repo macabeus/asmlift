@@ -234,9 +234,11 @@ export function evaluate(
   }
   const asmlift = runAsmlift(tc, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
-  // depends on — m2c commit, toolchain, inputs, target object (cache.ts). asmlift is NEVER cached.
-  const m2c = cachedM2cResult({ tcId: tc.id, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language }, () =>
-    evaluateM2c(tc, spec, obj, asm, score, asmDump),
+  // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
+  // asmlift is NEVER cached.
+  const m2c = cachedM2cResult(
+    { tcId: tc.id, cflags: tc.cflags, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language },
+    () => evaluateM2c(tc, spec, obj, asm, score, asmDump),
   );
   return {
     id: `${spec.project}:${spec.sym}:${tc.id}`,
