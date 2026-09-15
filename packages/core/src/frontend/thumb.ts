@@ -806,13 +806,44 @@ function decode(
   let dataLabel: string | null = null;
   let pendingFn = false;
   let pendingArm = false;
+  // DEBUG OUTPUT IS NEITHER CODE NOR DATA THE CODE READS. agbcc `-g` leaves `.text` byte-identical
+  // (`corpus/agbcc-debug{,-g}.s`), so the lift reads exactly the function it reads without `-g`, and
+  // two things are dropped:
+  //   • every line from a `.section .debug_*` (or a stabs section) to the next section switch: the
+  //     debug rows, their labels, and the data a trailing `.Letext0` label would otherwise head;
+  //   • the marker labels `-g` plants in the code stream (`.LFB1`, `.LM3`, `.LBB2`, `.LBE2`, `.LFE1`,
+  //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
+  //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
+  //     an `if` around a `do` instead of a `while`.
+  const codeLines: string[] = [];
+  let inDebugSection = false;
   for (const rawLine of asm.split('\n')) {
-    let rest = rawLine.split('@')[0].trim();
-    if (!rest) {
+    const line = rawLine.split('@')[0].trim();
+    if (!line) {
       continue;
     }
+    const sectionSwitch = line.match(/^\.(?:section\s+([^\s,]+)|text\b|data\b|bss\b)/);
+    if (sectionSwitch) {
+      inDebugSection = sectionSwitch[1] !== undefined && /^\.(debug|stab)/.test(sectionSwitch[1]);
+    }
+    if (!inDebugSection) {
+      codeLines.push(line);
+    }
+  }
+  const DEBUG_MARKER = /(?<![\w.$])\.L(?:FB|FE|M|BB|BE|etext)\d+\b/g;
+  const namedByCode = new Set<string>();
+  for (const line of codeLines) {
+    for (const m of line.replace(/^[A-Za-z_.$][\w.$]*:\s*/, '').matchAll(DEBUG_MARKER)) {
+      namedByCode.add(m[0]);
+    }
+  }
+  const isDebugMarker = (label: string) => /^\.L(?:FB|FE|M|BB|BE|etext)\d+$/.test(label) && !namedByCode.has(label);
+  for (let rest of codeLines) {
     // A label may share the line with what follows it (pret pools: `_08x: .4byte 0x…`) — peel it.
     const lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/);
+    if (lm && isDebugMarker(lm[1]) && lm[2] === '') {
+      continue;
+    }
     if (lm) {
       const lab = lm[1];
       if (pendingFn || pendingArm) {
