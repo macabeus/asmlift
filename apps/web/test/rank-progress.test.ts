@@ -175,7 +175,7 @@ describe('RankInbound', () => {
 
   test('a request advances the same id and runs', () => {
     const target = {} as RankingInput['target'];
-    expect(adopt({ kind: 'request', reqId: 13, name: 'f', asm: 'push {r4}', target })).toEqual({
+    expect(adopt({ kind: 'request', reqId: 13, name: 'f', asm: 'push {r4}', target, flags: [] })).toEqual({
       latest: 13,
       runs: true,
     });
@@ -196,6 +196,7 @@ const INPUT: RankingInput = {
   name: 'f',
   targetId: 'agbcc',
   target: {} as RankingInput['target'],
+  flags: ['-mthumb-interwork', '-O2'],
 };
 const RESULT = {
   winner: { variations: ['unsigned'], source: '', symbolRefs: [], score: { score: 0 } },
@@ -325,6 +326,7 @@ describe('viewRanking (H1 layer 1)', () => {
       { name: 'g' },
       { targetId: 'ido7.1' },
       { target: {} as RankingInput['target'] },
+      { flags: ['-mthumb-interwork', '-O2'] },
       { symbols: map },
     ]) {
       expect(sameRankingInput(INPUT, { ...INPUT, ...changed })).toBe(false);

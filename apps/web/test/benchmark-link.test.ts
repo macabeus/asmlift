@@ -9,15 +9,22 @@ import { canOpenInPlayground, playgroundShare } from '../src/pages/benchmark/lib
 import { decodeShare, encodeShare } from '../src/shared/utils/permalink';
 
 const row = (over: Partial<FunctionResult>): FunctionResult =>
-  ({ toolchain: 'ido7.1', sym: 'add1', targetAsm: '00000000 <add1>:\n   0:\tjr\tra\n', ...over }) as FunctionResult;
+  ({
+    toolchain: 'ido7.1',
+    sym: 'add1',
+    cflags: ['-mips2', '-O2', '-32', '-non_shared', '-G', '0'],
+    targetAsm: '00000000 <add1>:\n   0:\tjr\tra\n',
+    ...over,
+  }) as FunctionResult;
 
-test("a row's share is the exact playground state and round-trips through the permalink codec", () => {
+test("a row's share is the exact playground state, its flags included, and round-trips through the permalink codec", () => {
   const share = playgroundShare(row({}))!;
   expect(share).toEqual({
     target: 'ido7.1',
     backend: 'c',
     name: 'add1',
     asm: '00000000 <add1>:\n   0:\tjr\tra\n',
+    cflags: '-mips2 -O2 -32 -non_shared -G 0',
   });
   // The shell hands `share` to the editor and the editor re-encodes it into the `s=` param — so it
   // must survive an encode/decode round-trip unchanged.

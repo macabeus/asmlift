@@ -114,7 +114,13 @@ describe('the reported function ranks: kleod:WorldMapScreenDrawPath:agbcc, opene
   const results = JSON.parse(
     readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
   ) as { results: { id: string }[] };
-  const row = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
+  // the row, with the flags of its unit as the committed manifest records them
+  const manifest = JSON.parse(
+    readFileSync(join(import.meta.dirname, '../../benchmark/dataset/real/kleod.json'), 'utf8'),
+  ) as { units: Record<string, { cflags: string[] }>; functions: { sym: string; unit: string }[] };
+  const unit = manifest.functions.find((f) => f.sym === 'WorldMapScreenDrawPath')!.unit;
+  const found = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
+  const row = found && { ...found, cflags: manifest.units[unit].cflags };
 
   test('the row the bug report names is in the shipped dataset', () => {
     // Pinned by id inside a file every bench round regenerates: without this, a dataset change
@@ -129,6 +135,7 @@ describe('the reported function ranks: kleod:WorldMapScreenDrawPath:agbcc, opene
     const share = playgroundShare(row as never)!;
     expect(share.target).toBe('agbcc'); // ranking is gated to the agbcc target (Playground.tsx)
     expect(share.name).toBe('WorldMapScreenDrawPath'); // the row's symbol, carried by the hand-off
+    expect(share.cflags).toBe('-mthumb-interwork -O2 -fhex-asm -g -fprologue-bugfix'); // and its unit's flags
     // `backend: cBackend` exactly as the scorer passes it, so the hand-off this test claims to
     // reproduce is the scorer's by construction rather than by today's default.
     const cands = enumerateCandidates(share.name!, share.asm, ARMV4T_AGBCC, { backend: cBackend });

@@ -2,6 +2,7 @@
 // stage with its post-verify IR dump, pattern rewrites as before/after cards inside the
 // idiom-fold stage. Stages whose IR is identical to the previous dump are dimmed "no change":
 // a stage that did nothing on this input is information, not a display bug.
+import { levelOf, shellJoinFlags } from '@asmlift/core/codegen-flags';
 import type { PatternEvent, StageTrace, TraceReport } from '@asmlift/core/trace';
 
 import { RankCandidates } from './RankPanel';
@@ -71,6 +72,13 @@ function StageCard({ stage, changed, events }: { stage: StageTrace; changed: boo
   );
 }
 
+/** The flags a run decompiled for, in the build's words and order, with the level the compiler acts on. */
+function profileLine({ cflags, profile }: TraceReport['target']): string {
+  const words = shellJoinFlags(cflags);
+  const level = levelOf(profile);
+  return level === null ? words : `${words} (level ${level})`;
+}
+
 export function Pipeline({ report, ranking }: { report: TraceReport; ranking: Ranking }) {
   if (report.trace.length === 0) {
     return (
@@ -90,6 +98,10 @@ export function Pipeline({ report, ranking }: { report: TraceReport; ranking: Ra
   });
   return (
     <div className="scroll-slim h-full space-y-2 overflow-auto rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+      <p className="text-[11px] leading-relaxed text-slate-500">
+        {report.target.toolchain} at <span className="font-mono text-slate-400">{profileLine(report.target)}</span>:
+        every flag set decompiles against the toolchain&apos;s compiler behaviors
+      </p>
       {stages.map(({ stage, changed }, i) => (
         <StageCard
           key={`${stage.id}-${i}`}

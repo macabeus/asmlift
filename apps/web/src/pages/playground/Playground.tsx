@@ -5,7 +5,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { detectName } from '@asmlift/core/detect';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type DecompileResult, decompile } from '@asmlift/core/pipeline';
-import { type ResolvedTarget, TOOLCHAIN_TARGETS, type ToolchainId, targetFor } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { decompileTraced } from '@asmlift/core/trace';
 import { StreamLanguage } from '@codemirror/language';
 import { gas } from '@codemirror/legacy-modes/mode/gas';
@@ -20,29 +20,28 @@ import { Pipeline } from './Pipeline';
 import { RankBadge, RankDeclarations } from './RankPanel';
 import { deriveSpec, parseSpec } from './cpp-spec';
 import { EXAMPLES } from './examples';
+import { canonicalFlagsText, readFlags } from './flags-field';
 import { parseSymbolsJson } from './symbols-json';
 import { useRanking } from './useRanking';
 
-const atCanonicalFlags = (id: ToolchainId): ResolvedTarget => targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
-
-const TARGETS: Record<string, { resolved: ResolvedTarget; label: string; format: string }> = {
-  agbcc: { resolved: atCanonicalFlags('agbcc'), label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
-  'ido7.1': {
-    resolved: atCanonicalFlags('ido7.1'),
-    label: 'N64 — IDO / MIPS',
-    format: 'mips objdump -d --no-show-raw-insn',
-  },
-  'gcc2.7.2kmc': {
-    resolved: atCanonicalFlags('gcc2.7.2kmc'),
-    label: 'N64 — KMC GCC / MIPS',
-    format: 'mips objdump -d --no-show-raw-insn',
-  },
-  mwcc_242_81: {
-    resolved: atCanonicalFlags('mwcc_242_81'),
-    label: 'GC/Wii — mwcc / PPC',
-    format: 'ppc objdump -d -r --no-show-raw-insn',
-  },
+const TARGETS: Record<string, { id: ToolchainId; label: string; format: string }> = {
+  agbcc: { id: 'agbcc', label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
+  'ido7.1': { id: 'ido7.1', label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
+  'gcc2.7.2kmc': { id: 'gcc2.7.2kmc', label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
+  mwcc_242_81: { id: 'mwcc_242_81', label: 'GC/Wii — mwcc / PPC', format: 'ppc objdump -d -r --no-show-raw-insn' },
 };
+
+/** Each toolchain's name in the Toolchain select. */
+const TARGET_LABELS: Partial<Record<ToolchainId, string>> = Object.fromEntries(
+  Object.values(TARGETS).map((t) => [t.id, t.label]),
+);
+
+/** The flags a target starts at: its toolchain's canonical flags. */
+const canonicalFor = (targetId: string) => canonicalFlagsText(TARGETS[targetId].id);
+
+/** Ranking's flags while the field does not parse; ranking is off then, and a stable identity keeps
+ *  the ranking question from changing under it. */
+const NO_FLAGS: readonly string[] = [];
 
 // cpp has no static backend: cppBackend(spec) is built per run from the user/derived spec.
 const BACKENDS: Record<string, { backend?: LanguageBackend; label: string; highlight: 'c' | 'c++' | 'plain' }> = {
@@ -93,18 +92,30 @@ export function Playground({
   const [nameOverride, setNameOverride] = useState(initial?.name ?? '');
   const [specText, setSpecText] = useState(initial?.spec ?? '');
   const [symbolsText, setSymbolsText] = useState(initial?.symbols ?? '');
+  const [flagsText, setFlagsText] = useState(initial?.cflags ?? canonicalFor(initial?.target ?? EXAMPLES[0].target));
   // The Symbols pane is collapsed by default when empty; a share/preset that carries a map opens it.
   const [symbolsOpen, setSymbolsOpen] = useState(!!initial?.symbols);
-  const [debounced, setDebounced] = useState({ asm, targetId, backendId, nameOverride, specText, symbolsText });
+  const [debounced, setDebounced] = useState({
+    asm,
+    targetId,
+    backendId,
+    nameOverride,
+    specText,
+    symbolsText,
+    flagsText,
+  });
   const [tab, setTab] = useState<Tab>('source');
   const [copied, setCopied] = useState<'idle' | 'copied' | 'huge' | 'failed'>('idle');
   // The last #s= WE wrote, encoded — tells external changes apart from our own writes echoing back.
   const lastWritten = useRef<string | null>(initial ? encodeShare(initial) : null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced({ asm, targetId, backendId, nameOverride, specText, symbolsText }), 250);
+    const t = setTimeout(
+      () => setDebounced({ asm, targetId, backendId, nameOverride, specText, symbolsText, flagsText }),
+      250,
+    );
     return () => clearTimeout(t);
-  }, [asm, targetId, backendId, nameOverride, specText, symbolsText]);
+  }, [asm, targetId, backendId, nameOverride, specText, symbolsText, flagsText]);
 
   // An EXTERNAL #s= change (Back/Forward, the Benchmark's "Open in playground") loads into the
   // editor. Own writes are skipped via lastWritten, so a debounced (250ms-old) echo can never
@@ -119,7 +130,9 @@ export function Playground({
       return;
     }
     lastWritten.current = enc;
+    const sharedFlags = s.cflags ?? canonicalFor(s.target);
     setTargetId(s.target);
+    setFlagsText(sharedFlags);
     setBackendId(s.backend);
     setAsm(s.asm);
     setNameOverride(s.name ?? '');
@@ -136,6 +149,7 @@ export function Playground({
       nameOverride: s.name ?? '',
       specText: s.spec ?? '',
       symbolsText: s.symbols ?? '',
+      flagsText: sharedFlags,
     });
   }, [urlShare]);
 
@@ -153,6 +167,7 @@ export function Playground({
       ...(debounced.nameOverride.trim() ? { name: debounced.nameOverride.trim() } : {}),
       ...(debounced.backendId === 'cpp' && debounced.specText.trim() ? { spec: debounced.specText } : {}),
       ...(debounced.symbolsText.trim() ? { symbols: debounced.symbolsText } : {}),
+      cflags: debounced.flagsText,
     };
     lastWritten.current = encodeShare(state);
     void setUrlShare(state);
@@ -165,6 +180,15 @@ export function Playground({
   const symbolMap = symbolsParse && 'map' in symbolsParse ? symbolsParse.map : undefined;
   const symbolsError = symbolsParse && 'error' in symbolsParse ? symbolsParse.error : null;
 
+  // The Flags field: the profile the decompile resolves and the words every ranked candidate compiles
+  // with. The live reading echoes the level as it is typed; the debounced one is what runs.
+  const liveFlags = useMemo(() => readFlags(TARGETS[targetId].id, flagsText, TARGET_LABELS), [targetId, flagsText]);
+  const flags = useMemo(
+    () => readFlags(TARGETS[debounced.targetId].id, debounced.flagsText, TARGET_LABELS),
+    [debounced.targetId, debounced.flagsText],
+  );
+  const canonicalFlags = canonicalFor(targetId);
+
   const detected = useMemo(() => detectName(debounced.asm), [debounced.asm]);
   const override = debounced.nameOverride.trim();
   const fnName = override || detected;
@@ -173,14 +197,14 @@ export function Playground({
   // Resolve the language backend first (cpp needs a spec: user JSON, or derived from a first
   // C-backend pass), so the Source decompile and the Pipeline trace share the exact same one.
   const langBackend: { backend: LanguageBackend } | { error: string } | null = useMemo(() => {
-    if (!debounced.asm.trim() || !fnName || nameInvalid) {
+    if (!debounced.asm.trim() || !fnName || nameInvalid || 'error' in flags) {
       return null;
     }
     if (debounced.backendId !== 'cpp') {
       return { backend: BACKENDS[debounced.backendId].backend! };
     }
     try {
-      const { target } = TARGETS[debounced.targetId].resolved;
+      const { target } = flags.resolved;
       const spec = debounced.specText.trim()
         ? parseSpec(debounced.specText)
         : deriveSpec(
@@ -194,7 +218,7 @@ export function Playground({
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName, symbolMap]);
+  }, [debounced, fnName, nameInvalid, flags, symbolMap]);
 
   const result: DecompileResult | { error: string } | null = useMemo(() => {
     if (!debounced.asm.trim()) {
@@ -206,6 +230,9 @@ export function Playground({
     if (nameInvalid) {
       return { error: `"${fnName}" is not a valid identifier — the emitted source would not compile.` };
     }
+    if ('error' in flags) {
+      return { error: `flags: ${flags.error}` };
+    }
     if (langBackend === null) {
       return null;
     }
@@ -213,7 +240,7 @@ export function Playground({
       return { error: langBackend.error };
     }
     try {
-      return decompile(fnName, debounced.asm, TARGETS[debounced.targetId].resolved.target, {
+      return decompile(fnName, debounced.asm, flags.resolved.target, {
         backend: langBackend.backend,
         onGap: 'annotate',
         ...(symbolMap ? { symbols: symbolMap } : {}),
@@ -221,7 +248,7 @@ export function Playground({
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName, nameInvalid, langBackend, symbolMap]);
+  }, [debounced, fnName, nameInvalid, flags, langBackend, symbolMap]);
 
   // The Pipeline tab's trace — computed only while that tab is open (a second tower run).
   // A thrown trace is an ERROR result (rendered as such), never a silently blank panel.
@@ -231,6 +258,7 @@ export function Playground({
       !debounced.asm.trim() ||
       !fnName ||
       nameInvalid ||
+      'error' in flags ||
       langBackend === null ||
       'error' in langBackend
     ) {
@@ -238,7 +266,7 @@ export function Playground({
     }
     try {
       return {
-        report: decompileTraced(fnName, debounced.asm, TARGETS[debounced.targetId].resolved, {
+        report: decompileTraced(fnName, debounced.asm, flags.resolved, {
           backend: langBackend.backend,
           onGap: 'annotate',
           ...(symbolMap ? { symbols: symbolMap } : {}),
@@ -247,7 +275,7 @@ export function Playground({
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName, nameInvalid, langBackend, tab, symbolMap]);
+  }, [debounced, fnName, nameInvalid, flags, langBackend, tab, symbolMap]);
 
   const ok = result !== null && !('error' in result);
   const diagnostics = ok ? result.diagnostics : [];
@@ -260,10 +288,11 @@ export function Playground({
   // In-browser ranking — agbcc/ARMv4T + C backend only (the one target whose textual `.s` can be
   // reassembled and whose compiler exists as wasm). Async, worker-driven, stale-guarded (H1). For
   // every other target/backend it stays "off" and the view keeps the plain decompile.
-  const rankTarget = TARGETS[debounced.targetId].resolved.target;
+  const rankTarget = TOOLCHAIN_TARGETS[TARGETS[debounced.targetId].id].description;
   const rankEligible =
     active && // don't run WASM scoring while this view is hidden (e.g. a benchmark deep-link)
     rankTarget.compiler === 'agbcc' &&
+    !('error' in flags) &&
     debounced.backendId === 'c' &&
     !!fnName &&
     !nameInvalid &&
@@ -279,6 +308,7 @@ export function Playground({
     name: fnName,
     targetId: debounced.targetId,
     target: rankTarget,
+    flags: 'error' in flags ? NO_FLAGS : flags.argv,
     ...(symbolMap ? { symbols: symbolMap } : {}),
   });
   // The Source view shows the RANKED-BEST C when scoring has resolved for the current input;
@@ -304,6 +334,7 @@ export function Playground({
       return;
     }
     setTargetId(ex.target);
+    setFlagsText(canonicalFor(ex.target));
     setBackendId(ex.backend ?? 'c');
     setSpecText(ex.spec ?? '');
     setSymbolsText(ex.symbols ?? '');
@@ -320,7 +351,10 @@ export function Playground({
           <span className="text-xs uppercase tracking-wide text-slate-500">Toolchain</span>
           <select
             value={targetId}
-            onChange={(e) => setTargetId(e.target.value)}
+            onChange={(e) => {
+              setTargetId(e.target.value);
+              setFlagsText(canonicalFor(e.target.value));
+            }}
             className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5"
           >
             {Object.entries(TARGETS).map(([id, t]) => (
@@ -354,6 +388,39 @@ export function Playground({
             className="w-36 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono placeholder:text-slate-600"
           />
         </label>
+        <div className="order-last flex min-w-0 basis-full flex-col gap-1">
+          <label htmlFor="playground-flags" className="text-xs uppercase tracking-wide text-slate-500">
+            Flags
+          </label>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <input
+              id="playground-flags"
+              value={flagsText}
+              onChange={(e) => setFlagsText(e.target.value)}
+              spellCheck={false}
+              aria-invalid={'error' in liveFlags}
+              title="the flags the decompile reads, and every ranked candidate compiles with"
+              className={`w-full min-w-0 rounded-md border sm:w-auto sm:flex-1 bg-slate-900 px-2 py-1.5 font-mono text-xs ${
+                'error' in liveFlags ? 'border-rose-700' : 'border-slate-700'
+              }`}
+            />
+            <button
+              type="button"
+              onClick={() => setFlagsText(canonicalFlags)}
+              disabled={flagsText === canonicalFlags}
+              title={`restore ${targetId}'s canonical flags: ${canonicalFlags}`}
+              className="rounded-md px-1.5 py-1 text-xs text-teal-400 hover:bg-slate-800 disabled:cursor-default disabled:text-slate-600 disabled:hover:bg-transparent"
+            >
+              ⟲ canonical
+            </button>
+            {!('error' in liveFlags) && (
+              <span className="font-mono text-xs text-slate-400">level {liveFlags.level ?? 'not named'}</span>
+            )}
+            {!('error' in liveFlags) && liveFlags.notes.length > 0 && (
+              <span className="basis-full text-xs text-slate-500">{liveFlags.notes.join(' · ')}</span>
+            )}
+          </div>
+        </div>
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-wide text-slate-500">Examples</span>
           <select
@@ -387,6 +454,8 @@ export function Playground({
                 : 'share link'}
         </button>
       </div>
+
+      {'error' in liveFlags && <p className="-mt-2 text-xs text-rose-300">flags: {liveFlags.error}</p>}
 
       {backendId === 'cpp' && (
         <label className="flex flex-col gap-1 text-sm">
