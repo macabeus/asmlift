@@ -402,7 +402,16 @@ describe('the detectors themselves', () => {
     // `static` puts the object in .rodata and there is no per-call copy — the shape
     // `local-aggregate-init` is about — so the two tags are exclusive on the same declaration
     expect(src('void f(u8 h){ static const u8 t[] = { 1, 1, 0 }; use(t[h]); }')).toEqual(['static-local']);
+    expect(src('void f(u8 h){ static u8 t[] = { 1, 1, 0 }; use(t[h]); }')).toEqual(['static-local']);
     expect(src('void f(void){ s16 dx[4] = { 0, -1, 0, 1 }; g(dx[k]); }')).toEqual(['local-aggregate-init']);
+    expect(src('void f(void){ const s16 m[2][2] = { { 0, 1 }, { 2, 3 } }; g(m[a][b]); }')).toEqual([
+      'local-aggregate-init',
+    ]);
+    // a body holding both declarations carries both tags, and neither takes the other's
+    expect(src('void f(void){ static u8 s[] = { 1 }; u8 a[] = { 2 }; g(s[i], a[i]); }').sort()).toEqual([
+      'local-aggregate-init',
+      'static-local',
+    ]);
     // a brace initialiser is a DECLARATION, not any `= {`
     expect(src('void f(void){ p->cb = h; if (a) { b(); } }')).toEqual([]);
   });

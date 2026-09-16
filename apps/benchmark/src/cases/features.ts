@@ -223,6 +223,14 @@ function neutralizeDoWhileZero(body: string): string {
   return out.join('');
 }
 
+/** A local array declaration with a brace initialiser, its storage class captured rather than
+ *  skipped: `static u8 t[] = { … }` and `u8 t[] = { … }` are different shapes, and only the second
+ *  costs a copy into the frame. Qualifiers before the type are optional and any number, the
+ *  declarator may carry several extents (`s16 m[2][2]`), and the whole thing is anchored at a
+ *  statement boundary so an initialiser inside an expression cannot pass. */
+const LOCAL_AGGREGATE_INIT =
+  /(?:^|[;{}])\s*(?<storage>static\s+)?(?:(?:const|volatile|unsigned|signed|struct|union|enum)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)+=\s*\{/g;
+
 /** A real do-while loop — `do { … } while (0)` has already been neutralized by the caller. */
 function hasRealDoWhile(body: string): boolean {
   return /\bdo\s*\{/.test(body);
@@ -367,15 +375,12 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (/(?<![.\w]|->)\bnew\b\s*[\w([]|(?<![.\w]|->)\bdelete\b\s*(?:\[\s*\]\s*)?[\w(*]/.test(body)) {
     out.add('new-delete');
   }
-  // An AUTOMATIC local aggregate with a brace initialiser — a declaration statement carrying `[…]`
-  // and `= {`. `static` is excluded on purpose: a static aggregate lives in `.rodata` and is only
-  // referenced, where an automatic one is COPIED into the frame on every call, which is the shape
-  // the tag is about. That one is `static-local`.
-  if (
-    /(?:^|[;{}])\s*(?!\s*static\b)(?:(?:const|unsigned|signed|struct|union|volatile)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)+=\s*\{/.test(
-      body,
-    )
-  ) {
+  // A local aggregate with a brace initialiser — a declaration statement carrying `[…]` and `= {`.
+  // Only an AUTOMATIC one counts, so the storage class is CAPTURED rather than skipped: a `static`
+  // aggregate lives in .rodata and is merely referenced, where an automatic one is copied into the
+  // frame on every call, and that copy is the shape the tag is about. The static case is
+  // `static-local`, so a body holding both declarations gets both tags and neither takes the other's.
+  if ([...body.matchAll(LOCAL_AGGREGATE_INIT)].some((m) => m.groups?.storage === undefined)) {
     out.add('local-aggregate-init');
   }
   if (/<<|>>/.test(body)) out.add('shift');
