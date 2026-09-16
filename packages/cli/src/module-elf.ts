@@ -32,8 +32,13 @@ const SYMENT = 16; // Elf32_Sym
  *
  *  Exported because it is the only thing that makes a PLACED address readable: every base is a
  *  multiple of it, so `placed % PLACEMENT_STRIDE` is the symbol's offset in its own section as long
- *  as no section is larger than the stride (the largest measured is 170,428 B). A reader that must
- *  relate a module map's keys back to a module location — the benchmark's `addr` gate — needs it. */
+ *  as no section is larger than the stride. The largest allocated section measured over both
+ *  GameCube checkouts is Animal Crossing `foresta.plf`'s `.data` at 11,400,440 B — a margin of
+ *  1.47×, not a comfortable one (Mario Party 4's largest, `m450Dll.plf`'s `.text` at 170,428 B, is
+ *  the figure to quote only for Mario Party 4). A section that does outgrow the stride takes the
+ *  next multiple, so the readback then answers a WRONG offset rather than a colliding address, and
+ *  the benchmark's `addr` gate fails the row instead of admitting it. A reader that must relate a
+ *  module map's keys back to a module location — that gate — needs this. */
 export const PLACEMENT_STRIDE = 0x0100_0000;
 /** Placement has to stay inside a 32-bit address; a module needing more sections than this has
  *  outgrown the scheme and gets an error rather than a wrapped address. */
@@ -205,6 +210,55 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
  *  the map keys it at. FUNC values carry a Thumb low bit that @gba-kit/debug-info clears, and the
  *  map is keyed by what that reader produced, so the same normalization has to happen here. */
 export const symbolKey = (name: string, address: number): string => `${(address >>> 0).toString(16)}\0${name}`;
+
+/** Where a module ELF puts a FUNCTION: the section that holds it and its offset within that
+ *  section — the two halves of a `<module>:<section>+0x<offset>` row identity that a symbol MAP
+ *  cannot answer, because placement records a section INDEX and not a name.
+ *
+ *  Read straight off the UNPLACED `.plf`, where every allocated section sits at 0 and so every
+ *  `st_value` already IS the section-relative offset. A name maps to a LIST: Animal Crossing's
+ *  `foresta` holds 659 names at more than one `.text` offset (of 16,051), which is exactly why the
+ *  offset is part of the identity and the name is not.
+ *
+ *  Empty for anything that is not a relocatable ELF32 — the caller names the file. */
+export function moduleFunctionLocations(bytes: Uint8Array): Map<string, { section: string; offset: number }[]> {
+  const out = new Map<string, { section: string; offset: number }[]>();
+  const elf = readElf32(bytes);
+  if (!elf || elf.type !== ET_REL) {
+    return out;
+  }
+  const { buf, littleEndian } = elf;
+  const u32 = (o: number) => (littleEndian ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const u16 = (o: number) => (littleEndian ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+  for (const s of elf.sections) {
+    if (s.type !== SHT_SYMTAB) {
+      continue;
+    }
+    const strings = elf.sections[s.link]?.offset ?? 0;
+    for (let at = s.offset; at + SYMENT <= s.offset + s.size; at += SYMENT) {
+      const info = buf[at + 12];
+      if ((info & 0xf) !== STT_FUNC) {
+        continue;
+      }
+      const shndx = u16(at + 14);
+      const section = elf.sections[shndx];
+      if (shndx === SHN_UNDEF || shndx >= SHN_LORESERVE || section === undefined) {
+        continue;
+      }
+      if ((section.flags & SHF_ALLOC) === 0) {
+        continue;
+      }
+      const nameAt = strings + u32(at);
+      const end = buf.indexOf(0, nameAt);
+      const name = buf.toString('latin1', nameAt, end === -1 ? buf.length : end);
+      if (name === '') {
+        continue;
+      }
+      out.set(name, [...(out.get(name) ?? []), { section: section.name, offset: u32(at + 4) }]);
+    }
+  }
+  return out;
+}
 
 /** The {@link symbolKey}s of an ELF's GLOBAL-binding symbols: the ones another object may refer to,
  *  and so the only ones a module's map inherits from the base ELF it links against.

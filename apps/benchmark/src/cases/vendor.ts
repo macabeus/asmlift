@@ -15,11 +15,19 @@
 // must declare every function it calls — enforced here, and by test/real-manifests.test.ts and
 // test/implicit-declarations.test.ts over the committed blobs.
 //
-// Every row is proved against the ROM before anything is written: its unit's stored flags must be the
-// flags derived from the build at the checkout's HEAD, and its target, compiled at them, must be the
-// function the project's linked ELF holds at the row's address. The proof is stored as the row's
-// `romDigest`, which the runner's `build()` checks; a project with any refused row writes nothing.
-import { moduleOf } from '@asmlift/bench-schema';
+// Every row is proved before anything is written: its unit's stored flags must be the flags derived
+// from the build at the checkout's HEAD, and its target, compiled at them, must be the function the
+// project's linked ELF holds at the row's address. The proof is stored as the row's `romDigest`,
+// which the runner's `build()` checks; a project with any refused row writes nothing.
+//
+// ONE ROW SHAPE IS PROVED DIFFERENTLY, and it is named in the output every time: a row keyed by a
+// REL MODULE LOCATION has no address in the linked ELF (the module's bytes are not in it) and its
+// own module's bytes are unrelocated, which rom-function's ARM/MIPS masks cannot compare. Such a row
+// is instead proved to be where it says it is — its module ELF holds that symbol at that section and
+// offset — and its `romDigest` pins the target's own bytes rather than the game's. GC-6 owns the
+// PowerPC masks that let a REL row be compared against the game too.
+import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
+import { moduleFunctionLocations } from '@asmlift/cli/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
@@ -41,9 +49,10 @@ import {
   loadManifestsForVendor,
   resolveProjectRoot,
   rewriteManifest,
+  vendoredMapFile,
 } from './manifests';
 import { resolveProjectElf } from './project-elf';
-import { compareWithRom, romAddress } from './rom-function';
+import { compareWithRom, romAddress, targetDigest } from './rom-function';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 
@@ -66,7 +75,7 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   const write = (path: string, m: SymbolMap): void =>
     writeFileSync(path, gzipSync(Buffer.from(JSON.stringify(symbolMapToJson(m))), { level: 9 }));
   const map = await loadSymbolMap(res.elf);
-  write(join(outDir, 'symbols.json.gz'), map);
+  write(vendoredMapFile(outDir, undefined), map);
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);
 
   // ONE MAP PER REL MODULE THAT HAS ROWS. A module's code refers to the module's own symbols, so a
@@ -90,9 +99,54 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
       throw new Error(`${project}: rows live in module ${module}, but ${mod.reason}`);
     }
     const moduleMap = await loadModuleSymbolMap(mod.elf, res.elf);
-    write(join(moduleDir, `${module}.json.gz`), moduleMap);
+    write(vendoredMapFile(outDir, module), moduleMap);
     console.log(`${project}: vendored ${module}'s symbol map (${moduleMap.size} addresses, over ${res.elfRel})`);
   }
+}
+
+/** THE DECISION a module-located row is proved by, over the places its module puts `sym`
+ *  ({@link moduleFunctionLocations}): null when one of them is exactly the row's section AND
+ *  offset, a refusal line naming the real ones otherwise.
+ *
+ *  Both halves matter and neither is checkable anywhere else. The SECTION because a symbol map
+ *  records a section INDEX and not a name. The MODULE because `loadModuleSymbolMap` unions the
+ *  base ELF's globals into every module's map at their real addresses, so a DOL function answers
+ *  to any module's name there — here it is simply not among the module's own functions.
+ *
+ *  Exported as the testable core: the prover around it only resolves and reads a file. */
+export function moduleIdentityRefusal(
+  sym: string,
+  addr: string,
+  at: readonly { section: string; offset: number }[],
+): string | null {
+  const loc = moduleLocation(addr)!;
+  if (at.some((p) => p.section === loc.section && p.offset === loc.offset)) {
+    return null;
+  }
+  const where = (p: { section: string; offset: number }) => `${p.section}+0x${p.offset.toString(16).padStart(8, '0')}`;
+  return at.length === 0
+    ? `${sym}: ${addr} — ${loc.module} defines no function ${sym}`
+    : `${sym}: ${addr} — ${loc.module} puts ${sym} at ${at.map(where).join(', ')}`;
+}
+
+/** {@link moduleIdentityRefusal} against the checkout: resolves each module's own ELF and reads it
+ *  once — Animal Crossing's is 19 MB and every row of a project shares one. */
+function moduleIdentityProver(project: string, root: string): (sym: string, addr: string) => string | null {
+  const byModule = new Map<string, ReturnType<typeof moduleFunctionLocations> | string>();
+  const read = (module: string): ReturnType<typeof moduleFunctionLocations> | string => {
+    const mod = resolveProjectElf(project, root, module);
+    return mod.elf === null
+      ? `${project}: rows live in module ${module}, but ${mod.reason}`
+      : moduleFunctionLocations(readFileSync(mod.elf));
+  };
+  return (sym, addr) => {
+    const module = moduleOf(addr)!;
+    if (!byModule.has(module)) {
+      byModule.set(module, read(module));
+    }
+    const found = byModule.get(module)!;
+    return typeof found === 'string' ? found : moduleIdentityRefusal(sym, addr, found.get(sym) ?? []);
+  };
 }
 
 /** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
@@ -143,6 +197,8 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
 
     const outDir = join(REAL_DIR, 'tu', man.project);
     const prepared: { sym: string; tuI: string; ctxI: string; romDigest: string }[] = [];
+    const skipped: string[] = []; // rows whose ROM comparison was skipped, named below
+    const moduleIdentity = moduleIdentityProver(man.project, root);
     for (const f of man.functions) {
       const unit = man.units[f.unit];
       const cfg: RealProjectCfg = {
@@ -175,7 +231,20 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI);
       const at = romAddress(f.addr);
       if (at === null) {
-        refusals.push(`${f.sym}: ${f.addr} is a module location, and the linked ELF holds no module's bytes`);
+        // A REL row has no address in the linked ELF to compare against, and its own module's
+        // bytes are unrelocated, which this gate's ARM/MIPS masks cannot read. So the ROM
+        // comparison is SKIPPED — by name, out loud, and only for a module location — and the row
+        // is proved on the half that IS decidable here: that its module ELF really does hold this
+        // symbol at this section and offset. `romDigest` then pins the target's own bytes, so a
+        // row still cannot change what it builds without the dataset saying so; what it does not
+        // yet pin is that those bytes are the game's. GC-6 owns the PowerPC masks that close it.
+        const wrong = moduleIdentity(f.sym, f.addr);
+        if (wrong !== null) {
+          refusals.push(wrong);
+          continue;
+        }
+        skipped.push(f.sym);
+        prepared.push({ sym: f.sym, tuI, ctxI, romDigest: targetDigest(readFileSync(target.obj), f.sym) });
         continue;
       }
       const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, at);
@@ -221,7 +290,11 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
     console.log(
-      `${man.project}: vendored ${prepared.length} TUs (${ctxSeen.size} unique context(s)) → ${outDir}; every row EQ to the ROM`,
+      `${man.project}: vendored ${prepared.length} TUs (${ctxSeen.size} unique context(s)) → ${outDir}; ` +
+        (skipped.length === 0
+          ? 'every row EQ to the ROM'
+          : `${prepared.length - skipped.length} row(s) EQ to the ROM, ${skipped.length} module-located row(s) ` +
+            `NOT compared against it (${skipped.join(', ')}) — each proved at its module's <section>+<offset> instead`),
     );
     await vendorSymbols(man, root, outDir);
   }

@@ -42,7 +42,12 @@ export interface RealFunction {
   unit: string;
   /** The digest of the function's target as `bench vendor` proved it equal to the function the project's
    *  linked ELF holds at `addr` (cases/rom-function.ts `targetDigest`). A target built with another
-   *  digest is not the game's function, and its row is refused. */
+   *  digest is not the game's function, and its row is refused.
+   *
+   *  For a row keyed by a REL MODULE LOCATION this pins the target's own bytes and NOT the game's:
+   *  the linked ELF holds no module's bytes, so `bench vendor` proves that row's module, section and
+   *  offset against the module ELF instead, and names the skipped ROM comparison in its output every
+   *  time. See cases/vendor.ts. */
   romDigest: string;
   /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
    *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
@@ -162,19 +167,24 @@ export const vendoredMapFile = (dir: string, module: string | undefined): string
  *  rows run map-less as they always have. A project WITH a map but without the MODULE's THROWS
  *  instead of falling back to it: a module's code refers to the module's own symbols, so a REL row
  *  read with the base ELF's map alone would publish different source while looking like every
- *  other row. */
+ *  other row.
+ *
+ *  THE MODULE'S OWN FILE DECIDES FIRST, and the base map's absence is only ever an answer for a
+ *  base-map row. Asked the other way round, a dir holding `symbols/m416Dll.json.gz` and no
+ *  `symbols.json.gz` would answer "this project vendors no map" for m416Dll and run its rows
+ *  map-less — the quiet version of exactly the mix-up the throw below exists to prevent. */
 export function vendoredSymbols(project: string, dir: string, module: string | undefined): SymbolMap | undefined {
-  if (!existsSync(vendoredMapFile(dir, undefined))) {
+  const path = vendoredMapFile(dir, module);
+  if (existsSync(path)) {
+    return symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')));
+  }
+  if (module === undefined || !existsSync(vendoredMapFile(dir, undefined))) {
     return undefined; // the project vendors no map at all
   }
-  const path = vendoredMapFile(dir, module);
-  if (!existsSync(path)) {
-    throw new Error(
-      `${project}: rows live in module ${module}, but no map is vendored for it — ` +
-        `run \`pnpm bench vendor --project ${project}\``,
-    );
-  }
-  return symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')));
+  throw new Error(
+    `${project}: rows live in module ${module}, but no map is vendored for it — ` +
+      `run \`pnpm bench vendor --project ${project}\``,
+  );
 }
 
 export const REAL_DIR = join(import.meta.dirname, '..', '..', 'dataset', 'real');
