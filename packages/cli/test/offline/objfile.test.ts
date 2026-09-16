@@ -1,7 +1,7 @@
 // Object-file (.o) CLI input, OFFLINE — the pre-spawn decision points plus the full object
 // pipeline with the objdump spawns FAKED through runCli's ObjInput seam (the real spawns are
 // proven by test/matching/objfile-e2e.test.ts against actual toolchains).
-import { PPC_MWCC } from '@asmlift/core/target';
+import { MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -13,6 +13,14 @@ import { multiTextObject } from './multi-text-object';
 
 const ELF = new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1, 0]); // magic + junk
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../core/test/corpus', f), 'utf8');
+
+const scratchDirs: string[] = [];
+const scratch = () => {
+  const d = mkdtempSync(join(tmpdir(), 'asmlift-objfile-test-'));
+  scratchDirs.push(d);
+  return d;
+};
+afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 test('isElfObject: magic detected, text and short buffers are not', async () => {
   expect(isElfObject(ELF)).toBe(true);
@@ -71,6 +79,28 @@ test('the ObjectInputUnsupportedError class is what the agbcc path throws', asyn
   expect(new ObjectInputUnsupportedError('x')).toBeInstanceOf(Error);
 });
 
+// A stand-in objdump that records the argv it was called with and prints one plausible line, so
+// the flags the CLI actually SPAWNS are observable without a cross-binutils on the host.
+function recordingObjdump(): { bin: string; argv: () => string[] } {
+  const log = join(scratch(), 'argv.txt');
+  const bin = join(scratch(), 'fake-objdump');
+  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > ${log}\necho '   0:\\tblr'\n`);
+  chmodSync(bin, 0o755);
+  return { bin, argv: () => readFileSync(log, 'utf8').trimEnd().split('\n') };
+}
+
+test('the PowerPC disassembly names the Gekko machine; MIPS names none', () => {
+  const ppc = recordingObjdump();
+  disasmObject('fn.o', PPC_MWCC, ppc.bin);
+  // Without `-M gekko` the Gekko paired-single opcodes decode as POWER VSX at the wrong register
+  // file and offset: `psq_l f30,120(r1),0,0` prints as `lq r30,112(r1)`.
+  expect(ppc.argv().join(' ')).toContain('-M gekko');
+
+  const mips = recordingObjdump();
+  disasmObject('fn.o', MIPS_IDO, mips.bin);
+  expect(mips.argv()).not.toContain('gekko');
+});
+
 test('mwcc .o with no PowerPC objdump anywhere fails loud naming every remedy', async () => {
   const prev = process.env.ASMLIFT_PPC_OBJDUMP;
   process.env.ASMLIFT_PPC_OBJDUMP = '/nonexistent/powerpc-eabi-objdump';
@@ -94,14 +124,6 @@ test('mwcc .o with no PowerPC objdump anywhere fails loud naming every remedy', 
 // at address 0. objdump prints every block from address 0 and labels an address with whatever
 // symbol it finds at that value, so the function a NAME selects in a whole-object dump is not
 // reliably the one the symbol table places there.
-
-const scratchDirs: string[] = [];
-const scratch = () => {
-  const d = mkdtempSync(join(tmpdir(), 'asmlift-objfile-test-'));
-  scratchDirs.push(d);
-  return d;
-};
-afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 /** An `objdump` that reports only which object it was handed. */
 function echoObjdump(): string {

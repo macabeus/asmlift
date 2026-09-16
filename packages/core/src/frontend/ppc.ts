@@ -1,6 +1,9 @@
 // asmlift ISA frontend — PowerPC (GameCube/Wii, Metrowerks CodeWarrior `mwcceppc`). Input is
-// disassembled text (`powerpc-eabi-objdump -d --no-show-raw-insn`), parsed by the shared
-// `parseDisasm` with the reloc + branch-hint options enabled.
+// disassembled text (`powerpc-eabi-objdump -d -r -M gekko --no-show-raw-insn`), parsed by the
+// shared `parseDisasm` with the reloc + branch-hint options enabled. `-M gekko` is part of that
+// contract, not decoration: the generic PowerPC dialect decodes Gekko's paired-single opcodes as
+// POWER VSX, naming another register file at another offset. It is also the dialect that prints
+// the branch-prediction hint suffixes (`beq-`, `bdnz+`) `hintSuffixes` strips below.
 //
 // ISA facts that shape this frontend:
 //  • NO DELAY SLOTS — a block simply ends at its terminator.

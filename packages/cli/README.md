@@ -19,12 +19,13 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Inputs
 
-| Input                                | Accepted for                                       |
-| ------------------------------------ | -------------------------------------------------- |
-| Compiler `.s` text                   | All targets                                        |
-| `objdump -d --no-show-raw-insn` text | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2`, `mwcc_242_81` |
-| ELF object file (`.o`)               | MIPS/PPC targets                                   |
-| `-` (stdin)                          | text formats only                                  |
+| Input                                            | Accepted for                        |
+| ------------------------------------------------ | ----------------------------------- |
+| Compiler `.s` text                               | All targets                         |
+| `objdump -d --no-show-raw-insn` text             | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2` |
+| `objdump -d -r -M gekko --no-show-raw-insn` text | `mwcc_242_81`                       |
+| ELF object file (`.o`)                           | MIPS/PPC targets                    |
+| `-` (stdin)                                      | text formats only                   |
 
 If the file includes multi-functions, pass the `--name` flag.
 
@@ -33,6 +34,12 @@ An object whose code lives in several sections that share addresses **requires**
 starting at address 0, so a whole-object disassembly labels each address with whichever symbol it
 finds at that value — the function a name selects there is not reliably the one the symbol table
 places there. With `--name`, asmlift reads the function from the section its `st_shndx` names.
+
+The PowerPC command is not interchangeable with the MIPS one. `-r` carries the relocation lines
+that hold a `bl`'s callee name, and `-M gekko` names the machine CodeWarrior compiles for: without
+it objdump decodes the GameCube's paired-single opcodes as POWER VSX — `psq_l f30,120(r1),0,0`
+prints as `lq r30,112(r1)`, a different register file at a different offset. Object-file input runs
+the right command for you.
 
 ## CLI reference
 

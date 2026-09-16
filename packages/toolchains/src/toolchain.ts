@@ -83,7 +83,11 @@ export const MWCC_PPC_TOOLCHAIN = {
   // `-r` interleaves relocation lines (`R_PPC_REL24 <sym>`) after each instruction: an unresolved
   // `bl` in a .o encodes offset 0 (a self-referential placeholder), so the callee's NAME lives only
   // in the relocation — the PPC frontend reads it there to recover the call target (parseDisasm).
-  objdumpFlags: ['-d', '-r', '--no-show-raw-insn'],
+  // `-M gekko` names the machine `-proc gekko` above compiles for: the Gekko (750CL) paired-single
+  // opcodes share encodings with POWER's VSX/AltiVec, so the generic dialect both renames them and
+  // re-reads their fields — `psq_st f31,24(r1),0,0` becomes `xscmpeqdp vs31,vs1,vs0`, and
+  // `psq_l f30,120(r1),0,0` becomes `lq r30,112(r1)`, another register file at another offset.
+  objdumpFlags: ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'],
 };
 
 /** GCC 2.7.2 / MIPS — the compiler the Mario Party 3 (N64) decomp uses: `decompals/mips-gcc-2.7.2`
