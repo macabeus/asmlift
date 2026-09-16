@@ -99,6 +99,45 @@ export interface ScoringRung {
   prelude: string;
 }
 
+/** THE CANDIDATE'S OWN DECLARATION of `sym`: the declarator its definition opens with, as a prototype.
+ *  Null when the text defines no such function — a marker stub, or a C++ member definition, whose
+ *  declarator is not a declaration on its own. */
+export function candidateDeclarator(candC: string, sym: string): string | null {
+  const definition = new RegExp(`(?:^|[;}])\\s*([^;{}]*?\\b${sym}\\s*\\([^;{}]*\\))\\s*\\{`).exec(candC);
+  return definition === null ? null : definition[1].replace(/\s+/g, ' ').trim();
+}
+
+/** Whether `line` DECLARES `sym` rather than calling it: a statement ending in `;` whose text before the
+ *  name is a type and nothing else. `foo();`, `x = foo(a);` and `return foo(a);` are calls, and a context
+ *  is mostly function BODIES — a line-shaped rule that cannot tell them apart deletes code. */
+function declaresFunction(line: string, sym: string): boolean {
+  const statement = line.trim();
+  const at = statement.search(new RegExp(`\\b${sym}\\s*\\(`));
+  if (at < 0 || !statement.endsWith(';') || statement.includes('{')) {
+    return false;
+  }
+  const head = statement.slice(0, at);
+  return /^(?:[A-Za-z_]\w*|\*)(?:[\s*]+(?:[A-Za-z_]\w*|\*))*[\s*]+$/.test(head) && !/\b(?:return|sizeof)\b/.test(head);
+}
+
+/** The context with its own declaration of `sym` replaced by `declarator`, or null when it declares none.
+ *  Any further declaration of the same function is dropped: two spellings of one signature is
+ *  `redeclared` whichever of them the candidate wrote. */
+export function redeclare(ctxI: string, sym: string, declarator: string): string | null {
+  let replaced = false;
+  const lines = ctxI.split('\n').flatMap((line) => {
+    if (!declaresFunction(line, sym)) {
+      return [line];
+    }
+    if (replaced) {
+      return [];
+    }
+    replaced = true;
+    return [`${declarator};`];
+  });
+  return replaced ? lines.join('\n') : null;
+}
+
 /** The escalation ladder for ONE real function, tried in order: the first rung a candidate compiles in is the
  *  world it is scored in. What the ladder is depends on the row's translation unit (`tu`):
  *
@@ -117,9 +156,18 @@ export interface ScoringRung {
  *    1. unit context: the vendored context VERBATIM, with the typedefs it lacks added. The function's own
  *       prototype stays: the unit's earlier code calls the function through it (`HuDvdErrorWatch` twice,
  *       `fn_1_C2BC` four times), and without it each call declares the function implicitly and its
- *       definition is `redeclared`. A candidate compiles where the project would compile it, so a
- *       signature the project's own header contradicts does not compile there;
- *    2. bare typedefs, for a candidate the unit refuses.
+ *       definition is `redeclared`;
+ *    2. the same unit, with that one declaration REPLACED by the candidate's own. A decompiler recovers a
+ *       signature, and two ABI-identical spellings of it are not the same text: `u32 BoardRandMod(u32)`
+ *       against `s32 BoardRandMod(u32 arg0)` is `redeclared` in rung 1, so rung 1 alone scores the
+ *       SIGNATURE and not the code. The benchmark judges codegen — which is why the assembled ladder
+ *       strips the prototype outright — and the unit cannot simply drop it, because the unit's earlier
+ *       callers would then declare the function implicitly. Replacing it keeps the unit a world the
+ *       project could compile, with the candidate's own signature in it. The rung costs a compile only
+ *       for a candidate rung 1 refused, and it is one rule for both decompilers: m2c reads its signature
+ *       from the project's header on 32 of these 42 rows, asmlift is told only whether the row returns
+ *       void, and without this rung that difference alone decides noncompile;
+ *    3. bare typedefs, for a candidate the unit refuses.
  *
  *  Every rung re-provides `NULL`: the vendored context is PREPROCESSED, so the standard macro is
  *  expanded away, and a candidate spelling a null check the idiomatic way (`p != NULL`, as m2c
@@ -128,10 +176,26 @@ export interface ScoringRung {
  *
  *  EXPORTED because the reproduction scripts must materialize the very rung the harness used —
  *  see resolveScoringPrelude. */
-export function scoringLadder(tu: TuModel, prependC: string, ctxI: string, sym: string): ScoringRung[] {
+export function scoringLadder(
+  tu: TuModel,
+  prependC: string,
+  ctxI: string,
+  sym: string,
+  /** the candidate about to be compiled — the unit's second rung is written from its signature, and a
+   *  caller with no candidate in hand (a declined row's reproduction) gets the ladder without it */
+  candC?: string,
+): ScoringRung[] {
   const bare = { name: 'bare typedefs', prelude: `${C_TYPEDEFS}\n` };
   if (tu === 'unit') {
-    return [{ name: 'unit context', prelude: `${ctxTypedefPrelude(ctxI)}${ctxI}\n` }, bare].map(withNull);
+    const own = candC === undefined ? null : candidateDeclarator(candC, sym);
+    const redeclared = own === null ? null : redeclare(ctxI, sym, own);
+    return [
+      { name: 'unit context', prelude: `${ctxTypedefPrelude(ctxI)}${ctxI}\n` },
+      ...(redeclared === null
+        ? []
+        : [{ name: "unit context, the candidate's signature", prelude: `${ctxTypedefPrelude(ctxI)}${redeclared}\n` }]),
+      bare,
+    ].map(withNull);
   }
   const proDefsU8 = /typedef\s+unsigned\s+char\s+u8\b/.test(prependC);
   return [
@@ -204,7 +268,7 @@ export function makeRealCompile(
     // C++ candidate handed to the C parser fails on the word `class` — a diagnostic about the harness's
     // ladder, not about the decompiler's output.
     const failed = new Map<'c' | 'c++', string>();
-    const ladder = scoringLadder(tu, prependC, ctxI, sym);
+    const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
     const richest = richestRung(tu, ladder);
     // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
     // all: a richer context is the ordinary reason a candidate compiles, and paying for the
@@ -247,7 +311,7 @@ export function resolveScoringPrelude(
   macros = '',
 ): { rung: ScoringRung; language: 'c' | 'c++' } {
   const rc = compilerFor(toolchain, language);
-  const ladder = scoringLadder(tu, prependC, ctxI, sym);
+  const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
   // The DIALECT is replayed with the rung, for the same reason the rung is replayed at all: a C++
   // row whose source only compiles as C was scored as C, and a reproduction that states the row's
   // dialect would refuse the very source the benchmark published.

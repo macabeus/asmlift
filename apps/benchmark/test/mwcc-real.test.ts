@@ -257,6 +257,25 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
     },
     CONTAINER_BUDGET,
   );
+
+  // …and a candidate whose signature is an ABI-identical spelling of the unit's own prototype is
+  // `redeclared` there, though its CODE is what the row is about. The second rung replaces that one
+  // declaration with the candidate's, and the unit's earlier callers still compile against it.
+  test(
+    "a unit row's candidate is scored on its code, not on its spelling of the signature",
+    () => {
+      const ctx = 'unsigned int f(unsigned int value);\nunsigned int g(void) { return f(3); }\n';
+      const candidate = 'int f(unsigned int arg0) { return arg0 + 1; }\n';
+      const [unit, own] = scoringLadder('unit', '', ctx, 'f', candidate);
+      expect(own.name).toBe("unit context, the candidate's signature");
+      expect(() => mwcc.compileCandidate(`${unit.prelude}${candidate}`, 'f', CFLAGS, 'c')).toThrow(/redeclared/);
+      expect(exportedFunctions(mwcc.compileCandidate(`${own.prelude}${candidate}`, 'f', CFLAGS, 'c')).sort()).toEqual([
+        'f',
+        'g',
+      ]);
+    },
+    CONTAINER_BUDGET,
+  );
 });
 
 // ── a C++ row ──────────────────────────────────────────────────────────────────────────────

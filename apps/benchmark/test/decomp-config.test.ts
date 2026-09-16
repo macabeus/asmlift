@@ -190,6 +190,32 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     ]);
   });
 
+  // Rung 1 scores the SIGNATURE, not the code: a candidate that recovers an ABI-identical spelling of the
+  // row's own prototype is `redeclared` there. Rung 2 is the same unit with that one declaration replaced.
+  test("a unit row's second rung carries the candidate's own signature, callers and all", () => {
+    const ctx = 'u32 BoardRandMod(u32 value);\nu32 g(void) { return BoardRandMod(3); }\n';
+    const ladder = scoringLadder('unit', '', ctx, 'BoardRandMod', 's32 BoardRandMod(u32 arg0) {\n  return 0;\n}\n');
+    expect(ladder.map((r) => r.name)).toEqual([
+      'unit context',
+      "unit context, the candidate's signature",
+      'bare typedefs',
+    ]);
+    expect(ladder[1].prelude).toContain('s32 BoardRandMod(u32 arg0);');
+    expect(ladder[1].prelude).not.toContain('u32 BoardRandMod(u32 value);');
+    // the unit's own CALL of it is code, not a declaration, and a line-shaped rule that deletes it
+    // would compile a different unit
+    expect(ladder[1].prelude).toContain('return BoardRandMod(3);');
+  });
+
+  test('a text that defines no such function adds no rung: there is no signature to state', () => {
+    const ctx = 'u32 BoardRandMod(u32 value);\n';
+    const marker = '/* ASMLIFT_ERROR: cannot lift */\n';
+    expect(scoringLadder('unit', '', ctx, 'BoardRandMod', marker).map((r) => r.name)).toEqual([
+      'unit context',
+      'bare typedefs',
+    ]);
+  });
+
   test("the vendored rung strips the function's own prototype and keeps the rest verbatim", () => {
     const text = vendoredRung('typedef unsigned char u8;\ns32 keepMe(s32);\ns32 sq(s32);\n', 'sq');
     expect(text.endsWith('typedef unsigned char u8;\ns32 keepMe(s32);\n\n')).toBe(true); // verbatim, own proto gone
