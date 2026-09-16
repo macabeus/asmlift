@@ -146,25 +146,36 @@ describe('the definitions are well-formed', () => {
       'bitwise',
       'do-while',
       'goto',
+      'local-aggregate-init',
       'loop',
       'nested-loop',
+      'new-delete',
       'shift',
       'short-circuit',
       'sizeof',
+      'static-local',
       'switch',
       'ternary',
+      'varargs-def',
     ]);
     expect([...CODEGEN_DERIVED].sort()).toEqual([
       'branchless',
       'call',
       'comparison-tree',
       'dma',
+      'float-callee-save',
+      'float-compare',
       'hw-div',
       'jump-table',
+      'libm-call',
       'magic-div',
       'mmio',
+      'runtime-helper-call',
+      'savegpr-helper',
+      'sda-global',
       'soft-div',
       'strength-reduce',
+      'vararg-call',
     ]);
   });
 });
@@ -354,6 +365,76 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR['merge-chain']('{ void *a; void *b; if (s) a = p; else b = p; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; if (a) { x = 1; y = 2; } return x + y; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '', '')).toBe(true);
+  });
+
+  it('reads a static local, and does not read the aggregate it initialises as an automatic one', () => {
+    // `static` puts the object in .rodata and there is no per-call copy — the shape
+    // `local-aggregate-init` is about — so the two tags are exclusive on the same declaration
+    expect(src('void f(u8 h){ static const u8 t[] = { 1, 1, 0 }; use(t[h]); }')).toEqual(['static-local']);
+    expect(src('void f(void){ s16 dx[4] = { 0, -1, 0, 1 }; g(dx[k]); }')).toEqual(['local-aggregate-init']);
+    // a brace initialiser is a DECLARATION, not any `= {`
+    expect(src('void f(void){ p->cb = h; if (a) { b(); } }')).toEqual([]);
+  });
+
+  it('reads the ellipsis from the signature, where the body cannot show it', () => {
+    expect(src('void f(const char *fmt, ...) { g(fmt); }')).toEqual(['varargs-def']);
+    expect(src('void f(const char *fmt) { g(fmt); }')).toEqual([]);
+  });
+
+  it('separates a `new` expression from an identifier spelled `new`', () => {
+    expect(src('void f(void){ p = new Thing(3); }')).toEqual(['new-delete']);
+    expect(src('void f(void){ delete[] p; }')).toEqual(['new-delete']);
+    expect(src('void f(void){ x = s->new; }')).toEqual([]);
+    expect(src('void f(void){ x = new_value; }')).toEqual([]);
+  });
+
+  it('names the runtime helpers the compiler generated, and leaves the division ones to soft-div', () => {
+    const f = 'float f(float a, float b){ return a + b; }';
+    expect(cg(f, '\tbl\t__addsf3')).toEqual(['call', 'runtime-helper-call']);
+    expect(cg(f, '  10:\tbl\t10 <f+0x10>\n\t\t\t10: R_PPC_REL24\t__shl2i')).toEqual(['call', 'runtime-helper-call']);
+    // `soft-div` says more about the same call, so it is not doubled up
+    expect(cg('int f(int a){ return a/10; }', '\tbl\t__divsi3')).toEqual(['call', 'soft-div']);
+    // a project symbol that merely begins with two underscores is not a helper
+    expect(cg(f, '\tbl\t__osDisableInt')).toEqual(['call']);
+    // a DATA relocation names a datum, not a callee
+    expect(cg(f, '   8:\tlis\tr4,0\n\t\t\t8: R_PPC_ADDR16_HA\t__addsf3')).toEqual([]);
+  });
+
+  it('reads the maths library and the out-of-line register save off the call, not the text', () => {
+    expect(cg('f32 f(f32 a){ return sqrtf(a); }', '\tbl\tsqrtf')).toEqual(['call', 'libm-call']);
+    expect(cg('void f(void){ g(); }', '  10:\tbl\t10 <f+0x10>\n\t\t\t10: R_PPC_REL24\t_savegpr_25')).toEqual([
+      'call',
+      'savegpr-helper',
+    ]);
+  });
+
+  it('reads a float comparison on all three of its spellings', () => {
+    const s = 'f32 f(f32 a, f32 b){ if (a < b) { return a; } return b; }';
+    expect(cg(s, '  14:\tc.lt.s\t$f14,$f0\n  1c:\tbc1fl\t30 <f+0x30>')).toEqual(['float-compare']);
+    expect(cg(s, '   8:\tfcmpo\tcr0,f1,f2\n   c:\tbge\t20 <f+0x20>')).toEqual(['float-compare']);
+    // no FPU: the comparison is a helper call, and it is still a comparison
+    expect(cg(s, '\tbl\t__ltsf2\n\tcmp\tr0, #0\n\tbge\t.L3')).toEqual(['call', 'float-compare', 'runtime-helper-call']);
+    expect(cg('int f(int a,int b){ if (a<b) { return a; } return b; }', '\tcmp\tr0, r1\n\tbge\t.L3')).toEqual([]);
+  });
+
+  it('reads a float callee-save only where the register is written to the FRAME', () => {
+    const s = 'f32 f(f32 a){ return a; }';
+    expect(cg(s, '   4:\tsdc1\t$f20,16(sp)')).toEqual(['float-callee-save']);
+    expect(cg(s, '   4:\tstfd\tf14,8(r1)')).toEqual(['float-callee-save']);
+    expect(cg(s, '   4:\tpsq_st\tf31,192(r1),0,0')).toEqual(['float-callee-save']);
+    // a volatile register, and a callee-saved one used as a scratch against someone else's pointer
+    expect(cg(s, '   4:\tstfd\tf1,8(r1)')).toEqual([]);
+    expect(cg(s, '   4:\tsdc1\t$f20,0(a0)')).toEqual([]);
+  });
+
+  it('reads the variadic-call marker and the small-data relocation', () => {
+    expect(cg('void f(void){ printf(s); }', '   8:\tcrclr\t4*cr1+eq\n   c:\tbl\tprintf')).toEqual([
+      'call',
+      'vararg-call',
+    ]);
+    expect(cg('f32 f(f32 x){ return x * gScale; }', '   c:\tlfs\tf0,0(r2)\n\t\t\tc: R_PPC_EMB_SDA21\t@6')).toEqual([
+      'sda-global',
+    ]);
   });
 
   it('separates I/O registers from other hardware address ranges', () => {

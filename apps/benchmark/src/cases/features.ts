@@ -304,6 +304,10 @@ const hasControllingConnective = (body: string): boolean => {
 export function sourceEvidence(funcC: string): Set<string> {
   const b = stripLiterals(funcC);
   const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));
+  // Everything before the opening brace: the return type, the name and the parameter list. Some
+  // tags are facts about the SIGNATURE and leave no trace in the body at all — the same reason the
+  // `double` floor is handed the whole function rather than the body.
+  const signature = b.slice(0, Math.max(0, b.indexOf('{')));
   const out = new Set<string>();
   if (/\bswitch\s*\(/.test(body)) out.add('switch');
   if (/\bgoto\s+\w+\s*;/.test(body)) out.add('goto');
@@ -314,6 +318,28 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (/\?[^;{}]*:/.test(body)) out.add('ternary');
   if (hasControllingConnective(body)) out.add('short-circuit');
   if (/\bsizeof\b/.test(body)) out.add('sizeof');
+  // A declaration statement whose storage class is `static` — anchored at a statement boundary, so
+  // a `static` in a comment or mid-expression cannot pass. Only a DECLARATION can carry it in C.
+  if (/(?:^|[;{}])\s*static\b/.test(body)) out.add('static-local');
+  // `...` can only be the ellipsis of a parameter list here: the signature holds no expressions.
+  if (/\.\.\.\s*\)/.test(signature)) out.add('varargs-def');
+  // A `new`/`delete` EXPRESSION, which needs an operand after the keyword. Written so that an
+  // identifier merely spelled `new` (`s->new`, `new_value`) cannot pass: `\bnew\b` already refuses
+  // the second, and a leading `.`/`->` is excluded for the first.
+  if (/(?<![.\w]|->)\bnew\b\s*[\w([]|(?<![.\w]|->)\bdelete\b\s*(?:\[\s*\]\s*)?[\w(*]/.test(body)) {
+    out.add('new-delete');
+  }
+  // An AUTOMATIC local aggregate with a brace initialiser — a declaration statement carrying `[…]`
+  // and `= {`. `static` is excluded on purpose: a static aggregate lives in `.rodata` and is only
+  // referenced, where an automatic one is COPIED into the frame on every call, which is the shape
+  // the tag is about. That one is `static-local`.
+  if (
+    /(?:^|[;{}])\s*(?!\s*static\b)(?:(?:const|unsigned|signed|struct|union|volatile)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)+=\s*\{/.test(
+      body,
+    )
+  ) {
+    out.add('local-aggregate-init');
+  }
   if (/<<|>>/.test(body)) out.add('shift');
   // require a LEFT operand so `&x` (address-of) and `&&`/`||` do not count. A cast's closing
   // paren is NOT a left operand — `(u32)&tmp` is address-of — so casts come out first. (A
@@ -330,10 +356,72 @@ export function sourceEvidence(funcC: string): Set<string> {
 
 const DIV_HELPERS = /__(u?divsi3|u?modsi3|divdi3|moddi3)/;
 
+/** Every symbol the compiled code CALLS BY NAME.
+ *
+ *  Two spellings, because objdump renders a call differently depending on where the callee is. One
+ *  inside the object is printed on the branch itself (`bl __divsi3`); an external one leaves the
+ *  branch pointing at its own address and names the callee on the relocation line under it
+ *  (`10: R_PPC_REL24 _savegpr_25`). Only BRANCH relocations are read — `R_PPC_ADDR16_HA` names a
+ *  datum, not a callee.
+ *
+ *  MIPS has neither spelling: the harness's objdump flags emit no MIPS relocation and an external
+ *  `jal` renders against the enclosing symbol, so this returns nothing there. That is the same
+ *  limit `call` documents, and it is why every tag below is a claim about the calls it CAN see. */
+const CALL_TARGET =
+  /(?:\b(?:bl|bla|blrl|bctrl|jal|jalx)\s+|\bR_(?:PPC_(?:REL24|PLTREL24)|ARM_(?:CALL|PC24|THM_CALL|THM_XPC22)|MIPS_26)\s+)([A-Za-z_][\w$.]*)/g;
+
+const calledSymbols = (asm: string): Set<string> => new Set([...asm.matchAll(CALL_TARGET)].map((m) => m[1]));
+
+/** The four helpers `soft-div` already names. */
+const SOFT_DIV_HELPER = /^__(?:u?divsi3|u?modsi3|divdi3|moddi3)$/;
+
+/** A helper the COMPILER generated, for an operation the target has no instruction for. Two runtime
+ *  families appear in this corpus: libgcc's `__<op><mode>` names (agbcc, ido, kmc — soft float,
+ *  64-bit shifts and multiplies, conversions) and the Metrowerks runtime's `__cvt_*`, `__va_arg`
+ *  and `__<op>2<sign>`. Matched as WHOLE symbol names, so a project function that merely starts
+ *  with two underscores is not one. */
+const RUNTIME_HELPER =
+  /^__(?:u?(?:div|mod)(?:si|di)3|(?:ash[lr]|lshr|mul|neg)di3|(?:add|sub|mul|div)[sd]f3|neg[sd]f2|float(?:un)?si[sd]f|fix(?:uns)?[sd]fsi|extendsfdf2|truncdfsf2|(?:eq|ne|lt|le|gt|ge|cmp|unord)[sd]f2|(?:div|mod|shl|shr)2[iu]?|cvt_\w+|va_arg|aeabi_\w+)$/;
+
+/** The soft-float comparison helpers — a float compare on a target with no FPU. */
+const SOFT_FLOAT_COMPARE = /^__(?:eq|ne|lt|le|gt|ge|cmp|unord)[sd]f2$/;
+
+/** The C standard maths library, with its `f` and `l` spellings. */
+const LIBM =
+  /^(?:sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|exp|log|log10|pow|sqrt|fmod|ceil|floor|fabs|ldexp|frexp|modf|hypot)[fl]?$/;
+
+/** The PowerPC EABI's out-of-line prologue helpers. */
+const SAVE_GPR_HELPER = /^_(?:save|rest)(?:gpr|fpr)_\d+$/;
+
+/** A floating-point comparison in hardware: PowerPC into a condition register, MIPS into the FP
+ *  condition flag the `bc1` branches read (`bc1tl`/`bc1fl` are the likely forms). */
+const FLOAT_COMPARE =
+  /\bfcmp[ou]\b|\bc\.(?:f|un|eq|ueq|olt|ult|ole|ule|sf|ngle|seq|ngl|lt|nge|le|ngt)\.[sd]\b|\bbc1[tf]l?\b/;
+
+/** A callee-saved floating-point register written to the frame: PowerPC f14–f31 (`psq_st` is
+ *  Gekko's paired-single store), MIPS $f20–$f31. The store must be `(r1)`/`(sp)` — the same
+ *  register used as a scratch elsewhere is not a save. */
+const FLOAT_CALLEE_SAVE =
+  /\b(?:stfd|psq_st)\s+f(?:1[4-9]|2\d|3[01]),\s*-?\d+\(r1\)|\b(?:sdc1|swc1)\s+\$f(?:2\d|3[01]),\s*-?\d+\(sp\)/;
+
+/** The PowerPC EABI's variadic-call marker: CR bit 6 says whether any float was passed in an FP
+ *  register, and the caller sets or clears it at EVERY variadic call, including one passing none. */
+const VARARG_CALL = /\bcr(?:clr|set)\s+4\*cr1\+eq\b/;
+
 /** The `codegen` tags decidable from the assembly ALONE (no source needed). */
 function asmEvidence(targetAsm: string): Set<string> {
   const out = new Set<string>();
   if (DIV_HELPERS.test(targetAsm)) out.add('soft-div');
+  const called = calledSymbols(targetAsm);
+  // `soft-div` says more about the same call, so the division helpers are its own and not counted
+  // here — the two tags partition the runtime rather than doubling up on it.
+  if ([...called].some((s) => RUNTIME_HELPER.test(s) && !SOFT_DIV_HELPER.test(s))) out.add('runtime-helper-call');
+  if ([...called].some((s) => LIBM.test(s))) out.add('libm-call');
+  if ([...called].some((s) => SAVE_GPR_HELPER.test(s))) out.add('savegpr-helper');
+  if (FLOAT_COMPARE.test(targetAsm) || [...called].some((s) => SOFT_FLOAT_COMPARE.test(s))) out.add('float-compare');
+  if (FLOAT_CALLEE_SAVE.test(targetAsm)) out.add('float-callee-save');
+  if (VARARG_CALL.test(targetAsm)) out.add('vararg-call');
+  if (/\bR_PPC_EMB_SDA21\b/.test(targetAsm)) out.add('sda-global');
   // direct (`bl`/`jal`) and indirect (`jalr`/`blx`, agbcc's `_call_via_rN` thunk) alike
   if (/^\s*\S*\s*\b(bl|jal|jalr|blx)\b|_call_via_r/m.test(targetAsm)) out.add('call');
   const addrs = [...targetAsm.matchAll(/0x0?4[0-9a-f]{6}\b/gi)].map((m) => parseInt(m[0], 16));

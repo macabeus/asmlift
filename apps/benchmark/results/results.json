@@ -149,7 +149,8 @@
         "branch",
         "pointer",
         "arithmetic",
-        "short-circuit"
+        "short-circuit",
+        "float-compare"
       ],
       "loc": 53,
       "refSource": "f32 add_calc_a(f32* pValue, f32 target, f32 fraction, f32 step, f32 minStep) {\n    f32 stepSize = 0.0f;\n    f32 diff = target - *pValue;\n\n    if (target != *pValue) {\n        if (diff > 180.0f) {\n            diff = -(360.0f - diff);\n        } else if (diff < -180.0f) {\n            diff = 360.0f + diff;\n        }\n\n        stepSize = diff * fraction;\n\n        if ((stepSize >= minStep) || (stepSize <= -minStep)) {\n            if (step < stepSize) {\n                stepSize = step;\n            } else if (stepSize < -step) {\n                stepSize = -step;\n            }\n\n            *pValue += stepSize;\n\n            if (stepSize > 0.0f) {\n                if (target < *pValue) {\n                    *pValue = target;\n                }\n            } else if (*pValue < target) {\n                *pValue = target;\n            }\n        } else {\n            if (stepSize > 0.0f) {\n                stepSize = minStep;\n                *pValue += stepSize;\n                if (target < *pValue) {\n                    *pValue = target;\n                }\n            } else {\n                stepSize = -minStep;\n                *pValue += -minStep;\n                if (*pValue < target) {\n                    *pValue = target;\n                }\n            }\n        }\n    }\n    if (*pValue >= 360.0f) {\n        *pValue -= 360.0f;\n    }\n    if (*pValue < 0.0f) {\n        *pValue += 360.0f;\n    }\n    return stepSize;\n}",
@@ -251,7 +252,8 @@
       "features": [
         "cast",
         "arithmetic",
-        "branch"
+        "branch",
+        "float-compare"
       ],
       "loc": 31,
       "refSource": "s16 add_calc_short_angle3(s16* pValue, s16 target, f32 fraction, s16 maxStep, s16 minStep) {\n    f32 stepSize;\n    s32 uTarget;\n    s32 newValue;\n    s32 uValue;\n\n    if (target != *pValue) {\n        uValue = (u16)*pValue;\n        uTarget = (u16)target;\n\n        if (uValue > uTarget) {\n            uTarget += 0x10000;\n        }\n\n        stepSize = (uTarget - uValue) * fraction;\n\n        if (stepSize > maxStep) {\n            stepSize = maxStep;\n        } else if (stepSize < minStep) {\n            stepSize = minStep;\n        }\n\n        newValue = uValue + (s32)stepSize;\n        if (newValue > uTarget) {\n            newValue = uTarget;\n        }\n        *pValue = newValue;\n    }\n\n    return target - *pValue;\n}",
@@ -353,7 +355,8 @@
       "features": [
         "float",
         "branch",
-        "pointer"
+        "pointer",
+        "float-compare"
       ],
       "loc": 11,
       "refSource": "void add_calc0(f32* pValue, f32 fraction, f32 step) {\n    f32 stepSize = *pValue * fraction;\n\n    if (stepSize > step) {\n        stepSize = step;\n    } else if (stepSize < -step) {\n        stepSize = -step;\n    }\n\n    *pValue -= stepSize;\n}",
@@ -461,7 +464,8 @@
       "features": [
         "float",
         "branch",
-        "pointer"
+        "pointer",
+        "float-compare"
       ],
       "loc": 14,
       "refSource": "void add_calc2(f32* pValue, f32 target, f32 fraction, f32 step) {\n    f32 stepSize;\n    if (*pValue != target) {\n        stepSize = fraction * (target - *pValue);\n\n        if (stepSize > step) {\n            stepSize = step;\n        } else if (stepSize < -step) {\n            stepSize = -step;\n        }\n\n        *pValue += stepSize;\n    }\n}",
@@ -699,6 +703,8 @@
       "features": [
         "float",
         "branch",
+        "float-compare",
+        "float-callee-save",
         "call"
       ],
       "loc": 36,
@@ -902,7 +908,8 @@
       ],
       "features": [
         "float",
-        "branch"
+        "branch",
+        "float-compare"
       ],
       "loc": 19,
       "refSource": "s32 chase_f(f32* pValue, f32 target, f32 step) {\n    if (step) {\n        if (*pValue > target) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if ((step * (*pValue - target)) >= 0.0f) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else {\n        if (*pValue == target) {\n            return TRUE;\n        }\n    }\n    return FALSE;\n}",
@@ -1004,7 +1011,8 @@
       "features": [
         "float",
         "branch",
-        "ternary"
+        "ternary",
+        "float-compare"
       ],
       "loc": 20,
       "refSource": "s32 chase_f3(f32* pValue, f32 target, f32 incrStep, f32 decrStep) {\n    f32 step = (target >= *pValue) ? incrStep : decrStep;\n\n    if (step != 0.0f) {\n        if (target < *pValue) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if (((*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return 1;\n        }\n    } else if (target == *pValue) {\n        return 1;\n    }\n\n    return 0;\n}",
@@ -1433,7 +1441,8 @@
       "features": [
         "float",
         "branch",
-        "short-circuit"
+        "short-circuit",
+        "float-compare"
       ],
       "loc": 20,
       "refSource": "f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, s32 shiftMin) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shiftMin) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
@@ -1523,7 +1532,9 @@
       "features": [
         "float",
         "branch",
-        "arithmetic"
+        "arithmetic",
+        "float-compare",
+        "float-callee-save"
       ],
       "loc": 51,
       "refSource": "f32 get_percent_forAccelBrake(f32 x, f32 min, f32 max, f32 accelRange, f32 brakeRange) {\n    f32 percent;\n    f32 range;\n    f32 cur;\n    f32 scale;\n\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= min) {\n        return 0.0f;\n    }\n\n    cur = x - min;\n    range = max - min;\n\n    if (range < accelRange + brakeRange) {\n        return 0.0f;\n    }\n\n    scale = 1.0f / (2.0f * range - accelRange - brakeRange);\n\n    if (accelRange != 0.0f) {\n        if (cur <= accelRange) {\n            percent = scale * cur * cur;\n            percent /= accelRange;\n            return percent;\n        } else {\n            percent = scale * accelRange;\n        }\n    } else {\n        percent = 0.0f;\n    }\n\n    if (cur <= range - brakeRange) {\n        percent += (scale * 2.0f) * (cur - accelRange);\n        return percent;\n    }\n\n    percent += 2.0f * scale * (range - accelRange - brakeRange);\n\n    if (brakeRange != 0.0f) {\n        percent += scale * brakeRange;\n        if (cur < range) {\n            f32 left = range - cur;\n\n            percent -= scale * left * left / brakeRange;\n        }\n    }\n    return percent;\n}",
@@ -1625,7 +1636,8 @@
       "features": [
         "cast",
         "branch",
-        "float"
+        "float",
+        "float-compare"
       ],
       "loc": 18,
       "refSource": "f32 get_percent(s32 max, s32 min, s32 x) {\n    f32 denom;\n    f32 percent;\n\n    percent = 1.0f;\n    if (x < min) {\n        percent = 0.0f;\n    } else if (x < max) {\n        denom = (f32)(max - min);\n        if (denom != 0.0f) {\n            percent = (f32)(x - min) / denom;\n            if (percent > 1.0f) {\n                percent = 1.0f;\n            }\n        }\n    }\n    return percent;\n}",
@@ -2374,7 +2386,8 @@
       "features": [
         "float",
         "branch",
-        "macro"
+        "macro",
+        "float-compare"
       ],
       "loc": 7,
       "refSource": "f32 limiter(f32 val, f32 max) {\n    if (val < 0.0f) {\n        return CLAMP_MIN(val, -max);\n    } else {\n        return CLAMP_MAX(val, max);\n    }\n}",
@@ -3080,7 +3093,8 @@
       "features": [
         "float",
         "branch",
-        "macro"
+        "macro",
+        "float-compare"
       ],
       "loc": 7,
       "refSource": "f32 never_zero(f32 val, f32 min) {\n    if (val < 0.0f) {\n        return CLAMP_MAX(val, -min);\n    } else {\n        return CLAMP_MIN(val, min);\n    }\n}",
@@ -3481,7 +3495,8 @@
       "features": [
         "float",
         "matrix",
-        "arithmetic"
+        "arithmetic",
+        "float-callee-save"
       ],
       "loc": 122,
       "refSource": "void Skin_Matrix_MulMatrix(MtxF* mfA, MtxF* mfB, MtxF* dest) {\n    f32 cx;\n    f32 cy;\n    f32 cz;\n    f32 cw;\n\n    f32 rx = mfA->xx;\n    f32 ry = mfA->xy;\n    f32 rz = mfA->xz;\n    f32 rw = mfA->xw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->xx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->xy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->xz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->xw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->yx;\n    ry = mfA->yy;\n    rz = mfA->yz;\n    rw = mfA->yw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->yx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->yy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->yz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->yw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->zx;\n    ry = mfA->zy;\n    rz = mfA->zz;\n    rw = mfA->zw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->zx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->zy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->zz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->zw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->wx;\n    ry = mfA->wy;\n    rz = mfA->wz;\n    rw = mfA->ww;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->wx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->wy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->wz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->ww = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n}",
@@ -3577,7 +3592,8 @@
       "features": [
         "float",
         "matrix",
-        "arithmetic"
+        "arithmetic",
+        "float-callee-save"
       ],
       "loc": 47,
       "refSource": "void Skin_Matrix_SetQuaternion(MtxF* mf, f32* q) {\n    f32 n;\n    f32 xNorm;\n    f32 yNorm;\n    f32 zNorm;\n    f32 wxNorm;\n    f32 wyNorm;\n    f32 wzNorm;\n    f32 xxNorm;\n    f32 xyNorm;\n    f32 xzNorm;\n    f32 yyNorm;\n    f32 yzNorm;\n    f32 zzNorm;\n\n    n = 2.0f / ((q[3] * q[3]) + ((q[2] * q[2]) + ((q[1] * q[1]) + (q[0] * q[0]))));\n    xNorm = q[0] * n;\n    yNorm = q[1] * n;\n    zNorm = q[2] * n;\n\n    wxNorm = q[3] * xNorm;\n    wyNorm = q[3] * yNorm;\n    wzNorm = q[3] * zNorm;\n    xxNorm = q[0] * xNorm;\n    xyNorm = q[0] * yNorm;\n    xzNorm = q[0] * zNorm;\n    yyNorm = q[1] * yNorm;\n    yzNorm = q[1] * zNorm;\n    zzNorm = q[2] * zNorm;\n\n    mf->xx = (1.0f - (yyNorm + zzNorm));\n    mf->yx = (xyNorm + wzNorm);\n    mf->zx = (xzNorm - wyNorm);\n    mf->wx = 0.0f;\n    mf->xy = (xyNorm - wzNorm);\n    mf->yy = (1.0f - (xxNorm + zzNorm));\n    mf->zy = (yzNorm + wxNorm);\n    mf->wy = 0.0f;\n    mf->xz = (yzNorm + wyNorm);\n    mf->yz = (yzNorm - wxNorm);\n    mf->zz = (1.0f - (xxNorm + yyNorm));\n    mf->wz = 0.0f;\n    mf->xw = 0.0f;\n    mf->yw = 0.0f;\n    mf->ww = 1.0f;\n    mf->zw = 0.0f;\n}",
@@ -3766,6 +3782,7 @@
         "matrix",
         "shift",
         "bitwise",
+        "float-callee-save",
         "call"
       ],
       "loc": 67,
@@ -10991,6 +11008,7 @@
         "array",
         "arithmetic",
         "struct",
+        "float-callee-save",
         "call"
       ],
       "loc": 41,
@@ -13840,6 +13858,7 @@
         "array",
         "arithmetic",
         "struct",
+        "float-callee-save",
         "call"
       ],
       "loc": 37,
@@ -17266,6 +17285,7 @@
         "arithmetic",
         "fixed-point",
         "int64",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 9,
@@ -19367,6 +19387,7 @@
         "array",
         "branch",
         "global",
+        "static-local",
         "call"
       ],
       "loc": 39,
@@ -23625,6 +23646,7 @@
         "arithmetic",
         "int64",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 6,
@@ -23742,6 +23764,7 @@
         "do-while",
         "loop",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 9,
@@ -45218,6 +45241,7 @@
         "float",
         "double",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -50777,6 +50801,7 @@
         "memory",
         "arithmetic",
         "loop",
+        "savegpr-helper",
         "call"
       ],
       "loc": 1,
@@ -52991,6 +53016,7 @@
         "float",
         "cast",
         "float-to-int",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -53322,6 +53348,7 @@
       "features": [
         "float",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -53646,6 +53673,8 @@
       "features": [
         "float",
         "compare",
+        "runtime-helper-call",
+        "float-compare",
         "call"
       ],
       "loc": 1,
@@ -53748,7 +53777,8 @@
       ],
       "features": [
         "float",
-        "compare"
+        "compare",
+        "float-compare"
       ],
       "loc": 1,
       "refSource": "int fcmp(float a,float b){ return a>b; }",
@@ -53823,7 +53853,8 @@
       ],
       "features": [
         "float",
-        "compare"
+        "compare",
+        "float-compare"
       ],
       "loc": 1,
       "refSource": "int fcmp(float a,float b){ return a>b; }",
@@ -53916,6 +53947,7 @@
       "features": [
         "float",
         "compare",
+        "float-compare",
         "branchless"
       ],
       "loc": 1,
@@ -53986,6 +54018,7 @@
       "features": [
         "float",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -55400,6 +55433,7 @@
       "features": [
         "float",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -55739,6 +55773,7 @@
       "features": [
         "float",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -56411,6 +56446,7 @@
       "features": [
         "float",
         "arithmetic",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -60082,6 +60118,7 @@
         "float",
         "cast",
         "int-to-float",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -60334,7 +60371,8 @@
       "features": [
         "float",
         "cast",
-        "int-to-float"
+        "int-to-float",
+        "sda-global"
       ],
       "loc": 1,
       "refSource": "float i2f(int x){ return (float)x; }",
@@ -64931,6 +64969,7 @@
       "features": [
         "int64",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -65225,6 +65264,7 @@
       "features": [
         "int64",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -65310,6 +65350,7 @@
         "int64",
         "signed",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -65601,6 +65642,7 @@
         "int64",
         "signed",
         "shift",
+        "runtime-helper-call",
         "call"
       ],
       "loc": 1,
@@ -109950,6 +109992,7 @@
         "array",
         "switch",
         "loop",
+        "savegpr-helper",
         "call",
         "comparison-tree"
       ],

@@ -607,6 +607,28 @@ export const FEATURES: readonly FeatureDef[] = [
     },
     seeAlso: ['arithmetic', 'shift', 'div-pow2'],
   },
+  {
+    id: 'float-compare',
+    label: 'Floating-point comparison',
+    group: 'arithmetic',
+    evidence: 'codegen',
+    summary: 'two floating-point values are compared',
+    detail:
+      'Not an integer compare with different operands. PowerPC writes the result into a CONDITION ' +
+      'REGISTER FIELD as four bits — less, greater, equal, unordered — so `<` reads one bit while ' +
+      '`<=` needs two and the compiler ORs them together with `cror` before branching. MIPS writes ' +
+      'one FP condition flag that a separate `bc1t`/`bc1f` reads, which lets the compare and the ' +
+      'branch sit far apart. On a target with no FPU the same C becomes a call to `__ltsf2` and ' +
+      'friends, and that counts too: the tag is the comparison, not the unit that performs it. ' +
+      'What a recovery must get right is the predicate INCLUDING its unordered case — with a NaN ' +
+      'operand `a < b` and `!(a >= b)` are different answers, and they are different instructions.',
+    example: {
+      c: 'if (a < b) { return a; }',
+      asm: '  14:\tc.lt.s\t$f14,$f0\n  1c:\tbc1fl\t30 <add_calc0+0x30>',
+      toolchain: 'ido7.1',
+    },
+    seeAlso: ['float', 'double', 'compare', 'branch', 'runtime-helper-call'],
+  },
 
   // ── data & types ────────────────────────────────────────────────────────────────────────────
   {
@@ -839,6 +861,28 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['array', 'nested-loop', 'fixed-point'],
   },
   {
+    id: 'local-aggregate-init',
+    label: 'Local aggregate initialiser',
+    group: 'data-types',
+    evidence: 'source',
+    pending: true,
+    summary: 'an automatic local array or struct declared with a brace initialiser',
+    detail:
+      '`int v[4] = { 1, 2, 3, 4 };` inside a function is not a declaration the compiler can fold ' +
+      'away. The initialiser is emitted once into read-only data and COPIED into the frame on ' +
+      'every call, so the function carries a block move no statement wrote — and the bytes being ' +
+      'copied are in a data section, not in the function. Recovering it means reading that ' +
+      'section, recognising the copy as a declaration rather than as a `memcpy`, and re-emitting ' +
+      'the values as an initialiser list. Adding `static` to the same line removes the copy ' +
+      'entirely, because the object stops being in the frame: that is `static-local`.',
+    example: {
+      c: 'void f(void) { s16 dx[4] = { 0, -1, 0, 1 }; g(dx[k]); }',
+      asm: '  lwz  r5,0(r4)      @ the four values, loaded from .rodata …\n  stw  r5,8(r1)      @ … and stored into the frame, every call',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['static-local', 'array', 'table', 'memory'],
+  },
+  {
     id: 'sizeof',
     label: 'sizeof',
     group: 'data-types',
@@ -986,6 +1030,65 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['table', 'load', 'store', 'mmio'],
   },
   {
+    id: 'sda-global',
+    label: 'Small-data global',
+    group: 'memory',
+    evidence: 'codegen',
+    summary: 'a global reached through a small-data base register instead of its full address',
+    detail:
+      'The PowerPC EABI keeps r13 pointed at `.sdata`/`.sbss` and r2 at `.sdata2`, so a global the ' +
+      'linker decided is small enough costs ONE instruction — `lwz r3,-0x6cf0(r13)` — where an ' +
+      'ordinary global costs an `lis`/`addi` pair. Which globals qualify is a LINK-time decision ' +
+      'the compiler only records as a relocation (`R_PPC_EMB_SDA21`), so in an unlinked object the ' +
+      'offset is a placeholder and the base register is the only visible evidence. Two things a ' +
+      'recovery can get wrong: reading r13 as an ordinary register invents a pointer parameter the ' +
+      'source never had, and spelling the access as an ordinary global makes the compiler emit the ' +
+      'two-instruction form.',
+    example: {
+      c: 'extern f32 gScale;\nreturn x * gScale;',
+      asm: '   c:\tlfs\tf0,0(r2)\n\t\t\tc: R_PPC_EMB_SDA21\t@6',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['global', 'load', 'store', 'value-home', 'table'],
+  },
+  {
+    id: 'static-local',
+    label: 'Static local',
+    group: 'memory',
+    evidence: 'source',
+    summary: 'a `static` object declared inside the function body',
+    detail:
+      'Function SCOPE with static STORAGE: the object is not in the frame, it survives the call, ' +
+      'and the compiler emits it as an ordinary datum under a name it invents to keep it private ' +
+      '(`name$123` on Metrowerks, `name.0` on gcc). In the compiled code it is indistinguishable ' +
+      'from a file-scope global — the scope that makes it interesting is exactly the part that is ' +
+      'not in the bytes — so a decompiler can only recover WHERE the object lives, never that the ' +
+      'source declared it inside the function.',
+    example: {
+      c: 'void f(u8 h) { static const u8 tide[] = { 1, 1, 0 }; use(tide[h]); }',
+      asm: '\tldr\tr0, .L4\t@ .word tide.0 — a plain address, like any global',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['global', 'table', 'local-aggregate-init', 'load'],
+  },
+  {
+    id: 'new-delete',
+    label: 'new / delete',
+    group: 'memory',
+    evidence: 'source',
+    pending: true,
+    summary: 'a C++ `new` or `delete` expression',
+    detail:
+      'One keyword, several calls. `new T` calls the allocator (`__nw__FUl`) and then the ' +
+      "constructor on whatever came back — including the null check, because the operand of C++'s " +
+      'placement-free `new` may be null. `new T[n]` goes through `__construct_new_array`, which ' +
+      'takes the element constructor AND destructor as arguments so it can unwind. `delete` ' +
+      'mirrors it, and on a polymorphic class it does not call the allocator at all: it calls the ' +
+      'destructor with its hidden delete flag set and lets the destructor free the object. None ' +
+      'of that sequence is in the source, and none of it is spellable in C.',
+    seeAlso: ['method', 'call', 'struct'],
+  },
+  {
     id: 'pointer',
     label: 'Pointer',
     group: 'memory',
@@ -1095,6 +1198,124 @@ export const FEATURES: readonly FeatureDef[] = [
       'pointer rather than a mangled name. ' +
       "The row's `language` field records that it is C++.",
     seeAlso: ['call', 'struct', 'pointer'],
+  },
+  {
+    id: 'runtime-helper-call',
+    label: 'Runtime helper call',
+    group: 'calls',
+    evidence: 'codegen',
+    summary: 'the compiled code calls a compiler-generated helper the source never wrote',
+    detail:
+      'The target has no instruction for what the C says, so the compiler calls a helper instead. ' +
+      'On agbcc every floating-point OPERATOR becomes one (`__addsf3`, `__mulsf3`, `__floatsisf`, ' +
+      '`__fixsfsi`) and so does every 64-bit shift or multiply (`__ashrdi3`, `__muldi3`); ' +
+      'Metrowerks spells the same idea `__shl2i`, `__cvt_fp2unsigned`, `__va_arg`. Recovering the ' +
+      'function means folding the call back into the operator — leave it and the output calls a ' +
+      'function no header declares, which is the one kind of wrong answer that will not even ' +
+      'compile. The four DIVISION helpers are excluded on purpose: `soft-div` names them and says ' +
+      'more about the same call, so the two tags partition the runtime instead of doubling up. ' +
+      'Only a call the assembly NAMES can be seen, which on MIPS is none of them — the same limit ' +
+      '`call` documents.',
+    example: {
+      c: 'float f(float a, float b) { return a + b; }',
+      asm: '\tbl\t__addsf3',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['soft-div', 'call', 'float', 'int64', 'libm-call'],
+  },
+  {
+    id: 'libm-call',
+    label: 'Maths library call',
+    group: 'calls',
+    evidence: 'codegen',
+    pending: true,
+    summary: 'the compiled code calls the C maths library — `sin`, `sqrt`, `fmod` and friends',
+    detail:
+      'The mirror image of `runtime-helper-call`: a libm function is something the SOURCE asked ' +
+      'for, so the recovery has to SPELL the call rather than fold it away. What makes it a ' +
+      'measurement rather than a formality is everything around it — projects reach these through ' +
+      'their own wrappers and macros (`sind`, `cosd`), the arguments are widened to `double` and ' +
+      'the result narrowed back by conversions the source never wrote, and a compiler is free to ' +
+      'expand some of them inline instead, so that `fabsf` leaves two instructions and no call at ' +
+      'all.',
+    seeAlso: ['call', 'runtime-helper-call', 'float', 'double'],
+  },
+  {
+    id: 'savegpr-helper',
+    label: 'Out-of-line register save',
+    group: 'calls',
+    evidence: 'codegen',
+    summary: 'the prologue saves registers by CALLING `_savegpr_NN` instead of storing them inline',
+    detail:
+      'A function that uses many callee-saved registers pays a `stw` per register on entry and an ' +
+      '`lwz` per register on exit. Optimising for SIZE, the PowerPC EABI compiler replaces both ' +
+      'runs with one call each into a shared ladder of stores (`_savegpr_25` stores r25 upward, ' +
+      '`_restgpr_25` reloads them), and Gekko adds `_savefpr_`/`_restfpr_` for the FP half. Two ' +
+      'consequences for a recovery: the function CALLS something before its first statement, so ' +
+      'the call graph gains an edge the source has no line for, and the choice is driven purely ' +
+      'by how many registers the body ends up needing — which is decided by the spelling of the ' +
+      'body, not by anything local to the prologue.',
+    example: {
+      c: 'for (i = 0; i < n; i++) { s += a[i] * b[i]; }',
+      asm: '  10:\tbl\t10 <dotprod+0x10>\n\t\t\t10: R_PPC_REL24\t_savegpr_25',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['call', 'float-callee-save', 'runtime-helper-call', 'value-home'],
+  },
+  {
+    id: 'float-callee-save',
+    label: 'Float callee-save',
+    group: 'calls',
+    evidence: 'codegen',
+    summary: 'callee-saved floating-point registers are written to the frame and restored',
+    detail:
+      'A float value that has to stay live across a call cannot sit in a volatile register, so the ' +
+      "function borrows one of the ABI's callee-saved FP registers — PowerPC f14–f31, MIPS " +
+      '$f20–$f31 — and owes the caller a save and a restore for it. That makes the tag a PRESSURE ' +
+      'signal rather than a source construct: the same C compiles with none of it when the float ' +
+      'values do not outlive a call, so what the prologue saves is evidence about how the source ' +
+      'arranged its values. On Gekko the save is often `psq_st`, a paired-single store, which an ' +
+      'objdump given no `-M gekko` decodes as POWER vector instructions that have nothing to do ' +
+      'with this code.',
+    example: {
+      c: 'f32 g(f32 a, f32 b) { f32 t = a * b; h(); return t; }',
+      asm: '   4:\tsdc1\t$f20,16(sp)\n  ...\n  40:\tldc1\t$f20,16(sp)',
+      toolchain: 'ido7.1',
+    },
+    seeAlso: ['float', 'call', 'savegpr-helper', 'value-home'],
+  },
+  {
+    id: 'vararg-call',
+    label: 'Variadic call',
+    group: 'calls',
+    evidence: 'codegen',
+    pending: true,
+    summary: 'a call to a variadic function, marked by the PowerPC EABI’s CR bit 6',
+    detail:
+      'A variadic callee cannot know from its arguments whether any float arrived in an FP ' +
+      'register, so the PowerPC EABI has the CALLER say so out of band: `crset 4*cr1+eq` if a ' +
+      'float was passed, `crclr 4*cr1+eq` if not — and one of the two is emitted at EVERY variadic ' +
+      'call, including calls that pass nothing but integers. Two instructions that no construct in ' +
+      'the source explains, at a site that looks like any other call. Whether they appear is ' +
+      "decided by the CALLEE's declaration, so recovering the call means having the right " +
+      'prototype and not merely the right arguments.',
+    seeAlso: ['varargs-def', 'call', 'multi-arg', 'float'],
+  },
+  {
+    id: 'varargs-def',
+    label: 'Variadic definition',
+    group: 'calls',
+    evidence: 'source',
+    pending: true,
+    summary: 'the function itself is variadic — its parameter list ends in `...`',
+    detail:
+      'The definition side of the same ABI. `va_start` has to walk the arguments as MEMORY, so a ' +
+      'variadic function begins by spilling the whole argument register file into a save area: on ' +
+      'PowerPC the integer registers r3–r10 unconditionally, and the FP registers f1–f8 behind a ' +
+      "branch on the caller's CR bit 6, because storing eight doubles nobody passed would be eight " +
+      'wasted stores on every call. That prologue can be larger than the function, it is implied ' +
+      'entirely by the `...`, and a recovery that omits the ellipsis produces none of it.',
+    seeAlso: ['vararg-call', 'multi-arg', 'call', 'stack-addr'],
   },
 
   // ── meta ────────────────────────────────────────────────────────────────────────────────────
