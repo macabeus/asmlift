@@ -66,7 +66,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=109.0s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=89.0s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -119,15 +119,15 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-16: the ranked pass alone is **1,179 s over 152
-real rows** and **1,141 s over 675 synthetic rows**; wall clock is lower because eight shards run in
+Summed out of the committed artifact of 2026-09-16: the ranked pass alone is **728 s over 152
+real rows** and **821 s over 675 synthetic rows**; wall clock is lower because eight shards run in
 parallel. **These are WARM prices** — that run served a populated candidate store (`[candcache]`
 reported thousands of hits on every real shard, one of them 80,702 fail-hits). They are also PRICES
 UNDER THE MACHINE THEY RAN ON: the same corpus and the same cache state priced the real tier at
 1,742 s and the synthetic one at 1,677 s on an artifact generated while several rounds shared the
 machine, because a shard that shares a core takes longer to do the same work. So read a figure here
 beside the cache state AND the load of the run you are planning, not on its own. The single row
-`kleod:PauseMenuScreenHandler:agbcc` is 233 s of that real total — **20% of the tier in one row**,
+`kleod:PauseMenuScreenHandler:agbcc` is 200 s of that real total — **28% of the tier in one row**,
 and 399 s of the busier one.
 
 ## 4. How many full runs a round gets

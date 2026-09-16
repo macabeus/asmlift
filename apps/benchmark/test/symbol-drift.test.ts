@@ -4,7 +4,8 @@ import { symbolMapFromJson, symbolMapToJson } from '@asmlift/core/symbols';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
-import { symbolMapDrift } from '../src/run/symbol-drift';
+import type { RealManifest } from '../src/cases/manifests';
+import { symbolMapDrift, vendoredMapPaths } from '../src/run/symbol-drift';
 
 // a small fixture map in the exact shape vendor writes (symbolMapToJson output)
 const fixture = JSON.stringify({
@@ -32,5 +33,23 @@ describe('symbolMapDrift', () => {
     // exact bytes vendor wrote for an unchanged ELF
     const roundTripped = JSON.stringify(symbolMapToJson(symbolMapFromJson(JSON.parse(fixture))));
     expect(symbolMapDrift(fixture, roundTripped)).toBeNull();
+  });
+});
+
+describe("vendoredMapPaths — every map the project's rows are read with", () => {
+  const man = (addrs: string[]): RealManifest =>
+    ({ project: 'marioparty4', functions: addrs.map((addr, i) => ({ sym: `fn${i}`, addr })) }) as RealManifest;
+
+  test('a project of linked addresses has one map: its own', () => {
+    expect(vendoredMapPaths(man(['0x80003100', '0x80003200'])).map((m) => m.module)).toEqual([undefined]);
+  });
+
+  test("a REL module with rows adds one map of its own, once, sorted, beside the project's", () => {
+    const maps = vendoredMapPaths(
+      man(['0x80003100', 'm427Dll:.text+0x0000c2bc', 'm416Dll:.text+0x00001f20', 'm416Dll:.data+0x00000010']),
+    );
+    expect(maps.map((m) => m.module)).toEqual([undefined, 'm416Dll', 'm427Dll']);
+    expect(maps[1].path.endsWith('/tu/marioparty4/symbols/m416Dll.json.gz')).toBe(true);
+    expect(maps[0].path.endsWith('/tu/marioparty4/symbols.json.gz')).toBe(true);
   });
 });

@@ -217,6 +217,18 @@ describe('asmliftScript (pinned)', () => {
     expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('SYMBOLS:');
   });
 
+  test("a row in a REL module names THAT module's map and passes --module", () => {
+    // No GameCube row exists yet, so the row is a committed symbol-fed one moved into a module:
+    // what is pinned is the script's reading of the identity, which is all this owes.
+    const base = rows.find((r) => r.asmlift.symbolMap && r.tier === 'real')!;
+    const s = asmliftScript({ ...base, addr: 'm416Dll:.text+0x00001f20' });
+    expect(s).toContain(`apps/benchmark/dataset/real/tu/${base.project}/symbols/m416Dll.json.gz`);
+    expect(s).toContain('--module m416Dll');
+    // the module's map is what the row was read with — never the project's beside it
+    expect(s).not.toContain(`tu/${base.project}/symbols.json.gz`);
+    expect(asmliftScript(base)).not.toContain('--module');
+  });
+
   test('symbol-fed rows LOAD the map: PROJECT_PATH placeholder + --project-root on the pre-step', () => {
     const withMap = rows.filter((r) => r.asmlift.symbolMap && r.tier === 'real');
     expect(withMap.length).toBeGreaterThan(0);

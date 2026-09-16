@@ -362,6 +362,15 @@ the round that first ran it.
   The repository is read off `sourceUrl`, which the manifest validator requires on every real row
   and requires to cite the manifest's own `repo`. It is the FORK that is cited, so moving a fork to
   another owner reads as every row removed and added, too.
+- **GameCube REL code has no such address**, because the game's loader places a module: a row in one
+  is keyed by where it sits, `<module>:<section>+0x<offset>` — the module's disc file stem, which is
+  also its `objdiff.json` unit prefix. Measured over Mario Party 4's 7,515 and Animal Crossing's
+  17,387 REL functions that key collides 0 times, and it survived all 4,308 renames in Mario Party
+  4's `symbols.txt` history. Such a row is read with its MODULE's symbol map, vendored at
+  `tu/<project>/symbols/<module>.json.gz` (the module's own symbols, placed, over the base ELF's
+  globals), and its repro script passes the CLI `--module <module>`. A module the project splits
+  into no `objdiff.json` unit — 6 of Mario Party 4's 99 — can hold no row at all: a row needs its
+  unit's flags, and `bench flags` refuses it with `objdiff.json has no unit compiled from …`.
 - **Flags are the build's, and every target is the ROM's function.** A manifest's `units` hold each
   build unit's toolchain and flags, copied by `pnpm bench flags --project <p> --write` (a Makefile
   project through `gmake -n` in a clone of the checkout, a dtk project from `objdiff.json` checked
@@ -371,6 +380,16 @@ the round that first ran it.
   (relocations masked); it writes each row's `romDigest`, and `bench run` refuses a row whose target
   has another digest. A pin bump is therefore `bench flags --write`, then `bench vendor`, and
   `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were vendored from.
+- **A REL row is proved against its module, not against the ROM** — the one exception to the point
+  above, named in `bench vendor`'s output on every run that has one. The linked ELF holds no
+  module's bytes and a module's own are unrelocated, which the ROM gate's ARM/MIPS masks cannot
+  read, so the comparison is skipped and the row is instead proved to be where it says it is: its
+  module ELF must define that symbol at that section and that offset (`cases/vendor.ts`
+  `moduleIdentityRefusal`). Its `romDigest` then pins the target's own bytes rather than the game's.
+  CI holds only the OFFSET, out of the vendored module map (`test/real-manifests.test.ts`); the
+  module and the section are decidable only against the checkout, because a symbol map records a
+  section INDEX and unions the base ELF's globals into every module's map. PowerPC relocation masks,
+  which would let a REL target be compared with the game too, are not built yet.
 - **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
   identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
   the TU file names are keyed by `sym`, so the alias table alone does not make a rename. A function

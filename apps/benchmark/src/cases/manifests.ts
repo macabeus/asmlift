@@ -26,18 +26,28 @@ import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 export interface RealFunction {
   /** The upstream project's name for the function, as-is — presentation, and the row id's middle. */
   sym: string;
-  /** The function's address in the project's linked ELF — the row's IDENTITY (bench-schema
-   *  `rowIdentity`). `0x` + 8 lowercase hex, the spelling the vendored symbol map keys by; GBA
-   *  ROM-mapped with the Thumb bit clear, N64 VRAM. MEASURED from the build artifact, never
-   *  typed from a name: `test/real-manifests.test.ts` holds it equal to the address the
-   *  committed `tu/<project>/symbols.json.gz` gives `sym`. */
+  /** Where the function is — the row's IDENTITY (bench-schema `rowIdentity`). Either its address in
+   *  the project's linked ELF (`0x` + 8 lowercase hex, the spelling the vendored symbol map keys by;
+   *  GBA ROM-mapped with the Thumb bit clear, N64 VRAM), or, for code in a GameCube REL module,
+   *  which the game's loader places and which therefore has no linked address, its location
+   *  `<module>:<section>+0x<offset>`. MEASURED from the build artifact, never typed from a name:
+   *  `test/real-manifests.test.ts` holds it against the map the row is read with.
+   *
+   *  The module stem is also its `objdiff.json` unit prefix, so a module the project splits into no
+   *  unit — 6 of Mario Party 4's 99 — can hold no row: the row would need `units` flags, and
+   *  `bench flags` refuses it with `objdiff.json has no unit compiled from …`. */
   addr: string;
   /** The build unit the function is compiled in: the source file its `sourceUrl` cites, and a key of the
    *  manifest's `units`. Written by `bench flags --write`. */
   unit: string;
   /** The digest of the function's target as `bench vendor` proved it equal to the function the project's
    *  linked ELF holds at `addr` (cases/rom-function.ts `targetDigest`). A target built with another
-   *  digest is not the game's function, and its row is refused. */
+   *  digest is not the game's function, and its row is refused.
+   *
+   *  For a row keyed by a REL MODULE LOCATION this pins the target's own bytes and NOT the game's:
+   *  the linked ELF holds no module's bytes, so `bench vendor` proves that row's module, section and
+   *  offset against the module ELF instead, and names the skipped ROM comparison in its output every
+   *  time. See cases/vendor.ts. */
   romDigest: string;
   /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
    *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
@@ -135,8 +145,46 @@ export interface VendoredManifest extends RealManifest {
   vendored: (sym: string) => { tuI: string; ctxI: string };
   /** sym → repo-relative path of the vendored context blob (for the row's ctxRef). */
   ctxPath: (sym: string) => string;
-  /** the project's vendored symbol map (names + declaration shapes), when it exposes an ELF */
-  symbols?: SymbolMap;
+  /** The vendored symbol map (names + declaration shapes) a row of `module` is read with: the
+   *  project's own for a row with a linked address (`undefined` module), and the REL module's —
+   *  its own symbols over the base ELF's globals — for a row in one. Undefined for a project that
+   *  exposes no ELF; THROWS for a module the vendoring did not write, because reading a module's
+   *  row with the project's map alone would publish different source silently. */
+  symbolsFor: (module: string | undefined) => SymbolMap | undefined;
+}
+
+/** Where `bench vendor` writes one map per REL module that has rows, under `tu/<project>/`. */
+export const MODULE_MAP_DIR = 'symbols';
+
+/** The vendored map blob a row of `module` is read from, inside the project's vendored dir. */
+export const vendoredMapFile = (dir: string, module: string | undefined): string =>
+  module === undefined ? join(dir, 'symbols.json.gz') : join(dir, MODULE_MAP_DIR, `${module}.json.gz`);
+
+/** The vendored symbol map (name/shape metadata derived from the project's ELFs at vendor time) a
+ *  row of `module` is read with, out of the project's vendored dir `dir`.
+ *
+ *  Undefined for a project that vendors no map at all — one without a `tools.asmlift.elf`, whose
+ *  rows run map-less as they always have. A project WITH a map but without the MODULE's THROWS
+ *  instead of falling back to it: a module's code refers to the module's own symbols, so a REL row
+ *  read with the base ELF's map alone would publish different source while looking like every
+ *  other row.
+ *
+ *  THE MODULE'S OWN FILE DECIDES FIRST, and the base map's absence is only ever an answer for a
+ *  base-map row. Asked the other way round, a dir holding `symbols/m416Dll.json.gz` and no
+ *  `symbols.json.gz` would answer "this project vendors no map" for m416Dll and run its rows
+ *  map-less — the quiet version of exactly the mix-up the throw below exists to prevent. */
+export function vendoredSymbols(project: string, dir: string, module: string | undefined): SymbolMap | undefined {
+  const path = vendoredMapFile(dir, module);
+  if (existsSync(path)) {
+    return symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')));
+  }
+  if (module === undefined || !existsSync(vendoredMapFile(dir, undefined))) {
+    return undefined; // the project vendors no map at all
+  }
+  throw new Error(
+    `${project}: rows live in module ${module}, but no map is vendored for it — ` +
+      `run \`pnpm bench vendor --project ${project}\``,
+  );
 }
 
 export const REAL_DIR = join(import.meta.dirname, '..', '..', 'dataset', 'real');
@@ -284,7 +332,9 @@ export function validateManifest(
       // identity: one address per row, and no two rows of a project at the same one
       if (typeof f.addr !== 'string' || !ADDR_PATTERN.test(f.addr)) {
         problems.push(
-          `${file}: ${JSON.stringify(f.sym)} "addr" must be the ELF address as 0x + 8 lowercase hex (got ${JSON.stringify(f.addr)})`,
+          `${file}: ${JSON.stringify(f.sym)} "addr" must be where the function is — the linked ELF address as ` +
+            `0x + 8 lowercase hex, or a REL module location <module>:<section>+0x<offset> ` +
+            `(got ${JSON.stringify(f.addr)})`,
         );
       } else if (addrs.has(f.addr)) {
         problems.push(
@@ -399,15 +449,15 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
     }
     return entry;
   };
-  // the project's vendored symbol map (name/shape metadata derived from its ELF at vendor
-  // time) — absent for projects without a tools.asmlift.elf, and rows then run as before
-  const symbolsPath = join(dir, 'symbols.json.gz');
-  const symbols = existsSync(symbolsPath)
-    ? symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(symbolsPath)).toString('utf8')))
-    : undefined;
+  const maps = new Map<string | undefined, SymbolMap | undefined>();
   return {
     ...man,
-    symbols,
+    symbolsFor: (module) => {
+      if (!maps.has(module)) {
+        maps.set(module, vendoredSymbols(man.project, dir, module));
+      }
+      return maps.get(module);
+    },
     vendored: (sym) => {
       const entry = entryOf(sym);
       return {

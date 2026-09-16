@@ -4,13 +4,19 @@
 // context header). The asmlift script is benchmark-grade: a `pnpm bench target` pre-step builds
 // the target object + a decomp.yaml carrying the benchmark's own compile command, then the
 // plain CLI decompiles the embedded input and --score-against ranks candidates against it.
-import type { FunctionResult } from '@asmlift/bench-schema';
+import { type FunctionResult, moduleOf } from '@asmlift/bench-schema';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { REAL_DIR, type RealManifest, loadCompleteManifests } from '../cases/manifests';
+import {
+  MODULE_MAP_DIR,
+  REAL_DIR,
+  type RealManifest,
+  loadCompleteManifests,
+  vendoredMapFile,
+} from '../cases/manifests';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
 import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 
@@ -25,17 +31,18 @@ function manifestFor(project: string): RealManifest | null {
 
 const mapShaCache = new Map<string, string | null>();
 /** sha256 of the DECOMPRESSED vendored symbol-map JSON — the map's identity across machines
- *  (the .gz bytes vary with compressor settings; the JSON is byte-stable by construction). */
-function vendoredMapSha(project: string): string | null {
-  let sha = mapShaCache.get(project);
+ *  (the .gz bytes vary with compressor settings; the JSON is byte-stable by construction). The
+ *  MAP THE ROW WAS READ WITH: for a row in a REL module, the module's, not the project's. */
+function vendoredMapSha(project: string, module: string | undefined): string | null {
+  const p = vendoredMapFile(join(REAL_DIR, 'tu', project), module);
+  let sha = mapShaCache.get(p);
   if (sha === undefined) {
-    const p = join(REAL_DIR, 'tu', project, 'symbols.json.gz');
     sha = existsSync(p)
       ? createHash('sha256')
           .update(gunzipSync(readFileSync(p)))
           .digest('hex')
       : null;
-    mapShaCache.set(project, sha);
+    mapShaCache.set(p, sha);
   }
   return sha;
 }
@@ -97,16 +104,27 @@ function symbolsNote(fn: FunctionResult): string {
     return '';
   }
   if (usesSymbolMap(fn)) {
-    const rel = `apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`;
-    const sha = vendoredMapSha(fn.project);
+    const module = moduleOf(fn.addr);
+    const blob = module === undefined ? 'symbols.json.gz' : `${MODULE_MAP_DIR}/${module}.json.gz`;
+    const rel = `apps/benchmark/dataset/real/tu/${fn.project}/${blob}`;
+    const sha = vendoredMapSha(fn.project, module);
     return `
-# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived
-# from the ELF its decomp.yaml names), vendored at ${rel}
+# SYMBOLS: this row ran WITH ${
+      module === undefined
+        ? "the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names)"
+        : `module ${module}'s symbol map (the module's own symbols over the\n# base ELF's globals — this function lives in a REL module, and its code names the module's\n# symbols)`
+    }, vendored at ${rel}
 #   sha256 of the decompressed map JSON: ${sha ?? 'unavailable (vendored blob not present)'}
 # Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);
 # step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —
 # the CLI loads the same map, so this run reproduces the row's named spellings. A missing
-# checkout/ELF warns and runs map-less (output may then differ from the row).
+# checkout/ELF warns and runs map-less (output may then differ from the row).${
+      module === undefined
+        ? ''
+        : `
+# Step 3 passes --module ${module}: the CLI then reads that module's ELF, which the build writes
+# beside the one decomp.yaml names, and places its sections instead of collapsing them onto 0x0.`
+    }
 PROJECT_PATH='/path/to/${manifestFor(fn.project)!.repoDir}'`;
   }
   return `
@@ -308,7 +326,12 @@ ${flagLine('--asm-data dump.txt', 'the data sections above (jump-table/const rec
 ${flagLine('--proto proto.json', 'the prototype hints above (callee arities / void-ness)')}`
       : ''
   }
-${flagLine('--config decomp.yaml', 'the compile command from step 1')}
+${flagLine('--config decomp.yaml', 'the compile command from step 1')}${
+    moduleOf(fn.addr) === undefined
+      ? ''
+      : `
+${flagLine(`--module ${moduleOf(fn.addr)}`, "the REL module this function lives in: its ELF is the row's symbol map")}`
+  }
 ${flagLine('--score-against target.o', 'rank the candidates, objdiff-score each; exit 0 only on byte-exact')}
 )
 # the checkout's own asmlift bin — the BUILT bundle, not the repo's TypeScript sources run

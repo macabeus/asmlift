@@ -8,6 +8,7 @@
 // the function the ROM holds exactly when it has that digest (`targetDigest`).
 //
 // ELF32 only, ARM and MIPS: the machines the real tier builds for.
+import { moduleOf } from '@asmlift/bench-schema';
 import { createHash } from 'node:crypto';
 
 const SHT_RELA = 4;
@@ -217,6 +218,16 @@ export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr
   }
   return { equal: false, detail: `object ${objBytes.length} B, ROM ${romBytes.length} B, equal over the shorter` };
 }
+
+/** The address in the project's linked ELF the ROM gate reads a row's function at.
+ *
+ *  A row keyed by a REL MODULE LOCATION has none, and gets null rather than an address parsed out
+ *  of a spelling that holds no address: a module is placed by the game's loader, the linked ELF
+ *  holds none of its bytes, and the module's own ELF holds them with its relocations unresolved —
+ *  which this gate, whose masks cover ARM and MIPS, cannot compare. Null so the caller refuses the
+ *  row by name instead of comparing against a NaN address. */
+export const romAddress = (addr: string): number | null =>
+  moduleOf(addr) === undefined ? Number.parseInt(addr, 16) : null;
 
 /** The digest of function `sym` in a relocatable object, the value `compareWithRom` records for a target it
  *  proves. Throws when the object does not define `sym`. */

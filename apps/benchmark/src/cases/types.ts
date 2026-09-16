@@ -16,7 +16,7 @@ export type Case = CaseFields & RowTier;
 interface CaseFields {
   id: string; // `${project}:${sym}:${toolchain}` — the readable row id (identity: bench-schema `rowIdentity`)
   sym: string;
-  addr?: string; // real tier: the function's ELF address — the row's identity
+  addr?: string; // real tier: the function's ELF address or REL module location — the row's identity
   aliases?: string[]; // real tier: earlier upstream names
   project: string; // "synthetic" | manifest project name
   language: 'c' | 'c++';

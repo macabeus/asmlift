@@ -12,6 +12,7 @@
 // than producing a wrong ELF, but the failure names the wrong thing. Hence the precondition
 // below, and `gmake` where there is one.
 import { loadDecompConfig } from '@asmlift/cli/config';
+import { moduleElfPath } from '@asmlift/cli/module-elf';
 import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -37,10 +38,36 @@ export type ElfResolution =
   | { elf: string; elfRel: string } // exists on disk (possibly after `make asmlift-elf`)
   | { elf: null; elfRel: string | null; reason: string };
 
-/** Resolve the declared ELF for the checkout at `root`; if it is not built and the Makefile
- *  has an `asmlift-elf` target, run it (logged). Never throws — the CALLER decides whether a
- *  missing ELF is a warn-and-skip (vendor) or a loud failure (fidelity). */
-export function resolveProjectElf(project: string, root: string): ElfResolution {
+/** Resolve the ELF a row of `module` is read with: the project's declared ELF, or — for a row in a
+ *  GameCube REL module — that module's own ELF, which the project's build writes beside it
+ *  (`moduleElfPath`). A module ELF is never DERIVED: `asmlift-elf` builds the one ELF decomp.yaml
+ *  names, and a module's `.plf` is an ordinary product of the project's build, so a missing one
+ *  says so and names the path.
+ *
+ *  Never throws — the CALLER decides whether a missing ELF is a warn-and-skip (vendor) or a loud
+ *  failure (fidelity). */
+export function resolveProjectElf(project: string, root: string, module?: string): ElfResolution {
+  const base = resolveDeclaredElf(project, root);
+  if (module === undefined || base.elf === null) {
+    return base;
+  }
+  const path = moduleElfPath(base.elf, module);
+  if (path === undefined) {
+    return base; // `module` names the base ELF itself, which IS its own symbol source
+  }
+  const elfRel = join(dirname(base.elfRel), module, `${module}.plf`);
+  return existsSync(path)
+    ? { elf: path, elfRel }
+    : {
+        elf: null,
+        elfRel,
+        reason: `module ${module} has no ELF at ${elfRel} — run \`pnpm bench setup --project ${project} --build\``,
+      };
+}
+
+/** The ELF `tools.asmlift.elf` names; if it is not built and the Makefile has an `asmlift-elf`
+ *  target, run it (logged). */
+function resolveDeclaredElf(project: string, root: string): ElfResolution {
   const loaded = loadDecompConfig(undefined, root);
   const elfRel = loaded?.config.tools?.asmlift?.elf;
   if (!elfRel) {

@@ -22,7 +22,7 @@ import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
@@ -40,6 +40,7 @@ import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
 import { type FlagsInput, resolveFlags } from './flags';
+import { moduleElfPath } from './module-elf';
 import {
   ObjectInputUnsupportedError,
   SymbolRequiredError,
@@ -318,15 +319,9 @@ async function loadProjectSymbolMap(
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
     // --module: the function lives in a REL module, so the map is the MODULE's, over the base
-    // ELF's globals. dtk writes each module's ELF beside the base one, at
-    // `<module>/<module>.plf`, and that layout is the whole location rule — a project's
-    // decomp.yaml says nothing about its modules.
-    //
-    // The DOL is one of the names `--module` takes, because dtk gives its units a prefix too
-    // (`main/`, `static/`) and that prefix is what the base ELF is named after. Naming it selects
-    // the base ELF, which IS its symbol source; only a REL module has a second file to find.
-    const dol = module !== undefined && module === basename(elfPath, extname(elfPath));
-    const modulePath = module === undefined || dol ? undefined : join(dirname(elfPath), module, `${module}.plf`);
+    // ELF's globals — `moduleElfPath` (module-elf.ts) is the layout rule that says where that
+    // module's ELF is, and answers undefined for the base ELF's own name.
+    const modulePath = module === undefined ? undefined : moduleElfPath(elfPath, module);
     if (modulePath !== undefined && !existsSync(modulePath)) {
       return failure({
         code: EXIT.unreadable,

@@ -12,6 +12,7 @@
 // This file works on bytes rather than through @gba-kit/debug-info because neither fact it needs is
 // in that package's surface: a symbol's SECTION (which base its value belongs to) and its BINDING
 // (which of a base ELF's symbols a module may be unioned with).
+import { basename, dirname, extname, join } from 'node:path';
 
 const ELF_MAGIC = 0x7f454c46;
 const ELFCLASS32 = 1;
@@ -27,8 +28,18 @@ const SYMENT = 16; // Elf32_Sym
 
 /** Bases are handed out on this stride, so a placed address reads as section · offset. A section
  *  larger than the stride simply takes the next multiple — the invariant is that no two sections
- *  overlap, never that the stride divides the base. */
-const STRIDE = 0x0100_0000;
+ *  overlap, never that the stride divides the base.
+ *
+ *  Exported because it is the only thing that makes a PLACED address readable: every base is a
+ *  multiple of it, so `placed % PLACEMENT_STRIDE` is the symbol's offset in its own section as long
+ *  as no section is larger than the stride. The largest allocated section measured over both
+ *  GameCube checkouts is Animal Crossing `foresta.plf`'s `.data` at 11,400,440 B — a margin of
+ *  1.47×, not a comfortable one (Mario Party 4's largest, `m450Dll.plf`'s `.text` at 170,428 B, is
+ *  the figure to quote only for Mario Party 4). A section that does outgrow the stride takes the
+ *  next multiple, so the readback then answers a WRONG offset rather than a colliding address, and
+ *  the benchmark's `addr` gate fails the row instead of admitting it. A reader that must relate a
+ *  module map's keys back to a module location — that gate — needs this. */
+export const PLACEMENT_STRIDE = 0x0100_0000;
 /** Placement has to stay inside a 32-bit address; a module needing more sections than this has
  *  outgrown the scheme and gets an error rather than a wrapped address. */
 const LIMIT = 0xff00_0000;
@@ -97,6 +108,22 @@ function readElf32(bytes: Uint8Array): Elf32 | undefined {
   return { buf, littleEndian, type: u16(0x10), sections };
 }
 
+/** WHERE A MODULE'S ELF IS, given the base ELF beside it: dtk writes each module at
+ *  `<directory of the base ELF>/<module>/<module>.plf`, and that layout is the whole location
+ *  rule — a project's decomp.yaml says nothing about its modules.
+ *
+ *  Undefined when `module` names the BASE ELF itself. dtk gives the DOL's units a prefix too
+ *  (`main/`, `static/`), and the base ELF is named after it, so that prefix is a module name a
+ *  caller may hold; it selects the base ELF, which IS its own symbol source.
+ *
+ *  One rule, one home: the CLI's `--module` and the benchmark's REL rows resolve the same module
+ *  through this, so a project laid out one way cannot answer them differently. */
+export function moduleElfPath(baseElfPath: string, module: string): string | undefined {
+  return module === basename(baseElfPath, extname(baseElfPath))
+    ? undefined
+    : join(dirname(baseElfPath), module, `${module}.plf`);
+}
+
 /** Allocated sections that hold something. An EMPTY allocated section also sits at 0 in a `.plf`,
  *  but it can hold no symbol, so it neither collides nor needs a base. */
 const placeable = (elf: Elf32): Section[] => elf.sections.filter((s) => (s.flags & SHF_ALLOC) !== 0 && s.size > 0);
@@ -151,7 +178,7 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
   const u16 = (o: number) => (littleEndian ? out.readUInt16LE(o) : out.readUInt16BE(o));
 
   const base = new Map<number, number>();
-  let next = STRIDE;
+  let next = PLACEMENT_STRIDE;
   elf.sections.forEach((s, i) => {
     if ((s.flags & SHF_ALLOC) === 0 || s.size === 0) {
       return;
@@ -161,7 +188,7 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
     }
     base.set(i, next);
     put32(s.at + 12, next); // sh_addr
-    next = Math.ceil((next + s.size) / STRIDE) * STRIDE;
+    next = Math.ceil((next + s.size) / PLACEMENT_STRIDE) * PLACEMENT_STRIDE;
   });
 
   for (const s of elf.sections) {
@@ -183,6 +210,55 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
  *  the map keys it at. FUNC values carry a Thumb low bit that @gba-kit/debug-info clears, and the
  *  map is keyed by what that reader produced, so the same normalization has to happen here. */
 export const symbolKey = (name: string, address: number): string => `${(address >>> 0).toString(16)}\0${name}`;
+
+/** Where a module ELF puts a FUNCTION: the section that holds it and its offset within that
+ *  section — the two halves of a `<module>:<section>+0x<offset>` row identity that a symbol MAP
+ *  cannot answer, because placement records a section INDEX and not a name.
+ *
+ *  Read straight off the UNPLACED `.plf`, where every allocated section sits at 0 and so every
+ *  `st_value` already IS the section-relative offset. A name maps to a LIST: Animal Crossing's
+ *  `foresta` holds 659 names at more than one `.text` offset (of 16,051), which is exactly why the
+ *  offset is part of the identity and the name is not.
+ *
+ *  Empty for anything that is not a relocatable ELF32 — the caller names the file. */
+export function moduleFunctionLocations(bytes: Uint8Array): Map<string, { section: string; offset: number }[]> {
+  const out = new Map<string, { section: string; offset: number }[]>();
+  const elf = readElf32(bytes);
+  if (!elf || elf.type !== ET_REL) {
+    return out;
+  }
+  const { buf, littleEndian } = elf;
+  const u32 = (o: number) => (littleEndian ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const u16 = (o: number) => (littleEndian ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+  for (const s of elf.sections) {
+    if (s.type !== SHT_SYMTAB) {
+      continue;
+    }
+    const strings = elf.sections[s.link]?.offset ?? 0;
+    for (let at = s.offset; at + SYMENT <= s.offset + s.size; at += SYMENT) {
+      const info = buf[at + 12];
+      if ((info & 0xf) !== STT_FUNC) {
+        continue;
+      }
+      const shndx = u16(at + 14);
+      const section = elf.sections[shndx];
+      if (shndx === SHN_UNDEF || shndx >= SHN_LORESERVE || section === undefined) {
+        continue;
+      }
+      if ((section.flags & SHF_ALLOC) === 0) {
+        continue;
+      }
+      const nameAt = strings + u32(at);
+      const end = buf.indexOf(0, nameAt);
+      const name = buf.toString('latin1', nameAt, end === -1 ? buf.length : end);
+      if (name === '') {
+        continue;
+      }
+      out.set(name, [...(out.get(name) ?? []), { section: section.name, offset: u32(at + 4) }]);
+    }
+  }
+  return out;
+}
 
 /** The {@link symbolKey}s of an ELF's GLOBAL-binding symbols: the ones another object may refer to,
  *  and so the only ones a module's map inherits from the base ELF it links against.

@@ -80,11 +80,22 @@ describe('validateManifest: row identity', () => {
     expect(p.join('\n')).toMatch(/cites Dream-Atelier\/kl-eod-decomp, not this manifest's repo macabeus\/fakeproj/);
   });
 
-  test('an address must be spelled 0x + 8 lowercase hex, as the symbol map keys it', () => {
-    for (const bad of [undefined, '0800045c', '0x0800045C', '0x800045c', 0x0800045c]) {
+  test('an addr is a linked address (0x + 8 lowercase hex) or a REL module location', () => {
+    for (const bad of [undefined, '0800045c', '0x0800045C', '0x800045c', 0x0800045c, 'm416Dll:.text+0x1f20']) {
       const p = validateManifest({ ...base, functions: [fn('f', bad)] }, 'x.json');
-      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"addr" must be the ELF address/);
+      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"addr" must be where the function is/);
     }
+    // a module location is a row identity like any other — no complaint about `addr`
+    const ok = validateManifest({ ...base, functions: [fn('f', 'm416Dll:.text+0x00001f20')] }, 'x.json');
+    expect(ok.join('\n')).not.toMatch(/"addr"/);
+  });
+
+  test('two rows of one project in one module at one offset are one function listed twice', () => {
+    const p = validateManifest(
+      { ...base, functions: [fn('f', 'm416Dll:.text+0x00001f20'), fn('g', 'm416Dll:.text+0x00001f20')] },
+      'x.json',
+    );
+    expect(p.join('\n')).toMatch(/shares addr m416Dll:\.text\+0x00001f20/);
   });
 
   test('two rows of one project at the same address are one function listed twice', () => {

@@ -13,7 +13,14 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { runCli } from '../../src/main';
-import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey } from '../../src/module-elf';
+import {
+  assertPlaced,
+  globalSymbolKeys,
+  moduleElfPath,
+  moduleFunctionLocations,
+  placeModuleSections,
+  symbolKey,
+} from '../../src/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '../../src/symbols-provider';
 
 const ET_REL = 1;
@@ -158,6 +165,20 @@ const write = (name: string, bytes: Buffer): string => {
   return path;
 };
 
+describe('moduleElfPath — the layout rule the CLI and the benchmark share', () => {
+  test("a module's ELF sits beside the base ELF, at <module>/<module>.plf", () => {
+    expect(moduleElfPath('/p/build/GMPE01_00/main.elf', 'm416Dll')).toBe('/p/build/GMPE01_00/m416Dll/m416Dll.plf');
+    expect(moduleElfPath('/p/build/GAFE01_00/static.elf', 'foresta')).toBe('/p/build/GAFE01_00/foresta/foresta.plf');
+  });
+
+  test("the base ELF's own name names no module: the base ELF IS its symbol source", () => {
+    // dtk prefixes the DOL's units too (`main/`, `static/`), so that prefix is a name a caller may
+    // hold — and there is no build/main/main.plf for it to look for.
+    expect(moduleElfPath('/p/build/GMPE01_00/main.elf', 'main')).toBeUndefined();
+    expect(moduleElfPath('/p/build/GAFE01_00/static.elf', 'static')).toBeUndefined();
+  });
+});
+
 describe('assertPlaced — an unplaced relocatable ELF is refused', () => {
   test('a module .plf, whose allocated sections all sit at 0, is refused by name and address', () => {
     expect(() => assertPlaced(modulePlf(), '/p/m416Dll.plf')).toThrow(
@@ -227,6 +248,44 @@ describe('placeModuleSections — each section gets a base of its own', () => {
 
   test('a linked ELF is not a module ELF', () => {
     expect(() => placeModuleSections(dolElf(), '/p/main.elf')).toThrow(/a module ELF is a RELOCATABLE ELF32/);
+  });
+});
+
+// The SECTION half of a `<module>:<section>+0x<offset>` identity exists nowhere else: a placed map
+// records a section INDEX, so only the module ELF can say `.text`. This is what `bench vendor`
+// proves a REL row against.
+describe('moduleFunctionLocations — where a module puts a function', () => {
+  test('a function is named by its section and its offset within it', () => {
+    const at = moduleFunctionLocations(modulePlf());
+    expect(at.get('ObjectSetup')).toEqual([{ section: '.text', offset: 0x0 }]);
+    expect(at.get('_prolog')).toEqual([{ section: '.text', offset: 0x40 }]);
+  });
+
+  test('DATA symbols are not functions, so a row can never be keyed at one', () => {
+    const at = moduleFunctionLocations(modulePlf());
+    expect(at.has('stageSprId')).toBe(false);
+    expect(at.has('timerSec')).toBe(false);
+  });
+
+  // Animal Crossing's `foresta` holds 659 of its 16,051 `.text` names at more than one offset, so
+  // a name maps to a LIST — which is the whole reason the offset is part of the identity.
+  test('a name held at several offsets keeps every one of them', () => {
+    const twice = elf32(
+      ET_REL,
+      [{ name: '.text', size: 0x200 }],
+      [
+        { name: 'mSM_move_End', value: 0x20, shndx: 1 },
+        { name: 'mSM_move_End', value: 0x140, shndx: 1 },
+      ],
+    );
+    expect(moduleFunctionLocations(twice).get('mSM_move_End')).toEqual([
+      { section: '.text', offset: 0x20 },
+      { section: '.text', offset: 0x140 },
+    ]);
+  });
+
+  test('a linked ELF is not a module: it answers nothing rather than answering wrongly', () => {
+    expect(moduleFunctionLocations(dolElf()).size).toBe(0);
   });
 });
 
