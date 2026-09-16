@@ -34,8 +34,16 @@ const ppcObjdump = () => process.env.ASMLIFT_PPC_OBJDUMP ?? 'powerpc-eabi-objdum
 
 // PPC keeps `-r`: an unresolved `bl` encodes a placeholder offset, so the callee NAME lives
 // only in the interleaved relocation lines the frontend parses.
+//
+// `-M gekko` names the MACHINE. The only PowerPC asmlift reads is CodeWarrior's GameCube/Wii
+// output, and the Gekko (750CL) paired-single opcodes share encodings with POWER's VSX/AltiVec:
+// without the flag objdump's generic PowerPC dialect prints a float callee-save `psq_st f31,…`
+// as `xscmpeqdp vs31,…` and its `psq_l` as `lq` — a decode that is not merely unmodelled but
+// WRONG, so the frontend would lift a plausible instruction at the wrong operands. It is the
+// same machine `-proc gekko` compiles for, and what every GC/Wii decomp project disassembles
+// with (dtk's `powerpc-eabi-objdump -M gekko`).
 const MIPS_DISASM_FLAGS = ['-d', '--no-show-raw-insn'];
-const PPC_DISASM_FLAGS = ['-d', '-r', '--no-show-raw-insn'];
+const PPC_DISASM_FLAGS = ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'];
 
 interface ObjdumpChoice {
   bin: string;
