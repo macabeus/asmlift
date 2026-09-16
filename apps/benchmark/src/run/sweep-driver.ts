@@ -22,14 +22,16 @@
 // a bare `git worktree add` plus `pnpm install` is a complete base tree for this purpose.
 //
 // THE HAZARD THIS SHAPE HAS, said out loud: the base tree's modules are loaded into a process whose
-// entry came from the head tree. Nothing static crosses (see the imports below — `node:` only), so
-// there is no shared module instance to contaminate; what CAN cross is an environment variable, and
+// entry came from the head tree. Nothing static crosses at runtime (see the imports below — `node:`
+// only; the rest are `import type`, which is erased), so there is no shared module instance to
+// contaminate; what CAN cross is an environment variable, and
 // both sides inherit the same one deliberately, because a toolchain that resolves on one side and
 // not the other is a difference this command must NOT attribute to the code.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+import type { VendoredManifest } from '../cases/manifests';
 import type { SweepRecord } from './sweep';
 
 export interface SweepSelection {
@@ -447,7 +449,12 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
   return out;
 }
 
-/** The project's WHOLE vendored symbol map, for `--asm-dir --project`.
+/** The project's BASE vendored symbol map, for `--asm-dir --project`.
+ *
+ *  WHICH map, now that a project can vendor more than one: the base ELF's — `symbolsFor(undefined)`
+ *  — and never a REL module's. `--asm-dir` sweeps loose `.s` files, which carry no module (they are
+ *  the functions that are NOT rows), so there is no module to ask for; a GameCube project's REL
+ *  functions are simply out of this mode's reach until a caller can name their module.
  *
  *  Off `loadManifests()` and deliberately NOT off a `realCases()` row: every row's `symbols` has
  *  already had that row's own definition stripped (`asIfUndecompiled`, the real tier's
@@ -456,14 +463,19 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
  *  at the call site instead, which is the rule the rule exists to state: a function being lifted
  *  does not get to read its own map entry. */
 function projectSymbols(m: Awaited<ReturnType<typeof treeModules>>, project: string): unknown {
-  const man = m.manifests.loadManifests().find((x: { project: string }) => x.project === project);
+  // TYPED at this seam on purpose: `treeModules` dynamic-imports by path, so every module it
+  // returns is `any` and a renamed manifest field goes unnoticed by `pnpm typecheck` until the
+  // command throws at runtime. The annotation is erased, so nothing crosses into the base tree.
+  const manifests = m.manifests.loadManifests() as VendoredManifest[];
+  const man = manifests.find((x) => x.project === project);
   if (man === undefined) {
     throw new Error(`--project ${project}: no such manifest project`);
   }
-  if (man.symbols === undefined) {
+  const map = man.symbolsFor(undefined);
+  if (map === undefined) {
     throw new Error(`--project ${project}: this project exposes no vendored symbol map`);
   }
-  return man.symbols;
+  return map;
 }
 
 /** Subprocess entry: `tsx sweep-driver.ts <root> <out.json> <selection.json>`. Used only for the
