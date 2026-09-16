@@ -15,6 +15,10 @@ export interface RealProjectCfg {
   project: string;
   toolchain: ToolchainId;
   root: string; // project root (cwd for the preprocessor include resolution)
+  /** the build unit this TU belongs to, as the manifest keys its `units` by. A project's build can
+   *  run the compiler under a per-unit WRAPPER (dtk's `sjiswrap.exe`), and a unit preprocessed
+   *  without it is not the text that build compiled. */
+  unit: string;
   cppIncludes: string[]; // e.g. ["-nostdinc","-I","tools/agbcc/include","-iquote","include"]
   headers: string[]; // project headers to #include (in order)
   defines?: string[]; // extra -D macros for cpp

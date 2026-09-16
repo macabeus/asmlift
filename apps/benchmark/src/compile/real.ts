@@ -1,5 +1,6 @@
-// Real-tier compilation dispatch: ONE table from toolchain id to its compile module. An
-// unsupported toolchain is a TYPED null in the table (see mwcc.ts), not a default-case throw.
+// Real-tier compilation dispatch: ONE table from toolchain id to its compile module. The table is
+// EXHAUSTIVE over `ToolchainId`, so a new toolchain is a compile error here rather than a row that
+// fails at run time.
 //
 // Design: the dataset VENDORS each function's preprocessed translation unit (cases/vendor.ts) —
 // the compiler's actual input, frozen — so the runner needs no project checkouts. The target and every
@@ -19,12 +20,12 @@ import { ctxTypedefPrelude } from './util';
 
 export type { RealProjectCfg } from './types';
 
-const REAL_COMPILERS: Record<ToolchainId, RealCompile | null> = {
+const REAL_COMPILERS: Record<ToolchainId, RealCompile> = {
   agbcc: agbccReal,
   'ido7.1': idoReal,
   'gcc2.7.2kmc': kmcReal,
   'gcc2.7.2': gcc272Real,
-  mwcc_242_81: mwccReal, // typed "not wired" — see compile/mwcc.ts
+  mwcc_242_81: mwccReal,
 };
 
 /** Build the full translation unit: project #includes + any per-function prelude + the function.
@@ -35,11 +36,7 @@ export function makeTU(cfg: RealProjectCfg, prependC: string, funcC: string): st
 }
 
 export function realCompilerFor(toolchain: ToolchainId): RealCompile {
-  const rc = REAL_COMPILERS[toolchain];
-  if (!rc) {
-    throw new Error(`real tier not wired for ${toolchain} (add it to REAL_COMPILERS in compile/real.ts)`);
-  }
-  return rc;
+  return REAL_COMPILERS[toolchain];
 }
 
 /** Compile a vendored (preprocessed) target TU → scoring target + disassembly. The real tier's
