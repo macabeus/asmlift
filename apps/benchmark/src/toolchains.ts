@@ -17,6 +17,7 @@ import type { ToolchainId } from '@asmlift/bench-schema';
 import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { type CanonicalToolchainId, type ResolvedTarget, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
+  MWCC_BUILDS,
   type MwccToolchainId,
   agbccAvailable,
   assembleTarget,
@@ -87,11 +88,16 @@ export interface Toolchain {
 }
 
 /** One adapter per CodeWarrior build — one image, one asm format, one entry shape; only the
- *  directory mounted at /mwcc and the version in the label differ. */
-const mwccToolchain = (id: MwccToolchainId, label: string): Toolchain => ({
+ *  directory mounted at /mwcc and the version in the label differ.
+ *
+ *  ONE VERSION SCHEME, both halves said. `version` is the CodeWarrior release the id spells
+ *  (`mwcc_242_81` = 2.4.2 build 81), which is what apps/web labels these with; the pack directory
+ *  beside it — what a dtk project's `mw_version` names — comes from `MWCC_BUILDS`, so the two
+ *  numbers for one build cannot drift apart here. */
+const mwccToolchain = (id: MwccToolchainId, version: string): Toolchain => ({
   id,
   isa: 'ppc',
-  label,
+  label: `CodeWarrior ${version} / PowerPC (${MWCC_BUILDS[id]})`,
   asmKind: 'objdump',
   available: () => ppcDockerAvailable(id),
   buildTarget: (refC, sym, cflags, lang) =>
@@ -136,9 +142,9 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     available: () => gcc272Available(),
     buildTarget: (refC, sym, cflags) => compileMipsGcc272Target(refC, sym, cflags),
   },
-  mwcc_242_81: mwccToolchain('mwcc_242_81', 'CodeWarrior 1.3.2 / PowerPC (GC)'),
-  mwcc_233_163n: mwccToolchain('mwcc_233_163n', 'CodeWarrior 1.2.5n / PowerPC (GC)'),
-  mwcc_247_107: mwccToolchain('mwcc_247_107', 'CodeWarrior 2.6 / PowerPC (GC)'),
+  mwcc_242_81: mwccToolchain('mwcc_242_81', '2.4.2'),
+  mwcc_233_163n: mwccToolchain('mwcc_233_163n', '2.3.3'),
+  mwcc_247_107: mwccToolchain('mwcc_247_107', '2.4.7'),
 };
 
 export function availableToolchains(): Toolchain[] {

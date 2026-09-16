@@ -1,8 +1,8 @@
 # The decomp.yaml for GameCube/CodeWarrior GC/1.2.5n (CodeWarrior 2.3.3 build 163n) — a working
-# example of a `compiler` command for a
-# Win32 compiler: `mwcceppc.exe` runs through the wibo shim inside a one-shot `docker run`,
-# with the (proprietary, never-committed) compiler dir bind-mounted and the candidate's
-# directory mounted at /work, file names rebased with $(dirname)/$(basename).
+# example of a `compiler` command for a Win32 compiler: `mwcceppc.exe` runs through the wibo
+# shim inside a one-shot `docker run`, with the (proprietary, never-committed) compiler dir
+# bind-mounted and the candidate's directory mounted at /work, file names rebased with
+# $(dirname)/$(basename).
 #
 # {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce, and
 # {{cflags}} is where the codegen flags go: the benchmark fills it with each function's flags.
@@ -13,10 +13,11 @@
 #   $ASMLIFT_PPC_IMAGE → a linux/386 image bundling the wibo shim (this repo builds one
 #                        from packages/toolchains/ppc-docker)
 #   $ASMLIFT_WIBO      → wibo (the Win32-API shim binary inside that image)
-#   {{cflags}}         → your build's flags (Pikmin's `-O4,p … -lang=c++`), which
-#                        asmlift reads off the command, or keep it and pass --cflags. This toolchain has NO canonical
-#                        flags — it compiles no synthetic row, and every row of it names the flags
-#                        its own build uses — so a run that gives none anywhere is refused.
+#   {{cflags}}         → your build's flags (Pikmin's `-O4,p … -lang=c++`), which asmlift
+#                        reads off the command, or keep it and pass --cflags. This toolchain has NO
+#                        canonical flags — it compiles no synthetic row, and every row of it
+#                        names the flags its own build uses — so a run that gives none
+#                        anywhere is refused.
 # (The variables exist only to keep machine paths out of this repo — the benchmark fills
 # them in when it runs.)
 #

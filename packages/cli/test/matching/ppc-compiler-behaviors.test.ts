@@ -41,12 +41,14 @@ const BUDGET = 300_000;
 // defines a probe needs none of. `mwcc_242_81`'s are its canonical set, the flags its committed
 // probes and every synthetic row already use.
 const CANONICAL = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-/** Pikmin, `GC/1.2.5n` — `-O4,p`, and the only `-lang=c++` tree in the three projects (the probes
- *  are C, so the language word is the one thing left out). */
+/** Pikmin, `GC/1.2.5n` — `-O4,p`, and the only `-lang=c++` tree in the three projects. The probe
+ *  sources are C, and CodeWarrior reads them the same either way (both probes give the same
+ *  reading with and without the word), but every Pikmin row compiles with it, so the set stays the
+ *  set its rows use rather than one with the dialect quietly dropped. */
 const PIKMIN = [
   ...['-proc', 'gekko', '-align', 'powerpc', '-enum', 'int', '-fp', 'hardware'],
   ...['-Cpp_exceptions', 'off', '-O4,p', '-inline', 'auto', '-RTTI', 'off'],
-  ...['-fp_contract', 'off', '-str', 'reuse', '-RTTI', 'on', '-char', 'unsigned'],
+  ...['-fp_contract', 'off', '-str', 'reuse', '-RTTI', 'on', '-char', 'unsigned', '-lang=c++'],
 ];
 /** Mario Party 4's DOL `Game` lib, `GC/2.6`. Its flags really do name two levels — `-O4,p` early
  *  and `-O0,p` late — and the later one is what the compiler acts on, so dropping the tail is this
