@@ -253,13 +253,19 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      Caught by reading this list before publishing a run, which is what it is for.
   // v18: the agbcc candidate compile names its translation unit `c.c`. The name is part of the
   //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
+  // v19: a C++ row's candidate compiles with C linkage, and the context ladder falls back to plain
+  //      C for a candidate the row's own dialect refuses (compile/real.ts). `lang` is in the key,
+  //      so no C entry moves — but a c++ entry written before the fallback records a `noncompile`
+  //      the ladder now scores, which is how this was found: `pikmin:getMainStickX__10ControllerFv`
+  //      replayed `noncompile` out of a warm store while a direct `scoreM2c` on the same arguments
+  //      returned MATCH 0/14.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 18,
+      v: 19,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),
