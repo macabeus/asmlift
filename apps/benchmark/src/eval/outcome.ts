@@ -35,10 +35,13 @@ const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   // express in C (soft-float helper returns); the same cannot-express signal as M2C_CARRY
   { name: 'M2C bitwise cast', re: /\(bitwise / },
   // m2c's unknown-TYPE placeholder `?` — its explicit needs-context signal. Anchored to m2c's
-  // declaration shapes (`extern ?`, line-start decls, right after `(`/`{`/`,`); a single-line
-  // ternary cannot match these anchors, and m2c's formatter never wraps a ternary to line start.
+  // declaration shapes (`extern ?`, a declaration opening its line, right after `(`/`{`/`,`); a
+  // single-line ternary cannot match these anchors, and m2c's formatter never wraps a ternary to
+  // line start. A declaration opening its line may be indented — a local at the top of a body —
+  // and may follow the `/* 0x04 */` offset comment m2c writes before each field of a struct it
+  // inferred, the way its C++ target prints the class a member function's `this` points at.
   { name: '? placeholder', re: /extern \?/ },
-  { name: '? placeholder', re: /^\? /m },
+  { name: '? placeholder', re: /^[ \t]*(?:\/\* 0x[0-9A-Fa-f]+ \*\/[ \t]*)?\? /m },
   { name: '? placeholder', re: /\b(?:static|extern|const) \? / },
   { name: '? placeholder', re: /\(\? *\*/ },
   { name: '? placeholder', re: /[({,] *\? [A-Za-z_*]/ },
