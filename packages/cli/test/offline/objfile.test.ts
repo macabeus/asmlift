@@ -4,7 +4,7 @@
 import { PPC_MWCC } from '@asmlift/core/target';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterAll, expect, test } from 'vitest';
 
 import { type ObjInput, runCli } from '../../src/main';
@@ -111,39 +111,50 @@ function echoObjdump(): string {
   return path;
 }
 
-const objectAt = (name: string, code: readonly Buffer[]): string => {
+const objectAt = (name: string, code: readonly Buffer[], addrs?: readonly number[]): string => {
   const path = join(scratch(), name);
   writeFileSync(
     path,
     multiTextObject(
       code,
       code.map(() => 'ext'),
+      { addrs },
     ),
   );
   return path;
 };
 
+const TWO = [Buffer.from('AAAAAAAA'), Buffer.from('BBBBBBBB')];
+
 test("several code sections: the symbol's own section is disassembled, not the whole object", () => {
   const objdump = echoObjdump();
-  const many = objectAt('many.o', [Buffer.from('AAAA'), Buffer.from('BBBB')]);
+  const many = objectAt('many.o', TWO);
   const dumped = disasmObject(many, PPC_MWCC, objdump, 'f1').trim();
-  expect(dumped).not.toBe(many);
-  expect(dumped.endsWith('.f1.o')).toBe(true);
+  expect(dumped).not.toBe(many); // a scoped copy, in a scratch directory of its own
+  expect(basename(dumped)).toBe('many.o'); // under the name the user passed, for objdump's header
 });
 
 test('one code section: objdump still reads the object itself, byte for byte as before', () => {
   const objdump = echoObjdump();
-  const one = objectAt('one.o', [Buffer.from('AAAA')]);
+  const one = objectAt('one.o', [Buffer.from('AAAAAAAA')]);
   expect(disasmObject(one, PPC_MWCC, objdump, 'f0').trim()).toBe(one);
   expect(disasmObject(one, PPC_MWCC, objdump).trim()).toBe(one); // no --name needed
 });
 
-test('several code sections and no --name: refused, naming the remedy', async () => {
-  const many = objectAt('nameless.o', [Buffer.from('AAAA'), Buffer.from('BBBB')]);
+test('several code sections sharing addresses and no --name: refused as usage, naming the remedy', async () => {
+  const many = objectAt('nameless.o', TWO);
   const r = await runCli([many, '--target', 'mwcc_242_81'], () => new Uint8Array(readFileSync(many)));
-  expect(r.code).toBe(66);
-  expect(r.stderr).toContain('several code sections');
+  expect(r.code).toBe(64); // a missing flag, not an unreadable file
+  expect(r.stderr).toContain('2 code sections sharing addresses');
   expect(r.stderr).toContain('--name');
+  expect(r.stderr).not.toContain('cannot disassemble'); // objdump was never run
+  expect(r.stderr.match(new RegExp(many.replace(/[.]/g, '[.]'), 'g'))).toHaveLength(1);
+});
+
+test('several code sections at distinct addresses and no --name: read whole, as every label is unique', () => {
+  const objdump = echoObjdump();
+  const linked = objectAt('linked.elf', TWO, [0x8000_0400, 0x8000_0500]);
+  expect(disasmObject(linked, PPC_MWCC, objdump).trim()).toBe(linked);
 });
 
 test('several code sections and a --name the object does not define: refused, never answered', () => {

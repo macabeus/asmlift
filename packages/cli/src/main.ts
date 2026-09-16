@@ -40,7 +40,13 @@ import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
 import { type FlagsInput, resolveFlags } from './flags';
-import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
+import {
+  ObjectInputUnsupportedError,
+  SymbolRequiredError,
+  asmDataForObject,
+  disasmObject,
+  isElfObject,
+} from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // TYPE-ONLY, and it must stay that way: `./rank` pulls in objdiff-wasm, which this module loads
@@ -136,7 +142,7 @@ MIPS/PPC ELF object.
 Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 
   --name           select the function in multi-function input (default: detected;
-                   required for an object whose code lives in several sections)
+                   required for an object whose code sections share addresses)
   --cflags         the flags your build compiles this function's file with; they
                    fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
@@ -499,6 +505,10 @@ export async function runCli(
     } catch (e) {
       if (e instanceof ObjectInputUnsupportedError) {
         return { code: EXIT.gaps, stdout: '', stderr: `asmlift: [declined] ${e.message}\n` };
+      }
+      if (e instanceof SymbolRequiredError) {
+        // a missing flag, not an unreadable file: objdump was never run
+        return refuse(e.message);
       }
       return {
         code: EXIT.unreadable,

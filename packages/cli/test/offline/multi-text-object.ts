@@ -15,6 +15,7 @@ interface Sym {
   name: string;
   shndx: number;
   value: number;
+  size: number;
 }
 interface Sec {
   name: string;
@@ -23,12 +24,26 @@ interface Sec {
   info: number;
   link: number;
   body: Buffer;
+  addr?: number;
   entsize?: number;
+}
+
+/** Where a code section's function sits inside it — nonzero, as it is in a real CodeWarrior object,
+ *  whose sections hold several functions each. */
+const FUNC_AT = 4;
+
+interface Shape {
+  /** Where each code section starts. Default: all at 0 — the shape CodeWarrior emits, and the one a
+   *  name-keyed read of a whole-object disassembly cannot tell apart. */
+  addrs?: readonly number[];
+  /** What each code section's function is called. Default: `f0`, `f1`, … */
+  names?: readonly string[];
 }
 
 /** A big-endian ELF32 relocatable holding `code.length` sections all named `.text`, one `.rela.text`
  *  per code section, a `.rodata`, and a symbol table naming each code section's function. */
-export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly string[]): Buffer {
+export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly string[], shape: Shape = {}): Buffer {
+  const addrs = shape.addrs ?? code.map(() => 0);
   const strings = (items: readonly string[]) => {
     const at = new Map<string, number>([['', 0]]);
     const parts = [Buffer.from([0])];
@@ -43,7 +58,7 @@ export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly s
     return { at: (s: string) => at.get(s) ?? 0, bytes: Buffer.concat(parts) };
   };
 
-  const funcs = code.map((_, i) => `f${i}`);
+  const funcs = shape.names ?? code.map((_, i) => `f${i}`);
   const symNames = ['', ...funcs, 'roData', 'ext'];
   const str = strings(symNames);
   // section layout: NULL, (.text, .rela.text) per code section, .rodata, .symtab, .strtab, .shstrtab
@@ -54,15 +69,16 @@ export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly s
   const shstrtabAt = strtabAt + 1;
 
   const syms: Sym[] = [
-    { name: '', shndx: 0, value: 0 },
-    ...funcs.map((f, i) => ({ name: f, shndx: textAt(i), value: 0 })),
-    { name: 'roData', shndx: rodataAt, value: 0 },
-    { name: 'ext', shndx: 0, value: 0 },
+    { name: '', shndx: 0, value: 0, size: 0 },
+    ...funcs.map((f, i) => ({ name: f, shndx: textAt(i), value: FUNC_AT, size: code[i].length - FUNC_AT })),
+    { name: 'roData', shndx: rodataAt, value: 1, size: 1 },
+    { name: 'ext', shndx: 0, value: 0, size: 0 },
   ];
   const symtab = Buffer.alloc(16 * syms.length);
   syms.forEach((s, i) => {
     symtab.writeUInt32BE(str.at(s.name), i * 16);
     symtab.writeUInt32BE(s.value, i * 16 + 4);
+    symtab.writeUInt32BE(s.size, i * 16 + 8);
     symtab.writeUInt8(i === 0 ? 0 : 2, i * 16 + 12); // STT_FUNC/STT_OBJECT is immaterial here
     symtab.writeUInt16BE(s.shndx, i * 16 + 14);
   });
@@ -77,7 +93,7 @@ export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly s
   const sections: Sec[] = [
     { name: '', type: 0, flags: 0, info: 0, link: 0, body: Buffer.alloc(0) },
     ...code.flatMap((body, i) => [
-      { name: '.text', type: SHT_PROGBITS, flags: SHF_ALLOC | SHF_EXECINSTR, info: 0, link: 0, body },
+      { name: '.text', type: SHT_PROGBITS, flags: SHF_ALLOC | SHF_EXECINSTR, info: 0, link: 0, body, addr: addrs[i] },
       {
         name: '.rela.text',
         type: SHT_RELA,
@@ -121,6 +137,7 @@ export function multiTextObject(code: readonly Buffer[], relocSymbol: readonly s
     out.writeUInt32BE(shstr.at(s.name), sh);
     out.writeUInt32BE(s.type, sh + 4);
     out.writeUInt32BE(s.flags, sh + 8);
+    out.writeUInt32BE(s.addr ?? 0, sh + 12);
     out.writeUInt32BE(offsets[i], sh + 16);
     out.writeUInt32BE(s.body.length, sh + 20);
     out.writeUInt32BE(s.link, sh + 24);
@@ -143,6 +160,7 @@ export function readBack(bytes: Uint8Array) {
       name: b.readUInt32BE(sh),
       type: b.readUInt32BE(sh + 4),
       flags: b.readUInt32BE(sh + 8),
+      addr: b.readUInt32BE(sh + 12),
       offset: b.readUInt32BE(sh + 16),
       size: b.readUInt32BE(sh + 20),
       link: b.readUInt32BE(sh + 24),
@@ -155,11 +173,12 @@ export function readBack(bytes: Uint8Array) {
   const named = sections.map((s) => ({ ...s, nm: name(shstr, s.name) }));
   const symtab = named.find((s) => s.type === SHT_SYMTAB)!;
   const strtab = sections[symtab.link].offset;
-  const symbols: { name: string; value: number; shndx: number }[] = [];
+  const symbols: { name: string; value: number; size: number; shndx: number }[] = [];
   for (let at = symtab.offset; at + 16 <= symtab.offset + symtab.size; at += 16) {
     symbols.push({
       name: name(strtab, b.readUInt32BE(at)),
       value: b.readUInt32BE(at + 4),
+      size: b.readUInt32BE(at + 8),
       shndx: b.readUInt16BE(at + 14),
     });
   }

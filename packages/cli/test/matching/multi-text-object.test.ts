@@ -8,7 +8,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'nod
 import { basename, join, resolve } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
-import { scopedObjectPath, severalCodeSections } from '../../src/elf-section';
+import { codeSections, scopedObjectPath } from '../../src/elf-section';
 import { ppcDockerGate } from './docker-gate';
 
 const OBJECT = resolve(
@@ -36,7 +36,7 @@ describe.runIf(gate())('m_choice.o, eight `.text` sections', () => {
   const scoped = (sym: string) => ppcDisasmText(dir, basename(scopedObjectPath(join(dir, 'm_choice.o'), sym, dir)));
 
   test('the object really does hold several code sections, and the dump one block each', () => {
-    expect(severalCodeSections(readFileSync(OBJECT))).toBe(true);
+    expect(codeSections(readFileSync(OBJECT))).toEqual({ count: 8, ambiguous: true });
     expect(whole.match(/^Disassembly of section \.text:$/gm)).toHaveLength(8);
     expect(scoped('mChoice_dt').match(/^Disassembly of section \.text:$/gm)).toHaveLength(1);
   });

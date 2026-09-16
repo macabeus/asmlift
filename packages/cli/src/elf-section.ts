@@ -15,7 +15,8 @@
 // ELF32 only, either byte order — every object the CLI and the harness disassemble is ELF32. An
 // object this reader cannot parse is reported as having nothing to disambiguate, so it reaches
 // objdump exactly as it does today and objdump reports on it.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 const SHT_PROGBITS = 1;
@@ -87,11 +88,28 @@ function readElf32(bytes: Uint8Array): Elf32 | undefined {
 /** A section objdump disassembles: one carrying instruction bytes of its own. */
 const isCode = (s: SectionHeader): boolean => s.type === SHT_PROGBITS && (s.flags & SHF_EXECINSTR) !== 0 && s.size > 0;
 
-/** Whether a name-keyed read of this object's whole-object disassembly is ambiguous — i.e. whether it
- *  holds more than one code section. */
-export function severalCodeSections(bytes: Uint8Array): boolean {
+export interface CodeSections {
+  /** How many sections a whole-object `objdump -d` would disassemble. Zero for bytes this reader
+   *  cannot parse, which is also how it reports an object with nothing to disambiguate. */
+  count: number;
+  /** Whether a name-keyed read of that disassembly can pick the wrong bytes: two code sections
+   *  whose addresses overlap put two functions at one address, and objdump labels an address with
+   *  whichever symbol it finds at that value. A linked ELF's several code sections lie at distinct
+   *  addresses, so its labels stay unique. */
+  ambiguous: boolean;
+}
+
+/** The code sections of an object, and whether reading one of them by function NAME is ambiguous. */
+export function codeSections(bytes: Uint8Array): CodeSections {
   const elf = readElf32(bytes);
-  return elf !== undefined && elf.sections.filter(isCode).length > 1;
+  const code = (elf?.sections ?? []).filter(isCode).sort((a, b) => a.addr - b.addr);
+  let ambiguous = false;
+  let covered = 0;
+  for (const [i, s] of code.entries()) {
+    ambiguous ||= i > 0 && s.addr < covered;
+    covered = Math.max(covered, s.addr + s.size);
+  }
+  return { count: code.length, ambiguous };
 }
 
 /** The index of the code section defining `sym`, or undefined when no code section does. */
@@ -250,7 +268,22 @@ export function scopedObjectPath(objPath: string, sym: string, destDir: string):
   if (scoped === undefined) {
     return objPath;
   }
-  const path = join(destDir, `${basename(objPath).replace(/\.o$/, '')}.${sym.replace(/[^\w.-]/g, '_')}.o`);
-  writeFileSync(path, scoped);
+  const path = join(destDir, scopedName(objPath, sym));
+  // `destDir` is shared — the harness passes the object's own directory, which several shard
+  // processes reach at once — and the content is a function of (object, symbol), so two writers
+  // race over identical bytes. Rename the finished file into place so no reader sees a partial one.
+  const partial = `${path}.${process.pid}.part`;
+  writeFileSync(partial, scoped);
+  renameSync(partial, path);
   return path;
+}
+
+/** A file name for the scoped copy that is unique to `sym` and short enough for any filesystem: a
+ *  sanitized prefix so a human reading the directory recognizes it, and a digest of the whole
+ *  symbol so two names cannot collide — C++ mangled names run past the 255-byte limit and share
+ *  long prefixes. */
+function scopedName(objPath: string, sym: string): string {
+  const readable = sym.replace(/[^\w.-]/g, '_').slice(0, 48);
+  const digest = createHash('sha256').update(sym).digest('hex').slice(0, 12);
+  return `${basename(objPath).replace(/\.o$/, '')}.${readable}.${digest}.o`;
 }
