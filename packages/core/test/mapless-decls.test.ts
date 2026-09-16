@@ -231,6 +231,26 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     expect(refused).toEqual([{ name: 'v0', reason: 'emitter-name' }]);
   });
 
+  test('a MAP global spelled like the emitter\u2019s storage, which the target never names, collides with nothing', () => {
+    // Pikmin's map holds `.sdata` statics named `v0` and `v1`, so every function whose emitted C
+    // mints a `v0` local looked like it referenced that global, and every spelling died. The
+    // refusal is for a global the TARGET names; a name only the map supplies is the tree's own.
+    const asm = corpus('agbcc-mapless-globals.s');
+    const map: SymbolMap = new Map([
+      [0x03000000, [{ name: 'a0', kind: 'data' as const, size: 4 }]],
+      [0x03000004, [{ name: 'v0', kind: 'data' as const, size: 4 }]],
+    ]);
+    const refused: { name: string; reason: RefusedDeclarationReason }[] = [];
+    const cands = enumerateCandidates('UpdateWorldMapNodeTile', asm, ARMV4T_AGBCC, {
+      symbols: map,
+      onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
+    });
+    expect(cands.length).toBeGreaterThan(0);
+    expect(cands[0].source).toMatch(/\ba0\b/);
+    expect(cands.flatMap((c) => (c.symbolRefs ?? []).map((r) => r.name))).not.toContain('a0');
+    expect(refused.filter((r) => r.reason === 'emitter-name')).toEqual([]);
+  });
+
   test('the emitter already avoids the collision where a VARIATION mints the name', () => {
     // Renaming the same global to `p0` (a pointer local l3/basecse.ts would otherwise mint) does
     // NOT collide: it names its base local around the global, so the declaration stands and
