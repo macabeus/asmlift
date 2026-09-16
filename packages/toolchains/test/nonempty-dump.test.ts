@@ -46,12 +46,12 @@ describe('nonEmptyDump', () => {
 
 describe('the dump steps this package runs', () => {
   test('an asmdata objdump that prints nothing raises instead of parsing as empty AsmData', () => {
-    expect(() => mipsObjdumpText(anObject(), fakeBin('objdump', ''))).toThrow(/exited 0 but produced NO output/);
+    expect(() => mipsObjdumpText(anObject(), fakeBin('objdump', ''), 'f')).toThrow(/exited 0 but produced NO output/);
   });
 
   test('the same call with output returns it', () => {
     const dump = 'a.o:     file format elf32-tradbigmips\nSYMBOL TABLE:\n';
-    expect(mipsObjdumpText(anObject(), fakeBin('objdump', dump))).toBe(dump);
+    expect(mipsObjdumpText(anObject(), fakeBin('objdump', dump), 'f')).toBe(dump);
   });
 
   // THE REFERENCE-BUILD DISASSEMBLY IS A DIFFERENT OBJDUMP INVOCATION from the asmdata dump above

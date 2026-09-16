@@ -7,6 +7,7 @@ import { elf32 } from './elf32';
 
 const EM_ARM = 40;
 const EM_MIPS = 8;
+const EM_PPC = 20;
 const ROM = 0x08000100;
 
 /** A Thumb function with a 4-byte `bl` at +0, as an object (relocated) and linked (resolved). */
@@ -76,6 +77,75 @@ describe('compareWithRom', () => {
     expect(compareWithRom(object, 'g', linked(otherRegister), 0x80001000)).toMatchObject({ equal: false });
   });
 
+  // POWERPC: the machine the GameCube projects build for, and the one whose relocations rewrite more
+  // of an instruction than a displacement. `elf32` writes SHT_REL where CodeWarrior writes SHT_RELA;
+  // the mask reads both, and what is under test is which BITS each type leaves compared.
+  describe('PowerPC', () => {
+    const ppcObject = (text: number[], relocs: { offset: number; type: number }[]) =>
+      elf32({
+        machine: EM_PPC,
+        littleEndian: false,
+        textAddr: 0,
+        text,
+        symbols: [{ name: 'p', value: 0, size: text.length }],
+        relocs,
+      });
+    const ppcLinked = (text: number[]) =>
+      elf32({
+        machine: EM_PPC,
+        littleEndian: false,
+        textAddr: 0x80003000,
+        text,
+        symbols: [{ name: 'p', value: 0x80003000, size: text.length }],
+      });
+
+    test('a bl keeps its opcode and link bit compared, an address pair its upper half', () => {
+      // bl 0 ; lis r3,0 ; lwz r3,0(r3) ; blr — an ADDR16 relocation sits on the HALF-WORD it
+      // rewrites, two bytes into the instruction, and a branch relocation on the instruction.
+      const object = ppcObject(
+        [0x48, 0x00, 0x00, 0x01, 0x3c, 0x60, 0x00, 0x00, 0x80, 0x63, 0x00, 0x00, 0x4e, 0x80, 0x00, 0x20],
+        [
+          { offset: 0, type: 10 },
+          { offset: 6, type: 6 },
+          { offset: 10, type: 4 },
+        ],
+      );
+      const resolved = [0x48, 0x00, 0x12, 0x35, 0x3c, 0x60, 0x80, 0x0a, 0x80, 0x63, 0x12, 0x34, 0x4e, 0x80, 0x00, 0x20];
+      expect(compareWithRom(object, 'p', ppcLinked(resolved), 0x80003000)).toEqual({
+        equal: true,
+        digest: targetDigest(object, 'p'),
+      });
+      // the `bl`'s own opcode is not the linker's to write
+      const otherOpcode = [0x4c, 0x00, 0x12, 0x35, ...resolved.slice(4)];
+      expect(compareWithRom(object, 'p', ppcLinked(otherOpcode), 0x80003000)).toMatchObject({ equal: false });
+      // nor the destination register of the `lis`
+      const otherRegister = [...resolved.slice(0, 4), 0x3c, 0x80, 0x80, 0x0a, ...resolved.slice(8)];
+      expect(compareWithRom(object, 'p', ppcLinked(otherRegister), 0x80003000)).toMatchObject({ equal: false });
+    });
+
+    test('a small-data relocation masks the BASE REGISTER as well as the displacement', () => {
+      // EMB_SDA21 rewrites rA to r2/r13 at link time, so a comparison that masked only the
+      // displacement would call every small-data read a difference. CodeWarrior writes its offset
+      // BOTH ways — at the instruction and two bytes into it — and the field is the whole
+      // instruction either way, so both spellings are pinned.
+      for (const offset of [0, 2]) {
+        const object = ppcObject([0x80, 0x60, 0x00, 0x00, 0x4e, 0x80, 0x00, 0x20], [{ offset, type: 109 }]);
+        const resolved = [0x80, 0x6d, 0x81, 0x00, 0x4e, 0x80, 0x00, 0x20];
+        expect(compareWithRom(object, 'p', ppcLinked(resolved), 0x80003000)).toMatchObject({ equal: true });
+        // the LOADED register still is: r4 is a different instruction
+        const otherRegister = [0x80, 0x8d, 0x81, 0x00, 0x4e, 0x80, 0x00, 0x20];
+        expect(compareWithRom(object, 'p', ppcLinked(otherRegister), 0x80003000)).toMatchObject({ equal: false });
+      }
+    });
+
+    test('a relocation type nothing has measured is refused, not masked by guesswork', () => {
+      const object = ppcObject([0x80, 0x60, 0x00, 0x00, 0x4e, 0x80, 0x00, 0x20], [{ offset: 0, type: 1 }]);
+      expect(() =>
+        compareWithRom(object, 'p', ppcLinked([0x80, 0x60, 0x00, 0x00, 0x4e, 0x80, 0x00, 0x20]), 0x80003000),
+      ).toThrow(/no PowerPC relocation mask for type 1/);
+    });
+  });
+
   test('an unsized function ends at the next label, and a short zero tail is padding', () => {
     const object = elf32({
       machine: EM_ARM,
@@ -132,21 +202,23 @@ describe('compareWithRom', () => {
   });
 
   test('a machine with no relocation mask is refused', () => {
+    // EM_386, a machine the real tier builds for on no project: three do (ARM, MIPS, PowerPC) and
+    // every other one has to say so rather than compare bits nobody has read.
     const object = elf32({
-      machine: 20,
-      littleEndian: false,
+      machine: 3,
+      littleEndian: true,
       textAddr: 0,
       text: [0, 0, 0, 0],
       symbols: [{ name: 'p', value: 0, size: 4 }],
-      relocs: [{ offset: 0, type: 10 }],
+      relocs: [{ offset: 0, type: 1 }],
     });
     const linked = elf32({
-      machine: 20,
-      littleEndian: false,
+      machine: 3,
+      littleEndian: true,
       textAddr: 0x80003000,
       text: [0, 0, 0, 0],
       symbols: [{ name: 'p', value: 0x80003000, size: 4 }],
     });
-    expect(() => compareWithRom(object, 'p', linked, 0x80003000)).toThrow('no relocation mask for ELF machine 20');
+    expect(() => compareWithRom(object, 'p', linked, 0x80003000)).toThrow('no relocation mask for ELF machine 3');
   });
 });

@@ -285,11 +285,32 @@ export const TREE_MODULES = [
   'apps/benchmark/src/toolchains.ts',
 ] as const;
 
+/** How many parameters `rankOptionsFor` declares, in a tree this driver can sweep.
+ *
+ *  THE ONE SIGNATURE CHECK, and a compensating control `sweep.ts`'s floor note asks for:
+ *  `TREE_MODULES` proves a module EXISTS, and a module that exists with a CHANGED SIGNATURE is
+ *  exactly what it cannot catch. This driver calls the tree's own `rankOptionsFor` positionally, so
+ *  a tree declaring six would read this call's `sym` as its `prototypes` and lift the whole base
+ *  side under options nobody chose — a moved `src` that reads as a decompiler change and is not one.
+ *
+ *  WHAT IT CANNOT SEE, said out loud: a signature whose parameter COUNT is unchanged and whose
+ *  meaning is not. That one is still the `opts` digest's to report. */
+export const RANK_OPTIONS_ARITY = 7;
+
 /** Everything this driver needs out of the tree under test, loaded by absolute path. */
 async function treeModules(root: string) {
   const [synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains] = await Promise.all(
     TREE_MODULES.map((p) => import(`${root}/${p}`)),
   );
+  const arity = (evalAsmlift.rankOptionsFor as (...args: unknown[]) => unknown).length;
+  if (arity !== RANK_OPTIONS_ARITY) {
+    throw new Error(
+      `tree ${root}: its \`rankOptionsFor\` declares ${arity} parameters and this driver calls it with ` +
+        `${RANK_OPTIONS_ARITY} — it is on the other side of a signature change, so every row it lifted would be ` +
+        'lifted under options this command chose by accident. Compare against a newer revision, or use ' +
+        '`bench diff` against the published artifact.',
+    );
+  }
   return { synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains };
 }
 
@@ -438,6 +459,7 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         c.toolchain,
         c.codegen,
         built.obj,
+        c.sym,
         c.proto,
         c.compile,
         withMap ? c.symbols : undefined,

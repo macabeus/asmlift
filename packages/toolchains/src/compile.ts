@@ -621,8 +621,19 @@ function ppcExec(dir: string, script: (W: string) => string): { out: string; via
 }
 
 /** Compile `srcC` (a basename in `dir`) with mwcceppc-via-wibo at `flags` to `outObj`, and — when
- *  `disasm` — pipe the object through the PowerPC objdump in the same container, returning its text. */
-function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly string[], disasm: boolean): string {
+ *  `disasm` — pipe the object through the PowerPC objdump in the same container, returning its text.
+ *
+ *  Exported for the benchmark's real-tier compile (apps/benchmark/src/compile/mwcc.ts), which owns
+ *  its own scratch-directory policy and must not get the synthetic tier's typedef prelude: it
+ *  compiles a PREPROCESSED project translation unit, whose types the project's own headers already
+ *  declared. One container round trip for compile + dump, through the same pool. */
+export function ppcCompile(
+  dir: string,
+  srcC: string,
+  outObj: string,
+  flags: readonly string[],
+  disasm = false,
+): string {
   const t = MWCC_PPC_TOOLCHAIN;
   const { out, via } = ppcExec(dir, (W) => {
     const argv = [...t.harnessFlags, ...flags];
@@ -650,8 +661,11 @@ function shq(s: string): string {
  *  compile already produced in the same container; when the object holds several code sections —
  *  mwcc gives a translation unit one `.text` per part, all starting at address 0 — it is replaced by
  *  a dump of a copy holding only the section that defines `symbol`. A single-section object, which
- *  is every target the synthetic tier builds, keeps the dump it already has. */
-function ppcSectionScoped(dir: string, objName: string, symbol: string, asm: string): string {
+ *  is every target the synthetic tier builds, keeps the dump it already has.
+ *
+ *  Exported beside `ppcCompile` for the same reason: the real tier compiles project units, and a
+ *  project unit is exactly where several `.text` sections show up. */
+export function ppcSectionScoped(dir: string, objName: string, symbol: string, asm: string): string {
   const obj = join(dir, objName);
   const scoped = scopedObjectPath(obj, symbol, dir);
   return scoped === obj ? asm : ppcDisasmText(dir, basename(scoped));
@@ -666,7 +680,7 @@ export function compilePpcTarget(
 ): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-ppc-ref-', flags, cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
-  const asm = ppcContainer(dir, 'ref.c', 'ref.o', flags, true);
+  const asm = ppcCompile(dir, 'ref.c', 'ref.o', flags, true);
   return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
 }
 
@@ -674,7 +688,7 @@ export function compilePpcTarget(
 export function compileCandPpc(cSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-score-');
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
-  ppcContainer(dir, 'cand.c', 'cand.o', flags, false);
+  ppcCompile(dir, 'cand.c', 'cand.o', flags, false);
   return join(dir, 'cand.o');
 }
 
@@ -702,7 +716,7 @@ export function compilePpcCppTarget(
 ): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-ppc-cpp-ref-', flags, cppSource);
   writeFileSync(join(dir, 'ref.cp'), C_TYPEDEFS + cppSource);
-  const asm = ppcContainer(dir, 'ref.cp', 'ref.o', flags, true);
+  const asm = ppcCompile(dir, 'ref.cp', 'ref.o', flags, true);
   return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
 }
 
@@ -710,6 +724,82 @@ export function compilePpcCppTarget(
 export function compileCandPpcCpp(cppSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-cpp-score-');
   writeFileSync(join(dir, 'cand.cp'), C_TYPEDEFS + cppSource);
-  ppcContainer(dir, 'cand.cp', 'cand.o', flags, false);
+  ppcCompile(dir, 'cand.cp', 'cand.o', flags, false);
   return join(dir, 'cand.o');
+}
+
+// ── the project include tree, in CodeWarrior's dialect ─────────────────────────────────────
+// The real tier vendors each row's PREPROCESSED translation unit, and a GameCube project's headers
+// are written for mwcceppc: they branch on `__MWERKS__`, `__PPCGEKKO__` and the other macros only
+// that front end declares, and they use CodeWarrior spellings a host `cpp` rejects outright. So the
+// preprocessor that reads them has to be mwcceppc itself, which lives in the same container as the
+// compiler — with the checkout mounted, because the unit's `-i` paths are relative to it.
+
+export interface PpcPreprocessOptions {
+  /** the project checkout: the directory the unit's `-i` paths resolve against */
+  root: string;
+  /** the translation unit to preprocess. Must live under /tmp, which is where the container reads
+   *  and writes host-visible files. */
+  srcPath: string;
+  /** where the preprocessed text is written, beside `srcPath` under /tmp */
+  outPath: string;
+  /** the unit's preprocessor words: its `-i`/`-I` include paths and `-D`/`-d` macros, as the
+   *  project's own build passes them */
+  argv: readonly string[];
+  /** the words the unit's build rule runs the compiler UNDER, relative to `root`. dtk projects put
+   *  `build/tools/sjiswrap.exe` here, which converts the UTF-8 the repository stores to the
+   *  Shift-JIS the compiler expects as the file is read. */
+  wrapper?: readonly string[];
+}
+
+/** Preprocess one translation unit with mwcceppc's own front end (`-EP`: expand, and strip the
+ *  `#line` comments it would otherwise emit), returning the text.
+ *
+ *  A ONE-SHOT container, never the pool: the pool's mounts are fixed at `/mwcc` and `/tmp`, and this
+ *  needs the checkout as well. It is also not in the measured loop — a unit is preprocessed once, at
+ *  `bench vendor` time, and the runner then reads the frozen result. */
+export function ppcPreprocess(opts: PpcPreprocessOptions): string {
+  const t = MWCC_PPC_TOOLCHAIN;
+  const src = hostTmp(opts.srcPath);
+  const out = hostTmp(opts.outPath);
+  if (src === null || out === null) {
+    throw new Error(`mwcceppc preprocessing reads and writes under /tmp, not ${opts.srcPath} → ${opts.outPath}`);
+  }
+  const argv = [...t.harnessFlags, ...opts.argv, '-EP', src, '-o', out];
+  const wrapper = (opts.wrapper ?? []).map((w) => `/proj/${w}`);
+  const r = run(t.docker, [
+    'run',
+    '--rm',
+    '--platform',
+    'linux/386',
+    '-v',
+    `${t.dir}:/mwcc:ro`,
+    '-v',
+    `${opts.root}:/proj:ro`,
+    '-v',
+    '/tmp:/host-tmp',
+    '-w',
+    '/proj',
+    t.image,
+    'sh',
+    '-c',
+    [t.wibo, ...wrapper, '/mwcc/mwcceppc.exe', ...argv].map(shq).join(' '),
+  ]);
+  if (r.status !== 0 || !existsSync(opts.outPath)) {
+    throw new Error(`mwcceppc -EP failed: ${r.stderr || r.stdout}`);
+  }
+  const bytes = readFileSync(opts.outPath);
+  // The result is carried as a STRING — vendored, gzipped and compiled back from it — and a
+  // wrapper's job is to hand the compiler bytes that are not UTF-8: `sjiswrap` rewrites every
+  // multibyte literal into Shift-JIS, which no string decoding round-trips. Refuse rather than
+  // return mojibake that would compile to the wrong constants. (Measured on Animal Crossing at
+  // 09ca8e8b: 0 bytes ≥ 0x80 in the whole `src` and `include` tree, so no unit is affected today.)
+  const high = bytes.findIndex((b) => b >= 0x80);
+  if (high !== -1) {
+    throw new Error(
+      `mwcceppc -EP produced a non-ASCII byte at +0x${high.toString(16)}: this unit carries multibyte text, ` +
+        'which cannot be vendored as a translation unit — benchmark a function whose unit is ASCII',
+    );
+  }
+  return bytes.toString('utf8');
 }

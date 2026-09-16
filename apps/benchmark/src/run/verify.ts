@@ -33,6 +33,8 @@ export function verify(manifestPath: string): void {
       project: m.project,
       toolchain: unit.toolchain,
       root,
+      unit: f.unit,
+      cflags: unit.cflags,
       cppIncludes: m.cppIncludes,
       headers: m.headers,
       defines: m.defines,

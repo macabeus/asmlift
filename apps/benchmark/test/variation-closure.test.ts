@@ -149,7 +149,7 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
       const built = c.build();
       const asm = scrubObjectHeader(built.asm);
       for (const symbols of c.symbols === undefined ? [undefined] : [undefined, c.symbols]) {
-        const opts = rankOptionsFor(c.toolchain, c.codegen, built.obj, c.proto, c.compile, symbols);
+        const opts = rankOptionsFor(c.toolchain, c.codegen, built.obj, c.sym, c.proto, c.compile, symbols);
         let cands: { variations: readonly string[] }[];
         try {
           cands = enumerateRanked(c.sym, asm, c.codegen.target, { ...opts, onEnumerationError: () => {} });

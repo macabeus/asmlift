@@ -21,7 +21,7 @@ import type { DecompilerResult } from '@asmlift/bench-schema';
 import { objdiffVersion } from '@asmlift/cli/objdiff-version';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
-import { extractAsmData, mipsObjdumpText, ppcObjdumpText } from '@asmlift/toolchains';
+import { extractAsmData, mipsObjdumpText, ppcObjdumpText, scopedForDump } from '@asmlift/toolchains';
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -102,55 +102,74 @@ export function cachedBuildTarget(
   return { obj: oPath, asm: built.asm };
 }
 
-/** The PPC dockerized `objdump -s -r -t` text, content-cached by object bytes — the ONE cache
+/** Where the `objdump -s -r -t` text for `sym` is cached, and which object it is a dump OF.
+ *
+ *  THE KEY IS THE SCOPED OBJECT'S BYTES, not the object's and not the object-plus-symbol: a dump
+ *  describes the whole object it is given, so the object the dump is OF is the whole key. On a
+ *  single-code-section object — every target the synthetic tier builds and every one the GBA/N64
+ *  projects build — the scoped object IS the object, so the key is byte-for-byte the one this
+ *  cache has always written; on a CodeWarrior object with several `.text` sections, two functions
+ *  key apart because they are dumped from different bytes.
+ *
+ *  `scopedForDump` is the dump seam's OWN answer to "which object is this", asked once here and
+ *  handed back to it below rather than spelled a second time: two derivations of one fact can
+ *  drift, and the one deciding the key would then not be the one deciding the bytes.
+ *
+ *  Exported for the test that pins this, which needs neither Docker nor a toolchain to ask it. */
+export function ppcDumpCacheEntry(obj: string, sym: string): { scoped: string; path: string } {
+  const scoped = scopedForDump(obj, sym);
+  return { scoped, path: join(CACHE_DIR, `ppcdump-${sha(readFileSync(scoped))}.txt`) };
+}
+
+/** The PPC dockerized `objdump -s -r -t` text for one function, content-cached — the ONE cache
  *  path both PPC dump consumers share, so the path scheme cannot fork.
  *
  *  An empty dump raises in `ppcObjdumpText`, covering this cache, the uncached MIPS dumps and the
  *  direct `extractAsmData` callers at once. What is left for the cache is the DURABLE half: an
  *  entry written before that guard existed is a well-formed, TTL-less file that would be served
  *  forever, so an empty one READS AS A MISS and is rebuilt. */
-function cachedPpcDumpText(obj: string): string {
+function cachedPpcDumpText(obj: string, sym: string): string {
   if (!enabled()) {
-    return ppcObjdumpText(obj);
+    return ppcObjdumpText(obj, sym);
   }
-  const path = join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`);
+  const { scoped, path } = ppcDumpCacheEntry(obj, sym);
   if (existsSync(path)) {
     const cached = readFileSync(path, 'utf8');
     if (cached.trim() !== '') {
       return cached;
     }
   }
-  const dump = ppcObjdumpText(obj);
+  const dump = ppcObjdumpText(scoped, sym);
   put(path, dump);
   return dump;
 }
 
-/** Raw `objdump -s -r -t` text for the m2c normalizer's data-section emission: PPC via the
- *  content-cached dockerized dump; MIPS via the native objdump (cheap, uncached); ARM none
- *  (agbcc `.s` needs no normalization). */
-export function cachedAsmDumpText(obj: string, tcId: ToolchainId): string | undefined {
+/** Raw `objdump -s -r -t` text for the m2c normalizer's data-section emission, describing `sym`'s
+ *  own code section: PPC via the content-cached dockerized dump; MIPS via the native objdump
+ *  (cheap, uncached); ARM none (agbcc `.s` needs no normalization). */
+export function cachedAsmDumpText(obj: string, tcId: ToolchainId, sym: string): string | undefined {
   if (tcId === 'mwcc_242_81') {
-    return cachedPpcDumpText(obj);
+    return cachedPpcDumpText(obj, sym);
   }
   if (tcId === 'ido7.1') {
-    return mipsObjdumpText(obj, IDO_TOOLCHAIN.objdump);
+    return mipsObjdumpText(obj, IDO_TOOLCHAIN.objdump, sym);
   }
   if (tcId === 'gcc2.7.2kmc') {
-    return mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump);
+    return mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump, sym);
   }
   if (tcId === 'gcc2.7.2') {
-    return mipsObjdumpText(obj, GCC272_TOOLCHAIN.objdump);
+    return mipsObjdumpText(obj, GCC272_TOOLCHAIN.objdump, sym);
   }
   return undefined;
 }
 
 /** `extractAsmData`, with the PPC path's dockerized objdump TEXT cached by object content
  *  (the parse is cheap and stays live). MIPS uses a native objdump — no caching needed. */
-export function cachedExtractAsmData(obj: string, target: TargetDescription): AsmData | undefined {
+export function cachedExtractAsmData(obj: string, target: TargetDescription, sym: string): AsmData | undefined {
   if (target.compiler !== 'mwcc') {
-    return extractAsmData(obj, target);
+    return extractAsmData(obj, target, sym);
   }
-  const dump = cachedPpcDumpText(obj);
+  const dump = cachedPpcDumpText(obj, sym);
   return parseAsmData(dump, dump, dump, true);
 }
 

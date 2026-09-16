@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { cachedAsmDumpText, cachedBuildTarget, cachedExtractAsmData, sha } from '../src/cache';
+import { multiTextObject } from '../../../packages/cli/test/offline/multi-text-object';
+import { cachedAsmDumpText, cachedBuildTarget, cachedExtractAsmData, ppcDumpCacheEntry, sha } from '../src/cache';
 import { CACHE_DIR } from '../src/config';
 import { TOOLCHAINS, checkedTarget } from '../src/toolchains';
 
@@ -107,7 +108,10 @@ describe('the PPC dump cache does not serve an empty entry', () => {
     // The rebuild needs a PPC objdump this test has no business running, so the assertion is that
     // the empty entry is NOT returned: it either raises on the way to the container or comes back
     // with real content. What must never happen is the silent empty result.
-    for (const call of [() => cachedExtractAsmData(obj, PPC_MWCC), () => cachedAsmDumpText(obj, 'mwcc_242_81')]) {
+    for (const call of [
+      () => cachedExtractAsmData(obj, PPC_MWCC, 'f'),
+      () => cachedAsmDumpText(obj, 'mwcc_242_81', 'f'),
+    ]) {
       let served: unknown = 'THREW';
       try {
         served = call();
@@ -165,5 +169,42 @@ describe('the BuiltTarget invariant covers the real tier too', () => {
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
     }
+  });
+});
+
+// WHICH OBJECT A PPC DUMP IS CACHED UNDER. A `-s -r -t` dump describes the whole object it is
+// handed, so a key of the OBJECT's bytes serves one dump to every function of a CodeWarrior object
+// with several `.text` sections — one function's jump table read as another's, which is the
+// corruption class the scoping exists to end. Toolchain-free: only the key is asked for, and the
+// fixture is the same synthetic multi-`.text` ELF the scoping itself is pinned on.
+describe('a PPC dump is cached under the bytes it is a dump of', () => {
+  const objectWith = (sections: number, names: readonly string[]): string => {
+    const p = join(mkdtempSync(join(tmpdir(), 'ppcdump-key-')), 'u.o');
+    writeFileSync(
+      p,
+      multiTextObject(
+        Array.from({ length: sections }, (_, i) => Buffer.from([0x60, 0, 0, i, 0x4e, 0x80, 0x00, 0x20])),
+        names.map(() => 'ext'),
+        { names },
+      ),
+    );
+    return p;
+  };
+
+  test('two functions of one multi-.text object do not share an entry', () => {
+    const obj = objectWith(2, ['first', 'second']);
+    const [a, b] = [ppcDumpCacheEntry(obj, 'first'), ppcDumpCacheEntry(obj, 'second')];
+    // the objects dumped differ, so the entries must
+    expect(readFileSync(a.scoped).equals(readFileSync(b.scoped))).toBe(false);
+    expect(a.path).not.toBe(b.path);
+  });
+
+  test('a single-code-section object keys exactly as it always did — no cold cache for any old row', () => {
+    // Every target the synthetic tier builds and every one the GBA/N64 projects build is its own
+    // scope. If this drifted, the first run after the change would rebuild every PPC dump.
+    const obj = objectWith(1, ['only']);
+    const entry = ppcDumpCacheEntry(obj, 'only');
+    expect(entry.scoped).toBe(obj);
+    expect(entry.path).toBe(join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`));
   });
 });
