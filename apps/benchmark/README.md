@@ -379,19 +379,19 @@ the round that first ran it.
   against `build.ninja`) and never typed; each unit's `flagsFrom` names the build file at the commit.
   `pnpm bench vendor --project <p>` refuses a unit whose stored flags are not the build's at the
   checkout's HEAD, and any row whose target is not the function the linked ELF holds at its address
-  (relocations masked); it writes each row's `romDigest`, and `bench run` refuses a row whose target
+  (relocations masked; a REL row's module ELF, below); it writes each row's `romDigest`, and `bench run` refuses a row whose target
   has another digest. A pin bump is therefore `bench flags --write`, then `bench vendor`, and
   `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were vendored from.
-- **A REL row is proved against its module, not against the ROM** — the one exception to the point
-  above, named in `bench vendor`'s output on every run that has one. The linked ELF holds no
-  module's bytes and a module's own are unrelocated, which the ROM gate's ARM/MIPS masks cannot
-  read, so the comparison is skipped and the row is instead proved to be where it says it is: its
-  module ELF must define that symbol at that section and that offset (`cases/vendor.ts`
-  `moduleIdentityRefusal`). Its `romDigest` then pins the target's own bytes rather than the game's.
-  CI holds only the OFFSET, out of the vendored module map (`test/real-manifests.test.ts`); the
-  module and the section are decidable only against the checkout, because a symbol map records a
-  section INDEX and unions the base ELF's globals into every module's map. PowerPC relocation masks,
-  which would let a REL target be compared with the game too, are not built yet.
+- **A REL row is proved against its module's ELF.** The linked ELF holds no module's bytes, so a row
+  keyed by a module location is compared with the `.plf` the build turns into the disc's module,
+  its sections placed at addresses of their own (`cases/rom-function.ts` `romLocation`); the
+  module's bytes are unrelocated there, and every relocated field is masked by the object's own
+  relocations as for any other row. Before that, `bench vendor` proves the row is where it says it
+  is: its module ELF must define that symbol at that section and that offset
+  (`cases/vendor.ts` `moduleIdentityRefusal`). CI holds only the OFFSET, out of the vendored module
+  map (`test/real-manifests.test.ts`); the module and the section are decidable only against the
+  checkout, because a symbol map records a section INDEX and unions the base ELF's globals into
+  every module's map.
 - **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
   identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
   the TU file names are keyed by `sym`, so the alias table alone does not make a rename. A function

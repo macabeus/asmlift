@@ -4,7 +4,8 @@
 //   status        `ok`, `DRIFT <what changed>`, `MISSING` (the manifest stores none) or `UNPARSEABLE`
 //   unclassified  the codegen words core's flag table does not name
 //   rom           how many of the unit's rows compile, from their vendored TU at the derived flags, to the
-//                 function the project's linked ELF holds at their address (relocations masked)
+//                 function the project's linked ELF holds at their address — a REL row's module ELF at its
+//                 module location — with relocations masked
 // Every DIFF row, and every unit that could not be derived, is named under its table. `--write` stores the
 // derived units, and each row's unit, in the manifest. Exit 1 unless every unit is derived and `ok` (or
 // written) and every row is EQ.
@@ -24,8 +25,8 @@ import {
   rewriteManifest,
   withVendoredInputs,
 } from '../cases/manifests';
-import { resolveProjectElf } from '../cases/project-elf';
-import { compareWithRom, romAddress } from '../cases/rom-function';
+import { placedModuleElves, resolveProjectElf } from '../cases/project-elf';
+import { compareWithRom, romLocation } from '../cases/rom-function';
 import { buildRealTarget } from '../compile/real';
 
 export interface FlagsOptions {
@@ -76,6 +77,7 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
   const vendoredAt = provenanceCommit(man.project);
   const linked = elf.elf === null || vendoredAt !== deriver.commit ? undefined : readFileSync(elf.elf);
   const vendored = withVendoredInputs(man);
+  const placedModule = placedModuleElves(man.project, root);
 
   const units = new Map<string, RealFunction[]>();
   for (const fn of rows) {
@@ -121,13 +123,6 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
         break;
       }
       try {
-        const at = romAddress(fn.addr);
-        if (at === null) {
-          notes.push(
-            `${fn.sym} (${unit}): DIFF, ${fn.addr} is a module location, and the linked ELF holds no module's bytes`,
-          );
-          continue;
-        }
         const target = buildRealTarget(
           derived.toolchain,
           fn.sym,
@@ -135,7 +130,8 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
           vendored.vendored(fn.sym).tuI,
           unitLanguage(unit, derived.cflags),
         );
-        const rom = compareWithRom(readFileSync(target.obj), fn.sym, linked, at);
+        const { elf: romElf, at } = romLocation(fn.addr, linked, placedModule);
+        const rom = compareWithRom(readFileSync(target.obj), fn.sym, romElf, at);
         if (rom.equal) {
           equal++;
         } else {

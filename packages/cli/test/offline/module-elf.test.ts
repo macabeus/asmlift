@@ -19,6 +19,7 @@ import {
   moduleElfPath,
   moduleFunctionLocations,
   placeModuleSections,
+  placedSectionAddress,
   symbolKey,
 } from '../../src/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '../../src/symbols-provider';
@@ -254,6 +255,31 @@ describe('placeModuleSections — each section gets a base of its own', () => {
 // The SECTION half of a `<module>:<section>+0x<offset>` identity exists nowhere else: a placed map
 // records a section INDEX, so only the module ELF can say `.text`. This is what `bench vendor`
 // proves a REL row against.
+describe('placedSectionAddress — where placement put a section, by name', () => {
+  test("each section reads at its own base in the placed copy, and not in the module's own bytes", () => {
+    const placed = placeModuleSections(modulePlf(), '/p/m416Dll.plf');
+    expect(placedSectionAddress(placed, '.text')).toBe(0x0100_0000);
+    expect(placedSectionAddress(placed, '.data')).toBe(0x0200_0000);
+  });
+
+  test('a section the module does not hold, or holds twice, is refused', () => {
+    const placed = placeModuleSections(modulePlf(), '/p/m416Dll.plf');
+    expect(() => placedSectionAddress(placed, '.rodata')).toThrow(/no allocated section \.rodata/);
+    const twice = placeModuleSections(
+      elf32(
+        ET_REL,
+        [
+          { name: '.text', size: 0x40 },
+          { name: '.text', size: 0x40 },
+        ],
+        [{ name: 'f', value: 0, shndx: 1 }],
+      ),
+      '/p/two.plf',
+    );
+    expect(() => placedSectionAddress(twice, '.text')).toThrow(/2 allocated sections named \.text/);
+  });
+});
+
 describe('moduleFunctionLocations — where a module puts a function', () => {
   test('a function is named by its section and its offset within it', () => {
     const at = moduleFunctionLocations(modulePlf());

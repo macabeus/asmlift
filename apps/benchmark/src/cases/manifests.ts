@@ -44,10 +44,8 @@ export interface RealFunction {
    *  linked ELF holds at `addr` (cases/rom-function.ts `targetDigest`). A target built with another
    *  digest is not the game's function, and its row is refused.
    *
-   *  For a row keyed by a REL MODULE LOCATION this pins the target's own bytes and NOT the game's:
-   *  the linked ELF holds no module's bytes, so `bench vendor` proves that row's module, section and
-   *  offset against the module ELF instead, and names the skipped ROM comparison in its output every
-   *  time. See cases/vendor.ts. */
+   *  A row keyed by a REL MODULE LOCATION is proved the same way against its MODULE's ELF, the one the
+   *  build turns into the disc's module (cases/rom-function.ts `romLocation`). */
   romDigest: string;
   /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
    *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
