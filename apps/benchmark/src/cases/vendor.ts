@@ -30,7 +30,7 @@ import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provide
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -147,6 +147,35 @@ function moduleIdentityProver(project: string, root: string): (sym: string, addr
   };
 }
 
+/** Write each row's TU blob and its context blob, one file per distinct context, into `outDir`, and remove
+ *  every blob there this vendoring did not write: a row that left, or a context that changed, must not keep
+ *  a file nothing reads. Returns the index `index.json` records and how many contexts were written. */
+export function writeVendoredBlobs(
+  outDir: string,
+  prepared: readonly { sym: string; tuI: string; ctxI: string }[],
+): { index: Record<string, { tu: string; ctx: string }>; contexts: number } {
+  mkdirSync(outDir, { recursive: true });
+  const index: Record<string, { tu: string; ctx: string }> = {};
+  const ctxSeen = new Map<string, string>(); // content sha → file name
+  for (const { sym, tuI, ctxI } of prepared) {
+    const tuName = `${sym}.i.gz`;
+    writeFileSync(join(outDir, tuName), gzipSync(tuI));
+    const ctxSha = sha(ctxI).slice(0, 12);
+    let ctxName = ctxSeen.get(ctxSha);
+    if (!ctxName) {
+      ctxName = `ctx-${ctxSha}.i.gz`;
+      writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
+      ctxSeen.set(ctxSha, ctxName);
+    }
+    index[sym] = { tu: tuName, ctx: ctxName };
+  }
+  const written = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx]));
+  for (const stale of readdirSync(outDir).filter((f) => f.endsWith('.i.gz') && !written.has(f))) {
+    rmSync(join(outDir, stale));
+  }
+  return { index, contexts: ctxSeen.size };
+}
+
 /** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
  *  index.json and PROVENANCE.json byte-for-byte as committed. The two halves of the vendored
  *  dataset have DIFFERENT sources — the TUs come from cpp over the checkout's headers, the map
@@ -256,21 +285,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       throw new Error(`${man.project}: refused, nothing written:\n  ${refusals.join('\n  ')}`);
     }
 
-    mkdirSync(outDir, { recursive: true });
-    const index: Record<string, { tu: string; ctx: string }> = {};
-    const ctxSeen = new Map<string, string>(); // content sha → file name
-    for (const { sym, tuI, ctxI } of prepared) {
-      const tuName = `${sym}.i.gz`;
-      writeFileSync(join(outDir, tuName), gzipSync(tuI));
-      const ctxSha = sha(ctxI).slice(0, 12);
-      let ctxName = ctxSeen.get(ctxSha);
-      if (!ctxName) {
-        ctxName = `ctx-${ctxSha}.i.gz`;
-        writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
-        ctxSeen.set(ctxSha, ctxName);
-      }
-      index[sym] = { tu: tuName, ctx: ctxName };
-    }
+    const { index, contexts } = writeVendoredBlobs(outDir, prepared);
     const romDigests = new Map(prepared.map((p) => [p.sym, p.romDigest]));
     rewriteManifest(man.project, (m) => ({
       ...m,
@@ -286,7 +301,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
     console.log(
-      `${man.project}: vendored ${prepared.length} TUs (${ctxSeen.size} unique context(s)) → ${outDir}; ` +
+      `${man.project}: vendored ${prepared.length} TUs (${contexts} unique context(s)) → ${outDir}; ` +
         'every row EQ to the ROM',
     );
     await vendorSymbols(man, root, outDir);
