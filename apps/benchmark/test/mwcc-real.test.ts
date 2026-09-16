@@ -225,6 +225,24 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
     CONTAINER_BUDGET,
   );
 
+  // Bare typedefs refuse every candidate that names a project type, so their complaint is the same for every
+  // candidate and says nothing about this one; the unit is where the candidate had to compile.
+  test(
+    "a unit row that compiles nowhere publishes its unit's complaint",
+    () => {
+      const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'unit', '', 'typedef struct { int a; } S;\nS g;\n', 'c');
+      let message = '';
+      try {
+        compile('int f(void) { return g.b; }', 'f');
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/'b'/);
+      expect(message).not.toMatch(/undefined identifier 'g'/);
+    },
+    CONTAINER_BUDGET,
+  );
+
   // A unit row's candidate compiles after its unit's earlier code, which can call the function: Mario Party 4's
   // `HuDvdErrorWatch` is called twice before its definition. With the function's own prototype stripped, those
   // calls declare it implicitly and the definition is `redeclared`, so the candidate never reaches its unit.

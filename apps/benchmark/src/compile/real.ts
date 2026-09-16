@@ -198,21 +198,26 @@ export function makeRealCompile(
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
     // without this. The rest of the synthesized block stays dropped: the context owns it.
     const macros = macroDefinesOf(declarations);
-    // Each dialect's last complaint, because a row that compiles nowhere PUBLISHES this text as its
-    // error markers and only the row's OWN front end is talking about the candidate. The fallback
-    // dialect is a harness convenience, and a C++ candidate handed to the C parser fails on the
-    // word `class` — a diagnostic about the harness's ladder, not about the decompiler's output.
+    // Each dialect's complaint in the RICHEST context, because a row that compiles nowhere PUBLISHES
+    // this text as its error markers: the project's own context is where the candidate had to compile,
+    // and bare typedefs fail on every project type. The fallback dialect is a harness convenience, and a
+    // C++ candidate handed to the C parser fails on the word `class` — a diagnostic about the harness's
+    // ladder, not about the decompiler's output.
     const failed = new Map<'c' | 'c++', string>();
+    const ladder = scoringLadder(tu, prependC, ctxI, sym);
+    const richest = richestRung(tu, ladder);
     // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
     // all: a richer context is the ordinary reason a candidate compiles, and paying for the
     // fallback first would double every C++ row's compiles to answer a rarer question.
     for (const dialect of candidateDialects(language)) {
       const body = candidateLinkage(dialect, candC);
-      for (const { prelude } of scoringLadder(tu, prependC, ctxI, sym)) {
+      for (const rung of ladder) {
         try {
-          return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
+          return rc.compileCandidate(`${rung.prelude}${macros}${body}`, sym, cflags, dialect);
         } catch (e) {
-          failed.set(dialect, (e as Error).message);
+          if (rung === richest) {
+            failed.set(dialect, (e as Error).message);
+          }
         }
       }
     }
