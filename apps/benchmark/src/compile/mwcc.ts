@@ -13,7 +13,6 @@
 // itself (`ppcPreprocess`), run with the checkout mounted, under the wrapper the unit's own build
 // rule runs it under.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
-import { sliceSymbol } from '@asmlift/core/frontend/disasm';
 import {
   type MwccToolchainId,
   ppcCompile,
@@ -25,21 +24,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { unitCompileWrapper } from '../cases/dtk-project';
+import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir } from './util';
-
-/** The disassembly of `sym` alone: the dump's header, then its own listing.
- *
- *  A row compiled in its own unit (`tu: "unit"`) builds an object holding every function the unit defines
- *  before it — Mario Party 4's `fn_2_E66C` disassembles to 555 KB — and everything downstream of the target is
- *  about the row's function: the listing both decompilers are handed, the codegen tags read off it, and the
- *  `targetAsm` the row publishes. Read whole, `fn_1_C2BC`, two float stores, was tagged `libm-call`,
- *  `savegpr-helper`, `float-compare` and `float-callee-save` by the unit's other functions. */
-export function functionDisassembly(asm: string, sym: string): string {
-  const firstFunction = asm.search(/^[0-9a-f]+\s+<[^>]+>:\s*$/im);
-  return firstFunction === -1 ? asm : `${asm.slice(0, firstFunction)}${sliceSymbol(asm, sym).trimEnd()}\n`;
-}
 
 /** The CodeWarrior binary, as a project's own build rule names it. */
 const MWCCEPPC = 'mwcceppc.exe';

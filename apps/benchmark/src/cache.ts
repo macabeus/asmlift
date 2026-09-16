@@ -36,6 +36,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync
 import { join } from 'node:path';
 
 import { CACHE_DIR, M2C_DIR } from './config';
+import { functionScopedDump } from './eval/function-scope';
 import { functionStart } from './eval/m2c-normalizer';
 import { type BuiltTarget, type Toolchain, type ToolchainId, checkedTarget } from './toolchains';
 
@@ -141,6 +142,11 @@ export function ppcDumpCacheEntry(obj: string, sym: string): { scoped: string; p
  *  entry written before that guard existed is a well-formed, TTL-less file that would be served
  *  forever, so an empty one READS AS A MISS and is rebuilt. */
 function cachedPpcDumpText(obj: string, sym: string): string {
+  return functionScopedDump(cachedObjectDumpText(obj, sym), sym);
+}
+
+/** The whole section's dump, as the cache stores it; `cachedPpcDumpText` narrows it to the function. */
+function cachedObjectDumpText(obj: string, sym: string): string {
   if (!enabled()) {
     return ppcObjdumpText(obj, sym);
   }
