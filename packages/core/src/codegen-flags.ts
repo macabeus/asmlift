@@ -333,8 +333,12 @@ function specFor(family: FlagFamily, word: string): { spec: OptionSpec; m: Match
 /** A word that is not an option: a file, or `-`, which names standard input. */
 const isOperand = (word: string): boolean => word === '-' || !word.startsWith('-');
 
-/** A `-pragma` whose name only steers diagnostics. */
-const INERT_PRAGMA = /^(cats|warn_\w+|msg_show_realref)\b/;
+/** A `-pragma` whose name only steers diagnostics. `cats` is NOT one of them: `-pragma "cats off"`
+ *  suppresses the `.mwcats.text` section CodeWarrior otherwise writes — one ADDR32 record per
+ *  function — so a build stored without it emits a section the build itself does not. (Measured on
+ *  Pikmin's `nlibmath.cpp`: the section appears and disappears with the word, and the function's
+ *  own bytes are identical either way.) */
+const INERT_PRAGMA = /^(warn_\w+|msg_show_realref)\b/;
 
 interface LevelReading {
   value: string;

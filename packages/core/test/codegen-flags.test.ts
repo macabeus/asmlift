@@ -273,7 +273,19 @@ describe('parsing', () => {
     const pikmin = tokenizeFlags(
       '-nodefaults -proc gekko -w off -O4,p -i include -pragma "cats off" -str reuse, readonly',
     );
-    expect(storedFlags('mwcc', pikmin)).toEqual(['-proc', 'gekko', '-O4,p', '-str', 'reuse,', 'readonly']);
+    // `-pragma "cats off"` stays: it decides whether the object carries a `.mwcats.text` section.
+    expect(storedFlags('mwcc', pikmin)).toEqual([
+      '-proc',
+      'gekko',
+      '-O4,p',
+      '-pragma',
+      'cats off',
+      '-str',
+      'reuse,',
+      'readonly',
+    ]);
+    // a pragma that really does only steer diagnostics still goes
+    expect(storedFlags('mwcc', tokenizeFlags('-O4,p -pragma "warn_possunwant off"'))).toEqual(['-O4,p']);
     const pokeemerald = ['-mthumb-interwork', '-Wimplicit', '-Wparentheses', '-Werror', '-O2', '-fhex-asm', '-g'];
     expect(storedFlags('agbcc', pokeemerald)).toEqual(['-mthumb-interwork', '-O2', '-fhex-asm', '-g']);
   });

@@ -168,7 +168,8 @@ describe('the flags a dtk unit gives', () => {
   test("its effective codegen flags, and what its build's later words overrode", () => {
     const r = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: unit('marioparty4', REL_MAP) } }));
     expect(r.ok && r.lines).toBe(
-      'asmlift: [flags] -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -inline auto -RTTI off ' +
+      'asmlift: [flags] -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -inline auto ' +
+        "-pragma 'cats off' -RTTI off " +
         '-str reuse -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -lang=c ' +
         `(objdiff.json unit ${REL_MAP})\n` +
         'asmlift: [flags] note: -O4,p overridden by later -O0,p\n' +
