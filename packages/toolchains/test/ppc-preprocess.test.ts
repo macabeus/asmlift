@@ -72,6 +72,24 @@ describe('mwcceppc preprocessing of a project include tree', () => {
     );
 
     test(
+      'refuses a unit whose expansion is not ASCII, rather than vendoring mojibake',
+      () => {
+        // The result is carried as a JS STRING — vendored, gzipped, and compiled back from it — and
+        // a dtk wrapper's whole job is to hand the compiler bytes that are NOT UTF-8 (`sjiswrap`
+        // rewrites every multibyte literal into Shift-JIS, which no string decoding round-trips).
+        // Returning one would compile to the wrong constants silently, so this is the loud form of
+        // the dataset's "benchmark a function whose unit is ASCII" decision.
+        const { root, scratch } = fakeProject();
+        const srcPath = join(scratch, 'wide.c');
+        writeFileSync(srcPath, 'const char *greeting = "こんにちは";\n');
+        expect(() =>
+          ppcPreprocess({ root, srcPath, outPath: join(scratch, 'wide.i'), argv: ['-nosyspath', '-i', 'include'] }),
+        ).toThrow(/non-ASCII byte at \+0x[0-9a-f]+/);
+      },
+      CONTAINER_BUDGET,
+    );
+
+    test(
       'runs the compiler under the wrapper words the unit names',
       () => {
         const { root, scratch } = fakeProject();
