@@ -1,0 +1,170 @@
+{
+  "getStartHour__11PlayerStateFv": {
+    "tu": "getStartHour__11PlayerStateFv.i.gz",
+    "ctx": "ctx-3f30d31633ab.i.gz"
+  },
+  "getMainStickX__10ControllerFv": {
+    "tu": "getMainStickX__10ControllerFv.i.gz",
+    "ctx": "ctx-d2dfd9ca9839.i.gz"
+  },
+  "__ct__12RefCountableFv": {
+    "tu": "__ct__12RefCountableFv.i.gz",
+    "ctx": "ctx-aa3e3c9ba4b2.i.gz"
+  },
+  "draw__12DynMapObjectFR8Graphics": {
+    "tu": "draw__12DynMapObjectFR8Graphics.i.gz",
+    "ctx": "ctx-6ed1edd857df.i.gz"
+  },
+  "getFlag__11ResultFlagsFi": {
+    "tu": "getFlag__11ResultFlagsFi.i.gz",
+    "ctx": "ctx-294c212cc0fa.i.gz"
+  },
+  "isKinoko__8ViewPikiFv": {
+    "tu": "isKinoko__8ViewPikiFv.i.gz",
+    "ctx": "ctx-672acf479870.i.gz"
+  },
+  "RotAxisX__Q23zen17particleGeneratorFRA3_A4_fRfRf": {
+    "tu": "RotAxisX__Q23zen17particleGeneratorFRA3_A4_fRfRf.i.gz",
+    "ctx": "ctx-b64d73b01602.i.gz"
+  },
+  "initSoftReset__9StdSystemFv": {
+    "tu": "initSoftReset__9StdSystemFv.i.gz",
+    "ctx": "ctx-26f77a5708c1.i.gz"
+  },
+  "waitWhileBusy__10MemoryCardFi": {
+    "tu": "waitWhileBusy__10MemoryCardFi.i.gz",
+    "ctx": "ctx-8eba3ea6e203.i.gz"
+  },
+  "countAKeys__8AnimInfoFv": {
+    "tu": "countAKeys__8AnimInfoFv.i.gz",
+    "ctx": "ctx-af85a214dff2.i.gz"
+  },
+  "DispYesNo__Q23zen14ogScrMemChkMgrFb": {
+    "tu": "DispYesNo__Q23zen14ogScrMemChkMgrFb.i.gz",
+    "ctx": "ctx-3cb5b03d07cb.i.gz"
+  },
+  "readByte__6StreamFv": {
+    "tu": "readByte__6StreamFv.i.gz",
+    "ctx": "ctx-62c8b2730fcf.i.gz"
+  },
+  "getSuckPos__8GoalItemFv": {
+    "tu": "getSuckPos__8GoalItemFv.i.gz",
+    "ctx": "ctx-ed8888d504c0.i.gz"
+  },
+  "updateID__4ID32Fv": {
+    "tu": "updateID__4ID32Fv.i.gz",
+    "ctx": "ctx-01c1c9de30d9.i.gz"
+  },
+  "__dt__6SystemFv": {
+    "tu": "__dt__6SystemFv.i.gz",
+    "ctx": "ctx-8f4ab76c676d.i.gz"
+  },
+  "doDoAI__4PikiFv": {
+    "tu": "doDoAI__4PikiFv.i.gz",
+    "ctx": "ctx-a2b835338c91.i.gz"
+  },
+  "calcDataSize__6TexImgFiii": {
+    "tu": "calcDataSize__6TexImgFiii.i.gz",
+    "ctx": "ctx-5df2853a05a2.i.gz"
+  },
+  "changeFlower__6CPlateFP4Piki": {
+    "tu": "changeFlower__6CPlateFP4Piki.i.gz",
+    "ctx": "ctx-6c6129cb929b.i.gz"
+  },
+  "print__5GmWinFR8GraphicsiiPc": {
+    "tu": "print__5GmWinFR8GraphicsiiPc.i.gz",
+    "ctx": "ctx-24697898a006.i.gz"
+  },
+  "atan2__6NMathFFff": {
+    "tu": "atan2__6NMathFFff.i.gz",
+    "ctx": "ctx-94f894e686df.i.gz"
+  },
+  "stringDup__9StdSystemFPc": {
+    "tu": "stringDup__9StdSystemFPc.i.gz",
+    "ctx": "ctx-26f77a5708c1.i.gz"
+  },
+  "inside__5KRectFR8Vector3f": {
+    "tu": "inside__5KRectFR8Vector3f.i.gz",
+    "ctx": "ctx-9a9940a2e83f.i.gz"
+  },
+  "fullfillPiki__6AIPerfFR4Menu": {
+    "tu": "fullfillPiki__6AIPerfFR4Menu.i.gz",
+    "ctx": "ctx-9ff1cecff37d.i.gz"
+  },
+  "searchKanjiCode__FUs": {
+    "tu": "searchKanjiCode__FUs.i.gz",
+    "ctx": "ctx-c8fc5063499b.i.gz"
+  },
+  "init__18TAIAeffCloudOfDustFQ29EffectMgr12effTypeTablebiifiiiii": {
+    "tu": "init__18TAIAeffCloudOfDustFQ29EffectMgr12effTypeTablebiifiiiii.i.gz",
+    "ctx": "ctx-f11ad28d781d.i.gz"
+  },
+  "getTime__6SystemFv": {
+    "tu": "getTime__6SystemFv.i.gz",
+    "ctx": "ctx-8f4ab76c676d.i.gz"
+  },
+  "canPullout__12PikiHeadItemFv": {
+    "tu": "canPullout__12PikiHeadItemFv.i.gz",
+    "ctx": "ctx-0e5494322e77.i.gz"
+  },
+  "act__9TAIAdyingFR4Teki": {
+    "tu": "act__9TAIAdyingFR4Teki.i.gz",
+    "ctx": "ctx-2380f2cae6a0.i.gz"
+  },
+  "updateSysClock__6SystemFv": {
+    "tu": "updateSysClock__6SystemFv.i.gz",
+    "ctx": "ctx-8f4ab76c676d.i.gz"
+  },
+  "animate__20PVWPolygonColourInfoFPfR6Colour": {
+    "tu": "animate__20PVWPolygonColourInfoFPfR6Colour.i.gz",
+    "ctx": "ctx-5df2853a05a2.i.gz"
+  },
+  "doCtrlCode__8P2DPrintFi": {
+    "tu": "doCtrlCode__8P2DPrintFi.i.gz",
+    "ctx": "ctx-f8900a6a2b86.i.gz"
+  },
+  "setLightSpot__5LightFfi": {
+    "tu": "setLightSpot__5LightFfi.i.gz",
+    "ctx": "ctx-df1075031ed3.i.gz"
+  },
+  "readMailbox__3KIOFv": {
+    "tu": "readMailbox__3KIOFv.i.gz",
+    "ctx": "ctx-4de1fd5a8ece.i.gz"
+  },
+  "DoMount__FlPv": {
+    "tu": "DoMount__FlPv.i.gz",
+    "ctx": "ctx-6b047bf75f47.i.gz"
+  },
+  "setChildren__6ActionFie": {
+    "tu": "setChildren__6ActionFie.i.gz",
+    "ctx": "ctx-b591672907d6.i.gz"
+  },
+  "getRandomFreeSlotIndex__6PelletFv": {
+    "tu": "getRandomFreeSlotIndex__6PelletFv.i.gz",
+    "ctx": "ctx-53f2689cb16d.i.gz"
+  },
+  "setMatMatrices__11DGXGraphicsFP8Materiali": {
+    "tu": "setMatMatrices__11DGXGraphicsFP8Materiali.i.gz",
+    "ctx": "ctx-becbdef1c1ee.i.gz"
+  },
+  "__ct__7ActFreeFP4Piki": {
+    "tu": "__ct__7ActFreeFP4Piki.i.gz",
+    "ctx": "ctx-06dbe83354a5.i.gz"
+  },
+  "multiply__8Matrix4fFR8Matrix4f": {
+    "tu": "multiply__8Matrix4fFR8Matrix4f.i.gz",
+    "ctx": "ctx-11b74a80d031.i.gz"
+  },
+  "insert__12SearchBufferFP8Creaturef": {
+    "tu": "insert__12SearchBufferFP8Creaturef.i.gz",
+    "ctx": "ctx-19d0f93c7b31.i.gz"
+  },
+  "drawSphere__8GraphicsFR8Vector3ffR8Matrix4f": {
+    "tu": "drawSphere__8GraphicsFR8Vector3ffR8Matrix4f.i.gz",
+    "ctx": "ctx-5df2853a05a2.i.gz"
+  },
+  "getCardStatus__10MemoryCardFi": {
+    "tu": "getCardStatus__10MemoryCardFi.i.gz",
+    "ctx": "ctx-9ed72aa64911.i.gz"
+  }
+}
