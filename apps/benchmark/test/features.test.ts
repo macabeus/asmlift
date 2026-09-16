@@ -355,6 +355,13 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0', '')).toBe(true);
+    // a PowerPC indirect call is `bctrl`, and `fnptr` is the tag for a call through a pointer on
+    // every ISA the benchmark runs (ac-decomp:mCoBG_MakeJumpFlag, ac-decomp:aBALL_actor_move)
+    expect(JUDGEMENT_FLOOR.fnptr('{ p->proc(a); }', '  9c:\tbctrl', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.fnptr('{ draw(o); }', '  9c:\tbl\tdraw', '')).toBe(false);
+    // `double` reads the type, not the keyword: `f64` is the same type (ac-decomp:Matrix_MtxtoMtxF)
+    expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f64)0x10000); }')).toBe(true);
+    expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f32)0x10000); }')).toBe(false);
     // a variable subscript ANYWHERE in the chain: the `k` here follows a `]`, not a name, which
     // the first form of this floor could not see (synthetic:pmarrrow)
     expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][k]; }', '', '')).toBe(true);
@@ -393,7 +400,7 @@ describe('the detectors themselves', () => {
 
   it('holds the remaining new floors without pretending to decide them', () => {
     const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
-    // an indirect call, on all four ISAs — not the same predicate as `fnptr`, which has no PPC form
+    // an indirect call, on all four ISAs — the same necessary condition as `fnptr`
     expect(floor('virtual-call', '{ o->draw(); }', '  14:\tbctrl')).toBe(true);
     expect(floor('virtual-call', '{ o->draw(); }', '  14:\tjalr\tv0')).toBe(true);
     expect(floor('virtual-call', '{ draw(o); }', '  14:\tbl\tdraw')).toBe(false);
