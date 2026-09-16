@@ -136,8 +136,12 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // there follows a `]` rather than a name. `table` deliberately keeps the tighter form — it is a
   // claim about the OBJECT being a constant lookup table, which its own first subscript shows.
   'variable-index': (b) => subscripts(b, /[\w\]]\s*$/).some(isComputed),
+  // C-style `(T)x` and C++'s four NAMED casts. A functional cast (`GXTexGenSrc(x)`) is deliberately
+  // absent: it is spelled exactly like a call, so a floor that admitted it would decide nothing —
+  // the same reason `field` has no floor for a member read through an implicit `this`.
   cast: (b) =>
     /\(\s*\w+\s*\*+\s*\)/.test(b) ||
+    /\b(?:reinterpret|static|const|dynamic)_cast\s*</.test(b) ||
     /\(\s*(?:struct|union|enum|const|unsigned|signed|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/.test(
       b,
     ),

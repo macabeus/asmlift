@@ -1564,7 +1564,9 @@
       "features": [
         "array",
         "field",
-        "method"
+        "method",
+        "variable-index",
+        "cast"
       ],
       "prependC": "#include \"ID32.h\"\n\n#include \"Age.h\"\n#include \"DebugLog.h\"\n#include \"Stream.h\"\n#include \"sysNew.h\"",
       "funcC": "void ID32::updateID()\n{\n\tchar* id = reinterpret_cast<char*>(&mId);\n\n\tfor (int i = 0; i < 4; i++) {\n\t\tid[i] = this->mStringID[i];\n\t}\n}",
@@ -1814,7 +1816,8 @@
         "arithmetic",
         "method",
         "global",
-        "macro"
+        "macro",
+        "unsigned"
       ],
       "prependC": "#include \"system.h\"\n\n#include \"bigFont.h\"\n\n#include \"AtxStream.h\"\n#include \"BaseApp.h\"\n#include \"DebugLog.h\"\n#include \"Delegate.h\"\n#include \"Dolphin/ar.h\"\n#include \"Dolphin/card.h\"\n#include \"Dolphin/gx.h\"\n#include \"Dolphin/os.h\"\n#include \"Dolphin/pad.h\"\n#include \"Font.h\"\n#include \"Graphics.h\"\n#include \"LoadIdler.h\"\n#include \"gameflow.h\"\n#include \"jaudio/interface.h\"\n#include \"jaudio/verysimple.h\"\n#include \"sysNew.h\"\n#include \"timers.h\"\n#include <stddef.h>\n\n#if defined(WIN32)\n#include <windows.h>\n#endif",
       "funcC": "void System::updateSysClock()\n{\n\tOSTick tick = OSGetTick();\n\tmEngineFrames++;\n\tmFrameTicks = tick - mPrevTick;\n\tmDeltaTime  = mFrameTicks / (f64)OS_TIMER_CLOCK;\n\tmTotalFrames++;\n\tif (mDeltaTime > f32(1.0f / 30.0f)) {\n\t\tmDeltaTime = f32(1.0f / 30.0f);\n\t}\n\tif (mDeltaTime < 0.0f) {\n\t\tmDeltaTime = 0.0f;\n\t}\n\n\tint time = tick - mFpsSampleStart;\n\tif (time > OS_TIMER_CLOCK) {\n\t\tmFPS                 = (f64)(OS_TIMER_CLOCK * (mEngineFrames - mFramesAtSampleStart)) / time;\n\t\tmFpsSampleStart      = tick;\n\t\tmFramesAtSampleStart = mEngineFrames;\n\t}\n\tmPrevTick = tick;\n}",
@@ -1886,7 +1889,8 @@
         "global",
         "store",
         "method",
-        "static-member"
+        "static-member",
+        "switch-arms"
       ],
       "prependC": "#include \"KIO.h\"\n#include \"DebugLog.h\"\n#include \"Dolphin/hio.h\"\n#include \"Dolphin/os.h\"\n#include \"sysNew.h\"",
       "funcC": "void KIO::readMailbox()\n{\n\tu32 mail = 0;\n\tif (HIOReadMailbox(&mail) == FALSE) {\n\t\treturn;\n\t}\n\n\tswitch (mail) {\n\tcase 0x100000:\n\t{\n\t\tkontMode  = 0;\n\t\tmIsActive = false;\n\t\tbreak;\n\t}\n\tcase 0x100002:\n\t{\n\t\tkontMode  = 1;\n\t\tmIsActive = false;\n\t\tbreak;\n\t}\n\tcase 0x100001:\n\t{\n\t\tkontMode  = 2;\n\t\tmIsActive = false;\n\t\tbreak;\n\t}\n\tcase 0x100006:\n\t{\n\t\tmContext.write();\n\t\tbreak;\n\t}\n\tcase 0x100003:\n\t{\n\t\tfbCopy    = true;\n\t\tmIsActive = true;\n\t\tbreak;\n\t}\n\tdefault:\n\t{\n\t\tkontMode = 2;\n\t\tbreak;\n\t}\n\t}\n}",
@@ -1902,7 +1906,8 @@
         "cast",
         "global",
         "field",
-        "inlined-callee"
+        "inlined-callee",
+        "sparse"
       ],
       "prependC": "#include \"CardUtil.h\"\n\n#include \"DebugLog.h\"\n#include \"gameflow.h\"\n\nCardUtilThread CardThread;\n\nCardUtilControl CardControl;\n\nvoid CardUtilLockDirectory()\n{\n\tOSLockMutex(&CardControl.mDirMutex);\n}\n\nvoid CardUtilUnlockDirectory()\n{\n\tOSUnlockMutex(&CardControl.mDirMutex);\n}\n\ns32* CardUtilByteNotUsed()\n{\n\treturn &CardControl.mByteNotUsed;\n}\n\ns32* CardUtilFilesNotUsed()\n{\n\treturn &CardControl.mFilesNotUsed;\n}\n\nu32* CardUtilSectorSize()\n{\n\treturn &CardControl.mSectorSize;\n}",
       "funcC": "static s32 DoMount(s32 chan, void* workArea)\n{\n\t// reset directory count (thread-safe)\n\tCardUtilLockDirectory();\n\tCardControl.mDirentCount = 0;\n\tCardUtilUnlockDirectory();\n\n\t// reset control values and mount card\n\tCardControl.mFilesNotUsed  = 0;\n\tCardControl.mByteNotUsed   = 0;\n\tCardControl.mOperationSize = CARD_WORKAREA_SIZE;\n\ts32 res                    = CARDMount(chan, (CARDMemoryCard*)workArea, nullptr);\n\tswitch (res) {\n\tcase CARD_RESULT_READY:\n\tcase CARD_RESULT_BROKEN:\n\t{\n\t\t// fetch sector size for utility purposes (+ check card is accessible as a side effect)\n\t\ts32 sectorRes = CARDGetSectorSize(chan, CardUtilSectorSize());\n\t\tif (sectorRes < 0) {\n\t\t\t// throw error\n\t\t\treturn sectorRes;\n\t\t}\n\n\t\t// double check card is valid and working\n\t\tres = CARDCheck(chan);\n\t\tbreak;\n\t}\n\tcase CARD_RESULT_ENCODING:\n\t{\n\t\t// fetch sector size for utility purposes (+ check card is accessible as a side effect)\n\t\ts32 sectorRes = CARDGetSectorSize(chan, CardUtilSectorSize());\n\t\tif (sectorRes < 0) {\n\t\t\t// throw error\n\t\t\treturn sectorRes;\n\t\t}\n\t\tbreak;\n\t}\n\t}\n\n\t// if everything is fine, calc what's free on memory card and update our values\n\tif (res == CARD_RESULT_READY) {\n\t\tres = CARDFreeBlocks(chan, CardUtilByteNotUsed(), CardUtilFilesNotUsed());\n\t}\n\treturn res;\n}",
@@ -1951,7 +1956,8 @@
         "array",
         "variable-index",
         "field",
-        "method"
+        "method",
+        "bool"
       ],
       "prependC": "#include \"DebugLog.h\"\n#include \"Dolphin/os.h\"\n#include \"Font.h\"\n#include \"Graphics.h\"\n#include \"Mesh.h\"\n#include \"Shape.h\"\n#include \"sysNew.h\"",
       "funcC": "void DGXGraphics::setMatMatrices(Material* mat, int p2)\n{\n\tmHasTexGen = (mat->mTextureInfo.mTevStageCount) ? true : false;\n\tGXSetNumTexGens(mat->mTextureInfo.mTexGenDataCount);\n\n\tint matrixType = 30;\n\tfor (int i = 0, j = 0; i < mat->mTextureInfo.mTexGenDataCount; i++) {\n\n\t\tu32 postMtxId = mat->mTextureInfo.mTexGenData[i].mMatrixType;\n\t\tif (postMtxId != 10) {\n\t\t\tpostMtxId = matrixType;\n\t\t} else {\n\t\t\tpostMtxId = 60;\n\t\t}\n\n\t\tGXTexGenSrc texGenSrc   = GXTexGenSrc(mat->mTextureInfo.mTexGenData[i].mTexGenSrc);\n\t\tGXTexGenType texGenType = GXTexGenType(mat->mTextureInfo.mTexGenData[i].mTexGenType);\n\t\tGXTexCoordID texCoordID = GXTexCoordID(mat->mTextureInfo.mTexGenData[i].mTexCoordID);\n\t\tGXSetTexCoordGen2(texCoordID, texGenType, texGenSrc, postMtxId, GX_FALSE, GX_PTIDENTITY);\n\n\t\tif (mat->mTextureInfo.mTexGenData[i].mTexGenType != 1) {\n\t\t\tcontinue;\n\t\t}\n\n\t\tint animFactor = mat->mTextureInfo.mTextureData[j].mAnimationFactor;\n\t\tif (animFactor != 0xFF) {\n\t\t\tint id = (animFactor != 10) ? matrixType : 60;\n\t\t\tGXLoadTexMtxImm(mat->mTextureInfo.mTextureData[j].mAnimatedTexMtx.mMtx, id, GX_MTX2x4);\n\n\t\t\tif (mHasTexGen && mat->mTextureInfo.mTexGenData[i].mTexGenSrc == 1) {\n\t\t\t\tmTexMtxBaseID = matrixType;\n\t\t\t\tmatrixType += (mat->mTextureInfo.mTevStageCount * p2) * 3;\n\t\t\t} else {\n\t\t\t\tmatrixType += 3;\n\t\t\t}\n\t\t}\n\t\tj++;\n\t}\n}",
