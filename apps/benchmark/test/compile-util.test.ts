@@ -58,6 +58,16 @@ describe('pickDiagnostics (pinned)', () => {
     expect(picked).toEqual(['#   Error:  ^', '#   error: the real message']);
   });
 
+  // The FIRST line of a captured message carries the harness's own wrapper, so a diagnostic block
+  // that OPENS on a caret line still has to hand over the next line — otherwise the row publishes
+  // a bare `^` as the cause it was judged on.
+  test('a caret line keeps its explanation even behind the wrapper prefix', () => {
+    expect(pickDiagnostics(['mwcceppc failed: #   Error:      ^', '#   type mismatch'])).toEqual([
+      'mwcceppc failed: #   Error:      ^',
+      '#   type mismatch',
+    ]);
+  });
+
   test('returns [] when nothing matches', () => {
     expect(pickDiagnostics(['banner', 'more banner'])).toEqual([]);
   });
