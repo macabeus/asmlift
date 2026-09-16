@@ -33,16 +33,16 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: all 252 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
-project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry a
-hand-written `ctx` naming callees the project's headers do not declare, held symmetric with the
-`proto` hints asmlift gets by `test/authored-facts.test.ts`; none does since the 2026-09-13 kleod
-swap (six kleod rows did before it). Synthetic rows carry the prototype in
+context**: 293 of the 294 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
+a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
+`test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
+cannot be handed to m2c's C parser at all (residual 5). Synthetic rows carry the prototype in
 the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
 what that translation unit preprocesses to, **never an invented type** (where a project types a
 global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
 and the row's own signature is not pasted into it out of `funcC` — the one channel by which it
-still arrives on 8 rows is residual 4 below, disclosed and measured. Remaining m2c declines
+still arrives on 1 row is residual 4 below, disclosed and measured. Remaining m2c declines
 are genuine modeling gaps — carry flags, unknown instructions, and callees the project itself
 never declares — that context cannot fix; same class as asmlift's declines (the decline-reason
 Pareto in Gap Analysis is the roadmap).
@@ -91,14 +91,22 @@ real row, and that map is not name-and-address: sizes, declaration shapes, signe
 extents, volatility, const-ness, address-cast macro bodies, and, where the vendoring found them,
 callee signatures and struct tags with full field tables. So m2c is given the matching thing —
 that row's own vendored preprocessed context, verbatim, via `--context` — on every real row.
+How much of that map a project actually carries is a property of ITS vendoring, and on one of the
+seven it is name, kind and size alone: residual 6 measures it.
 
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
-transfer"), and it now applies to both halves — with residual 4 as the one measured exception. The row's own declaration reaches m2c only where the context already
-carries it (39 rows: 31 declared by the project's headers, as a user mid-decomp genuinely has, and
-8 by the forward declaration the manifest needs to compile the reference standalone — residual 4)
-or as the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`, 84 rows).
-The remaining 123 rows get nothing appended, and m2c infers the signature as asmlift does.
+transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
+How m2c learns the row's own declaration, over the 294 real rows. Every count here is re-derived
+from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
+
+| how m2c learns the row's own declaration                                                                                                                                   | rows |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |   77 |
+| the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   91 |
+| the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  124 |
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -114,7 +122,7 @@ _Favouring m2c._
    `.state/.frameCounter/.type/.datap` in the context.
 2. **Callee prototypes.** m2c reads them out of the headers; asmlift's channel is the map's
    `signature` field, which the vendoring extracts for kleod and pokeemerald only — af,
-   marioparty3, sa3 and snowboardkids2 vendor **zero**.
+   marioparty3, sa3, snowboardkids2 and ac-decomp vendor **zero**.
 3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
    and m2c can READ it, so where it declares a struct type for a project static table
    (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
@@ -126,14 +134,34 @@ _Favouring m2c._
    `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none a match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
    scorer also compiles against. Named by `test/authored-facts.test.ts`.
 
+5. **A hand-written `ctx` has no cap.** `m2cOwnPrototype` exists to hold the vendored path at
+   "what `proto` gives asmlift". A hand-written `ctx` does not go through it, and it cannot: no
+   honest C declaration omits a return type, and `FnProto` has no field for one (residual 9 is the
+   same hole from the other side). The one row on that path today,
+   `ac-decomp:JW_JUTGamePad_read`, declares `OSTime OSGetTime(void)` — so m2c is told the callee
+   returns 64 bits, where asmlift's `proto` says only `{"params": []}`, and m2c's output uses it
+   (`s64 temp_ret = OSGetTime();`). It is on that path because its unit is C++: the vendored
+   context is not C, so m2c's parser cannot be given it, and `authored-facts.test.ts` refuses a
+   row with no m2c context at all. Both tools decline the row on other causes today. The callee
+   NAMES either side is told are already held equal by `test/authored-facts.test.ts`, and the same
+   test pins the rows on this path by name.
+
+6. **A symbol map with no type facts.** The justification above — sizes, shapes, signedness,
+   extents — is a property of the vendoring, not of every project. ac-decomp's maps carry
+   `{name, kind, size}` and nothing else (its linked ELF has no DWARF; 6,173 base entries and
+   66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
+   gets that row's ~650 KB preprocessed context with every struct and every prototype. 42 of the
+   294 real rows are on that footing. The other six projects carry the shape family (`declared`:
+   pokeemerald 24,539, marioparty3 902, sa3 148, kleod 113, af 89, snowboardkids2 27).
+
 _Favouring asmlift._
 
-5. **Scope.** The symbol map is whole-project and every row gets all of it; a context is one
+7. **Scope.** The symbol map is whole-project and every row gets all of it; a context is one
    translation unit, so a fact another TU's headers declare reaches asmlift and not m2c.
-6. **Named callees.** Four callees are named to asmlift through `proto` and are absent from the
+8. **Named callees.** Four callees are named to asmlift through `proto` and are absent from the
    row's context, all on `sa3:sub_8001FD4` (`ValidateSave`, `PackSaveSector`, `WriteSaveSector`,
    `sub_8001A90`).
-7. **Non-void rows.** On the 6 rows whose `proto` says the function is non-void and whose context
+9. **Non-void rows.** On the 6 rows whose `proto` says the function is non-void and whose context
    does not declare it, asmlift is told that — and on 3 of them a parameter list as well
    (`af:mPl_SceneNo2SoundRoomType` `["s32"]`, `pokeemerald:GetAnchorCoord` `["s32","s32","s32"]`,
    `sa3:sub_8001FD4` `[]`, i.e. arity 0) — while m2c is told nothing: `proto` carries no return
