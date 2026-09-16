@@ -22,7 +22,7 @@ import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
@@ -147,8 +147,10 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
                    spells, else the target's canonical flags)
-  --module         with an objdiff.json beside decomp.yaml: look for the function's
-                   unit in this module only (REL code repeats names across modules)
+  --module         the REL module the function belongs to: its symbols come from
+                   <tools.asmlift.elf dir>/<module>/<module>.plf over that ELF's
+                   globals, and its unit is looked for in this module only (REL
+                   code repeats names across modules)
   --strict         fail on any gap instead of annotating
   --config         decomp.yaml to use (default: nearest ancestor of the input)
   --score-against  recompile the output with the project's compiler and objdiff
@@ -296,6 +298,7 @@ const failureResult = (e: unknown, targetTrace: string, warn: string, code: numb
 async function loadProjectSymbolMap(
   toolCfg: AsmliftToolConfig | undefined,
   configDir: string | undefined,
+  module: string | undefined,
 ): Promise<{ map: SymbolMap | undefined } | { failure: CliResult }> {
   const failure = (r: CliResult): { failure: CliResult } => ({ failure: r });
   // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
@@ -313,14 +316,31 @@ async function loadProjectSymbolMap(
   }
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
+    // --module: the function lives in a REL module, so the map is the MODULE's, over the base
+    // ELF's globals. dtk writes each module's ELF beside the base one, at
+    // `<module>/<module>.plf`, and that layout is the whole location rule — a project's
+    // decomp.yaml says nothing about its modules.
+    const modulePath = module === undefined ? undefined : join(dirname(elfPath), module, `${module}.plf`);
+    if (modulePath !== undefined && !existsSync(modulePath)) {
+      return failure({
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: --module ${module}: no module ELF at ${modulePath}\n`,
+      });
+    }
     try {
-      const { loadSymbolMap } = await import('./symbols-provider');
-      symbols = await loadSymbolMap(elfPath);
+      const { loadModuleSymbolMap, loadSymbolMap } = await import('./symbols-provider');
+      symbols =
+        modulePath === undefined ? await loadSymbolMap(elfPath) : await loadModuleSymbolMap(modulePath, elfPath);
     } catch (e) {
       return failure({
         code: EXIT.unreadable,
         stdout: '',
-        stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
+        stderr: `asmlift: cannot load symbols from ${
+          modulePath === undefined
+            ? `tools.asmlift.elf (${elfPath})`
+            : `module ${module} (${modulePath} over ${elfPath})`
+        }: ${e instanceof Error ? e.message : e}\n`,
       });
     }
   } else if (toolCfg?.symbols) {
@@ -571,7 +591,51 @@ export async function runCli(
     prototypes = parsed as Prototypes;
   }
 
-  const loadedMap = await loadProjectSymbolMap(toolCfg, configDir);
+  // The dtk project beside decomp.yaml, read before anything consumes it: it is what gives
+  // `--module` a meaning, and both of the flag's jobs — the module's symbol map below, its unit's
+  // flags further down — are wrong if the name is not one of this project's modules.
+  const cflagsFlag = flags.get('cflags') as string | undefined;
+  const moduleFlag = flags.get('module') as string | undefined;
+  let project: ReturnType<typeof readObjdiffUnits>;
+  if (configDir !== undefined) {
+    try {
+      project = readObjdiffUnits(configDir);
+    } catch (e) {
+      return {
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot read objdiff.json: ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+  }
+  if (moduleFlag !== undefined) {
+    if (project !== undefined && !moduleHasUnits(project.units, moduleFlag)) {
+      return {
+        code: EXIT.usage,
+        stdout: '',
+        stderr: `asmlift: --module ${moduleFlag}: ${project.path} has no unit in it\n`,
+      };
+    }
+    // A flag that can do NOTHING is a discarded intent, not a default. --module has two jobs, and
+    // this project has to offer it at least one of them.
+    const inert = [
+      project === undefined
+        ? 'there is no objdiff.json beside decomp.yaml'
+        : cflagsFlag !== undefined
+          ? '--cflags gives the flags without one'
+          : undefined,
+      toolCfg?.elf === undefined ? 'tools.asmlift.elf is unset, so there is no module ELF beside it' : undefined,
+    ].filter((r) => r !== undefined);
+    if (inert.length === 2) {
+      return {
+        code: EXIT.usage,
+        stdout: '',
+        stderr: `asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and ${inert.join(', and ')}\n`,
+      };
+    }
+  }
+
+  const loadedMap = await loadProjectSymbolMap(toolCfg, configDir, moduleFlag);
   if ('failure' in loadedMap) {
     return loadedMap.failure;
   }
@@ -604,40 +668,10 @@ export async function runCli(
 
   // The dtk unit that defines the function, when the project has an objdiff.json and no --cflags
   // takes its place.
-  const cflagsFlag = flags.get('cflags') as string | undefined;
-  const moduleFlag = flags.get('module') as string | undefined;
-  let dtk: FlagsInput['dtk'];
-  if (cflagsFlag === undefined && configDir !== undefined) {
-    let project: ReturnType<typeof readObjdiffUnits>;
-    try {
-      project = readObjdiffUnits(configDir);
-    } catch (e) {
-      return {
-        code: EXIT.unreadable,
-        stdout: '',
-        stderr: `asmlift: cannot read objdiff.json: ${e instanceof Error ? e.message : e}\n`,
-      };
-    }
-    if (project !== undefined) {
-      if (moduleFlag !== undefined && !moduleHasUnits(project.units, moduleFlag)) {
-        return {
-          code: EXIT.usage,
-          stdout: '',
-          stderr: `asmlift: --module ${moduleFlag}: ${project.path} has no unit in it\n`,
-        };
-      }
-      dtk = { symbol: name, module: moduleFlag, lookup: unitDefining(configDir, project.units, name, moduleFlag) };
-    }
-  }
-  if (moduleFlag !== undefined && dtk === undefined) {
-    const why =
-      cflagsFlag !== undefined ? '--cflags gives the flags without one' : 'there is no objdiff.json beside decomp.yaml';
-    return {
-      code: EXIT.usage,
-      stdout: '',
-      stderr: `asmlift: --module chooses the objdiff.json unit that gives the flags, and ${why}\n`,
-    };
-  }
+  const dtk: FlagsInput['dtk'] =
+    cflagsFlag === undefined && project !== undefined
+      ? { symbol: name, module: moduleFlag, lookup: unitDefining(configDir!, project.units, name, moduleFlag) }
+      : undefined;
   const flagsResolution = resolveFlags({
     toolchain: targetKey,
     cflags: cflagsFlag,

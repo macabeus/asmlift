@@ -59,7 +59,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                                                                                       |
 | `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                                                                                            |
 | `--cflags`        | The flags your build compiles this function's file with, as the build spells them (`--cflags "-mthumb-interwork -O1"`). They fill `{{cflags}}` in the `compiler` command and win over every other source. See [Compiler flags](#compiler-flags)                                                                                                                                  |
-| `--module`        | With an `objdiff.json` beside `decomp.yaml`: look for the function's unit among this module's units only. REL code repeats names across modules, and a function several units define is refused until you choose                                                                                                                                                                 |
+| `--module`        | The REL module the function belongs to. Its symbols come from that module's own ELF (see [REL modules](#rel-modules)), and its unit is looked for among this module's `objdiff.json` units only — REL code repeats names across modules, and a function several units define is refused until you choose                                                                         |
 | `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                                                                                        |
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                                                                                           |
 | `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                                                                                         |
@@ -156,6 +156,22 @@ Every map fact is ranked, never an override: naming a global can change an old c
 codegen, so the named spelling and its `/raw-globals` sibling are both enumerated, and
 `--score-against`'s byte-diff picks the winner — a tie goes to the name. Unmapped addresses
 (MMIO registers, unnamed cells) keep the honest cast spelling.
+
+### REL modules
+
+A GameCube/Wii REL module is linked by the game's loader, not by the linker, so its ELF is
+RELOCATABLE and every allocated section starts at address 0 — a symbol's value is an offset into
+its own section. Naming such a file as `elf:` is refused: read address-first it puts each
+section's first symbol at `0x0`, which is 2,393 colliding addresses over Mario Party 4's 99
+modules.
+
+`--module <name>` is how a module's function is decompiled instead. `elf:` stays the base
+(DOL) ELF, and asmlift reads the module's own ELF beside it at dtk's own layout,
+`<directory of elf:>/<module>/<module>.plf` — there is no setting for it. Each of that ELF's
+sections is placed at a base of its own, and the base ELF's **global** symbols are unioned in
+with the module winning any name they share, because inside a module that name means the
+module's own definition. The name must be one the project's `objdiff.json` knows, and a missing
+module ELF is refused with the path asmlift looked for.
 
 ### Producing the ELF
 

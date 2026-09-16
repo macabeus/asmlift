@@ -7,11 +7,12 @@
 // such a file is REFUSED, and the module map that replaces it places each section at a base of its
 // own and inherits only what a module may refer to in the base ELF.
 import { symbolsByName } from '@asmlift/core/symbols';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { runCli } from '../../src/main';
 import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey } from '../../src/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '../../src/symbols-provider';
 
@@ -282,5 +283,88 @@ describe('loadModuleSymbolMap — the module, placed, over the base ELF globals'
     await expect(
       loadModuleSymbolMap(write('m416Dll.plf', modulePlf()), write('base.plf', modulePlf())),
     ).rejects.toThrow(/base\.plf: it is a RELOCATABLE ELF/);
+  });
+});
+
+/** A dtk project: decomp.yaml naming the base ELF, one objdiff.json unit under `m416Dll`, and the
+ *  build directory dtk writes a module's ELF into. `plf` is what lands at the module path — absent
+ *  writes none at all. */
+function dtkProject(plf?: Buffer) {
+  const root = mkdtempSync(join(tmpdir(), 'asmlift-modcli-'));
+  mkdirSync(join(root, 'build', 'm416Dll'), { recursive: true });
+  writeFileSync(join(root, 'build', 'main.elf'), dolElf());
+  if (plf) {
+    writeFileSync(join(root, 'build', 'm416Dll', 'm416Dll.plf'), plf);
+  }
+  writeFileSync(
+    join(root, 'objdiff.json'),
+    JSON.stringify({
+      units: [
+        {
+          name: 'm416Dll/REL/executor',
+          target_path: 'build/m416Dll/executor.o',
+          scratch: { compiler: 'mwcc_242_81', c_flags: '-O4,p' },
+        },
+      ],
+    }),
+  );
+  writeFileSync(join(root, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    elf: build/main.elf\n');
+  const asm = join(root, 'clamp0.asm');
+  writeFileSync(asm, readFileSync(join(import.meta.dirname, '../../../core/test/corpus/ppc-clamp0.asm'), 'utf8'));
+  return { root, asm };
+}
+
+describe('--module at the CLI surface', () => {
+  test("--module is how a module's symbols are read; the same file as tools.asmlift.elf is refused", async () => {
+    const { root, asm } = dtkProject(modulePlf());
+    expect(await runCli([asm, '--module', 'm416Dll'])).toMatchObject({ code: 0 });
+    // the same bytes as tools.asmlift.elf: the map this gate exists to stop building
+    writeFileSync(join(root, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    elf: build/m416Dll/m416Dll.plf\n');
+    const direct = await runCli([asm]);
+    expect(direct.code).toBe(66);
+    expect(direct.stderr).toMatch(/cannot load symbols from tools\.asmlift\.elf .*RELOCATABLE ELF/s);
+  });
+
+  test('the module map is read OVER the base ELF — a failure names both files', async () => {
+    const { root, asm } = dtkProject(modulePlf());
+    rmSync(join(root, 'build', 'main.elf'));
+    const r = await runCli([asm, '--module', 'm416Dll']);
+    expect(r.code).toBe(66);
+    expect(r.stderr).toContain(
+      `cannot load symbols from module m416Dll (${join(root, 'build', 'm416Dll', 'm416Dll.plf')} over ${join(root, 'build', 'main.elf')})`,
+    );
+  });
+
+  test('a module with no ELF at the dtk path is refused with the path asmlift looked for', async () => {
+    const { root, asm } = dtkProject();
+    expect(await runCli([asm, '--module', 'm416Dll'])).toEqual({
+      code: 66,
+      stdout: '',
+      stderr: `asmlift: --module m416Dll: no module ELF at ${join(root, 'build', 'm416Dll', 'm416Dll.plf')}\n`,
+    });
+  });
+
+  test('an unreadable module ELF names the module, not the project ELF', async () => {
+    const { root, asm } = dtkProject(Buffer.from('not an ELF at all'));
+    const r = await runCli([asm, '--module', 'm416Dll']);
+    expect(r.code).toBe(66);
+    expect(r.stderr).toContain(
+      `asmlift: cannot load symbols from module m416Dll (${join(root, 'build', 'm416Dll', 'm416Dll.plf')} over `,
+    );
+    expect(r.stderr).toContain('a module ELF is a RELOCATABLE ELF32');
+  });
+
+  test('--cflags no longer makes --module inert: it still names the map', async () => {
+    const { asm } = dtkProject(modulePlf());
+    expect(await runCli([asm, '--module', 'm416Dll', '--cflags', '-O4,p'])).toMatchObject({ code: 0 });
+  });
+
+  test('a name that is no module of this project is still refused before anything is read', async () => {
+    const { root, asm } = dtkProject(modulePlf());
+    expect(await runCli([asm, '--module', 'm999Dll'])).toEqual({
+      code: 64,
+      stdout: '',
+      stderr: `asmlift: --module m999Dll: ${join(root, 'objdiff.json')} has no unit in it\n`,
+    });
   });
 });

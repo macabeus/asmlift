@@ -299,16 +299,18 @@ describe('at the CLI surface', () => {
       stdout: '',
       stderr: `asmlift: --module m999Dll: ${join(root, 'objdiff.json')} has no unit in it\n`,
     });
+    // --module has two jobs, the unit lookup here and the module's symbol map; a project that
+    // offers it NEITHER is a discarded intent rather than a default
     expect(await runCli([asm, '--module', 'm427Dll', '--cflags', '-O4,p'])).toEqual({
       code: 64,
       stdout: '',
       stderr:
-        'asmlift: --module chooses the objdiff.json unit that gives the flags, and --cflags gives the flags without one\n',
+        'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and --cflags gives the flags without one, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     });
     const bare = mkdtempSync(join(tmpdir(), 'asmlift-nodtk-'));
     writeFileSync(join(bare, 'decomp.yaml'), 'platform: gc\n');
     expect((await runCli([asm, '--config', join(bare, 'decomp.yaml'), '--module', 'm427Dll'])).stderr).toBe(
-      'asmlift: --module chooses the objdiff.json unit that gives the flags, and there is no objdiff.json beside decomp.yaml\n',
+      'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and there is no objdiff.json beside decomp.yaml, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     );
   });
 });
