@@ -19,7 +19,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
-import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -135,7 +135,8 @@ Input: GBA .s text (agbcc output or pret-style splits), objdump -d text, or a
 MIPS/PPC ELF object.
 Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 
-  --name           select the function in multi-function input (default: detected)
+  --name           select the function in multi-function input (default: detected;
+                   required for an object whose code lives in several sections)
   --cflags         the flags your build compiles this function's file with; they
                    fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
@@ -162,10 +163,12 @@ Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 3 the candidate-object 
             bytes a fresh compile disagrees with · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
 
-// The object-input seam, injectable so the offline CLI tests can fake the objdump spawns.
+// The object-input seam, injectable so the offline CLI tests can fake the objdump spawns. `sym` is
+// `--name`: an object whose code lives in several sections (CodeWarrior emits many, all called
+// `.text`) is read through the one its symbol table places the function in.
 export interface ObjInput {
-  disasm: typeof disasmObject;
-  asmData: typeof asmDataForObject;
+  disasm: (obj: string, target: TargetDescription, sym?: string) => string;
+  asmData: (obj: string, target: TargetDescription, sym?: string) => AsmData | undefined;
 }
 
 export interface CliResult {
@@ -487,12 +490,12 @@ export async function runCli(
         stderr: 'asmlift: object-file input via stdin is not supported — pass a file path\n',
       };
     }
-    const obj = objInput ?? {
-      disasm: (path, t) => disasmObject(path, t, toolCfg?.objdump),
-      asmData: (path, t) => asmDataForObject(path, t, toolCfg?.objdump),
+    const obj: ObjInput = objInput ?? {
+      disasm: (path, t, sym) => disasmObject(path, t, toolCfg?.objdump, sym),
+      asmData: (path, t, sym) => asmDataForObject(path, t, toolCfg?.objdump, sym),
     };
     try {
-      asm = obj.disasm(input, target);
+      asm = obj.disasm(input, target, nameFlag);
     } catch (e) {
       if (e instanceof ObjectInputUnsupportedError) {
         return { code: EXIT.gaps, stdout: '', stderr: `asmlift: [declined] ${e.message}\n` };
@@ -504,7 +507,7 @@ export async function runCli(
       };
     }
     try {
-      asmData = obj.asmData(input, target);
+      asmData = obj.asmData(input, target, nameFlag);
     } catch (e) {
       warn = `asmlift: warning: no jump-table side-table (${e instanceof Error ? e.message : e}) — a dense switch will decline\n`;
     }

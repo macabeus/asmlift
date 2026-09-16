@@ -9,6 +9,11 @@
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { scopedObjectPath, severalCodeSections } from './elf-section';
 
 /** ELF magic: 0x7f 'E' 'L' 'F'. The one sniff the CLI needs — every toolchain here emits ELF. */
 export const isElfObject = (b: Uint8Array): boolean =>
@@ -62,22 +67,57 @@ const run = (choice: ObjdumpChoice, args: string[], obj: string, what: string): 
   return r.stdout;
 };
 
+/** Run objdump over the object a read of `sym` may legitimately see. An object holding several code
+ *  sections — CodeWarrior emits many, all named `.text` and all starting at address 0 — is replaced
+ *  by a copy holding only the section `sym`'s `st_shndx` names, with only that section's
+ *  relocations; without a symbol to scope by, every name in such a dump is ambiguous and the read is
+ *  refused rather than answered with another section's bytes. Every single-code-section object goes
+ *  through untouched. */
+function overObject<T>(obj: string, sym: string | undefined, use: (path: string) => T): T {
+  let bytes: Uint8Array;
+  try {
+    bytes = readFileSync(obj);
+  } catch {
+    return use(obj); // an unreadable object is objdump's to report, in its own words
+  }
+  if (!severalCodeSections(bytes)) {
+    return use(obj);
+  }
+  if (sym === undefined) {
+    throw new Error(
+      `${obj} holds several code sections, each disassembling from address 0 — pass --name <symbol> ` +
+        'to say which function to read',
+    );
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-section-'));
+  try {
+    return use(scopedObjectPath(obj, sym, dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** `objdump -d` text for the object, using the target family's disassembler — exactly the
  *  text the frontend reads. `objdumpBin` (a decomp.yaml `tools.asmlift.objdump`) overrides
- *  the PATH/env-resolved binary. */
-export function disasmObject(obj: string, target: TargetDescription, objdumpBin?: string): string {
+ *  the PATH/env-resolved binary; `sym` is the function being read (`--name`). */
+export function disasmObject(obj: string, target: TargetDescription, objdumpBin?: string, sym?: string): string {
   const choice = objdumpFor(target, objdumpBin);
-  return run(choice, choice.disasmFlags, obj, 'disassemble');
+  return overObject(obj, sym, (path) => run(choice, choice.disasmFlags, path, 'disassemble'));
 }
 
 /** The `objdump -s -r -t` side-table (AsmData) for jump-table recovery; undefined when the
  *  target has no extractor. Failures here are the CALLER's to soften — the side-table is
  *  optional (without it a dense-switch dispatch declines loudly downstream). */
-export function asmDataForObject(obj: string, target: TargetDescription, objdumpBin?: string): AsmData | undefined {
+export function asmDataForObject(
+  obj: string,
+  target: TargetDescription,
+  objdumpBin?: string,
+  sym?: string,
+): AsmData | undefined {
   if (target.compiler === 'agbcc') {
     return undefined;
   }
   const choice = objdumpFor(target, objdumpBin);
-  const dump = run(choice, ['-s', '-r', '-t'], obj, 'asmdata');
+  const dump = overObject(obj, sym, (path) => run(choice, ['-s', '-r', '-t'], path, 'asmdata'));
   return parseAsmData(dump, dump, dump, true);
 }
