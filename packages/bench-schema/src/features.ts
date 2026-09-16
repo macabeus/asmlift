@@ -853,6 +853,25 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['int-to-float', 'float', 'cast'],
   },
   {
+    id: 'reference',
+    label: 'C++ reference',
+    group: 'data-types',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a C++ reference — a pointer the source never spells as one',
+    detail:
+      '`void f(Vec& v)` and `void f(Vec* v)` compile to the same instructions. What differs is the ' +
+      'SOURCE: every use of the reference is missing a `*` or a `->`, and assigning to it writes ' +
+      'THROUGH it where assigning to a pointer would rebind it. Two things do reach the object, ' +
+      'which is what keeps the tag from being purely cosmetic: a reference cannot be null, so the ' +
+      'null checks a careful pointer version would carry are absent, and it cannot be reseated, so ' +
+      'the compiler may keep it in a register across code that would have had to reload a pointer. ' +
+      'A C decompiler necessarily spells the parameter as a pointer — the same object, a different ' +
+      'source, and on a C++ compile a different mangled name.',
+    example: { c: 'void add(Vec& dst, const Vec& src) { dst.x += src.x; dst.y += src.y; }' },
+    seeAlso: ['pointer', 'method', 'struct-return', 'struct'],
+  },
+  {
     id: 'matrix',
     label: 'Matrix math',
     group: 'data-types',
@@ -880,7 +899,7 @@ export const FEATURES: readonly FeatureDef[] = [
       asm: '  lwz  r5,0(r4)      @ the four values, loaded from .rodata …\n  stw  r5,8(r1)      @ … and stored into the frame, every call',
       toolchain: 'mwcc_242_81',
     },
-    seeAlso: ['static-local', 'array', 'table', 'memory'],
+    seeAlso: ['static-local', 'struct-copy', 'array', 'table', 'memory'],
   },
   {
     id: 'sizeof',
@@ -1072,6 +1091,48 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['global', 'table', 'local-aggregate-init', 'load'],
   },
   {
+    id: 'static-member',
+    label: 'Static data member',
+    group: 'memory',
+    evidence: 'judgement',
+    pending: true,
+    summary: "a class's static data member is read or written",
+    detail:
+      'File-scope storage under a class-scope NAME. In the object it is an ordinary global — a ' +
+      'mangled symbol (`count__5Thing`) reached through the same relocation as any other — so the ' +
+      'scope that makes it a member is the part that is not in the bytes, exactly as with ' +
+      '`global`. The part that IS: an inline-initialised or template static member may be emitted ' +
+      'into whichever object references it rather than into one definition, so WHICH unit owns the ' +
+      'datum is not decided by the source file it appears in. ' +
+      'No machine-checked floor: the mangling is the only hint the symbol gives, and a row may ' +
+      'reach the member through a project accessor that mentions neither.',
+    seeAlso: ['global', 'method', 'load', 'store', 'struct'],
+  },
+  {
+    id: 'struct-copy',
+    label: 'Struct copy',
+    group: 'memory',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a struct is assigned BY VALUE, and the compiler emits the copy',
+    detail:
+      '`*a = *b;` on a struct is not one store. The compiler emits a run of loads and stores — or ' +
+      'a call to a copy helper once the struct is large enough — sized and aligned by a type that ' +
+      'is nowhere in the object. Recovering it therefore means inventing a struct whose SIZE ' +
+      'happens to match the run: one word short and the tail of the function shifts, one word long ' +
+      'and it shifts the other way. And it means spelling the assignment as an assignment, because ' +
+      'the loads and stores written out by hand are a different (legal, wrong) answer that the ' +
+      'compiler will not re-fuse. ' +
+      'Floor: an assignment whose right-hand side is a whole object rather than an expression. ' +
+      'Whether that object is an aggregate is what no scan can decide — the types are the project’s.',
+    example: {
+      c: 'void set(Rect *a, const Rect *b) { *a = *b; }',
+      asm: '  lwz  r0,0(r4)\n  stw  r0,0(r3)\n  lwz  r0,4(r4)\n  stw  r0,4(r3)   @ …and so on, once per word',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['struct', 'memory', 'local-aggregate-init', 'struct-return', 'field'],
+  },
+  {
     id: 'new-delete',
     label: 'new / delete',
     group: 'memory',
@@ -1086,7 +1147,7 @@ export const FEATURES: readonly FeatureDef[] = [
       'mirrors it, and on a polymorphic class it does not call the allocator at all: it calls the ' +
       'destructor with its hidden delete flag set and lets the destructor free the object. None ' +
       'of that sequence is in the source, and none of it is spellable in C.',
-    seeAlso: ['method', 'call', 'struct'],
+    seeAlso: ['ctor', 'dtor', 'virtual-call', 'method', 'call'],
   },
   {
     id: 'pointer',
@@ -1200,6 +1261,124 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['call', 'struct', 'pointer'],
   },
   {
+    id: 'virtual-call',
+    label: 'Virtual call',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: "a call dispatched through the object's virtual table",
+    detail:
+      'Two dependent loads and an indirect branch: read the vtable pointer out of the object, read ' +
+      'the slot at a fixed offset in that table, call it. NOTHING here names the callee — the ' +
+      'whole of what a recovery must get right is the SLOT NUMBER, and that is decided by a class ' +
+      'hierarchy which appears nowhere in the object. The vtable pointer is not always at offset 0 ' +
+      'either: a class deriving from a non-polymorphic base carries it after that base’s fields. ' +
+      'A decompiler with no class model can only spell this as a load of a function-pointer field, ' +
+      'which compiles to the same two loads exactly when its invented offsets agree with the real ' +
+      'layout. ' +
+      'Floor: an indirect call in the compiled code. Whether it goes through a vtable rather than a ' +
+      'plain function pointer is the judgement — `fnptr` is the tag for the other answer.',
+    example: {
+      c: 'void tick(Obj *o) { o->draw(); }',
+      asm: '   8:\tlwz\tr12,0(r3)\n   c:\tlwz\tr12,8(r12)\n  10:\tmtctr\tr12\n  14:\tbctrl',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['fnptr', 'method', 'ctor', 'dtor', 'call'],
+  },
+  {
+    id: 'ctor',
+    label: 'Constructor',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a C++ constructor',
+    detail:
+      'A constructor is not a function whose source is all there. Before the first statement of ' +
+      'its body the compiler runs the base constructors and then the member constructors in ' +
+      'DECLARATION order, and on a polymorphic class it installs the vtable pointer — a store of a ' +
+      '`__vt__` address into the object that no line of source corresponds to. All of that order ' +
+      'comes from the class, not from the body, so a recovery that spells the initialisation as ' +
+      'ordinary assignments can produce the right stores in the wrong sequence and be wrong by the ' +
+      'whole prologue. ' +
+      'Floor: a `Name::Name(` in the signature. Whether the constructor’s generated part is what ' +
+      'the row is about stays the judgement.',
+    example: { c: 'Thing::Thing(int n) { this->count = n; }' },
+    seeAlso: ['dtor', 'method', 'new-delete', 'virtual-call', 'struct'],
+  },
+  {
+    id: 'dtor',
+    label: 'Destructor',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a C++ destructor',
+    detail:
+      'The mirror of `ctor` — member and base destructors run in REVERSE declaration order after ' +
+      'the body — plus a parameter the source cannot see. A destructor reachable through `delete` ' +
+      'takes a hidden flag saying whether to free the object as well as destroy it; Metrowerks ' +
+      'passes it in the second argument register and tests it with an `extsh`. The flag is not in ' +
+      'the mangled name (`__dt__6SystemFv` claims to take nothing at all), so a prototype that ' +
+      'matches the CODE has to contradict the symbol that names it. ' +
+      'Floor: a `~Name(` in the signature.',
+    example: { c: 'System::~System() { free(this->buf); }' },
+    seeAlso: ['ctor', 'method', 'new-delete', 'virtual-call'],
+  },
+  {
+    id: 'struct-return',
+    label: 'Struct returned by value',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a struct or class is returned BY VALUE, through a hidden pointer',
+    detail:
+      'No ABI here returns an aggregate in a register. The CALLER allocates the space and passes ' +
+      'its address as a hidden argument ahead of every real one — which on a member function ' +
+      'pushes `this` into the SECOND argument register — and the callee writes through it and ' +
+      'returns it. A recovery that spells the function as returning the type gets all of that for ' +
+      'free; one that spells the hidden pointer as an ordinary first parameter gets byte-identical ' +
+      'code and a signature no other call site in the program can use. ' +
+      'No machine-checked floor: the returned type is a project typedef, and no scan can tell ' +
+      '`Vec3f f(void)` from `u32 f(void)`.',
+    seeAlso: ['multi-arg', 'method', 'struct', 'struct-copy', 'reference'],
+  },
+  {
+    id: 'hw-float-abi',
+    label: 'Hardware float ABI',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'floating-point arguments and results travel in floating-point registers',
+    detail:
+      'A target with an FPU has a SECOND register file in its calling convention: PowerPC passes ' +
+      'floats in f1–f8 and returns in f1, MIPS passes $f12/$f14 and returns in $f0, and no ' +
+      'general-purpose register is involved at all. The GBA has no FPU, so the same C passes the ' +
+      'same values as integers and calls a helper to add them. That makes the float TYPE ' +
+      'load-bearing in a way it is not elsewhere: a decompiler that reads a parameter as an ' +
+      'integer does not merely name it wrongly, it passes it in the wrong register file, and ' +
+      'every call site moves. ' +
+      'Floor: a floating-point type in the signature. Whether the ABI is what the diff turns on ' +
+      'stays the judgement.',
+    example: { c: 'f32 lerp(f32 a, f32 b, f32 t) { return a + (b - a) * t; }' },
+    seeAlso: ['float', 'double', 'float-callee-save', 'runtime-helper-call', 'multi-arg'],
+  },
+  {
+    id: 'inlined-callee',
+    label: 'Inlined callee',
+    group: 'calls',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a call the source spells that the compiler expanded in place',
+    detail:
+      'The source says `fabsf(x)`, or calls a small static helper in the same unit, and the object ' +
+      'contains no call — the callee’s body is sitting in the middle of this one. The decompiler ' +
+      'sees only that body, and both ways of writing it back can be wrong: spell the expansion and ' +
+      'the code is right but the source is a paraphrase no one would maintain; spell the call and ' +
+      'it only reproduces the bytes if the recompile can SEE the same definition and chooses to ' +
+      'inline it again. Which of those two the row is measuring is the judgement. ' +
+      'Floor: the body spells at least one call for the compiler to have expanded.',
+    seeAlso: ['call', 'inline-member', 'libm-call', 'macro'],
+  },
+  {
     id: 'runtime-helper-call',
     label: 'Runtime helper call',
     group: 'calls',
@@ -1238,7 +1417,7 @@ export const FEATURES: readonly FeatureDef[] = [
       'the result narrowed back by conversions the source never wrote, and a compiler is free to ' +
       'expand some of them inline instead, so that `fabsf` leaves two instructions and no call at ' +
       'all.',
-    seeAlso: ['call', 'runtime-helper-call', 'float', 'double'],
+    seeAlso: ['call', 'runtime-helper-call', 'inlined-callee', 'float', 'double'],
   },
   {
     id: 'savegpr-helper',
@@ -1329,7 +1508,27 @@ export const FEATURES: readonly FeatureDef[] = [
       'The source spells something as a macro that expands to code no one would write by hand. ' +
       'Recovery cannot reproduce the macro, only its expansion — so these rows measure whether ' +
       'the expansion itself is recoverable.',
-    seeAlso: ['baseline'],
+    seeAlso: ['baseline', 'inline-member'],
+  },
+  {
+    id: 'inline-member',
+    label: 'Inline member',
+    group: 'meta',
+    evidence: 'judgement',
+    pending: true,
+    summary: 'a header-defined member function, expanded into the body, is what the diff turns on',
+    detail:
+      'C++ game code spells its accessors, its operators and its small helpers as inline member ' +
+      'functions in headers, and the compiler expands every one of them. What reaches the object ' +
+      'is the EXPANSION, and the expansion carries decisions the caller’s source does not: which ' +
+      'field an `operator+` reads first, whether a getter is one load or a load and a mask, how a ' +
+      'chain of them folds. A decompiler reading only the caller can reproduce the instructions ' +
+      'and still not be able to spell the source, because the source is in a header it is not ' +
+      'reading. The C++ sibling of `macro`, and distinct from `inlined-callee`: that one is a call ' +
+      'the compiler chose to expand, this one is code that was never going to be a call. ' +
+      'No machine-checked floor: an expanded accessor and hand-written field arithmetic are the ' +
+      'same text.',
+    seeAlso: ['macro', 'method', 'inlined-callee', 'field', 'struct'],
   },
   {
     id: 'baseline',

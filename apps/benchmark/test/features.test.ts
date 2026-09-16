@@ -367,6 +367,37 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '', '')).toBe(true);
   });
 
+  it('holds the C++ floors to the signature, where their evidence is', () => {
+    const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
+    // a constructor repeats the class name; a destructor puts a `~` in front of it
+    expect(floor('ctor', 'Thing::Thing(int n) { this->count = n; }')).toBe(true);
+    expect(floor('ctor', 'void Thing::reset(int n) { this->count = n; }')).toBe(false);
+    expect(floor('dtor', 'System::~System() { free(this->buf); }')).toBe(true);
+    expect(floor('dtor', 'System::System() { this->buf = 0; }')).toBe(false);
+    // a reference parameter, NOT a binary `&` in the body — which is why this reads the signature
+    expect(floor('reference', 'void add(Vec& dst, const Vec& src) { dst.x += src.x; }')).toBe(true);
+    expect(floor('reference', 'void add(Vec *dst) { dst->x = a & b; }')).toBe(false);
+    // a float in the signature is what travels in an FP register; one confined to the body is not
+    expect(floor('hw-float-abi', 'f32 lerp(f32 a, f32 b) { return a + b; }')).toBe(true);
+    expect(floor('hw-float-abi', 'int n(int a) { float t = a; return (int)t; }')).toBe(false);
+  });
+
+  it('holds the remaining new floors without pretending to decide them', () => {
+    const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
+    // an indirect call, on all four ISAs — not the same predicate as `fnptr`, which has no PPC form
+    expect(floor('virtual-call', '{ o->draw(); }', '  14:\tbctrl')).toBe(true);
+    expect(floor('virtual-call', '{ o->draw(); }', '  14:\tjalr\tv0')).toBe(true);
+    expect(floor('virtual-call', '{ draw(o); }', '  14:\tbl\tdraw')).toBe(false);
+    // an assignment whose right-hand side is a whole object, not an expression
+    expect(floor('struct-copy', '{ *a = *b; }')).toBe(true);
+    expect(floor('struct-copy', '{ p->pos = q->pos; }')).toBe(true);
+    expect(floor('struct-copy', '{ p->x = q->x + 1; }')).toBe(false);
+    expect(floor('struct-copy', '{ p->x = f(q); }')).toBe(false);
+    // a callee can only have been inlined if the body spells a call; `if (` is not one
+    expect(floor('inlined-callee', '{ return fabsf(x); }')).toBe(true);
+    expect(floor('inlined-callee', '{ if (x > 0) { return x; } return -x; }')).toBe(false);
+  });
+
   it('reads a static local, and does not read the aggregate it initialises as an automatic one', () => {
     // `static` puts the object in .rodata and there is no per-call copy — the shape
     // `local-aggregate-init` is about — so the two tags are exclusive on the same declaration

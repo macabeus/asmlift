@@ -29,6 +29,12 @@ export { KNOWN_FEATURES };
  *  aggregate's brace — so the members would otherwise be counted as declaration statements. */
 const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b[^{;]*\{[^{}]*\}/g, ' ');
 
+/** Everything before the opening brace: the return type, the name and the parameter list. A floor
+ *  reading it is handed the WHOLE function (the third argument) rather than the body, for the
+ *  reason `double` was: a `(int a)` in a signature is not a cast, and a `&` there is not a
+ *  bitwise AND. */
+const signatureOf = (whole: string): string => whole.slice(0, Math.max(0, whole.indexOf('{')));
+
 /** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
  *
  *  "Is this *bulk* memory movement?" cannot be decided by a regex, so the sufficient condition
@@ -134,6 +140,38 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   },
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
+
+  // A vtable dispatch is an INDIRECT call, on every ISA the benchmark runs — PowerPC through the
+  // count or link register, MIPS `jalr`, ARM `blx` or agbcc's `_call_via_rN` thunk. Whether the
+  // callee came out of a vtable rather than a function-pointer field is the judgement, and `fnptr`
+  // is the tag for the other answer. (Deliberately NOT the same predicate as `fnptr`'s floor,
+  // which has no PowerPC form; widening that one would change which rows can claim `fnptr`.)
+  'virtual-call': (_b, asm) => /\bbctrl\b|\bblrl\b|\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+
+  // A constructor's declarator repeats the class name — `Thing::Thing(`. The SIGNATURE carries it
+  // and the body never does, so like `double` this reads the whole function.
+  ctor: (_b, _asm, whole) => /\b(\w+)\s*::\s*\1\s*\(/.test(signatureOf(whole)),
+  // …and a destructor's is the same name behind a `~`.
+  dtor: (_b, _asm, whole) => /~\s*\w+\s*\(/.test(signatureOf(whole)),
+
+  // A reference PARAMETER: an `&` between a type and a name, in the parameter list. Read from the
+  // signature and not the body, where a binary `a & b` is the same three tokens. A reference local
+  // is the same construct and cannot pass this floor — the same narrowing `double` accepts.
+  reference: (_b, _asm, whole) => /[\w>\]]\s*&\s*\**\s*\w+\s*[,)=]/.test(signatureOf(whole)),
+
+  // A hardware float ABI needs a floating-point type in the SIGNATURE — a float that only ever
+  // exists inside the body is never passed or returned. Which projects spell it `f32`/`f64`
+  // rather than `float`/`double` is why all four are accepted.
+  'hw-float-abi': (_b, _asm, whole) => /\b(?:float|double|f32|f64)\b/.test(signatureOf(whole)),
+
+  // A by-value struct assignment is an assignment whose right-hand side is a WHOLE OBJECT — `*a =
+  // *b;`, `p->pos = q->pos;`, `v = w;` — and not an expression, which would be a scalar store. That
+  // the object is an aggregate is exactly what no scan can decide: the types are the project's.
+  'struct-copy': (b) => /=\s*\*?\s*[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*\s*;/.test(b),
+
+  // For a callee to have been inlined, the body has to spell a call. The keywords that take a
+  // parenthesis are excluded, or every `if (` would pass.
+  'inlined-callee': (b) => /\b(?!if|while|for|switch|return|sizeof|do|catch)[A-Za-z_]\w*\s*\(/.test(b),
   'switch-arms': (b) => /\bswitch\s*\(/.test(b),
   dense: (b) => /\bswitch\s*\(/.test(b),
   sparse: (b) => /\bswitch\s*\(/.test(b),
