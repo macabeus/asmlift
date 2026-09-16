@@ -1,6 +1,7 @@
 // asmlift — the ELF symbol-map provider (research/symbol-map-plan-2026-07-22.md).
 //
-// Reads the ONE file `tools.asmlift.elf` names and produces the core `SymbolMap`:
+// Reads the ELF `tools.asmlift.elf` names — or, for a function in a REL module, that module's own
+// ELF placed and unioned with it (`loadModuleSymbolMap`) — and produces the core `SymbolMap`:
 //   names+addresses+kind from `.symtab` (always), declaration shapes from the DWARF
 //   types-sidecar the project links in (when present — `hasTypeInfo` is the detector; absent
 //   ⇒ names-only, gracefully). The join is by NAME: the sidecar's variable DIEs carry
@@ -26,6 +27,8 @@
 import { addressCastMacrosFrom } from '@asmlift/core/macros';
 import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
+
+import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey } from './module-elf';
 
 /** `variableShape` result — declared structurally so this package does not depend on
  *  @gba-kit/debug-info's exported types. The cv-qualifier flags are OPTIONAL at this boundary
@@ -257,9 +260,47 @@ export function layoutOf(
     });
 }
 
+/** The project's map, from the ONE ELF `tools.asmlift.elf` names. */
 export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
+  return symbolMapFromElf(readFileSync(elfPath), elfPath);
+}
+
+/** A REL MODULE's map: the module's own symbols, at bases placed for it, plus the base (DOL) ELF's
+ *  GLOBAL symbols — the ones a module is allowed to refer to.
+ *
+ *  A module SHADOWS the base. Both ELFs carry a `_ctors`, a `_dtors` and whatever file statics the
+ *  project repeats, and inside the module those names mean the module's own definitions: that is
+ *  what its relocations point at. Letting both into one map would make every such name an alias
+ *  pair, and `symbolsByName` answers an ambiguous name with nothing at all.
+ *
+ *  Only the module is placed, because only the module is unplaced: the base ELF is linked, its
+ *  addresses are the game's, and {@link assertPlaced} holds it to that. */
+export async function loadModuleSymbolMap(moduleElfPath: string, baseElfPath: string): Promise<SymbolMap> {
+  const map = await symbolMapFromElf(placeModuleSections(readFileSync(moduleElfPath), moduleElfPath), moduleElfPath);
+  const shadowed = new Set([...map.values()].flatMap((infos) => infos.map((i) => i.name)));
+  const baseBytes = readFileSync(baseElfPath);
+  const globals = globalSymbolKeys(baseBytes);
+  const base = await symbolMapFromElf(baseBytes, baseElfPath, (name, address) => globals.has(symbolKey(name, address)));
+  for (const [address, infos] of base) {
+    const inherited = infos.filter((i) => !shadowed.has(i.name));
+    if (inherited.length === 0) {
+      continue;
+    }
+    const already = map.get(address);
+    map.set(address, already ? [...already, ...inherited].sort(canonicalOrder) : inherited);
+  }
+  return map;
+}
+
+/** `keep` selects which of the ELF's own symbols reach the map, by name and mapped address (the
+ *  module union's binding filter). Macro names are not symbols and are never filtered by it. */
+async function symbolMapFromElf(
+  bytes: Buffer,
+  elfPath: string,
+  keep?: (name: string, address: number) => boolean,
+): Promise<SymbolMap> {
+  assertPlaced(bytes, elfPath);
   const { DebugInfo, STT_FUNC } = await import('@gba-kit/debug-info');
-  const bytes = readFileSync(elfPath);
   // EI_DATA (ELF header byte 5): 1 = little-endian. Gates the bitfield facts — see layoutOf.
   const littleEndian = bytes[5] === 1;
   const di = DebugInfo.fromElf(bytes);
@@ -282,6 +323,9 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
   for (const s of di.symbols.symbols) {
     // ARM mapping symbols ($t/$d/$a) and local labels are not project names
     if (!s.name || s.name.startsWith('$') || s.name.startsWith('.')) {
+      continue;
+    }
+    if (keep && !keep(s.name, s.address)) {
       continue;
     }
     const kind: SymbolInfo['kind'] = s.type === STT_FUNC ? 'code' : 'data';
