@@ -10,7 +10,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-import { REAL_DIR, type RealManifest, loadCompleteManifests, vendoredMapFile } from '../cases/manifests';
+import {
+  MODULE_MAP_DIR,
+  REAL_DIR,
+  type RealManifest,
+  loadCompleteManifests,
+  vendoredMapFile,
+} from '../cases/manifests';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
 import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 
@@ -99,7 +105,8 @@ function symbolsNote(fn: FunctionResult): string {
   }
   if (usesSymbolMap(fn)) {
     const module = moduleOf(fn.addr);
-    const rel = `apps/benchmark/dataset/real/tu/${fn.project}/${module === undefined ? 'symbols.json.gz' : `symbols/${module}.json.gz`}`;
+    const blob = module === undefined ? 'symbols.json.gz' : `${MODULE_MAP_DIR}/${module}.json.gz`;
+    const rel = `apps/benchmark/dataset/real/tu/${fn.project}/${blob}`;
     const sha = vendoredMapSha(fn.project, module);
     return `
 # SYMBOLS: this row ran WITH ${

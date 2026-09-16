@@ -164,20 +164,17 @@ export const vendoredMapFile = (dir: string, module: string | undefined): string
  *  read with the base ELF's map alone would publish different source while looking like every
  *  other row. */
 export function vendoredSymbols(project: string, dir: string, module: string | undefined): SymbolMap | undefined {
-  const read = (path: string) =>
-    existsSync(path) ? symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(path)).toString('utf8'))) : undefined;
-  const base = read(vendoredMapFile(dir, undefined));
-  if (module === undefined || base === undefined) {
-    return base;
+  if (!existsSync(vendoredMapFile(dir, undefined))) {
+    return undefined; // the project vendors no map at all
   }
-  const map = read(vendoredMapFile(dir, module));
-  if (map === undefined) {
+  const path = vendoredMapFile(dir, module);
+  if (!existsSync(path)) {
     throw new Error(
       `${project}: rows live in module ${module}, but no map is vendored for it — ` +
         `run \`pnpm bench vendor --project ${project}\``,
     );
   }
-  return map;
+  return symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')));
 }
 
 export const REAL_DIR = join(import.meta.dirname, '..', '..', 'dataset', 'real');
