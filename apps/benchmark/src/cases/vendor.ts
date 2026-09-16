@@ -5,15 +5,15 @@
 // self-contained. Re-run `bench vendor` deliberately when a project state should change.
 //
 // Two blobs per function, gzip'd under dataset/real/tu/<project>/:
-//   <sym>.i.gz      — the preprocessed TARGET TU (headers + prependC + function)
-//   ctx-<sha12>.i.gz — the preprocessed CONTEXT (headers + prependC, no function), deduped by
+//   <sym>.i.gz      — the preprocessed TARGET TU (`rowSources`)
+//   ctx-<sha12>.i.gz — the preprocessed CONTEXT (the TU without the function), deduped by
 //                      content (most functions of a project share one context); the candidate
 //                      scorer's richest strategy compiles against it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version).
 //
-// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU
-// must declare every function it calls — enforced here, and by test/real-manifests.test.ts and
-// test/implicit-declarations.test.ts over the committed blobs.
+// Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU the
+// manifest assembles must declare every function it calls — enforced here, and by
+// test/real-manifests.test.ts and test/implicit-declarations.test.ts over the committed blobs.
 //
 // Every row is proved before anything is written: its unit's stored flags must be the flags derived
 // from the build at the checkout's HEAD, and its target, compiled at them, must be the function the
@@ -43,6 +43,7 @@ import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
 import {
   MODULE_MAP_DIR,
   REAL_DIR,
+  type RealFunction,
   type RealManifest,
   loadManifestsForVendor,
   resolveProjectRoot,
@@ -53,6 +54,35 @@ import { placedModuleElves, resolveProjectElf } from './project-elf';
 import { compareWithRom, romLocation } from './rom-function';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
+
+/** A row's two texts before preprocessing: its translation unit, and the context its candidates compile in
+ *  — the same text without the function. What the translation unit IS is the manifest's `tu`:
+ *
+ *    assembled  `headers`, `prependC`, `funcC`.
+ *    unit       the row's unit (`readUnit`) through the last line `sourceUrl` cites. Its context is the unit
+ *               before the first. Throws unless those lines are `funcC` verbatim — a permalink citing lines
+ *               that are not the row's function is refused here rather than published.
+ */
+export function rowSources(
+  tu: RealManifest['tu'],
+  cfg: RealProjectCfg,
+  f: Pick<RealFunction, 'sym' | 'funcC' | 'prependC' | 'sourceUrl'>,
+  readUnit: () => string,
+): { tu: string; ctx: string } {
+  if (tu === 'assembled') {
+    return { tu: makeTU(cfg, f.prependC ?? '', f.funcC), ctx: makeTU(cfg, f.prependC ?? '', '') };
+  }
+  const span = /#L(\d+)-L(\d+)$/.exec(f.sourceUrl ?? '');
+  if (span === null) {
+    throw new Error(`${f.sym}: its sourceUrl cites no line span`);
+  }
+  const [first, last] = [Number(span[1]), Number(span[2])];
+  const lines = readUnit().split('\n');
+  if (lines.slice(first - 1, last).join('\n') !== f.funcC) {
+    throw new Error(`${f.sym}: funcC is not lines ${first}-${last} of ${cfg.unit}, which its sourceUrl cites`);
+  }
+  return { tu: `${lines.slice(0, last).join('\n')}\n`, ctx: `${lines.slice(0, first - 1).join('\n')}\n` };
+}
 
 /** Vendor the project's symbol map (symbol-map-benchmark-plan-2026-07-23.md): the checkout's
  *  own decomp.yaml names its ELF (tools.asmlift.elf); the derived name/shape map is project
@@ -245,12 +275,15 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         defines: man.defines,
       };
       const rc = realCompilerFor(unit.toolchain);
-      const tuI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
-      const ctxI = rc.vendoredContext(
-        rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', '')),
-        unit.cflags,
-        unitLanguage(f.unit, unit.cflags),
-      );
+      let sources: { tu: string; ctx: string };
+      try {
+        sources = rowSources(man.tu, cfg, f, () => readFileSync(join(root, f.unit), 'utf8'));
+      } catch (e) {
+        refusals.push((e as Error).message);
+        continue;
+      }
+      const tuI = rc.preprocess(cfg, sources.tu);
+      const ctxI = rc.vendoredContext(rc.preprocess(cfg, sources.ctx), unit.cflags, unitLanguage(f.unit, unit.cflags));
       for (const [what, text] of [
         ['tu', tuI],
         ['ctx', ctxI],
@@ -259,7 +292,11 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
           throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
         }
       }
-      const undeclared = rc.undeclaredCallees(tuI, unit.cflags, unitLanguage(f.unit, unit.cflags));
+      // A unit's own text declares what the project's unit declares, implicit declarations included —
+      // Mario Party 4's selmenuDll/main.c declares `rand8` only `#ifndef __MWERKS__` — so only a TU the
+      // manifest assembles can be missing a declaration the game's unit had.
+      const undeclared =
+        man.tu === 'assembled' ? rc.undeclaredCallees(tuI, unit.cflags, unitLanguage(f.unit, unit.cflags)) : [];
       if (undeclared.length > 0) {
         refusals.push(
           `${f.sym}: the vendored TU calls ${undeclared.join(', ')} with no declaration in scope — ` +

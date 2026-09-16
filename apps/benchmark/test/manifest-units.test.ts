@@ -24,6 +24,7 @@ const manifest = (over: Partial<RealManifest> = {}, row: Record<string, unknown>
     repoDir: 'fakeproj',
     repo: 'macabeus/fakeproj',
     branch: 'asmlift-benchmark',
+    tu: 'assembled',
     cppIncludes: [],
     headers: [],
     units: { 'src/f.c': UNIT },

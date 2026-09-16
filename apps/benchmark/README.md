@@ -447,7 +447,15 @@ the round that first ran it.
   census and is not a derived order, so the fidelity check below is what vouches for it; `proto`
   gives `returnsVoid` exactly where the return type is `void`; tags are the judgement tags that pass
   `JUDGEMENT_FLOOR` on the new body. Then check fidelity the harness's way: every row, compiled
-  standalone, equals the ROM function bytes (relocations masked).
+  standalone, equals the ROM function bytes (relocations masked). That is a manifest with
+  `"tu": "assembled"`.
+- **Or compile each row in its own unit** (`"tu": "unit"`, Mario Party 4): the translation unit is the
+  unit's own text from its first line through the last line `sourceUrl` cites, read from the checkout by
+  `bench vendor`, which refuses a row whose `funcC` is not that span verbatim; `headers` is empty and no
+  row has a `prependC`. A declarations-only preamble is not enough everywhere: CodeWarrior GC/2.6 at
+  `-O0,p` compiles `HuMemHeapDump` and `HuDvdErrorWatch` to other branch-prediction bits after their
+  unit's declarations than after its earlier definitions, and only the second is the game's function
+  (the other 40 Mario Party 4 rows compile to the game's bytes either way).
 - **Pins.** A fork branch is the upstream commit plus one integration commit. kleod's is
   `macabeus/kleod@6f149e3` on upstream `testyourmine/kleod@64a83ad`; the upstream sha is otherwise
   only in the fork's README.

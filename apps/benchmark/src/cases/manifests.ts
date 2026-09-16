@@ -136,6 +136,18 @@ export interface RealManifest {
    *  to reproduce them from a map the rows were not measured with. Gated in
    *  `test/real-manifests.test.ts` against the checkout's own Makefile. */
   elfMake?: string;
+  /** What a row's translation unit is, before preprocessing (cases/vendor.ts `rowSources`):
+   *
+   *    assembled  the manifest's `headers`, then the row's `prependC`, then its `funcC`.
+   *    unit       the row's own unit, from its first line through the last line its `sourceUrl` cites —
+   *               a span that must be `funcC` verbatim. `headers` is empty and no row has a `prependC`.
+   *
+   *  `unit` exists because a function's code is not always decided by the declarations in scope alone.
+   *  CodeWarrior GC/2.6 at -O0,p compiles Mario Party 4's `HuMemHeapDump` and `HuDvdErrorWatch` to
+   *  different branch-prediction bits after their unit's file-scope declarations than after the unit's
+   *  earlier function DEFINITIONS, and only the second is the game's function. A candidate compiles in
+   *  that same prefix, so the scoring world is the one the game's function was compiled in too. */
+  tu: 'assembled' | 'unit';
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
   defines?: string[]; // extra -D macros
@@ -324,6 +336,25 @@ export function validateManifest(
   }
   if (!Array.isArray(man.cppIncludes) || !Array.isArray(man.headers)) {
     problems.push(`${file}: "cppIncludes"/"headers" must be arrays`);
+  }
+  if (man.tu !== 'assembled' && man.tu !== 'unit') {
+    problems.push(`${file}: "tu" must be "assembled" or "unit"`);
+  } else if (man.tu === 'unit') {
+    if (Array.isArray(man.headers) && man.headers.length > 0) {
+      problems.push(`${file}: a "unit" translation unit is the unit's own text, so "headers" must be empty`);
+    }
+    for (const f of Array.isArray(man.functions) ? man.functions : []) {
+      if (f.prependC !== undefined) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} has a "prependC", which a "unit" translation unit never reads`,
+        );
+      }
+      if (typeof f.sourceUrl !== 'string' || !/#L\d+-L\d+$/.test(f.sourceUrl)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" must cite the line span funcC is (#L<first>-L<last>)`,
+        );
+      }
+    }
   }
   if (man.units !== undefined && !isRecord(man.units)) {
     problems.push(`${file}: "units" must map each unit's source path to its toolchain and flags`);

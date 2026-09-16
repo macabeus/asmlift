@@ -35,6 +35,7 @@ const manifest = (project: string): RealManifest => ({
   repoDir: project,
   repo: 'o/n',
   branch: 'main',
+  tu: 'assembled',
   cppIncludes: [],
   headers: [],
   units: {},

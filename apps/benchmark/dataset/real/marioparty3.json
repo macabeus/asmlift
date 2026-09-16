@@ -5,6 +5,7 @@
   "repo": "macabeus/marioparty3",
   "branch": "asmlift-benchmark",
   "elfMake": "asmlift-elf",
+  "tu": "assembled",
   "cppIncludes": [
     "-nostdinc",
     "-I",
