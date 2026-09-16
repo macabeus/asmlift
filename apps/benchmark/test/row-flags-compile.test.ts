@@ -65,8 +65,8 @@ describe("the real tier's non-agbcc modules compile at the row's flags", () => {
   test('IDO: the target and the candidate cc argv carry them', () => {
     const flags = atAnotherLevel(TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     seen.run.length = 0;
-    const { obj } = idoReal.buildTarget(TU, 'f', flags);
-    const candidate = idoReal.compileCandidate(TU, 'f', flags);
+    const { obj } = idoReal.buildTarget(TU, 'f', flags, 'c');
+    const candidate = idoReal.compileCandidate(TU, 'f', flags, 'c');
     const cc = seen.run.filter((r) => r.cmd === IDO_TOOLCHAIN.cc).map((r) => r.args);
     expect(cc).toEqual([
       [...IDO_TOOLCHAIN.harnessFlags, ...flags, '-o', obj, join(obj, '..', 'u.i')],
@@ -83,8 +83,8 @@ describe("the real tier's non-agbcc modules compile at the row's flags", () => {
       const flags = atAnotherLevel(canonical);
       expect(flags).not.toEqual([...canonical]);
       seen.pooledCompile.length = 0;
-      real.buildTarget(TU, 'f', flags);
-      real.compileCandidate(TU, 'f', flags);
+      real.buildTarget(TU, 'f', flags, 'c');
+      real.compileCandidate(TU, 'f', flags, 'c');
       expect(seen.pooledCompile).toEqual([
         { compiler, flags },
         { compiler, flags },
@@ -94,8 +94,8 @@ describe("the real tier's non-agbcc modules compile at the row's flags", () => {
 
   test('two flag sets of one TU build in two reference directories', () => {
     const canonical = TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags;
-    expect(idoReal.buildTarget(TU, 'f', atAnotherLevel(canonical)).obj).not.toBe(
-      idoReal.buildTarget(TU, 'f', canonical).obj,
+    expect(idoReal.buildTarget(TU, 'f', atAnotherLevel(canonical), 'c').obj).not.toBe(
+      idoReal.buildTarget(TU, 'f', canonical, 'c').obj,
     );
   });
 });

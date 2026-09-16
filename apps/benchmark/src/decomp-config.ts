@@ -17,6 +17,7 @@
 import { type CandidateCompiler, compileFromCommand, renderCflags } from '@asmlift/cli/compile-command';
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
@@ -169,6 +170,18 @@ export function benchScorer(
   return (candC, sym, obj, declarations) => scoreObjects(obj, compile(candC, sym, 'c', declarations), sym);
 }
 
+/** What a reproduction config carries beyond its toolchain and flags: the project's symbol-map ELF
+ *  or its authored map, the materialized scoring context, and the row's language. */
+export interface ScoreConfigParts {
+  elf?: string; // absolute path — symbol-fed rows
+  ctxFile?: string; // basename of the materialized scoring context (materializeScoringContext)
+  symbolsFile?: string; // basename of an authored symbol map, where no ELF backs it
+  // The dialect the CANDIDATE is compiled in — not the one the target was built in. `c++` is
+  // legal only alongside a `ctxFile`, the one place the linkage block a C++ candidate needs can
+  // be written; absent ⇒ C.
+  language?: 'c' | 'c++';
+}
+
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on
  *  EVERY toolchain (one-shot docker for the pooled pair) — the config `bench target` hands the
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
@@ -185,12 +198,24 @@ export function writeScoreConfig(
   id: ToolchainId,
   cflags: readonly string[],
   dir: string,
-  elf?: string,
-  ctxFile?: string,
-  symbolsFile?: string,
+  { elf, ctxFile, symbolsFile, language }: ScoreConfigParts = {},
 ): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
-  doc.tools.asmlift.compiler = renderCflags(doc.tools.asmlift.compiler!, cflags);
+  // `-lang=c++` without a context file is a config that cannot work: the linkage block lives in the
+  // `cat` the context file builds, and without it the C++ front end mangles the candidate a second
+  // time and the scorer finds no symbol to align. Refuse it here rather than write a repro that
+  // fails with "symbol not found" in the reader's hands.
+  if (language === 'c++' && !ctxFile) {
+    throw new Error(`${id}: a C++ candidate needs a scoring context to carry its linkage block`);
+  }
+  // A CodeWarrior row's DIALECT is stated in the command, exactly as compile/mwcc.ts states it for
+  // the harness's own compiles and for the same reason: the reproduction writes its candidate to a
+  // `.c` path, so an unstated `-lang` would read a C++ row's candidate with the C front end and
+  // export an unmangled symbol the target has none of.
+  doc.tools.asmlift.compiler = renderCflags(
+    doc.tools.asmlift.compiler!,
+    TOOLCHAIN_TARGETS[id].family === 'mwcc' ? [...cflags, `-lang=${language ?? 'c'}`] : cflags,
+  );
   if (elf) {
     doc.tools.asmlift.elf = elf;
   }
@@ -208,8 +233,18 @@ export function writeScoreConfig(
     // candidate is concatenated after that context: the reproduction grades where the
     // benchmark graded. The CLI's prelude probe sees a context-injecting template and drops
     // its typedefs + synthesized declarations on its own, so no flag says any of this.
+    //
+    // A C++ row's candidate is enclosed in the SAME linkage block the scorer compiles it in
+    // (compile/real.ts's candidateLinkage), because its target is keyed by a mangled symbol and a
+    // C-shaped candidate mangles a second time without it. The block cannot live in `ctx.i`: it
+    // has to close AFTER the candidate, and the context is a C++ translation unit that must stay
+    // outside it.
+    const cat =
+      language === 'c++'
+        ? `{ cat ${ctxFile}; echo 'extern "C" {'; cat {{inputPath}}; echo '}'; }`
+        : `cat ${ctxFile} {{inputPath}}`;
     doc.tools.asmlift.compiler =
-      `cat ${ctxFile} {{inputPath}} > {{inputPath}}.ctx.c && ` +
+      `${cat} > {{inputPath}}.ctx.c && ` +
       doc.tools.asmlift.compiler.replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c');
   }
   writeFileSync(join(dir, 'decomp.yaml'), YAML.stringify(doc));

@@ -118,3 +118,67 @@ describe('validateManifest: build units', () => {
     expect(problems(manifest({}, { romDigest: 'x' }), false)).toMatch(/"romDigest" must be a sha256/);
   });
 });
+
+describe('validateManifest: a C++ row and m2c', () => {
+  const CPP_UNIT: BuildUnit = {
+    ...UNIT,
+    toolchain: 'mwcc_242_81',
+    cflags: ['-O4,p', '-lang=c++'],
+    flagsFrom: {
+      from: 'objdiff',
+      commit: 'a'.repeat(40),
+      file: 'objdiff.json',
+      sha256: 'b'.repeat(64),
+      unit: 'main/f',
+    },
+  };
+  const cppRow = (row: Record<string, unknown> = {}) =>
+    manifest(
+      { units: { 'src/f.cpp': CPP_UNIT } },
+      {
+        unit: 'src/f.cpp',
+        sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.cpp#L1-L1',
+        ...row,
+      },
+    );
+
+  // m2c's `--context` parser is pycparser: a C++ unit's vendored context is not degraded input,
+  // it is a hard failure, and the row would publish `m2c=failed` for a harness decision.
+  test('a c++ row cannot inherit the vendored C++ context', () => {
+    expect(problems(cppRow({ m2cCtx: true }))).toMatch(
+      /sets "m2cCtx" on a c\+\+ unit — m2c's context parser is C-only/,
+    );
+  });
+
+  test('…and is fine with a hand-written context, or with none', () => {
+    expect(problems(cppRow())).toBe('');
+    expect(problems(cppRow({ ctx: 'struct Controller;' }))).toBe('');
+  });
+
+  // The rule is about the unit's DIALECT, never about the toolchain or the file name: the same
+  // CodeWarrior toolchain builds Animal Crossing's 3,984 C units.
+  test('a C unit of the same toolchain keeps the vendored context', () => {
+    expect(
+      problems(manifest({ units: { 'src/f.c': { ...CPP_UNIT, cflags: ['-O4,s', '-lang=c'] } } }, { m2cCtx: true })),
+    ).toBe('');
+  });
+
+  // CodeWarrior is the only C++ front end here. On any other toolchain a c++ unit builds a C
+  // object with an UNMANGLED symbol and publishes a number about a language the compiler never
+  // read — compile/real.ts refuses the pairing, but only by toolchain and only once a case is
+  // being constructed, which names neither the project nor the unit.
+  test('a c++ unit needs a CodeWarrior toolchain, and the manifest says which unit', () => {
+    expect(problems(manifest({ units: { 'src/f.c': { ...UNIT, cflags: [...UNIT.cflags, '-lang=c++'] } } }))).toMatch(
+      /unit src\/f.c is C\+\+, and agbcc has no C\+\+ front end/,
+    );
+    // …and the extension alone is enough, because that is what the front end itself would read.
+    expect(
+      problems(
+        manifest(
+          { units: { 'src/f.cpp': UNIT } },
+          { unit: 'src/f.cpp', sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.cpp#L1-L1' },
+        ),
+      ),
+    ).toMatch(/unit src\/f.cpp is C\+\+, and agbcc has no C\+\+ front end/);
+  });
+});

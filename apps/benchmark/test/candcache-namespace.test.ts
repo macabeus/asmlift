@@ -322,7 +322,7 @@ describe('compiler flags — one namespace per flag set', () => {
       const { agbccReal } = await import('../src/compile/agbcc');
       const tu = 'int sum(int *p, int n){ int s = 0, i; for (i = 0; i < n; i++) s += p[i]; return s; }\n';
       const o1 = ['-mthumb-interwork', '-O1', '-fhex-asm'];
-      const at = (cflags: readonly string[]) => readFileSync(agbccReal.compileCandidate(tu, 'sum', cflags));
+      const at = (cflags: readonly string[]) => readFileSync(agbccReal.compileCandidate(tu, 'sum', cflags, 'c'));
       const canonical = at(CANONICAL);
       const atO1 = at(o1);
       expect(atO1.equals(canonical), 'the TU must compile differently at -O1, or this test proves nothing').toBe(false);
@@ -354,8 +354,8 @@ describe('debug-info flags — a `-g` unit keeps its cache and its listing', () 
     vi.resetModules();
     try {
       const { agbccReal } = await import('../src/compile/agbcc');
-      const first = readFileSync(agbccReal.compileCandidate(tu, 'twice', G));
-      expect(readFileSync(agbccReal.compileCandidate(tu, 'twice', G)).equals(first)).toBe(true);
+      const first = readFileSync(agbccReal.compileCandidate(tu, 'twice', G, 'c'));
+      expect(readFileSync(agbccReal.compileCandidate(tu, 'twice', G, 'c')).equals(first)).toBe(true);
       expect(
         execSync(`find ${store}/ns -mindepth 1 -maxdepth 1 -type d`, { encoding: 'utf8' }).trim().split('\n'),
       ).toHaveLength(1);
@@ -376,7 +376,7 @@ describe('debug-info flags — a `-g` unit keeps its cache and its listing', () 
     vi.resetModules();
     try {
       const { agbccReal } = await import('../src/compile/agbcc');
-      expect(() => agbccReal.compileCandidate('int f(void)\n{ return x; }\n', 'f', G)).toThrow(
+      expect(() => agbccReal.compileCandidate('int f(void)\n{ return x; }\n', 'f', G, 'c')).toThrow(
         /^agbcc failed: c\.c:2: `x' undeclared/,
       );
     } finally {
@@ -390,8 +390,8 @@ describe('debug-info flags — a `-g` unit keeps its cache and its listing', () 
     'the `-g` target listing both decompilers read has no debug section, and names no path',
     async () => {
       const { agbccReal } = await import('../src/compile/agbcc');
-      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', G);
-      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', CANONICAL);
+      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', G, 'c');
+      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', CANONICAL, 'c');
       expect(debug.asm).not.toMatch(/\.section\s+\.debug/);
       expect(readFileSync(debug.obj).includes('.debug_info')).toBe(true);
       expect(readFileSync(debug.obj).toString('latin1')).not.toMatch(/\/tmp\/|\/private\/|\/var\/folders\//);

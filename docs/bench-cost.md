@@ -66,7 +66,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=121.1s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=102.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -119,16 +119,17 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-16: the ranked pass alone is **941 s over 152
-real rows** and **889 s over 678 synthetic rows**; wall clock is lower because eight shards run in
-parallel. **These are MIXED-CACHE prices** — that run was made from a fresh worktree, so most
-synthetic shards missed the candidate store nearly throughout (`[candcache] {"miss":1387,...}`)
-while one real shard served 80,633 fail-hits. They are also PRICES UNDER THE MACHINE THEY RAN ON:
-the same corpus priced the real tier at 1,742 s and the synthetic one at 1,677 s on an artifact
-generated while several rounds shared the machine, because a shard that shares a core takes longer
-to do the same work. So read a figure here beside the cache state AND the load of the run you are
-planning, not on its own. The single row `kleod:PauseMenuScreenHandler:agbcc` is 240 s of that real
-total — **25% of the tier in one row**, and 399 s of the busier one.
+Summed out of the committed artifact of 2026-09-16: the ranked pass alone is **818 s over 152
+real rows** and **417 s over 678 synthetic rows**; wall clock is lower because eight shards run in
+parallel. **These are WARM-CACHE prices** — that run reused a candidate store the day's earlier
+benches had already filled, so every shard reports hits and one real shard served 80,643 fail-hits.
+The same corpus off a COLD store cost 941 s and 889 s, on the artifact this one replaced. They are
+also PRICES UNDER THE MACHINE THEY RAN ON: it priced the real tier at 1,742 s and the synthetic one
+at 1,677 s on an artifact generated while several rounds shared the machine, because a shard that
+shares a core takes longer to do the same work. So read a figure here beside the cache state AND the
+load of the run you are planning, not on its own. The single row
+`kleod:PauseMenuScreenHandler:agbcc` is 215 s of that real total — **26% of the tier in one row**,
+and 399 s of the busier one.
 
 ## 4. How many full runs a round gets
 

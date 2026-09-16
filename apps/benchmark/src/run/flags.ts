@@ -8,6 +8,7 @@
 // Every DIFF row, and every unit that could not be derived, is named under its table. `--write` stores the
 // derived units, and each row's unit, in the manifest. Exit 1 unless every unit is derived and `ok` (or
 // written) and every row is EQ.
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { UnreadableLevelError, parseFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { existsSync, readFileSync } from 'node:fs';
@@ -127,7 +128,13 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
           );
           continue;
         }
-        const target = buildRealTarget(derived.toolchain, fn.sym, derived.cflags, vendored.vendored(fn.sym).tuI);
+        const target = buildRealTarget(
+          derived.toolchain,
+          fn.sym,
+          derived.cflags,
+          vendored.vendored(fn.sym).tuI,
+          unitLanguage(unit, derived.cflags),
+        );
         const rom = compareWithRom(readFileSync(target.obj), fn.sym, linked, at);
         if (rom.equal) {
           equal++;

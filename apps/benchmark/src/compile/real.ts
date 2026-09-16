@@ -7,7 +7,7 @@
 // candidate compile at the row's codegen flags (`Case.codegen`).
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { macroDefinesOf } from '@asmlift/core/declare';
-import { C_TYPEDEFS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { type BuiltTarget, type ToolchainId, checkedTarget } from '../toolchains';
 import { agbccReal, stripPrototype } from './agbcc';
@@ -41,6 +41,20 @@ export function realCompilerFor(toolchain: ToolchainId): RealCompile {
   return REAL_COMPILERS[toolchain];
 }
 
+/** The compile module for a row of this toolchain in this language, refusing the pairing no
+ *  toolchain implements.
+ *
+ *  CodeWarrior is the one compiler here that is a C AND a C++ front end; agbcc, IDO and the two
+ *  GCCs have no C++ mode at all. A `c++` row on one of them would otherwise reach a `buildTarget`
+ *  that simply ignores the parameter and build a C object with an UNMANGLED symbol — which scores,
+ *  and publishes a number about a language the toolchain never read. */
+function compilerFor(toolchain: ToolchainId, language: 'c' | 'c++'): RealCompile {
+  if (language === 'c++' && TOOLCHAIN_TARGETS[toolchain].family !== 'mwcc') {
+    throw new Error(`${toolchain} has no C++ front end — a c++ row needs a CodeWarrior toolchain`);
+  }
+  return realCompilerFor(toolchain);
+}
+
 /** Compile a vendored (preprocessed) target TU → scoring target + disassembly. The real tier's
  *  `Case.build`, and the only place its `BuiltTarget`s are born — `checkedTarget` is stated here
  *  rather than per compiler for the same reason the synthetic tier states it in `cachedBuildTarget`
@@ -50,8 +64,12 @@ export function buildRealTarget(
   sym: string,
   cflags: readonly string[],
   tuI: string,
+  language: 'c' | 'c++',
 ): BuiltTarget {
-  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI, sym, cflags), `${toolchain} real-tier target`);
+  return checkedTarget(
+    compilerFor(toolchain, language).buildTarget(tuI, sym, cflags, language),
+    `${toolchain} real-tier target`,
+  );
 }
 
 // ── context-aware candidate scoring ────────────────────────────────────────────────────────
@@ -87,26 +105,79 @@ export function scoringPreludes(prependC: string, ctxI: string, sym: string): st
   return rungs.map((r) => `#define NULL ((void *)0)\n${r}`);
 }
 
+/** THE CANDIDATE, GIVEN THE LINKAGE ITS TARGET SYMBOL HAS — the C++ row's half of the ladder.
+ *
+ *  A C++ row's target symbol is MANGLED (`Vec::dot(Vec*)` → `dot__3VecFP3Vec`), and objdiff aligns
+ *  a candidate to its target by that exact string. A decompiler writing a C-shaped function NAMED
+ *  by the mangled symbol — which is what m2c's `ppc-mwcc-c++` target emits, `this` named and all —
+ *  mangles a SECOND time under the C++ front end: measured, `dot__3VecFP3Vec` compiles to
+ *  `dot__3VecFP3Vec__FP3VecP3Vec`, and the row would publish a noncompile about nothing.
+ *
+ *  So a C++ row's candidate is compiled with C language linkage, and that is ONE rule for both
+ *  decompilers rather than a per-tool shim: a genuine member definition — what asmlift's C++
+ *  backend emits — keeps its normal mangling inside the block, which is what the standard says and
+ *  what mwcceppc was measured to do (`int Vec::dot(Vec*o){…}` inside `extern "C"` still exports
+ *  `dot__3VecFP3Vec`). The block wraps the CANDIDATE alone, never the prelude: rung 3 is the
+ *  project's own preprocessed C++ context, and templates inside a linkage block are ill-formed. */
+export function candidateLinkage(language: 'c' | 'c++', candC: string): string {
+  return language === 'c++' ? `extern "C" {\n${candC}\n}\n` : `${candC}\n`;
+}
+
+/** THE DIALECTS a row's candidate may be compiled in, the row's own first.
+ *
+ *  A C++ row gets a second: PLAIN C. Its target's symbol is the mangled string, and a C compile
+ *  exports whatever name the candidate is written with — so a C-shaped candidate named by the
+ *  mangled symbol aligns either way. The fallback exists because m2c's `ppc-mwcc-c++` output names
+ *  the implicit receiver `this` on EVERY member function, and `this` is a C++ keyword: compiled in
+ *  the row's own dialect that is `'(' expected`, and m2c would go 0-for-42 on Pikmin for a spelling
+ *  rather than for its code. Same policy as the `#define NULL` every rung re-provides — a
+ *  decompiler is judged on the code, not on an artifact of the harness's choice of front end.
+ *
+ *  SOUND, measured rather than assumed: on `pikmin:getFlag__11ResultFlagsFi` at that unit's real
+ *  flags, the same C-shaped candidate compiled `-lang=c++` inside the linkage block and compiled
+ *  `-lang=c` produce BYTE-IDENTICAL 712-byte objects and score 7/13 either way. THE RISK IS STATED:
+ *  that is one row at one flag set, so the row's own dialect is always tried first and C is reached
+ *  only for text the C++ front end REFUSED — text which is therefore not C++ at all. */
+const candidateDialects = (language: 'c' | 'c++'): readonly ('c' | 'c++')[] =>
+  language === 'c++' ? ['c++', 'c'] : ['c'];
+
 /** Compile a candidate in the project's escalating context, returning the object of the FIRST
  *  prelude that compiles. The context is what lets an emission referencing project types/GLOBALS
  *  compile at all — the same context m2c is scored in, so asmlift's real-tier scoring is
  *  symmetric. Throws if none compile. */
-export function makeRealCompile(toolchain: ToolchainId, cflags: readonly string[], prependC: string, ctxI: string) {
-  const rc = realCompilerFor(toolchain);
+export function makeRealCompile(
+  toolchain: ToolchainId,
+  cflags: readonly string[],
+  prependC: string,
+  ctxI: string,
+  language: 'c' | 'c++',
+) {
+  const rc = compilerFor(toolchain, language);
   return (candC: string, sym: string, _backendId?: string, declarations?: string): string => {
     // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
     // world — rungs 1/2 are asmlift's own prelude, rung 3 the project's PREPROCESSED context —
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
     // without this. The rest of the synthesized block stays dropped: the context owns it.
     const macros = macroDefinesOf(declarations);
-    let lastErr = '';
-    for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
-      try {
-        return rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym, cflags);
-      } catch (e) {
-        lastErr = (e as Error).message;
+    // Each dialect's last complaint, because a row that compiles nowhere PUBLISHES this text as its
+    // error markers and only the row's OWN front end is talking about the candidate. The fallback
+    // dialect is a harness convenience, and a C++ candidate handed to the C parser fails on the
+    // word `class` — a diagnostic about the harness's ladder, not about the decompiler's output.
+    const failed = new Map<'c' | 'c++', string>();
+    // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
+    // all: a richer context is the ordinary reason a candidate compiles, and paying for the
+    // fallback first would double every C++ row's compiles to answer a rarer question.
+    for (const dialect of candidateDialects(language)) {
+      const body = candidateLinkage(dialect, candC);
+      for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
+        try {
+          return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
+        } catch (e) {
+          failed.set(dialect, (e as Error).message);
+        }
       }
     }
+    const lastErr = failed.get(language) ?? '';
     throw new Error(lastErr || 'candidate did not compile in any context');
   };
 }
@@ -125,27 +196,40 @@ export function resolveScoringPrelude(
   ctxI: string,
   sym: string,
   candC: string,
+  language: 'c' | 'c++',
   /** the candidate's address-cast macro defines — every rung needs them (see makeRealCompile),
    *  and replaying the ladder WITHOUT them would fail every rung and pick the wrong one */
   macros = '',
-): { prelude: string; rung: number } {
-  const rc = realCompilerFor(toolchain);
+): { prelude: string; rung: number; language: 'c' | 'c++' } {
+  const rc = compilerFor(toolchain, language);
   const preludes = scoringPreludes(prependC, ctxI, sym);
-  for (const [i, prelude] of preludes.entries()) {
-    try {
-      rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym, cflags);
-      return { prelude, rung: i + 1 };
-    } catch {
-      // next rung
+  // The DIALECT is replayed with the rung, for the same reason the rung is replayed at all: a C++
+  // row whose source only compiles as C was scored as C, and a reproduction that states the row's
+  // dialect would refuse the very source the benchmark published.
+  for (const dialect of candidateDialects(language)) {
+    const body = candidateLinkage(dialect, candC);
+    for (const [i, prelude] of preludes.entries()) {
+      try {
+        rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
+        return { prelude, rung: i + 1, language: dialect };
+      } catch {
+        // next rung
+      }
     }
   }
-  return { prelude: preludes[preludes.length - 1], rung: preludes.length };
+  return { prelude: preludes[preludes.length - 1], rung: preludes.length, language };
 }
 
 /** A context-aware Scorer (real tier): compile the candidate in project context, then objdiff it
  *  against the target. Shares makeRealCompile so asmlift and m2c compile in the identical context. */
-export function makeRealScorer(toolchain: ToolchainId, cflags: readonly string[], prependC: string, ctxI: string) {
-  const compile = makeRealCompile(toolchain, cflags, prependC, ctxI);
+export function makeRealScorer(
+  toolchain: ToolchainId,
+  cflags: readonly string[],
+  prependC: string,
+  ctxI: string,
+  language: 'c' | 'c++',
+) {
+  const compile = makeRealCompile(toolchain, cflags, prependC, ctxI, language);
   return (candC: string, sym: string, targetObj: string): MatchScore =>
     scoreObjects(targetObj, compile(candC, sym), sym);
 }

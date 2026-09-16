@@ -253,6 +253,16 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      Caught by reading this list before publishing a run, which is what it is for.
   // v18: the agbcc candidate compile names its translation unit `c.c`. The name is part of the
   //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
+  // `cppLadder` is the same register for a change no C row can see, and it bumps INSTEAD of `v`:
+  // compile/real.ts's candidate ladder — C linkage on the candidate, then a plain-C fallback for
+  // text the C++ front end refuses — reaches a c++ row only. A C row's candidate is the same text
+  // (`candidateLinkage('c', c)` is `${c}\n`, what the ladder-less code concatenated) compiled at
+  // the same flags by the same module, so bumping `v` for it would recompute 1,066 entries to
+  // rewrite none of them.
+  //   cppLadder 1: a c++ entry written before the ladder records a `noncompile` it now scores,
+  //      which is how the ladder was found: `pikmin:getMainStickX__10ControllerFv` replayed
+  //      `noncompile` out of a warm store while a direct `scoreM2c` on the same arguments returned
+  //      MATCH 0/14.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
@@ -269,7 +279,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       asm,
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
-      ...(lang === 'c++' && { lang }),
+      ...(lang === 'c++' && { lang, cppLadder: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

@@ -155,7 +155,7 @@ describe('the BuiltTarget invariant covers the real tier too', () => {
     });
     vi.resetModules();
     const { buildRealTarget: fresh } = await import('../src/compile/real');
-    expect(() => fresh('agbcc', 'f', TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int f(void){return 0;}')).toThrow(
+    expect(() => fresh('agbcc', 'f', TOOLCHAIN_TARGETS.agbcc.canonicalFlags, 'int f(void){return 0;}', 'c')).toThrow(
       /agbcc real-tier target produced an empty/,
     );
     vi.doUnmock('../src/compile/agbcc');
