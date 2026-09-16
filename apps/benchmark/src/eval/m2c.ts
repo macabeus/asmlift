@@ -42,23 +42,30 @@ export function assertM2cPinned(): void {
  *  The caller scores the source AS EMITTED first and reaches for this only when nothing compiles
  *  (`m2cCandidates`): the plain-C fallback dialect accepts the word, and a row that already scores
  *  through it must not be re-scored in a different front end. */
-export function renameReceiver(source: string, sym: string): string {
+export function renameReceiver(source: string, sym: string): M2cCandidate {
   const declared = new RegExp(`\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(([^)]*)\\)`).exec(source);
   if (declared === null || !/(^|[\s*(])this\s*(,|$)/.test(declared[1])) {
-    return source;
+    return { source };
   }
   let name = 'this_';
   while (new RegExp(`\\b${name}\\b`).test(source)) {
     name += '_';
   }
-  return source.replace(/\bthis\b/g, name);
+  return { source: source.replace(/\bthis\b/g, name), receiverRenamed: name };
 }
 
-/** The texts m2c's output is scored as, in order. The first that compiles is the measurement AND
- *  what the row publishes, so a reproduction compiles the text the benchmark graded. */
-export function m2cCandidates(source: string, sym: string, language: 'c' | 'c++'): string[] {
-  const renamed = language === 'c++' ? renameReceiver(source, sym) : source;
-  return renamed === source ? [source] : [source, renamed];
+/** One text m2c's output is scored as, and — when it is not m2c's own — the name that made it. */
+export interface M2cCandidate {
+  source: string;
+  receiverRenamed?: string;
+}
+
+/** The texts m2c's output is scored as, in order: m2c's own first, so a row that compiles anywhere
+ *  today is untouched. The text that DECIDES the row is what the row publishes, alongside the name
+ *  it was renamed with, so a reproduction can reach it from m2c's output. */
+export function m2cCandidates(source: string, sym: string, language: 'c' | 'c++'): M2cCandidate[] {
+  const renamed = language === 'c++' ? renameReceiver(source, sym) : { source };
+  return renamed.receiverRenamed === undefined ? [{ source }] : [{ source }, renamed];
 }
 
 export interface M2cResult {

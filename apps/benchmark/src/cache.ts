@@ -285,6 +285,14 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
   //   cppLadder 2: m2c's receiver parameter is renamed off the C++ keyword `this` (eval/m2c.ts),
   //      so a c++ entry written before it replays a `noncompile` whose only defect was the word.
+  //   cppLadder 3: a `noncompile` now publishes the DECIDING candidate's text and ITS error
+  //      (eval/evaluate.ts), so a cppLadder-2 entry replays the as-emitted attempt's `')' expected`
+  //      for a row whose real failure is m2c's own, plus a `source` with no `receiverRenamed`.
+  //      It also covers the caret-line fix in `pickDiagnostics` (compile/util.ts): an mwcc
+  //      diagnostic block that OPENS on a caret now hands over its explanation. That reaches a C
+  //      row in principle, and `v` is still not bumped for it, because it rewrites none: NO row of
+  //      the 1,068 published carries a wrapper-prefixed caret marker (measured over results.json),
+  //      so bumping `v` would recompute every entry to change nothing.
   // `sliced` is that register for the normalizer reading the row's own function out of the target
   // disassembly (m2c-normalizer.ts `disasmToM2c`). Its input changes only where that disassembly
   // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
@@ -306,7 +314,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       asm,
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
-      ...(lang === 'c++' && { lang, cppLadder: 2 }),
+      ...(lang === 'c++' && { lang, cppLadder: 3 }),
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
       ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
