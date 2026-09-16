@@ -3,7 +3,17 @@
 // (apps/benchmark/dataset/real/*.json); the dtk row is a CodeWarrior unit with a level word overridden,
 // a state no committed row is in.
 import type { DecompilerResult, FlagsFrom, FunctionResult, ToolchainId } from '@asmlift/bench-schema';
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { canonicalFlagsOf } from '@asmlift/core/target';
+
+/** A synthetic sample row compiles at its toolchain's canonical flags — so a toolchain that has
+ *  none cannot have one, and says so here rather than producing a row with no flags. */
+function canonicalCflags(toolchain: ToolchainId): string[] {
+  const flags = canonicalFlagsOf(toolchain);
+  if (flags === undefined) {
+    throw new Error(`${toolchain} has no canonical flags: it compiles no synthetic row`);
+  }
+  return [...flags];
+}
 
 const ISA: Record<ToolchainId, FunctionResult['isa']> = {
   agbcc: 'arm',
@@ -11,6 +21,8 @@ const ISA: Record<ToolchainId, FunctionResult['isa']> = {
   'gcc2.7.2': 'mips',
   'gcc2.7.2kmc': 'mips',
   mwcc_242_81: 'ppc',
+  mwcc_233_163n: 'ppc',
+  mwcc_247_107: 'ppc',
 };
 
 function declined(decompiler: DecompilerResult['decompiler']): DecompilerResult {
@@ -44,7 +56,7 @@ function row(id: string, unit: Unit | null): FunctionResult {
     isa: ISA[toolchain],
     compiler: toolchain,
     language: 'c',
-    cflags: unit === null ? [...TOOLCHAIN_TARGETS[toolchain].canonicalFlags!] : unit.cflags,
+    cflags: unit === null ? canonicalCflags(toolchain) : unit.cflags,
     features: [],
     loc: 1,
     refSource: `void ${sym}(void) {}`,

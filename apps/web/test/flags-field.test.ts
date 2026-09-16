@@ -1,12 +1,14 @@
 // The Playground's Flags field: the canonical text each target starts at, and how a typed flag set
 // becomes the profile the decompile resolves, the level the field echoes, or the sentence that refuses it.
 import { tokenizeFlags } from '@asmlift/core/codegen-flags';
-import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
+import { type CanonicalToolchainId, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { describe, expect, test } from 'vitest';
 
 import { canonicalFlagsText, readFlags } from '../src/pages/playground/flags-field';
 
-const PLAYGROUND_TARGETS: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
+// The picker's own type: a target with no canonical flags has no canonical text to start at, and
+// the registry refuses it at the NAME rather than at the use.
+const PLAYGROUND_TARGETS: CanonicalToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
 
 const LABELS = { mwcc_242_81: 'GC/Wii — mwcc / PPC' };
 
