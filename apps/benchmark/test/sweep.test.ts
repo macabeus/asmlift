@@ -23,6 +23,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
+import { rankOptionsFor } from '../src/eval/asmlift';
 import {
   FIELDS,
   SWEEP_FAN_LIMIT,
@@ -36,7 +37,7 @@ import {
   sweepRefusal,
   unmeasuredCounts,
 } from '../src/run/sweep';
-import { fanDigests, mapModesFor, optsDigest, stable } from '../src/run/sweep-driver';
+import { RANK_OPTIONS_ARITY, fanDigests, mapModesFor, optsDigest, stable } from '../src/run/sweep-driver';
 
 const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'mapMode'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
@@ -248,6 +249,16 @@ describe('the record carries its INPUT, not only its output', () => {
     const line = renderDiff(compareSweeps(b, h))[0];
     expect(line).toContain('asm aaaaaaaaaaaa -> bbbbbbbbbbbb');
     expect(line.indexOf('asm ')).toBeLessThan(line.indexOf('src '));
+  });
+
+  it('knows how many arguments the tree it drives takes, so a base on the other side is refused', () => {
+    // The driver calls the tree under test's OWN `rankOptionsFor` positionally, and a base tree
+    // declaring fewer parameters would read one of this call's arguments as a different option —
+    // lifting the whole base side under a configuration nobody chose. `treeModules` refuses on
+    // `Function.length`, so the constant it compares against must be THIS tree's own arity: add a
+    // parameter without moving the constant and every base, an identical checkout included, is
+    // refused.
+    expect(rankOptionsFor.length).toBe(RANK_OPTIONS_ARITY);
   });
 
   it('digests the option object without depending on key order, and ignores the compiler closure', () => {

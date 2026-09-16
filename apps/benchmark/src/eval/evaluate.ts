@@ -232,7 +232,7 @@ export function evaluate(
     // the dump header names the object's ABSOLUTE path (cache dir — machine-specific); scrub it
     // so published rows and scripts are byte-identical across machines. Nothing parses the
     // header line (the normalizer and --asm-data read the tables below it).
-    const dump = cachedAsmDumpText(obj, tc.id);
+    const dump = cachedAsmDumpText(obj, tc.id, spec.sym);
     asmDump = dump === undefined ? undefined : scrubObjectHeader(dump);
   } catch {
     // text-only fallback

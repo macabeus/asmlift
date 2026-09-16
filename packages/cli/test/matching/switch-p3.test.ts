@@ -100,7 +100,7 @@ describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switc
   test('8-case dense switch scores 0 with the AsmData side-table', () => {
     const c = dense(8);
     const { obj, asm } = compileMipsTarget(c, 'sw_jt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
-    const asmData = extractMipsAsmData(obj, IDO_TOOLCHAIN.objdump);
+    const asmData = extractMipsAsmData(obj, IDO_TOOLCHAIN.objdump, 'sw_jt');
     const src = decompile('sw_jt', asm, MIPS_IDO, { asmData }).source;
     expect(src).toContain('switch (');
     expect(scoreCMips(src, 'sw_jt', obj, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags).score).toBe(0);
@@ -134,7 +134,7 @@ describe.runIf(HAVE_DOCKER)('P3 KMC-GCC/MIPS — dense jump-table switch recover
   test('8-case dense switch scores 0', () => {
     const c = dense(8);
     const { obj, asm } = compileMipsGccTarget(c, 'sw_jt', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
-    const asmData = extractMipsAsmData(obj, GCC_KMC_TOOLCHAIN.objdump);
+    const asmData = extractMipsAsmData(obj, GCC_KMC_TOOLCHAIN.objdump, 'sw_jt');
     const src = decompile('sw_jt', asm, MIPS_GCC, { asmData }).source;
     expect(src).toContain('switch (');
     expect(scoreCMipsGcc(src, 'sw_jt', obj, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags).score).toBe(0);
@@ -146,7 +146,7 @@ describe.runIf(HAVE_PPC)('P3 mwcc/PPC — dense jump-table switch recovers (R_PP
   test('8-case dense switch scores 0', () => {
     const c = dense(8);
     const { obj, asm } = compilePpcTarget(c, 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
-    const asmData = extractPpcAsmData(obj);
+    const asmData = extractPpcAsmData(obj, 'sw_jt');
     const src = decompile('sw_jt', asm, PPC_MWCC, { asmData }).source;
     expect(src).toContain('switch (');
     expect(scoreCPpc(src, 'sw_jt', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).score).toBe(0);

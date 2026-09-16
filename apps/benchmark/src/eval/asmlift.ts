@@ -42,21 +42,30 @@ export type Scorer = (candC: string, sym: string, obj: string, declarations?: st
  *  The return type is ANNOTATED rather than inferred, and that annotation is the guard the
  *  paragraph above asks for: an inferred object literal accepts a misspelled option silently, and
  *  a mistyped option is a dropped one. With `RankOptions` named, tsc answers "'symbolz' does not
- *  exist in type 'RankOptions'. Did you mean to write 'symbols'?". */
+ *  exist in type 'RankOptions'. Did you mean to write 'symbols'?".
+ *
+ *  `sym` is a REQUIRED parameter and not an optional one on the end, although the parameter list is
+ *  what `bench sweep --base` calls across two trees (run/sweep.ts's floor note). An optional symbol
+ *  would let a caller silently ask for a side table scoped to nothing, which on a CodeWarrior object
+ *  is another function's jump table; a required one moves `Function.length` from 3 to 4, which is
+ *  what run/sweep-driver.ts refuses a too-old base tree by. */
 export function rankOptionsFor(
   tc: Toolchain,
   codegen: ResolvedTarget,
   obj: string,
+  sym: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
-  // dense MIPS/PPC switch can recover. Best-effort — a missing/failed objdump (or agbcc, whose
-  // table is inline) yields `undefined`.
+  // dense MIPS/PPC switch can recover, reading the section that defines `sym` — a CodeWarrior object
+  // gives a translation unit one `.text` per part, all at address 0, and a whole-object dump would
+  // measure a jump table's base from whichever section happened to be printed last. Best-effort — a
+  // missing/failed objdump (or agbcc, whose table is inline) yields `undefined`.
   let asmData;
   try {
-    asmData = cachedExtractAsmData(obj, codegen.target);
+    asmData = cachedExtractAsmData(obj, codegen.target, sym);
   } catch {
     asmData = undefined;
   }
@@ -149,7 +158,7 @@ export function runAsmlift(
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
 ): DecompilerResult {
-  const opts = rankOptionsFor(tc, codegen, obj, prototypes, contextCompile, symbols);
+  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).

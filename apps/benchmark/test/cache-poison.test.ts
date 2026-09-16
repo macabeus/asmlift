@@ -107,7 +107,10 @@ describe('the PPC dump cache does not serve an empty entry', () => {
     // The rebuild needs a PPC objdump this test has no business running, so the assertion is that
     // the empty entry is NOT returned: it either raises on the way to the container or comes back
     // with real content. What must never happen is the silent empty result.
-    for (const call of [() => cachedExtractAsmData(obj, PPC_MWCC), () => cachedAsmDumpText(obj, 'mwcc_242_81')]) {
+    for (const call of [
+      () => cachedExtractAsmData(obj, PPC_MWCC, 'f'),
+      () => cachedAsmDumpText(obj, 'mwcc_242_81', 'f'),
+    ]) {
       let served: unknown = 'THREW';
       try {
         served = call();
