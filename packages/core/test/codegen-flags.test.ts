@@ -299,4 +299,15 @@ describe("a unit's language", () => {
     expect(unitLanguage('src/static/m_house.c', ['-lang=c++'])).toBe('c++');
     expect(unitLanguage('src/static/jsyswrap.cpp', ['-lang=c'])).toBe('c');
   });
+
+  // `-dialect` is the same option under another name and `ec++` is the third word of its
+  // vocabulary (mwcceppc -help). Both are C++ — `-lang=ec++` and `-lang=c++` compile one unit to
+  // a byte-identical object — and reading either as C would build it with the wrong front end.
+  test('reads -dialect and ec++ as the C++ they are, and refuses any other word', () => {
+    expect(unitLanguage('src/u.c', ['-dialect=c++'])).toBe('c++');
+    expect(unitLanguage('src/u.c', ['-dialect', 'c++'])).toBe('c++');
+    expect(unitLanguage('src/u.c', ['-lang=ec++'])).toBe('c++');
+    expect(unitLanguage('src/u.c', ['-dialect=c++', '-lang=c'])).toBe('c');
+    expect(() => unitLanguage('src/u.c', ['-lang=objc'])).toThrow(/not one of c, c\+\+, ec\+\+/);
+  });
 });

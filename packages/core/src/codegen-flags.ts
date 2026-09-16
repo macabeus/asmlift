@@ -194,7 +194,10 @@ const TABLES: Record<FlagFamily, readonly OptionSpec[]> = {
     { match: /^-[ID](.+)$/ },
     { match: /^-(d|D|i|I|ir|maxerrors|w|msgstyle)$/, takesArg: true },
     { match: /^-(nodefaults|nosyspath|nostdinc|stderr|c|multibyte|requireprotos)$/ },
-    { match: /^-lang=(.+)$/, slot: 'lang' },
+    // `-dialect | -lang keyword` is one option under two names (mwcceppc -help), and all four
+    // spellings compile the same source to the same object in the container.
+    { match: /^-(?:lang|dialect)=(.+)$/, slot: 'lang' },
+    { match: '-dialect', slot: 'lang', takesArg: true },
     { match: '-fp', slot: 'fp', takesArg: true, value: (v) => (v === 'hardware' ? 'hard' : v) },
     // These add to what earlier occurrences enabled. At -O4,p inl.c with `-inline auto -inline
     // deferred` differs from both `-inline auto` and `-inline deferred`, and str.c with `-str noreuse
@@ -593,21 +596,31 @@ export function storedFlags(family: FlagFamily, argv: readonly string[]): string
  *  to export the mangled symbol its target is keyed by.
  *
  *  THE BUILD'S FLAGS ARE THE SIGNAL, never the file name: 62 of Animal Crossing's `.c` units are
- *  compiled `-lang=c++`. CodeWarrior spells the option both ways and one project uses both —
- *  Pikmin's 385 game units say `-lang=c++` and its 57 jaudio units say `-lang c++` — so both are
- *  read here, and the LAST one wins, as it does on the command line.
+ *  compiled `-lang=c++`. The option has two names and two spellings and one project uses two of
+ *  them — Pikmin's 385 game units say `-lang=c++` and its 57 jaudio units say `-lang c++` — so the
+ *  mwcc flag table owns the slot and the LAST occurrence wins, as it does on the command line.
+ *
+ *  Its whole vocabulary is `c | c++ | ec++` (mwcceppc -help). `ec++` is Embedded C++, which the
+ *  help says only adds warnings, and the container agrees: a unit with a virtual function, a loop
+ *  and an `extern "C"` entry point compiles to a BYTE-IDENTICAL object at `-lang=ec++` and
+ *  `-lang=c++`. So it is a C++ row, and any other word is refused rather than read as C — a unit
+ *  built by the C++ front end and compiled here by the C one would publish a number about a
+ *  language it never read.
  *
  *  `unit` is the fallback and only that: where the flags name no dialect, the file's extension is
  *  what the front end itself would have used. Across the three GameCube projects the only units
- *  whose flags say nothing are six `.s` files no compile edge builds. Only mwcc has a `-lang`, and
- *  only mwcc has a C++ front end, so every other family answers `c` unless its unit is named for
- *  C++ — which none is. */
+ *  whose flags say nothing are six `.s` files no compile edge builds. Only mwcc has a dialect
+ *  option, and only mwcc has a C++ front end, so every other family answers `c` unless its unit is
+ *  named for C++ — which none is, and where one is, real.ts refuses the row by name. */
 export function unitLanguage(unit: string, cflags: readonly string[]): 'c' | 'c++' {
-  let stated: string | undefined;
-  for (const [i, f] of cflags.entries()) {
-    stated = f.startsWith('-lang=') ? f.slice('-lang='.length) : f === '-lang' ? cflags[i + 1] : stated;
+  const stated = parseFlags('mwcc', cflags).slots.lang;
+  if (stated === undefined) {
+    return /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
   }
-  return (stated ?? (/\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c')) === 'c++' ? 'c++' : 'c';
+  if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++') {
+    throw new Error(`${unit}: CodeWarrior dialect '${stated}' is not one of c, c++, ec++`);
+  }
+  return stated === 'c' ? 'c' : 'c++';
 }
 
 /** The optimisation level the compiler acts on (`-O2`, `-O4,p`), or null when the flags name none and
