@@ -155,23 +155,31 @@ function cachedPpcDumpText(obj: string, sym: string): string {
   return dump;
 }
 
+/** How each toolchain's object is dumped for the m2c normalizer — ONE table, EXHAUSTIVE over
+ *  `ToolchainId`, so a new toolchain is a compile error here rather than a row that silently
+ *  publishes no `asmDump` (`compile/real.ts`'s dispatch table is exhaustive for the same reason).
+ *
+ *  `null` is the ARM answer and it is a statement, not an omission: agbcc's `.s` needs no
+ *  normalization. Every CodeWarrior build shares one entry because the dump is the IMAGE's
+ *  objdump reading an ELF — the build that WROTE the object changes nothing about reading it. */
+const ASM_DUMP_TEXT: Record<ToolchainId, ((obj: string, sym: string) => string) | null> = {
+  agbcc: null,
+  'ido7.1': (obj, sym) => mipsObjdumpText(obj, IDO_TOOLCHAIN.objdump, sym),
+  'gcc2.7.2kmc': (obj, sym) => mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump, sym),
+  'gcc2.7.2': (obj, sym) => mipsObjdumpText(obj, GCC272_TOOLCHAIN.objdump, sym),
+  mwcc_242_81: cachedPpcDumpText,
+  mwcc_233_163n: cachedPpcDumpText,
+  mwcc_247_107: cachedPpcDumpText,
+};
+
 /** Raw `objdump -s -r -t` text for the m2c normalizer's data-section emission, describing `sym`'s
  *  own code section: PPC via the content-cached dockerized dump; MIPS via the native objdump
- *  (cheap, uncached); ARM none (agbcc `.s` needs no normalization). */
+ *  (cheap, uncached); ARM none (agbcc `.s` needs no normalization).
+ *
+ *  `undefined` reaches `evaluate` as a text-only row and nothing says so, which is why the answer
+ *  comes from a table tsc checks rather than from a chain of ids a new toolchain falls off. */
 export function cachedAsmDumpText(obj: string, tcId: ToolchainId, sym: string): string | undefined {
-  if (tcId === 'mwcc_242_81') {
-    return cachedPpcDumpText(obj, sym);
-  }
-  if (tcId === 'ido7.1') {
-    return mipsObjdumpText(obj, IDO_TOOLCHAIN.objdump, sym);
-  }
-  if (tcId === 'gcc2.7.2kmc') {
-    return mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump, sym);
-  }
-  if (tcId === 'gcc2.7.2') {
-    return mipsObjdumpText(obj, GCC272_TOOLCHAIN.objdump, sym);
-  }
-  return undefined;
+  return ASM_DUMP_TEXT[tcId]?.(obj, sym);
 }
 
 /** `extractAsmData`, with the PPC path's dockerized objdump TEXT cached by object content

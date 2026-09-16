@@ -7,6 +7,7 @@
 // weeks looks like a decompiler regression. One such entry (of 642) cost a session its zero-flip
 // gate before this guard existed.
 import { PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { MWCC_TOOLCHAIN_IDS } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -206,5 +207,28 @@ describe('a PPC dump is cached under the bytes it is a dump of', () => {
     const entry = ppcDumpCacheEntry(obj, 'only');
     expect(entry.scoped).toBe(obj);
     expect(entry.path).toBe(join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`));
+  });
+
+  // …AND WHICH TOOLCHAINS ASK FOR ONE. `cachedAsmDumpText` answering `undefined` is an error
+  // nowhere: `evaluate` catches around it and publishes the row with no `asmDump` at all, so the
+  // m2c normalizer loses the object's data sections (jump tables, anonymous constants) and
+  // `bench target`'s reproduction scripts carry none either. A CodeWarrior build the dispatch
+  // fails to name would lose them for every one of its rows and say nothing about it.
+  test('every CodeWarrior build asks for a dump; agbcc is the only toolchain that declines one', () => {
+    // A real ELF, and no Docker: what this discriminates is WHICH ARM ran, not what it returned.
+    // The PPC arm goes on to the containerized objdump — which returns text, or raises where the
+    // container is absent — while a toolchain the table answers `null` for returns `undefined`
+    // having touched nothing.
+    const obj = objectWith(1, ['only']);
+    for (const id of MWCC_TOOLCHAIN_IDS) {
+      let answer: unknown = 'RAISED';
+      try {
+        answer = cachedAsmDumpText(obj, id, 'only');
+      } catch {
+        /* an absent container is acceptable here; a silent `undefined` is not */
+      }
+      expect(answer, `${id} must reach the PPC dump`).not.toBeUndefined();
+    }
+    expect(cachedAsmDumpText(obj, 'agbcc', 'only')).toBeUndefined();
   });
 });
