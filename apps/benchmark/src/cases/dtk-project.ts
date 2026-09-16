@@ -339,8 +339,12 @@ export function unitCompileWrapper(root: string, unit: string, compilerExe: stri
     words.findIndex((w) => w.split('/').at(-1) === compilerExe);
   const compiles: { rule: string; words: string[] }[] = [];
   for (const line of lines) {
-    // `build <outputs>: <rule> <inputs> | <implicit> || <order-only>` — the unit is an explicit input
-    const edge = /^build [^:]+: (\S+)((?: [^|\n]*)?)/.exec(line);
+    // `build <outputs>: <rule> <inputs> | <implicit> || <order-only>` — the unit is an explicit
+    // input. The separator after the colon is `\s+`, not one space: an edge with a long output path
+    // wraps immediately after it, and joining the `$`-continuation leaves the space that preceded
+    // the `$` beside the one that replaced the newline. Animal Crossing spells 483 of its compile
+    // edges that way, Mario Party 4 three and Pikmin four.
+    const edge = /^build [^:]+:\s+(\S+)((?:\s[^|\n]*)?)/.exec(line);
     if (edge === null || !edge[2].split(/\s+/).includes(unit)) {
       continue;
     }
