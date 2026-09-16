@@ -240,6 +240,25 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     });
   });
 
+  test('a context-less CodeWarrior row compiles its candidate as C, and C++ there is refused', () => {
+    inDir((dir) => {
+      // THE SYNTHETIC SHAPE. A synthetic row has no context file, so the linkage block has nowhere
+      // to live — and its candidates are compiled by benchScorer as C whatever dialect the TARGET
+      // was built in. Two committed rows (`Vec__len2`, `Counter__inc`) build a C++ target and
+      // publish a MATCH; stating their target's dialect here exports `Vec__len2__FPi` and the
+      // reproduction finds no symbol to score.
+      writeScoreConfig('mwcc_242_81', canonical('mwcc_242_81'), dir, {});
+      const cmd = (YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc).tools.asmlift.compiler;
+      expect(cmd).toContain('-lang=c ');
+      expect(cmd).not.toContain('-lang=c++');
+      expect(cmd).not.toContain('extern "C"');
+
+      expect(() => writeScoreConfig('mwcc_242_81', canonical('mwcc_242_81'), dir, { language: 'c++' })).toThrow(
+        /linkage block/,
+      );
+    });
+  });
+
   test('every toolchain template stays substitutable after the wrap (placeholders intact)', () => {
     inDir((dir) => {
       for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {

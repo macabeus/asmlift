@@ -450,8 +450,10 @@ switch (command) {
     // ladder against it. (Synthetic rows have no context: they are scored bare, config stays bare.)
     let ctxFile: string | undefined;
     let ctxRung = 0;
-    // the dialect the row's candidate was SCORED in — its unit's, unless the ladder fell back to C
-    let ctxLanguage = c.language;
+    // The dialect the row's CANDIDATE was scored in, which is not the dialect its TARGET was built
+    // in: a synthetic row's candidates all go through benchScorer, which compiles them as C whatever
+    // the target's language, and only the real tier's ladder below can land on C++.
+    let ctxLanguage: 'c' | 'c++' = 'c';
     if (c.tier === 'real') {
       const man = loadManifests().find((m) => m.project === c.project);
       if (man) {

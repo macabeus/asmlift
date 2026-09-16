@@ -176,7 +176,10 @@ export interface ScoreConfigParts {
   elf?: string; // absolute path — symbol-fed rows
   ctxFile?: string; // basename of the materialized scoring context (materializeScoringContext)
   symbolsFile?: string; // basename of an authored symbol map, where no ELF backs it
-  language?: 'c' | 'c++'; // the row's dialect; absent ⇒ C, which is every synthetic row
+  // The dialect the CANDIDATE is compiled in — not the one the target was built in. `c++` is
+  // legal only alongside a `ctxFile`, the one place the linkage block a C++ candidate needs can
+  // be written; absent ⇒ C.
+  language?: 'c' | 'c++';
 }
 
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on
@@ -198,6 +201,13 @@ export function writeScoreConfig(
   { elf, ctxFile, symbolsFile, language }: ScoreConfigParts = {},
 ): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
+  // `-lang=c++` without a context file is a config that cannot work: the linkage block lives in the
+  // `cat` the context file builds, and without it the C++ front end mangles the candidate a second
+  // time and the scorer finds no symbol to align. Refuse it here rather than write a repro that
+  // fails with "symbol not found" in the reader's hands.
+  if (language === 'c++' && !ctxFile) {
+    throw new Error(`${id}: a C++ candidate needs a scoring context to carry its linkage block`);
+  }
   // A CodeWarrior row's DIALECT is stated in the command, exactly as compile/mwcc.ts states it for
   // the harness's own compiles and for the same reason: the reproduction writes its candidate to a
   // `.c` path, so an unstated `-lang` would read a C++ row's candidate with the C front end and
