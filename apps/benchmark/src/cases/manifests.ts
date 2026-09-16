@@ -31,7 +31,11 @@ export interface RealFunction {
    *  GBA ROM-mapped with the Thumb bit clear, N64 VRAM), or, for code in a GameCube REL module,
    *  which the game's loader places and which therefore has no linked address, its location
    *  `<module>:<section>+0x<offset>`. MEASURED from the build artifact, never typed from a name:
-   *  `test/real-manifests.test.ts` holds it against the map the row is read with. */
+   *  `test/real-manifests.test.ts` holds it against the map the row is read with.
+   *
+   *  The module stem is also its `objdiff.json` unit prefix, so a module the project splits into no
+   *  unit — 6 of Mario Party 4's 99 — can hold no row: the row would need `units` flags, and
+   *  `bench flags` refuses it with `objdiff.json has no unit compiled from …`. */
   addr: string;
   /** The build unit the function is compiled in: the source file its `sourceUrl` cites, and a key of the
    *  manifest's `units`. Written by `bench flags --write`. */
