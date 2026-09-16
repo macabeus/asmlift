@@ -129,33 +129,44 @@ export function FeatureDetail({
 
           <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
             <div className="text-[11px] uppercase tracking-wide text-slate-500">In this benchmark</div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-              <span className="text-slate-300">
-                <span className="font-mono text-white">{carrying.length}</span> rows
-              </span>
-              {carrying.length > 0 && (
-                <span className="text-slate-500">
-                  match rate{' '}
-                  <span className="font-mono" style={{ color: DECOMPILER_COLOR.asmlift }}>
-                    {(matchRate(carrying, 'asmlift') * 100).toFixed(0)}%
+            {/* A `pending` definition is deliberately ahead of its rows, and a see-also link can
+                reach one. Offering its filter would empty the table, so say what it is instead. */}
+            {def.pending ? (
+              <p className="mt-2 text-sm text-slate-400">
+                No row carries this tag yet. The definition is here so that the detector and the floor behind it are in
+                place when the first one lands.
+              </p>
+            ) : (
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+                  <span className="text-slate-300">
+                    <span className="font-mono text-white">{carrying.length}</span> rows
                   </span>
-                  {' / '}
-                  <span className="font-mono" style={{ color: DECOMPILER_COLOR.m2c }}>
-                    {(matchRate(carrying, 'm2c') * 100).toFixed(0)}%
-                  </span>
-                  <span className="text-slate-600"> (asmlift / m2c)</span>
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => {
-                onExplore({ feature: [def.id] });
-                onClose();
-              }}
-              className="mt-3 rounded-md border border-teal-700 bg-teal-900/40 px-3 py-1 text-sm font-medium text-teal-300 hover:bg-teal-900/70"
-            >
-              Filter the table to these {carrying.length} rows →
-            </button>
+                  {carrying.length > 0 && (
+                    <span className="text-slate-500">
+                      match rate{' '}
+                      <span className="font-mono" style={{ color: DECOMPILER_COLOR.asmlift }}>
+                        {(matchRate(carrying, 'asmlift') * 100).toFixed(0)}%
+                      </span>
+                      {' / '}
+                      <span className="font-mono" style={{ color: DECOMPILER_COLOR.m2c }}>
+                        {(matchRate(carrying, 'm2c') * 100).toFixed(0)}%
+                      </span>
+                      <span className="text-slate-600"> (asmlift / m2c)</span>
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    onExplore({ feature: [def.id] });
+                    onClose();
+                  }}
+                  className="mt-3 rounded-md border border-teal-700 bg-teal-900/40 px-3 py-1 text-sm font-medium text-teal-300 hover:bg-teal-900/70"
+                >
+                  Filter the table to these {carrying.length} rows →
+                </button>
+              </>
+            )}
           </div>
 
           {def.seeAlso && def.seeAlso.length > 0 && (
