@@ -103,8 +103,8 @@ const placeable = (elf: Elf32): Section[] => elf.sections.filter((s) => (s.flags
 
 /** Refuse an UNPLACED relocatable ELF: one whose allocated sections share an address, so its symbol
  *  values are section-relative and a map keyed by address is a pile of collisions. This is what
- *  naming a `<module>.plf` as `tools.asmlift.elf` does — 99 of Mario Party 4's 99 modules — and
- *  what it produced before this gate was a map with 2,393 colliding addresses and no warning.
+ *  naming a `<module>.plf` as `tools.asmlift.elf` does — 99 of Mario Party 4's 99 modules, whose
+ *  maps would carry 2,393 colliding addresses between them, with no warning to read.
  *
  *  A relocatable object with ONE allocated section is accepted: nothing can collide with it, and
  *  its values then read as ordinary addresses. */

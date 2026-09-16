@@ -59,7 +59,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                                                                                       |
 | `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                                                                                            |
 | `--cflags`        | The flags your build compiles this function's file with, as the build spells them (`--cflags "-mthumb-interwork -O1"`). They fill `{{cflags}}` in the `compiler` command and win over every other source. See [Compiler flags](#compiler-flags)                                                                                                                                  |
-| `--module`        | The REL module the function belongs to. Its symbols come from that module's own ELF (see [REL modules](#rel-modules)), and its unit is looked for among this module's `objdiff.json` units only — REL code repeats names across modules, and a function several units define is refused until you choose                                                                         |
+| `--module`        | The dtk module the function belongs to. Its unit is looked for among this module's `objdiff.json` units only — REL code repeats names across modules, and a function several units define is refused until you choose — and a REL module's symbols come from that module's own ELF (see [REL modules](#rel-modules))                                                             |
 | `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                                                                                        |
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                                                                                           |
 | `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                                                                                         |
@@ -172,6 +172,11 @@ sections is placed at a base of its own, and the base ELF's **global** symbols a
 with the module winning any name they share, because inside a module that name means the
 module's own definition. The name must be one the project's `objdiff.json` knows, and a missing
 module ELF is refused with the path asmlift looked for.
+
+dtk prefixes the DOL's own units too (`main/`, `static/`), and `elf:` is the file named after that
+prefix. So `--module main` names the base ELF itself: it narrows the unit lookup to the DOL's units
+and the map is `elf:`'s, unplaced and unioned with nothing. With `symbols:` in place of `elf:` there
+is no ELF to find a module beside, and `--module` does the unit job alone.
 
 ### Producing the ELF
 

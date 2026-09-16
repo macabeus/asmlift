@@ -1,11 +1,11 @@
 // A REL module's symbol map (src/module-elf.ts + loadModuleSymbolMap).
 //
 // A GameCube module builds to a RELOCATABLE `<module>.plf` whose allocated sections all start at
-// address 0. Naming one as `tools.asmlift.elf` used to produce a map where the first function, the
-// first data word and the first BSS variable share the address 0x0 — silently, since a map full of
+// address 0. Read as an ordinary ELF, such a file yields a map where the first function, the first
+// data word and the first BSS variable share the address 0x0 — silently, since a map full of
 // aliases loads exactly like a map full of symbols. These tests pin the two halves of the answer:
-// such a file is REFUSED, and the module map that replaces it places each section at a base of its
-// own and inherits only what a module may refer to in the base ELF.
+// such a file is REFUSED as `tools.asmlift.elf`, and the module map reached with `--module` places
+// each section at a base of its own and inherits only what a module may refer to in the base ELF.
 import { symbolsByName } from '@asmlift/core/symbols';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -184,7 +184,7 @@ describe('assertPlaced — an unplaced relocatable ELF is refused', () => {
     expect(() => assertPlaced(empty, '/p/add.o')).not.toThrow();
   });
 
-  test('it is the gate on loadSymbolMap: a .plf named as tools.asmlift.elf no longer loads', async () => {
+  test('it is the gate on loadSymbolMap: a .plf named as tools.asmlift.elf is refused', async () => {
     await expect(loadSymbolMap(write('m416Dll.plf', modulePlf()))).rejects.toThrow(/RELOCATABLE ELF/);
   });
 });
@@ -286,9 +286,9 @@ describe('loadModuleSymbolMap — the module, placed, over the base ELF globals'
   });
 });
 
-/** A dtk project: decomp.yaml naming the base ELF, one objdiff.json unit under `m416Dll`, and the
- *  build directory dtk writes a module's ELF into. `plf` is what lands at the module path — absent
- *  writes none at all. */
+/** A dtk project: decomp.yaml naming the base ELF, one objdiff.json unit under `m416Dll` and one
+ *  under the DOL's own prefix `main`, and the build directory dtk writes a module's ELF into.
+ *  `plf` is what lands at the module path — absent writes none at all. */
 function dtkProject(plf?: Buffer) {
   const root = mkdtempSync(join(tmpdir(), 'asmlift-modcli-'));
   mkdirSync(join(root, 'build', 'm416Dll'), { recursive: true });
@@ -303,6 +303,11 @@ function dtkProject(plf?: Buffer) {
         {
           name: 'm416Dll/REL/executor',
           target_path: 'build/m416Dll/executor.o',
+          scratch: { compiler: 'mwcc_242_81', c_flags: '-O4,p' },
+        },
+        {
+          name: 'main/game/host',
+          target_path: 'build/main/host.o',
           scratch: { compiler: 'mwcc_242_81', c_flags: '-O4,p' },
         },
       ],
@@ -354,9 +359,30 @@ describe('--module at the CLI surface', () => {
     expect(r.stderr).toContain('a module ELF is a RELOCATABLE ELF32');
   });
 
-  test('--cflags no longer makes --module inert: it still names the map', async () => {
+  test('--cflags takes over the flags job, and --module still names the map', async () => {
     const { asm } = dtkProject(modulePlf());
     expect(await runCli([asm, '--module', 'm416Dll', '--cflags', '-O4,p'])).toMatchObject({ code: 0 });
+  });
+
+  test('the DOL is a module name too, and its map is tools.asmlift.elf itself', async () => {
+    // dtk gives the DOL's units a prefix (`main/`) and names the base ELF after it, so `main` is a
+    // name --module takes — there is no build/main/main.plf and there must not need to be.
+    const { asm } = dtkProject(modulePlf());
+    const dol = await runCli([asm, '--module', 'main']);
+    expect(dol.code).toBe(0);
+    expect(dol.stdout).toBe((await runCli([asm, '--cflags', '-O4,p'])).stdout);
+  });
+
+  test('--cflags alone still runs when objdiff.json cannot be read; --module needs it', async () => {
+    // --cflags is the way past a project whose objdiff.json asmlift cannot use, so it must not be
+    // read on that path. --module is a claim ABOUT that file, so there it is read and refused.
+    const { root, asm } = dtkProject(modulePlf());
+    writeFileSync(join(root, 'objdiff.json'), '{ not json');
+    expect(await runCli([asm, '--cflags', '-O4,p'])).toMatchObject({ code: 0 });
+    expect((await runCli([asm])).stderr).toMatch(/^asmlift: cannot read objdiff\.json: /);
+    expect((await runCli([asm, '--module', 'm416Dll', '--cflags', '-O4,p'])).stderr).toMatch(
+      /^asmlift: cannot read objdiff\.json: /,
+    );
   });
 
   test('a name that is no module of this project is still refused before anything is read', async () => {

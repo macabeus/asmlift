@@ -22,7 +22,7 @@ import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
@@ -147,10 +147,11 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
                    spells, else the target's canonical flags)
-  --module         the REL module the function belongs to: its symbols come from
-                   <tools.asmlift.elf dir>/<module>/<module>.plf over that ELF's
-                   globals, and its unit is looked for in this module only (REL
-                   code repeats names across modules)
+  --module         the dtk module the function belongs to: its unit is looked for
+                   in this module only (REL code repeats names across modules), and
+                   a REL module's symbols come from <tools.asmlift.elf dir>/
+                   <module>/<module>.plf over that ELF's globals (the DOL, named
+                   after tools.asmlift.elf itself, IS that ELF)
   --strict         fail on any gap instead of annotating
   --config         decomp.yaml to use (default: nearest ancestor of the input)
   --score-against  recompile the output with the project's compiler and objdiff
@@ -320,7 +321,12 @@ async function loadProjectSymbolMap(
     // ELF's globals. dtk writes each module's ELF beside the base one, at
     // `<module>/<module>.plf`, and that layout is the whole location rule — a project's
     // decomp.yaml says nothing about its modules.
-    const modulePath = module === undefined ? undefined : join(dirname(elfPath), module, `${module}.plf`);
+    //
+    // The DOL is one of the names `--module` takes, because dtk gives its units a prefix too
+    // (`main/`, `static/`) and that prefix is what the base ELF is named after. Naming it selects
+    // the base ELF, which IS its symbol source; only a REL module has a second file to find.
+    const dol = module !== undefined && module === basename(elfPath, extname(elfPath));
+    const modulePath = module === undefined || dol ? undefined : join(dirname(elfPath), module, `${module}.plf`);
     if (modulePath !== undefined && !existsSync(modulePath)) {
       return failure({
         code: EXIT.unreadable,
@@ -594,10 +600,14 @@ export async function runCli(
   // The dtk project beside decomp.yaml, read before anything consumes it: it is what gives
   // `--module` a meaning, and both of the flag's jobs — the module's symbol map below, its unit's
   // flags further down — are wrong if the name is not one of this project's modules.
+  //
+  // Read only when one of those jobs needs it. `--cflags` alone is the escape hatch from a project
+  // whose objdiff.json cannot be read, so reading it there would refuse the run the flag exists to
+  // rescue.
   const cflagsFlag = flags.get('cflags') as string | undefined;
   const moduleFlag = flags.get('module') as string | undefined;
   let project: ReturnType<typeof readObjdiffUnits>;
-  if (configDir !== undefined) {
+  if (configDir !== undefined && (moduleFlag !== undefined || cflagsFlag === undefined)) {
     try {
       project = readObjdiffUnits(configDir);
     } catch (e) {
