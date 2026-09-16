@@ -167,7 +167,11 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (instrs[i].mnemonic !== 'bctr') {
       continue;
     }
-    const [lis, slwi, addi, lwzx, mtctr] = [instrs[i - 5], instrs[i - 4], instrs[i - 3], instrs[i - 2], instrs[i - 1]];
+    const [lis, lwzx, mtctr] = [instrs[i - 5], instrs[i - 2], instrs[i - 1]];
+    // The index is scaled and the table's low half formed in either order: mwcc 2.4.2 emits the
+    // `slwi` first, GC/1.2.5n the `addi`. The two instructions are independent.
+    const [slwi, addi] =
+      instrs[i - 4].mnemonic === 'slwi' ? [instrs[i - 4], instrs[i - 3]] : [instrs[i - 3], instrs[i - 4]];
     if (
       lis.mnemonic !== 'lis' ||
       slwi.mnemonic !== 'slwi' ||
