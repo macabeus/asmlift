@@ -124,7 +124,7 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
   const written = (elf?: string, cflags: readonly string[] = canonical('agbcc')): Doc => {
     const dir = mkdtempSync(join(tmpdir(), 'score-config-'));
     try {
-      writeScoreConfig('agbcc', cflags, dir, elf);
+      writeScoreConfig('agbcc', cflags, dir, { elf });
       return YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -213,7 +213,7 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
 
   test('the generated compile command concatenates ctx.i ahead of the candidate', () => {
     inDir((dir) => {
-      writeScoreConfig('agbcc', canonical('agbcc'), dir, undefined, 'ctx.i');
+      writeScoreConfig('agbcc', canonical('agbcc'), dir, { ctxFile: 'ctx.i' });
       const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
       expect(doc.tools.asmlift.compiler).toBe(
         'cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c && ' +
@@ -222,10 +222,28 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     });
   });
 
+  test("a CodeWarrior row's command states its dialect, and a C++ row's encloses the candidate", () => {
+    inDir((dir) => {
+      // The reproduction writes its candidate to a `.c` path, so the dialect cannot be left to the
+      // extension — and a C++ row's candidate must be enclosed in the same linkage block the
+      // scorer compiles it in, or it mangles a second time and aligns to nothing.
+      writeScoreConfig('mwcc_242_81', canonical('mwcc_242_81'), dir, { ctxFile: 'ctx.i', language: 'c++' });
+      const cpp = (YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc).tools.asmlift.compiler;
+      expect(cpp).toContain(`{ cat ctx.i; echo 'extern "C" {'; cat {{inputPath}}; echo '}'; } > {{inputPath}}.ctx.c`);
+      expect(cpp).toContain('-lang=c++');
+
+      writeScoreConfig('mwcc_242_81', canonical('mwcc_242_81'), dir, { ctxFile: 'ctx.i', language: 'c' });
+      const c = (YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc).tools.asmlift.compiler;
+      expect(c).toContain('cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c');
+      expect(c).toContain('-lang=c');
+      expect(c).not.toContain('extern "C"');
+    });
+  });
+
   test('every toolchain template stays substitutable after the wrap (placeholders intact)', () => {
     inDir((dir) => {
       for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {
-        writeScoreConfig(id, canonical(id), dir, undefined, 'ctx.i');
+        writeScoreConfig(id, canonical(id), dir, { ctxFile: 'ctx.i' });
         const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
         expect(doc.tools.asmlift.compiler, id).toContain('{{inputPath}}');
         expect(doc.tools.asmlift.compiler, id).toContain('{{outputPath}}');

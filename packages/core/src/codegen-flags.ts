@@ -588,6 +588,28 @@ export function storedFlags(family: FlagFamily, argv: readonly string[]): string
   return argv.filter((_, i) => !inert.has(i));
 }
 
+/** THE DIALECT a translation unit is compiled in — the benchmark row's `language`, the `-lang` word
+ *  its target and every candidate compile state, and (on a C++ row) the linkage a candidate needs
+ *  to export the mangled symbol its target is keyed by.
+ *
+ *  THE BUILD'S FLAGS ARE THE SIGNAL, never the file name: 62 of Animal Crossing's `.c` units are
+ *  compiled `-lang=c++`. CodeWarrior spells the option both ways and one project uses both —
+ *  Pikmin's 385 game units say `-lang=c++` and its 57 jaudio units say `-lang c++` — so both are
+ *  read here, and the LAST one wins, as it does on the command line.
+ *
+ *  `unit` is the fallback and only that: where the flags name no dialect, the file's extension is
+ *  what the front end itself would have used. Across the three GameCube projects the only units
+ *  whose flags say nothing are six `.s` files no compile edge builds. Only mwcc has a `-lang`, and
+ *  only mwcc has a C++ front end, so every other family answers `c` unless its unit is named for
+ *  C++ — which none is. */
+export function unitLanguage(unit: string, cflags: readonly string[]): 'c' | 'c++' {
+  let stated: string | undefined;
+  for (const [i, f] of cflags.entries()) {
+    stated = f.startsWith('-lang=') ? f.slice('-lang='.length) : f === '-lang' ? cflags[i + 1] : stated;
+  }
+  return (stated ?? (/\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c')) === 'c++' ? 'c++' : 'c';
+}
+
 /** The optimisation level the compiler acts on (`-O2`, `-O4,p`), or null when the flags name none and
  *  the family has no measured default. */
 export function optLevel(family: FlagFamily, argv: readonly string[]): string | null {

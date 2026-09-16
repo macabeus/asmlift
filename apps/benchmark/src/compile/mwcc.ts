@@ -12,6 +12,7 @@
 // `__MWERKS__` and the other macros only mwcceppc declares. So the preprocessor here is the compiler
 // itself (`ppcPreprocess`), run with the checkout mounted, under the wrapper the unit's own build
 // rule runs it under.
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { type MwccToolchainId, ppcCompile, ppcPreprocess, ppcSectionScoped } from '@asmlift/toolchains';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,22 +26,15 @@ import { compilerDiagnostics, contentDir } from './util';
 /** The CodeWarrior binary, as a project's own build rule names it. */
 const MWCCEPPC = 'mwcceppc.exe';
 
-/** The `-lang` word mwcceppc must be handed to read this unit in the dialect its own build reads it
- *  in — stated ALWAYS, never left to the front end's default.
+/** The `-lang` word mwcceppc is handed to read a source in one dialect — stated ALWAYS, never left
+ *  to the front end's default, and stated LAST so it overrides whatever the unit's own flags say.
  *
- *  That default is the source file's extension, and the translation unit is written here as `u.c`
- *  because a preprocessed blob has no project filename. Left implicit, every unit would be read as
- *  C and a C++ unit's headers would take the `#ifdef __cplusplus` branch the project's own build
- *  does not. The extension would be the wrong signal even under the real name: 62 of Animal
- *  Crossing's units are `.c` files its build compiles with `-lang=c++`.
- *
- *  The unit's flags are the signal. Where they name no language — 57 Pikmin units — the unit's own
- *  extension is what mwcc itself would have used, so that is what gets said out loud. The last
- *  `-lang` wins, as it does on the command line. */
-function unitLang(cfg: RealProjectCfg): string {
-  const stated = cfg.cflags.filter((f) => f.startsWith('-lang=')).at(-1);
-  return stated ?? (/\.(cc|cp|cpp|cxx)$/i.test(cfg.unit) ? '-lang=c++' : '-lang=c');
-}
+ *  That default is the file's extension, and every source this module writes is named `u.c` or
+ *  `c.c`: neither a preprocessed blob nor a candidate has a project filename. Left implicit, a C++
+ *  unit would be preprocessed against the `#ifdef __cplusplus` branch its own build does not take,
+ *  its target would be built by the C front end, and its candidates would compile to unmangled
+ *  symbols the mangled target has none of. */
+const langFlag = (language: 'c' | 'c++'): string => `-lang=${language}`;
 
 /** Compile one source in `dir`, mapping a container or compiler failure onto the `<tool> failed:
  *  <diagnostic>` shape the evaluator turns into a row's error markers. */
@@ -64,21 +58,22 @@ function compile(
  *  must be the same compiler, and a scratch directory keyed by flags and text alone would let two
  *  builds share one. */
 export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
-  buildTarget(iText, sym, cflags): BuiltTarget {
-    const dir = contentDir('ppc', [mwcc, ...cflags], iText);
+  buildTarget(iText, sym, cflags, language): BuiltTarget {
+    const flags = [...cflags, langFlag(language)];
+    const dir = contentDir('ppc', [mwcc, ...flags], iText);
     writeFileSync(join(dir, 'u.c'), iText);
-    const asm = compile(mwcc, dir, 'u.c', 'u.o', cflags, true);
+    const asm = compile(mwcc, dir, 'u.c', 'u.o', flags, true);
     // A project unit is exactly where a translation unit gets several `.text` sections, all at
     // address 0: the decompiler reads the one that defines this row's function.
     return { obj: join(dir, 'u.o'), asm: ppcSectionScoped(mwcc, dir, 'u.o', sym, asm) };
   },
-  compileCandidate(tu, sym, cflags): string {
+  compileCandidate(tu, sym, cflags, language): string {
     // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same
     // measured reason: a path reused across compiles that the container reaches through the shared
     // /tmp mount fails ~30% of the time with `c.o: No such file or directory`.
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-cand-'));
     writeFileSync(join(dir, 'c.c'), stripPrototype(tu, sym));
-    compile(mwcc, dir, 'c.c', 'c.o', cflags, false);
+    compile(mwcc, dir, 'c.c', 'c.o', [...cflags, langFlag(language)], false);
     return join(dir, 'c.o');
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
@@ -89,7 +84,7 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
       root: cfg.root,
       srcPath: join(dir, 'u.c'),
       outPath: join(dir, 'u.i'),
-      argv: [...cfg.cppIncludes, ...(cfg.defines ?? []), unitLang(cfg)],
+      argv: [...cfg.cppIncludes, ...(cfg.defines ?? []), langFlag(unitLanguage(cfg.unit, cfg.cflags))],
       wrapper: unitCompileWrapper(cfg.root, cfg.unit, MWCCEPPC),
     });
   },

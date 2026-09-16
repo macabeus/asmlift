@@ -29,12 +29,14 @@ export interface RealProjectCfg {
 }
 
 export interface RealCompile {
-  /** Compile a PREPROCESSED translation unit at `cflags` → scoring-target obj + the disasm asmlift
-   *  consumes, read from the section defining `sym` when the object has more than one. */
-  buildTarget(iText: string, sym: string, cflags: readonly string[]): BuiltTarget;
-  /** Compile a candidate TU (self-contained — no project includes) at `cflags` → obj path. Throws on
-   *  compile failure (mapped to `noncompile` upstream). */
-  compileCandidate(tu: string, sym: string, cflags: readonly string[]): string;
+  /** Compile a PREPROCESSED translation unit at `cflags`, in the row's `language` → scoring-target
+   *  obj + the disasm asmlift consumes, read from the section defining `sym` when the object has
+   *  more than one. A toolchain with no C++ front end implements the C parameters alone: real.ts
+   *  refuses a `c++` row before it can reach one. */
+  buildTarget(iText: string, sym: string, cflags: readonly string[], language: 'c' | 'c++'): BuiltTarget;
+  /** Compile a candidate TU (self-contained — no project includes) at `cflags`, in the row's
+   *  `language` → obj path. Throws on compile failure (mapped to `noncompile` upstream). */
+  compileCandidate(tu: string, sym: string, cflags: readonly string[], language: 'c' | 'c++'): string;
   /** Preprocess a raw TU against a live checkout — vendor/verify time only. */
   preprocess(cfg: RealProjectCfg, tu: string): string;
 }

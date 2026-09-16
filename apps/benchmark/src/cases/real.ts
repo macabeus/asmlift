@@ -10,6 +10,7 @@
 // doc states what each channel carries; README.md lists the residuals, in both directions, and
 // the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
 import { moduleOf, onlySelects } from '@asmlift/bench-schema';
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
@@ -36,6 +37,10 @@ export function realCases(filter: RealFilter = {}): Case[] {
       // module's own symbols over the base ELF's globals
       const symbols = man.symbolsFor(moduleOf(f.addr));
       const codegen = codegenFor(unit.toolchain, unit.cflags);
+      // THE DIALECT THE ROW'S OWN BUILD READS ITS UNIT IN, and never a property of the row's name:
+      // it picks m2c's target, the `-lang` word the target and every candidate compile state, and
+      // the linkage a candidate needs to export the mangled symbol a C++ target is keyed by.
+      const language = unitLanguage(f.unit, unit.cflags);
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
       const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
       const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
@@ -46,7 +51,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         addr: f.addr,
         aliases: f.aliases,
         project: man.project,
-        language: 'c',
+        language,
         features: f.features,
         loc: f.funcC.split('\n').length,
         refSource: f.funcC,
@@ -75,10 +80,10 @@ export function realCases(filter: RealFilter = {}): Case[] {
             id,
             f,
             unit.toolchain,
-            buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI),
+            buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI, language),
           ),
-        scorer: makeRealScorer(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
-        compile: makeRealCompile(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
+        scorer: makeRealScorer(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI, language),
+        compile: makeRealCompile(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI, language),
       });
     }
   }

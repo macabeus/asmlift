@@ -10,15 +10,16 @@
 //   - a project's headers are preprocessed by mwcceppc itself, under the wrapper the unit's own
 //     build rule uses.
 import { MWCC_TOOLCHAIN_IDS, compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
-import { realCompilerFor } from '../src/compile/real';
+import { candidateLinkage, realCompilerFor } from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
 
@@ -89,7 +90,7 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
   test(
     'compiles a preprocessed unit verbatim — no typedef prelude in front of it',
     () => {
-      const built = mwcc.buildTarget(TU, 'twice', CFLAGS);
+      const built = mwcc.buildTarget(TU, 'twice', CFLAGS, 'c');
       expect(statSync(built.obj).size).toBeGreaterThan(0);
       expect(built.asm).toContain('twice');
       // THE CONTROL, and the reason this module is not `compilePpcTarget`: the same text through the
@@ -102,11 +103,11 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
   test(
     'compiles a candidate, and names the compiler in a failure instead of the container',
     () => {
-      const obj = mwcc.compileCandidate(TU.replace('x + x', 'x * 2'), 'twice', CFLAGS);
+      const obj = mwcc.compileCandidate(TU.replace('x + x', 'x * 2'), 'twice', CFLAGS, 'c');
       expect(statSync(obj).size).toBeGreaterThan(0);
       let message = '';
       try {
-        mwcc.compileCandidate(TU.replace('x + x', 'x +'), 'twice', CFLAGS);
+        mwcc.compileCandidate(TU.replace('x + x', 'x +'), 'twice', CFLAGS, 'c');
       } catch (e) {
         message = (e as Error).message;
       }
@@ -118,6 +119,77 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
     },
     CONTAINER_BUDGET,
   );
+});
+
+// ── a C++ row ──────────────────────────────────────────────────────────────────────────────
+// A C++ target is keyed by a MANGLED symbol, and objdiff aligns a candidate to it by that exact
+// string. Everything below is the measurement that decides how a candidate has to be compiled;
+// each case is stated as the SYMBOL the object exports, because that is the only thing the scorer
+// looks a candidate up by.
+const VEC = 'struct Vec{int x;int y;int dot(Vec*o);};\n';
+/** m2c's own `ppc-mwcc-c++` output shape: a C function NAMED by the mangled symbol, `this` and
+ *  all. (Verified against the pinned m2c on this very function.) */
+const AS_M2C_EMITS = `${VEC}int dot__3VecFP3Vec(Vec *thisp, Vec *o) { return thisp->x * o->x + thisp->y * o->y; }\n`;
+/** asmlift's C++ backend shape: a real member definition, which mangles by itself. */
+const AS_CPP_BACKEND = `${VEC}int Vec::dot(Vec * o) { return x * o->x + y * o->y; }\n`;
+
+const exportedFunctions = (obj: string): string[] =>
+  execFileSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '--platform',
+      'linux/386',
+      '-v',
+      `${dirname(obj)}:/w`,
+      'asmlift-ppc',
+      'sh',
+      '-c',
+      `powerpc-eabi-objdump -t /w/${basename(obj)}`,
+    ],
+    { encoding: 'utf8' },
+  )
+    .split('\n')
+    .filter((l) => / F .*\.text\t/.test(l))
+    .map((l) => l.trim().split(/\s+/).pop()!);
+
+describe.runIf(ppcDockerAvailable())('a C++ row', () => {
+  test(
+    'compiles its candidates in the C++ dialect, whatever the scratch file is called',
+    () => {
+      // The candidate is always written as `c.c`, so the extension default would read a C++ row's
+      // candidate as C. `-lang` decides it, and the dialects disagree on this source.
+      expect(exportedFunctions(mwcc.compileCandidate(AS_CPP_BACKEND, 'dot__3VecFP3Vec', CFLAGS, 'c++'))).toEqual([
+        'dot__3VecFP3Vec',
+      ]);
+      expect(() => mwcc.compileCandidate(AS_CPP_BACKEND, 'dot__3VecFP3Vec', CFLAGS, 'c')).toThrow(/mwcceppc failed/);
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'needs C linkage on the candidate, because a C-shaped one mangles a SECOND time without it',
+    () => {
+      // THE DEFECT candidateLinkage exists for: m2c's output compiled as C++ exports a name the
+      // target has none of, and the row would publish a noncompile about nothing.
+      const bare = mwcc.compileCandidate(AS_M2C_EMITS, 'dot__3VecFP3Vec', CFLAGS, 'c++');
+      expect(exportedFunctions(bare)).toEqual(['dot__3VecFP3Vec__FP3VecP3Vec']);
+
+      // …and the linkage block restores it — for BOTH shapes, which is why it is one rule and not
+      // a per-decompiler shim: mwcceppc gives a member function its normal mangling inside the
+      // block, as the standard says a class member's language linkage is ignored.
+      for (const shape of [AS_M2C_EMITS, AS_CPP_BACKEND]) {
+        const wrapped = mwcc.compileCandidate(candidateLinkage('c++', shape), 'dot__3VecFP3Vec', CFLAGS, 'c++');
+        expect(exportedFunctions(wrapped)).toEqual(['dot__3VecFP3Vec']);
+      }
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test('a C row keeps its candidate exactly as the decompiler wrote it', () => {
+    expect(candidateLinkage('c', 'int f(void){return 0;}')).toBe('int f(void){return 0;}\n');
+  });
 });
 
 // The include tree of a REAL project, which is the thing a host `cpp` cannot read. Gated on the

@@ -10,6 +10,7 @@ import {
   shellJoinFlags,
   storedFlags,
   tokenizeFlags,
+  unitLanguage,
 } from '../src/codegen-flags';
 import {
   ARMV4T_AGBCC,
@@ -275,5 +276,27 @@ describe('parsing', () => {
     expect(storedFlags('mwcc', pikmin)).toEqual(['-proc', 'gekko', '-O4,p', '-str', 'reuse,', 'readonly']);
     const pokeemerald = ['-mthumb-interwork', '-Wimplicit', '-Wparentheses', '-Werror', '-O2', '-fhex-asm', '-g'];
     expect(storedFlags('agbcc', pokeemerald)).toEqual(['-mthumb-interwork', '-O2', '-fhex-asm', '-g']);
+  });
+});
+
+describe("a unit's language", () => {
+  // CodeWarrior spells `-lang` two ways and one project uses both — Pikmin's game units say
+  // `-lang=c++` and its jaudio units say `-lang c++`. Reading only the `=` form called those 57
+  // units C, which would preprocess them against the wrong `#ifdef __cplusplus` branch.
+  test('is whichever -lang word the build states last, in either spelling', () => {
+    expect(unitLanguage('src/plugPikiKando/piki.cpp', ['-O4,p', '-lang=c++'])).toBe('c++');
+    expect(unitLanguage('src/jaudio/aramcall.c', ['-O4,p', '-lang', 'c++'])).toBe('c++');
+    expect(unitLanguage('src/static/m_house.c', ['-lang=c'])).toBe('c');
+    expect(unitLanguage('src/u.c', ['-lang', 'c++', '-lang=c'])).toBe('c');
+    expect(unitLanguage('src/u.c', ['-lang=c', '-lang', 'c++'])).toBe('c++');
+  });
+
+  // The extension is the FALLBACK and never the rule: 62 of Animal Crossing's `.c` units are
+  // compiled `-lang=c++`, so a row's dialect cannot be read off its file name.
+  test('falls back to the extension only when no flag names one', () => {
+    expect(unitLanguage('src/static/jsyswrap.cpp', [])).toBe('c++');
+    expect(unitLanguage('src/static/m_house.c', [])).toBe('c');
+    expect(unitLanguage('src/static/m_house.c', ['-lang=c++'])).toBe('c++');
+    expect(unitLanguage('src/static/jsyswrap.cpp', ['-lang=c'])).toBe('c');
   });
 });

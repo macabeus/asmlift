@@ -29,6 +29,7 @@
 import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
 import { moduleFunctionLocations } from '@asmlift/cli/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -230,7 +231,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         );
         continue;
       }
-      const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI);
+      const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI, unitLanguage(f.unit, unit.cflags));
       const at = romAddress(f.addr);
       if (at === null) {
         // A REL row has no address in the linked ELF to compare against, and its own module's

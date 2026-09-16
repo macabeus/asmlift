@@ -466,13 +466,13 @@ switch (command) {
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.
         const picked = source
-          ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, macros)
+          ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, c.language, macros)
           : { prelude: ladder[ladder.length - 1], rung: ladder.length };
         ctxRung = picked.rung;
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, elf, ctxFile, symbolsFile);
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: c.language });
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id} ${shellJoinFlags(c.codegen.cflags)}${
         c.tier === 'real' ? `, the flags of ${c.unit}` : ''
