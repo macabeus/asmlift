@@ -293,6 +293,80 @@ export async function runNinja(opts: NinjaOptions): Promise<NinjaAttempt[]> {
   throw new Error(`${exe} did not finish in ${attempts} attempts (${runs.map(describeAttempt).join('; ')}) — ${log}`);
 }
 
+/** `build.ninja` with its `$`-continuations joined — the form every reader of it wants, since an
+ *  edge's inputs and a rule's command are both wrapped across lines. */
+const flatNinja = (root: string): string[] =>
+  readFileSync(join(root, 'build.ninja'), 'utf8')
+    .replace(/\$\r?\n[ \t]*/g, ' ')
+    .split('\n');
+
+/** The command of the ninja rule named `rule`, as words. */
+function ruleCommand(lines: readonly string[], rule: string): string[] | undefined {
+  const at = lines.findIndex((l) => l.trimEnd() === `rule ${rule}`);
+  if (at === -1) {
+    return undefined;
+  }
+  for (let i = at + 1; i < lines.length && /^[ \t]/.test(lines[i]); i++) {
+    const command = /^[ \t]+command = (.*)$/.exec(lines[i])?.[1];
+    if (command !== undefined) {
+      return command.split(/\s+/).filter((w) => w !== '');
+    }
+  }
+  return undefined;
+}
+
+/** The checkout's own executables the unit's build rule runs `compilerExe` UNDER, relative to the
+ *  checkout.
+ *
+ *  A dtk project compiles a Shift-JIS source through `build/tools/sjiswrap.exe`, which converts the
+ *  UTF-8 the repository stores as the compiler reads the file — so a translation unit preprocessed
+ *  WITHOUT it is not the text the project's own build compiled. Animal Crossing runs all 3,617 of
+ *  its compile edges that way.
+ *
+ *  The LAUNCHER is not one of these words: the checkout says `wine`, asmlift's container says
+ *  `wibo`, and which one runs the Win32 executables is the caller's business. What comes back is
+ *  everything between it and the compiler.
+ *
+ *  `[]` for a rule that runs the compiler directly, and for a project with no `build.ninja` at
+ *  all — a Makefile project's recipe is read by `cases/derive-flags.ts`, and none of them wraps its
+ *  compiler. */
+export function unitCompileWrapper(root: string, unit: string, compilerExe: string): string[] {
+  if (!existsSync(join(root, 'build.ninja'))) {
+    return [];
+  }
+  const lines = flatNinja(root);
+  const runsCompiler = (words: readonly string[]): number =>
+    words.findIndex((w) => w.split('/').at(-1) === compilerExe);
+  const compiles: { rule: string; words: string[] }[] = [];
+  for (const line of lines) {
+    // `build <outputs>: <rule> <inputs> | <implicit> || <order-only>` — the unit is an explicit input
+    const edge = /^build [^:]+: (\S+)((?: [^|\n]*)?)/.exec(line);
+    if (edge === null || !edge[2].split(/\s+/).includes(unit)) {
+      continue;
+    }
+    const words = ruleCommand(lines, edge[1]);
+    if (words !== undefined && runsCompiler(words) !== -1) {
+      compiles.push({ rule: edge[1], words });
+    }
+  }
+  if (compiles.length !== 1) {
+    throw new Error(
+      compiles.length === 0
+        ? `no build.ninja edge compiles ${unit} with ${compilerExe}`
+        : `${unit} is compiled by ${compiles.length} build.ninja rules: ${compiles.map((c) => c.rule).join(', ')}`,
+    );
+  }
+  const { words } = compiles[0];
+  const wrapper = words.slice(1, runsCompiler(words));
+  const unexpanded = wrapper.find((w) => w.includes('$'));
+  if (unexpanded !== undefined) {
+    // A ninja variable here would be dropped silently otherwise, and a dropped wrapper is a
+    // translation unit the project's own build never compiled.
+    throw new Error(`${unit}: its rule wraps the compiler in ${unexpanded}, which this reader cannot expand`);
+  }
+  return wrapper;
+}
+
 /** Every unit's TARGET object — what dtk cut from the disc, which a candidate is scored against —
  *  read from the `objdiff.json` the configure step writes, keyed by unit name. Throws when the
  *  split has not run, or has left a unit's object behind. */

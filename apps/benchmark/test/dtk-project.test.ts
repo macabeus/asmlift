@@ -17,6 +17,7 @@ import {
   requireDisc,
   requireVersion,
   runNinja,
+  unitCompileWrapper,
 } from '../src/cases/dtk-project';
 
 const scratch = mkdtempSync(join(tmpdir(), 'dtk-project-'));
@@ -307,5 +308,83 @@ describe('the target objects of a dtk build', () => {
 
   test('refuse a checkout that has not been configured since the split', () => {
     expect(() => dtkTargetObjects(dir())).toThrow(/has no objdiff\.json/);
+  });
+});
+
+// THE WRAPPER A UNIT'S RULE RUNS THE COMPILER UNDER. Animal Crossing compiles all 3,617 of its
+// edges through `build/tools/sjiswrap.exe`, which rewrites the UTF-8 the repository stores into the
+// Shift-JIS the compiler expects as the file is read — so a translation unit preprocessed without it
+// is not the text that build compiled. The lines below are the real shape, `$`-continuations and
+// all, because that wrapping is what a naive reader trips on.
+describe('the wrapper a unit is compiled under', () => {
+  const ninja = [
+    'rule mwcc',
+    '  command = wine build/compilers/$mw_version/mwcceppc.exe $cflags -MMD -c $',
+    '      $in -o $basedir',
+    '  description = MWCC $out',
+    '',
+    'rule mwcc_sjis',
+    '  command = wine build/tools/sjiswrap.exe $',
+    '      build/compilers/$mw_version/mwcceppc.exe $cflags -MMD -c $in -o $',
+    '      $basedir',
+    '',
+    'rule decompctx',
+    '  command = $python tools/decompctx.py $in -o $out',
+    '',
+    'build build/GAFE01_00/src/boot.o: mwcc_sjis src/static/boot.c | $',
+    '    build/compilers build/tools/sjiswrap.exe || pre-compile',
+    '  mw_version = GC/1.3.2',
+    'build build/GAFE01_00/src/boot.ctx: decompctx src/static/boot.c | tools/decompctx.py',
+    'build build/GAFE01_00/src/plain.o: mwcc src/static/plain.c | build/compilers',
+    '',
+  ].join('\n');
+  const project = (): string => {
+    const root = dir();
+    write(root, 'build.ninja', ninja);
+    return root;
+  };
+
+  test('a Shift-JIS unit names the wrapper; a plain one names none', () => {
+    expect(unitCompileWrapper(project(), 'src/static/boot.c', 'mwcceppc.exe')).toEqual(['build/tools/sjiswrap.exe']);
+    expect(unitCompileWrapper(project(), 'src/static/plain.c', 'mwcceppc.exe')).toEqual([]);
+  });
+
+  test("the launcher is not a wrapper — which one runs a Win32 binary is the caller's business", () => {
+    // `wine` in the checkout, `wibo` in asmlift's container: the word that differs must not be
+    // carried across, and the word that does not must be.
+    expect(unitCompileWrapper(project(), 'src/static/boot.c', 'mwcceppc.exe')).not.toContain('wine');
+  });
+
+  test('a unit no rule compiles is refused, and so is one two rules compile', () => {
+    // `.ctx` shares the source with `.o`, so a reader that took the first edge naming the unit would
+    // answer with the context generator's command.
+    expect(() => unitCompileWrapper(project(), 'src/static/nothing.c', 'mwcceppc.exe')).toThrow(
+      /no build\.ninja edge compiles src\/static\/nothing\.c/,
+    );
+    const twice = dir();
+    write(twice, 'build.ninja', `${ninja}build build/b.o: mwcc src/static/boot.c\n`);
+    expect(() => unitCompileWrapper(twice, 'src/static/boot.c', 'mwcceppc.exe')).toThrow(
+      /compiled by 2 build\.ninja rules: mwcc_sjis, mwcc/,
+    );
+  });
+
+  test('a wrapper this reader cannot expand is refused, never dropped', () => {
+    const root = dir();
+    write(
+      root,
+      'build.ninja',
+      [
+        'rule mwcc_var',
+        '  command = wine $wrapper build/compilers/$mw_version/mwcceppc.exe $cflags -c $in',
+        '',
+        'build build/x.o: mwcc_var src/x.c',
+        '',
+      ].join('\n'),
+    );
+    expect(() => unitCompileWrapper(root, 'src/x.c', 'mwcceppc.exe')).toThrow(/wraps the compiler in \$wrapper/);
+  });
+
+  test('a project with no build.ninja wraps nothing', () => {
+    expect(unitCompileWrapper(dir(), 'src/main.c', 'mwcceppc.exe')).toEqual([]);
   });
 });
