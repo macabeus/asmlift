@@ -15,6 +15,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
 import { realCompilerFor } from '../src/compile/real';
@@ -62,6 +63,23 @@ describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each C
       // Pairwise distinct, not pinned constants: what is being claimed is that the ids do not
       // collapse onto one binary, and a rebuilt container image may legitimately move all three.
       expect(new Set(digests).size).toBe(MWCC_TOOLCHAIN_IDS.length);
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "publishes its object's data sections — the m2c normalizer's half of every row",
+    () => {
+      // `cache.ts` names all three in its dump table, and `cache-poison.test.ts` pins that list;
+      // this is the same claim with the container attached, because what the table promises is a
+      // dump and what a row needs is the dump's CONTENT. A build the table missed answered
+      // `undefined`, which `evaluate` catches into a row published with no `asmDump` at all.
+      for (const id of MWCC_TOOLCHAIN_IDS) {
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        const dump = cachedAsmDumpText(built.obj, id, 'sep');
+        expect(dump, `${id} published no asmDump`).toBeDefined();
+        expect(dump, `${id}'s dump names no section`).toContain('Contents of section');
+      }
     },
     CONTAINER_BUDGET,
   );

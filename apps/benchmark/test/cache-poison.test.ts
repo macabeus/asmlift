@@ -7,7 +7,6 @@
 // weeks looks like a decompiler regression. One such entry (of 642) cost a session its zero-flip
 // gate before this guard existed.
 import { PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
-import { MWCC_TOOLCHAIN_IDS } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +15,10 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { multiTextObject } from '../../../packages/cli/test/offline/multi-text-object';
 import { cachedAsmDumpText, cachedBuildTarget, cachedExtractAsmData, ppcDumpCacheEntry, sha } from '../src/cache';
 import { CACHE_DIR } from '../src/config';
-import { TOOLCHAINS, checkedTarget } from '../src/toolchains';
+import { TOOLCHAINS, type ToolchainId, checkedTarget } from '../src/toolchains';
+
+/** Every toolchain a row can name — the dispatch below is asserted over all of them, never a sample. */
+const ALL_TOOLCHAIN_IDS = Object.keys(TOOLCHAINS) as ToolchainId[];
 
 // A stand-in for the real build step, counting its calls. `refC` is unique per test so the
 // content key is too, and nothing here touches a compiler.
@@ -214,21 +216,34 @@ describe('a PPC dump is cached under the bytes it is a dump of', () => {
   // m2c normalizer loses the object's data sections (jump tables, anonymous constants) and
   // `bench target`'s reproduction scripts carry none either. A CodeWarrior build the dispatch
   // fails to name would lose them for every one of its rows and say nothing about it.
-  test('every CodeWarrior build asks for a dump; agbcc is the only toolchain that declines one', () => {
-    // A real ELF, and no Docker: what this discriminates is WHICH ARM ran, not what it returned.
-    // The PPC arm goes on to the containerized objdump — which returns text, or raises where the
-    // container is absent — while a toolchain the table answers `null` for returns `undefined`
-    // having touched nothing.
+  test('every CodeWarrior build asks for a dump; agbcc is the only toolchain that declines one', async () => {
+    // The WHOLE list, in one assertion, because an absent dump is silent: what has to be pinned is
+    // which toolchains reach a dump at all. The two dump seams are STUBBED, so this asks only which
+    // arm ran — no container, no compiler, no objdump, and it runs where CI has none of the three.
+    vi.doMock('@asmlift/toolchains', async () => {
+      const real = await vi.importActual<typeof import('@asmlift/toolchains')>('@asmlift/toolchains');
+      return { ...real, ppcObjdumpText: () => 'PPC-DUMP', mipsObjdumpText: () => 'MIPS-DUMP' };
+    });
+    vi.resetModules();
+    const { cachedAsmDumpText: fresh } = await import('../src/cache');
+
     const obj = objectWith(1, ['only']);
-    for (const id of MWCC_TOOLCHAIN_IDS) {
-      let answer: unknown = 'RAISED';
-      try {
-        answer = cachedAsmDumpText(obj, id, 'only');
-      } catch {
-        /* an absent container is acceptable here; a silent `undefined` is not */
-      }
-      expect(answer, `${id} must reach the PPC dump`).not.toBeUndefined();
+    const arm = (id: ToolchainId) => fresh(obj, id, 'only');
+    process.env.ASMLIFT_BENCH_CACHE = '0'; // the cache would serve a real entry ahead of the stub
+    try {
+      expect(Object.fromEntries(ALL_TOOLCHAIN_IDS.map((id) => [id, arm(id)]))).toEqual({
+        agbcc: undefined,
+        'ido7.1': 'MIPS-DUMP',
+        'gcc2.7.2kmc': 'MIPS-DUMP',
+        'gcc2.7.2': 'MIPS-DUMP',
+        mwcc_242_81: 'PPC-DUMP',
+        mwcc_233_163n: 'PPC-DUMP',
+        mwcc_247_107: 'PPC-DUMP',
+      });
+    } finally {
+      delete process.env.ASMLIFT_BENCH_CACHE;
+      vi.doUnmock('@asmlift/toolchains');
+      vi.resetModules();
     }
-    expect(cachedAsmDumpText(obj, 'agbcc', 'only')).toBeUndefined();
   });
 });
