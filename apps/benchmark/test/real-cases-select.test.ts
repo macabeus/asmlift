@@ -34,6 +34,7 @@ vi.mock('../src/cases/manifests', () => ({
       ],
       vendored: () => ({ tuI: '', ctxI: '' }),
       ctxPath: () => '',
+      symbolsFor: () => undefined,
     },
   ],
 }));

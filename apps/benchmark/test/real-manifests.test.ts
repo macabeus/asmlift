@@ -1,16 +1,48 @@
 // The portability policy, enforced: every committed real-tier manifest must parse, validate,
 // and carry no machine paths. A manifest that regresses to an absolute root fails CI here, not
 // on some other machine's broken clone.
+import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
+import { PLACEMENT_STRIDE } from '@asmlift/cli/module-elf';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
-import { REAL_DIR, type RealManifest, resolveProjectRoot, validateManifest } from '../src/cases/manifests';
+import {
+  REAL_DIR,
+  type RealManifest,
+  resolveProjectRoot,
+  validateManifest,
+  vendoredMapFile,
+} from '../src/cases/manifests';
 import { ELF_MAKE_TARGET, makefileHasAsmliftElf } from '../src/cases/project-elf';
 
 const files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
+
+type MapJson = Record<string, { name: string; kind?: string }[]>;
+
+/** The vendored map a row of this `addr` is read with — the project's, or its REL module's — as
+ *  raw JSON, plus name → the keys it sits at. Read and indexed once per map: these maps run to
+ *  hundreds of thousands of entries, and a project has 42 rows. */
+const mapCache = new Map<string, { map: MapJson; at: Map<string, string[]> }>();
+function mapFor(man: RealManifest, addr: string): { map: MapJson; at: Map<string, string[]> } {
+  const path = vendoredMapFile(join(REAL_DIR, 'tu', man.project), moduleOf(addr));
+  let cached = mapCache.get(path);
+  if (cached === undefined) {
+    expect(existsSync(path), `${man.project} has no vendored symbol map at ${path} to check addr against`).toBe(true);
+    const map = JSON.parse(gunzipSync(readFileSync(path)).toString('utf8')) as MapJson;
+    const at = new Map<string, string[]>();
+    for (const [key, entries] of Object.entries(map)) {
+      for (const e of entries) {
+        at.set(e.name, [...(at.get(e.name) ?? []), key]);
+      }
+    }
+    cached = { map, at };
+    mapCache.set(path, cached);
+  }
+  return cached;
+}
 
 describe('committed real-tier manifests', () => {
   test('there are manifests to police', () => {
@@ -56,23 +88,29 @@ describe('committed real-tier manifests', () => {
       }
     });
 
-    // A row's `addr` is its identity, so it is a MEASUREMENT: the address the project's own ELF gives
-    // the symbol, read here back out of the committed symbol map that ELF was vendored into — no
+    // A row's `addr` is its identity, so it is a MEASUREMENT: where the project's own ELF puts the
+    // symbol, read here back out of the committed symbol map that ELF was vendored into — no
     // checkout needed, so CI holds it. A typo'd or guessed address would join the wrong rows.
-    test(`${f} keys every row by the address its vendored symbol map gives the symbol`, () => {
+    //
+    // A REL row is read out of its MODULE's map, and the keys there are the synthetic bases the
+    // module's sections were placed at (cli/module-elf), never the game's addresses — so what is
+    // held is the half of the identity a person types: the symbol appears at exactly one key, and
+    // that key's offset within its section is the row's. The SECTION is not checkable from the map
+    // (placement records an index, not a name); `bench vendor` is where that is proved.
+    test(`${f} keys every row where its vendored symbol map puts the symbol`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
-      const mapPath = join(REAL_DIR, 'tu', man.project, 'symbols.json.gz');
-      expect(existsSync(mapPath), `${man.project} has no vendored symbol map to check addr against`).toBe(true);
-      const map = JSON.parse(gunzipSync(readFileSync(mapPath)).toString('utf8')) as Record<string, { name: string }[]>;
-      const at = new Map<string, string[]>();
-      for (const [addr, entries] of Object.entries(map)) {
-        for (const e of entries) {
-          at.set(e.name, [...(at.get(e.name) ?? []), addr]);
+      const wrong: string[] = [];
+      for (const fn of man.functions) {
+        const keys = mapFor(man, fn.addr).at.get(fn.sym) ?? [];
+        const loc = moduleLocation(fn.addr);
+        const ok =
+          loc === undefined
+            ? JSON.stringify(keys) === JSON.stringify([fn.addr])
+            : keys.length === 1 && Number.parseInt(keys[0], 16) % PLACEMENT_STRIDE === loc.offset;
+        if (!ok) {
+          wrong.push(`${man.project}:${fn.sym} addr ${fn.addr}, map ${JSON.stringify(keys)}`);
         }
       }
-      const wrong = man.functions
-        .filter((fn) => JSON.stringify(at.get(fn.sym)) !== JSON.stringify([fn.addr]))
-        .map((fn) => `${man.project}:${fn.sym} addr ${fn.addr}, map ${JSON.stringify(at.get(fn.sym) ?? null)}`);
       expect(wrong).toEqual([]);
     });
 
@@ -80,16 +118,18 @@ describe('committed real-tier manifests', () => {
     // construction — overlays reuse it, and the linked ELFs carry addresses holding more than one
     // FUNC name (marioparty3 1,605 of them, snowboardkids2 20, af 5). No row sits on one today, and
     // this keeps it that way: a row added at an overlay address would otherwise join a removed row
-    // at the same VRAM across two artifacts without a word.
-    test(`${f} puts every row at an address holding exactly one code symbol`, () => {
+    // at the same VRAM across two artifacts without a word. A REL row is checked at the key its own
+    // module's map gives it, which is the same question one module down.
+    test(`${f} puts every row where exactly one code symbol lives`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
-      const map = JSON.parse(
-        gunzipSync(readFileSync(join(REAL_DIR, 'tu', man.project, 'symbols.json.gz'))).toString('utf8'),
-      ) as Record<string, { name: string; kind?: string }[]>;
       const shared = man.functions
-        .map((fn) => ({ fn, code: (map[fn.addr] ?? []).filter((e) => e.kind !== 'data').map((e) => e.name) }))
+        .map((fn) => {
+          const { map, at } = mapFor(man, fn.addr);
+          const key = moduleLocation(fn.addr) === undefined ? fn.addr : ((at.get(fn.sym) ?? [])[0] ?? fn.addr);
+          return { fn, key, code: (map[key] ?? []).filter((e) => e.kind !== 'data').map((e) => e.name) };
+        })
         .filter(({ code }) => code.length !== 1)
-        .map(({ fn, code }) => `${man.project}:${fn.sym} at ${fn.addr} shares it with ${JSON.stringify(code)}`);
+        .map(({ fn, key, code }) => `${man.project}:${fn.sym} at ${key} shares it with ${JSON.stringify(code)}`);
       expect(shared).toEqual([]);
     });
 

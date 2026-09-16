@@ -19,10 +19,11 @@
 // flags derived from the build at the checkout's HEAD, and its target, compiled at them, must be the
 // function the project's linked ELF holds at the row's address. The proof is stored as the row's
 // `romDigest`, which the runner's `build()` checks; a project with any refused row writes nothing.
-import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
-import { symbolMapToJson } from '@asmlift/core/symbols';
+import { moduleOf } from '@asmlift/bench-schema';
+import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
+import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -33,9 +34,16 @@ import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
 import { flagsStatus, unitDeriver } from './derive-flags';
 import { undeclaredCallees } from './implicit-declarations';
-import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot, rewriteManifest } from './manifests';
+import {
+  MODULE_MAP_DIR,
+  REAL_DIR,
+  type RealManifest,
+  loadManifestsForVendor,
+  resolveProjectRoot,
+  rewriteManifest,
+} from './manifests';
 import { resolveProjectElf } from './project-elf';
-import { compareWithRom } from './rom-function';
+import { compareWithRom, romAddress } from './rom-function';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 
@@ -55,10 +63,36 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
     console.warn(`${project}: tools.asmlift.elf points at ${res.elfRel} but ${res.reason} — symbols NOT vendored`);
     return;
   }
+  const write = (path: string, m: SymbolMap): void =>
+    writeFileSync(path, gzipSync(Buffer.from(JSON.stringify(symbolMapToJson(m))), { level: 9 }));
   const map = await loadSymbolMap(res.elf);
-  const json = JSON.stringify(symbolMapToJson(map));
-  writeFileSync(join(outDir, 'symbols.json.gz'), gzipSync(Buffer.from(json), { level: 9 }));
+  write(join(outDir, 'symbols.json.gz'), map);
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);
+
+  // ONE MAP PER REL MODULE THAT HAS ROWS. A module's code refers to the module's own symbols, so a
+  // REL row is read with the module's map — its symbols, placed, over the base ELF's globals
+  // (cli/symbols-provider `loadModuleSymbolMap`) — and never with a map of every module at once:
+  // merged, name lookup is ambiguous at 62.8% of Mario Party 4's 324,965 REL relocation sites, and
+  // `asIfUndecompiled(map, 'ObjectSetup')` would strip the facts of 90 modules' functions.
+  //
+  // The directory is REBUILT, not added to: a module whose last row left must not keep a map that
+  // nothing checks and nothing reads.
+  const moduleDir = join(outDir, MODULE_MAP_DIR);
+  rmSync(moduleDir, { recursive: true, force: true });
+  const modules = [...new Set(man.functions.map((f) => moduleOf(f.addr)))].filter((m) => m !== undefined).sort();
+  if (modules.length === 0) {
+    return;
+  }
+  mkdirSync(moduleDir, { recursive: true });
+  for (const module of modules) {
+    const mod = resolveProjectElf(project, root, module);
+    if (mod.elf === null) {
+      throw new Error(`${project}: rows live in module ${module}, but ${mod.reason}`);
+    }
+    const moduleMap = await loadModuleSymbolMap(mod.elf, res.elf);
+    write(join(moduleDir, `${module}.json.gz`), moduleMap);
+    console.log(`${project}: vendored ${module}'s symbol map (${moduleMap.size} addresses, over ${res.elfRel})`);
+  }
 }
 
 /** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
@@ -139,7 +173,12 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         continue;
       }
       const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI);
-      const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, Number.parseInt(f.addr, 16));
+      const at = romAddress(f.addr);
+      if (at === null) {
+        refusals.push(`${f.sym}: ${f.addr} is a module location, and the linked ELF holds no module's bytes`);
+        continue;
+      }
+      const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, at);
       if (!rom.equal) {
         refusals.push(
           `${f.sym} (unit ${f.unit}, ${unit.cflags.join(' ')}): not the function the ROM holds, ${rom.detail}`,

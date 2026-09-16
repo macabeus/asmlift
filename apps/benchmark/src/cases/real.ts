@@ -9,7 +9,7 @@
 // Neither is handed the row's own signature out of the reference source. manifests.ts's `m2cCtx`
 // doc states what each channel carries; README.md lists the residuals, in both directions, and
 // the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
-import { onlySelects } from '@asmlift/bench-schema';
+import { moduleOf, onlySelects } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
@@ -32,6 +32,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
     for (const f of man.functions.filter((x) => onlySelects(filter.only, x.sym, x.aliases))) {
       const unit = man.units[f.unit];
       const tc = TOOLCHAINS[unit.toolchain];
+      // the map the row is read with: the project's, or — for a row in a REL module — the
+      // module's own symbols over the base ELF's globals
+      const symbols = man.symbolsFor(moduleOf(f.addr));
       const codegen = codegenFor(unit.toolchain, unit.cflags);
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
       const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
@@ -61,7 +64,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         // the map as it would look with this function still `INCLUDE_ASM` (core's
         // asIfUndecompiled) — otherwise any future signature/local/location feature scores on
         // facts it could never have in the flow the dogfood reproduces.
-        symbols: man.symbols && asIfUndecompiled(man.symbols, f.sym),
+        symbols: symbols && asIfUndecompiled(symbols, f.sym),
         note: f.note,
         toolchain: tc,
         codegen,

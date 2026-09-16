@@ -24,7 +24,7 @@ import {
   withVendoredInputs,
 } from '../cases/manifests';
 import { resolveProjectElf } from '../cases/project-elf';
-import { compareWithRom } from '../cases/rom-function';
+import { compareWithRom, romAddress } from '../cases/rom-function';
 import { buildRealTarget } from '../compile/real';
 
 export interface FlagsOptions {
@@ -120,8 +120,15 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
         break;
       }
       try {
+        const at = romAddress(fn.addr);
+        if (at === null) {
+          notes.push(
+            `${fn.sym} (${unit}): DIFF, ${fn.addr} is a module location, and the linked ELF holds no module's bytes`,
+          );
+          continue;
+        }
         const target = buildRealTarget(derived.toolchain, fn.sym, derived.cflags, vendored.vendored(fn.sym).tuI);
-        const rom = compareWithRom(readFileSync(target.obj), fn.sym, linked, Number.parseInt(fn.addr, 16));
+        const rom = compareWithRom(readFileSync(target.obj), fn.sym, linked, at);
         if (rom.equal) {
           equal++;
         } else {

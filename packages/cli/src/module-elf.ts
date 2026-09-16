@@ -28,8 +28,13 @@ const SYMENT = 16; // Elf32_Sym
 
 /** Bases are handed out on this stride, so a placed address reads as section · offset. A section
  *  larger than the stride simply takes the next multiple — the invariant is that no two sections
- *  overlap, never that the stride divides the base. */
-const STRIDE = 0x0100_0000;
+ *  overlap, never that the stride divides the base.
+ *
+ *  Exported because it is the only thing that makes a PLACED address readable: every base is a
+ *  multiple of it, so `placed % PLACEMENT_STRIDE` is the symbol's offset in its own section as long
+ *  as no section is larger than the stride (the largest measured is 170,428 B). A reader that must
+ *  relate a module map's keys back to a module location — the benchmark's `addr` gate — needs it. */
+export const PLACEMENT_STRIDE = 0x0100_0000;
 /** Placement has to stay inside a 32-bit address; a module needing more sections than this has
  *  outgrown the scheme and gets an error rather than a wrapped address. */
 const LIMIT = 0xff00_0000;
@@ -168,7 +173,7 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
   const u16 = (o: number) => (littleEndian ? out.readUInt16LE(o) : out.readUInt16BE(o));
 
   const base = new Map<number, number>();
-  let next = STRIDE;
+  let next = PLACEMENT_STRIDE;
   elf.sections.forEach((s, i) => {
     if ((s.flags & SHF_ALLOC) === 0 || s.size === 0) {
       return;
@@ -178,7 +183,7 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
     }
     base.set(i, next);
     put32(s.at + 12, next); // sh_addr
-    next = Math.ceil((next + s.size) / STRIDE) * STRIDE;
+    next = Math.ceil((next + s.size) / PLACEMENT_STRIDE) * PLACEMENT_STRIDE;
   });
 
   for (const s of elf.sections) {

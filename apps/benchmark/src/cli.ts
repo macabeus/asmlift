@@ -77,7 +77,7 @@
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
-import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
+import { type FunctionResult, moduleOf, resolveRow } from '@asmlift/bench-schema';
 import {
   CACHE_MISMATCH_EXIT,
   MISMATCH_LOG,
@@ -460,7 +460,8 @@ switch (command) {
         // Address-cast macro defines the published source NAMES. Every rung needs them (the
         // scoring compile prepends them too), and the reproduction context must carry them or
         // the published script cannot build the source the benchmark published.
-        const macros = source && man.symbols ? macroDefinesUsedBy(man.symbols, source) : '';
+        const symbols = man.symbolsFor(moduleOf(c.addr));
+        const macros = source && symbols ? macroDefinesUsedBy(symbols, source) : '';
         // Only a SCORED row's source pins a rung. declined/noncompile/failed rows have no source
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.

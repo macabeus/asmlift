@@ -23,7 +23,7 @@ export type EvalSpec = EvalSpecFields & RowTier;
 
 interface EvalSpecFields {
   sym: string;
-  addr?: string; // real tier: the row's identity, published verbatim (bench-schema rowIdentity)
+  addr?: string; // real tier: the row's identity — address or module location, published verbatim (bench-schema rowIdentity)
   aliases?: string[]; // real tier: earlier upstream names, published verbatim
   project: string;
   language: 'c' | 'c++';
