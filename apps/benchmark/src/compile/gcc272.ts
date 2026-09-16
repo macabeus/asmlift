@@ -3,9 +3,10 @@
 // situation: the published binary is `decompals/mips-gcc-2.7.2`, so the .c/.i compiles inside a
 // linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
 // is disassembled + scored with the native host binutils/objdiff.
+import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
@@ -22,8 +23,11 @@ function compile(dir: string, iName: string, oName: string, cflags: readonly str
   }
 }
 
-function disasm(oPath: string): string {
-  const dis = run(GCC272_TOOLCHAIN.objdump, [...GCC272_TOOLCHAIN.objdumpFlags, oPath]);
+function disasm(oPath: string, sym: string): string {
+  const dis = run(GCC272_TOOLCHAIN.objdump, [
+    ...GCC272_TOOLCHAIN.objdumpFlags,
+    scopedObjectPath(oPath, sym, dirname(oPath)),
+  ]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${compilerDiagnostics(dis.stderr)}`);
   }
@@ -31,12 +35,12 @@ function disasm(oPath: string): string {
 }
 
 export const gcc272Real: RealCompile = {
-  buildTarget(iText, cflags): BuiltTarget {
+  buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');
     writeFileSync(join(dir, 'u.i'), iText);
     compile(dir, 'u.i', 'u.o', cflags);
-    return { obj: oPath, asm: disasm(oPath) };
+    return { obj: oPath, asm: disasm(oPath, sym) };
   },
   compileCandidate(tu, sym, cflags): string {
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE

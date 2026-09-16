@@ -235,9 +235,18 @@ function rewriteSymbols(symtab: Buffer, le: boolean, index: (old: number) => num
 /** The object to disassemble when reading `sym`: `objPath` itself when it holds at most one code
  *  section, otherwise a section-scoped copy written into `destDir`. The caller owns `destDir` — the
  *  CLI a scratch directory it removes, the harness the object's own (already container-visible)
- *  directory. */
+ *  directory.
+ *
+ *  An object that cannot even be read passes through: this seam decides which SECTION to
+ *  disassemble, and a missing or unreadable object is the disassembler's to report. */
 export function scopedObjectPath(objPath: string, sym: string, destDir: string): string {
-  const scoped = sectionScopedObject(readFileSync(objPath), sym);
+  let bytes: Uint8Array;
+  try {
+    bytes = readFileSync(objPath);
+  } catch {
+    return objPath;
+  }
+  const scoped = sectionScopedObject(bytes, sym);
   if (scoped === undefined) {
     return objPath;
   }

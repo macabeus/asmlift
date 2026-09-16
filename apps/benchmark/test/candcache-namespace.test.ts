@@ -390,8 +390,8 @@ describe('debug-info flags — a `-g` unit keeps its cache and its listing', () 
     'the `-g` target listing both decompilers read has no debug section, and names no path',
     async () => {
       const { agbccReal } = await import('../src/compile/agbcc');
-      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, G);
-      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, CANONICAL);
+      const debug = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', G);
+      const plain = agbccReal.buildTarget(`int thrice(int x){ return x + x + x; }\n`, 'thrice', CANONICAL);
       expect(debug.asm).not.toMatch(/\.section\s+\.debug/);
       expect(readFileSync(debug.obj).includes('.debug_info')).toBe(true);
       expect(readFileSync(debug.obj).toString('latin1')).not.toMatch(/\/tmp\/|\/private\/|\/var\/folders\//);

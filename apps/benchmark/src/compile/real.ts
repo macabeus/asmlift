@@ -46,8 +46,13 @@ export function realCompilerFor(toolchain: ToolchainId): RealCompile {
  *  `Case.build`, and the only place its `BuiltTarget`s are born — `checkedTarget` is stated here
  *  rather than per compiler for the same reason the synthetic tier states it in `cachedBuildTarget`
  *  and not in each `TOOLCHAINS[*].buildTarget`. */
-export function buildRealTarget(toolchain: ToolchainId, cflags: readonly string[], tuI: string): BuiltTarget {
-  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI, cflags), `${toolchain} real-tier target`);
+export function buildRealTarget(
+  toolchain: ToolchainId,
+  sym: string,
+  cflags: readonly string[],
+  tuI: string,
+): BuiltTarget {
+  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI, sym, cflags), `${toolchain} real-tier target`);
 }
 
 // ── context-aware candidate scoring ────────────────────────────────────────────────────────

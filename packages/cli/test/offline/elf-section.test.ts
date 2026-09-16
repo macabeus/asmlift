@@ -97,4 +97,9 @@ describe('scopedObjectPath', () => {
     writeFileSync(one, multiTextObject([CODE[0]], ['ext']));
     expect(scopedObjectPath(one, 'f0', scratch())).toBe(one);
   });
+
+  test('an object that cannot be read passes through, for the disassembler to report on', () => {
+    const absent = join(scratch(), 'absent.o');
+    expect(scopedObjectPath(absent, 'f0', scratch())).toBe(absent);
+  });
 });

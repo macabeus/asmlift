@@ -2,9 +2,10 @@
 // inside the linux/386 container via the pooled helper score.ts uses (a one-shot shell command
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
 // compiler — @asmlift/toolchains' compiler, bound at the row's flags, serves candidate scoring).
+import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
@@ -21,8 +22,11 @@ function compile(dir: string, iName: string, oName: string, cflags: readonly str
   }
 }
 
-function disasm(oPath: string): string {
-  const dis = run(GCC_KMC_TOOLCHAIN.objdump, [...GCC_KMC_TOOLCHAIN.objdumpFlags, oPath]);
+function disasm(oPath: string, sym: string): string {
+  const dis = run(GCC_KMC_TOOLCHAIN.objdump, [
+    ...GCC_KMC_TOOLCHAIN.objdumpFlags,
+    scopedObjectPath(oPath, sym, dirname(oPath)),
+  ]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${compilerDiagnostics(dis.stderr)}`);
   }
@@ -30,13 +34,13 @@ function disasm(oPath: string): string {
 }
 
 export const kmcReal: RealCompile = {
-  buildTarget(iText, cflags): BuiltTarget {
+  buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc', cflags, iText);
     const iPath = join(dir, 'u.i'),
       oPath = join(dir, 'u.o');
     writeFileSync(iPath, iText);
     compile(dir, 'u.i', 'u.o', cflags);
-    return { obj: oPath, asm: disasm(oPath) };
+    return { obj: oPath, asm: disasm(oPath, sym) };
   },
   compileCandidate(tu, sym, cflags): string {
     // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE

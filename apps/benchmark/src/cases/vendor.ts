@@ -138,7 +138,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         );
         continue;
       }
-      const target = buildRealTarget(unit.toolchain, unit.cflags, tuI);
+      const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI);
       const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, Number.parseInt(f.addr, 16));
       if (!rom.equal) {
         refusals.push(

@@ -235,7 +235,7 @@ function cacheFor(cflags: readonly string[]): CandCache {
 export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
 export const agbccReal: RealCompile = {
-  buildTarget(iText, cflags): BuiltTarget {
+  buildTarget(iText, _sym, cflags): BuiltTarget {
     const dir = contentDir('arm', cflags, iText);
     const sPath = join(dir, 'u.s'),
       oPath = join(dir, 'u.o');

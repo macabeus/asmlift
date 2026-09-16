@@ -120,7 +120,7 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
         break;
       }
       try {
-        const target = buildRealTarget(derived.toolchain, derived.cflags, vendored.vendored(fn.sym).tuI);
+        const target = buildRealTarget(derived.toolchain, fn.sym, derived.cflags, vendored.vendored(fn.sym).tuI);
         const rom = compareWithRom(readFileSync(target.obj), fn.sym, linked, Number.parseInt(fn.addr, 16));
         if (rom.equal) {
           equal++;

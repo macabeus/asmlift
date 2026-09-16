@@ -7,13 +7,14 @@
 // already evaluated this module. (An index-only side effect would be bypassed by subpath
 // imports, silently leaving @asmlift/cli's registry empty — and the benchmark's gcc/mwcc
 // rows would record "noncompile" instead of failing loud.)
+import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/score';
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
 
@@ -199,7 +200,7 @@ export function nonEmptyDump(text: string, what: string): string {
 /** Compile reference C with IDO at `flags` → {obj (scoring target), asm (disassembly, frontend input)}. */
 export function compileMipsTarget(
   cSource: string,
-  _symbol: string,
+  symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-mips-ref-', flags, cSource);
@@ -210,7 +211,7 @@ export function compileMipsTarget(
   if (cc.status !== 0) {
     throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
   }
-  const dis = run(IDO_TOOLCHAIN.objdump, [...IDO_TOOLCHAIN.objdumpFlags, oPath]);
+  const dis = run(IDO_TOOLCHAIN.objdump, [...IDO_TOOLCHAIN.objdumpFlags, scopedObjectPath(oPath, symbol, dir)]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
@@ -283,7 +284,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
  *  the KMC path. */
 export function compileMipsGcc272Target(
   cSource: string,
-  _symbol: string,
+  symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
   const { objdump, objdumpFlags } = GCC272_TOOLCHAIN;
@@ -291,7 +292,7 @@ export function compileMipsGcc272Target(
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
   gcc272Compile(dir, 'ref.c', 'ref.o', flags);
   const oPath = join(dir, 'ref.o');
-  const dis = run(objdump, [...objdumpFlags, oPath]);
+  const dis = run(objdump, [...objdumpFlags, scopedObjectPath(oPath, symbol, dir)]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
@@ -514,7 +515,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
  *  input)}. */
 export function compileMipsGccTarget(
   cSource: string,
-  _symbol: string,
+  symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
   const t = GCC_KMC_TOOLCHAIN;
@@ -522,7 +523,7 @@ export function compileMipsGccTarget(
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
   kmcCompile(dir, 'ref.c', 'ref.o', flags);
   const oPath = join(dir, 'ref.o');
-  const dis = run(t.objdump, [...t.objdumpFlags, oPath]);
+  const dis = run(t.objdump, [...t.objdumpFlags, scopedObjectPath(oPath, symbol, dir)]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
@@ -579,18 +580,13 @@ export function ppcDockerAvailable(): boolean {
   return existsSync(join(t.dir, 'mwcceppc.exe'));
 }
 
-/** Run one linux/386 container that compiles `srcC` (a basename in `dir`) with mwcceppc-via-wibo at
- *  `flags` to `outObj`, and — when `disasm` — pipes the object through the PowerPC objdump, returning
- *  its text. The proprietary CodeWarrior dir is mounted read-only at /mwcc; the scratch dir at /work. */
-function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly string[], disasm: boolean): string {
+/** Run one shell command in a linux/386 container over `dir`: through the pool when `dir` is under
+ *  the shared /tmp mount, else in a single-shot container that mounts it at /work. The proprietary
+ *  CodeWarrior dir is mounted read-only at /mwcc. `script` is parameterized by the container-side
+ *  path of `dir`, which differs between the two routes; `via` names the route that answered, so an
+ *  empty result can be blamed on the right one. */
+function ppcExec(dir: string, script: (W: string) => string): { out: string; via: string } {
   const t = MWCC_PPC_TOOLCHAIN;
-  // The script is parameterized by the container-side workdir: `/work` for the single-shot
-  // container (per-call mount), the /host-tmp mapping for the pooled one.
-  const script = (W: string) => {
-    const argv = [...t.harnessFlags, ...flags];
-    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
-    return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
-  };
   const w = hostTmp(dir);
   if (w) {
     const { name, mounts } = ppcPoolCfg(t);
@@ -599,8 +595,7 @@ function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly
       if (r.status !== 0) {
         throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
       }
-      // a compile-only run legitimately prints nothing; only the piped objdump owes output
-      return disasm ? nonEmptyDump(r.stdout, `ppc objdump (pooled) on ${dir}/${outObj}`) : r.stdout;
+      return { out: r.stdout, via: 'pooled' };
     }
   }
   const r = run(t.docker, [
@@ -622,24 +617,57 @@ function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly
   if (r.status !== 0) {
     throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
   }
-  return disasm ? nonEmptyDump(r.stdout, `ppc objdump (one-shot) on ${dir}/${outObj}`) : r.stdout;
+  return { out: r.stdout, via: 'one-shot' };
+}
+
+/** Compile `srcC` (a basename in `dir`) with mwcceppc-via-wibo at `flags` to `outObj`, and — when
+ *  `disasm` — pipe the object through the PowerPC objdump in the same container, returning its text. */
+function ppcContainer(dir: string, srcC: string, outObj: string, flags: readonly string[], disasm: boolean): string {
+  const t = MWCC_PPC_TOOLCHAIN;
+  const { out, via } = ppcExec(dir, (W) => {
+    const argv = [...t.harnessFlags, ...flags];
+    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
+    return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
+  });
+  // a compile-only run legitimately prints nothing; only the piped objdump owes output
+  return disasm ? nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${outObj}`) : out;
+}
+
+/** `objdump -d -r` on an object ALREADY in `dir` — the PowerPC objdump ships only inside the image,
+ *  so re-reading an object (a section-scoped copy of one this path just built) needs the container
+ *  too. */
+export function ppcDisasmText(dir: string, objName: string): string {
+  const t = MWCC_PPC_TOOLCHAIN;
+  const { out, via } = ppcExec(dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`);
+  return nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${objName}`);
 }
 // CodeWarrior flags carry spaces (e.g. `msg_show_realref off`), so quote each token for the shell.
 function shq(s: string): string {
   return /[^\w/.,=-]/.test(s) ? `'${s.replace(/'/g, "'\\''")}'` : s;
 }
 
+/** The disassembly a read of `symbol` may legitimately see. `asm` is the whole-object dump the
+ *  compile already produced in the same container; when the object holds several code sections —
+ *  mwcc gives a translation unit one `.text` per part, all starting at address 0 — it is replaced by
+ *  a dump of a copy holding only the section that defines `symbol`. A single-section object, which
+ *  is every target the synthetic tier builds, keeps the dump it already has. */
+function ppcSectionScoped(dir: string, objName: string, symbol: string, asm: string): string {
+  const obj = join(dir, objName);
+  const scoped = scopedObjectPath(obj, symbol, dir);
+  return scoped === obj ? asm : ppcDisasmText(dir, basename(scoped));
+}
+
 /** Compile reference C with CodeWarrior at `flags` → {obj (scoring target), asm (disassembly,
  *  frontend input)}. */
 export function compilePpcTarget(
   cSource: string,
-  _symbol: string,
+  symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-ppc-ref-', flags, cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
   const asm = ppcContainer(dir, 'ref.c', 'ref.o', flags, true);
-  return { obj: join(dir, 'ref.o'), asm };
+  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
 }
 
 /** Compile candidate C with CodeWarrior (dockerized wibo) at `flags`; returns the object path. */
@@ -669,13 +697,13 @@ registerCandidateCompiler('mwcc', mwccCandidateCompiler(TOOLCHAIN_TARGETS.mwcc_2
  *  (frontend input)}. */
 export function compilePpcCppTarget(
   cppSource: string,
-  _symbol: string,
+  symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-ppc-cpp-ref-', flags, cppSource);
   writeFileSync(join(dir, 'ref.cp'), C_TYPEDEFS + cppSource);
   const asm = ppcContainer(dir, 'ref.cp', 'ref.o', flags, true);
-  return { obj: join(dir, 'ref.o'), asm };
+  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
 }
 
 /** Compile candidate C++ (`.cp`) with CodeWarrior at `flags`; returns the object path. */
