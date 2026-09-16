@@ -424,7 +424,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // row used to be `kleod:ReturnOne:agbcc` (retired), which the 2026-09 source swap found is not a
   // function (it is the `movs r0, #1; bx lr` tail label of `StringCompare` in testyourmine/kleod's
   // asm/util.s), so the control lives here, where no binary can dispute its boundaries.
-  { sym: 'retone', src: 'int retone(void){ return 1; }', features: ['baseline'], toolchains: ['agbcc'] },
+  //
+  // Two lanes, and the second is not decoration: a control says "a decompiler that cannot match
+  // this has a problem unrelated to any feature", which is a claim about ONE compiler's codegen at
+  // a time. Animal Crossing is about to be the tag's only real carrier and it is CodeWarrior, so
+  // the PowerPC control (`li r3,1; blr`) is what its row can be read against. ido7.1 and
+  // gcc2.7.2kmc are left off: neither carries the tag anywhere, and a control nothing is read
+  // against is a compile, not a measurement.
+  {
+    sym: 'retone',
+    src: 'int retone(void){ return 1; }',
+    features: ['baseline'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+  },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
@@ -623,6 +635,25 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // ── memory ──────────────────────────────────────────────────────────────────────────────
   { sym: 'deref', src: 'int deref(int *p){ return *p; }', features: ['memory', 'load'], toolchains: ALL },
+  // The float half of the same tag. `deref` covers every toolchain, so `load` already has a
+  // CodeWarrior carrier — but a load into the FPU is a different instruction into a different
+  // register file (`lfs f1,0(r3)` against `lwz r3,0(r3)`), decided by the pointer's type and by
+  // nothing in the surrounding code, and the Animal Crossing rows about to claim `load` include
+  // exactly this shape. mwcc_242_81 alone: `deref` already stands on the other three, and a float
+  // load is soft-float on the GBA, where it is a different construct altogether.
+  //
+  // It DECLINES, on `lfs` being unmodelled in the PowerPC frontend, and that is the row's second
+  // use. Every mwcc float row here already declines that way (`fadd` on `fadds`, `f2i` on
+  // `fctiwz`, `i2f` on `lfd`, `upun` on `stfs`) — this is the smallest of them, two instructions
+  // with no arithmetic, no conversion and no store, so the Animal Crossing float-load row it
+  // mirrors cannot have its decline blamed on the relocation it also carries.
+  {
+    sym: 'loadf',
+    src: 'float loadf(float *p){ return *p; }',
+    features: ['memory', 'load', 'float'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'float loadf(float*);',
+  },
   {
     sym: 'storep',
     src: 'void storep(int *p,int v){ *p=v; }',
@@ -1831,6 +1862,23 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['promotion', 'arithmetic'],
     toolchains: ALL,
   },
+  // The other signedness, and the one the GameCube rows need. `promsh` covers every toolchain, so
+  // `promotion` already has a CodeWarrior carrier — but a promoted `s16` and a promoted `u8` are
+  // different recovery problems and different instructions (`extsh` against `clrlwi`), and the real
+  // carriers about to claim the tag are all unsigned, because Animal Crossing compiles `-char
+  // unsigned`. mwcc_242_81 alone: what agbcc, ido7.1 and gcc2.7.2kmc do with a `u8` pair was not
+  // measured, and `promsh` already stands on those three.
+  //
+  // The promotion is load-bearing in the object, not just in the source — measured, in
+  // `packages/cli/test/matching/ppc-tag-lanes.test.ts`: `a+b` zero-extends both operands and then
+  // adds (`clrlwi/clrlwi/add`), while the re-narrowed `(u8)(a+b)` adds and then zero-extends once,
+  // a shorter and different object. A decompiler that spells the parameters `int` cannot match.
+  {
+    sym: 'promzb',
+    src: 'int promzb(u8 a,u8 b){ return a+b; }',
+    features: ['promotion', 'zero-extend', 'arithmetic'],
+    toolchains: ['mwcc_242_81'],
+  },
   {
     sym: 'narrow',
     src: 'void narrow(u8 *p,int x){ *p=(u8)x; }',
@@ -2307,11 +2355,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // attributed to the placement rule the other three satisfy. It separates a placement rule keyed
   // on strict dominance from one keyed on arm count.
   //
-  // agbcc only. The mechanism above is a fact about THIS compiler, established by reading its
-  // pass list and confirmed by compiling both spellings. Whether ido7.1, gcc2.7.2kmc and
-  // mwcc_242_81 move a read the same way was NOT measured, so those lanes are left off rather
-  // than assumed: each needs its own read-it-then-compile-it pair before these rows mean
-  // anything there.
+  // The four below are agbcc only. The mechanism above is a fact about THAT compiler, established
+  // by reading its pass list and confirmed by compiling both spellings. Whether ido7.1 and
+  // gcc2.7.2kmc move a read the same way is still NOT measured, so those lanes are left off
+  // rather than assumed: each needs its own read-it-then-compile-it pair before these rows mean
+  // anything there. `readptr` is the one lane that HAS had its pair — see its own comment.
   {
     sym: 'readshare',
     src:
@@ -2370,6 +2418,30 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
     proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
+  },
+  // The CodeWarrior lane, and the ONLY row of this family that is not agbcc. `read-once` has no
+  // machine floor, so the one thing that can keep it honest is an exemplar per compiler it is
+  // claimed on — and the Animal Crossing rows claim it on CodeWarrior. The claim was measured
+  // rather than transferred (`packages/cli/test/matching/ppc-tag-lanes.test.ts` holds it): the read
+  // spelled once above the branch is emitted once above it into r3, a register live across the
+  // branch, and the read spelled per arm is emitted twice into the scratch r0 — 0x24 bytes against
+  // 0x28, at `-O4,p` and at the `-O4,s` the real rows build at alike. agbcc's pass list is not the
+  // reason; it says nothing about CodeWarrior.
+  //
+  // Pointer PARAMETERS rather than absolute addresses, which is what the name says: the macros the
+  // four rows above use are a GBA memory map, and on PowerPC an absolute address would add a
+  // `lis/ori` materialisation — a second moving part in a row whose whole point is one read's
+  // placement. Two output pointers rather than a subscripted one, for the same reason: `a[0]`/`a[1]`
+  // would make the row an `array` row as well.
+  {
+    sym: 'readptr',
+    src:
+      'void readptr(u32 *p, u32 *a, u32 *b, u32 c){ u32 s = *p;' +
+      ' if (c & 1){ *a = s << 3; } else { *b = s << 4; } }',
+    features: ['read-once', 'branch'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'void readptr(u32 *p, u32 *a, u32 *b, u32 c);',
+    proto: { readptr: { returnsVoid: true } },
   },
 
   // WHICH ARMS, IN WHICH ORDER. The read-once family above asks where a value is COMPUTED; this

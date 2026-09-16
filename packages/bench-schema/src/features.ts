@@ -1013,7 +1013,10 @@ export const FEATURES: readonly FeatureDef[] = [
       'itself proof of the block the source read in.) Recovering ' +
       'it at each use is therefore a spelling this compiler emits only for a source that read per arm: ' +
       'it costs a second load, a second pool literal for the folded address, and a live range ' +
-      'short enough to change the whole allocation downstream. The tag marks rows where the diff ' +
+      'short enough to change the whole allocation downstream. mwcc_242_81 keeps the placement too, ' +
+      'measured rather than transferred, and in both of its optimisation modes: the read spelled ' +
+      'above the branch lands once in a register live across it and the read spelled per arm lands ' +
+      'twice in the scratch register, two objects of different lengths. The tag marks rows where the diff ' +
       'turns on that placement alone — the computation, the types and the control flow all agree. ' +
       'No machine-checked floor: whether the source named a temp above the branch is ordinary C ' +
       'style that no scan can distinguish from an incidental one.',
