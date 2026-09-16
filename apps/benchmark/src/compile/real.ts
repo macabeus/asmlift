@@ -123,6 +123,24 @@ export function candidateLinkage(language: 'c' | 'c++', candC: string): string {
   return language === 'c++' ? `extern "C" {\n${candC}\n}\n` : `${candC}\n`;
 }
 
+/** THE DIALECTS a row's candidate may be compiled in, the row's own first.
+ *
+ *  A C++ row gets a second: PLAIN C. Its target's symbol is the mangled string, and a C compile
+ *  exports whatever name the candidate is written with — so a C-shaped candidate named by the
+ *  mangled symbol aligns either way. The fallback exists because m2c's `ppc-mwcc-c++` output names
+ *  the implicit receiver `this` on EVERY member function, and `this` is a C++ keyword: compiled in
+ *  the row's own dialect that is `'(' expected`, and m2c would go 0-for-42 on Pikmin for a spelling
+ *  rather than for its code. Same policy as the `#define NULL` every rung re-provides — a
+ *  decompiler is judged on the code, not on an artifact of the harness's choice of front end.
+ *
+ *  SOUND, measured rather than assumed: on `pikmin:getFlag__11ResultFlagsFi` at that unit's real
+ *  flags, the same C-shaped candidate compiled `-lang=c++` inside the linkage block and compiled
+ *  `-lang=c` produce BYTE-IDENTICAL 712-byte objects and score 7/13 either way. THE RISK IS STATED:
+ *  that is one row at one flag set, so the row's own dialect is always tried first and C is reached
+ *  only for text the C++ front end REFUSED — text which is therefore not C++ at all. */
+const candidateDialects = (language: 'c' | 'c++'): readonly ('c' | 'c++')[] =>
+  language === 'c++' ? ['c++', 'c'] : ['c'];
+
 /** Compile a candidate in the project's escalating context, returning the object of the FIRST
  *  prelude that compiles. The context is what lets an emission referencing project types/GLOBALS
  *  compile at all — the same context m2c is scored in, so asmlift's real-tier scoring is
@@ -141,13 +159,18 @@ export function makeRealCompile(
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
     // without this. The rest of the synthesized block stays dropped: the context owns it.
     const macros = macroDefinesOf(declarations);
-    const body = candidateLinkage(language, candC);
     let lastErr = '';
-    for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
-      try {
-        return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, language);
-      } catch (e) {
-        lastErr = (e as Error).message;
+    // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
+    // all: a richer context is the ordinary reason a candidate compiles, and paying for the
+    // fallback first would double every C++ row's compiles to answer a rarer question.
+    for (const dialect of candidateDialects(language)) {
+      const body = candidateLinkage(dialect, candC);
+      for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
+        try {
+          return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
+        } catch (e) {
+          lastErr = (e as Error).message;
+        }
       }
     }
     throw new Error(lastErr || 'candidate did not compile in any context');
@@ -172,19 +195,24 @@ export function resolveScoringPrelude(
   /** the candidate's address-cast macro defines — every rung needs them (see makeRealCompile),
    *  and replaying the ladder WITHOUT them would fail every rung and pick the wrong one */
   macros = '',
-): { prelude: string; rung: number } {
+): { prelude: string; rung: number; language: 'c' | 'c++' } {
   const rc = compilerFor(toolchain, language);
   const preludes = scoringPreludes(prependC, ctxI, sym);
-  const body = candidateLinkage(language, candC);
-  for (const [i, prelude] of preludes.entries()) {
-    try {
-      rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, language);
-      return { prelude, rung: i + 1 };
-    } catch {
-      // next rung
+  // The DIALECT is replayed with the rung, for the same reason the rung is replayed at all: a C++
+  // row whose source only compiles as C was scored as C, and a reproduction that states the row's
+  // dialect would refuse the very source the benchmark published.
+  for (const dialect of candidateDialects(language)) {
+    const body = candidateLinkage(dialect, candC);
+    for (const [i, prelude] of preludes.entries()) {
+      try {
+        rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
+        return { prelude, rung: i + 1, language: dialect };
+      } catch {
+        // next rung
+      }
     }
   }
-  return { prelude: preludes[preludes.length - 1], rung: preludes.length };
+  return { prelude: preludes[preludes.length - 1], rung: preludes.length, language };
 }
 
 /** A context-aware Scorer (real tier): compile the candidate in project context, then objdiff it

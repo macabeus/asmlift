@@ -450,6 +450,8 @@ switch (command) {
     // ladder against it. (Synthetic rows have no context: they are scored bare, config stays bare.)
     let ctxFile: string | undefined;
     let ctxRung = 0;
+    // the dialect the row's candidate was SCORED in — its unit's, unless the ladder fell back to C
+    let ctxLanguage = c.language;
     if (c.tier === 'real') {
       const man = loadManifests().find((m) => m.project === c.project);
       if (man) {
@@ -467,12 +469,13 @@ switch (command) {
         // three compiles to land on the richest rung — take it directly.
         const picked = source
           ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, c.language, macros)
-          : { prelude: ladder[ladder.length - 1], rung: ladder.length };
+          : { prelude: ladder[ladder.length - 1], rung: ladder.length, language: c.language };
         ctxRung = picked.rung;
+        ctxLanguage = picked.language;
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: c.language });
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: ctxLanguage });
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id} ${shellJoinFlags(c.codegen.cflags)}${
         c.tier === 'real' ? `, the flags of ${c.unit}` : ''

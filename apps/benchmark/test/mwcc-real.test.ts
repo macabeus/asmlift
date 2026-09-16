@@ -19,7 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
-import { candidateLinkage, realCompilerFor } from '../src/compile/real';
+import { candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
 
@@ -183,6 +183,35 @@ describe.runIf(ppcDockerAvailable())('a C++ row', () => {
         const wrapped = mwcc.compileCandidate(candidateLinkage('c++', shape), 'dot__3VecFP3Vec', CFLAGS, 'c++');
         expect(exportedFunctions(wrapped)).toEqual(['dot__3VecFP3Vec']);
       }
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "falls back to plain C for a candidate the row's own dialect refuses — m2c names the receiver `this`",
+    () => {
+      // m2c's `ppc-mwcc-c++` target names the implicit receiver `this` on EVERY member function,
+      // and `this` is a C++ keyword. Compiled in the row's own dialect that is a syntax error, and
+      // m2c would go 0-for-42 on Pikmin for a spelling rather than for its code.
+      // m2c self-declares a PLAIN struct — no member functions — exactly as it does on a real row.
+      const POD = 'typedef struct Vec { int x; int y; } Vec;\n';
+      const withThis = `${POD}int dot__3VecFP3Vec(Vec *this, Vec *o) { return this->x * o->x + this->y * o->y; }\n`;
+      expect(() => mwcc.compileCandidate(candidateLinkage('c++', withThis), 'dot__3VecFP3Vec', CFLAGS, 'c++')).toThrow(
+        /mwcceppc failed/,
+      );
+
+      // The ladder reaches it, and — the reason the fallback is sound rather than convenient — a C
+      // compile exports the name the candidate is WRITTEN with, which on a C++ row is the mangled
+      // symbol itself. No linkage block, and the same alignment key.
+      const compile = makeRealCompile('mwcc_242_81', CFLAGS, '', '', 'c++');
+      expect(exportedFunctions(compile(withThis, 'dot__3VecFP3Vec'))).toEqual(['dot__3VecFP3Vec']);
+
+      // …and the two routes are the same OBJECT for a C-shaped body, which is what makes scoring
+      // one against a C++-built target honest.
+      const noThis = withThis.replaceAll('this->', 'self->').replace('Vec *this', 'Vec *self');
+      const asCpp = mwcc.compileCandidate(candidateLinkage('c++', noThis), 'dot__3VecFP3Vec', CFLAGS, 'c++');
+      const asC = mwcc.compileCandidate(candidateLinkage('c', noThis), 'dot__3VecFP3Vec', CFLAGS, 'c');
+      expect(readFileSync(asCpp).equals(readFileSync(asC))).toBe(true);
     },
     CONTAINER_BUDGET,
   );
