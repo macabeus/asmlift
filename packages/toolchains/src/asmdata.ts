@@ -15,7 +15,7 @@ import type { TargetDescription } from '@asmlift/core/target';
 import { copyFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { hostTmp, mkShareableTmp, nonEmptyDump, poolExec, ppcPoolCfg, run } from './compile';
+import { hostTmp, mkShareableTmp, nonEmptyDump, poolExec, ppcDumpPoolCfg, run } from './compile';
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN } from './toolchain';
 
 /** The object whose `-s -r -t` dump describes `sym` and nothing else.
@@ -77,7 +77,7 @@ export function ppcObjdumpText(obj: string, sym: string): string {
   }
   try {
     if (poolPath) {
-      const { name, mounts } = ppcPoolCfg(t);
+      const { name, mounts } = ppcDumpPoolCfg();
       const r = poolExec(t.docker, t.image, name, mounts, [name, t.objdump, '-s', '-r', '-t', poolPath]);
       if (r) {
         if (r.status !== 0) {

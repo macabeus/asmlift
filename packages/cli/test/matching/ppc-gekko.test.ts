@@ -24,7 +24,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ppcDockerGate } from './docker-gate';
 
-const HAVE = ppcDockerGate('ppc-gekko');
+const HAVE = ppcDockerGate('ppc-gekko', 'mwcc_242_81');
 
 // A float argument returned after a call: `x` must survive `side()`, so it lands in f31 and the
 // prologue saves f31's two halves.
@@ -53,7 +53,12 @@ function disasmWithoutMachine(obj: string): string {
 
 describe.runIf(HAVE)('PowerPC disassembly names the Gekko machine', () => {
   test('a float callee-save prologue decodes as psq_st/psq_l — and as VSX without -M gekko', () => {
-    const { obj, asm } = compilePpcTarget(FLOAT_CALLEE_SAVE, 'keepf', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+    const { obj, asm } = compilePpcTarget(
+      'mwcc_242_81',
+      FLOAT_CALLEE_SAVE,
+      'keepf',
+      TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
+    );
 
     // What the harness feeds the frontend, at the toolchain's flags. The stack offset is mwcc's
     // frame layout, not this flag's business, so it is left open.

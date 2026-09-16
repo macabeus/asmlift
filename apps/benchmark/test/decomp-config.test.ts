@@ -8,7 +8,7 @@
 import { readCompilerCommand } from '@asmlift/cli/flags';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS, type ToolchainId, isToolchainId } from '@asmlift/core/target';
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN, mwccDir } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,7 +63,7 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     expect(renderScoreCommand('mwcc_242_81', canonical('mwcc_242_81'))).toBe(
       [
         `${shq(MWCC_PPC_TOOLCHAIN.docker)} run --rm`,
-        `-v ${shq(MWCC_PPC_TOOLCHAIN.dir)}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
+        `-v ${shq(mwccDir('mwcc_242_81'))}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
         shq(MWCC_PPC_TOOLCHAIN.image),
         `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe`,
         MWCC_PPC_TOOLCHAIN.harnessFlags.map(shq).join(' '),

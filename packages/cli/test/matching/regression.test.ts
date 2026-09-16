@@ -44,8 +44,9 @@ const RUNNERS: Record<FixtureToolchain, ToolchainRunner> = {
   },
   mwcc: {
     target: PPC_MWCC,
-    compile: (c, sym) => compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
-    score: (source, symbol, obj) => scoreCPpc(source, symbol, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
+    compile: (c, sym) => compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
+    score: (source, symbol, obj) =>
+      scoreCPpc('mwcc_242_81', source, symbol, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
   },
 };
 
@@ -71,7 +72,7 @@ function runFixture(fx: DecompFixture) {
   expect(s.match).toBe(fx.expectMatch ?? true);
 }
 
-const HAVE_PPC = ppcDockerGate('regression');
+const HAVE_PPC = ppcDockerGate('regression', 'mwcc_242_81');
 
 describe('regression: decompile → recompile → objdiff', () => {
   for (const fx of FIXTURES.filter((f) => f.toolchain !== 'mwcc')) {

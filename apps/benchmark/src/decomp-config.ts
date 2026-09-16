@@ -25,6 +25,7 @@ import {
   TOOLCHAIN,
   kmcCandidateCompiler,
   mwccCandidateCompiler,
+  mwccDir,
 } from '@asmlift/toolchains';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -49,7 +50,7 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_DOCKER: GCC_KMC_TOOLCHAIN.docker,
   ASMLIFT_KMC_DIR: GCC_KMC_TOOLCHAIN.dir,
   ASMLIFT_KMC_IMAGE: GCC_KMC_TOOLCHAIN.image,
-  ASMLIFT_MWCC_DIR: MWCC_PPC_TOOLCHAIN.dir,
+  ASMLIFT_MWCC_DIR: mwccDir('mwcc_242_81'),
   ASMLIFT_PPC_IMAGE: MWCC_PPC_TOOLCHAIN.image,
   ASMLIFT_WIBO: MWCC_PPC_TOOLCHAIN.wibo,
 };
@@ -58,7 +59,7 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
  *  containers), bound at the row's flags. */
 const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => CandidateCompiler>> = {
   'gcc2.7.2kmc': kmcCandidateCompiler,
-  mwcc_242_81: mwccCandidateCompiler,
+  mwcc_242_81: mwccCandidateCompiler('mwcc_242_81'),
 };
 
 /** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.

@@ -389,8 +389,8 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
     ],
     [
       'mwcc_242_81',
-      ppcDockerGate('reread-mwcc'),
-      (c) => compilePpcTarget(c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).asm,
+      ppcDockerGate('reread-mwcc', 'mwcc_242_81'),
+      (c) => compilePpcTarget('mwcc_242_81', c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).asm,
       /\blbz\s+r\d+,\s*(0x)?1\(r\d+\)/,
     ],
   ];
@@ -407,22 +407,27 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
     });
   }
 
-  test.runIf(ppcDockerGate('reread-mwcc'))('mwcc: a read held across a call folds flat, and the local matches', () => {
-    // On agbcc this is the nest `read-behind-effect` keeps; on mwcc the rule stands down and the
-    // default lift spells `v0 = a0[3]; fnA(); a0[4] = v0;` — the target's own bytes (3/24 with the
-    // rule running here).
-    const c =
-      'extern void fnA(void); extern void fnB(void);\n' +
-      'void f(u8 *p, s32 a){ if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB(); }';
-    const { asm, obj } = compilePpcTarget(c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
-    const r = decompile('f', asm, PPC_MWCC, {
-      prototypes: {
-        f: { params: 2, returnsVoid: true },
-        fnA: { params: 0, returnsVoid: true },
-        fnB: { params: 0, returnsVoid: true },
-      },
-    });
-    expect(r.source).toContain('&&');
-    expect(scoreCPpc(r.source, 'f', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).match).toBe(true);
-  });
+  test.runIf(ppcDockerGate('reread-mwcc', 'mwcc_242_81'))(
+    'mwcc: a read held across a call folds flat, and the local matches',
+    () => {
+      // On agbcc this is the nest `read-behind-effect` keeps; on mwcc the rule stands down and the
+      // default lift spells `v0 = a0[3]; fnA(); a0[4] = v0;` — the target's own bytes (3/24 with the
+      // rule running here).
+      const c =
+        'extern void fnA(void); extern void fnB(void);\n' +
+        'void f(u8 *p, s32 a){ if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB(); }';
+      const { asm, obj } = compilePpcTarget('mwcc_242_81', c, 'f', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const r = decompile('f', asm, PPC_MWCC, {
+        prototypes: {
+          f: { params: 2, returnsVoid: true },
+          fnA: { params: 0, returnsVoid: true },
+          fnB: { params: 0, returnsVoid: true },
+        },
+      });
+      expect(r.source).toContain('&&');
+      expect(scoreCPpc('mwcc_242_81', r.source, 'f', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).match).toBe(
+        true,
+      );
+    },
+  );
 });

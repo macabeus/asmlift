@@ -127,9 +127,11 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'ppc',
     label: 'CodeWarrior / PowerPC (GC)',
     asmKind: 'objdump',
-    available: () => ppcDockerAvailable(),
+    available: () => ppcDockerAvailable('mwcc_242_81'),
     buildTarget: (refC, sym, cflags, lang) =>
-      lang === 'c++' ? compilePpcCppTarget(refC, sym, cflags) : compilePpcTarget(refC, sym, cflags),
+      lang === 'c++'
+        ? compilePpcCppTarget('mwcc_242_81', refC, sym, cflags)
+        : compilePpcTarget('mwcc_242_81', refC, sym, cflags),
   },
 };
 

@@ -22,7 +22,14 @@ import { objdiffVersion } from '@asmlift/cli/objdiff-version';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { extractAsmData, mipsObjdumpText, ppcObjdumpText, scopedForDump } from '@asmlift/toolchains';
-import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import {
+  GCC272_TOOLCHAIN,
+  GCC_KMC_TOOLCHAIN,
+  IDO_TOOLCHAIN,
+  MWCC_PPC_TOOLCHAIN,
+  TOOLCHAIN,
+  mwccDir,
+} from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -48,7 +55,7 @@ const TC_CFG: Record<ToolchainId, unknown> = {
   'ido7.1': IDO_TOOLCHAIN,
   'gcc2.7.2kmc': GCC_KMC_TOOLCHAIN,
   'gcc2.7.2': GCC272_TOOLCHAIN,
-  mwcc_242_81: MWCC_PPC_TOOLCHAIN,
+  mwcc_242_81: [MWCC_PPC_TOOLCHAIN, mwccDir('mwcc_242_81')],
 };
 
 /** `tc.buildTarget`, cached by (toolchain config, codegen flags, reference source, symbol, and — for

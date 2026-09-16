@@ -34,12 +34,12 @@ describe('mwcceppc preprocessing of a project include tree', () => {
     // The container reaches host files through ONE mount, /tmp. A path outside it would be
     // "not found" from inside, and mwcc's usage error names a path the caller never chose — so the
     // refusal is stated here, where the reason is known.
-    expect(() => ppcPreprocess({ root: '/nowhere', srcPath: '/etc/u.c', outPath: '/tmp/u.i', argv: [] })).toThrow(
-      /reads and writes under \/tmp/,
-    );
-    expect(() => ppcPreprocess({ root: '/nowhere', srcPath: '/tmp/u.c', outPath: '/etc/u.i', argv: [] })).toThrow(
-      /reads and writes under \/tmp/,
-    );
+    expect(() =>
+      ppcPreprocess({ mwcc: 'mwcc_242_81', root: '/nowhere', srcPath: '/etc/u.c', outPath: '/tmp/u.i', argv: [] }),
+    ).toThrow(/reads and writes under \/tmp/);
+    expect(() =>
+      ppcPreprocess({ mwcc: 'mwcc_242_81', root: '/nowhere', srcPath: '/tmp/u.c', outPath: '/etc/u.i', argv: [] }),
+    ).toThrow(/reads and writes under \/tmp/);
   });
 
   // A ONE-SHOT CONTAINER COSTS SECONDS, not milliseconds: ~1.2 s of `docker run` launch on an idle
@@ -48,7 +48,7 @@ describe('mwcceppc preprocessing of a project include tree', () => {
   // states its own budget.
   const CONTAINER_BUDGET = 120_000;
 
-  describe.runIf(ppcDockerAvailable())('with the CodeWarrior container', () => {
+  describe.runIf(ppcDockerAvailable('mwcc_242_81'))('with the CodeWarrior container', () => {
     test(
       "expands the project's headers in CodeWarrior's dialect, with #line comments stripped",
       () => {
@@ -56,6 +56,7 @@ describe('mwcceppc preprocessing of a project include tree', () => {
         const srcPath = join(scratch, 'u.c');
         writeFileSync(srcPath, '#include "dialect.h"\n');
         const text = ppcPreprocess({
+          mwcc: 'mwcc_242_81',
           root,
           srcPath,
           outPath: join(scratch, 'u.i'),
@@ -83,7 +84,13 @@ describe('mwcceppc preprocessing of a project include tree', () => {
         const srcPath = join(scratch, 'wide.c');
         writeFileSync(srcPath, 'const char *greeting = "こんにちは";\n');
         expect(() =>
-          ppcPreprocess({ root, srcPath, outPath: join(scratch, 'wide.i'), argv: ['-nosyspath', '-i', 'include'] }),
+          ppcPreprocess({
+            mwcc: 'mwcc_242_81',
+            root,
+            srcPath,
+            outPath: join(scratch, 'wide.i'),
+            argv: ['-nosyspath', '-i', 'include'],
+          }),
         ).toThrow(/non-ASCII byte at \+0x[0-9a-f]+/);
       },
       CONTAINER_BUDGET,
@@ -100,6 +107,7 @@ describe('mwcceppc preprocessing of a project include tree', () => {
         // resolved against the checkout: without them the same call preprocesses fine.
         expect(() =>
           ppcPreprocess({
+            mwcc: 'mwcc_242_81',
             root,
             srcPath,
             outPath: join(scratch, 'wrapped.i'),
@@ -108,7 +116,13 @@ describe('mwcceppc preprocessing of a project include tree', () => {
           }),
         ).toThrow(/no-such-wrapper\.exe/);
         expect(
-          ppcPreprocess({ root, srcPath, outPath: join(scratch, 'plain.i'), argv: ['-nosyspath', '-i', 'include'] }),
+          ppcPreprocess({
+            mwcc: 'mwcc_242_81',
+            root,
+            srcPath,
+            outPath: join(scratch, 'plain.i'),
+            argv: ['-nosyspath', '-i', 'include'],
+          }),
         ).toContain('plain');
       },
       CONTAINER_BUDGET,

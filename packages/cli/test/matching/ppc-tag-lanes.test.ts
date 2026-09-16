@@ -35,11 +35,11 @@ const READ_ABOVE =
 const READ_PER_ARM =
   'void readptr(u32 *p, u32 *a, u32 *b, u32 c){ if (c & 1){ *a = *p << 3; } else { *b = *p << 4; } }';
 
-describe.runIf(ppcDockerGate('ppc-tag-lanes'))('the PowerPC lanes of four floorless tags', () => {
+describe.runIf(ppcDockerGate('ppc-tag-lanes', 'mwcc_242_81'))('the PowerPC lanes of four floorless tags', () => {
   it('read-once: the read is emitted in the block that spelled it, at both optimisation modes', () => {
     for (const flags of [CANONICAL, FOR_SIZE]) {
-      const above = compilePpcTarget(READ_ABOVE, 'readptr', flags);
-      const perArm = compilePpcTarget(READ_PER_ARM, 'readptr', flags);
+      const above = compilePpcTarget('mwcc_242_81', READ_ABOVE, 'readptr', flags);
+      const perArm = compilePpcTarget('mwcc_242_81', READ_PER_ARM, 'readptr', flags);
 
       // The placement itself: one load, BEFORE the conditional branch, into a register that stays
       // live across it — against one load inside each arm, which is AFTER it. Counting alone would
@@ -60,8 +60,8 @@ describe.runIf(ppcDockerGate('ppc-tag-lanes'))('the PowerPC lanes of four floorl
     // `a+b` on two `u8` parameters is an int add of two promoted operands (0..510); the same sum
     // re-narrowed is a different value, and CodeWarrior spells the difference in where the
     // `clrlwi` goes. A decompiler that recovered the parameters as `int` could not match.
-    const promoted = compilePpcTarget('int promzb(u8 a,u8 b){ return a+b; }', 'promzb', CANONICAL);
-    const narrowed = compilePpcTarget('int promzb(u8 a,u8 b){ return (u8)(a+b); }', 'promzb', CANONICAL);
+    const promoted = compilePpcTarget('mwcc_242_81', 'int promzb(u8 a,u8 b){ return a+b; }', 'promzb', CANONICAL);
+    const narrowed = compilePpcTarget('mwcc_242_81', 'int promzb(u8 a,u8 b){ return (u8)(a+b); }', 'promzb', CANONICAL);
 
     const CLRLWI = /\tclrlwi\s/;
     const ADD = /\tadd\s/;
@@ -72,8 +72,8 @@ describe.runIf(ppcDockerGate('ppc-tag-lanes'))('the PowerPC lanes of four floorl
   });
 
   it('load: a float load is the whole function, and it is not the integer one', () => {
-    const loadf = compilePpcTarget('float loadf(float *p){ return *p; }', 'loadf', CANONICAL);
-    const deref = compilePpcTarget('int deref(int *p){ return *p; }', 'deref', CANONICAL);
+    const loadf = compilePpcTarget('mwcc_242_81', 'float loadf(float *p){ return *p; }', 'loadf', CANONICAL);
+    const deref = compilePpcTarget('mwcc_242_81', 'int deref(int *p){ return *p; }', 'deref', CANONICAL);
 
     expect(count(loadf.asm, /\tlfs\s+f1,0\(r3\)/)).toBe(1);
     expect(count(loadf.asm, LWZ)).toBe(0);
@@ -81,7 +81,7 @@ describe.runIf(ppcDockerGate('ppc-tag-lanes'))('the PowerPC lanes of four floorl
   });
 
   it('baseline: the control is two instructions on PowerPC too', () => {
-    const retone = compilePpcTarget('int retone(void){ return 1; }', 'retone', CANONICAL);
+    const retone = compilePpcTarget('mwcc_242_81', 'int retone(void){ return 1; }', 'retone', CANONICAL);
 
     expect(count(retone.asm, /\tli\s+r3,1/)).toBe(1);
     expect(count(retone.asm, /\tblr\b/)).toBe(1);

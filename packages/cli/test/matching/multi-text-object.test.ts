@@ -24,7 +24,7 @@ function gate(): boolean {
     );
     return false;
   }
-  return ppcDockerGate('multi-text-object');
+  return ppcDockerGate('multi-text-object', 'mwcc_242_81');
 }
 
 describe.runIf(gate())('m_choice.o, eight `.text` sections', () => {
@@ -32,8 +32,9 @@ describe.runIf(gate())('m_choice.o, eight `.text` sections', () => {
   const dir = mkdtempSync('/tmp/asmlift-multitext-');
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
   copyFileSync(OBJECT, join(dir, 'm_choice.o'));
-  const whole = ppcDisasmText(dir, 'm_choice.o');
-  const scoped = (sym: string) => ppcDisasmText(dir, basename(scopedObjectPath(join(dir, 'm_choice.o'), sym, dir)));
+  const whole = ppcDisasmText('mwcc_242_81', dir, 'm_choice.o');
+  const scoped = (sym: string) =>
+    ppcDisasmText('mwcc_242_81', dir, basename(scopedObjectPath(join(dir, 'm_choice.o'), sym, dir)));
 
   test('the object really does hold several code sections, and the dump one block each', () => {
     expect(codeSections(readFileSync(OBJECT))).toEqual({ count: 8, ambiguous: true });

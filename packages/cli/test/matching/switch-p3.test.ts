@@ -141,19 +141,19 @@ describe.runIf(HAVE_DOCKER)('P3 KMC-GCC/MIPS — dense jump-table switch recover
   });
 });
 
-const HAVE_PPC = ppcDockerGate('switch-p3');
+const HAVE_PPC = ppcDockerGate('switch-p3', 'mwcc_242_81');
 describe.runIf(HAVE_PPC)('P3 mwcc/PPC — dense jump-table switch recovers (R_PPC_ADDR32 table in .data)', () => {
   test('8-case dense switch scores 0', () => {
     const c = dense(8);
-    const { obj, asm } = compilePpcTarget(c, 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
     const asmData = extractPpcAsmData(obj, 'sw_jt');
     const src = decompile('sw_jt', asm, PPC_MWCC, { asmData }).source;
     expect(src).toContain('switch (');
-    expect(scoreCPpc(src, 'sw_jt', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).score).toBe(0);
+    expect(scoreCPpc('mwcc_242_81', src, 'sw_jt', obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags).score).toBe(0);
   });
 
   test('fail-closed: WITHOUT the side-table the bctr dispatch loud-fails', () => {
-    const { asm } = compilePpcTarget(dense(8), 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+    const { asm } = compilePpcTarget('mwcc_242_81', dense(8), 'sw_jt', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
     expect(() => decompile('sw_jt', asm, PPC_MWCC)).toThrow();
   });
 });

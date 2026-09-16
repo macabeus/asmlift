@@ -11,6 +11,7 @@ import {
   compileCandPpc,
   compileCandPpcCpp,
 } from './compile';
+import type { MwccToolchainId } from './toolchain';
 
 /** Compile C with agbcc, assemble to an object, and objdiff-score it against a target .o. */
 export function scoreC(cSource: string, symbol: string, targetObj: string, flags: readonly string[]): MatchScore {
@@ -42,18 +43,25 @@ export function scoreCMipsGcc(
   return scoreObjects(targetObj, compileCandKmc(cSource, flags), symbol);
 }
 
-/** Compile candidate C with CodeWarrior, and objdiff-score it against a target object. */
-export function scoreCPpc(cSource: string, symbol: string, targetObj: string, flags: readonly string[]): MatchScore {
-  return scoreObjects(targetObj, compileCandPpc(cSource, flags), symbol);
+/** Compile candidate C with one CodeWarrior build, and objdiff-score it against a target object. */
+export function scoreCPpc(
+  mwcc: MwccToolchainId,
+  cSource: string,
+  symbol: string,
+  targetObj: string,
+  flags: readonly string[],
+): MatchScore {
+  return scoreObjects(targetObj, compileCandPpc(mwcc, cSource, flags), symbol);
 }
 
 /** Compile candidate C++ (`.cp`) with CodeWarrior, and objdiff-score it against the target
  *  object by its MANGLED symbol — how the C++ backend's output is judged byte-exact. */
 export function scoreCppPpc(
+  mwcc: MwccToolchainId,
   cppSource: string,
   symbol: string,
   targetObj: string,
   flags: readonly string[],
 ): MatchScore {
-  return scoreObjects(targetObj, compileCandPpcCpp(cppSource, flags), symbol);
+  return scoreObjects(targetObj, compileCandPpcCpp(mwcc, cppSource, flags), symbol);
 }

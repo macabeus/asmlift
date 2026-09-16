@@ -15,14 +15,15 @@ registers the four candidate compilers with `@asmlift/cli`'s registry (registrat
 
 Paths resolve from env vars with sibling-checkout defaults (`src/toolchain.ts`):
 `ASMLIFT_AGBCC`, `ASMLIFT_ARM_AS`, `ASMLIFT_IDO_CC`, `ASMLIFT_MIPS_OBJDUMP`,
-`ASMLIFT_KMC_DIR`, `ASMLIFT_KMC_IMAGE`, `ASMLIFT_MWCC_DIR`, `ASMLIFT_PPC_IMAGE`,
+`ASMLIFT_KMC_DIR`, `ASMLIFT_KMC_IMAGE`, `ASMLIFT_MWCC_ROOT`, `ASMLIFT_PPC_IMAGE`,
 `ASMLIFT_PPC_OBJDUMP`, `ASMLIFT_WIBO`, `ASMLIFT_DOCKER`. `ASMLIFT_DOCKER_POOL=0` disables the
 persistent container pool (the benchmark's A/B baseline switch).
 
-The `mwcc_242_81` Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
+The CodeWarrior Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
 `docker build -t asmlift-ppc:latest packages/toolchains/ppc-docker` — 32-bit wibo + PowerPC
-objdump ([`ppc-docker/Dockerfile`](ppc-docker/Dockerfile)); the proprietary CodeWarrior dir is
-bind-mounted at run time, never baked in.
+objdump ([`ppc-docker/Dockerfile`](ppc-docker/Dockerfile)); the proprietary CodeWarrior dirs are
+bind-mounted at run time, never baked in. `ASMLIFT_MWCC_ROOT` names the directory holding them,
+one per build (`mwcc_242_81`, `mwcc_233_163n`, `mwcc_247_107`), as decomp.me vendors them.
 
 ## Modules
 
