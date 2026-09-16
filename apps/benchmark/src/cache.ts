@@ -262,7 +262,9 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
   // v19: the outcome classifier reads an INDENTED `?` declaration as a decline — a local at the top
   //      of a body, a field of a struct m2c inferred. `marioparty3:GWBoardRecordGet:gcc2.7.2`
-  //      moves from noncompile to declined, and a v18 entry replays the old label.
+  //      moves from noncompile to declined, and a v18 entry replays the old label. The same
+  //      version covers the normalizer spelling a condition-register bit as a number
+  //      (`cror 2,1,2`), which no row published before it disassembles to.
   // `cppLadder` is the same register for a change no C row can see, and it bumps INSTEAD of `v`:
   // compile/real.ts's candidate ladder — C linkage on the candidate, then a plain-C fallback for
   // text the C++ front end refuses — reaches a c++ row only. A C row's candidate is the same text

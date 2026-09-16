@@ -490,6 +490,24 @@ export function disasmToM2c(disasm: string, isa: Isa, sym: string, asmDump?: str
   return out.join('\n') + '\n';
 }
 
+/** The bit numbers objdump names within one condition-register field. */
+const CR_FLAG_BIT: Record<string, number> = { lt: 0, gt: 1, eq: 2, so: 3, un: 3 };
+
+/** A condition-register logic instruction with its bit operands as numbers. objdump names a bit by
+ *  field and flag (`eq`, `4*cr1+eq`); m2c recognises a float `<=`/`>=` only as `fcmpo` followed by
+ *  `cror 2, N, 2`, and read the named spelling as an unknown instruction. */
+function numericCrBits(text: string): string {
+  const m = /^(cr(?:and|andc|clr|eqv|move|nand|nor|not|or|orc|set|xor)\s+)(\S+)$/.exec(text);
+  if (m === null) {
+    return text;
+  }
+  const bits = m[2].split(',').map((op) => {
+    const bit = /^(?:4\*cr([0-7])\+)?(lt|gt|eq|so|un)$/.exec(op);
+    return bit === null ? op : String(4 * Number(bit[1] ?? 0) + CR_FLAG_BIT[bit[2]]);
+  });
+  return `${m[1]}${bits.join(',')}`;
+}
+
 function rewriteInsn(
   ins: Insn,
   isa: Isa,
@@ -532,7 +550,7 @@ function rewriteInsn(
       text = `${sp[1]}\t${ops}`;
     }
   }
-  return text;
+  return isa === 'ppc' ? numericCrBits(text) : text;
 }
 
 // GCC ATTRIBUTES ARE NOT STRIPPED, and there used to be a function here that stripped them on

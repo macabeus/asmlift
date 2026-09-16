@@ -50,6 +50,16 @@ describe('m2c-normalizer (pinned)', () => {
     expect(() => disasmToM2c(twoAfter, 'ppc', 'absent')).toThrow(/symbol 'absent' not found/);
   });
 
+  test('a condition-register bit reaches m2c as the number its parser reads', () => {
+    // objdump names the bit (`eq`, `4*cr1+eq`); m2c recognises a float `<=`/`>=` only as
+    // `fcmpo` followed by `cror 2, N, 2`, and read the named spelling as an unknown instruction
+    const asm =
+      '00000000 <le>:\n   0:\tfcmpo   cr0,f1,f2\n   4:\tcror    eq,gt,eq\n   8:\tcrclr   4*cr1+eq\n   c:\tblr\n';
+    expect(disasmToM2c(asm, 'ppc', 'le')).toBe(
+      'glabel le\n    fcmpo   cr0,f1,f2\n    cror    2,1,2\n    crclr   6\n    blr\n',
+    );
+  });
+
   test('unparseable input throws (never silently feeds m2c garbage)', () => {
     expect(() => disasmToM2c('not objdump output', 'mips', 'f')).toThrow(/could not parse/);
   });
