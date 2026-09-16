@@ -9,8 +9,9 @@
 //     every row would be `noncompile` for a reason that has nothing to do with the decompiler.
 //   - a project's headers are preprocessed by mwcceppc itself, under the wrapper the unit's own
 //     build rule uses.
-import { compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
-import { existsSync, statSync } from 'node:fs';
+import { MWCC_TOOLCHAIN_IDS, compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -38,6 +39,32 @@ test('the real tier is wired for CodeWarrior', () => {
   // already holds: every toolchain a row can name has a compile module.
   expect(typeof mwcc.buildTarget).toBe('function');
   expect(typeof mwcc.preprocess).toBe('function');
+});
+
+// WHICH BINARY A ROW'S TOOLCHAIN ID ACTUALLY RUNS. Three CodeWarrior builds share one module, one
+// container image and one set of flags; what separates them is the directory `mwccReal(id)` binds,
+// and binding the wrong one produces a well-formed object that simply is not the ROM's. Nothing
+// else in the suite can see that: the toolchain id travels with the row, the compile succeeds, and
+// the only two ROM proofs are a checkout away (`mwcc-rom-proof.test.ts`) — one of them skipped on
+// every machine, the other, on Mario Party 4's DOL code, byte-identical under two of the three
+// builds by measurement. So the separation is asserted here, on a source chosen because all three
+// builds disagree about it, with no checkout and no ROM.
+const SEPARATOR = 'int sep(int x) { return x * 3 + (x >> 2); }\n';
+
+describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each CodeWarrior build', () => {
+  test(
+    'is the binary its own toolchain id names — three ids, three different objects',
+    () => {
+      const digests = MWCC_TOOLCHAIN_IDS.map((id) => {
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        return createHash('sha256').update(readFileSync(built.obj)).digest('hex');
+      });
+      // Pairwise distinct, not pinned constants: what is being claimed is that the ids do not
+      // collapse onto one binary, and a rebuilt container image may legitimately move all three.
+      expect(new Set(digests).size).toBe(MWCC_TOOLCHAIN_IDS.length);
+    },
+    CONTAINER_BUDGET,
+  );
 });
 
 describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', () => {

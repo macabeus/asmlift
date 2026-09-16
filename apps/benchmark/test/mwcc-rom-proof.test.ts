@@ -10,13 +10,15 @@
 // tree, the target compile, then `compareWithRom` against the project's linked ELF with every
 // relocated field masked — and the answer must be the bytes the game holds at that address.
 //
-// WHAT EACH PROOF SEPARATES IS NOT THE SAME. Compiling Pikmin's C++ with `mwcc_242_81` instead
-// breaks at +0x3, so that one really does read the build. Mario Party 4's DOL code does not:
-// `mwcc_242_81` and `mwcc_247_107` compile all 128 functions of `game/main.c`, `game/dvd.c`,
-// `game/memory.c` and `game/board/main.c` to IDENTICAL bytes, at `-O0,p` and at `-O4,p` alike, so
-// on that code GC/2.6 is a provenance fact rather than a codegen one — what it buys is a manifest
-// that names the compiler the project names. Said here because a proof that cannot fail under a
-// substitution is worth exactly what it proves and no more.
+// EQUALITY IS HALF A PROOF. That the bytes match says the harness compiled something correctly; it
+// does not say the id chose the binary, because a substituted build can answer the same bytes.
+// Mario Party 4's DOL code is the case in point: `mwcc_242_81` and `mwcc_247_107` compile all 128
+// functions of `game/main.c`, `game/dvd.c`, `game/memory.c` and `game/board/main.c` to IDENTICAL
+// bytes, at `-O0,p` and at `-O4,p` alike, so on that code GC/2.6 buys provenance rather than
+// codegen — a manifest naming the compiler the project names. So each proof also names a build
+// that must NOT reproduce its bytes, chosen among the substitutions its own unit decides, and
+// asserts that too. WHAT EACH SEPARATES DIFFERS: Pikmin's C++ breaks at +0x3 under `mwcc_242_81`,
+// Mario Party 4's unit at +0x0 under `mwcc_233_163n`.
 //
 // Checkout-gated: `bench setup --build` materializes and builds these projects, and CI has
 // neither. Where a checkout is absent the claim is not weakened, it is simply not asked.
@@ -46,6 +48,12 @@ interface RomProof {
   /** where the game holds that function, and the linked ELF that holds it */
   addr: number;
   elf: string;
+  /** A build that must NOT reproduce these bytes. Equality on its own proves the harness compiled
+   *  SOMETHING correctly; it does not prove the binary was chosen by the id, because a substituted
+   *  build can answer the very same bytes — Mario Party 4's DOL code does, under GC/1.3.2 and
+   *  GC/2.6 alike. The substitution named here is one this unit DOES decide, so the proof turns
+   *  red when an id stops selecting its own compiler. */
+  separatedFrom: ToolchainId;
 }
 
 const PROOFS: RomProof[] = [
@@ -57,6 +65,8 @@ const PROOFS: RomProof[] = [
     sym: 'HuMemHeapDump',
     addr: 0x8000ad48,
     elf: 'build/GMPE01_00/main.elf',
+    // GC/1.3.2 IS this unit's twin (all 128 functions identical); GC/1.2.5n is not.
+    separatedFrom: 'mwcc_233_163n',
   },
   {
     toolchain: 'mwcc_233_163n',
@@ -66,6 +76,7 @@ const PROOFS: RomProof[] = [
     sym: 'getMainStickX__10ControllerFv',
     addr: 0x80040a9c,
     elf: 'build/GPIE01_01/main.elf',
+    separatedFrom: 'mwcc_242_81',
   },
 ];
 
@@ -148,8 +159,16 @@ describe('a CodeWarrior build compiles its own game', () => {
         const rc = realCompilerFor(p.toolchain);
         const iText = rc.preprocess(cfg, readFileSync(join(root, p.unit), 'utf8'));
         const target = rc.buildTarget(iText, p.sym, cflags);
-        const rom = compareWithRom(readFileSync(target.obj), p.sym, readFileSync(join(root, p.elf)), p.addr);
-        expect(rom).toMatchObject({ equal: true });
+        const elf = readFileSync(join(root, p.elf));
+        expect(compareWithRom(readFileSync(target.obj), p.sym, elf, p.addr)).toMatchObject({ equal: true });
+
+        // …and the same text through a build the project does NOT name is not these bytes. Without
+        // this half the proof passes just as happily with every id bound to one binary.
+        const other = realCompilerFor(p.separatedFrom).buildTarget(iText, p.sym, cflags);
+        expect(
+          compareWithRom(readFileSync(other.obj), p.sym, elf, p.addr),
+          `${p.separatedFrom} must not reproduce ${p.project}'s ${p.sym}`,
+        ).toMatchObject({ equal: false });
       },
       BUDGET,
     );
