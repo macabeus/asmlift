@@ -16,7 +16,26 @@
 // SYNTHETIC rows have no address — they are not functions of any binary — and keep name identity:
 // their key IS their id.
 //
+// GAMECUBE REL CODE HAS NO SUCH ADDRESS. A GameCube module (`<module>.rel`, built as
+// `<module>.plf`) is placed by the game's loader, at a different address every run, so every
+// symbol value in it is an offset into its own section and there is no linked address to key by.
+// The key is the location instead: `<module file>:<section>+0x<offset>`. Measured over Mario
+// Party 4's 7,515 and Animal Crossing's 17,387 REL functions it collides 0 times, and it survived
+// all 4,308 renames in Mario Party 4's `symbols.txt` history; module id + offset collides on 976
+// keys, module + name on 18, name alone on 877, and a content hash on 737. The module stem is the
+// disc's own file name, which upstream cannot rename.
+//
+// The synthetic bases a module's sections are PLACED at to read its symbol map (cli/module-elf)
+// are not part of this: they are picked to be injective and readable, differ with the placement
+// scheme, and name nothing about the game. The offset here is the module's own, fixed by the
+// disc.
+//
 // The address is the join key and never prose: nothing here renders it for a reader.
+//
+// A module location contains `:`, so `rowIdentity` of a REL row carries four segments rather than
+// three. Nothing splits an IDENTITY on `:` — the splitters (`retiredIdentifiable` here,
+// cases/retired.ts, cases/real.ts, run/sweep.ts) all split a row ID, whose middle is a symbol name
+// — and `identity.test.ts` pins that.
 
 /** The fields identity is computed from — a subset of `FunctionResult`, spelled out so this module
  *  stays importable by both the harness and the browser without dragging the whole row type in. */
@@ -26,20 +45,53 @@ export interface Identifiable {
   sym: string;
   toolchain: string;
   tier: 'synthetic' | 'real';
-  /** real tier: the function's address, `0x` + 8 lowercase hex digits (see ADDR_PATTERN) */
+  /** real tier: where the function is, in one of the two spellings ADDR_PATTERN accepts — a linked
+   *  address, or a REL module location */
   addr?: string;
   /** real tier: names this row was published under before, oldest first */
   aliases?: string[];
   sourceUrl?: string;
 }
 
-/** The one spelling of an address: `0x` and eight lowercase hex digits — the same spelling the
- *  vendored symbol maps key their entries by, so a row's `addr` can be looked up there verbatim. */
-export const ADDR_PATTERN = /^0x[0-9a-f]{8}$/;
+/** A linked address: `0x` and eight lowercase hex digits — the spelling the project's vendored
+ *  symbol map keys its entries by, so a row's `addr` can be looked up there verbatim. */
+const LINKED_ADDR = /^0x[0-9a-f]{8}$/;
+
+/** A REL module location: the module's disc file stem, the section the function lives in, and its
+ *  offset in that section — `m427Dll:.text+0x0000c2bc`. The stem is also the module's `objdiff.json`
+ *  unit prefix and its `config/<version>/rels/<stem>` directory, so one name resolves all three. */
+const MODULE_ADDR = /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(\.[A-Za-z0-9_.]+)\+0x([0-9a-f]{8})$/;
+
+/** Where a real row's function is, in the two spellings a row may use: a linked address, or a REL
+ *  module location. The two cannot be confused — one starts with `0x`, the other carries a `:`. */
+export const ADDR_PATTERN = new RegExp(`${LINKED_ADDR.source}|${MODULE_ADDR.source}`);
+
+/** A function's place inside a REL module, as `moduleLocation` reads it off an `addr`. */
+export interface ModuleLocation {
+  /** the module's disc file stem (`m427Dll`), case-sensitive as the disc spells it */
+  module: string;
+  /** the section the function lives in, leading dot included (`.text`) */
+  section: string;
+  /** the function's offset in that section */
+  offset: number;
+}
+
+/** The REL module location an `addr` names, or undefined when it names a linked address. */
+export const moduleLocation = (addr: string): ModuleLocation | undefined => {
+  const m = MODULE_ADDR.exec(addr);
+  return m === null ? undefined : { module: m[1], section: m[2], offset: Number.parseInt(m[3], 16) };
+};
+
+/** The REL module a row lives in — the one thing most callers want off an `addr`: which module's
+ *  symbol map, module ELF and `--module` flag the row is read with. Undefined for a row with a
+ *  linked address (DOL, ROM), which is read with the project's own ELF and no module. */
+export const moduleOf = (addr: string | undefined): string | undefined =>
+  addr === undefined ? undefined : moduleLocation(addr)?.module;
 
 /** The key two rows are compared by. A real row with an address is keyed by it; everything else
- *  (synthetic rows, and a real row from an artifact that predates addresses) by its id. The two
- *  shapes cannot collide: an id's middle segment is an identifier, and never starts with a digit. */
+ *  (synthetic rows, and a real row from an artifact that predates addresses) by its id. The shapes
+ *  cannot collide: an id's middle segment is a symbol name, so it never starts with a digit and
+ *  never carries the `:`…`+0x` of a module location. */
 export const rowIdentity = (r: Identifiable): string =>
   r.tier === 'real' && r.addr !== undefined ? `${r.project}:${r.addr}:${r.toolchain}` : r.id;
 

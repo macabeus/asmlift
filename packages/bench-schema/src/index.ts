@@ -163,9 +163,10 @@ export interface FunctionRow {
    *  in ./identity, which keys a real row by `addr`. */
   id: string;
   sym: string;
-  /** REAL tier only: the function's address in the project's linked ELF (`0x` + 8 lowercase hex;
-   *  GBA ROM-mapped with the Thumb bit clear, N64 VRAM). The row's identity. Synthetic rows have
-   *  no address and are identified by `id`. */
+  /** REAL tier only: where the function is — its address in the project's linked ELF (`0x` + 8
+   *  lowercase hex; GBA ROM-mapped with the Thumb bit clear, N64 VRAM), or, for code in a GameCube
+   *  REL module, which has no linked address, its location `<module>:<section>+0x<offset>`. The
+   *  row's identity. Synthetic rows have neither and are identified by `id`. */
   addr?: string;
   /** REAL tier only: names the row was published under before its upstream renamed the function,
    *  so a citation or a permalink of the old spelling still resolves to it. */
