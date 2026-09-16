@@ -100,35 +100,14 @@ function preprocessorWords(words: string[]): { includes: string[]; defines: stri
   return { includes, defines };
 }
 
-/** PIKMIN'S ONE PREPROCESSOR-ONLY SOURCE LINE. `include/DebugLog.h` spells an `#elif` with C++'s
- *  alternative `or`, which every CodeWarrior build COMPILES and none of them accepts under `-EP` —
- *  measured on all three, with `-lang=c++`, a `.cpp` extension, `-ansi off` and `-stdkeywords off`
- *  alike. It is the only such line in the tree, and it stands between this project and a vendored
- *  translation unit, so the row PR that switches the checkout to the fork branch has to rewrite it
- *  as `||` (a no-op for the compiler, which is what makes the rewrite safe).
- *
- *  Until then this proof cannot be asked of Pikmin, and it says which line is why rather than
- *  reporting a compiler failure. */
-const PIKMIN_EP_BLOCKER = /^#elif defined\(VERSION_DPIJ01_PIKIDEMO\) or /m;
-
-function blockedByAlternativeToken(root: string, project: string): boolean {
-  const header = join(root, 'include/DebugLog.h');
-  return project === 'pikmin' && existsSync(header) && PIKMIN_EP_BLOCKER.test(readFileSync(header, 'utf8'));
-}
-
 describe('a CodeWarrior build compiles its own game', () => {
   for (const p of PROOFS) {
     const root = join(benchCheckoutsDir(), p.project);
     const built = existsSync(join(root, 'build.ninja')) && existsSync(join(root, p.elf));
     if (!built) {
       console.warn(`[${p.toolchain}] ${p.project} is not built — skipping its ROM proof.`);
-    } else if (blockedByAlternativeToken(root, p.project)) {
-      console.warn(
-        `[${p.toolchain}] ${p.project}'s include/DebugLog.h still spells an #elif with C++'s ` +
-          `alternative 'or', which mwcceppc -EP rejects — skipping its ROM proof.`,
-      );
     }
-    test.runIf(built && !blockedByAlternativeToken(root, p.project))(
+    test.runIf(built)(
       `${p.toolchain}: ${p.sym} is byte-equal to ${p.project}'s own 0x${p.addr.toString(16)}`,
       () => {
         const objdiff = JSON.parse(readFileSync(join(root, 'objdiff.json'), 'utf8')) as {

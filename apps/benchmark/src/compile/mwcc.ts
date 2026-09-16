@@ -43,6 +43,32 @@ const MWCCEPPC = 'mwcceppc.exe';
  *  symbols the mangled target has none of. */
 const langFlag = (language: 'c' | 'c++'): string => `-lang=${language}`;
 
+/** C++'s alternative operator spellings (ISO 646), defined as the operators they denote.
+ *
+ *  mwcceppc's COMPILE reads `or`, `and`, `not` and the rest as operators in a C++ unit, in `#if` as in
+ *  code, but its preprocess-only modes (`-EP`, `-E`) do not: `#elif defined(A) or defined(B)` is an
+ *  `expression syntax error` there, under every CodeWarrior build. Pikmin's `include/DebugLog.h` spells
+ *  one, so without these no Pikmin unit preprocesses at all. Defined, the preprocessor reads the unit
+ *  the way the compile does, and the definitions leave nothing in its output. Never in C, where the
+ *  words are ordinary identifiers. Written into the source, not passed as `-D`, because mwcceppc's
+ *  option parser refuses an `=` inside a define's value (`-Dand_eq=&=`). */
+const ALTERNATIVE_TOKENS: readonly (readonly [string, string])[] = [
+  ['and', '&&'],
+  ['and_eq', '&='],
+  ['bitand', '&'],
+  ['bitor', '|'],
+  ['compl', '~'],
+  ['not', '!'],
+  ['not_eq', '!='],
+  ['or', '||'],
+  ['or_eq', '|='],
+  ['xor', '^'],
+  ['xor_eq', '^='],
+];
+
+const alternativeTokenDefines = (language: 'c' | 'c++'): string =>
+  language === 'c++' ? ALTERNATIVE_TOKENS.map(([word, op]) => `#define ${word} ${op}\n`).join('') : '';
+
 /** Compile one source in `dir`, mapping a container or compiler failure onto the `<tool> failed:
  *  <diagnostic>` shape the evaluator turns into a row's error markers. */
 function compile(
@@ -180,14 +206,15 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     });
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
+    const language = unitLanguage(cfg.unit, cfg.cflags);
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-vendor-'));
-    writeFileSync(join(dir, 'u.c'), tu);
+    writeFileSync(join(dir, 'u.c'), `${alternativeTokenDefines(language)}${tu}`);
     return ppcPreprocess({
       mwcc,
       root: cfg.root,
       srcPath: join(dir, 'u.c'),
       outPath: join(dir, 'u.i'),
-      argv: [...cfg.cppIncludes, ...(cfg.defines ?? []), langFlag(unitLanguage(cfg.unit, cfg.cflags))],
+      argv: [...cfg.cppIncludes, ...(cfg.defines ?? []), langFlag(language)],
       wrapper: unitCompileWrapper(cfg.root, cfg.unit, MWCCEPPC),
     });
   },
