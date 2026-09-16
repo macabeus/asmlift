@@ -870,6 +870,60 @@ function filesWithPragmas(root: string): string[] {
     .map((f) => f.replace(/^\.\//, ''));
 }
 
+/** A preprocessed unit's BYTES as ASCII text, with every non-ASCII byte inside a narrow string literal
+ *  written as the three-digit octal escape the compiler reads back as that same byte.
+ *
+ *  A vendored unit is carried as a string, and a dtk project's wrapper hands the compiler bytes that
+ *  are not UTF-8: `sjiswrap` rewrites the repository's UTF-8 literals into Shift-JIS as the compiler
+ *  reads them, so a Pikmin header's `"カーソル抜き"` reaches the preprocessor's output as bytes no
+ *  string decoding round-trips. As escapes the same literal is plain text, and it compiles to the
+ *  same object: measured on the whole of Pikmin's `piki.cpp`, 1,165 such characters, the escaped unit
+ *  and the raw bytes build byte-identical objects under GC/1.2.5n.
+ *
+ *  The unit is read a byte at a time, the way the compiler reads it: `sjiswrap` already doubles a
+ *  Shift-JIS trail byte that is a backslash, so no lead byte may swallow the byte after it here. A
+ *  non-ASCII byte anywhere else — outside a literal, in a character constant or a wide literal, or
+ *  right after a backslash — has no escape that means the same thing, and is refused. */
+export function asciiLiterals(bytes: Uint8Array): string {
+  const QUOTE = 0x22;
+  const APOSTROPHE = 0x27;
+  const BACKSLASH = 0x5c;
+  const WIDE = 0x4c; // the `L` of `L"…"`
+  let text = '';
+  let literal: 'string' | 'wide string' | 'character constant' | undefined;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    const at = `+0x${i.toString(16)}`;
+    if (literal === undefined) {
+      if (b >= 0x80) {
+        throw new Error(`a non-ASCII byte outside any literal at ${at}, which no escape can spell`);
+      }
+      if (b === QUOTE) {
+        literal = bytes[i - 1] === WIDE ? 'wide string' : 'string';
+      } else if (b === APOSTROPHE) {
+        literal = 'character constant';
+      }
+      text += String.fromCharCode(b);
+    } else if (b === BACKSLASH) {
+      if (bytes[i + 1] >= 0x80) {
+        throw new Error(`a backslash before a non-ASCII byte at ${at}, which no escape can spell`);
+      }
+      text += String.fromCharCode(b, bytes[++i]);
+    } else if (b >= 0x80) {
+      if (literal !== 'string') {
+        throw new Error(`a non-ASCII byte in a ${literal} at ${at}, which no escape can spell`);
+      }
+      text += `\\${b.toString(8).padStart(3, '0')}`;
+    } else {
+      if (b === (literal === 'character constant' ? APOSTROPHE : QUOTE)) {
+        literal = undefined;
+      }
+      text += String.fromCharCode(b);
+    }
+  }
+  return text;
+}
+
 /** Preprocess one translation unit with mwcceppc's own front end (`-EP`: expand, and strip the
  *  `#line` comments it would otherwise emit), returning the text — with every live `#pragma`
  *  directive of the unit and of the project files it reads still in place (see above).
@@ -923,18 +977,11 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
   if (r.status !== 0 || !existsSync(opts.outPath)) {
     throw new Error(`mwcceppc -EP failed: ${r.stderr || r.stdout}`);
   }
-  const bytes = readFileSync(opts.outPath);
-  // The result is carried as a STRING — vendored, gzipped and compiled back from it — and a
-  // wrapper's job is to hand the compiler bytes that are not UTF-8: `sjiswrap` rewrites every
-  // multibyte literal into Shift-JIS, which no string decoding round-trips. Refuse rather than
-  // return mojibake that would compile to the wrong constants. (Measured on Animal Crossing at
-  // 09ca8e8b: 0 bytes ≥ 0x80 in the whole `src` and `include` tree, so no unit is affected today.)
-  const high = bytes.findIndex((b) => b >= 0x80);
-  if (high !== -1) {
-    throw new Error(
-      `mwcceppc -EP produced a non-ASCII byte at +0x${high.toString(16)}: this unit carries multibyte text, ` +
-        'which cannot be vendored as a translation unit — benchmark a function whose unit is ASCII',
-    );
+  let text;
+  try {
+    text = asciiLiterals(readFileSync(opts.outPath));
+  } catch (e) {
+    throw new Error(`mwcceppc -EP of ${opts.srcPath} cannot be vendored as text: ${(e as Error).message}`);
   }
-  return restorePragmas(bytes.toString('utf8'), pragmas);
+  return restorePragmas(text, pragmas);
 }
