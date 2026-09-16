@@ -46,13 +46,15 @@ Full runs of the real tier, minimum wall per day, over the window in which the t
 2026-08-31  1124.1 s      2026-09-06  1541.0 s      2026-09-12  1879.5 s
 ```
 
-**The 42 Animal Crossing rows add about 40 s.** Measured 2026-09-16 at this branch's dataset commit:
-`pnpm bench run --tier real --project ac-decomp` → `✓ real: 42 results in 39.6s`, on a machine at load
-~13. The run before it walled 21.2 s, and the difference is not noise: m2c then failed on 28 of the
-rows over a context line, before reading any of their assembly. 34 of the 42 rows DECLINE, and a declined row enumerates no
-candidates: its price is one target build plus one asmlift and one m2c run, ~1-3 s. So a PowerPC row
-is cheap exactly while asmlift cannot lift it, and this figure will grow with the capabilities that
-close those declines, not with the row count.
+**The 42 Animal Crossing rows add about 40 s to a COLD real tier, and about 10 s to a warm one.**
+Measured 2026-09-16 at this branch's dataset commit: `pnpm bench run --tier real --project ac-decomp`
+→ `✓ real: 42 results in 39.6s` on a machine at load ~13 with nothing built, and `9.5s` on the same
+42 rows once their targets are built. The full run the tier is priced by in §2 is the cold figure.
+The run before the cold one walled 21.2 s, and the difference is not noise: m2c then failed on 28 of
+the rows over a context line, before reading any of their assembly. 34 of the 42 rows DECLINE, and a
+declined row enumerates no candidates: its price is one target build plus one asmlift and one m2c
+run, ~1-3 s. So a PowerPC row is cheap exactly while asmlift cannot lift it, and this figure will
+grow with the capabilities that close those declines, not with the row count.
 
 The window ends at 2026-09-13. That day's stage-1 gate run of the kleod swap walled the real tier
 at **1898.1 s** on the same 252 rows. The same day, after the swap, the tier took **2169.1 s** on
