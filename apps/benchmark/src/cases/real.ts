@@ -68,7 +68,12 @@ export function realCases(filter: RealFilter = {}): Case[] {
         unit: f.unit,
         flagsFrom: unit.flagsFrom,
         build: () =>
-          romTarget(id, f, unit.toolchain, buildRealTarget(unit.toolchain, codegen.cflags, man.vendored(f.sym).tuI)),
+          romTarget(
+            id,
+            f,
+            unit.toolchain,
+            buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI),
+          ),
         scorer: makeRealScorer(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
         compile: makeRealCompile(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI),
       });

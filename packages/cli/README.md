@@ -28,6 +28,12 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 If the file includes multi-functions, pass the `--name` flag.
 
+An object whose code lives in several sections that share addresses **requires** `--name` (exit
+`64` without it). CodeWarrior gives one translation unit many sections, all called `.text` and all
+starting at address 0, so a whole-object disassembly labels each address with whichever symbol it
+finds at that value — the function a name selects there is not reliably the one the symbol table
+places there. With `--name`, asmlift reads the function from the section its `st_shndx` names.
+
 ## CLI reference
 
 ```
@@ -42,7 +48,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | Flag              | Meaning                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--target`        | Which ISA+compiler pair produced the input. Optional inside a `decomp.yaml` project (resolution: flag > `tools.asmlift.target` > `platform`, traced on stderr; an ambiguous platform like `n64` asks you to choose rather than guessing)                                                                                                                                         |
-| `--name`          | The function to decompile when the input holds several (default: auto-detected)                                                                                                                                                                                                                                                                                                  |
+| `--name`          | The function to decompile when the input holds several (default: auto-detected; required for an object whose code sections share addresses, see [Inputs](#inputs))                                                                                                                                                                                                               |
 | `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                                                                                       |
 | `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                                                                                            |
 | `--cflags`        | The flags your build compiles this function's file with, as the build spells them (`--cflags "-mthumb-interwork -O1"`). They fill `{{cflags}}` in the `compiler` command and win over every other source. See [Compiler flags](#compiler-flags)                                                                                                                                  |

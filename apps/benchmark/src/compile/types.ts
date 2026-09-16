@@ -22,8 +22,8 @@ export interface RealProjectCfg {
 
 export interface RealCompile {
   /** Compile a PREPROCESSED translation unit at `cflags` → scoring-target obj + the disasm asmlift
-   *  consumes. */
-  buildTarget(iText: string, cflags: readonly string[]): BuiltTarget;
+   *  consumes, read from the section defining `sym` when the object has more than one. */
+  buildTarget(iText: string, sym: string, cflags: readonly string[]): BuiltTarget;
   /** Compile a candidate TU (self-contained — no project includes) at `cflags` → obj path. Throws on
    *  compile failure (mapped to `noncompile` upstream). */
   compileCandidate(tu: string, sym: string, cflags: readonly string[]): string;

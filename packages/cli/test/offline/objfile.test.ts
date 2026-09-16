@@ -1,12 +1,15 @@
 // Object-file (.o) CLI input, OFFLINE — the pre-spawn decision points plus the full object
 // pipeline with the objdump spawns FAKED through runCli's ObjInput seam (the real spawns are
 // proven by test/matching/objfile-e2e.test.ts against actual toolchains).
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { PPC_MWCC } from '@asmlift/core/target';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import { afterAll, expect, test } from 'vitest';
 
 import { type ObjInput, runCli } from '../../src/main';
-import { ObjectInputUnsupportedError, isElfObject } from '../../src/objfile';
+import { ObjectInputUnsupportedError, disasmObject, isElfObject } from '../../src/objfile';
+import { multiTextObject } from './multi-text-object';
 
 const ELF = new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1, 0]); // magic + junk
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../core/test/corpus', f), 'utf8');
@@ -84,4 +87,77 @@ test('mwcc .o with no PowerPC objdump anywhere fails loud naming every remedy', 
       process.env.ASMLIFT_PPC_OBJDUMP = prev;
     }
   }
+});
+
+// ── objects whose code lives in several sections ─────────────────────────────────────────────
+// CodeWarrior emits one `.text` per part of a translation unit, all named `.text` and all starting
+// at address 0. objdump prints every block from address 0 and labels an address with whatever
+// symbol it finds at that value, so the function a NAME selects in a whole-object dump is not
+// reliably the one the symbol table places there.
+
+const scratchDirs: string[] = [];
+const scratch = () => {
+  const d = mkdtempSync(join(tmpdir(), 'asmlift-objfile-test-'));
+  scratchDirs.push(d);
+  return d;
+};
+afterAll(() => scratchDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
+/** An `objdump` that reports only which object it was handed. */
+function echoObjdump(): string {
+  const path = join(scratch(), 'objdump');
+  writeFileSync(path, '#!/bin/sh\nfor a in "$@"; do :; done\necho "$a"\n');
+  chmodSync(path, 0o755);
+  return path;
+}
+
+const objectAt = (name: string, code: readonly Buffer[], addrs?: readonly number[]): string => {
+  const path = join(scratch(), name);
+  writeFileSync(
+    path,
+    multiTextObject(
+      code,
+      code.map(() => 'ext'),
+      { addrs },
+    ),
+  );
+  return path;
+};
+
+const TWO = [Buffer.from('AAAAAAAA'), Buffer.from('BBBBBBBB')];
+
+test("several code sections: the symbol's own section is disassembled, not the whole object", () => {
+  const objdump = echoObjdump();
+  const many = objectAt('many.o', TWO);
+  const dumped = disasmObject(many, PPC_MWCC, objdump, 'f1').trim();
+  expect(dumped).not.toBe(many); // a scoped copy, in a scratch directory of its own
+  expect(basename(dumped)).toBe('many.o'); // under the name the user passed, for objdump's header
+});
+
+test('one code section: objdump still reads the object itself, byte for byte as before', () => {
+  const objdump = echoObjdump();
+  const one = objectAt('one.o', [Buffer.from('AAAAAAAA')]);
+  expect(disasmObject(one, PPC_MWCC, objdump, 'f0').trim()).toBe(one);
+  expect(disasmObject(one, PPC_MWCC, objdump).trim()).toBe(one); // no --name needed
+});
+
+test('several code sections sharing addresses and no --name: refused as usage, naming the remedy', async () => {
+  const many = objectAt('nameless.o', TWO);
+  const r = await runCli([many, '--target', 'mwcc_242_81'], () => new Uint8Array(readFileSync(many)));
+  expect(r.code).toBe(64); // a missing flag, not an unreadable file
+  expect(r.stderr).toContain('2 code sections sharing addresses');
+  expect(r.stderr).toContain('--name');
+  expect(r.stderr).not.toContain('cannot disassemble'); // objdump was never run
+  expect(r.stderr.match(new RegExp(many.replace(/[.]/g, '[.]'), 'g'))).toHaveLength(1);
+});
+
+test('several code sections at distinct addresses and no --name: read whole, as every label is unique', () => {
+  const objdump = echoObjdump();
+  const linked = objectAt('linked.elf', TWO, [0x8000_0400, 0x8000_0500]);
+  expect(disasmObject(linked, PPC_MWCC, objdump).trim()).toBe(linked);
+});
+
+test('several code sections and a --name the object does not define: refused, never answered', () => {
+  const many = objectAt('absent.o', [Buffer.from('AAAA'), Buffer.from('BBBB')]);
+  expect(() => disasmObject(many, PPC_MWCC, echoObjdump(), 'nope')).toThrow(/none of them defines 'nope'/);
 });

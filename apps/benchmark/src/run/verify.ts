@@ -41,7 +41,7 @@ export function verify(manifestPath: string): void {
     let asm: string;
     try {
       const tuI = realCompilerFor(unit.toolchain).preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
-      asm = buildRealTarget(unit.toolchain, codegen.cflags, tuI).asm;
+      asm = buildRealTarget(unit.toolchain, f.sym, codegen.cflags, tuI).asm;
     } catch (e) {
       console.log(`✗ COMPILE ${f.sym}: ${(e as Error).message.split('\n')[0]}`);
       continue;

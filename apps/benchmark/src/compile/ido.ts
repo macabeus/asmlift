@@ -1,9 +1,10 @@
 // IDO / MIPS (N64) — every harness-side spelling of "compile C with IDO": real-tier target
 // build, real-tier candidate compile (shared cc step). Every compile passes the harness words from
 // @asmlift/toolchains, then the row's codegen flags.
+import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
@@ -19,8 +20,8 @@ function compile(iPath: string, oPath: string, cflags: readonly string[]): void 
   }
 }
 
-function disasm(oPath: string): string {
-  const dis = run(IDO_TOOLCHAIN.objdump, [...IDO_TOOLCHAIN.objdumpFlags, oPath]);
+function disasm(oPath: string, sym: string): string {
+  const dis = run(IDO_TOOLCHAIN.objdump, [...IDO_TOOLCHAIN.objdumpFlags, scopedObjectPath(oPath, sym, dirname(oPath))]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${compilerDiagnostics(dis.stderr)}`);
   }
@@ -33,13 +34,13 @@ const candScratch = scratchSlot('bench-cand-');
 const vendorScratch = scratchSlot('bench-vendor-');
 
 export const idoReal: RealCompile = {
-  buildTarget(iText, cflags): BuiltTarget {
+  buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('ido', cflags, iText);
     const iPath = join(dir, 'u.i'),
       oPath = join(dir, 'u.o');
     writeFileSync(iPath, iText);
     compile(iPath, oPath, cflags);
-    return { obj: oPath, asm: disasm(oPath) };
+    return { obj: oPath, asm: disasm(oPath, sym) };
   },
   compileCandidate(tu, sym, cflags): string {
     const dir = candScratch();

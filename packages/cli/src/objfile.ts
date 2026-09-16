@@ -9,6 +9,11 @@
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+
+import { codeSections, sectionScopedObject } from './elf-section';
 
 /** ELF magic: 0x7f 'E' 'L' 'F'. The one sniff the CLI needs — every toolchain here emits ELF. */
 export const isElfObject = (b: Uint8Array): boolean =>
@@ -16,6 +21,10 @@ export const isElfObject = (b: Uint8Array): boolean =>
 
 /** Thrown when a target's frontend cannot consume disassembled objects (agbcc reads .s text). */
 export class ObjectInputUnsupportedError extends Error {}
+
+/** Thrown when the object cannot be read without being told which function to read: a usage
+ *  condition the caller reports as one, not an unreadable input. */
+export class SymbolRequiredError extends Error {}
 
 // Env reads are LAZY (call time, not module load) so tests can vary them. These two env names
 // are also read by the pinned-toolchain config (@asmlift/toolchains) for its asmdata
@@ -62,22 +71,67 @@ const run = (choice: ObjdumpChoice, args: string[], obj: string, what: string): 
   return r.stdout;
 };
 
+/** Run objdump over the object a read of `sym` may legitimately see. An object holding several code
+ *  sections — CodeWarrior emits many, all named `.text` and all starting at address 0 — is replaced
+ *  by a copy holding only the section `sym`'s `st_shndx` names, with only that section's
+ *  relocations. Every single-code-section object goes through untouched.
+ *
+ *  Without a symbol to scope by, a dump whose code sections overlap labels two functions with one
+ *  address and the read is refused rather than answered with another section's bytes; one whose
+ *  sections lie at distinct addresses still labels each function uniquely and is read whole. */
+function overObject<T>(obj: string, sym: string | undefined, use: (path: string) => T): T {
+  let bytes: Uint8Array;
+  try {
+    bytes = readFileSync(obj);
+  } catch {
+    return use(obj); // an unreadable object is objdump's to report, in its own words
+  }
+  if (sym === undefined) {
+    const { count, ambiguous } = codeSections(bytes);
+    if (ambiguous) {
+      throw new SymbolRequiredError(
+        `${obj} holds ${count} code sections sharing addresses, so a function name in its ` +
+          'disassembly does not say which bytes to read — pass --name <symbol>',
+      );
+    }
+    return use(obj);
+  }
+  const scoped = sectionScopedObject(bytes, sym);
+  if (scoped === undefined) {
+    return use(obj);
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-section-'));
+  try {
+    // the object's own basename, so objdump's header line names what the user passed
+    const path = join(dir, basename(obj));
+    writeFileSync(path, scoped);
+    return use(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** `objdump -d` text for the object, using the target family's disassembler — exactly the
  *  text the frontend reads. `objdumpBin` (a decomp.yaml `tools.asmlift.objdump`) overrides
- *  the PATH/env-resolved binary. */
-export function disasmObject(obj: string, target: TargetDescription, objdumpBin?: string): string {
+ *  the PATH/env-resolved binary; `sym` is the function being read (`--name`). */
+export function disasmObject(obj: string, target: TargetDescription, objdumpBin?: string, sym?: string): string {
   const choice = objdumpFor(target, objdumpBin);
-  return run(choice, choice.disasmFlags, obj, 'disassemble');
+  return overObject(obj, sym, (path) => run(choice, choice.disasmFlags, path, 'disassemble'));
 }
 
 /** The `objdump -s -r -t` side-table (AsmData) for jump-table recovery; undefined when the
  *  target has no extractor. Failures here are the CALLER's to soften — the side-table is
  *  optional (without it a dense-switch dispatch declines loudly downstream). */
-export function asmDataForObject(obj: string, target: TargetDescription, objdumpBin?: string): AsmData | undefined {
+export function asmDataForObject(
+  obj: string,
+  target: TargetDescription,
+  objdumpBin?: string,
+  sym?: string,
+): AsmData | undefined {
   if (target.compiler === 'agbcc') {
     return undefined;
   }
   const choice = objdumpFor(target, objdumpBin);
-  const dump = run(choice, ['-s', '-r', '-t'], obj, 'asmdata');
+  const dump = overObject(obj, sym, (path) => run(choice, ['-s', '-r', '-t'], path, 'asmdata'));
   return parseAsmData(dump, dump, dump, true);
 }
