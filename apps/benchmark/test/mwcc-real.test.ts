@@ -83,6 +83,8 @@ const AC_CFG: RealProjectCfg = {
   toolchain: 'mwcc_242_81',
   root: AC,
   unit: 'src/static/GBA2/JoyBoot.c',
+  // the tail of the flags objdiff.json says this unit's build compiles it at
+  cflags: ['-O4,s', '-sdata', '0', '-sdata2', '0', '-inline', 'on', '-lang=c'],
   cppIncludes: [
     '-nosyspath',
     '-i',
@@ -110,6 +112,22 @@ describe.runIf(ppcDockerAvailable() && existsSync(join(AC, 'build.ninja')))("Ani
       // …and nothing of THIS machine: a vendored blob is committed
       expect(text).not.toMatch(/\/Users\/|\/home\/|\/private\/var\//);
       expect(text).not.toContain('#line');
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "preprocesses a unit in the LANGUAGE its build compiles it in, not the one the blob's name implies",
+    () => {
+      // Every vendored TU is written as `u.c`, so mwcc's extension default would read all 4,103 of
+      // Animal Crossing's units as C — including the 116 its build compiles with `-lang=c++`, whose
+      // headers would then take the wrong `#ifdef __cplusplus` branch and vendor a blob the project
+      // never compiled. The claim is checked on ONE header both ways, so the C++ answer cannot be
+      // the C one misread.
+      const src = '#include "m_house.h"\nint f(void) { return 0; }\n';
+      const asCpp = mwcc.preprocess({ ...AC_CFG, unit: 'src/static/jsyswrap.cpp', cflags: ['-lang=c++'] }, src);
+      expect(asCpp).toContain('extern "C"');
+      expect(mwcc.preprocess(AC_CFG, src)).not.toContain('extern "C"');
     },
     CONTAINER_BUDGET,
   );

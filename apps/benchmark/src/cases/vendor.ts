@@ -206,6 +206,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         toolchain: unit.toolchain,
         root,
         unit: f.unit,
+        cflags: unit.cflags,
         cppIncludes: man.cppIncludes,
         headers: man.headers,
         defines: man.defines,

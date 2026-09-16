@@ -25,6 +25,23 @@ import { compilerDiagnostics, contentDir } from './util';
 /** The CodeWarrior binary, as a project's own build rule names it. */
 const MWCCEPPC = 'mwcceppc.exe';
 
+/** The `-lang` word mwcceppc must be handed to read this unit in the dialect its own build reads it
+ *  in — stated ALWAYS, never left to the front end's default.
+ *
+ *  That default is the source file's extension, and the translation unit is written here as `u.c`
+ *  because a preprocessed blob has no project filename. Left implicit, every unit would be read as
+ *  C and a C++ unit's headers would take the `#ifdef __cplusplus` branch the project's own build
+ *  does not. The extension would be the wrong signal even under the real name: 62 of Animal
+ *  Crossing's units are `.c` files its build compiles with `-lang=c++`.
+ *
+ *  The unit's flags are the signal. Where they name no language — 57 Pikmin units — the unit's own
+ *  extension is what mwcc itself would have used, so that is what gets said out loud. The last
+ *  `-lang` wins, as it does on the command line. */
+function unitLang(cfg: RealProjectCfg): string {
+  const stated = cfg.cflags.filter((f) => f.startsWith('-lang=')).at(-1);
+  return stated ?? (/\.(cc|cp|cpp|cxx)$/i.test(cfg.unit) ? '-lang=c++' : '-lang=c');
+}
+
 /** Compile one source in `dir`, mapping a container or compiler failure onto the `<tool> failed:
  *  <diagnostic>` shape the evaluator turns into a row's error markers. */
 function compile(dir: string, srcName: string, objName: string, cflags: readonly string[], disasm: boolean): string {
@@ -60,7 +77,7 @@ export const mwccReal: RealCompile = {
       root: cfg.root,
       srcPath: join(dir, 'u.c'),
       outPath: join(dir, 'u.i'),
-      argv: [...cfg.cppIncludes, ...(cfg.defines ?? [])],
+      argv: [...cfg.cppIncludes, ...(cfg.defines ?? []), unitLang(cfg)],
       wrapper: unitCompileWrapper(cfg.root, cfg.unit, MWCCEPPC),
     });
   },
