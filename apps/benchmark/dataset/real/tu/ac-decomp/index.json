@@ -1,0 +1,170 @@
+{
+  "lbRk_SeirekiDays": {
+    "tu": "lbRk_SeirekiDays.i.gz",
+    "ctx": "ctx-1d71f9f6f095.i.gz"
+  },
+  "mCO_pat_idx_to_idx": {
+    "tu": "mCO_pat_idx_to_idx.i.gz",
+    "ctx": "ctx-648e7913385c.i.gz"
+  },
+  "aNRG2_setup_j11_cont": {
+    "tu": "aNRG2_setup_j11_cont.i.gz",
+    "ctx": "ctx-52bd886a0dc6.i.gz"
+  },
+  "mFI_BGDisplayListTop": {
+    "tu": "mFI_BGDisplayListTop.i.gz",
+    "ctx": "ctx-ad468e7c5444.i.gz"
+  },
+  "mEv_clear_status": {
+    "tu": "mEv_clear_status.i.gz",
+    "ctx": "ctx-202cd23f4bb9.i.gz"
+  },
+  "mCoBG_MakeJumpFlag": {
+    "tu": "mCoBG_MakeJumpFlag.i.gz",
+    "ctx": "ctx-4f4524b8bb24.i.gz"
+  },
+  "mMck_strlen": {
+    "tu": "mMck_strlen.i.gz",
+    "ctx": "ctx-5ce142eefbeb.i.gz"
+  },
+  "aINS_get_catch_range_sub": {
+    "tu": "aINS_get_catch_range_sub.i.gz",
+    "ctx": "ctx-e2905acd8eed.i.gz"
+  },
+  "mBGM_check_ignore_collect_insects_volume": {
+    "tu": "mBGM_check_ignore_collect_insects_volume.i.gz",
+    "ctx": "ctx-a4b096859fcb.i.gz"
+  },
+  "setScissorView": {
+    "tu": "setScissorView.i.gz",
+    "ctx": "ctx-5d1a988e10c9.i.gz"
+  },
+  "mRmTp_SetNowSceneOriginalWallStatus": {
+    "tu": "mRmTp_SetNowSceneOriginalWallStatus.i.gz",
+    "ctx": "ctx-8c31320a37e5.i.gz"
+  },
+  "Math3DLengthPlaneAndPos": {
+    "tu": "Math3DLengthPlaneAndPos.i.gz",
+    "ctx": "ctx-516fb9d56d7c.i.gz"
+  },
+  "aPMAN_set_move_idx": {
+    "tu": "aPMAN_set_move_idx.i.gz",
+    "ctx": "ctx-31af1eedccbe.i.gz"
+  },
+  "mKK_windowlight_alpha_get": {
+    "tu": "mKK_windowlight_alpha_get.i.gz",
+    "ctx": "ctx-750dc7a7fcd3.i.gz"
+  },
+  "chase_angle": {
+    "tu": "chase_angle.i.gz",
+    "ctx": "ctx-125846512d71.i.gz"
+  },
+  "check_percent_abs": {
+    "tu": "check_percent_abs.i.gz",
+    "ctx": "ctx-125846512d71.i.gz"
+  },
+  "mISL_GetFlatCheckSum": {
+    "tu": "mISL_GetFlatCheckSum.i.gz",
+    "ctx": "ctx-d4abbcf22eeb.i.gz"
+  },
+  "bite_check": {
+    "tu": "bite_check.i.gz",
+    "ctx": "ctx-d428617759ba.i.gz"
+  },
+  "mCD_set_number_str": {
+    "tu": "mCD_set_number_str.i.gz",
+    "ctx": "ctx-7da76de889eb.i.gz"
+  },
+  "evw_anime_colreg_manual": {
+    "tu": "evw_anime_colreg_manual.i.gz",
+    "ctx": "ctx-d68a3dea8ae9.i.gz"
+  },
+  "aNGD_check_talk_msg_no": {
+    "tu": "aNGD_check_talk_msg_no.i.gz",
+    "ctx": "ctx-20ea7d77ce8e.i.gz"
+  },
+  "mMld_TransformMelodyData_u64_2_u8": {
+    "tu": "mMld_TransformMelodyData_u64_2_u8.i.gz",
+    "ctx": "ctx-37e35bc8d44d.i.gz"
+  },
+  "mMck_search_sep": {
+    "tu": "mMck_search_sep.i.gz",
+    "ctx": "ctx-a99f5112f05f.i.gz"
+  },
+  "eDahsAsimoto_GetMakeOffset": {
+    "tu": "eDahsAsimoto_GetMakeOffset.i.gz",
+    "ctx": "ctx-55d07c0014ef.i.gz"
+  },
+  "aINS_destruct": {
+    "tu": "aINS_destruct.i.gz",
+    "ctx": "ctx-323aa9c88f96.i.gz"
+  },
+  "mMsr_Rtc2MushTime": {
+    "tu": "mMsr_Rtc2MushTime.i.gz",
+    "ctx": "ctx-51cb5b7343a6.i.gz"
+  },
+  "mAc_ActorShadowEllipse": {
+    "tu": "mAc_ActorShadowEllipse.i.gz",
+    "ctx": "ctx-68c139a33174.i.gz"
+  },
+  "JW_JUTGamePad_read": {
+    "tu": "JW_JUTGamePad_read.i.gz",
+    "ctx": "ctx-a0528ee5d665.i.gz"
+  },
+  "Skin_Matrix_MulMatrix": {
+    "tu": "Skin_Matrix_MulMatrix.i.gz",
+    "ctx": "ctx-7b961464e537.i.gz"
+  },
+  "add_calc_short_angle3": {
+    "tu": "add_calc_short_angle3.i.gz",
+    "ctx": "ctx-125846512d71.i.gz"
+  },
+  "Matrix_MtxtoMtxF": {
+    "tu": "Matrix_MtxtoMtxF.i.gz",
+    "ctx": "ctx-f6cbd1e2a989.i.gz"
+  },
+  "aQMgr_decide_idx_prob_table": {
+    "tu": "aQMgr_decide_idx_prob_table.i.gz",
+    "ctx": "ctx-ca129a922bcc.i.gz"
+  },
+  "mGcgba_IsTypes": {
+    "tu": "mGcgba_IsTypes.i.gz",
+    "ctx": "ctx-1b08d819444b.i.gz"
+  },
+  "eNight15Moon_GetNowMoonPos": {
+    "tu": "eNight15Moon_GetNowMoonPos.i.gz",
+    "ctx": "ctx-df653424d8e7.i.gz"
+  },
+  "EffectBG_object_before_display_xlu": {
+    "tu": "EffectBG_object_before_display_xlu.i.gz",
+    "ctx": "ctx-bf7fdee9f1bd.i.gz"
+  },
+  "mDE_waku_circle_write": {
+    "tu": "mDE_waku_circle_write.i.gz",
+    "ctx": "ctx-58eb16188d69.i.gz"
+  },
+  "mPr_SetPossessionItem": {
+    "tu": "mPr_SetPossessionItem.i.gz",
+    "ctx": "ctx-3801a6397c52.i.gz"
+  },
+  "cKF_KeyCalc": {
+    "tu": "cKF_KeyCalc.i.gz",
+    "ctx": "ctx-6b714020b183.i.gz"
+  },
+  "mEnv_ChangeRGBLight": {
+    "tu": "mEnv_ChangeRGBLight.i.gz",
+    "ctx": "ctx-750dc7a7fcd3.i.gz"
+  },
+  "lbRTC_RTCTimeToTicks": {
+    "tu": "lbRTC_RTCTimeToTicks.i.gz",
+    "ctx": "ctx-e673c9c56e02.i.gz"
+  },
+  "aBALL_actor_move": {
+    "tu": "aBALL_actor_move.i.gz",
+    "ctx": "ctx-5d392bd7d693.i.gz"
+  },
+  "step0_make_dl": {
+    "tu": "step0_make_dl.i.gz",
+    "ctx": "ctx-b8fc4715a8e3.i.gz"
+  }
+}
