@@ -29,11 +29,57 @@ export { KNOWN_FEATURES };
  *  aggregate's brace — so the members would otherwise be counted as declaration statements. */
 const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b[^{;]*\{[^{}]*\}/g, ' ');
 
-/** Everything before the opening brace: the return type, the name and the parameter list. A floor
- *  reading it is handed the WHOLE function (the third argument) rather than the body, for the
- *  reason `double` was: a `(int a)` in a signature is not a cast, and a `&` there is not a
- *  bitwise AND. */
-const signatureOf = (whole: string): string => whole.slice(0, Math.max(0, whole.indexOf('{')));
+/** A preprocessor directive, blanked to spaces so the text keeps its length and its line breaks.
+ *  A function-like macro's replacement list is a `)` followed by a brace, which is a function
+ *  definition to anything reading punctuation; a `#define` continued with a backslash keeps going
+ *  onto the next line. */
+const withoutDirectives = (s: string): string =>
+  s.replace(/^[ \t]*#(?:[^\n\\]|\\[\s\S])*/gm, (d) => d.replace(/[^\n]/g, ' '));
+
+/** Anything that takes a parenthesis and a brace without being a declarator. */
+const NOT_A_DECLARATOR = /\b(?:if|else|while|for|switch|do|catch|return|sizeof)\s*$/;
+
+/** The function's own definition: the declarator that names it, and the body that declarator opens.
+ *
+ *  A row's source is not a declarator followed by a body. A spec opens with the typedefs, macros
+ *  and aggregate definitions its signature needs, so the first `{` in the text is routinely not the
+ *  function's — which leaves "everything before it" a preamble rather than a signature, and
+ *  "everything after it" wider than the one function. So: the body opens at the first top-level `{`
+ *  that closes a parameter list, the signature is what stands between the preceding top-level `;`
+ *  or `}` and that brace, and the body ends at the brace's match — a file-scope declaration after
+ *  it is not part of this function and neither is one before it. */
+export function definitionOf(whole: string): { signature: string; body: string } {
+  const scan = withoutDirectives(whole);
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < scan.length; i++) {
+    const ch = scan[i];
+    if (ch === '{') {
+      const head = scan.slice(start, i);
+      if (
+        depth === 0 &&
+        /\)\s*(?:const\s+|volatile\s+)*$/.test(head) &&
+        !NOT_A_DECLARATOR.test(head.slice(0, head.lastIndexOf('(')))
+      ) {
+        let d = 0;
+        for (let j = i; j < scan.length; j++) {
+          if (scan[j] === '{') d++;
+          else if (scan[j] === '}' && --d === 0)
+            return { signature: whole.slice(start, i), body: whole.slice(i, j + 1) };
+        }
+        return { signature: whole.slice(start, i), body: whole.slice(i) };
+      }
+      depth++;
+    } else if (ch === '}') {
+      if (--depth === 0) start = i + 1;
+    } else if (ch === ';' && depth === 0) {
+      start = i + 1;
+    }
+  }
+  // No declarator: a vocabulary `example.c` is often a fragment. Read it whole.
+  const at = whole.indexOf('{');
+  return { signature: at < 0 ? whole : whole.slice(0, at), body: at < 0 ? whole : whole.slice(at) };
+}
 
 /** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
  *
@@ -150,28 +196,32 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
 
   // A constructor's declarator repeats the class name — `Thing::Thing(`. The SIGNATURE carries it
   // and the body never does, so like `double` this reads the whole function.
-  ctor: (_b, _asm, whole) => /\b(\w+)\s*::\s*\1\s*\(/.test(signatureOf(whole)),
+  ctor: (_b, _asm, whole) => /\b(\w+)\s*::\s*\1\s*\(/.test(definitionOf(whole).signature),
   // …and a destructor's is the same name behind a `~`.
-  dtor: (_b, _asm, whole) => /~\s*\w+\s*\(/.test(signatureOf(whole)),
+  dtor: (_b, _asm, whole) => /~\s*\w+\s*\(/.test(definitionOf(whole).signature),
 
   // A reference PARAMETER: an `&` between a type and a name, in the parameter list. Read from the
   // signature and not the body, where a binary `a & b` is the same three tokens. A reference local
   // is the same construct and cannot pass this floor — the same narrowing `double` accepts.
-  reference: (_b, _asm, whole) => /[\w>\]]\s*&\s*\**\s*\w+\s*[,)=]/.test(signatureOf(whole)),
+  reference: (_b, _asm, whole) => /[\w>\]]\s*&\s*\**\s*\w+\s*[,)=]/.test(definitionOf(whole).signature),
 
   // A hardware float ABI needs a floating-point type in the SIGNATURE — a float that only ever
   // exists inside the body is never passed or returned. Which projects spell it `f32`/`f64`
   // rather than `float`/`double` is why all four are accepted.
-  'hw-float-abi': (_b, _asm, whole) => /\b(?:float|double|f32|f64)\b/.test(signatureOf(whole)),
+  'hw-float-abi': (_b, _asm, whole) => /\b(?:float|double|f32|f64)\b/.test(definitionOf(whole).signature),
 
   // A by-value struct assignment is an assignment whose right-hand side is a WHOLE OBJECT — `*a =
-  // *b;`, `p->pos = q->pos;`, `v = w;` — and not an expression, which would be a scalar store. That
-  // the object is an aggregate is exactly what no scan can decide: the types are the project's.
-  'struct-copy': (b) => /=\s*\*?\s*[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*\s*;/.test(b),
+  // *b;`, `p->pos = q->pos;`, `v = w;` — and not an expression, which would be a scalar store. It
+  // has to be a PLAIN assignment: `a += b` reads and writes, and `a == b` does neither, so the `=`
+  // is required to stand alone. That the object is an aggregate is what no scan can decide — the
+  // types are the project's — so `v = w` between two scalars passes, and must.
+  'struct-copy': (b) =>
+    /(?<![-+*/%&|^!<>=])=(?!=)\s*\*?\s*[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*\s*;/.test(b),
 
   // For a callee to have been inlined, the body has to spell a call. The keywords that take a
-  // parenthesis are excluded, or every `if (` would pass.
-  'inlined-callee': (b) => /\b(?!if|while|for|switch|return|sizeof|do|catch)[A-Za-z_]\w*\s*\(/.test(b),
+  // parenthesis are excluded, or every `if (` would pass — and the lookahead closes on a word
+  // boundary, or `forward(x)` is refused for beginning with one of them.
+  'inlined-callee': (b) => /\b(?!(?:if|while|for|switch|return|sizeof|do|catch)\b)[A-Za-z_]\w*\s*\(/.test(b),
   'switch-arms': (b) => /\bswitch\s*\(/.test(b),
   dense: (b) => /\bswitch\s*\(/.test(b),
   sparse: (b) => /\bswitch\s*\(/.test(b),
@@ -223,13 +273,14 @@ function neutralizeDoWhileZero(body: string): string {
   return out.join('');
 }
 
-/** A local array declaration with a brace initialiser, its storage class captured rather than
+/** A local aggregate declaration with a brace initialiser, its storage class captured rather than
  *  skipped: `static u8 t[] = { … }` and `u8 t[] = { … }` are different shapes, and only the second
  *  costs a copy into the frame. Qualifiers before the type are optional and any number, the
- *  declarator may carry several extents (`s16 m[2][2]`), and the whole thing is anchored at a
+ *  declarator may carry several extents (`s16 m[2][2]`) or NONE — a struct is an aggregate and
+ *  takes the same copy, which is what the tag is about — and the whole thing is anchored at a
  *  statement boundary so an initialiser inside an expression cannot pass. */
 const LOCAL_AGGREGATE_INIT =
-  /(?:^|[;{}])\s*(?<storage>static\s+)?(?:(?:const|volatile|unsigned|signed|struct|union|enum)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)+=\s*\{/g;
+  /(?:^|[;{}])\s*(?<storage>static\s+)?(?:(?:const|volatile|unsigned|signed|struct|union|enum)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)*=\s*\{/g;
 
 /** A real do-while loop — `do { … } while (0)` has already been neutralized by the caller. */
 function hasRealDoWhile(body: string): boolean {
@@ -348,12 +399,11 @@ const hasControllingConnective = (body: string): boolean => {
 
 /** Which `source` tags the function's own C supports. */
 export function sourceEvidence(funcC: string): Set<string> {
-  const b = stripLiterals(funcC);
-  const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));
-  // Everything before the opening brace: the return type, the name and the parameter list. Some
-  // tags are facts about the SIGNATURE and leave no trace in the body at all — the same reason the
-  // `double` floor is handed the whole function rather than the body.
-  const signature = b.slice(0, Math.max(0, b.indexOf('{')));
+  const def = definitionOf(stripLiterals(funcC));
+  const body = neutralizeDoWhileZero(def.body);
+  // Some tags are facts about the SIGNATURE and leave no trace in the body at all — the same
+  // reason the `double` floor is handed the whole function rather than the body.
+  const signature = def.signature;
   const out = new Set<string>();
   if (/\bswitch\s*\(/.test(body)) out.add('switch');
   if (/\bgoto\s+\w+\s*;/.test(body)) out.add('goto');
@@ -365,7 +415,8 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (hasControllingConnective(body)) out.add('short-circuit');
   if (/\bsizeof\b/.test(body)) out.add('sizeof');
   // A declaration statement whose storage class is `static` — anchored at a statement boundary, so
-  // a `static` in a comment or mid-expression cannot pass. Only a DECLARATION can carry it in C.
+  // a `static` in a comment or mid-expression cannot pass, and read from the body alone, so the
+  // `static` that makes the FUNCTION file-scope is not one of these.
   if (/(?:^|[;{}])\s*static\b/.test(body)) out.add('static-local');
   // `...` can only be the ellipsis of a parameter list here: the signature holds no expressions.
   if (/\.\.\.\s*\)/.test(signature)) out.add('varargs-def');
@@ -375,7 +426,7 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (/(?<![.\w]|->)\bnew\b\s*[\w([]|(?<![.\w]|->)\bdelete\b\s*(?:\[\s*\]\s*)?[\w(*]/.test(body)) {
     out.add('new-delete');
   }
-  // A local aggregate with a brace initialiser — a declaration statement carrying `[…]` and `= {`.
+  // A local aggregate with a brace initialiser — a declaration statement carrying `= {`.
   // Only an AUTOMATIC one counts, so the storage class is CAPTURED rather than skipped: a `static`
   // aggregate lives in .rodata and is merely referenced, where an automatic one is copied into the
   // frame on every call, and that copy is the shape the tag is about. The static case is
@@ -409,9 +460,15 @@ const DIV_HELPERS = /__(u?divsi3|u?modsi3|divdi3|moddi3)/;
  *
  *  MIPS has neither spelling: the harness's objdump flags emit no MIPS relocation and an external
  *  `jal` renders against the enclosing symbol, so this returns nothing there. That is the same
- *  limit `call` documents, and it is why every tag below is a claim about the calls it CAN see. */
+ *  limit `call` documents, and it is why every tag below is a claim about the calls it CAN see.
+ *
+ *  Two things are deliberately unreadable. `bctrl` and `blrl` take no operand, so anything after
+ *  them is the next line rather than a callee. And an unresolved branch prints its own ADDRESS
+ *  followed by the enclosing symbol in angle brackets (`jal 0 <atans_table>`, `bl c <call1+0xc>`);
+ *  the address can be all hex letters and read as a name, and the bracketed symbol is the caller,
+ *  not the callee — so an operand followed by `<` names nothing and is skipped. */
 const CALL_TARGET =
-  /(?:\b(?:bl|bla|blrl|bctrl|jal|jalx)\s+|\bR_(?:PPC_(?:REL24|PLTREL24)|ARM_(?:CALL|PC24|THM_CALL|THM_XPC22)|MIPS_26)\s+)([A-Za-z_][\w$.]*)/g;
+  /(?:\b(?:bl|bla|jal|jalx)\s+|\bR_(?:PPC_(?:REL24|PLTREL24)|ARM_(?:CALL|PC24|THM_CALL|THM_XPC22)|MIPS_26)\s+)([A-Za-z_][\w$.]*)(?![\w$.])(?!\s*<)/g;
 
 const calledSymbols = (asm: string): Set<string> => new Set([...asm.matchAll(CALL_TARGET)].map((m) => m[1]));
 
