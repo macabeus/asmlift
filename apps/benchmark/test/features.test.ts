@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SYNTHETIC } from '../dataset/synthetic';
 import {
+  ASSEMBLY_ONLY_FLOOR,
   CODEGEN_DERIVED,
   JUDGEMENT_FLOOR,
   SOURCE_CHECKED,
@@ -218,38 +219,62 @@ describe('tags match their evidence', () => {
     expect(bad.sort()).toEqual([]);
   });
 
-  it('keeps every judgement tag above its floor', () => {
-    // EVERY toolchain's assembly for the symbol: a tag defensible on the row that branches must
-    // not be failed by the row the compiler made branchless.
-    const asmOf = new Map<string, string>();
-    for (const r of rows) {
-      const k = `${r.project}:${r.sym}`;
-      asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
-    }
-    const floors = (tags: string[], src: string, asm: string) => {
-      const stripped = stripLiterals(src);
-      const body = definitionOf(stripped).body;
-      return tags.filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped));
-    };
-    // The floors the ASSEMBLY decides: measured over the published rows rather than listed, as the
-    // tags some row passes with its assembly and fails without it. `results.json` is a published
-    // artifact, so a row the last `bench run` has not met carries no assembly here — it is held to
-    // every other floor, and to these as soon as the next run publishes it.
-    const assemblyDecides = new Set(
-      authored.flatMap(({ where, tags, src }) => {
-        const asm = asmOf.get(where);
-        return asm === undefined ? [] : floors(tags, src, '').filter((t) => !floors([t], src, asm).length);
-      }),
-    );
-    const bad = authored
+  // EVERY toolchain's assembly for the symbol: a tag defensible on the row that branches must
+  // not be failed by the row the compiler made branchless.
+  const asmOf = new Map<string, string>();
+  for (const r of rows) {
+    const k = `${r.project}:${r.sym}`;
+    asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
+  }
+  const floors = (tags: string[], src: string, asm: string) => {
+    const stripped = stripLiterals(src);
+    const body = definitionOf(stripped).body;
+    return tags.filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped));
+  };
+  /** Every floor a row fails, minus the ones only its object could have met while `results.json`
+   *  — a published artifact — has not met the row yet. A row the next `bench run` publishes is
+   *  held to those too, and to every source-reading floor it is held on the spot. */
+  const floorFailures = (entries: typeof authored) =>
+    entries
       .flatMap(({ where, tags, src }) => {
         const asm = asmOf.get(where);
         return floors(tags, src, asm ?? '')
-          .filter((t) => asm !== undefined || !assemblyDecides.has(t))
+          .filter((t) => asm !== undefined || !ASSEMBLY_ONLY_FLOOR.has(t))
           .map((t) => `${where} claims ${t}`);
       })
       .sort();
-    expect(bad).toEqual([]);
+
+  it('keeps every judgement tag above its floor', () => {
+    expect(floorFailures(authored)).toEqual([]);
+  });
+
+  it('holds a row the artifact has not met to every floor the SOURCE decides', () => {
+    // `branch` reads the source first and the assembly second, so a row with no assembly is still
+    // answerable — and a body with no conditional in it cannot claim the tag.
+    const fabricated = [{ where: 'unpublished:f', tags: ['branch'], src: 'int f(void) { return K; }' }];
+    expect(floorFailures(fabricated)).toEqual(['unpublished:f claims branch']);
+    expect(floorFailures([{ ...fabricated[0], src: 'int f(void) { return a ? K : J; }' }])).toEqual([]);
+    // …while the two floors nothing in the C can meet wait for the row to be published
+    expect(floorFailures([{ where: 'unpublished:g', tags: ['fnptr'], src: 'void g(S* s) { s->proc(); }' }])).toEqual(
+      [],
+    );
+  });
+
+  it('excuses only floors that no source can meet', () => {
+    // The direction that can hide a fabrication: a deferred floor that the C could have decided.
+    // Measured over every source the dataset holds and the vocabulary's own example for the tag —
+    // if any of them meets the floor with no assembly at all, the floor does not belong here.
+    const sources = [
+      ...authored.map((a) => a.src),
+      ...[...ASSEMBLY_ONLY_FLOOR].map((t) => FEATURE_BY_ID.get(t)?.example?.c ?? ''),
+    ];
+    const met = [...ASSEMBLY_ONLY_FLOOR].filter((t) =>
+      sources.some((src) => {
+        const stripped = stripLiterals(src);
+        return JUDGEMENT_FLOOR[t](definitionOf(stripped).body, '', stripped);
+      }),
+    );
+    expect(met).toEqual([]);
   });
 
   it('every judgement tag with a floor is actually a judgement tag', () => {

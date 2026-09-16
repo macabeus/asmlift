@@ -242,6 +242,14 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   'mod-reg': (b) => /%/.test(b),
 };
 
+/** The floors NOTHING in the C can meet: an indirect call exists only in the object, so these two
+ *  read the assembly and ignore the source entirely. A row the last `bench run` has not published
+ *  yet carries no assembly, so it cannot be held to these until it does — and to every OTHER floor
+ *  it is held on the spot, because every other floor reads the source. Declared here rather than
+ *  inferred from which tags some published row needs its assembly for: `branch` passes on either
+ *  evidence, and inferring swept it in and stopped checking the half the source decides. */
+export const ASSEMBLY_ONLY_FLOOR = new Set(['fnptr', 'virtual-call']);
+
 /** Strip comments and string/char literals so operator scans cannot match inside them. */
 export function stripLiterals(c: string): string {
   return c
