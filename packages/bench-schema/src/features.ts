@@ -672,8 +672,19 @@ export const FEATURES: readonly FeatureDef[] = [
     summary: 'a declared C bitfield (`u32 x : 2`) is read or written',
     detail:
       'A DECLARED bitfield, not a hand-rolled shift-and-mask. The compiled code is identical either ' +
-      'way, so the tag records source intent that cannot be recovered from the bytes.',
-    seeAlso: ['mask', 'shift', 'struct'],
+      'way, so the tag records source intent that cannot be recovered from the bytes. ' +
+      'What "identical" costs is per-ISA, and worth knowing before reading a diff on one of these ' +
+      'rows: ARM and MIPS spell an insert as a load, a mask, a shift, an OR and a store, while ' +
+      'PowerPC has ONE instruction for the whole of it — `rlwimi` rotates the new value into ' +
+      'position and writes only the bits its mask selects, leaving the rest of the word untouched. ' +
+      'So the same declaration is five instructions on one row here and one on another, and the ' +
+      'hand-rolled spelling compiles back to that same single instruction.',
+    example: {
+      c: 'struct S { u32 a : 3; u32 b : 5; };\ns->b = v;',
+      asm: '   8:\tlwz\tr0,0(r3)\n   c:\trlwimi\tr0,r4,24,3,7\t@ v into bits 3–7, the rest as it was\n  10:\tstw\tr0,0(r3)',
+      toolchain: 'mwcc_242_81',
+    },
+    seeAlso: ['mask', 'shift', 'struct', 'field'],
   },
   {
     id: 'array',
