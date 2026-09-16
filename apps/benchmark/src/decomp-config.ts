@@ -23,6 +23,7 @@ import {
   IDO_TOOLCHAIN,
   MWCC_PPC_TOOLCHAIN,
   TOOLCHAIN,
+  isMwccToolchainId,
   kmcCandidateCompiler,
   mwccCandidateCompiler,
   mwccDir,
@@ -40,7 +41,16 @@ const DATASET_DIR = join(SRC_DIR, '..', 'dataset', 'toolchains');
 const CONFIG_ROOT = join(SRC_DIR, '..', '.cache', 'decomp-configs');
 
 /** Machine locations for the $ASMLIFT_* placeholders in the committed configs — resolved
- *  through @asmlift/toolchains, which honors these exact names as env overrides. */
+ *  through @asmlift/toolchains, which honors these exact names as env overrides.
+ *
+ *  `$ASMLIFT_MWCC_DIR` is per TOOLCHAIN, not per machine: the three CodeWarrior configs are the
+ *  same command over three different compiler directories, and that directory is the whole
+ *  difference between them. */
+const placeholderValues = (id: ToolchainId): Record<string, string> => ({
+  ...PLACEHOLDER_VALUES,
+  ...(isMwccToolchainId(id) ? { ASMLIFT_MWCC_DIR: mwccDir(id) } : {}),
+});
+
 const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_AGBCC: TOOLCHAIN.agbcc,
   ASMLIFT_ARM_AS: TOOLCHAIN.as,
@@ -50,7 +60,6 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_DOCKER: GCC_KMC_TOOLCHAIN.docker,
   ASMLIFT_KMC_DIR: GCC_KMC_TOOLCHAIN.dir,
   ASMLIFT_KMC_IMAGE: GCC_KMC_TOOLCHAIN.image,
-  ASMLIFT_MWCC_DIR: mwccDir('mwcc_242_81'),
   ASMLIFT_PPC_IMAGE: MWCC_PPC_TOOLCHAIN.image,
   ASMLIFT_WIBO: MWCC_PPC_TOOLCHAIN.wibo,
 };
@@ -66,7 +75,7 @@ const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => Candidat
  *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */
 function substitutePlaceholders(cmd: string, id: ToolchainId): string {
   return cmd.replace(/"\$(ASMLIFT_[A-Z0-9_]+)"|\$(ASMLIFT_[A-Z0-9_]+)/g, (_, quoted, bare) => {
-    const value = PLACEHOLDER_VALUES[quoted ?? bare];
+    const value = placeholderValues(id)[quoted ?? bare];
     if (value === undefined) {
       throw new Error(`unknown placeholder $${quoted ?? bare} in dataset/toolchains/${id}/decomp.yaml`);
     }

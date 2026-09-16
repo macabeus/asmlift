@@ -83,6 +83,8 @@ export type MwccToolchainId = keyof typeof MWCC_BUILDS;
 
 export const MWCC_TOOLCHAIN_IDS = Object.keys(MWCC_BUILDS) as MwccToolchainId[];
 
+export const isMwccToolchainId = (id: string): id is MwccToolchainId => Object.hasOwn(MWCC_BUILDS, id);
+
 /** CodeWarrior mwcceppc toolchain — runs the Win32 PE `mwcceppc.exe` through `wibo` inside a
  *  linux/386 Docker image (packages/toolchains/ppc-docker), exactly as decomp.me does. The image bundles a
  *  32-bit `wibo` + a PowerPC objdump; the PROPRIETARY CodeWarrior binaries are NOT baked in —

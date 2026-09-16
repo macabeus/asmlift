@@ -26,6 +26,8 @@ const REAL_COMPILERS: Record<ToolchainId, RealCompile> = {
   'gcc2.7.2kmc': kmcReal,
   'gcc2.7.2': gcc272Real,
   mwcc_242_81: mwccReal('mwcc_242_81'),
+  mwcc_233_163n: mwccReal('mwcc_233_163n'),
+  mwcc_247_107: mwccReal('mwcc_247_107'),
 };
 
 /** Build the full translation unit: project #includes + any per-function prelude + the function.

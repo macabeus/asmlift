@@ -62,13 +62,15 @@ while for the dockerized three (KMC GCC, GCC 2.7.2, mwcc) the harness strips the
 built-ins (with container pooling) serve it, the same either/or a user gets. The reproduction
 scripts (`bench target`) get the command intact on every toolchain:
 
-| id            | ISA / compiler                     | asm both decompilers read                   |
-| ------------- | ---------------------------------- | ------------------------------------------- |
-| `agbcc`       | agbcc / ARM (GBA)                  | agbcc `.s` (shared by both — ARM is free)   |
-| `ido7.1`      | IDO / MIPS (N64)                   | `objdump -d` → normalized to GNU-as for m2c |
-| `gcc2.7.2kmc` | KMC GCC / MIPS (N64, Docker)       | `objdump -d` → normalized for m2c           |
-| `gcc2.7.2`    | GCC 2.7.2 / MIPS (N64, Docker)     | `objdump -d` → normalized for m2c           |
-| `mwcc_242_81` | CodeWarrior / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
+| id              | ISA / compiler                           | asm both decompilers read                   |
+| --------------- | ---------------------------------------- | ------------------------------------------- |
+| `agbcc`         | agbcc / ARM (GBA)                        | agbcc `.s` (shared by both — ARM is free)   |
+| `ido7.1`        | IDO / MIPS (N64)                         | `objdump -d` → normalized to GNU-as for m2c |
+| `gcc2.7.2kmc`   | KMC GCC / MIPS (N64, Docker)             | `objdump -d` → normalized for m2c           |
+| `gcc2.7.2`      | GCC 2.7.2 / MIPS (N64, Docker)           | `objdump -d` → normalized for m2c           |
+| `mwcc_242_81`   | CodeWarrior 2.4.2 / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
+| `mwcc_233_163n` | CodeWarrior 2.3.3 / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
+| `mwcc_247_107`  | CodeWarrior 2.4.7 / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
 
 asmlift's MIPS/PPC frontends consume `objdump`; m2c wants GNU-as text, so `src/eval/m2c-normalizer.ts`
 normalizes objdump -> GNU-as (faithful: same instructions/order, resyntaxed). ARM needs no
@@ -274,7 +276,7 @@ because the answer is not what the `decomp.yaml` files suggest:
 | --------- | ----------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys      | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
 | synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored          | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
-| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
+| synthetic | `gcc2.7.2kmc`, every `mwcc_*`       | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
 | synthetic | `gcc2.7.2`                          | n/a                                                   | no synthetic rows                                                                                  |
 | real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
 | real      | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc` | **no** — no `[candcache]` line at all                 | `REAL_COMPILERS`; only `compile/agbcc.ts` wires the cache                                          |

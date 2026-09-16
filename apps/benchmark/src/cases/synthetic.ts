@@ -2,6 +2,7 @@
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
+import { isCanonicalToolchainId } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
@@ -58,6 +59,11 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       if (spec.lang === 'c++' && tcId !== 'mwcc_242_81') {
         // only the mwcc adapter has a C++ build path; any other pairing would compile C++ as C
         throw new Error(`${spec.sym}: c++ specs must target mwcc_242_81 only, got ${tcId}`);
+      }
+      // A synthetic row compiles at the toolchain's canonical flags, so a toolchain that has none
+      // has no synthetic tier at all — the two CodeWarrior builds whose only rows are real ones.
+      if (!isCanonicalToolchainId(tcId)) {
+        throw new Error(`${spec.sym}: ${tcId} has no canonical flags, so it can carry no synthetic row`);
       }
       const tc = TOOLCHAINS[tcId];
       const codegen = canonicalCodegen(tcId);

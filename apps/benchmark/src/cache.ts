@@ -55,7 +55,11 @@ const TC_CFG: Record<ToolchainId, unknown> = {
   'ido7.1': IDO_TOOLCHAIN,
   'gcc2.7.2kmc': GCC_KMC_TOOLCHAIN,
   'gcc2.7.2': GCC272_TOOLCHAIN,
+  // One bag per CodeWarrior build: the shared half plus the directory that is the build, so two
+  // builds at one flag set never key to the same reference object.
   mwcc_242_81: [MWCC_PPC_TOOLCHAIN, mwccDir('mwcc_242_81')],
+  mwcc_233_163n: [MWCC_PPC_TOOLCHAIN, mwccDir('mwcc_233_163n')],
+  mwcc_247_107: [MWCC_PPC_TOOLCHAIN, mwccDir('mwcc_247_107')],
 };
 
 /** `tc.buildTarget`, cached by (toolchain config, codegen flags, reference source, symbol, and — for

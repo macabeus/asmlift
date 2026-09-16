@@ -309,17 +309,35 @@ describe('refusals', () => {
     );
   });
 
+  // A toolchain with no synthetic tier has no canonical flags to assume (target.ts): every row of
+  // it names the flags its own build compiles that unit with, so a run that found none anywhere has
+  // nothing to fall back on and says so instead of picking a set.
+  test('a toolchain with no canonical flags refuses a run that gives none', () => {
+    expect(refusal({ toolchain: 'mwcc_247_107' })).toBe(
+      'mwcc_247_107 has no canonical flags; pass --cflags "<the flags your build compiles this file with>"',
+    );
+    expect(refusal({ toolchain: 'mwcc_233_163n', cflags: '' })).toBe(
+      '--cflags is empty; mwcc_233_163n has no canonical flags to leave it out for',
+    );
+    // …and with flags it resolves like any other toolchain
+    const given = resolveFlags(input({ toolchain: 'mwcc_247_107', cflags: '-proc gekko -O0,p -char unsigned' }));
+    expect(given).toMatchObject({ ok: true });
+    expect(given.ok && given.resolved.profile.slots.O).toBe('0,p');
+    // the shipped build, at the SAME missing flags, still has its own set to assume
+    expect(resolveFlags(input({ toolchain: 'mwcc_242_81' }))).toMatchObject({ ok: true });
+  });
+
   test('a level word the family cannot read names the target that reads it', () => {
     expect(refusal({ cflags: '-O4,p' })).toBe(
       '--cflags: -O4,p is not an optimisation level agbcc accepts; mwcc spells its levels that way; ' +
-        'did you mean --target mwcc_242_81?',
+        'did you mean --target mwcc_242_81 or --target mwcc_233_163n or --target mwcc_247_107?',
     );
     expect(refusal({ toolchain: 'mwcc_242_81', cflags: '-O9' })).toBe(
       '--cflags: -O9 is not an optimisation level mwcc accepts',
     );
     expect(refusal({ command: 'agbcc -O4,s {{inputPath}} -o {{outputPath}}' })).toBe(
       'tools.asmlift.compiler: -O4,s is not an optimisation level agbcc accepts; mwcc spells its levels that way; ' +
-        'did you mean --target mwcc_242_81?',
+        'did you mean --target mwcc_242_81 or --target mwcc_233_163n or --target mwcc_247_107?',
     );
   });
 

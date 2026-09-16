@@ -3,6 +3,7 @@
 // testable without the editor or the wasm compiler.
 import { UnreadableLevelError, optLevel, shellJoinFlags, tokenizeFlags } from '@asmlift/core/codegen-flags';
 import {
+  type CanonicalToolchainId,
   type ResolvedTarget,
   TOOLCHAIN_TARGETS,
   type ToolchainId,
@@ -21,8 +22,9 @@ export type FlagsReading =
     }
   | { error: string };
 
-/** A toolchain's canonical flags as the field spells them. */
-export function canonicalFlagsText(toolchain: ToolchainId): string {
+/** A toolchain's canonical flags as the field spells them. The ⟲ button restores them, so the
+ *  Playground only offers toolchains that HAVE them — a real-only one has nothing to restore. */
+export function canonicalFlagsText(toolchain: CanonicalToolchainId): string {
   return shellJoinFlags(TOOLCHAIN_TARGETS[toolchain].canonicalFlags);
 }
 

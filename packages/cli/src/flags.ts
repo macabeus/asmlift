@@ -24,6 +24,7 @@ import {
   type ResolvedTarget,
   TOOLCHAIN_TARGETS,
   type ToolchainId,
+  canonicalFlagsOf,
   isToolchainId,
   targetFor,
 } from '@asmlift/core/target';
@@ -291,7 +292,8 @@ function words(source: string, text: string): string[] | Refusal {
 /** The flags a run is about, or the refusal that stops it. */
 export function resolveFlags(input: FlagsInput): FlagsResolution {
   const { toolchain, command, env, ranked, dtk } = input;
-  const { family, canonicalFlags } = TOOLCHAIN_TARGETS[toolchain];
+  const { family } = TOOLCHAIN_TARGETS[toolchain];
+  const canonicalFlags = canonicalFlagsOf(toolchain);
   const takesCflags = command?.includes('{{cflags}}') === true;
   const takesCc = command?.includes('{{cc}}') === true;
   /** what the source of the flags is, said under the head */
@@ -319,7 +321,9 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
         ok: false,
         message: ranked
           ? '--cflags is empty; --score-against compiles every candidate with the flags it gives'
-          : `--cflags is empty; leave it out to decompile at ${toolchain}'s canonical flags`,
+          : canonicalFlags === undefined
+            ? `--cflags is empty; ${toolchain} has no canonical flags to leave it out for`
+            : `--cflags is empty; leave it out to decompile at ${toolchain}'s canonical flags`,
       };
     }
     cflags = argv;
@@ -441,15 +445,23 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
     }
   }
 
-  const resolved = orLevelRefusal(source || 'tools.asmlift.compiler', () =>
-    targetFor(toolchain, cflags ?? canonicalFlags),
-  );
+  // A toolchain with no synthetic tier has no canonical flags to fall back on (target.ts), so a run
+  // that found none anywhere has nothing to resolve against. Saying so is the whole of the fallback:
+  // a set picked here would be a set nobody's build uses.
+  const effective = cflags ?? canonicalFlags;
+  if (effective === undefined) {
+    return {
+      ok: false,
+      message: `${toolchain} has no canonical flags; pass --cflags "<the flags your build compiles this file with>"`,
+    };
+  }
+  const resolved = orLevelRefusal(source || 'tools.asmlift.compiler', () => targetFor(toolchain, effective));
   if (isRefusal(resolved)) {
     return resolved;
   }
   const head =
     cflags === undefined
-      ? `${unread ? 'unread (compiler command)' : 'none given'}: decompiling at ${toolchain}'s canonical flags ${shellJoinFlags(canonicalFlags)}; ` +
+      ? `${unread ? 'unread (compiler command)' : 'none given'}: decompiling at ${toolchain}'s canonical flags ${shellJoinFlags(effective)}; ` +
         'pass --cflags if your build differs'
       : cflags.length === 0
         ? `no codegen flags (${source})`

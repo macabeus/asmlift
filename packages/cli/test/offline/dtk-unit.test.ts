@@ -176,12 +176,13 @@ describe('the flags a dtk unit gives', () => {
   test("a unit compiled by another compiler is refused, unless the command takes the unit's through {{cc}}", () => {
     const main = unit('marioparty4', 'main/game/main');
     const refused = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: main } }));
-    // a plain run with no compile command: the unit's flags, quoted to paste, are the one way on
+    // a plain run with no compile command. `mwcc_247_107` is a target asmlift HAS, so switching to
+    // it leads the list and pasting the unit's flags is the escape for anyone who cannot.
     expect(refused).toEqual({
       ok: false,
       message:
-        'objdiff.json unit main/game/main is compiled by mwcc_247_107, and the target is mwcc_242_81; asmlift has no ' +
-        `mwcc_247_107 target: pass --cflags '${main.cflags}' to give the unit's flags yourself`,
+        'objdiff.json unit main/game/main is compiled by mwcc_247_107, and the target is mwcc_242_81: ' +
+        `pass --target mwcc_247_107, or pass --cflags '${main.cflags}' to give the unit's flags yourself`,
     });
     const compiled = resolveFlags(
       dtkInput({
@@ -192,7 +193,7 @@ describe('the flags a dtk unit gives', () => {
     expect(compiled).toMatchObject({
       ok: false,
       message: expect.stringMatching(
-        /target: write \{\{cc\}\} in tools\.asmlift\.compiler where the compiler's name goes to compile with the unit's compiler, or pass --cflags '.*' to give the unit's flags yourself$/,
+        /is mwcc_242_81: pass --target mwcc_247_107, write \{\{cc\}\} in tools\.asmlift\.compiler where the compiler's name goes to compile with the unit's compiler, or pass --cflags '.*' to give the unit's flags yourself$/,
       ),
     });
     const mwccUnitOnAgbcc = resolveFlags(

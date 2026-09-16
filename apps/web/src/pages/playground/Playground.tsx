@@ -5,7 +5,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { detectName } from '@asmlift/core/detect';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type DecompileResult, decompile } from '@asmlift/core/pipeline';
-import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
+import { type CanonicalToolchainId, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { decompileTraced } from '@asmlift/core/trace';
 import { StreamLanguage } from '@codemirror/language';
 import { gas } from '@codemirror/legacy-modes/mode/gas';
@@ -24,7 +24,7 @@ import { canonicalFlagsText, readFlags } from './flags-field';
 import { parseSymbolsJson } from './symbols-json';
 import { useRanking } from './useRanking';
 
-const TARGETS: Record<string, { id: ToolchainId; label: string; format: string }> = {
+const TARGETS: Record<string, { id: CanonicalToolchainId; label: string; format: string }> = {
   agbcc: { id: 'agbcc', label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
   'ido7.1': { id: 'ido7.1', label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
   'gcc2.7.2kmc': { id: 'gcc2.7.2kmc', label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },

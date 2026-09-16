@@ -25,7 +25,7 @@
 // Pure data: this module stays browser-safe. `offeredWhen` names admission tables by key; their rules
 // are `variation-gates.ts`, which a reader of a title or a summary never loads.
 import type { FlagFamily } from './codegen-flags';
-import type { ToolchainId } from './target';
+import type { CanonicalToolchainId } from './target';
 import type { GateTableName } from './variation-gates';
 import type { GatingBehavior, VariationKind, VariationName } from './variation-tokens';
 
@@ -111,8 +111,9 @@ export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: Variat
 export type ExampleCompiler = FlagFamily;
 
 /** The toolchain each example compiler builds with. An example and a witness are claims at that
- *  toolchain's canonical flags (`TOOLCHAIN_TARGETS`), which is what the matching suite compiles them at. */
-export const EXAMPLE_COMPILER_TOOLCHAINS: { readonly [C in ExampleCompiler]: ToolchainId } = {
+ *  toolchain's canonical flags (`TOOLCHAIN_TARGETS`), which is what the matching suite compiles them
+ *  at — so the toolchain named here must be one that HAS them, which the type says. */
+export const EXAMPLE_COMPILER_TOOLCHAINS: { readonly [C in ExampleCompiler]: CanonicalToolchainId } = {
   agbcc: 'agbcc',
   ido: 'ido7.1',
   gcc: 'gcc2.7.2kmc',

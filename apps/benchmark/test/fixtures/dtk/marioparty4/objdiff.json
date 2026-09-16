@@ -93,6 +93,26 @@
         "progress_categories": ["modules"],
         "auto_generated": false
       }
+    },
+    {
+      "name": "main/game/unknown",
+      "target_path": "build/GMPE01_00/obj/game/unknown.o",
+      "base_path": "build/GMPE01_00/src/game/unknown.o",
+      "scratch": {
+        "platform": "gc_wii",
+        "compiler": "mwcc_999_999",
+        "c_flags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c",
+        "preset_id": 82,
+        "ctx_path": "build/GMPE01_00/src/game/unknown.ctx",
+        "build_ctx": true
+      },
+      "metadata": {
+        "complete": true,
+        "reverse_fn_order": false,
+        "source_path": "src/game/unknown.c",
+        "progress_categories": ["dol"],
+        "auto_generated": false
+      }
     }
   ]
 }

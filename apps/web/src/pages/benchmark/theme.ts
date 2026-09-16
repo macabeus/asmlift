@@ -85,9 +85,19 @@ export const TOOLCHAIN_LABEL: Record<ToolchainId, string> = {
   'gcc2.7.2kmc': 'KMC GCC 2.7.2 / MIPS',
   'gcc2.7.2': 'GCC 2.7.2 / MIPS',
   mwcc_242_81: 'CodeWarrior 2.4.2 / PPC',
+  mwcc_233_163n: 'CodeWarrior 2.3.3 / PPC',
+  mwcc_247_107: 'CodeWarrior 2.4.7 / PPC',
 };
 
-export const TOOLCHAIN_ORDER: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'];
+export const TOOLCHAIN_ORDER: ToolchainId[] = [
+  'agbcc',
+  'ido7.1',
+  'gcc2.7.2kmc',
+  'gcc2.7.2',
+  'mwcc_242_81',
+  'mwcc_233_163n',
+  'mwcc_247_107',
+];
 
 /** Human labels for the ISAs (the "assembly" axis).
  *

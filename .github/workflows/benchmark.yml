@@ -12,8 +12,9 @@
 #                   Mario Party 3's tools/Makefile fetches), at -O1; runs in the same i386 container
 #   - CodeWarrior:  files.decomp.dev compilers pack, one dir per build (the exact mapping
 #                   decomp.me's own images use, pinned in packages/toolchains/src/toolchain.ts):
-#                   mwcc_242_81 = GC/1.3.2. They run through the asmlift-ppc image (wibo), built
-#                   here from packages/toolchains/ppc-docker
+#                   mwcc_242_81 = GC/1.3.2, mwcc_233_163n = GC/1.2.5n, mwcc_247_107 = GC/2.6.
+#                   They run through the asmlift-ppc image (wibo), built here from
+#                   packages/toolchains/ppc-docker
 #   - m2c:          PINNED commit — the m2c result cache and the baseline's meaning are keyed to
 #                   it; bump deliberately, never float
 #   - real tier:    fully self-contained — the dataset vendors each function's PREPROCESSED
@@ -83,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps
-          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v5
+          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v6
 
       - name: Fetch toolchains + m2c (pinned)
         if: steps.deps.outputs.cache-hit != 'true'
@@ -115,9 +116,11 @@ jobs:
           # CodeWarrior: one dir per build, named as decomp.me names it (MWCC_BUILDS holds the
           # pack-directory mapping, and a test pins it)
           curl -fsSL "https://files.decomp.dev/compilers_${COMPILERS_TAG}.zip" -o /tmp/compilers.zip
-          unzip -q /tmp/compilers.zip 'GC/1.3.2/*' -d /tmp/compilers
+          unzip -q /tmp/compilers.zip 'GC/1.3.2/*' 'GC/1.2.5n/*' 'GC/2.6/*' -d /tmp/compilers
           mkdir -p "$DEPS/mwcc"
           mv /tmp/compilers/GC/1.3.2 "$DEPS/mwcc/mwcc_242_81"
+          mv "/tmp/compilers/GC/1.2.5n" "$DEPS/mwcc/mwcc_233_163n"
+          mv /tmp/compilers/GC/2.6 "$DEPS/mwcc/mwcc_247_107"
           rm -rf /tmp/compilers.zip /tmp/compilers
 
           # m2c — the pinned baseline

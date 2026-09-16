@@ -149,9 +149,19 @@ describe('a dtk unit', () => {
     });
   });
 
+  test("a DOL unit's own CodeWarrior build is derived, not the project's most common one", () => {
+    // Mario Party 4 builds its RELs with GC/1.3.2 and its DOL `Game` lib with GC/2.6, and this is
+    // where a row learns which: the unit names the compiler, the manifest stores it, and the row
+    // compiles with that binary.
+    const main = deriveDtkFlags(root, commit, 'src/game/main.c');
+    expect(main.toolchain).toBe('mwcc_247_107');
+    expect(main.cflags).toContain('-O0,p');
+    expect(main.flagsFrom).toMatchObject({ from: 'objdiff', unit: 'main/game/main' });
+  });
+
   test('a compiler asmlift has no toolchain for, a source several units compile, and no unit are refused', () => {
-    expect(() => deriveDtkFlags(root, commit, 'src/game/main.c')).toThrow(
-      'main/game/main is compiled by mwcc_247_107, which is not an asmlift toolchain',
+    expect(() => deriveDtkFlags(root, commit, 'src/game/unknown.c')).toThrow(
+      'main/game/unknown is compiled by mwcc_999_999, which is not an asmlift toolchain',
     );
     expect(() => deriveDtkFlags(root, commit, 'src/REL/executor.c')).toThrow(
       'src/REL/executor.c is compiled in 2 objdiff.json units: m403Dll/REL/executor, m427Dll/REL/executor',

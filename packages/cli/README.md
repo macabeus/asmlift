@@ -19,13 +19,13 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Inputs
 
-| Input                                            | Accepted for                        |
-| ------------------------------------------------ | ----------------------------------- |
-| Compiler `.s` text                               | All targets                         |
-| `objdump -d --no-show-raw-insn` text             | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2` |
-| `objdump -d -r -M gekko --no-show-raw-insn` text | `mwcc_242_81`                       |
-| ELF object file (`.o`)                           | MIPS/PPC targets                    |
-| `-` (stdin)                                      | text formats only                   |
+| Input                                            | Accepted for                                   |
+| ------------------------------------------------ | ---------------------------------------------- |
+| Compiler `.s` text                               | All targets                                    |
+| `objdump -d --no-show-raw-insn` text             | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2`            |
+| `objdump -d -r -M gekko --no-show-raw-insn` text | `mwcc_242_81`, `mwcc_233_163n`, `mwcc_247_107` |
+| ELF object file (`.o`)                           | MIPS/PPC targets                               |
+| `-` (stdin)                                      | text formats only                              |
 
 If the file includes multi-functions, pass the `--name` flag.
 
@@ -44,7 +44,8 @@ the right command for you.
 ## CLI reference
 
 ```
-usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81>]
+usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81|
+                                           mwcc_233_163n|mwcc_247_107>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--cflags <flags>] [--module <module>]
                 [--config <decomp.yaml>] [--score-against <target.o>]

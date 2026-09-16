@@ -19,6 +19,8 @@ import {
   TOOLCHAIN_TARGETS,
   type TargetDescription,
   type ToolchainId,
+  canonicalFlagsOf,
+  isCanonicalToolchainId,
   isToolchainId,
   structureOptionsFor,
   targetFor,
@@ -30,12 +32,23 @@ const DESCRIPTIONS: Record<ToolchainId, TargetDescription> = {
   'gcc2.7.2kmc': MIPS_GCC,
   'gcc2.7.2': MIPS_GCC,
   mwcc_242_81: PPC_MWCC,
+  mwcc_233_163n: PPC_MWCC,
+  mwcc_247_107: PPC_MWCC,
 };
 const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
+/** the toolchains that HAVE canonical flags — the questions below that are about a flag set */
+const CANONICAL_IDS = IDS.filter(isCanonicalToolchainId);
 
 describe('targetFor', () => {
-  test.each(IDS)('%s at its canonical flags is its description', (id) => {
+  test.each(CANONICAL_IDS)('%s at its canonical flags is its description', (id) => {
     expect(targetFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags).target).toBe(DESCRIPTIONS[id]);
+  });
+
+  // A toolchain with no synthetic tier has no canonical flags, and every flag set still resolves to
+  // its description — what it lacks is a set to fall back ON, not a reading.
+  test.each(IDS.filter((id) => !isCanonicalToolchainId(id)))('%s has no canonical flags at all', (id) => {
+    expect(canonicalFlagsOf(id)).toBeUndefined();
+    expect(targetFor(id, ['-proc', 'gekko', '-O0,p']).target).toBe(DESCRIPTIONS[id]);
   });
 
   // A profile of a compiler inherits its declarations. Withholding them would not claim nothing:
@@ -53,14 +66,14 @@ describe('targetFor', () => {
     expect(structureOptionsFor(r.target, false)).toEqual(structureOptionsFor(DESCRIPTIONS[id], false));
   });
 
-  test.each(IDS)('%s’s canonical flags are in normal form and every word is in its family’s table', (id) => {
+  test.each(CANONICAL_IDS)('%s’s canonical flags are in normal form and every word is in its family’s table', (id) => {
     const { family, canonicalFlags } = TOOLCHAIN_TARGETS[id];
     expect(storedFlags(family, canonicalFlags)).toEqual(canonicalFlags);
     expect(parseFlags(family, canonicalFlags).unclassified).toEqual([]);
   });
 
   test('a toolchain id is a key of the registry and nothing else', () => {
-    expect(IDS).toEqual(['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81']);
+    expect(IDS).toEqual(['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107']);
     expect(isToolchainId('toString')).toBe(false);
   });
 });

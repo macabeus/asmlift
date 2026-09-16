@@ -4,12 +4,23 @@
 // resolves to, and that nothing downstream can conflate two of them.
 //
 // TOOLCHAIN-FREE: paths and container names are computed, never run. No Docker, no CodeWarrior.
+import { TOOLCHAIN_TARGETS, isToolchainId } from '@asmlift/core/target';
 import { describe, expect, test } from 'vitest';
 
 import { ppcDumpPoolCfg, ppcPoolCfg } from '../src/compile';
 import { MWCC_BUILDS, MWCC_PPC_TOOLCHAIN, MWCC_TOOLCHAIN_IDS, mwccDir } from '../src/toolchain';
 
 describe('the CodeWarrior builds', () => {
+  // TWO LISTS, ONE FACT. @asmlift/core says which toolchains a row may name; this package says which
+  // binaries exist to compile them. A toolchain declared there with no directory here would compile
+  // nothing; a directory here that no toolchain names would be mounted by no row.
+  test('are exactly the mwcc toolchains the registry declares', () => {
+    const declared = Object.keys(TOOLCHAIN_TARGETS)
+      .filter(isToolchainId)
+      .filter((id) => TOOLCHAIN_TARGETS[id].family === 'mwcc');
+    expect([...MWCC_TOOLCHAIN_IDS].sort()).toEqual([...declared].sort());
+  });
+
   test('each resolves to its own directory under the compilers root', () => {
     for (const id of MWCC_TOOLCHAIN_IDS) {
       expect(mwccDir(id)).toBe(`${MWCC_PPC_TOOLCHAIN.root}/${id}`);
