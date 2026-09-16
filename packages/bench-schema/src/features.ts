@@ -903,8 +903,10 @@ export const FEATURES: readonly FeatureDef[] = [
       'every call, so the function carries a block move no statement wrote — and the bytes being ' +
       'copied are in a data section, not in the function. Recovering it means reading that ' +
       'section, recognising the copy as a declaration rather than as a `memcpy`, and re-emitting ' +
-      'the values as an initialiser list. Adding `static` to the same line removes the copy ' +
-      'entirely, because the object stops being in the frame: that is `static-local`.',
+      'the values as an initialiser list. A struct is an aggregate too — `Vec3f v = { 0, 1, 2 };` ' +
+      'takes the same copy and carries the same tag, with no array extent to give it away. Adding ' +
+      '`static` to either line removes the copy entirely, because the object stops being in the ' +
+      'frame: that is `static-local`.',
     example: {
       c: 'void f(void) { s16 dx[4] = { 0, -1, 0, 1 }; g(dx[k]); }',
       asm: '  lwz  r5,0(r4)      @ the four values, loaded from .rodata …\n  stw  r5,8(r1)      @ … and stored into the frame, every call',
@@ -1427,7 +1429,9 @@ export const FEATURES: readonly FeatureDef[] = [
       'their own wrappers and macros (`sind`, `cosd`), the arguments are widened to `double` and ' +
       'the result narrowed back by conversions the source never wrote, and a compiler is free to ' +
       'expand some of them inline instead, so that `fabsf` leaves two instructions and no call at ' +
-      'all.',
+      'all. The tag is read off the callee NAME and nothing else, so a project function of its own ' +
+      'called `log`, `pow` or `floor` carries it and should not — the names the standard claims are ' +
+      'ordinary enough that a decomp reuses them.',
     seeAlso: ['call', 'runtime-helper-call', 'inlined-callee', 'float', 'double'],
   },
   {
