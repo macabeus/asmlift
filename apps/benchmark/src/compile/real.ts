@@ -11,6 +11,7 @@ import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { type BuiltTarget, type ToolchainId, checkedTarget } from '../toolchains';
 import { agbccReal, stripPrototype } from './agbcc';
+import { declarationsOnly } from './declarations';
 import { gcc272Real } from './gcc272';
 import { idoReal } from './ido';
 import { kmcReal } from './kmc';
@@ -39,6 +40,20 @@ export function makeTU(cfg: RealProjectCfg, prependC: string, funcC: string): st
 
 export function realCompilerFor(toolchain: ToolchainId): RealCompile {
   return REAL_COMPILERS[toolchain];
+}
+
+/** The context m2c's `--context` reads, out of the context a row's candidates compile in.
+ *
+ *  A host `cpp` writes GNU C, which m2c's C parser reads as it is. CodeWarrior's own `-EP` keeps CodeWarrior's
+ *  dialect, and the Dolphin SDK every GameCube unit includes defines inline functions around `asm { … }`
+ *  blocks, which m2c refuses at the first one — so for CodeWarrior m2c gets the DECLARATIONS
+ *  (`declarationsOnly`). That is everything m2c takes from a context: its reader never descends into a
+ *  function body, and on the two existing real rows whose contexts carry bodies
+ *  (`pokeemerald:Cmd_tryconversiontypechange`, `pokeemerald:AnimTask_FlashHealthboxOnLevelUp_Step`) m2c's
+ *  output is byte-identical with the bodies removed. The candidate context keeps them: a candidate calling
+ *  an inline function has to inline it. */
+export function m2cContext(toolchain: ToolchainId, ctxI: string): string {
+  return TOOLCHAIN_TARGETS[toolchain].family === 'mwcc' ? declarationsOnly(ctxI) : ctxI;
 }
 
 /** The compile module for a row of this toolchain in this language, refusing the pairing no

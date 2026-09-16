@@ -4,11 +4,13 @@
 // checkouts, no submodules, no generated headers and no upstream pins: the dataset is
 // self-contained. Re-run `bench vendor` deliberately when a project state should change.
 //
-// Two blobs per function, gzip'd under dataset/real/tu/<project>/:
+// Blobs per function, gzip'd under dataset/real/tu/<project>/:
 //   <sym>.i.gz      — the preprocessed TARGET TU (`rowSources`)
 //   ctx-<sha12>.i.gz — the preprocessed CONTEXT (the TU without the function), deduped by
 //                      content (most functions of a project share one context); the candidate
-//                      scorer's richest strategy compiles against it
+//                      scorer's richest strategy compiles against it — and the context m2c reads
+//                      (compile/real.ts `m2cContext`), which is the same file unless CodeWarrior
+//                      preprocessed it
 // plus index.json (sym → blobs) and PROVENANCE.json (project commit, dirty flag, cpp version).
 //
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths, and a target TU the
@@ -35,7 +37,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 import { sha } from '../cache';
-import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
+import { buildRealTarget, m2cContext, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
@@ -45,6 +47,7 @@ import {
   REAL_DIR,
   type RealFunction,
   type RealManifest,
+  type VendoredEntry,
   loadManifestsForVendor,
   resolveProjectRoot,
   rewriteManifest,
@@ -182,24 +185,27 @@ function moduleIdentityProver(project: string, root: string): (sym: string, addr
  *  a file nothing reads. Returns the index `index.json` records and how many contexts were written. */
 export function writeVendoredBlobs(
   outDir: string,
-  prepared: readonly { sym: string; tuI: string; ctxI: string }[],
-): { index: Record<string, { tu: string; ctx: string }>; contexts: number } {
+  prepared: readonly { sym: string; tuI: string; ctxI: string; m2cI: string }[],
+): { index: Record<string, VendoredEntry>; contexts: number } {
   mkdirSync(outDir, { recursive: true });
-  const index: Record<string, { tu: string; ctx: string }> = {};
+  const index: Record<string, VendoredEntry> = {};
   const ctxSeen = new Map<string, string>(); // content sha → file name
-  for (const { sym, tuI, ctxI } of prepared) {
+  const contextFile = (text: string): string => {
+    const ctxSha = sha(text).slice(0, 12);
+    let name = ctxSeen.get(ctxSha);
+    if (!name) {
+      name = `ctx-${ctxSha}.i.gz`;
+      writeFileSync(join(outDir, name), gzipSync(text));
+      ctxSeen.set(ctxSha, name);
+    }
+    return name;
+  };
+  for (const { sym, tuI, ctxI, m2cI } of prepared) {
     const tuName = `${sym}.i.gz`;
     writeFileSync(join(outDir, tuName), gzipSync(tuI));
-    const ctxSha = sha(ctxI).slice(0, 12);
-    let ctxName = ctxSeen.get(ctxSha);
-    if (!ctxName) {
-      ctxName = `ctx-${ctxSha}.i.gz`;
-      writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
-      ctxSeen.set(ctxSha, ctxName);
-    }
-    index[sym] = { tu: tuName, ctx: ctxName };
+    index[sym] = { tu: tuName, ctx: contextFile(ctxI), m2c: contextFile(m2cI) };
   }
-  const written = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx]));
+  const written = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx, e.m2c]));
   for (const stale of readdirSync(outDir).filter((f) => f.endsWith('.i.gz') && !written.has(f))) {
     rmSync(join(outDir, stale));
   }
@@ -259,7 +265,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     }
 
     const outDir = join(REAL_DIR, 'tu', man.project);
-    const prepared: { sym: string; tuI: string; ctxI: string; romDigest: string }[] = [];
+    const prepared: { sym: string; tuI: string; ctxI: string; m2cI: string; romDigest: string }[] = [];
     const moduleIdentity = moduleIdentityProver(man.project, root);
     const placedModule = placedModuleElves(man.project, root);
     for (const f of man.functions) {
@@ -320,7 +326,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         );
         continue;
       }
-      prepared.push({ sym: f.sym, tuI, ctxI, romDigest: proof.digest });
+      prepared.push({ sym: f.sym, tuI, ctxI, m2cI: m2cContext(unit.toolchain, ctxI), romDigest: proof.digest });
     }
     if (refusals.length > 0) {
       throw new Error(`${man.project}: refused, nothing written:\n  ${refusals.join('\n  ')}`);

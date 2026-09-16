@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vitest';
 import {
   REAL_DIR,
   type RealManifest,
+  type VendoredEntry,
   resolveProjectRoot,
   validateManifest,
   vendoredMapFile,
@@ -191,14 +192,11 @@ describe('committed real-tier manifests', () => {
     test(`${f} has vendored TUs for every function, free of machine paths`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const dir = join(REAL_DIR, 'tu', man.project);
-      const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<
-        string,
-        { tu: string; ctx: string }
-      >;
+      const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<string, VendoredEntry>;
       for (const fn of man.functions) {
         const entry = index[fn.sym];
         expect(entry, `${man.project}:${fn.sym} missing from vendored index`).toBeDefined();
-        for (const blob of [entry.tu, entry.ctx]) {
+        for (const blob of [entry.tu, entry.ctx, entry.m2c]) {
           const text = gunzipSync(readFileSync(join(dir, blob))).toString('utf8');
           expect(text, `machine path inside ${man.project}/${blob}`).not.toMatch(MACHINE_PATH);
         }

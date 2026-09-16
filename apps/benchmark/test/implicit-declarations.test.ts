@@ -40,7 +40,8 @@ describe('every committed vendored TU declares every function it calls', () => {
     const found: string[] = [];
     const unasked: string[] = [];
     let checked = 0;
-    for (const man of manifests) {
+    // A `unit` TU is the project's own unit, implicit declarations and all (cases/vendor.ts).
+    for (const man of manifests.filter((m) => m.tu === 'assembled')) {
       const dir = join(REAL_DIR, 'tu', man.project);
       const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<string, { tu: string }>;
       for (const fn of man.functions) {
@@ -66,6 +67,8 @@ describe('every committed vendored TU declares every function it calls', () => {
       console.warn(`no CodeWarrior container: ${unasked.length} GameCube row(s) not asked (${unasked.join(', ')})`);
     }
     expect(found).toEqual([]);
-    expect(checked + unasked.length).toBe(manifests.reduce((n, m) => n + m.functions.length, 0));
+    expect(checked + unasked.length).toBe(
+      manifests.filter((m) => m.tu === 'assembled').reduce((n, m) => n + m.functions.length, 0),
+    );
   }, 900_000);
 });

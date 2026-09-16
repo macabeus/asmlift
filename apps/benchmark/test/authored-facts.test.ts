@@ -36,7 +36,7 @@ import {
   protoFactProblems,
   quotedSignature,
 } from '../src/cases/authored-facts';
-import { REAL_DIR, type RealManifest } from '../src/cases/manifests';
+import { REAL_DIR, type RealManifest, type VendoredEntry } from '../src/cases/manifests';
 import { m2cOwnPrototype } from '../src/cases/real';
 import { syntheticCases } from '../src/cases/synthetic';
 
@@ -100,16 +100,13 @@ describe('every authored fact agrees with the function the compiler actually saw
   });
 });
 
-/** The vendored CONTEXT blob of every function in one manifest (the `--context` m2c is given,
+/** The vendored m2c CONTEXT blob of every function in one manifest (the `--context` m2c is given,
  *  before the prototype line). */
 function vendoredCtxs(man: RealManifest): Map<string, string> {
   const dir = join(REAL_DIR, 'tu', man.project);
-  const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<
-    string,
-    { tu: string; ctx: string }
-  >;
+  const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<string, VendoredEntry>;
   return new Map(
-    man.functions.map((fn) => [fn.sym, gunzipSync(readFileSync(join(dir, index[fn.sym].ctx))).toString('utf8')]),
+    man.functions.map((fn) => [fn.sym, gunzipSync(readFileSync(join(dir, index[fn.sym].m2c))).toString('utf8')]),
   );
 }
 

@@ -42,8 +42,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
       // the linkage a candidate needs to export the mangled symbol a C++ target is keyed by.
       const language = unitLanguage(f.unit, unit.cflags);
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
-      const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
-      const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
+      const m2cI = f.m2cCtx ? man.vendored(f.sym).m2cI : null;
+      const ctxProto = m2cI === null ? null : m2cOwnPrototype(f.sym, f.proto, m2cI);
       cases.push({
         id,
         tier: 'real',
@@ -61,7 +61,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         // (ctxRef) instead of embedding ~100 KB of text. A row whose vendored context m2c's C
         // parser cannot be given at all — a C++ unit — keeps a hand-written `ctx` instead, and
         // that path has no m2cOwnPrototype cap on it: README residual 5 states what it costs.
-        ctx: ctxI === null ? f.ctx : appendCtxProto(ctxI, ctxProto),
+        ctx: m2cI === null ? f.ctx : appendCtxProto(m2cI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         ctxProto: ctxProto ?? undefined,
         proto: f.proto,
