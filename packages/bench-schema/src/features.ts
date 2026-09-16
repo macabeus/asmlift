@@ -8,7 +8,8 @@
 //
 // CLOSED: a published tag with no definition, or a definition carried by no row, fails
 // apps/benchmark/test/features.test.ts — so a typo cannot become a silently-new category that
-// halves every aggregate over it.
+// halves every aggregate over it. A definition may run AHEAD of its rows only by saying so
+// (`pending`), and only until the first row carries it.
 
 export type FeatureGroup = 'control-flow' | 'arithmetic' | 'data-types' | 'memory' | 'calls' | 'meta';
 
@@ -60,6 +61,12 @@ export interface FeatureDef {
   /** a retired id, kept only so an archived dataset stays readable. Exempt from the
    *  "every definition is carried by a row" gate; never offered in the picker. */
   deprecated?: true;
+  /** an id defined AHEAD of the rows that will carry it: the construct it names is not in the
+   *  corpus yet, so its detector fires on nothing and no dataset authors it. Also exempt from the
+   *  "carried by a row" gate, and also kept out of the picker, where it would be a filter that
+   *  matches nothing. The flag cannot outlive what it waits for: `definitionsOutOfStep` fails
+   *  while a row carries a pending tag, so the PR that lands the first carrier must remove it. */
+  pending?: true;
 }
 
 export const FEATURES: readonly FeatureDef[] = [
@@ -1120,7 +1127,35 @@ export const FEATURE_BY_ID: ReadonlyMap<string, FeatureDef> = new Map(FEATURES.m
 /** Every id the vocabulary defines, including deprecated ones. */
 export const KNOWN_FEATURES: ReadonlySet<string> = new Set(FEATURES.map((f) => f.id));
 
-/** The ids of one evidence kind — the producer's detectors and validators are keyed off these. */
+/** The tags a reader can filter on. A `deprecated` id names something the dataset no longer has and
+ *  a `pending` one something it does not have YET, so offering either is offering an empty filter. */
+export const PICKABLE_FEATURES: readonly FeatureDef[] = FEATURES.filter((f) => !f.deprecated && !f.pending);
+
+/** Where the definitions and the tags the rows publish contradict each other — both directions, so
+ *  neither a dead definition nor a stale flag can sit there unnoticed:
+ *
+ *   - a live definition NO row carries. The picker would offer a filter that matches nothing, and
+ *     the drawer would define a shape the benchmark cannot show. Say `pending` if the rows are
+ *     coming, `deprecated` if they are gone; silence is the one thing this refuses.
+ *   - a `pending` definition a row DOES carry. The tag has arrived, so the flag is now a lie: it
+ *     hides the id from the picker that should be offering it. */
+export function definitionsOutOfStep(published: ReadonlySet<string>, defs: readonly FeatureDef[] = FEATURES): string[] {
+  return defs
+    .flatMap((f) => {
+      if (f.deprecated) {
+        return [];
+      }
+      if (f.pending) {
+        return published.has(f.id) ? [`${f.id}: marked pending, but rows carry it — drop the flag`] : [];
+      }
+      return published.has(f.id) ? [] : [`${f.id}: defined, but no row carries it`];
+    })
+    .sort();
+}
+
+/** The ids of one evidence kind — the producer's detectors and validators are keyed off these. A
+ *  `pending` id is INCLUDED: its detector or floor has to be wired before the rows arrive, or the
+ *  first row carrying it would publish a tag nothing checks. */
 export function featuresByEvidence(kind: EvidenceKind): FeatureDef[] {
   return FEATURES.filter((f) => f.evidence === kind && !f.deprecated);
 }

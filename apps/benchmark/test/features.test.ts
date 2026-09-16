@@ -2,7 +2,15 @@
 // @asmlift/bench-schema and the detectors in src/cases/features.ts; these assert that they and the
 // dataset agree — published tags are defined, definitions are used and well-formed, derived tags
 // match their evidence in both directions, and authored tags stay above their floor.
-import { FEATURES, FEATURE_BY_ID, GROUP_ORDER, KNOWN_FEATURES, featuresByEvidence } from '@asmlift/bench-schema';
+import {
+  FEATURES,
+  FEATURE_BY_ID,
+  type FeatureDef,
+  GROUP_ORDER,
+  KNOWN_FEATURES,
+  definitionsOutOfStep,
+  featuresByEvidence,
+} from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -59,10 +67,8 @@ describe('the vocabulary is closed over the published data', () => {
     expect([...undefined_].sort()).toEqual([]);
   });
 
-  it('every definition is carried by at least one row', () => {
-    const published = new Set(rows.flatMap((r) => r.features));
-    const unused = FEATURES.filter((f) => !f.deprecated && !published.has(f.id)).map((f) => f.id);
-    expect(unused.sort()).toEqual([]);
+  it('every definition is carried by a row, and every pending definition still waits for one', () => {
+    expect(definitionsOutOfStep(new Set(rows.flatMap((r) => r.features)))).toEqual([]);
   });
 
   it('every AUTHORED tag has a definition', () => {
@@ -74,6 +80,42 @@ describe('the vocabulary is closed over the published data', () => {
 
   it('gives every row at least one tag', () => {
     expect(rows.filter((r) => r.features.length === 0).map((r) => r.id)).toEqual([]);
+  });
+});
+
+// A tag can be defined before the rows that carry it exist — the GameCube vocabulary landed a
+// release ahead of the GameCube rows. `pending` is how a definition says so, and it is a promise
+// with an expiry: these hold that the exemption works in one direction only.
+describe('a definition and the rows that carry it', () => {
+  const def = (id: string, extra: Partial<FeatureDef> = {}): FeatureDef => ({
+    id,
+    label: id,
+    group: 'meta',
+    evidence: 'judgement',
+    summary: id,
+    ...extra,
+  });
+
+  it('reports a live definition no row carries', () => {
+    expect(definitionsOutOfStep(new Set(['carried']), [def('carried'), def('orphan')])).toEqual([
+      'orphan: defined, but no row carries it',
+    ]);
+  });
+
+  it('lets a pending definition wait', () => {
+    expect(definitionsOutOfStep(new Set(), [def('later', { pending: true })])).toEqual([]);
+  });
+
+  it('refuses a pending definition the rows have caught up with', () => {
+    expect(definitionsOutOfStep(new Set(['later']), [def('later', { pending: true })])).toEqual([
+      'later: marked pending, but rows carry it — drop the flag',
+    ]);
+  });
+
+  it('exempts a deprecated definition either way', () => {
+    const gone = [def('gone', { deprecated: true })];
+    expect(definitionsOutOfStep(new Set(), gone)).toEqual([]);
+    expect(definitionsOutOfStep(new Set(['gone']), gone)).toEqual([]);
   });
 });
 

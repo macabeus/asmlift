@@ -1,7 +1,7 @@
 // The two domain adapters over the generic <MultiSelect>: each turns a closed vocabulary into
 // options. What a tag means lives in @asmlift/bench-schema, what a decline class means in
 // lib/declines — neither belongs inside a shared UI component.
-import { FEATURES, FEATURE_GROUP_LABEL, GROUP_ORDER } from '@asmlift/bench-schema';
+import { FEATURE_GROUP_LABEL, GROUP_ORDER, PICKABLE_FEATURES } from '@asmlift/bench-schema';
 import { useMemo } from 'react';
 
 import { MultiSelect, type MultiSelectOption } from '../../../shared/components/MultiSelect';
@@ -30,8 +30,7 @@ export function FeaturePicker({
   const hash = useCurrentHash();
   const options = useMemo<MultiSelectOption[]>(() => {
     const rank = new Map(GROUP_ORDER.map((g, i) => [g, i]));
-    return [...FEATURES]
-      .filter((f) => !f.deprecated)
+    return [...PICKABLE_FEATURES]
       .sort((a, b) => rank.get(a.group)! - rank.get(b.group)! || a.label.localeCompare(b.label))
       .map((f) => ({
         value: f.id,
