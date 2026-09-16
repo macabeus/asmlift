@@ -3,6 +3,7 @@
 // The supervised runs drive shell scripts standing in for ninja, so every failure mode wine
 // produces on this machine — a launch failure, a frozen compile, a build that never ends — is
 // reproduced here without wine.
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -129,9 +130,21 @@ function fakeNinja(root: string, script: string): string {
   const path = join(root, 'fake-ninja.sh');
   writeFileSync(
     path,
-    `#!/bin/sh\nn=$(cat "${join(root, 'runs')}" 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > "${join(root, 'runs')}"\n${script}\n`,
+    [
+      '#!/bin/sh',
+      '[ -n "$FAKE_NINJA_WARMUP" ] && exit 0',
+      `n=$(cat "${join(root, 'runs')}" 2>/dev/null || echo 0)`,
+      'n=$((n+1))',
+      `echo $n > "${join(root, 'runs')}"`,
+      script,
+      '',
+    ].join('\n'),
   );
   chmodSync(path, 0o755);
+  // The FIRST exec of a freshly written script costs a few hundred milliseconds on macOS before
+  // its first byte reaches the log, and the stall windows below are of that order: pay it here,
+  // where nothing is being timed, rather than inside a supervised run.
+  spawnSync(path, [], { stdio: 'ignore', env: { ...process.env, FAKE_NINJA_WARMUP: '1' } });
   return path;
 }
 
@@ -158,9 +171,9 @@ describe('ninja under supervision', () => {
     // run 1 prints, then freezes at 0% CPU for longer than the whole test would wait
     const exe = fakeNinja(
       root,
-      'echo "[9176/9188] MWCC npc_1_landing1.o"\nif [ "$n" = 1 ]; then sleep 600; fi\nexit 0',
+      'echo "[9176/9188] MWCC npc_1_landing1.o"\nif [ "$n" = 1 ]; then exec sleep 30; fi\nexit 0',
     );
-    const runs = await runNinja({ ...supervised, stallMs: 300, dir: root, log: join(root, 'log'), exe });
+    const runs = await runNinja({ ...supervised, stallMs: 1_000, dir: root, log: join(root, 'log'), exe });
     expect(runs).toHaveLength(2);
     expect(runs[0].stopped).toBe('stalled');
     expect(runs[1].status).toBe(0);
@@ -168,14 +181,14 @@ describe('ninja under supervision', () => {
 
   test('does not call a slow but talking ninja stalled', async () => {
     const root = dir();
-    // talks for three times the stall window, never pausing for more than a third of it
+    // talks for twice the stall window, never pausing for more than a fifth of it
     const exe = fakeNinja(
       root,
       'i=0\nwhile [ $i -lt 10 ]; do i=$((i+1)); echo "[$i/10] MWCC"; sleep 0.2; done\nexit 0',
     );
-    const runs = await runNinja({ ...supervised, stallMs: 700, dir: root, log: join(root, 'log'), exe });
+    const runs = await runNinja({ ...supervised, stallMs: 1_000, dir: root, log: join(root, 'log'), exe });
     expect(runs).toEqual([{ status: 0, signal: null, stopped: undefined, seconds: expect.any(Number) }]);
-    expect(runs[0].seconds).toBeGreaterThan(0.7);
+    expect(runs[0].seconds).toBeGreaterThan(1);
   });
 
   test('abandons an attempt that outlives the timeout even while it talks', async () => {
