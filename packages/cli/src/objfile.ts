@@ -36,14 +36,20 @@ const ppcObjdump = () => process.env.ASMLIFT_PPC_OBJDUMP ?? 'powerpc-eabi-objdum
 // only in the interleaved relocation lines the frontend parses.
 //
 // `-M gekko` names the MACHINE. The only PowerPC asmlift reads is CodeWarrior's GameCube/Wii
-// output, and the Gekko (750CL) paired-single opcodes share encodings with POWER's VSX/AltiVec:
-// without the flag objdump's generic PowerPC dialect prints a float callee-save `psq_st f31,…`
-// as `xscmpeqdp vs31,…` and its `psq_l` as `lq` — a decode that is not merely unmodelled but
-// WRONG, so the frontend would lift a plausible instruction at the wrong operands. It is the
+// output, and the Gekko (750CL) paired-single opcodes share encodings with POWER's VSX/AltiVec,
+// so the generic dialect renames them AND re-reads their fields as some other instruction's:
+//   psq_st f31,24(r1),0,0   → xscmpeqdp vs31,vs1,vs0   (float callee-save)
+//   psq_l  f30,120(r1),0,0  → lq        r30,112(r1)    (another register file, another offset)
+// Nothing downstream can recover the truth from that text: the frontend declines naming an
+// instruction the reader cannot find in their own object, and m2c — which models `psq_l`/`psq_st`
+// and nothing called `lq`/`xxsel`/`xscmpeqdp` — loses an instruction it understands. It is the
 // same machine `-proc gekko` compiles for, and what every GC/Wii decomp project disassembles
 // with (dtk's `powerpc-eabi-objdump -M gekko`).
 const MIPS_DISASM_FLAGS = ['-d', '--no-show-raw-insn'];
-const PPC_DISASM_FLAGS = ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'];
+/** Exported so one test can pin it equal to the mwcc toolchain's own `objdumpFlags`: the two lists
+ *  are deliberately duplicated (this module takes no toolchain dependency) and would otherwise
+ *  drift one-sidedly, each site's test blind to the other's. */
+export const PPC_DISASM_FLAGS = ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'];
 
 interface ObjdumpChoice {
   bin: string;

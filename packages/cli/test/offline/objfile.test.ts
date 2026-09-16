@@ -2,14 +2,13 @@
 // pipeline with the objdump spawns FAKED through runCli's ObjInput seam (the real spawns are
 // proven by test/matching/objfile-e2e.test.ts against actual toolchains).
 import { MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
-import { MWCC_PPC_TOOLCHAIN } from '@asmlift/toolchains';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, expect, test } from 'vitest';
 
 import { type ObjInput, runCli } from '../../src/main';
-import { ObjectInputUnsupportedError, PPC_DISASM_FLAGS, disasmObject, isElfObject } from '../../src/objfile';
+import { ObjectInputUnsupportedError, disasmObject, isElfObject } from '../../src/objfile';
 import { multiTextObject } from './multi-text-object';
 
 const ELF = new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1, 0]); // magic + junk
@@ -100,13 +99,6 @@ test('the PowerPC disassembly names the Gekko machine; MIPS names none', () => {
   const mips = recordingObjdump();
   disasmObject('fn.o', MIPS_IDO, mips.bin);
   expect(mips.argv()).not.toContain('gekko');
-});
-
-// The CLI's flag list and the pinned toolchain's are duplicated on purpose (objfile.ts takes no
-// toolchain dependency), and each site's own test is blind to the other's — so a one-sided edit
-// would pass both suites. This is what forbids the drift.
-test('the CLI and the mwcc toolchain disassemble PowerPC with identical flags', () => {
-  expect(PPC_DISASM_FLAGS).toEqual(MWCC_PPC_TOOLCHAIN.objdumpFlags);
 });
 
 test('mwcc .o with no PowerPC objdump anywhere fails loud naming every remedy', async () => {

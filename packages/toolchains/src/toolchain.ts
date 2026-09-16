@@ -84,8 +84,9 @@ export const MWCC_PPC_TOOLCHAIN = {
   // `bl` in a .o encodes offset 0 (a self-referential placeholder), so the callee's NAME lives only
   // in the relocation — the PPC frontend reads it there to recover the call target (parseDisasm).
   // `-M gekko` names the machine `-proc gekko` above compiles for: the Gekko (750CL) paired-single
-  // opcodes share encodings with POWER's VSX/AltiVec, so the generic PowerPC dialect decodes a
-  // float callee-save `psq_st f31,24(r1),0,0` as `xscmpeqdp vs31,vs1,vs0` and its `psq_l` as `lq`.
+  // opcodes share encodings with POWER's VSX/AltiVec, so the generic dialect both renames them and
+  // re-reads their fields — `psq_st f31,24(r1),0,0` becomes `xscmpeqdp vs31,vs1,vs0`, and
+  // `psq_l f30,120(r1),0,0` becomes `lq r30,112(r1)`, another register file at another offset.
   objdumpFlags: ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'],
 };
 

@@ -28,7 +28,13 @@ const TARGETS: Record<string, { id: ToolchainId; label: string; format: string }
   agbcc: { id: 'agbcc', label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
   'ido7.1': { id: 'ido7.1', label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
   'gcc2.7.2kmc': { id: 'gcc2.7.2kmc', label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
-  mwcc_242_81: { id: 'mwcc_242_81', label: 'GC/Wii — mwcc / PPC', format: 'ppc objdump -d -r --no-show-raw-insn' },
+  // `-M gekko` is load-bearing, not decoration: the generic dialect prints the GameCube's
+  // paired-single opcodes as POWER VSX, at the wrong register file and offset.
+  mwcc_242_81: {
+    id: 'mwcc_242_81',
+    label: 'GC/Wii — mwcc / PPC',
+    format: 'ppc objdump -d -r -M gekko --no-show-raw-insn',
+  },
 };
 
 /** Each toolchain's name in the Toolchain select. */

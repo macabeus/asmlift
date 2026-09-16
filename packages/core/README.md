@@ -31,7 +31,10 @@ console.log(source); // s32 my_func(s32 a0) { ... }
 Input is **text**, following what each target's toolchain produces:
 
 - The ARM target reads GBA `.s`, produced by agbcc and pret-style project splits.
-- The MIPS/PPC targets read `objdump -d --no-show-raw-insn` output and Splat-disassembled `.s`.
+- The MIPS targets read `objdump -d --no-show-raw-insn` output and Splat-disassembled `.s`.
+- The PPC target reads `powerpc-eabi-objdump -d -r -M gekko --no-show-raw-insn` output. `-r` carries
+  the relocation lines a `bl`'s callee name lives in, and `-M gekko` names CodeWarrior's machine:
+  the generic dialect decodes the GameCube's paired-single opcodes as POWER VSX.
 
 ### `decompile(name, asm, target, opts?)`
 
