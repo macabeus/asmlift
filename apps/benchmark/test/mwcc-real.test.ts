@@ -9,11 +9,13 @@
 //     every row would be `noncompile` for a reason that has nothing to do with the decompiler.
 //   - a project's headers are preprocessed by mwcceppc itself, under the wrapper the unit's own
 //     build rule uses.
-import { compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
-import { existsSync, statSync } from 'node:fs';
+import { MWCC_TOOLCHAIN_IDS, compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
 import { realCompilerFor } from '../src/compile/real';
@@ -40,7 +42,50 @@ test('the real tier is wired for CodeWarrior', () => {
   expect(typeof mwcc.preprocess).toBe('function');
 });
 
-describe.runIf(ppcDockerAvailable())('the CodeWarrior real tier', () => {
+// WHICH BINARY A ROW'S TOOLCHAIN ID ACTUALLY RUNS. Three CodeWarrior builds share one module, one
+// container image and one set of flags; what separates them is the directory `mwccReal(id)` binds,
+// and binding the wrong one produces a well-formed object that simply is not the ROM's. Nothing
+// else in the suite can see that: the toolchain id travels with the row, the compile succeeds, and
+// the only two ROM proofs are a checkout away (`mwcc-rom-proof.test.ts`) — one of them skipped on
+// every machine, the other, on Mario Party 4's DOL code, byte-identical under two of the three
+// builds by measurement. So the separation is asserted here, on a source chosen because all three
+// builds disagree about it, with no checkout and no ROM.
+const SEPARATOR = 'int sep(int x) { return x * 3 + (x >> 2); }\n';
+
+describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each CodeWarrior build', () => {
+  test(
+    'is the binary its own toolchain id names — three ids, three different objects',
+    () => {
+      const digests = MWCC_TOOLCHAIN_IDS.map((id) => {
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        return createHash('sha256').update(readFileSync(built.obj)).digest('hex');
+      });
+      // Pairwise distinct, not pinned constants: what is being claimed is that the ids do not
+      // collapse onto one binary, and a rebuilt container image may legitimately move all three.
+      expect(new Set(digests).size).toBe(MWCC_TOOLCHAIN_IDS.length);
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "publishes its object's data sections — the m2c normalizer's half of every row",
+    () => {
+      // `cache.ts` names all three in its dump table, and `cache-poison.test.ts` pins that list;
+      // this is the same claim with the container attached, because what the table promises is a
+      // dump and what a row needs is the dump's CONTENT. A build the table missed answered
+      // `undefined`, which `evaluate` catches into a row published with no `asmDump` at all.
+      for (const id of MWCC_TOOLCHAIN_IDS) {
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        const dump = cachedAsmDumpText(built.obj, id, 'sep');
+        expect(dump, `${id} published no asmDump`).toBeDefined();
+        expect(dump, `${id}'s dump names no section`).toContain('Contents of section');
+      }
+    },
+    CONTAINER_BUDGET,
+  );
+});
+
+describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', () => {
   test(
     'compiles a preprocessed unit verbatim — no typedef prelude in front of it',
     () => {
@@ -49,7 +94,7 @@ describe.runIf(ppcDockerAvailable())('the CodeWarrior real tier', () => {
       expect(built.asm).toContain('twice');
       // THE CONTROL, and the reason this module is not `compilePpcTarget`: the same text through the
       // synthetic tier's target build redefines `u8`.
-      expect(() => compilePpcTarget(TU, 'twice', CFLAGS)).toThrow(/mwcceppc/);
+      expect(() => compilePpcTarget('mwcc_242_81', TU, 'twice', CFLAGS)).toThrow(/mwcceppc/);
     },
     CONTAINER_BUDGET,
   );
@@ -102,39 +147,42 @@ const AC_CFG: RealProjectCfg = {
   defines: ['-DVERSION=0', '-DDEBUG=0', '-DNDEBUG', '-d', '_LANGUAGE_C', '-d', 'F3DEX_GBI_2', '-d', 'MUST_MATCH'],
 };
 
-describe.runIf(ppcDockerAvailable() && existsSync(join(AC, 'build.ninja')))("Animal Crossing's include tree", () => {
-  test(
-    'preprocesses through the compiler that wrote it, carrying no machine path',
-    () => {
-      const text = mwcc.preprocess(AC_CFG, '#include "GBA2/gba2.h"\nint f(void) { return GBA2_GBA_STATE_ERROR; }\n');
-      // a declaration only this project's headers hold, so the include tree really was read
-      expect(text).toContain('GBAGetStatus');
-      // …and nothing of THIS machine: a vendored blob is committed
-      expect(text).not.toMatch(/\/Users\/|\/home\/|\/private\/var\//);
-      expect(text).not.toContain('#line');
-    },
-    CONTAINER_BUDGET,
-  );
+describe.runIf(ppcDockerAvailable('mwcc_242_81') && existsSync(join(AC, 'build.ninja')))(
+  "Animal Crossing's include tree",
+  () => {
+    test(
+      'preprocesses through the compiler that wrote it, carrying no machine path',
+      () => {
+        const text = mwcc.preprocess(AC_CFG, '#include "GBA2/gba2.h"\nint f(void) { return GBA2_GBA_STATE_ERROR; }\n');
+        // a declaration only this project's headers hold, so the include tree really was read
+        expect(text).toContain('GBAGetStatus');
+        // …and nothing of THIS machine: a vendored blob is committed
+        expect(text).not.toMatch(/\/Users\/|\/home\/|\/private\/var\//);
+        expect(text).not.toContain('#line');
+      },
+      CONTAINER_BUDGET,
+    );
 
-  test(
-    "preprocesses a unit in the LANGUAGE its build compiles it in, not the one the blob's name implies",
-    () => {
-      // Every vendored TU is written as `u.c`, so mwcc's extension default would read all 4,103 of
-      // Animal Crossing's units as C — including the 116 its build compiles with `-lang=c++`, whose
-      // headers would then take the wrong `#ifdef __cplusplus` branch and vendor a blob the project
-      // never compiled. The claim is checked on ONE header both ways, so the C++ answer cannot be
-      // the C one misread.
-      const src = '#include "m_house.h"\nint f(void) { return 0; }\n';
-      const asCpp = mwcc.preprocess({ ...AC_CFG, unit: 'src/static/jsyswrap.cpp', cflags: ['-lang=c++'] }, src);
-      expect(asCpp).toContain('extern "C"');
-      expect(mwcc.preprocess(AC_CFG, src)).not.toContain('extern "C"');
-    },
-    CONTAINER_BUDGET,
-  );
+    test(
+      "preprocesses a unit in the LANGUAGE its build compiles it in, not the one the blob's name implies",
+      () => {
+        // Every vendored TU is written as `u.c`, so mwcc's extension default would read all 4,103 of
+        // Animal Crossing's units as C — including the 116 its build compiles with `-lang=c++`, whose
+        // headers would then take the wrong `#ifdef __cplusplus` branch and vendor a blob the project
+        // never compiled. The claim is checked on ONE header both ways, so the C++ answer cannot be
+        // the C one misread.
+        const src = '#include "m_house.h"\nint f(void) { return 0; }\n';
+        const asCpp = mwcc.preprocess({ ...AC_CFG, unit: 'src/static/jsyswrap.cpp', cflags: ['-lang=c++'] }, src);
+        expect(asCpp).toContain('extern "C"');
+        expect(mwcc.preprocess(AC_CFG, src)).not.toContain('extern "C"');
+      },
+      CONTAINER_BUDGET,
+    );
 
-  test("uses the wrapper the unit's own rule uses — every Animal Crossing edge has one", () => {
-    // If this stops holding, the preprocessing above stops being what the project compiled, and
-    // the assertion that catches it is this one rather than a silent difference in the blob.
-    expect(unitCompileWrapper(AC, AC_CFG.unit, 'mwcceppc.exe')).toEqual(['build/tools/sjiswrap.exe']);
-  });
-});
+    test("uses the wrapper the unit's own rule uses — every Animal Crossing edge has one", () => {
+      // If this stops holding, the preprocessing above stops being what the project compiled, and
+      // the assertion that catches it is this one rather than a silent difference in the blob.
+      expect(unitCompileWrapper(AC, AC_CFG.unit, 'mwcceppc.exe')).toEqual(['build/tools/sjiswrap.exe']);
+    });
+  },
+);

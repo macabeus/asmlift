@@ -7,8 +7,13 @@
 // row's flags, which fill `{{cflags}}`, after them.
 import { readCompilerCommand } from '@asmlift/cli/flags';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
-import { TOOLCHAIN_TARGETS, type ToolchainId, isToolchainId } from '@asmlift/core/target';
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import {
+  type CanonicalToolchainId,
+  TOOLCHAIN_TARGETS,
+  isCanonicalToolchainId,
+  isToolchainId,
+} from '@asmlift/core/target';
+import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN, mwccDir } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,8 +24,10 @@ import { scoringPreludes } from '../src/compile/real';
 import { shq } from '../src/compile/util';
 import { materializeScoringContext, renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
-const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId);
-const canonical = (id: ToolchainId): readonly string[] => TOOLCHAIN_TARGETS[id].canonicalFlags;
+// The toolchains with canonical flags: the ones a committed config can be rendered at without a
+// row to take the flags from.
+const IDS = Object.keys(TOOLCHAIN_TARGETS).filter(isToolchainId).filter(isCanonicalToolchainId);
+const canonical = (id: CanonicalToolchainId): readonly string[] => TOOLCHAIN_TARGETS[id].canonicalFlags;
 
 describe('committed decomp.yaml configs mirror the built-in toolchain invocations', () => {
   test('agbcc: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
@@ -63,7 +70,7 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     expect(renderScoreCommand('mwcc_242_81', canonical('mwcc_242_81'))).toBe(
       [
         `${shq(MWCC_PPC_TOOLCHAIN.docker)} run --rm`,
-        `-v ${shq(MWCC_PPC_TOOLCHAIN.dir)}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
+        `-v ${shq(mwccDir('mwcc_242_81'))}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,
         shq(MWCC_PPC_TOOLCHAIN.image),
         `${MWCC_PPC_TOOLCHAIN.wibo} /mwcc/mwcceppc.exe`,
         MWCC_PPC_TOOLCHAIN.harnessFlags.map(shq).join(' '),
@@ -83,6 +90,24 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     expect(read(canonical(id))).toEqual(canonical(id));
     const level = family === 'mwcc' ? '-O0,p' : '-O1';
     expect(read([...canonical(id), level, '-g'])).toEqual([...canonical(id), level, '-g']);
+  });
+
+  // The two real-only CodeWarrior builds have no canonical flags to render at, so the checks above
+  // cannot reach them — and the one thing their configs must get right is the very thing that makes
+  // them three configs rather than one: which compiler directory is mounted at /mwcc.
+  test.each([
+    ['mwcc_233_163n', ['-proc', 'gekko', '-O4,p', '-char', 'unsigned', '-lang=c++']],
+    ['mwcc_247_107', ['-proc', 'gekko', '-O0,p', '-char', 'unsigned', '-lang=c']],
+  ] as const)('%s: mounts its own build, and its command reads back the flags it was rendered at', (id, cflags) => {
+    const cmd = renderScoreCommand(id, cflags);
+    expect(cmd).toContain(`-v ${shq(mwccDir(id))}:/mwcc:ro`);
+    for (const other of ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const) {
+      expect(cmd.includes(`-v ${shq(mwccDir(other))}:/mwcc:ro`)).toBe(other === id);
+    }
+    expect(readCompilerCommand(cmd, 'mwcc')?.flagWords.map((w) => w.value)).toEqual([...cflags]);
+    const template = readCompilerCommand(renderScoreCommand(id, ['{{cflags}}']), 'mwcc');
+    expect(template?.takesCflags).toBe(true);
+    expect(template?.flagWords).toEqual([]);
   });
 
   test.each(IDS)('%s: the template spells no codegen flag beside {{cflags}}', (id) => {

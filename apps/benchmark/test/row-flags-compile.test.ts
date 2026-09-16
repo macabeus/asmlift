@@ -44,7 +44,9 @@ vi.mock('@asmlift/toolchains', async (importOriginal) => {
     kmcCompile: compileAt('kmc'),
     gcc272Compile: compileAt('gcc272'),
     kmcCandidateCompiler: bindAt('kmc'),
-    mwccCandidateCompiler: bindAt('mwcc'),
+    // CodeWarrior's binds in two steps — the BUILD, then the row's flags — so the recorded
+    // compiler name carries the build the pool would mount.
+    mwccCandidateCompiler: (mwcc: string) => bindAt(`mwcc:${mwcc}`),
   };
 });
 
@@ -101,7 +103,7 @@ describe("the real tier's non-agbcc modules compile at the row's flags", () => {
 describe("the pooled toolchains' candidate compiler is bound at the row's flags", () => {
   test.each([
     ['gcc2.7.2kmc', 'kmc'],
-    ['mwcc_242_81', 'mwcc'],
+    ['mwcc_242_81', 'mwcc:mwcc_242_81'],
   ] as const)('%s', (id, compiler) => {
     const flags = atAnotherLevel(TOOLCHAIN_TARGETS[id].canonicalFlags);
     seen.pooledBind.length = 0;

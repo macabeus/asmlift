@@ -23,8 +23,10 @@ import {
   IDO_TOOLCHAIN,
   MWCC_PPC_TOOLCHAIN,
   TOOLCHAIN,
+  isMwccToolchainId,
   kmcCandidateCompiler,
   mwccCandidateCompiler,
+  mwccDir,
 } from '@asmlift/toolchains';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -38,8 +40,21 @@ const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 const DATASET_DIR = join(SRC_DIR, '..', 'dataset', 'toolchains');
 const CONFIG_ROOT = join(SRC_DIR, '..', '.cache', 'decomp-configs');
 
-/** Machine locations for the $ASMLIFT_* placeholders in the committed configs — resolved
- *  through @asmlift/toolchains, which honors these exact names as env overrides. */
+/** Machine locations for the $ASMLIFT_* placeholders in the committed configs — resolved through
+ *  @asmlift/toolchains, which honors each of the names below as an env override, with ONE
+ *  exception.
+ *
+ *  `$ASMLIFT_MWCC_DIR` is that exception, and it is not a machine location at all: it is per
+ *  TOOLCHAIN. The three CodeWarrior configs are the same command over three different compiler
+ *  directories, and which directory is mounted is the whole difference between them — so this one
+ *  is computed, `mwccDir(id)`, under the machine's `$ASMLIFT_MWCC_ROOT`. Exporting
+ *  `ASMLIFT_MWCC_DIR` moves nothing here (it remains what a user's own shell expands in the
+ *  command this file renders for them); `ASMLIFT_MWCC_ROOT` is the knob. */
+const placeholderValues = (id: ToolchainId): Record<string, string> => ({
+  ...PLACEHOLDER_VALUES,
+  ...(isMwccToolchainId(id) ? { ASMLIFT_MWCC_DIR: mwccDir(id) } : {}),
+});
+
 const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_AGBCC: TOOLCHAIN.agbcc,
   ASMLIFT_ARM_AS: TOOLCHAIN.as,
@@ -49,7 +64,6 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_DOCKER: GCC_KMC_TOOLCHAIN.docker,
   ASMLIFT_KMC_DIR: GCC_KMC_TOOLCHAIN.dir,
   ASMLIFT_KMC_IMAGE: GCC_KMC_TOOLCHAIN.image,
-  ASMLIFT_MWCC_DIR: MWCC_PPC_TOOLCHAIN.dir,
   ASMLIFT_PPC_IMAGE: MWCC_PPC_TOOLCHAIN.image,
   ASMLIFT_WIBO: MWCC_PPC_TOOLCHAIN.wibo,
 };
@@ -58,14 +72,14 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
  *  containers), bound at the row's flags. */
 const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => CandidateCompiler>> = {
   'gcc2.7.2kmc': kmcCandidateCompiler,
-  mwcc_242_81: mwccCandidateCompiler,
+  mwcc_242_81: mwccCandidateCompiler('mwcc_242_81'),
 };
 
 /** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.
  *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */
 function substitutePlaceholders(cmd: string, id: ToolchainId): string {
   return cmd.replace(/"\$(ASMLIFT_[A-Z0-9_]+)"|\$(ASMLIFT_[A-Z0-9_]+)/g, (_, quoted, bare) => {
-    const value = PLACEHOLDER_VALUES[quoted ?? bare];
+    const value = placeholderValues(id)[quoted ?? bare];
     if (value === undefined) {
       throw new Error(`unknown placeholder $${quoted ?? bare} in dataset/toolchains/${id}/decomp.yaml`);
     }

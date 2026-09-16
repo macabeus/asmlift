@@ -16,7 +16,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
-import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
+import {
+  GCC272_TOOLCHAIN,
+  GCC_KMC_TOOLCHAIN,
+  IDO_TOOLCHAIN,
+  MWCC_PPC_TOOLCHAIN,
+  type MwccToolchainId,
+  TOOLCHAIN,
+  mwccDir,
+} from './toolchain';
 
 const noPascal = (compiler: string): never => {
   throw new Error(`${compiler} target has no Pascal backend`);
@@ -557,11 +565,20 @@ registerCandidateCompiler('gcc', kmcCandidateCompiler(TOOLCHAIN_TARGETS['gcc2.7.
 // The PPC pool container's identity: its NAME encodes exactly the mount config it was created
 // with, so the pairing must change together — kept in one place so a one-sided edit can't
 // resolve the same pooled name with incompatible mount expectations.
-export function ppcPoolCfg(t: typeof MWCC_PPC_TOOLCHAIN): { name: string; mounts: string[] } {
+export function ppcPoolCfg(mwcc: MwccToolchainId): { name: string; mounts: string[] } {
+  const dir = mwccDir(mwcc);
   return {
-    name: poolName('ppc', `${t.image}|${t.dir}`),
-    mounts: ['-v', `${t.dir}:/mwcc:ro`, '-v', '/tmp:/host-tmp'],
+    name: poolName('ppc', `${MWCC_PPC_TOOLCHAIN.image}|${dir}`),
+    mounts: ['-v', `${dir}:/mwcc:ro`, '-v', '/tmp:/host-tmp'],
   };
+}
+
+/** The pooled container that runs the image's OWN tools with no CodeWarrior build mounted. The
+ *  PowerPC objdump belongs to the image, not to any of the three compiler directories, so a dump
+ *  that picked one of their pools would name a build it does not depend on — and would start that
+ *  build's container to read an object it never compiled. */
+export function ppcDumpPoolCfg(): { name: string; mounts: string[] } {
+  return { name: poolName('ppc-dump', MWCC_PPC_TOOLCHAIN.image), mounts: ['-v', '/tmp:/host-tmp'] };
 }
 
 /** Are ALL three PPC-path prerequisites present: the Docker daemon, the LOCALLY-BUILT image
@@ -569,7 +586,7 @@ export function ppcPoolCfg(t: typeof MWCC_PPC_TOOLCHAIN): { name: string; mounts
  *  and the bind-mounted proprietary CodeWarrior dir? Fixtures gate on this so a fresh checkout
  *  with the image un-built (or the mwcc dir absent) SKIPS cleanly instead of hard-failing
  *  inside `docker run`. */
-export function ppcDockerAvailable(): boolean {
+export function ppcDockerAvailable(mwcc: MwccToolchainId): boolean {
   const t = MWCC_PPC_TOOLCHAIN;
   if (spawnSync(t.docker, ['info'], { encoding: 'utf8' }).status !== 0) {
     return false;
@@ -577,7 +594,7 @@ export function ppcDockerAvailable(): boolean {
   if (spawnSync(t.docker, ['image', 'inspect', t.image], { encoding: 'utf8' }).status !== 0) {
     return false;
   }
-  return existsSync(join(t.dir, 'mwcceppc.exe'));
+  return existsSync(join(mwccDir(mwcc), 'mwcceppc.exe'));
 }
 
 /** Run one shell command in a linux/386 container over `dir`: through the pool when `dir` is under
@@ -585,11 +602,11 @@ export function ppcDockerAvailable(): boolean {
  *  CodeWarrior dir is mounted read-only at /mwcc. `script` is parameterized by the container-side
  *  path of `dir`, which differs between the two routes; `via` names the route that answered, so an
  *  empty result can be blamed on the right one. */
-function ppcExec(dir: string, script: (W: string) => string): { out: string; via: string } {
+function ppcExec(mwcc: MwccToolchainId, dir: string, script: (W: string) => string): { out: string; via: string } {
   const t = MWCC_PPC_TOOLCHAIN;
   const w = hostTmp(dir);
   if (w) {
-    const { name, mounts } = ppcPoolCfg(t);
+    const { name, mounts } = ppcPoolCfg(mwcc);
     const r = poolExec(t.docker, t.image, name, mounts, [name, 'sh', '-c', script(w)]);
     if (r) {
       if (r.status !== 0) {
@@ -604,7 +621,7 @@ function ppcExec(dir: string, script: (W: string) => string): { out: string; via
     '--platform',
     'linux/386',
     '-v',
-    `${t.dir}:/mwcc:ro`,
+    `${mwccDir(mwcc)}:/mwcc:ro`,
     '-v',
     `${dir}:/work`,
     '-w',
@@ -628,6 +645,7 @@ function ppcExec(dir: string, script: (W: string) => string): { out: string; via
  *  compiles a PREPROCESSED project translation unit, whose types the project's own headers already
  *  declared. One container round trip for compile + dump, through the same pool. */
 export function ppcCompile(
+  mwcc: MwccToolchainId,
   dir: string,
   srcC: string,
   outObj: string,
@@ -635,7 +653,7 @@ export function ppcCompile(
   disasm = false,
 ): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const { out, via } = ppcExec(dir, (W) => {
+  const { out, via } = ppcExec(mwcc, dir, (W) => {
     const argv = [...t.harnessFlags, ...flags];
     const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
     return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
@@ -647,9 +665,9 @@ export function ppcCompile(
 /** `objdump -d -r` on an object ALREADY in `dir` — the PowerPC objdump ships only inside the image,
  *  so re-reading an object (a section-scoped copy of one this path just built) needs the container
  *  too. */
-export function ppcDisasmText(dir: string, objName: string): string {
+export function ppcDisasmText(mwcc: MwccToolchainId, dir: string, objName: string): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const { out, via } = ppcExec(dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`);
+  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`);
   return nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${objName}`);
 }
 // CodeWarrior flags carry spaces (e.g. `msg_show_realref off`), so quote each token for the shell.
@@ -665,40 +683,52 @@ function shq(s: string): string {
  *
  *  Exported beside `ppcCompile` for the same reason: the real tier compiles project units, and a
  *  project unit is exactly where several `.text` sections show up. */
-export function ppcSectionScoped(dir: string, objName: string, symbol: string, asm: string): string {
+export function ppcSectionScoped(
+  mwcc: MwccToolchainId,
+  dir: string,
+  objName: string,
+  symbol: string,
+  asm: string,
+): string {
   const obj = join(dir, objName);
   const scoped = scopedObjectPath(obj, symbol, dir);
-  return scoped === obj ? asm : ppcDisasmText(dir, basename(scoped));
+  return scoped === obj ? asm : ppcDisasmText(mwcc, dir, basename(scoped));
 }
 
 /** Compile reference C with CodeWarrior at `flags` → {obj (scoring target), asm (disassembly,
  *  frontend input)}. */
 export function compilePpcTarget(
+  mwcc: MwccToolchainId,
   cSource: string,
   symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
-  const dir = contentShareableDir('asmlift-ppc-ref-', flags, cSource);
+  const dir = contentShareableDir('asmlift-ppc-ref-', [mwcc, ...flags], cSource);
   writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
-  const asm = ppcCompile(dir, 'ref.c', 'ref.o', flags, true);
-  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
+  const asm = ppcCompile(mwcc, dir, 'ref.c', 'ref.o', flags, true);
+  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(mwcc, dir, 'ref.o', symbol, asm) };
 }
 
 /** Compile candidate C with CodeWarrior (dockerized wibo) at `flags`; returns the object path. */
-export function compileCandPpc(cSource: string, flags: readonly string[]): string {
+export function compileCandPpc(mwcc: MwccToolchainId, cSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-score-');
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
-  ppcCompile(dir, 'cand.c', 'cand.o', flags, false);
+  ppcCompile(mwcc, dir, 'cand.c', 'cand.o', flags, false);
   return join(dir, 'cand.o');
 }
 
 /** CodeWarrior's candidate compiler at `flags`. The registry holds it at mwcc_242_81's canonical flags. */
 export const mwccCandidateCompiler =
+  (mwcc: MwccToolchainId) =>
   (flags: readonly string[]): CandidateCompiler =>
   (source, _symbol, backendId) =>
-    backendId === 'pascal' ? noPascal('mwcc') : compileCandPpc(source, flags);
+    backendId === 'pascal' ? noPascal('mwcc') : compileCandPpc(mwcc, source, flags);
 
-registerCandidateCompiler('mwcc', mwccCandidateCompiler(TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags));
+// The registry is keyed by `TargetDescription.compiler`, which all three CodeWarrior builds spell
+// `mwcc`, so it holds exactly one of them: the build with canonical flags to hold it at. The other
+// two are real-tier-only — every path that compiles for them binds its build explicitly — and a
+// registry entry naming a build they are not is why this one says which it is out loud.
+registerCandidateCompiler('mwcc', mwccCandidateCompiler('mwcc_242_81')(TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags));
 
 // ── C++ path (mangled-symbol harness) ─────────────────────────────────────────────────────
 // mwcceppc is a C AND C++ compiler: the `.cp` extension selects the C++ frontend. A C++ target's
@@ -710,21 +740,22 @@ registerCandidateCompiler('mwcc', mwccCandidateCompiler(TOOLCHAIN_TARGETS.mwcc_2
 /** Compile reference C++ (`.cp`) with CodeWarrior at `flags` → {obj (scoring target), disasm
  *  (frontend input)}. */
 export function compilePpcCppTarget(
+  mwcc: MwccToolchainId,
   cppSource: string,
   symbol: string,
   flags: readonly string[],
 ): { obj: string; asm: string } {
-  const dir = contentShareableDir('asmlift-ppc-cpp-ref-', flags, cppSource);
+  const dir = contentShareableDir('asmlift-ppc-cpp-ref-', [mwcc, ...flags], cppSource);
   writeFileSync(join(dir, 'ref.cp'), C_TYPEDEFS + cppSource);
-  const asm = ppcCompile(dir, 'ref.cp', 'ref.o', flags, true);
-  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(dir, 'ref.o', symbol, asm) };
+  const asm = ppcCompile(mwcc, dir, 'ref.cp', 'ref.o', flags, true);
+  return { obj: join(dir, 'ref.o'), asm: ppcSectionScoped(mwcc, dir, 'ref.o', symbol, asm) };
 }
 
 /** Compile candidate C++ (`.cp`) with CodeWarrior at `flags`; returns the object path. */
-export function compileCandPpcCpp(cppSource: string, flags: readonly string[]): string {
+export function compileCandPpcCpp(mwcc: MwccToolchainId, cppSource: string, flags: readonly string[]): string {
   const dir = mkShareableTmp('asmlift-ppc-cpp-score-');
   writeFileSync(join(dir, 'cand.cp'), C_TYPEDEFS + cppSource);
-  ppcCompile(dir, 'cand.cp', 'cand.o', flags, false);
+  ppcCompile(mwcc, dir, 'cand.cp', 'cand.o', flags, false);
   return join(dir, 'cand.o');
 }
 
@@ -736,6 +767,8 @@ export function compileCandPpcCpp(cppSource: string, flags: readonly string[]): 
 // compiler — with the checkout mounted, because the unit's `-i` paths are relative to it.
 
 export interface PpcPreprocessOptions {
+  /** the CodeWarrior build whose front end reads the tree — the headers branch on its own macros */
+  mwcc: MwccToolchainId;
   /** the project checkout: the directory the unit's `-i` paths resolve against */
   root: string;
   /** the translation unit to preprocess. Must live under /tmp, which is where the container reads
@@ -773,7 +806,7 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
     '--platform',
     'linux/386',
     '-v',
-    `${t.dir}:/mwcc:ro`,
+    `${mwccDir(opts.mwcc)}:/mwcc:ro`,
     '-v',
     `${opts.root}:/proj:ro`,
     '-v',

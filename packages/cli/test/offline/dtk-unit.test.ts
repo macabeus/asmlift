@@ -105,7 +105,12 @@ function project(fixture: string, defines: Record<string, readonly string[]>, co
   }
   writeFileSync(
     join(root, 'decomp.yaml'),
-    YAML.stringify({ platform: 'gc', tools: { asmlift: compiler === undefined ? {} : { compiler } } }),
+    YAML.stringify({
+      platform: 'gc',
+      // GameCube names three CodeWarrior builds, so the platform alone resolves no target: these
+      // fixtures are about the dtk unit lookup, and they say which compiler out loud.
+      tools: { asmlift: { target: 'mwcc_242_81', ...(compiler === undefined ? {} : { compiler }) } },
+    }),
   );
   const asm = join(root, 'clamp0.asm');
   writeFileSync(asm, readFileSync(join(import.meta.dirname, '../../../core/test/corpus/ppc-clamp0.asm'), 'utf8'));
@@ -176,12 +181,13 @@ describe('the flags a dtk unit gives', () => {
   test("a unit compiled by another compiler is refused, unless the command takes the unit's through {{cc}}", () => {
     const main = unit('marioparty4', 'main/game/main');
     const refused = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: main } }));
-    // a plain run with no compile command: the unit's flags, quoted to paste, are the one way on
+    // a plain run with no compile command. `mwcc_247_107` is a target asmlift HAS, so switching to
+    // it leads the list and pasting the unit's flags is the escape for anyone who cannot.
     expect(refused).toEqual({
       ok: false,
       message:
-        'objdiff.json unit main/game/main is compiled by mwcc_247_107, and the target is mwcc_242_81; asmlift has no ' +
-        `mwcc_247_107 target: pass --cflags '${main.cflags}' to give the unit's flags yourself`,
+        'objdiff.json unit main/game/main is compiled by mwcc_247_107, and the target is mwcc_242_81: ' +
+        `pass --target mwcc_247_107, or pass --cflags '${main.cflags}' to give the unit's flags yourself`,
     });
     const compiled = resolveFlags(
       dtkInput({
@@ -192,7 +198,7 @@ describe('the flags a dtk unit gives', () => {
     expect(compiled).toMatchObject({
       ok: false,
       message: expect.stringMatching(
-        /target: write \{\{cc\}\} in tools\.asmlift\.compiler where the compiler's name goes to compile with the unit's compiler, or pass --cflags '.*' to give the unit's flags yourself$/,
+        /is mwcc_242_81: pass --target mwcc_247_107, write \{\{cc\}\} in tools\.asmlift\.compiler where the compiler's name goes to compile with the unit's compiler, or pass --cflags '.*' to give the unit's flags yourself$/,
       ),
     });
     const mwccUnitOnAgbcc = resolveFlags(
@@ -308,7 +314,7 @@ describe('at the CLI surface', () => {
         'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and --cflags gives the flags without one, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     });
     const bare = mkdtempSync(join(tmpdir(), 'asmlift-nodtk-'));
-    writeFileSync(join(bare, 'decomp.yaml'), 'platform: gc\n');
+    writeFileSync(join(bare, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    target: mwcc_242_81\n');
     expect((await runCli([asm, '--config', join(bare, 'decomp.yaml'), '--module', 'm427Dll'])).stderr).toBe(
       'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and there is no objdiff.json beside decomp.yaml, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     );

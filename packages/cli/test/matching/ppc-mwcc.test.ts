@@ -29,7 +29,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ppcDockerGate } from './docker-gate';
 
-const HAVE = ppcDockerGate('ppc-mwcc');
+const HAVE = ppcDockerGate('ppc-mwcc', 'mwcc_242_81');
 
 // CodeWarrior codegen asmlift reproduces byte-exact — the flow works AND the PPC-specific shapes
 // (extended mnemonics, cr0 fusion, conditional-return) are handled.
@@ -77,10 +77,10 @@ const MATCH_CASES: { sym: string; c: string; expect: string }[] = [
 describe('PowerPC (CodeWarrior) fixtures: compile → disasm → decompile → recompile → objdiff', () => {
   for (const { sym, c, expect: golden } of MATCH_CASES) {
     test.runIf(HAVE)(`${sym}`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
       expect(r.source).toBe(golden);
-      const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -137,10 +137,10 @@ const S5_CASES: { sym: string; c: string; expect: string }[] = [
 describe('PowerPC S5: complemented-logic (andc/orc/eqv/nand) + sign-extend (extsb/extsh) → objdiff', () => {
   for (const { sym, c, expect: golden } of S5_CASES) {
     test.runIf(HAVE)(`${sym}`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
       expect(r.source).toBe(golden);
-      const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -178,10 +178,10 @@ const INDEXED_CASES: { sym: string; c: string; proto?: Prototypes; expect: strin
 describe('PowerPC INDEXED-LOAD: variable-index arrays (lwzx/stwx/lhax) → recompile → objdiff', () => {
   for (const { sym, c, proto, expect: golden } of INDEXED_CASES) {
     test.runIf(HAVE)(`${sym}`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC, { prototypes: proto ?? {} });
       expect(r.source).toBe(golden);
-      const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -238,10 +238,10 @@ const WIDEN_CASES: { sym: string; c: string; proto?: Prototypes; expect: string 
 describe('PowerPC PPC-WIDEN: bl calls (reloc-recovered) + frame transparency + rlwinm extract', () => {
   for (const { sym, c, proto, expect: golden } of WIDEN_CASES) {
     test.runIf(HAVE)(`${sym}`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC, { prototypes: proto });
       expect(r.source).toBe(golden);
-      const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -274,10 +274,10 @@ const NEARMISS_CASES: { sym: string; c: string; expect: string; note: string }[]
 describe('PowerPC (CodeWarrior) near-miss frontier — decoded faithfully, recompiles non-exact', () => {
   for (const { sym, c, expect: golden, note } of NEARMISS_CASES) {
     test.runIf(HAVE)(`${sym} — ${note}`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
       expect(r.source).toBe(golden); // the decode/emit is pinned and correct…
-      const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       expect(s.match).toBe(false); // …the recompile is a documented near-miss (flip when closed)
       expect(s.score).toBeGreaterThan(0);
     });

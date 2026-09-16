@@ -15,7 +15,7 @@ import { describe, expect, test } from 'vitest';
 
 import { dockerGate, ppcDockerGate } from './docker-gate';
 
-const HAVE_PPC = ppcDockerGate('hw-divide-tier1');
+const HAVE_PPC = ppcDockerGate('hw-divide-tier1', 'mwcc_242_81');
 const HAVE_DOCKER = dockerGate('hw-divide-tier1');
 
 describe.runIf(HAVE_PPC)('T1: PowerPC hardware divide (divw/divwu) → a / b, byte-exact', () => {
@@ -25,9 +25,9 @@ describe.runIf(HAVE_PPC)('T1: PowerPC hardware divide (divw/divwu) → a / b, by
   ];
   for (const { sym, c, op } of CASES) {
     test(`${sym} matches`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
-      const sc = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const sc = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       expect(r.source).toContain(op);
       expect(r.source).not.toContain('?'); // no unresolved opaque
       expect(sc.match).toBe(true); // byte-exact on real mwcc
@@ -50,9 +50,9 @@ describe.runIf(HAVE_PPC)('T5: PowerPC synthesized remainder (divw/mullw/subf) �
   ];
   for (const { sym, c, expect: want } of CASES) {
     test(`${sym} matches`, () => {
-      const { obj, asm } = compilePpcTarget(c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC);
-      const sc = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const sc = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       expect(r.source).toContain(want);
       expect(r.source).not.toContain('?'); // no unresolved opaque
       expect(sc.match).toBe(true); // byte-exact on real mwcc

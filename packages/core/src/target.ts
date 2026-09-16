@@ -578,10 +578,15 @@ export const PPC_MWCC: TargetDescription = {
 export interface ToolchainTarget {
   family: FlagFamily;
   /** The codegen flags every committed probe of this toolchain was compiled with: the flags a
-   *  synthetic row compiles at, and the flags a decompile with none given assumes. A toolchain whose
-   *  compiler has no committed probes has none. They are in normal form (`storedFlags` keeps every
-   *  word), so the words only the harness needs (`-c`, the diagnostics) live beside the binary's
-   *  paths in @asmlift/toolchains. */
+   *  synthetic row compiles at, and the flags a decompile with none given assumes. They are in
+   *  normal form (`storedFlags` keeps every word), so the words only the harness needs (`-c`, the
+   *  diagnostics) live beside the binary's paths in @asmlift/toolchains.
+   *
+   *  A toolchain with no SYNTHETIC tier has NONE, and inventing one would be the fiction the field
+   *  exists to avoid: nothing about the compiler picks a set, every row names the flags its own
+   *  build compiles that unit with, and the probes behind its description are run at those. A
+   *  decompile that reaches such a toolchain with no flags from anywhere is refused rather than
+   *  resolved against a set nobody chose (`resolveFlags`). */
   canonicalFlags?: readonly string[];
   /** What this compiler does. Every flag set of the toolchain decompiles against it: a profile of a
    *  compiler inherits its declarations until a probe refutes one there. */
@@ -640,9 +645,48 @@ export const TOOLCHAIN_TARGETS = {
     ],
     description: PPC_MWCC,
   },
+  // The other two CodeWarrior builds the GameCube projects compile with: 2.3.3b163n (Pikmin's whole
+  // game tree) and 2.4.7b107 (Mario Party 4's DOL). Both SHARE `PPC_MWCC`, and on their own evidence
+  // rather than because they are the same compiler family: `test/matching/ppc-compiler-behaviors.test.ts`
+  // re-runs both of its probes on each binary at the flags that build's rows compile at, and each
+  // reads as the description says. What moves those readings is the optimisation level — at `-O0,p`
+  // the shipped `mwcc_242_81` re-reads the local too — so the difference is one no per-compiler
+  // field could carry anyway.
+  //
+  // NEITHER HAS CANONICAL FLAGS. They have no synthetic tier: every row of theirs is a real one that
+  // names its unit's own flags, and Pikmin's `-O4,p -lang=c++` and Mario Party 4's `-O0,p -lang=c`
+  // are two different sets, neither of which is "the" one. See `canonicalFlags` above.
+  mwcc_233_163n: {
+    family: 'mwcc',
+    description: PPC_MWCC,
+  },
+  mwcc_247_107: {
+    family: 'mwcc',
+    description: PPC_MWCC,
+  },
 } as const satisfies Readonly<Record<string, ToolchainTarget>>;
 
 export type ToolchainId = keyof typeof TOOLCHAIN_TARGETS;
+
+/** A toolchain that HAS canonical flags — every toolchain with a synthetic tier. Computed from the
+ *  registry, so the set cannot drift from it: a caller that needs a fallback flag set (the
+ *  playground's target picker, the benchmark's synthetic rows) takes this instead of `ToolchainId`
+ *  and a real-only toolchain is refused where it is named, not where it is used. */
+export type CanonicalToolchainId = {
+  [K in ToolchainId]: (typeof TOOLCHAIN_TARGETS)[K] extends { canonicalFlags: readonly string[] } ? K : never;
+}[ToolchainId];
+
+/** A toolchain's canonical flags, or `undefined` where it has none. The ONE place the optional
+ *  field is read: the registry's literal type says which entries carry it, and every caller that
+ *  holds a plain `ToolchainId` has to answer for the ones that do not. */
+export function canonicalFlagsOf(id: ToolchainId): readonly string[] | undefined {
+  const t: ToolchainTarget = TOOLCHAIN_TARGETS[id];
+  return t.canonicalFlags;
+}
+
+export function isCanonicalToolchainId(id: ToolchainId): id is CanonicalToolchainId {
+  return canonicalFlagsOf(id) !== undefined;
+}
 
 export function isToolchainId(id: string): id is ToolchainId {
   return Object.hasOwn(TOOLCHAIN_TARGETS, id);

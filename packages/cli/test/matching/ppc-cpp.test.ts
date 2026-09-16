@@ -21,7 +21,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ppcDockerGate } from './docker-gate';
 
-const HAVE = ppcDockerGate('ppc-cpp');
+const HAVE = ppcDockerGate('ppc-cpp', 'mwcc_242_81');
 
 const INT = { base: 'int', ptr: 0 },
   VOID = { base: 'void', ptr: 0 },
@@ -74,13 +74,13 @@ describe('C++ backend: compile → disasm → decompile (idiomatic C++) → reco
   for (const { cpp, spec, expect: golden, note } of CASES) {
     const sym = cppSymbol(spec);
     test.runIf(HAVE)(`${sym} — ${note}`, () => {
-      const { obj, asm } = compilePpcCppTarget(cpp, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const { obj, asm } = compilePpcCppTarget('mwcc_242_81', cpp, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC, {
         backend: cppBackend(spec),
         prototypes: { [sym]: { returnsVoid: spec.retType.base === 'void' } },
       });
       expect(r.source).toBe(golden);
-      const s = scoreCppPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
+      const s = scoreCppPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       if (!s.match) {
         console.log(`emitted C++ for ${sym}:\n${r.source}`);
         console.log('objdiff:', JSON.stringify(s));
@@ -157,13 +157,14 @@ describe('C++ mangled-C spike: the plain-C backend reaches a C++ target as mangl
   test.runIf(HAVE)('dot__3VecFP3Vec matches the C++ target from plain C (pointer indexing)', () => {
     const sym = 'dot__3VecFP3Vec';
     const { obj, asm } = compilePpcCppTarget(
+      'mwcc_242_81',
       'struct Vec{int x;int y;int dot(Vec*o);}; int Vec::dot(Vec*o){ return x*o->x + y*o->y; }',
       sym,
       TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
     );
     const r = decompile(sym, asm, PPC_MWCC); // DEFAULT C backend — mangled-C
     expect(r.source).toBe(`s32 ${sym}(s32 * a0, s32 * a1) {\n    return *a0 * *a1 + a0[1] * a1[1];\n}\n`);
-    const s = scoreCPpc(r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags); // compiled as plain C, scored vs the C++ target
+    const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags); // compiled as plain C, scored vs the C++ target
     expect(s.score).toBe(0);
     expect(s.match).toBe(true);
   });

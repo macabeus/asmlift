@@ -6,7 +6,7 @@
 // was dropped, withheld candidates, a winner carrying a subject (`coalesce-v1-v0`), and fans of 5
 // to 800.
 import type { DecompilerResult, FunctionResult, Outcome, ToolchainId } from '@asmlift/bench-schema';
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { canonicalFlagsOf } from '@asmlift/core/target';
 
 type Tally = { candidates: number; dropped?: number; withheld?: number };
 
@@ -40,6 +40,16 @@ const UNIT = {
   unit: 'src/sample.c',
   flagsFrom: { from: 'makefile', commit: 'a'.repeat(40), file: 'Makefile', sha256: 'b'.repeat(64), command: 'cc1' },
 } as const;
+
+/** A synthetic sample row compiles at its toolchain's canonical flags — so a toolchain that has
+ *  none cannot have one, and says so here rather than producing a row with no flags. */
+function canonicalCflags(toolchain: ToolchainId): string[] {
+  const flags = canonicalFlagsOf(toolchain);
+  if (flags === undefined) {
+    throw new Error(`${toolchain} has no canonical flags: it compiles no synthetic row`);
+  }
+  return [...flags];
+}
 
 const ISA: Partial<Record<ToolchainId, FunctionResult['isa']>> = {
   agbcc: 'arm',
@@ -75,7 +85,7 @@ function ranked(
     isa: ISA[toolchain]!,
     compiler: toolchain,
     language: 'c',
-    cflags: project === 'synthetic' ? [...TOOLCHAIN_TARGETS[toolchain].canonicalFlags!] : UNIT_FLAGS[project],
+    cflags: project === 'synthetic' ? canonicalCflags(toolchain) : UNIT_FLAGS[project],
     features: [],
     loc: 0,
     refSource: '',

@@ -1,0 +1,45 @@
+# The decomp.yaml for GameCube/CodeWarrior GC/1.2.5n (CodeWarrior 2.3.3 build 163n) — a working
+# example of a `compiler` command for a Win32 compiler: `mwcceppc.exe` runs through the wibo
+# shim inside a one-shot `docker run`, with the (proprietary, never-committed) compiler dir
+# bind-mounted and the candidate's directory mounted at /work, file names rebased with
+# $(dirname)/$(basename).
+#
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce, and
+# {{cflags}} is where the codegen flags go: the benchmark fills it with each function's flags.
+#
+# To use this in your project, replace:
+#   $ASMLIFT_DOCKER    → docker
+#   $ASMLIFT_MWCC_DIR  → the directory holding mwcceppc.exe (e.g. tools/mwcc_233_163n)
+#   $ASMLIFT_PPC_IMAGE → a linux/386 image bundling the wibo shim (this repo builds one
+#                        from packages/toolchains/ppc-docker)
+#   $ASMLIFT_WIBO      → wibo (the Win32-API shim binary inside that image)
+#   {{cflags}}         → your build's flags (Pikmin's `-O4,p … -lang=c++`), which asmlift
+#                        reads off the command, or keep it and pass --cflags. This toolchain has NO
+#                        canonical flags — it compiles no synthetic row, and every row of it
+#                        names the flags its own build uses — so a run that gives none
+#                        anywhere is refused.
+# (The variables exist only to keep machine paths out of this repo — the benchmark fills
+# them in when it runs.)
+#
+# (The benchmark's own scoring skips this command and reuses a pooled long-lived container;
+# the reproduction scripts run it as written.)
+name: asmlift benchmark (mwcc_233_163n)
+platform: gc
+tools:
+  asmlift:
+    target: mwcc_233_163n
+    # This compile runs the compiler inside a container IMAGE, which is named by a mutable TAG:
+    # rebuild `the mwcc image` tomorrow and it is a different compiler under the same name, invisible
+    # to every token, every environment variable and the candidate cache's stamp probe alike
+    # (the probe compiles THROUGH the container, so it moves only if the image already did). So
+    # this project refuses the cross-run candidate-object cache for itself. asmlift refuses this
+    # shape on its own too, from a list of runtime names — but a list's miss serves a STALE
+    # OBJECT, and saying it here does not depend on asmlift having heard of your runtime.
+    candidateCache: off
+    compiler: >-
+      "$ASMLIFT_DOCKER" run --rm
+      -v "$ASMLIFT_MWCC_DIR":/mwcc:ro -v "$(dirname {{inputPath}})":/work
+      "$ASMLIFT_PPC_IMAGE"
+      $ASMLIFT_WIBO /mwcc/mwcceppc.exe
+      '-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr' {{cflags}}
+      -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

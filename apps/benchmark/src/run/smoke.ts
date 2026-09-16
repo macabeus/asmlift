@@ -1,6 +1,7 @@
 // Smoke check: drive one trivial function through asmlift end-to-end on every available
 // toolchain, validating the toolchain adapters + asmlift import path.
 import { decompile } from '@asmlift/core/pipeline';
+import { isCanonicalToolchainId } from '@asmlift/core/target';
 
 import { benchScorer } from '../decomp-config';
 import { availableToolchains, canonicalCodegen } from '../toolchains';
@@ -10,6 +11,12 @@ const SYM = 'add';
 
 export function smoke(): void {
   for (const tc of availableToolchains()) {
+    // The smoke test compiles ONE fixed reference at the toolchain's canonical flags. A toolchain
+    // with none has no flag set of its own to run it at — its rows each bring their build's.
+    if (!isCanonicalToolchainId(tc.id)) {
+      console.log(`[${tc.id}] no canonical flags — every row of this toolchain names its own`);
+      continue;
+    }
     try {
       const codegen = canonicalCodegen(tc.id);
       const { obj, asm } = tc.buildTarget(REF, SYM, codegen.cflags);

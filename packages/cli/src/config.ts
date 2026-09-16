@@ -5,16 +5,19 @@
 // spec-compliant `tools.asmlift` block. Loader shape: upward walk trying decomp.yaml AND
 // decomp.yml, an explicit path short-circuits, `null` when absent — the config is an
 // enhancement, never required. One deliberate choice: on an ambiguous platform
-// (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2) asmlift DECLINES naming the candidates instead of falling back
+// (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2; gc/gamecube/wii ⇒ one of three CodeWarrior builds)
+// asmlift DECLINES naming the candidates instead of falling back
 // to a generic default — per the cardinal rule, a guessed compiler mis-scores candidates.
+import type { FlagFamily } from '@asmlift/core/codegen-flags';
+import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import YAML from 'yaml';
 
 /** asmlift's payload inside `tools.asmlift` (arbitrary tool blocks are part of the spec). */
 export interface AsmliftToolConfig {
-  /** the asmlift target key (agbcc | ido7.1 | gcc2.7.2kmc | gcc2.7.2 | mwcc_242_81) — disambiguates
-   *  platforms that map to several compilers */
+  /** the asmlift target key (agbcc | ido7.1 | gcc2.7.2kmc | gcc2.7.2 | mwcc_242_81 | mwcc_233_163n |
+   *  mwcc_247_107) — disambiguates platforms that map to several compilers */
   target?: string;
   /** candidate-compile command template ({{inputPath}}/{{outputPath}}/{{symbol}}) — the
    *  project's own toolchain */
@@ -134,14 +137,23 @@ function noteObsoleteKeys(path: string, config: DecompConfig): void {
   }
 }
 
+/** The registry's target keys in one compiler family — so a platform's candidate list is read off
+ *  the registry rather than transcribed beside it. A toolchain added to a family asmlift already
+ *  compiles for lands in its platform's list on its own, and a platform that thereby names several
+ *  compilers starts declining, which is the only safe direction for that change to go. */
+const familyTargets = (...families: readonly FlagFamily[]): string[] =>
+  Object.keys(TOOLCHAIN_TARGETS).filter((id) => families.includes(TOOLCHAIN_TARGETS[id as ToolchainId].family));
+
 // decomp_settings platform → asmlift target keys. A platform naming SEVERAL compilers needs
-// `tools.asmlift.target` to disambiguate (resolveTarget declines, listing these).
+// `tools.asmlift.target` to disambiguate (resolveTarget declines, listing these). GameCube and Wii
+// name THREE CodeWarrior builds, which differ in codegen: the platform cannot pick between them,
+// and picking wrong is a well-formed object that simply does not match the ROM.
 const PLATFORM_TARGETS: Record<string, string[]> = {
-  gba: ['agbcc'],
-  n64: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
-  gc: ['mwcc_242_81'],
-  gamecube: ['mwcc_242_81'],
-  wii: ['mwcc_242_81'],
+  gba: familyTargets('agbcc'),
+  n64: familyTargets('ido', 'gcc'),
+  gc: familyTargets('mwcc'),
+  gamecube: familyTargets('mwcc'),
+  wii: familyTargets('mwcc'),
 };
 
 /** The decomp.yaml setting that makes `targetKey` the target: its platform, where that platform names no

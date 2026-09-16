@@ -65,7 +65,8 @@ platform: gba
 tools:
   asmlift:
     # Optional. Used only for disambiguation when multiple toolchains are available.
-    # Possible values: agbcc, ido7.1, gcc2.7.2kmc, mwcc_242_81
+    # Possible values: agbcc, ido7.1, gcc2.7.2kmc, gcc2.7.2,
+    #                 mwcc_242_81, mwcc_233_163n, mwcc_247_107
     target: agbcc
 
     # Optional. The project's built ELF. asmlift reads its symbol table and debug info to

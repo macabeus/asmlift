@@ -5,8 +5,9 @@
 // against a harness-built one, and a one-sided edit would disassemble them at different dialects.
 //
 // Neither site's own test can see that. Each is proven by a mutation that leaves the other green,
-// so the drift this forbids is exactly the drift nothing else would catch (GC-7 adds two more
-// PowerPC toolchains beside this one).
+// so the drift this forbids is exactly the drift nothing else would catch. The list is per IMAGE,
+// not per CodeWarrior build: all three builds disassemble with the image's one objdump, so there is
+// one list to keep in step however many builds are mounted.
 //
 // TOOLCHAIN-FREE: both imports are plain constant arrays — no spawn, no Docker, no CodeWarrior.
 import { PPC_DISASM_FLAGS } from '@asmlift/cli/objfile';

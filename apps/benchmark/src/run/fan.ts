@@ -33,6 +33,7 @@ import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations, splitVariations } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 
@@ -44,7 +45,7 @@ import { asmliftFan, fanSize, fanSizeOfError, rankOptionsFor } from '../eval/asm
 import { commitsSinceArtifact } from '../report/baseline';
 import { readCommitted } from '../report/committed';
 import { fanMove } from '../report/diff';
-import { TOOLCHAINS, type Toolchain, canonicalCodegen } from '../toolchains';
+import { TOOLCHAINS, type Toolchain } from '../toolchains';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
@@ -721,7 +722,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   // The same phase-1 verdict the row path states first: a gap here is what would make a published
   // row `declined`, and enumeration below throws on it rather than annotating.
   try {
-    const dec = decompile(sym, asm, canonicalCodegen(tc.id).target, { onGap: 'annotate' });
+    const dec = decompile(sym, asm, TOOLCHAIN_TARGETS[tc.id].description, { onGap: 'annotate' });
     for (const d of dec.diagnostics) {
       note(`asmlift: [declined] ${d.stage}: ${d.reason.split('\n')[0].slice(0, 200)}`);
     }
@@ -732,7 +733,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   const enumerationErrors = new Map<string, string>();
   let cands: Candidate[];
   try {
-    cands = enumerateRanked(sym, asm, canonicalCodegen(tc.id).target, {
+    cands = enumerateRanked(sym, asm, TOOLCHAIN_TARGETS[tc.id].description, {
       onEnumerationError: (variations: readonly string[], error: string) => {
         const step = threwStep(variations);
         enumerationErrors.set(step, threwLine(sym, step, error.split('\n')[0]));

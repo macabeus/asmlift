@@ -15,8 +15,10 @@
 // The adapter records which format `asm` is in via `asmKind` so each decompiler runner can adapt.
 import type { ToolchainId } from '@asmlift/bench-schema';
 import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
-import { type ResolvedTarget, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
+import { type CanonicalToolchainId, type ResolvedTarget, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
+  MWCC_BUILDS,
+  type MwccToolchainId,
   agbccAvailable,
   assembleTarget,
   compileMipsGcc272Target,
@@ -67,8 +69,9 @@ export function checkedTarget(built: BuiltTarget, what: string): BuiltTarget {
  *  sets. Throws on a level word the toolchain's family cannot read. */
 export const codegenFor = (id: ToolchainId, cflags: readonly string[]): ResolvedTarget => targetFor(id, cflags);
 
-/** A toolchain at its canonical flags. */
-export function canonicalCodegen(id: ToolchainId): ResolvedTarget {
+/** A toolchain at its canonical flags — the synthetic tier's own question. A real-only toolchain
+ *  has none and cannot be asked it (target.ts), which the parameter type says rather than the body. */
+export function canonicalCodegen(id: CanonicalToolchainId): ResolvedTarget {
   return codegenFor(id, TOOLCHAIN_TARGETS[id].canonicalFlags);
 }
 
@@ -83,6 +86,23 @@ export interface Toolchain {
   available: () => boolean;
   buildTarget: (refC: string, sym: string, cflags: readonly string[], lang?: 'c' | 'c++') => BuiltTarget;
 }
+
+/** One adapter per CodeWarrior build — one image, one asm format, one entry shape; only the
+ *  directory mounted at /mwcc and the version in the label differ.
+ *
+ *  ONE VERSION SCHEME, both halves said. `version` is the CodeWarrior release the id spells
+ *  (`mwcc_242_81` = 2.4.2 build 81), which is what apps/web labels these with; the pack directory
+ *  beside it — what a dtk project's `mw_version` names — comes from `MWCC_BUILDS`, so the two
+ *  numbers for one build cannot drift apart here. */
+const mwccToolchain = (id: MwccToolchainId, version: string): Toolchain => ({
+  id,
+  isa: 'ppc',
+  label: `CodeWarrior ${version} / PowerPC (${MWCC_BUILDS[id]})`,
+  asmKind: 'objdump',
+  available: () => ppcDockerAvailable(id),
+  buildTarget: (refC, sym, cflags, lang) =>
+    lang === 'c++' ? compilePpcCppTarget(id, refC, sym, cflags) : compilePpcTarget(id, refC, sym, cflags),
+});
 
 export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
   agbcc: {
@@ -122,15 +142,9 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     available: () => gcc272Available(),
     buildTarget: (refC, sym, cflags) => compileMipsGcc272Target(refC, sym, cflags),
   },
-  mwcc_242_81: {
-    id: 'mwcc_242_81',
-    isa: 'ppc',
-    label: 'CodeWarrior / PowerPC (GC)',
-    asmKind: 'objdump',
-    available: () => ppcDockerAvailable(),
-    buildTarget: (refC, sym, cflags, lang) =>
-      lang === 'c++' ? compilePpcCppTarget(refC, sym, cflags) : compilePpcTarget(refC, sym, cflags),
-  },
+  mwcc_242_81: mwccToolchain('mwcc_242_81', '2.4.2'),
+  mwcc_233_163n: mwccToolchain('mwcc_233_163n', '2.3.3'),
+  mwcc_247_107: mwccToolchain('mwcc_247_107', '2.4.7'),
 };
 
 export function availableToolchains(): Toolchain[] {

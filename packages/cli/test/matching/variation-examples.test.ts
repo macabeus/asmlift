@@ -37,7 +37,7 @@ const COMPILE: { readonly [C in ExampleCompiler]: (source: string) => string } =
   agbcc: (source) => compileCandAgbcc(source, flagsOf('agbcc')),
   ido: (source) => compileCandIdoC(source, flagsOf('ido')),
   gcc: (source) => compileCandKmc(source, flagsOf('gcc')),
-  mwcc: (source) => compileCandPpc(source, flagsOf('mwcc')),
+  mwcc: (source) => compileCandPpc('mwcc_242_81', source, flagsOf('mwcc')),
 };
 
 const entries = Object.entries(VARIATION_DEFINITIONS);
@@ -46,7 +46,7 @@ const HAVE: { readonly [C in ExampleCompiler]: boolean } = {
   agbcc: true,
   ido: true,
   gcc: !uses('gcc') || dockerGate('variation-examples'),
-  mwcc: !uses('mwcc') || ppcDockerGate('variation-examples'),
+  mwcc: !uses('mwcc') || ppcDockerGate('variation-examples', 'mwcc_242_81'),
 };
 
 const spell = (unit: string, spelling: string): string => `${unit.replace(EXAMPLE_HOLE, spelling)}\n`;

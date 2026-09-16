@@ -19,13 +19,13 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Inputs
 
-| Input                                            | Accepted for                        |
-| ------------------------------------------------ | ----------------------------------- |
-| Compiler `.s` text                               | All targets                         |
-| `objdump -d --no-show-raw-insn` text             | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2` |
-| `objdump -d -r -M gekko --no-show-raw-insn` text | `mwcc_242_81`                       |
-| ELF object file (`.o`)                           | MIPS/PPC targets                    |
-| `-` (stdin)                                      | text formats only                   |
+| Input                                            | Accepted for                                   |
+| ------------------------------------------------ | ---------------------------------------------- |
+| Compiler `.s` text                               | All targets                                    |
+| `objdump -d --no-show-raw-insn` text             | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2`            |
+| `objdump -d -r -M gekko --no-show-raw-insn` text | `mwcc_242_81`, `mwcc_233_163n`, `mwcc_247_107` |
+| ELF object file (`.o`)                           | MIPS/PPC targets                               |
+| `-` (stdin)                                      | text formats only                              |
 
 If the file includes multi-functions, pass the `--name` flag.
 
@@ -44,7 +44,8 @@ the right command for you.
 ## CLI reference
 
 ```
-usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81>]
+usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81|
+                                           mwcc_233_163n|mwcc_247_107>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--cflags <flags>] [--module <module>]
                 [--config <decomp.yaml>] [--score-against <target.o>]
@@ -54,7 +55,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 
 | Flag              | Meaning                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--target`        | Which ISA+compiler pair produced the input. Optional inside a `decomp.yaml` project (resolution: flag > `tools.asmlift.target` > `platform`, traced on stderr; an ambiguous platform like `n64` asks you to choose rather than guessing)                                                                                                                                         |
+| `--target`        | Which ISA+compiler pair produced the input. Optional inside a `decomp.yaml` project (resolution: flag > `tools.asmlift.target` > `platform`, traced on stderr; an ambiguous platform like `n64` or `gc` asks you to choose rather than guessing)                                                                                                                                 |
 | `--name`          | The function to decompile when the input holds several (default: auto-detected; required for an object whose code sections share addresses, see [Inputs](#inputs))                                                                                                                                                                                                               |
 | `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                                                                                       |
 | `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                                                                                            |
@@ -83,7 +84,7 @@ All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
 | Field      | Meaning                                                                                                                                                                                                                                                                    |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                  |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`; `gc`/`gamecube`/`wii` → `mwcc_242_81`, `mwcc_233_163n` or `mwcc_247_107`)                                                                        |
 | `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
 | `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
 | `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |

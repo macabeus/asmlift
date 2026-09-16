@@ -61,17 +61,41 @@ export const GCC_KMC_TOOLCHAIN = {
   objdumpFlags: ['-d', '--no-show-raw-insn'],
 };
 
+/** The CodeWarrior builds asmlift compiles PowerPC with: each key is the directory name decomp.me
+ *  vendors the build under, each value the `GC/<version>` directory of the compilers pack it is a
+ *  copy of — what `.github/workflows/benchmark.yml` unzips, and what a dtk project's `mw_version`
+ *  names. The version IS the spec, and the three GameCube projects need three builds:
+ *
+ *    • mwcc_242_81   = CodeWarrior 2.4.2 build 81  — Animal Crossing, Mario Party 4's RELs
+ *    • mwcc_233_163n = 2.3.3 build 163n            — Pikmin's whole game tree
+ *    • mwcc_247_107  = 2.4.7 build 107             — Mario Party 4's DOL `Game` lib
+ *
+ *  One image, one `wibo`, one objdump and one set of harness words serve all three: the only thing
+ *  that differs is which directory is mounted at /mwcc, so the bag below holds the shared half and
+ *  `mwccDir` holds the build. */
+export const MWCC_BUILDS = {
+  mwcc_242_81: 'GC/1.3.2',
+  mwcc_233_163n: 'GC/1.2.5n',
+  mwcc_247_107: 'GC/2.6',
+} as const;
+
+export type MwccToolchainId = keyof typeof MWCC_BUILDS;
+
+export const MWCC_TOOLCHAIN_IDS = Object.keys(MWCC_BUILDS) as MwccToolchainId[];
+
+export const isMwccToolchainId = (id: string): id is MwccToolchainId => Object.hasOwn(MWCC_BUILDS, id);
+
 /** CodeWarrior mwcceppc toolchain — runs the Win32 PE `mwcceppc.exe` through `wibo` inside a
  *  linux/386 Docker image (packages/toolchains/ppc-docker), exactly as decomp.me does. The image bundles a
  *  32-bit `wibo` + a PowerPC objdump; the PROPRIETARY CodeWarrior binaries are NOT baked in —
- *  they are bind-mounted from decomp.me's vendored `mwcc_<version>` dir (never committed). The
- *  version IS the spec: mwcc_242_81 = CodeWarrior 2.4.2 build 81, a widely-used GameCube
- *  compiler. Command mirrors decomp.me's `MWCCEPPC_CC` (compilers.py). Overridable via
- *  ASMLIFT_MWCC_DIR / ASMLIFT_PPC_IMAGE / ASMLIFT_DOCKER. */
+ *  they are bind-mounted from decomp.me's vendored `mwcc_<version>` dirs (never committed).
+ *  Command mirrors decomp.me's `MWCCEPPC_CC` (compilers.py). Overridable via
+ *  ASMLIFT_MWCC_ROOT / ASMLIFT_PPC_IMAGE / ASMLIFT_DOCKER. */
 export const MWCC_PPC_TOOLCHAIN = {
   docker: env('ASMLIFT_DOCKER', 'docker'),
   image: env('ASMLIFT_PPC_IMAGE', 'asmlift-ppc:latest'),
-  dir: env('ASMLIFT_MWCC_DIR', join(WORKSPACE, 'decomp.me/backend/compilers/gc_wii/mwcc_242_81')),
+  /** the directory holding decomp.me's `mwcc_<version>` dirs — one per `MWCC_BUILDS` key */
+  root: env('ASMLIFT_MWCC_ROOT', join(WORKSPACE, 'decomp.me/backend/compilers/gc_wii')),
   // decomp.me: `mwcceppc.exe -pragma "msg_show_realref off" -c -proc gekko -nostdinc -stderr`.
   // `-proc gekko` is codegen and belongs to the canonical flags, where -O4,p (opt-4 + peephole),
   // -enum int and -inline auto are the load-bearing GC matching flags.
@@ -89,6 +113,9 @@ export const MWCC_PPC_TOOLCHAIN = {
   // `psq_l f30,120(r1),0,0` becomes `lq r30,112(r1)`, another register file at another offset.
   objdumpFlags: ['-d', '-r', '-M', 'gekko', '--no-show-raw-insn'],
 };
+
+/** The directory holding one build's `mwcceppc.exe` — the directory mounted at /mwcc. */
+export const mwccDir = (id: MwccToolchainId): string => join(MWCC_PPC_TOOLCHAIN.root, id);
 
 /** GCC 2.7.2 / MIPS — the compiler the Mario Party 3 (N64) decomp uses: `decompals/mips-gcc-2.7.2`
  *  at `-O1`. A DIFFERENT flag convention from KMC's `gcc2.7.2kmc` (Kyoto's `-O2` Snowboard Kids 2
