@@ -167,6 +167,15 @@ _Favouring asmlift._
    `sa3:sub_8001FD4` `[]`, i.e. arity 0) — while m2c is told nothing: `proto` carries no return
    type to state, and inventing one would not be parity.
 
+_Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
+
+8. **No types at all in asmlift's map.** Mario Party 4's ELFs carry no DWARF (`main.elf`'s `.debug` is
+   empty and no `.plf` has a debug section), so its vendored maps are names, addresses and sizes: no
+   declaration shapes, no signatures, no layouts. m2c's context is the unit's full declarations.
+9. **Every earlier function's signature.** A unit row's context is its unit before the function, so m2c
+   reads the declarator of every function the unit defines above it — not only its callees — where an
+   assembled row's context holds the headers and a `prependC`.
+
 **A context is not one uniform thing**, and the repro scripts say so per row rather than
 generalising. It is whatever that TU preprocesses to: af's manifest has `headers: []` — its
 headers do not survive a host `cpp` — so an af row's entire context is that row's own `prependC`,
