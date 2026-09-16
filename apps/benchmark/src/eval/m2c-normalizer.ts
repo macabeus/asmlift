@@ -110,9 +110,10 @@ function mipsReg(tok: string): string {
 
 /** Parse the shared objdump body into (symbol, instruction list). Branch/jump target addresses are
  *  captured from the `<sym+0xNN>` annotation (objdump prints the absolute target as a bare hex). */
-function parse(disasm: string): { sym: string; insns: Insn[] } | null {
+function parse(disasm: string): { sym: string; start: number; insns: Insn[] } | null {
   const lines = disasm.split('\n');
   let sym = '';
+  let start = 0;
   const insns: Insn[] = [];
   for (const raw of lines) {
     const line = raw.replace(/\r$/, '');
@@ -120,6 +121,7 @@ function parse(disasm: string): { sym: string; insns: Insn[] } | null {
     if (label) {
       if (!sym) {
         sym = label[2];
+        start = parseInt(label[1], 16);
       }
       continue;
     }
@@ -134,7 +136,7 @@ function parse(disasm: string): { sym: string; insns: Insn[] } | null {
       insns.push({ addr: parseInt(ins[1], 16), text: ins[2].trim() });
     }
   }
-  return sym ? { sym, insns } : null;
+  return sym ? { sym, start, insns } : null;
 }
 
 /** Parse an `objdump -s -r -t` dump into symbols, per-section relocations and section bytes. */
@@ -202,16 +204,33 @@ function parseAsmDump(dump: string): AsmDump {
   return { symbols, relocs, contents };
 }
 
+/** Where the function being normalized starts in its section. The instructions carry section addresses, so
+ *  a branch annotated `<fn+0xNN>` targets `start + 0xNN` — which is `0xNN` only for a function at the section's
+ *  start, as every single-function target is. A function compiled in its own unit is not: Mario Party 4's
+ *  `HuMemHeapDump` sits at 0x43c, and reading the annotation as an address sent m2c to a `.L4c` no
+ *  instruction carries (`Cannot find branch target`) on 26 of 42 rows. */
+interface FunctionPlace {
+  sym: string;
+  start: number;
+}
+
+/** Where a listing's first function starts in its section. */
+export function functionStart(disasm: string): number {
+  const label = /^([0-9a-f]+)\s+<[^>]+>:$/im.exec(disasm);
+  return label === null ? 0 : parseInt(label[1], 16);
+}
+
 /** The branch/jump target address embedded in an operand's `<sym+0xNN>`/`<sym>` annotation.
- *  Returns the absolute address or null. */
-function branchTarget(text: string): number | null {
-  const m = text.match(/<[^>+]+\+0x([0-9a-f]+)>/i);
+ *  Returns the section address or null. */
+function branchTarget(text: string, fn: FunctionPlace): number | null {
+  const base = (sym: string) => (sym === fn.sym ? fn.start : 0);
+  const m = text.match(/<([^>+]+)\+0x([0-9a-f]+)>/i);
   if (m) {
-    return parseInt(m[1], 16);
+    return base(m[1]) + parseInt(m[2], 16);
   }
-  const m0 = text.match(/<[^>+]+>$/); // target is the function entry (offset 0)
+  const m0 = text.match(/<([^>+]+)>$/); // target is the symbol's entry (offset 0)
   if (m0) {
-    return 0;
+    return base(m0[1]);
   }
   return null;
 }
@@ -229,6 +248,7 @@ interface DataRegion {
 interface DataEmission {
   dump: AsmDump;
   fnSym: string; // the function symbol — its relocs mark jump-table entries alongside `.text`
+  fnStart: number; // where it starts in `.text`: an entry relocated against it is an offset from there
   regions: Map<string, DataRegion>;
   jtblTargets: Set<number>;
   /** instruction address → the MIPS REL addend recovered from the immediate (see mipsRelAddends) */
@@ -286,7 +306,7 @@ function regionLines(e: DataEmission, region: DataRegion): string[] {
       const word = bytes
         ? ((bytes[off] << 24) | (bytes[off + 1] << 16) | (bytes[off + 2] << 8) | bytes[off + 3]) >>> 0
         : 0;
-      const target = rel.addend !== 0 ? rel.addend : word;
+      const target = rel.addend !== 0 ? (rel.sym === e.fnSym ? e.fnStart : 0) + rel.addend : word;
       e.jtblTargets.add(target);
       lines.push(`.word .L${target.toString(16)}`);
     } else if (bytes) {
@@ -397,12 +417,14 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
   if (!parsed) {
     throw new Error('disasmToM2c: could not parse objdump output');
   }
-  const { sym, insns } = parsed;
+  const { sym, start, insns } = parsed;
+  const fn = { sym, start };
   const dump = asmDump ? parseAsmDump(asmDump) : null;
   const emission: DataEmission | null = dump
     ? {
         dump,
         fnSym: sym,
+        fnStart: start,
         regions: new Map(),
         jtblTargets: new Set(),
         relAddends: mipsRelAddends(insns, dump.relocs.get('.text') ?? []),
@@ -423,7 +445,7 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
       /^[bj]/.test(ins.text) &&
       !/^(bl|blr|blelr|bgelr|bltlr|bgtlr|beqlr|bnelr|bdnzlr|bctr|bctrl|jal|jalr|jr)\b/.test(ins.text)
     ) {
-      const t = branchTarget(ins.text);
+      const t = branchTarget(ins.text, fn);
       if (t !== null) {
         targets.add(t);
       }
@@ -433,7 +455,7 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
   // Pass 2 — render instructions (data rewrites register the referenced regions)…
   const rendered: { addr: number; text: string }[] = [];
   for (const ins of insns) {
-    rendered.push({ addr: ins.addr, text: rewriteInsn(ins, isa, textRelocs, emission) });
+    rendered.push({ addr: ins.addr, text: rewriteInsn(ins, isa, fn, textRelocs, emission) });
   }
   // …then materialize the data blocks FIRST: their relocated entries name the `.L` case labels
   // the text must carry.
@@ -458,7 +480,13 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
   return out.join('\n') + '\n';
 }
 
-function rewriteInsn(ins: Insn, isa: Isa, textRelocs: Map<number, Reloc>, emission: DataEmission | null): string {
+function rewriteInsn(
+  ins: Insn,
+  isa: Isa,
+  fn: FunctionPlace,
+  textRelocs: Map<number, Reloc>,
+  emission: DataEmission | null,
+): string {
   let text = ins.text;
   const dumpReloc = textRelocs.get(ins.addr);
   const isCall = /^(bl|jal)\b/.test(text);
@@ -470,7 +498,7 @@ function rewriteInsn(ins: Insn, isa: Isa, textRelocs: Map<number, Reloc>, emissi
       dataRewritten = true;
     }
   }
-  const t = branchTarget(text);
+  const t = branchTarget(text, fn);
   if (!dataRewritten && t !== null) {
     // Replace the `<sym+0xNN>`/`<sym>` annotation (and the numeric target objdump prints before
     // it): calls take their reloc symbol — the real callee; local branches always take `.L`.

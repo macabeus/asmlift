@@ -93,3 +93,26 @@ describe('disasm-to-m2c data-section emission (pinned)', () => {
     expect(disasmToM2c(PPC_JTBL_IN, 'ppc')).not.toContain('.rodata');
   });
 });
+
+// A function compiled in its own unit does not start at its section's start: every instruction carries a
+// section address, while objdump annotates a branch as an offset into the function (`<sw_jt+0x60>`) and a
+// CodeWarrior jump-table entry is relocated against the function symbol plus that same offset.
+describe('a function that starts past its section start', () => {
+  const START = 0x100;
+  const hex = (n: number) => n.toString(16);
+  const moved = PPC_JTBL_IN.replace('00000000 <sw_jt>:', `${hex(START).padStart(8, '0')} <sw_jt>:`)
+    .replace(/^(\s*)([0-9a-f]+):/gm, (_m, pad: string, at: string) => `${pad}${hex(START + parseInt(at, 16))}:`)
+    .replace(
+      /\b([0-9a-f]+) <sw_jt\+0x([0-9a-f]+)>/g,
+      (_m, _at, off: string) => `${hex(START + parseInt(off, 16))} <sw_jt+0x${off}>`,
+    );
+  const movedDump = PPC_JTBL_DUMP.replace('0000000a R_PPC_ADDR16_HA', '0000010a R_PPC_ADDR16_HA')
+    .replace('00000012 R_PPC_ADDR16_LO', '00000112 R_PPC_ADDR16_LO')
+    .replace('00000000 g     F .text', '00000100 g     F .text');
+  const labelsMoved = (text: string) =>
+    text.replace(/\.L([0-9a-f]+)/g, (_m, at: string) => `.L${hex(START + parseInt(at, 16))}`);
+
+  test('its branches and its jump table land on the labels its instructions carry', () => {
+    expect(disasmToM2c(moved, 'ppc', movedDump)).toBe(labelsMoved(PPC_JTBL_OUT));
+  });
+});

@@ -36,6 +36,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync
 import { join } from 'node:path';
 
 import { CACHE_DIR, M2C_DIR } from './config';
+import { functionStart } from './eval/m2c-normalizer';
 import { type BuiltTarget, type Toolchain, type ToolchainId, checkedTarget } from './toolchains';
 
 const enabled = () => process.env.ASMLIFT_BENCH_CACHE !== '0';
@@ -263,6 +264,11 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      which is how the ladder was found: `pikmin:getMainStickX__10ControllerFv` replayed
   //      `noncompile` out of a warm store while a direct `scoreM2c` on the same arguments returned
   //      MATCH 0/14.
+  // `placed` is the same kind of register, for a function that starts past its section's start — one
+  // compiled in its own unit. The normalizer read a branch's `<fn+0xNN>` annotation as a section address,
+  // which is the same number only at the section's start, so no entry keyed on such a listing can be
+  // served from before it read the function's own start.
+  //   placed 1: a Mario Party 4 row replayed `Cannot find branch target .L4c` out of a warm store.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
@@ -280,6 +286,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
       ...(lang === 'c++' && { lang, cppLadder: 1 }),
+      ...(functionStart(asm) !== 0 && { placed: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);
