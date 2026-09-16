@@ -116,3 +116,18 @@ describe('a function that starts past its section start', () => {
     expect(disasmToM2c(moved, 'ppc', movedDump)).toBe(labelsMoved(PPC_JTBL_OUT));
   });
 });
+
+// A small-data EXTERN: the object records its relocation but not its section, and m2c reads an `@sda21`
+// operand's symbol whatever the base register — so it must reach m2c named, not as `0(0)` (`*NULL`).
+describe('a small-data extern', () => {
+  const IN =
+    '\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000264 <get>:\n 264:\tlwz     r0,0(0)\n\t\t\t264: R_PPC_EMB_SDA21\tminimumVcount\n 268:\tli      r3,0\n\t\t\t268: R_PPC_EMB_SDA21\tcorrectDiskID\n 26c:\tblr\n';
+  const DUMP =
+    '\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000264 g     F .text\t0000000c get\n00000000         *UND*\t00000000 minimumVcount\n00000000         *UND*\t00000000 correctDiskID\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000264 R_PPC_EMB_SDA21   minimumVcount\n00000268 R_PPC_EMB_SDA21   correctDiskID\n\n\n';
+
+  test('is read through its name, in both the memory and the address form', () => {
+    expect(disasmToM2c(IN, 'ppc', DUMP)).toBe(
+      'glabel get\n    lwz     r0,minimumVcount@sda21(r13)\n    addi      r3,r13,correctDiskID@sda21\n    blr\n',
+    );
+  });
+});

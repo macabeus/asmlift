@@ -269,6 +269,9 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // which is the same number only at the section's start, so no entry keyed on such a listing can be
   // served from before it read the function's own start.
   //   placed 1: a Mario Party 4 row replayed `Cannot find branch target .L4c` out of a warm store.
+  // `sda` is one more, for a listing that reads a small-data EXTERN: the normalizer left its operand as
+  // `0(0)`, which m2c reads as `*NULL`, and now names it.
+  //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
@@ -287,6 +290,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       obj: sha(readFileSync(obj)),
       ...(lang === 'c++' && { lang, cppLadder: 1 }),
       ...(functionStart(asm) !== 0 && { placed: 1 }),
+      ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

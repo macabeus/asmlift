@@ -401,11 +401,16 @@ function rewriteData(e: DataEmission, ins: Insn, r: Reloc): string | null {
         ? t.replace(/(-?(?:0x[0-9a-f]+|\d+))\(/, `${name}@l(`)
         : t.replace(/(-?(?:0x[0-9a-f]+|\d+))$/, `${name}@l`);
     case 'R_PPC_EMB_SDA21': {
-      if (named) {
-        return null; // base register needs the region's section — stay conservative for externs
-      }
-      const base = e.regions.get(name)?.section.endsWith('2') ? 'r2' : 'r13';
-      return t.replace(/(-?(?:0x[0-9a-f]+|\d+))\(\s*0?r?0?\s*\)/, `${name}@sda21(${base})`);
+      // The linker writes r2 as the base of .sdata2/.sbss2 and r13 as the base of .sdata/.sbss. m2c reads the
+      // SYMBOL of an `@sda21` operand whatever its base (m2c translate.py `strip_macros`; its `addi`→`li` fold
+      // takes r2 and r13 alike), so a named extern — whose section an object does not record — takes r13.
+      // Left unrewritten it reached m2c as `lwz r0,0(0)`, which m2c reads as `*NULL`: Mario Party 4's
+      // `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
+      const base = !named && e.regions.get(name)?.section.endsWith('2') ? 'r2' : 'r13';
+      const rewritten = /^li\s/.test(t)
+        ? t.replace(/^li(\s+)(r\d+),\s*0$/, `addi$1$2,${base},${name}@sda21`)
+        : t.replace(/(-?(?:0x[0-9a-f]+|\d+))\(\s*0?r?0?\s*\)/, `${name}@sda21(${base})`);
+      return rewritten === t ? null : rewritten;
     }
     default:
       return null;
