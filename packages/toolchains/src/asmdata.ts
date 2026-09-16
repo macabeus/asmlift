@@ -30,8 +30,14 @@ import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN } from './toolchai
  *  A single-code-section object — every target the synthetic tier builds, and every one the GBA/N64
  *  projects build — is its own scope, so its dump is byte-identical to the one this seam produced
  *  before it existed. The scoped copy is written beside the object, which is the directory the
- *  container already reaches. */
-const scopedForDump = (obj: string, sym: string): string => scopedObjectPath(obj, sym, dirname(obj));
+ *  container already reaches.
+ *
+ *  Exported because a dump is CONTENT-CACHED by the benchmark, and what the cache keys on is these
+ *  bytes: "which object this dump is of" is one question with one answer, and a second spelling of
+ *  it in the cache could drift from this one. Scoping is idempotent — a scoped copy holds one code
+ *  section, so it is its own scope and nothing is rewritten — so a caller that has already asked may
+ *  hand the answer straight back to the dump functions below. */
+export const scopedForDump = (obj: string, sym: string): string => scopedObjectPath(obj, sym, dirname(obj));
 
 /** Raw `objdump -s -r -t` text for the MIPS object's `sym` (native objdump — only compilation is
  *  containerized). */
