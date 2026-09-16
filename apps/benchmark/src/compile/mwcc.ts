@@ -13,6 +13,7 @@
 // itself (`ppcPreprocess`), run with the checkout mounted, under the wrapper the unit's own build
 // rule runs it under.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
+import { sliceSymbol } from '@asmlift/core/frontend/disasm';
 import {
   type MwccToolchainId,
   ppcCompile,
@@ -27,6 +28,18 @@ import { unitCompileWrapper } from '../cases/dtk-project';
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir } from './util';
+
+/** The disassembly of `sym` alone: the dump's header, then its own listing.
+ *
+ *  A row compiled in its own unit (`tu: "unit"`) builds an object holding every function the unit defines
+ *  before it — Mario Party 4's `fn_2_E66C` disassembles to 555 KB — and everything downstream of the target is
+ *  about the row's function: the listing both decompilers are handed, the codegen tags read off it, and the
+ *  `targetAsm` the row publishes. Read whole, `fn_1_C2BC`, two float stores, was tagged `libm-call`,
+ *  `savegpr-helper`, `float-compare` and `float-callee-save` by the unit's other functions. */
+export function functionDisassembly(asm: string, sym: string): string {
+  const firstFunction = asm.search(/^[0-9a-f]+\s+<[^>]+>:\s*$/im);
+  return firstFunction === -1 ? asm : `${asm.slice(0, firstFunction)}${sliceSymbol(asm, sym).trimEnd()}\n`;
+}
 
 /** The CodeWarrior binary, as a project's own build rule names it. */
 const MWCCEPPC = 'mwcceppc.exe';
@@ -95,8 +108,9 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     writeFileSync(join(dir, 'u.c'), iText);
     const asm = compile(mwcc, dir, 'u.c', 'u.o', flags, true);
     // A project unit is exactly where a translation unit gets several `.text` sections, all at
-    // address 0: the decompiler reads the one that defines this row's function.
-    return { obj: join(dir, 'u.o'), asm: ppcSectionScoped(mwcc, dir, 'u.o', sym, asm) };
+    // address 0: the decompiler reads the one that defines this row's function — and, of that section,
+    // the function alone.
+    return { obj: join(dir, 'u.o'), asm: functionDisassembly(ppcSectionScoped(mwcc, dir, 'u.o', sym, asm), sym) };
   },
   compileCandidate(tu, _sym, cflags, language): string {
     // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same

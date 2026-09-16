@@ -211,6 +211,20 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
     CONTAINER_BUDGET,
   );
 
+  // A unit row's target object holds every function its unit defines before it; the row is about one.
+  test(
+    "a target's disassembly is its function's alone",
+    () => {
+      const unit = 'int ext(int x);\nint helper(int x) { return ext(x) + 1; }\nint f(int x) { return ext(x) * 2; }\n';
+      const built = mwcc.buildTarget(unit, 'f', CFLAGS, 'c');
+      expect(built.asm).toMatch(/^Disassembly of section \.text:$/m);
+      expect(built.asm).toMatch(/^[0-9a-f]+ <f>:$/m);
+      expect(built.asm).not.toMatch(/<helper>:/);
+      expect(built.asm).toMatch(/R_PPC_REL24\s+ext/);
+    },
+    CONTAINER_BUDGET,
+  );
+
   // A unit row's candidate compiles after its unit's earlier code, which can call the function: Mario Party 4's
   // `HuDvdErrorWatch` is called twice before its definition. With the function's own prototype stripped, those
   // calls declare it implicitly and the definition is `redeclared`, so the candidate never reaches its unit.
