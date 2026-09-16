@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 
-import { loadDecompConfig, resolveTarget } from '../../src/config';
+import { loadDecompConfig, resolveTarget, targetSetting } from '../../src/config';
 import { runCli } from '../../src/main';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'asmlift-cfg-'));
@@ -60,6 +60,21 @@ test('ambiguous and unknown platforms DECLINE naming the candidates, never guess
   writeFileSync(join(n64, 'decomp.yaml'), 'platform: n64\n');
   const amb = resolveTarget(undefined, loadDecompConfig(undefined, n64));
   expect('error' in amb && amb.error).toMatch(/ido7.1 or gcc2.7.2kmc/);
+
+  // GameCube and Wii name THREE CodeWarrior builds, and they differ in codegen: Pikmin's
+  // `getMainStickX__10ControllerFv` compiled by mwcc_242_81 rather than by its own mwcc_233_163n
+  // differs from the ROM at +0x3. A platform that used to name one compiler and now names three
+  // is exactly when an inference has to stop being one.
+  for (const platform of ['gc', 'gamecube', 'wii']) {
+    const gc = tmp();
+    writeFileSync(join(gc, 'decomp.yaml'), `platform: ${platform}\n`);
+    const res = resolveTarget(undefined, loadDecompConfig(undefined, gc));
+    expect('error' in res && res.error).toMatch(/mwcc_242_81 or mwcc_233_163n or mwcc_247_107/);
+  }
+  // …so the setting a refusal tells a CodeWarrior user to write is the one that decides the build,
+  // never the platform that no longer does.
+  expect(targetSetting('mwcc_242_81')).toBe('tools.asmlift.target: mwcc_242_81');
+  expect(targetSetting('agbcc')).toBe('platform: gba');
 
   const weird = tmp();
   writeFileSync(join(weird, 'decomp.yaml'), 'platform: dreamcast\n');
