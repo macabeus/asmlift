@@ -412,6 +412,12 @@ describe('the detectors themselves', () => {
     // the first form of this floor could not see (synthetic:pmarrrow)
     expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][k]; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][7]; }', '', '')).toBe(false);
+    // the WHOLE subscript decides, not its first character: `[2 * i]` opens on a digit
+    expect(JUDGEMENT_FLOOR['variable-index']('{ return table[2 * i]; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['table']('{ return table[2 * i]; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['table']('{ return table[0x10]; }', '', '')).toBe(false);
+    // and a nested subscript is the OUTER index, not the inner constant
+    expect(JUDGEMENT_FLOOR['variable-index']('{ gBg[gPtr[2]].hOfs = 0; }', '', '')).toBe(true);
     // merge-chain wants MORE THAN ONE local for the arms to decide, initialised or not
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x; if (a) x = 1; else x = 2; return x; }', '', '')).toBe(false);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; return f(x, y); }', '', '')).toBe(false);
