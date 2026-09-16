@@ -7,7 +7,7 @@
 // relocated bits cleared, and the relocations themselves. A target built later, with no ELF at hand, holds
 // the function the ROM holds exactly when it has that digest (`targetDigest`).
 //
-// ELF32 only, ARM and MIPS: the machines the real tier builds for.
+// ELF32 only, ARM, MIPS and PowerPC: the machines the real tier builds for.
 import { moduleOf } from '@asmlift/bench-schema';
 import { createHash } from 'node:crypto';
 
@@ -20,6 +20,7 @@ const SHN_LORESERVE = 0xff00;
 const STT_NOTYPE = 0;
 const STT_FUNC = 2;
 const EM_MIPS = 8;
+const EM_PPC = 20;
 const EM_ARM = 40;
 
 interface Section {
@@ -107,6 +108,30 @@ function nextLabel(elf: Elf32, start: number, shndx: number | undefined): number
   return later.length > 0 ? Math.min(...later) : undefined;
 }
 
+/** Which bits each PowerPC relocation LEAVES for comparison — the bits the linker does not write —
+ *  and how wide its field is. Big-endian, bit 0 the most significant.
+ *
+ *  These six are every type that appears in a code section of the three GameCube projects' objects
+ *  (`ADDR32`/`UADDR32` appear only in data sections, which this mask never covers): Animal Crossing
+ *  8,206 objects, Mario Party 4 1,161, Pikmin 1,166 — 4, 5, 6, 10, 11 and 109 in all three and
+ *  nothing else.
+ *
+ *  A 2-BYTE FIELD STARTS AT `r_offset`; A 4-BYTE ONE AT THE WORD AROUND IT. The ABI puts an
+ *  `ADDR16_*` relocation on the half-word it rewrites, two bytes into the instruction, and a
+ *  branch relocation on the instruction — measured over those 3,000-odd objects, 4/5/6 are at an
+ *  offset ≡ 2 (mod 4) every time and 10/11 at ≡ 0 every time. `EMB_SDA21` is written BOTH WAYS by
+ *  CodeWarrior (66,828 at ≡ 0, 34,669 at ≡ 2, both spellings inside one project's own compiled
+ *  objects) while rewriting the whole instruction either way — it replaces the BASE REGISTER field
+ *  as well as the displacement — so its field is the word the offset falls in. */
+const PPC_FIELD: Readonly<Record<number, { bytes: 2 | 4; keep: number }>> = {
+  4: { bytes: 2, keep: 0 }, // R_PPC_ADDR16_LO — the low half of an address
+  5: { bytes: 2, keep: 0 }, // R_PPC_ADDR16_HI — the high half
+  6: { bytes: 2, keep: 0 }, // R_PPC_ADDR16_HA — the high half, adjusted for a signed low half
+  10: { bytes: 4, keep: 0xfc000003 }, // R_PPC_REL24 — a `bl`: the opcode and the AA/LK bits survive
+  11: { bytes: 4, keep: 0xffff0003 }, // R_PPC_REL14 — a conditional branch, with AA/LK
+  109: { bytes: 4, keep: 0xffe00000 }, // R_PPC_EMB_SDA21 — base register AND displacement
+};
+
 /** Per byte of `[start, start + length)` of section `shndx`: which bits the relocations leave compared. */
 function relocationMask(elf: Elf32, shndx: number, start: number, length: number): number[] {
   const mask = new Array<number>(length).fill(0xff);
@@ -131,6 +156,15 @@ function relocationMask(elf: Elf32, shndx: number, start: number, length: number
       } else if (elf.machine === EM_MIPS) {
         // R_MIPS_26 fills the jump target and keeps the opcode; HI16, LO16 and GPREL16 fill the immediate
         clear(offset, 4, type === 4 ? 0xfc000000 : type === 5 || type === 6 || type === 7 ? 0xffff0000 : 0);
+      } else if (elf.machine === EM_PPC) {
+        const field = PPC_FIELD[type];
+        if (field === undefined) {
+          // LOUD, where MIPS falls back to clearing the whole word. A type this table does not
+          // know is one nothing has measured, and guessing its field WIDENS what the comparison
+          // ignores — the direction that lets a target that is not the game's function pass.
+          throw new Error(`no PowerPC relocation mask for type ${type}`);
+        }
+        clear(field.bytes === 2 ? offset : offset & ~3, field.bytes, field.keep);
       } else {
         throw new Error(`no relocation mask for ELF machine ${elf.machine}`);
       }
