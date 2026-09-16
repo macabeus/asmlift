@@ -1916,7 +1916,8 @@
         "cast",
         "struct",
         "field",
-        "double"
+        "double",
+        "union"
       ],
       "prependC": "#include \"sys_matrix.h\"\n#include \"TwoHeadArena.h\"\n#include \"m_skin_matrix.h\"\n#include \"graph.h\"\n#include \"libc64/math64.h\"\n#include \"MSL_C/w_math.h\"\n#include \"libforest/gbi_extensions.h\"",
       "funcC": "void Matrix_MtxtoMtxF(Mtx* src, MtxF* dest) {\n    u16* m1 = (u16*)&src->m[0][0];\n    u16* m2 = (u16*)&src->m[2][0];\n\n    dest->xx = ((m1[0] << 0x10) | m2[0]) * (1 / (f64)0x10000);\n    dest->yx = ((m1[1] << 0x10) | m2[1]) * (1 / (f64)0x10000);\n    dest->zx = ((m1[2] << 0x10) | m2[2]) * (1 / (f64)0x10000);\n    dest->wx = ((m1[3] << 0x10) | m2[3]) * (1 / (f64)0x10000);\n    dest->xy = ((m1[4] << 0x10) | m2[4]) * (1 / (f64)0x10000);\n    dest->yy = ((m1[5] << 0x10) | m2[5]) * (1 / (f64)0x10000);\n    dest->zy = ((m1[6] << 0x10) | m2[6]) * (1 / (f64)0x10000);\n    dest->wy = ((m1[7] << 0x10) | m2[7]) * (1 / (f64)0x10000);\n    dest->xz = ((m1[8] << 0x10) | m2[8]) * (1 / (f64)0x10000);\n    dest->yz = ((m1[9] << 0x10) | m2[9]) * (1 / (f64)0x10000);\n    dest->zz = ((m1[10] << 0x10) | m2[10]) * (1 / (f64)0x10000);\n    dest->wz = ((m1[11] << 0x10) | m2[11]) * (1 / (f64)0x10000);\n    dest->xw = ((m1[12] << 0x10) | m2[12]) * (1 / (f64)0x10000);\n    dest->yw = ((m1[13] << 0x10) | m2[13]) * (1 / (f64)0x10000);\n    dest->zw = ((m1[14] << 0x10) | m2[14]) * (1 / (f64)0x10000);\n    dest->ww = ((m1[15] << 0x10) | m2[15]) * (1 / (f64)0x10000);\n}",
