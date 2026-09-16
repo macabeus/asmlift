@@ -424,7 +424,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // row used to be `kleod:ReturnOne:agbcc` (retired), which the 2026-09 source swap found is not a
   // function (it is the `movs r0, #1; bx lr` tail label of `StringCompare` in testyourmine/kleod's
   // asm/util.s), so the control lives here, where no binary can dispute its boundaries.
-  { sym: 'retone', src: 'int retone(void){ return 1; }', features: ['baseline'], toolchains: ['agbcc'] },
+  //
+  // Two lanes, and the second is not decoration: a control says "a decompiler that cannot match
+  // this has a problem unrelated to any feature", which is a claim about ONE compiler's codegen at
+  // a time. Animal Crossing is about to be the tag's only real carrier and it is CodeWarrior, so
+  // the PowerPC control (`li r3,1; blr`) is what its row can be read against. ido7.1 and
+  // gcc2.7.2kmc are left off: neither carries the tag anywhere, and a control nothing is read
+  // against is a compile, not a measurement.
+  {
+    sym: 'retone',
+    src: 'int retone(void){ return 1; }',
+    features: ['baseline'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+  },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
