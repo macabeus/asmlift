@@ -785,20 +785,106 @@ export interface PpcPreprocessOptions {
   wrapper?: readonly string[];
 }
 
+// ── #pragma, which mwcceppc's preprocessor consumes ─────────────────────────────────────────
+// No preprocessing mode of mwcceppc writes a `#pragma` back out: `-E`, `-EP`, `-P` and
+// `-preprocess` all execute the directive and drop it, and GC/1.3.2 has no option that keeps it.
+// A vendored translation unit is then NOT the unit the project compiled, and the difference is not
+// cosmetic. Measured on Animal Crossing's own headers: `include/types.h` declares the section every
+// `__declspec(section "forcestrip")` names, so without it the blob does not compile at all
+// (`unknown section name 'forcestrip'`), and `include/libc/math.h` wraps `floor`, `sqrtf` and the
+// rest in `#pragma cplusplus on … reset`, so without it a C unit's calls to them lose their C++
+// linkage — `floor__Fd` becomes `floor` — silently.
+//
+// So every directive is carried through as a MARKER: an identifier no program spells, on a line of
+// its own directly below the directive, which the preprocessor passes through verbatim wherever the
+// directive was live and drops with it wherever an `#if` made it dead. The directive itself stays,
+// so what it does to preprocessing (`#pragma once`) still happens. The project's files cannot be
+// edited, so each one holding a directive is shadowed, inside the container only, by a marked copy.
+//
+// THE COST, stated: a marked file is one line longer below each directive, so `__LINE__` expanded
+// INSIDE that file after a directive reads one higher per directive above it. A row's own function
+// is never in such a file (its unit is written fresh), so what this could move is a header's inline
+// body, and the ROM gate is what would refuse the row if it did.
+
+const PRAGMA_MARKER = /^[ \t]*__asmlift_pragma_(\d+)__[ \t]*$/gm;
+const PRAGMA_DIRECTIVE = /^[ \t]*#[ \t]*pragma\b/;
+
+/** `text` with a marker line below every `#pragma` directive, each directive appended to
+ *  `pragmas` so its marker's number indexes it. A directive continued over several lines with a
+ *  backslash is one directive, marked after its last line. */
+export function markPragmas(text: string, pragmas: string[]): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const continued = i > 0 && lines[i - 1].endsWith('\\');
+    if (continued || !PRAGMA_DIRECTIVE.test(lines[i])) {
+      out.push(lines[i]);
+      continue;
+    }
+    let end = i;
+    while (end < lines.length - 1 && lines[end].endsWith('\\')) {
+      end++;
+    }
+    const directive = lines.slice(i, end + 1);
+    out.push(...directive, `__asmlift_pragma_${pragmas.length}__`);
+    pragmas.push(directive.join('\n'));
+    i = end;
+  }
+  return out.join('\n');
+}
+
+/** Preprocessed `text` with every marker line replaced by the directive it stands for. Throws when
+ *  a marker survives anywhere else: the preprocessor joined it into a line, and the directive's
+ *  place in the unit can no longer be told. */
+export function restorePragmas(text: string, pragmas: readonly string[]): string {
+  const restored = text.replace(PRAGMA_MARKER, (_, i: string) => pragmas[Number(i)]);
+  const stray = /__asmlift_pragma_\d+__/.exec(restored);
+  if (stray !== null) {
+    throw new Error(`mwcceppc -EP moved the #pragma marker ${stray[0]} into a line of code`);
+  }
+  return restored;
+}
+
+/** The files under `root` holding a `#pragma` directive, relative to it: the ones a preprocess
+ *  that reads the checkout has to see marked. */
+function filesWithPragmas(root: string): string[] {
+  const r = spawnSync('grep', ['-rlIE', '^[[:space:]]*#[[:space:]]*pragma', '--exclude-dir=.git', '.'], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (r.error || (r.status !== 0 && r.status !== 1)) {
+    throw new Error(`cannot search ${root} for #pragma directives: ${r.error?.message ?? r.stderr}`);
+  }
+  return r.stdout
+    .split('\n')
+    .filter((f) => f !== '')
+    .map((f) => f.replace(/^\.\//, ''));
+}
+
 /** Preprocess one translation unit with mwcceppc's own front end (`-EP`: expand, and strip the
- *  `#line` comments it would otherwise emit), returning the text.
+ *  `#line` comments it would otherwise emit), returning the text — with every live `#pragma`
+ *  directive of the unit and of the project files it reads still in place (see above).
  *
  *  A ONE-SHOT container, never the pool: the pool's mounts are fixed at `/mwcc` and `/tmp`, and this
  *  needs the checkout as well. It is also not in the measured loop — a unit is preprocessed once, at
  *  `bench vendor` time, and the runner then reads the frozen result. */
 export function ppcPreprocess(opts: PpcPreprocessOptions): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const src = hostTmp(opts.srcPath);
   const out = hostTmp(opts.outPath);
-  if (src === null || out === null) {
+  if (hostTmp(opts.srcPath) === null || out === null) {
     throw new Error(`mwcceppc preprocessing reads and writes under /tmp, not ${opts.srcPath} → ${opts.outPath}`);
   }
-  const argv = [...t.harnessFlags, ...opts.argv, '-EP', src, '-o', out];
+  const pragmas: string[] = [];
+  const markedSrc = join(dirname(opts.srcPath), `marked-${basename(opts.srcPath)}`);
+  writeFileSync(markedSrc, markPragmas(readFileSync(opts.srcPath, 'utf8'), pragmas));
+  const shadows = mkdtempSync(join('/tmp', 'asmlift-ppc-pragmas-'));
+  const shadowMounts = filesWithPragmas(opts.root).flatMap((rel, i) => {
+    const copy = join(shadows, `${i}-${basename(rel)}`);
+    writeFileSync(copy, markPragmas(readFileSync(join(opts.root, rel), 'utf8'), pragmas));
+    return ['-v', `${copy}:/proj/${rel}:ro`];
+  });
+  const argv = [...t.harnessFlags, ...opts.argv, '-EP', hostTmp(markedSrc)!, '-o', out];
   const wrapper = (opts.wrapper ?? []).map((w) => `/proj/${w}`);
   const r = run(t.docker, [
     'run',
@@ -809,6 +895,7 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
     `${mwccDir(opts.mwcc)}:/mwcc:ro`,
     '-v',
     `${opts.root}:/proj:ro`,
+    ...shadowMounts,
     '-v',
     '/tmp:/host-tmp',
     '-w',
@@ -834,5 +921,5 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
         'which cannot be vendored as a translation unit — benchmark a function whose unit is ASCII',
     );
   }
-  return bytes.toString('utf8');
+  return restorePragmas(bytes.toString('utf8'), pragmas);
 }

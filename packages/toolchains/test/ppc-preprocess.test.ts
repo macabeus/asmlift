@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { ppcDockerAvailable, ppcPreprocess } from '../src/compile';
+import { markPragmas, ppcDockerAvailable, ppcPreprocess, restorePragmas } from '../src/compile';
 
 /** A throwaway "checkout": an `include/` the unit's `-i` resolves against, under /tmp so the
  *  container reaches it the same way a real checkout mounted read-only is reached. */
@@ -30,6 +30,34 @@ function fakeProject(): { root: string; scratch: string } {
 }
 
 describe('mwcceppc preprocessing of a project include tree', () => {
+  test('marks every #pragma directive, continued ones whole, and restores each where its marker stands', () => {
+    const pragmas: string[] = [];
+    const marked = markPragmas(
+      ['#pragma section RX "forcestrip"', 'int a;', '  # pragma cplusplus \\', 'on', '#define P "#pragma no"'].join(
+        '\n',
+      ),
+      pragmas,
+    );
+    expect(pragmas).toEqual(['#pragma section RX "forcestrip"', '  # pragma cplusplus \\\non']);
+    expect(marked.split('\n')).toEqual([
+      '#pragma section RX "forcestrip"',
+      '__asmlift_pragma_0__',
+      'int a;',
+      '  # pragma cplusplus \\',
+      'on',
+      '__asmlift_pragma_1__',
+      '#define P "#pragma no"',
+    ]);
+    // what the preprocessor hands back: the directives gone, the markers left where they were live
+    expect(restorePragmas('\n__asmlift_pragma_1__\nint a;\n', pragmas)).toBe('\n  # pragma cplusplus \\\non\nint a;\n');
+  });
+
+  test('refuses a marker the preprocessor joined into a line of code', () => {
+    expect(() => restorePragmas('int a; __asmlift_pragma_0__\n', ['#pragma once'])).toThrow(
+      /moved the #pragma marker __asmlift_pragma_0__/,
+    );
+  });
+
   test('refuses a source or destination the container cannot see', () => {
     // The container reaches host files through ONE mount, /tmp. A path outside it would be
     // "not found" from inside, and mwcc's usage error names a path the caller never chose — so the
@@ -68,6 +96,45 @@ describe('mwcceppc preprocessing of a project include tree', () => {
         expect(text).not.toContain('SOME_OTHER_FRONT_END');
         // -EP, not -E: a vendored blob carries no `#line` bookkeeping.
         expect(text).not.toContain('#line');
+      },
+      CONTAINER_BUDGET,
+    );
+
+    test(
+      'keeps every live #pragma of the unit and of the project headers it reads, and no dead one',
+      () => {
+        // mwcceppc executes a #pragma while preprocessing and writes none of them out, in every
+        // mode it has. Animal Crossing's `types.h` declares a section this way that its headers'
+        // declarations then name, and `libc/math.h` switches C++ linkage on around `floor` — so a
+        // blob without them either does not compile or silently links other symbols.
+        const { root, scratch } = fakeProject();
+        writeFileSync(
+          join(root, 'include', 'pragmas.h'),
+          [
+            '#pragma section RX "forcestrip"',
+            'extern __declspec(section "forcestrip") void g(void);',
+            '#if 0',
+            '#pragma dead_branch',
+            '#endif',
+          ].join('\n') + '\n',
+        );
+        const srcPath = join(scratch, 'u.c');
+        writeFileSync(srcPath, '#include "pragmas.h"\n#pragma cplusplus on\ndouble floor(double);\n');
+        const text = ppcPreprocess({
+          mwcc: 'mwcc_242_81',
+          root,
+          srcPath,
+          outPath: join(scratch, 'u.i'),
+          argv: ['-nosyspath', '-i', 'include'],
+        });
+        const lines = text.split(/\r?\n/);
+        expect(lines.indexOf('#pragma section RX "forcestrip"')).toBeGreaterThanOrEqual(0);
+        expect(lines.indexOf('#pragma section RX "forcestrip"')).toBeLessThan(
+          lines.findIndex((l) => l.includes('__declspec(section "forcestrip")')),
+        );
+        expect(lines).toContain('#pragma cplusplus on');
+        expect(text).not.toContain('dead_branch');
+        expect(text).not.toContain('__asmlift_pragma_');
       },
       CONTAINER_BUDGET,
     );
