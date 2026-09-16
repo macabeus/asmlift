@@ -387,6 +387,7 @@
         "arithmetic",
         "branch"
       ],
+      "note": "AF-PAIR: same source as ac-decomp row lbRk_SeirekiDays @ foresta.rel .text+0x97284; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
       "prependC": "typedef unsigned char u8;\ntypedef int s32;\ntypedef u8 lbRTC_day_t;\nextern lbRTC_day_t t_seiyo_days_tbl[2][13];",
       "funcC": "s32 lbRk_SeirekiDays(s32 year, s32 month) {\n    s32 idx = 0;\n\n    if ((year % 4) == 0) {\n        idx = 1;\n    }\n\n    return t_seiyo_days_tbl[idx][month];\n}",
       "m2cCtx": true,
@@ -446,6 +447,7 @@
         "float",
         "branch"
       ],
+      "note": "AF-PAIR: same source as ac-decomp row check_percent_abs @ foresta.rel .text+0x4B3A8; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, s32 shiftMin) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shiftMin) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
       "m2cCtx": true,
@@ -521,6 +523,7 @@
         "arithmetic",
         "branch"
       ],
+      "note": "AF-PAIR: same source as ac-decomp row add_calc_short_angle3 @ foresta.rel .text+0x4B27C; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
       "prependC": "typedef short s16;\ntypedef unsigned short u16;\ntypedef int s32;\ntypedef float f32;",
       "funcC": "s16 add_calc_short_angle3(s16* pValue, s16 target, f32 fraction, s16 maxStep, s16 minStep) {\n    f32 stepSize;\n    s32 uTarget;\n    s32 newValue;\n    s32 uValue;\n\n    if (target != *pValue) {\n        uValue = (u16)*pValue;\n        uTarget = (u16)target;\n\n        if (uValue > uTarget) {\n            uTarget += 0x10000;\n        }\n\n        stepSize = (uTarget - uValue) * fraction;\n\n        if (stepSize > maxStep) {\n            stepSize = maxStep;\n        } else if (stepSize < minStep) {\n            stepSize = minStep;\n        }\n\n        newValue = uValue + (s32)stepSize;\n        if (newValue > uTarget) {\n            newValue = uTarget;\n        }\n        *pValue = newValue;\n    }\n\n    return target - *pValue;\n}",
       "m2cCtx": true,
@@ -641,6 +644,7 @@
         "branch",
         "global"
       ],
+      "note": "AF-PAIR: same source as ac-decomp row chase_angle @ foresta.rel .text+0x4A984; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
       "prependC": "typedef short s16;\ntypedef int s32;\ntypedef float f32;\n#define TRUE 1\n#define FALSE 0\nextern f32 game_GameFrame_2F;",
       "funcC": "s32 chase_angle(s16* pValue, s16 target, s16 step) {\n    if (step != 0) {\n        f32 updateScale = game_GameFrame_2F;\n\n        if ((s16)(*pValue - target) > 0) {\n            step = -step;\n        }\n\n        *pValue += (s16)(step * updateScale);\n\n        if (((s16)(*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else if (*pValue == target) {\n        return TRUE;\n    }\n\n    return FALSE;\n}",
       "m2cCtx": true,
@@ -766,6 +770,7 @@
         "matrix",
         "arithmetic"
       ],
+      "note": "AF-PAIR: same source as ac-decomp row Skin_Matrix_MulMatrix @ foresta.rel .text+0x81364; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
       "funcC": "void Skin_Matrix_MulMatrix(MtxF* mfA, MtxF* mfB, MtxF* dest) {\n    f32 cx;\n    f32 cy;\n    f32 cz;\n    f32 cw;\n\n    f32 rx = mfA->xx;\n    f32 ry = mfA->xy;\n    f32 rz = mfA->xz;\n    f32 rw = mfA->xw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->xx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->xy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->xz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->xw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->yx;\n    ry = mfA->yy;\n    rz = mfA->yz;\n    rw = mfA->yw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->yx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->yy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->yz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->yw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->zx;\n    ry = mfA->zy;\n    rz = mfA->zz;\n    rw = mfA->zw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->zx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->zy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->zz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->zw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->wx;\n    ry = mfA->wy;\n    rz = mfA->wz;\n    rw = mfA->ww;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->wx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->wy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->wz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->ww = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n}",
       "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
