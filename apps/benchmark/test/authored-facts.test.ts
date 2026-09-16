@@ -20,6 +20,7 @@
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
 // fail on a hosted runner with no compilers, not only where someone can run the benchmark.
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { renderDeclarations } from '@asmlift/core/declare';
 import { arrayInnerExtents, declaredFields } from '@asmlift/core/symbols';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -36,7 +37,7 @@ import {
   protoFactProblems,
   quotedSignature,
 } from '../src/cases/authored-facts';
-import { REAL_DIR, type RealManifest, type VendoredEntry } from '../src/cases/manifests';
+import { REAL_DIR, type RealFunction, type RealManifest, type VendoredEntry } from '../src/cases/manifests';
 import { m2cOwnPrototype } from '../src/cases/real';
 import { syntheticCases } from '../src/cases/synthetic';
 
@@ -54,6 +55,10 @@ function vendoredTUs(man: RealManifest): Map<string, string> {
   );
 }
 
+/** The dialect a row's own build unit is compiled in. */
+const languageOf = (man: RealManifest, fn: RealManifest['functions'][number]): 'c' | 'c++' =>
+  unitLanguage(fn.unit, man.units[fn.unit].cflags);
+
 const manifests = files.map((f) => ({
   file: f,
   man: JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest,
@@ -67,7 +72,9 @@ describe('every authored fact agrees with the function the compiler actually saw
   for (const { file, man } of manifests) {
     test(`${file}: proto and funcC agree with the vendored TU`, () => {
       const tus = vendoredTUs(man);
-      const problems = man.functions.flatMap((fn) => authoredFactProblems(man.project, fn, tus.get(fn.sym)!));
+      const problems = man.functions.flatMap((fn) =>
+        authoredFactProblems(man.project, fn, tus.get(fn.sym)!, languageOf(man, fn)),
+      );
       expect(problems).toEqual([]);
     }, 30_000);
   }
@@ -80,7 +87,9 @@ describe('every authored fact agrees with the function the compiler actually saw
       const tus = vendoredTUs(man);
       return man.functions
         .filter(
-          (fn) => quotedSignature(fn.funcC) === null || typeof oracleFor('', fn.sym, tus.get(fn.sym)!) === 'string',
+          (fn) =>
+            quotedSignature(fn.funcC) === null ||
+            typeof oracleFor('', fn.sym, tus.get(fn.sym)!, languageOf(man, fn)) === 'string',
         )
         .map((fn) => `${man.project}:${fn.sym}`);
     });
@@ -92,11 +101,42 @@ describe('every authored fact agrees with the function the compiler actually saw
   // rows the project's own context, written down so the next row cannot quietly re-open the gap.
   // It names the offending rows rather than asserting a count, so a correct new row is a
   // one-word fix and not a reason to delete the gate.
-  test('no real row is left without an m2c context', () => {
+  //
+  // A C ROW. A C++ row's vendored context is a C++ translation unit, which m2c's C-only context
+  // parser fails on outright, so `validateManifest` refuses `m2cCtx` there and the row states its
+  // own choice: a hand-written C-parseable `ctx`, or none (cases/manifests.ts).
+  test('no real C row is left without an m2c context', () => {
     const bare = manifests.flatMap(({ man }) =>
-      man.functions.filter((fn) => !fn.m2cCtx && fn.ctx === undefined).map((fn) => `${man.project}:${fn.sym}`),
+      man.functions
+        .filter((fn) => languageOf(man, fn) === 'c' && !fn.m2cCtx && fn.ctx === undefined)
+        .map((fn) => `${man.project}:${fn.sym}`),
     );
     expect(bare).toEqual([]);
+  });
+});
+
+describe('a C++ row is held to its own definition', () => {
+  // A CodeWarrior C++ unit defines a mangled symbol under its SOURCE name, so the oracle looks for
+  // that name; the reference source quotes it the same way. Pikmin's shapes, reduced.
+  const unit = (sym: string, funcC: string, tu: string) =>
+    authoredFactProblems(
+      'pikmin',
+      { sym, addr: '0x80000000', unit: 'u.cpp', romDigest: '', features: [], funcC } as RealFunction,
+      tu,
+      'c++',
+    );
+
+  test('a member function resolves by its qualified name, and a wrong parameter is named', () => {
+    const tu = 'struct ResultFlags { u8 getFlag(int); };\nu8 ResultFlags::getFlag(int index)\n{\n return 0;\n}\n';
+    expect(unit('getFlag__11ResultFlagsFi', 'u8 ResultFlags::getFlag(int index)\n{\n return 0;\n}', tu)).toEqual([]);
+    expect(unit('getFlag__11ResultFlagsFi', 'u8 ResultFlags::getFlag(s16 index)\n{\n return 0;\n}', tu)).toEqual([
+      'pikmin:getFlag__11ResultFlagsFi: `funcC` parameter 0 is `s16 index`, the compiled one is `int index`',
+    ]);
+  });
+
+  test('a constructor resolves through its member initializers', () => {
+    const funcC = 'ActFree::ActFree(Piki* piki)\n    : Action(piki, true)\n{\n}';
+    expect(unit('__ct__7ActFreeFP4Piki', funcC, `struct ActFree;\n${funcC}\n`)).toEqual([]);
   });
 });
 

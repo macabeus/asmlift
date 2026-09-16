@@ -67,6 +67,7 @@ const RULES: Rule[] = [
       { path: /^packages\/bench-schema\/src\/features\.ts$/, why: "the feature vocabulary's two orthogonal axes" },
       { path: /^packages\/bench-schema\/README\.md$/, line: /filter groups by/, why: "the feature vocabulary's axis" },
       { path: /^\.claude\/commands\/dogfood-klonoa\.md$/, line: /\[window\]\[axis\]/, why: 'an array dimension' },
+      { path: /./, line: /RotAxisX/, why: "a ROM function's symbol name" },
     ],
   },
   {
