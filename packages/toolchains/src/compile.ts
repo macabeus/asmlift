@@ -12,7 +12,7 @@ import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -810,7 +810,9 @@ export interface PpcPreprocessOptions {
 // THE COST, stated: a marked file is one line longer below each directive, so `__LINE__` expanded
 // INSIDE that file after a directive reads one higher per directive above it. A row's own function
 // is never in such a file (its unit is written fresh), so what this could move is a header's inline
-// body, and the ROM gate is what would refuse the row if it did.
+// body, and the ROM gate is what would refuse the row if it did. `__FILE__` does NOT move: mwcceppc
+// expands it to the basename, and the marked copy the unit is preprocessed from keeps the unit's
+// own — which the ROM gate could not have caught, a string literal's address being a relocation.
 
 const PRAGMA_MARKER = /^[ \t]*__asmlift_pragma_(\d+)__[ \t]*$/gm;
 const PRAGMA_DIRECTIVE = /^[ \t]*#[ \t]*pragma\b/;
@@ -882,35 +884,42 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
     throw new Error(`mwcceppc preprocessing reads and writes under /tmp, not ${opts.srcPath} → ${opts.outPath}`);
   }
   const pragmas: string[] = [];
-  const markedSrc = join(dirname(opts.srcPath), `marked-${basename(opts.srcPath)}`);
-  writeFileSync(markedSrc, markPragmas(readFileSync(opts.srcPath, 'utf8'), pragmas));
-  const shadows = mkdtempSync(join('/tmp', 'asmlift-ppc-pragmas-'));
-  const shadowMounts = filesWithPragmas(opts.root).flatMap((rel, i) => {
-    const copy = join(shadows, `${i}-${basename(rel)}`);
-    writeFileSync(copy, markPragmas(readFileSync(join(opts.root, rel), 'utf8'), pragmas));
-    return ['-v', `${copy}:/proj/${rel}:ro`];
-  });
-  const argv = [...t.harnessFlags, ...opts.argv, '-EP', hostTmp(markedSrc)!, '-o', out];
-  const wrapper = (opts.wrapper ?? []).map((w) => `/proj/${w}`);
-  const r = run(t.docker, [
-    'run',
-    '--rm',
-    '--platform',
-    'linux/386',
-    '-v',
-    `${mwccDir(opts.mwcc)}:/mwcc:ro`,
-    '-v',
-    `${opts.root}:/proj:ro`,
-    ...shadowMounts,
-    '-v',
-    '/tmp:/host-tmp',
-    '-w',
-    '/proj',
-    t.image,
-    'sh',
-    '-c',
-    [t.wibo, ...wrapper, '/mwcc/mwcceppc.exe', ...argv].map(shq).join(' '),
-  ]);
+  const marked = mkdtempSync(join('/tmp', 'asmlift-ppc-pragmas-'));
+  const unit = join(marked, basename(opts.srcPath));
+  let r;
+  try {
+    writeFileSync(unit, markPragmas(readFileSync(opts.srcPath, 'utf8'), pragmas));
+    const shadowMounts = filesWithPragmas(opts.root).flatMap((rel, i) => {
+      const copy = join(marked, `${i}-${basename(rel)}`);
+      writeFileSync(copy, markPragmas(readFileSync(join(opts.root, rel), 'utf8'), pragmas));
+      return ['-v', `${copy}:/proj/${rel}:ro`];
+    });
+    const argv = [...t.harnessFlags, ...opts.argv, '-EP', `/unit/${basename(unit)}`, '-o', out];
+    const wrapper = (opts.wrapper ?? []).map((w) => `/proj/${w}`);
+    r = run(t.docker, [
+      'run',
+      '--rm',
+      '--platform',
+      'linux/386',
+      '-v',
+      `${mwccDir(opts.mwcc)}:/mwcc:ro`,
+      '-v',
+      `${opts.root}:/proj:ro`,
+      '-v',
+      `${marked}:/unit:ro`,
+      ...shadowMounts,
+      '-v',
+      '/tmp:/host-tmp',
+      '-w',
+      '/proj',
+      t.image,
+      'sh',
+      '-c',
+      [t.wibo, ...wrapper, '/mwcc/mwcceppc.exe', ...argv].map(shq).join(' '),
+    ]);
+  } finally {
+    rmSync(marked, { recursive: true, force: true });
+  }
   if (r.status !== 0 || !existsSync(opts.outPath)) {
     throw new Error(`mwcceppc -EP failed: ${r.stderr || r.stdout}`);
   }

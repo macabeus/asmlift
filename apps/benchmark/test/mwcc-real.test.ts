@@ -371,6 +371,17 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81') && existsSync(join(AC, 'build.n
     );
 
     test(
+      "expands __FILE__ to the unit's own name, not the name of the copy it is preprocessed from",
+      () => {
+        // mwcceppc expands `__FILE__` to the BASENAME, so the shadow copy the #pragma markers are
+        // written into must keep the unit's. A string literal's length is a fact about the object:
+        // the ROM gate cannot see it move, because its address is a masked relocation.
+        expect(mwcc.preprocess(AC_CFG, 'const char* f(void) { return __FILE__; }\n')).toContain('"u.c"');
+      },
+      CONTAINER_BUDGET,
+    );
+
+    test(
       "preprocesses a unit in the LANGUAGE its build compiles it in, not the one the blob's name implies",
       () => {
         // Every vendored TU is written as `u.c`, so mwcc's extension default would read all 4,103 of
