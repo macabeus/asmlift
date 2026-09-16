@@ -50,8 +50,16 @@ describe('vendoredSymbols', () => {
   });
 
   test('a project that vendors no map at all has none for any row: those rows run map-less', () => {
-    const dir = vendoredDir({ project: false, module: true });
+    const dir = vendoredDir({ project: false });
     expect(vendoredSymbols('af', dir, undefined)).toBeUndefined();
     expect(vendoredSymbols('af', dir, 'm416Dll')).toBeUndefined();
+  });
+
+  // The module's OWN file decides first. Asked the other way round, a dir holding the module's map
+  // and no base map used to answer "this project vendors no map" and run a REL row MAP-LESS — the
+  // quiet version of the mix-up the refusal above exists to prevent.
+  test("a module's map is read even where the project's own is absent", () => {
+    const map = vendoredSymbols('marioparty4', vendoredDir({ project: false, module: true }), 'm416Dll');
+    expect([...map!.values()].flat().map((i) => i.name)).toEqual(['ObjectSetup']);
   });
 });

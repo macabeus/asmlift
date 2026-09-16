@@ -44,6 +44,50 @@ function mapFor(man: RealManifest, addr: string): { map: MapJson; at: Map<string
   return cached;
 }
 
+/** Does the symbol's set of map keys put it where `addr` says? The gate the loop below applies to
+ *  every committed row, as a function so it can also be exercised on maps no project has yet
+ *  (`the addr gate` below) — over live manifests alone it is vacuous until the first REL row. */
+export function addrAgreesWithMap(addr: string, keys: string[]): boolean {
+  const loc = moduleLocation(addr);
+  return loc === undefined
+    ? JSON.stringify(keys) === JSON.stringify([addr])
+    : keys.filter((k) => Number.parseInt(k, 16) % PLACEMENT_STRIDE === loc.offset).length === 1;
+}
+
+describe('the addr gate', () => {
+  const placed = (section: number, offset: number) =>
+    `0x${(PLACEMENT_STRIDE * section + offset).toString(16).padStart(8, '0')}`;
+
+  test('a linked row must sit at exactly its own address, alone', () => {
+    expect(addrAgreesWithMap('0x0800d188', ['0x0800d188'])).toBe(true);
+    expect(addrAgreesWithMap('0x0800d188', ['0x0800d18c'])).toBe(false);
+    expect(addrAgreesWithMap('0x0800d188', [])).toBe(false);
+    expect(addrAgreesWithMap('0x0800d188', ['0x0800d188', '0x0800d18c'])).toBe(false);
+  });
+
+  test('a REL row is placed by its OFFSET, whichever section it landed in', () => {
+    expect(addrAgreesWithMap('m416Dll:.text+0x00001f20', [placed(1, 0x1f20)])).toBe(true);
+    expect(addrAgreesWithMap('m416Dll:.text+0x00001f20', [placed(4, 0x1f20)])).toBe(true);
+    expect(addrAgreesWithMap('m416Dll:.text+0x00001f20', [placed(1, 0x1f24)])).toBe(false);
+  });
+
+  // The 659 Animal Crossing names that sit at more than one `.text` offset in `foresta`: the
+  // identity picks one by offset, and the gate must admit it rather than refusing the name.
+  test('a name held at several offsets is rowable at each of them', () => {
+    const keys = [placed(1, 0x3930), placed(1, 0x1a0cf0)];
+    expect(addrAgreesWithMap('foresta:.text+0x00003930', keys)).toBe(true);
+    expect(addrAgreesWithMap('foresta:.text+0x001a0cf0', keys)).toBe(true);
+    expect(addrAgreesWithMap('foresta:.text+0x00003931', keys)).toBe(false);
+  });
+
+  // Stated so the limit is a test and not only a comment: this gate cannot tell a module's own
+  // function from a DOL global unioned into the module's map, because the arithmetic is the same.
+  // `bench vendor`'s moduleIdentityProver is what rejects that row.
+  test('a DOL global passes the arithmetic — the module half lives at vendor time', () => {
+    expect(addrAgreesWithMap('m416Dll:.text+0x001d3a04', ['0x801d3a04'])).toBe(true);
+  });
+});
+
 describe('committed real-tier manifests', () => {
   test('there are manifests to police', () => {
     expect(files.length).toBeGreaterThan(0);
@@ -92,22 +136,29 @@ describe('committed real-tier manifests', () => {
     // symbol, read here back out of the committed symbol map that ELF was vendored into — no
     // checkout needed, so CI holds it. A typo'd or guessed address would join the wrong rows.
     //
-    // A REL row is read out of its MODULE's map, and the keys there are the synthetic bases the
-    // module's sections were placed at (cli/module-elf), never the game's addresses — so what is
-    // held is the half of the identity a person types: the symbol appears at exactly one key, and
-    // that key's offset within its section is the row's. The SECTION is not checkable from the map
-    // (placement records an index, not a name); `bench vendor` is where that is proved.
+    // A REL row is read out of its MODULE's map, whose keys are the synthetic bases the module's
+    // sections were placed at (cli/module-elf), never the game's addresses. So this holds ONE of
+    // the identity's three parts: the OFFSET. Exactly one of the symbol's keys must sit at it.
+    //
+    // WHAT IT DOES NOT HOLD, so nobody reads more into a green run than is there:
+    //   - the SECTION, because placement records a section INDEX and not a name;
+    //   - the MODULE, because `loadModuleSymbolMap` unions the base ELF's globals into every
+    //     module's map at their real addresses, and a DOL address is `base + offset` too
+    //     (0x801d3a04 % 0x01000000 = 0x1d3a04), so a DOL function passes this arithmetic under any
+    //     module's name.
+    // Both are proved by `bench vendor` against the module ELF itself (cases/vendor.ts
+    // `moduleIdentityProver`), which is the only place a section name exists to check.
+    //
+    // NOT `keys.length === 1`: a name may sit at several offsets in one module — Animal Crossing's
+    // `foresta` holds 659 of its 16,051 `.text` names at more than one (`mSM_move_End` at two) —
+    // and the offset in the identity is what tells them apart. Demanding a unique name would make
+    // every one of those 659 functions un-rowable for no gain.
     test(`${f} keys every row where its vendored symbol map puts the symbol`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const wrong: string[] = [];
       for (const fn of man.functions) {
         const keys = mapFor(man, fn.addr).at.get(fn.sym) ?? [];
-        const loc = moduleLocation(fn.addr);
-        const ok =
-          loc === undefined
-            ? JSON.stringify(keys) === JSON.stringify([fn.addr])
-            : keys.length === 1 && Number.parseInt(keys[0], 16) % PLACEMENT_STRIDE === loc.offset;
-        if (!ok) {
+        if (!addrAgreesWithMap(fn.addr, keys)) {
           wrong.push(`${man.project}:${fn.sym} addr ${fn.addr}, map ${JSON.stringify(keys)}`);
         }
       }

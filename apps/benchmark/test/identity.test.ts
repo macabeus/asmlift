@@ -254,14 +254,19 @@ describe('an identity carrying a `:` is still one key', () => {
   });
 });
 
-test('nothing in the shipped sources splits a row IDENTITY on `:`', () => {
+test('nothing in the shipped sources cuts a row IDENTITY on `:`', () => {
   // A REL row's identity has four `:`-separated segments, so a reader that recovers a row's parts
-  // by splitting on `:` is only correct if what it splits is an ID (three segments, middle a
-  // symbol name). These are every `split(':')` the sources contain; each one is on an id, except
-  // compile-command's, which splits a flag's path list. A new entry belongs here only after the
-  // same check.
+  // by cutting on `:` is only correct if what it cuts is an ID (three segments, middle a symbol
+  // name) — and an id is what all but two of these hold. compile-command's cuts a flag's path
+  // list; homesplit's cuts an L3 leaf token that is no identity at all. A new entry belongs here
+  // only after the same check.
+  //
+  // EVERY WAY OF CUTTING, not only `split`: `indexOf`/`lastIndexOf` reach the same first and last
+  // segment, and this census claims to be complete. `apps/web/src` is scanned too (it has none
+  // today), and `.tsx` with it.
   const roots = [
     join(import.meta.dirname, '..', 'src'),
+    join(import.meta.dirname, '..', '..', 'web', 'src'),
     ...readdirSync(join(import.meta.dirname, '..', '..', '..', 'packages'), { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => join(e.parentPath, e.name, 'src')),
@@ -276,11 +281,11 @@ test('nothing in the shipped sources splits a row IDENTITY on `:`', () => {
   const found: string[] = [];
   for (const root of roots) {
     for (const f of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
-      if (!f.endsWith('.ts')) {
+      if (!f.endsWith('.ts') && !f.endsWith('.tsx')) {
         continue;
       }
       for (const line of readFileSync(join(root, f), 'utf8').split('\n')) {
-        if (/\.split\(['"]:['"]\)/.test(line)) {
+        if (/\.(?:split|indexOf|lastIndexOf)\((?:['"]:['"]|\/:\/)\)/.test(line)) {
           found.push(`${root.split('/').slice(-3).join('/')}/${f}: ${line.trim()}`);
         }
       }
@@ -290,7 +295,12 @@ test('nothing in the shipped sources splits a row IDENTITY on `:`', () => {
     "apps/benchmark/src/cases/real.ts: `run \\`pnpm bench flags --project ${id.split(':')[0]}\\`, then \\`pnpm bench vendor\\``,",
     "apps/benchmark/src/cases/retired.ts: r.id.split(':').length < 3 ||",
     "apps/benchmark/src/run/sweep.ts: const parts = id.split(':');",
+    "apps/benchmark/src/run/sweep.ts: pricedProjects.add(id.slice(0, id.indexOf(':')));",
+    "packages/bench-schema/src/identity.ts: const head = id.slice(0, id.indexOf(':') + 1);",
     "packages/bench-schema/src/identity.ts: const parts = e.id.split(':');",
+    "packages/bench-schema/src/identity.ts: const tail = id.slice(id.lastIndexOf(':'));",
+    "packages/bench-schema/src/identity.ts: if (names.some((n) => n.slice(0, n.lastIndexOf(':')) === ref)) {",
     "packages/cli/src/compile-command.ts: for (const seg of val.split(':')) {",
+    "packages/core/src/l3/homesplit.ts: const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);",
   ]);
 });

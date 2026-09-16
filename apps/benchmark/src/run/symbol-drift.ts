@@ -22,7 +22,7 @@ const sha256 = (s: string | Buffer): string => createHash('sha256').update(s).di
 
 /** The project's vendored symbol-map blob, when it has one. */
 export function vendoredMapPath(project: string): string | null {
-  const p = join(REAL_DIR, 'tu', project, 'symbols.json.gz');
+  const p = vendoredMapFile(join(REAL_DIR, 'tu', project), undefined);
   return existsSync(p) ? p : null;
 }
 
