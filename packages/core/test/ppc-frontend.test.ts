@@ -116,6 +116,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
 
   test('an indirect branch (bctr) FAILS LOUD too', () => {
     expect(() => dis('jumptab', '0:\tbctr\n')).toThrow(/unmodelled control transfer 'bctr'/);
+    expect(() => dis('jumptab', '0:\tbctr\n')).toThrow(/CTR-counted loop or indirect branch/);
+  });
+
+  // An indirect CALL is neither of those, and a decline that named a loop-unrolling gap sent every
+  // reader of a C++ virtual dispatch looking for one.
+  test('an indirect call says so', () => {
+    expect(() => dis('virt', '0:\tblrl\n')).toThrow(/'blrl' at 0x0 \(an indirect call — a virtual dispatch/);
   });
 
   // `bl` with the callee recovered from the interleaved R_PPC_REL24 relocation (an unresolved bl in

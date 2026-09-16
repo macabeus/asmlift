@@ -380,7 +380,9 @@ export function lift(
       } // recovered switch dispatch
       throw new PpcUnsupportedError(
         `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`,
+          (ins.mnemonic === 'blrl' || ins.mnemonic === 'bctrl'
+            ? `(an indirect call — a virtual dispatch or a call through a pointer — is not yet supported)`
+            : `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`),
       );
     }
   }
