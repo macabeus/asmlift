@@ -635,6 +635,25 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // ── memory ──────────────────────────────────────────────────────────────────────────────
   { sym: 'deref', src: 'int deref(int *p){ return *p; }', features: ['memory', 'load'], toolchains: ALL },
+  // The float half of the same tag. `deref` covers every toolchain, so `load` already has a
+  // CodeWarrior carrier — but a load into the FPU is a different instruction into a different
+  // register file (`lfs f1,0(r3)` against `lwz r3,0(r3)`), decided by the pointer's type and by
+  // nothing in the surrounding code, and the Animal Crossing rows about to claim `load` include
+  // exactly this shape. mwcc_242_81 alone: `deref` already stands on the other three, and a float
+  // load is soft-float on the GBA, where it is a different construct altogether.
+  //
+  // It DECLINES, on `lfs` being unmodelled in the PowerPC frontend, and that is the row's second
+  // use. Every mwcc float row here already declines that way (`fadd` on `fadds`, `f2i` on
+  // `fctiwz`, `i2f` on `lfd`, `upun` on `stfs`) — this is the smallest of them, two instructions
+  // with no arithmetic, no conversion and no store, so the Animal Crossing float-load row it
+  // mirrors cannot have its decline blamed on the relocation it also carries.
+  {
+    sym: 'loadf',
+    src: 'float loadf(float *p){ return *p; }',
+    features: ['memory', 'load', 'float'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'float loadf(float*);',
+  },
   {
     sym: 'storep',
     src: 'void storep(int *p,int v){ *p=v; }',
@@ -1842,6 +1861,23 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int promsh(s16 a,s16 b){ return a+b; }',
     features: ['promotion', 'arithmetic'],
     toolchains: ALL,
+  },
+  // The other signedness, and the one the GameCube rows need. `promsh` covers every toolchain, so
+  // `promotion` already has a CodeWarrior carrier — but a promoted `s16` and a promoted `u8` are
+  // different recovery problems and different instructions (`extsh` against `clrlwi`), and the real
+  // carriers about to claim the tag are all unsigned, because Animal Crossing compiles `-char
+  // unsigned`. mwcc_242_81 alone: what agbcc, ido7.1 and gcc2.7.2kmc do with a `u8` pair was not
+  // measured, and `promsh` already stands on those three.
+  //
+  // The promotion is load-bearing in the object, not just in the source — measured, in
+  // `packages/cli/test/matching/ppc-tag-lanes.test.ts`: `a+b` zero-extends both operands and then
+  // adds (`clrlwi/clrlwi/add`), while the re-narrowed `(u8)(a+b)` adds and then zero-extends once,
+  // a shorter and different object. A decompiler that spells the parameters `int` cannot match.
+  {
+    sym: 'promzb',
+    src: 'int promzb(u8 a,u8 b){ return a+b; }',
+    features: ['promotion', 'zero-extend', 'arithmetic'],
+    toolchains: ['mwcc_242_81'],
   },
   {
     sym: 'narrow',
