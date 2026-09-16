@@ -1734,7 +1734,8 @@
       "features": [
         "global",
         "branch",
-        "sparse"
+        "sparse",
+        "switch-arms"
       ],
       "funcC": "void HuDvdErrorWatch()\n{\n    int status = DVDGetDriveStatus();\n    if(status == beforeDvdStatus) {\n        return;\n    }\n    beforeDvdStatus = status;\n    switch(status+1) {\n        case 0:\n            OSReport(\"DVD ERROR:Fatal error occurred\\n***HALT***\");\n            while(1);\n            break;\n            \n        case 5:\n            OSReport(\"DVD ERROR:No disk\\n\");\n            break;\n            \n        case 6:\n            OSReport(\"DVD ERROR:Cover open\\n\");\n            break;\n            \n        case 7:\n            OSReport(\"DVD ERROR:Wrong disk\\n\");\n            break;\n            \n        case 12:\n            OSReport(\"DVD ERROR:Please retry\\n\");\n            break;\n            \n        default:\n            break;\n    }\n}",
       "m2cCtx": true,
@@ -1753,7 +1754,9 @@
       "features": [
         "multi-arg",
         "branch",
-        "narrow"
+        "narrow",
+        "struct",
+        "field"
       ],
       "funcC": "void HuMemHeapDump(void *heap_ptr, s16 status)\n{\n    struct memory_block *block = heap_ptr;\n    s32 size = 0;\n    s32 inactive_size = 0;\n    s32 num_blocks = 0;\n    s32 num_unused_blocks = 0;\n    u8 dump_type;\n\n    if(status < 0) {\n        dump_type = 10;\n    } else if(status == 0) {\n        dump_type = 0;\n    } else {\n        dump_type = 1;\n    }\n    OSReport(\"======== HuMem heap dump %08x ========\\n\", heap_ptr);\n    OSReport(\"MCB-----+Size----+MG+FL+Prev----+Next----+UNum----+Body----+Call----\\n\");\n    do {\n        if(dump_type == 10 || block->flag == dump_type) {\n            OSReport(\"%08x %08x %02x %02x %08x %08x %08x %08x %08x\\n\", block, block->size, block->magic, block->flag,\n                block->prev, block->next, block->num, BLOCK_GET_DATA(block), block->retaddr);\n        }\n        if(block->flag == 1) {\n            size += block->size;\n            num_blocks++;\n        } else {\n            inactive_size += block->size;\n            num_unused_blocks++;\n        }\n        \n        block = block->next;\n    } while(block != heap_ptr);\n    OSReport(\"MCB:%d(%d/%d) MEM:%08x(%08x/%08x)\\n\", num_blocks+num_unused_blocks, num_blocks, num_unused_blocks, \n        size+inactive_size, size, inactive_size);\n    OSReport(\"======== HuMem heap dump %08x end =====\\n\", heap_ptr);\n}",
       "m2cCtx": true,
@@ -1793,7 +1796,9 @@
         "narrow-counter",
         "mask",
         "int-to-float",
-        "global"
+        "global",
+        "array",
+        "variable-index"
       ],
       "funcC": "void HuWinMesMaxSizeGet(s16 mess_num, float *size, ...)\n{\n    s16 i;\n    u32 mess;\n    va_list list;\n\n    winInsertF = 0;\n    va_start(list, size);\n    winMaxWidth = winMaxHeight = 0;\n    for (i = 0; i < mess_num; i++) {\n        mess = va_arg(list, u32);\n        GetMesMaxSizeSub(mess);\n    }\n    for (i = 0; i < 8; i++) {\n        mesWInsert[i] = 0;\n    }\n    winTabSize = 24;\n    cancelCRF = 0;\n    size[0] = (winMaxWidth + 0x1F) & 0xFFF0;\n    size[1] = winMaxHeight + 0x10;\n    va_end(list);\n}",
       "m2cCtx": true,
@@ -1843,7 +1848,8 @@
         "branch",
         "global",
         "struct",
-        "inlined-callee"
+        "inlined-callee",
+        "field"
       ],
       "funcC": "void BoardSpaceBlockPosSet(void)\n{\n    BoardSpace *space;\n    s32 block_pos;\nbegin:\n    if (boardTutorialBlockF) {\n        GWSystem.block_pos = boardTutorialBlockPos;\n        return;\n    }\n    block_pos = BoardRandMod(spaceCnt[0]) + 1;\n    if (block_pos == GWSystem.block_pos) {\n        goto begin;\n    }\n    space = BoardSpaceGet(0, block_pos);\n    if (space->type != 1) {\n        goto begin;\n    }\n    GWSystem.block_pos = block_pos;\n}",
       "m2cCtx": true,
@@ -1919,7 +1925,8 @@
         "mod-const",
         "arithmetic",
         "struct",
-        "inlined-callee"
+        "inlined-callee",
+        "field"
       ],
       "funcC": "void fn_1_5D3C(UnkBssA4Data *arg0, Vec *arg1)\n{\n    fn_1_5530(arg1, arg0->unk98 + arg0->unk108 * 20);\n    arg0->unk98 = (arg0->unk98 + 1) % 20;\n}",
       "m2cCtx": true,
@@ -1956,7 +1963,9 @@
       "features": [
         "float",
         "stack-addr",
-        "global"
+        "global",
+        "struct",
+        "field"
       ],
       "funcC": "void ObjectSetup(void)\n{\n    HUPROCESS *objman;\n    Vec pos;\n    Vec up;\n    Vec target;\n    OSReport(\"******* M416ObjectSetup *********\\n\");\n    objman = omInitObjMan(50, 8192);\n    omGameSysInit(objman);\n    Hu3DCameraCreate(1);\n    Hu3DCameraPerspectiveSet(1, 30, 20, 25000, 1.2);\n    Hu3DCameraViewportSet(1, 0, 0, 640, 480, 0, 1);\n    lbl_1_bss_950 = omAddObjEx(objman, 32730, 0, 0, -1, omOutView);\n    lbl_1_bss_958 = omAddObjEx(objman, 0, 0, 0, -1, fn_1_458);\n    fn_1_1260(objman);\n    lbl_1_bss_954 = omAddObjEx(objman, 10, 0, 0, -1, fn_1_6E5C);\n    pos.x = 0;\n    pos.y = 3000;\n    pos.z = 1;\n    up.x = 0;\n    up.y = 1;\n    up.z = 0;\n    target.x = 0;\n    target.y = 0;\n    target.z = 0;\n    Hu3DShadowCreate(30, 20, 25000);\n    Hu3DShadowTPLvlSet(0.9f);\n    Hu3DShadowPosSet(&pos, &up, &target);\n    Hu3DLightAllKill();\n    lbl_1_bss_91A[0] = Hu3DGLightCreate(-700, 1200, 700, 0, -0.5, -1, lbl_1_data_38.r, lbl_1_data_38.g, lbl_1_data_38.b);\n    Hu3DGLightStaticSet(lbl_1_bss_91A[0], 1);\n    Hu3DGLightInfinitytSet(lbl_1_bss_91A[0]);\n    lbl_1_bss_91A[1] = Hu3DGLightCreate(0, 0, 0, 0, 0, 0, 0, 0, 0);\n    Hu3DGLightStaticSet(lbl_1_bss_91A[1], 1);\n    Hu3DGLightPointSet(lbl_1_bss_91A[1], 0, 0, 3);\n    lbl_1_bss_918 = 0;\n    HuAudSndGrpSet(41);\n    Hu3DBGColorSet(0, 0, 0);\n    fn_1_79D0(objman);\n}",
       "m2cCtx": true,
@@ -1977,7 +1986,9 @@
         "float-to-int",
         "narrow",
         "global",
-        "hw-float-abi"
+        "hw-float-abi",
+        "struct",
+        "field"
       ],
       "funcC": "void fn_1_8FF4(float arg0)\n{\n    lbl_1_data_268.a = arg0 * 255;\n}",
       "m2cCtx": true,
@@ -1996,7 +2007,9 @@
       "features": [
         "array",
         "variable-index",
-        "global"
+        "global",
+        "struct",
+        "field"
       ],
       "funcC": "void fn_1_1F14(void)\n{\n    M420DllPlayerStruct *var_r31 = HuPrcCurrentGet()->user_data;\n    while (TRUE) {\n        lbl_1_data_EC[var_r31->unk_48](var_r31);\n    }\n}",
       "m2cCtx": true,
@@ -2018,7 +2031,9 @@
         "compare",
         "array",
         "variable-index",
-        "global"
+        "global",
+        "struct",
+        "field"
       ],
       "funcC": "s32 fn_1_67A4(s32 arg0)\n{\n    M420DllUnkMapStruct *var_r31 = &lbl_1_bss_C0[arg0];\n    return var_r31->unk_1C >= 200.0f;\n}",
       "m2cCtx": true,
@@ -2033,7 +2048,8 @@
         "float",
         "field",
         "store",
-        "hw-float-abi"
+        "hw-float-abi",
+        "struct"
       ],
       "funcC": "void fn_1_C2BC(Vec2f *arg0, float arg8, float arg9)\n{\n    arg0->x = arg8;\n    arg0->y = arg9;\n}",
       "m2cCtx": true,
@@ -2054,7 +2070,12 @@
         "abs",
         "float",
         "break",
-        "hw-float-abi"
+        "hw-float-abi",
+        "struct",
+        "field",
+        "global",
+        "array",
+        "variable-index"
       ],
       "funcC": "s32 fn_1_155E0(float arg8, float arg9, float argA, float *arg0)\n{\n    float var_f31;\n    float var_f30;\n    double var_f29;\n    double var_f28;\n    M427DllBss590Struct *var_r31;\n    s32 var_r30;\n    M427DllBss590Struct *var_r29;\n\n    for (var_r30 = 0; var_r30 < (lbl_1_bss_580 - 1); var_r30++) {\n        var_r31 = &lbl_1_bss_590[var_r30];\n        var_r29 = &lbl_1_bss_590[var_r30 + 1];\n        if ((argA < var_r31->unk_80->z) && (argA >= var_r29->unk_80->z)) {\n            var_f31 = var_r29->unk_80->z - var_r31->unk_80->z;\n            if ((arg0 != NULL) && (var_f31 != 0.0f)) {\n                *arg0 = fabs((argA - var_r31->unk_80->z) / var_f31);\n            }\n            break;\n        }\n    }\n    return var_r30;\n}",
       "m2cCtx": true,
@@ -2066,12 +2087,12 @@
       "unit": "src/REL/m429Dll/main.c",
       "romDigest": "7df5095ccdc770ef15f9807d091a8b834056db4b3fc93eeb1eb34d25251acc56",
       "features": [
-        "float-to-int",
-        "unsigned",
         "float",
-        "arithmetic",
         "array",
-        "variable-index"
+        "variable-index",
+        "struct",
+        "field",
+        "global"
       ],
       "funcC": "void fn_1_7098(s32 arg0, float *arg1)\n{\n    Bss130Struct *temp_r30;\n    Hu3DCameraViewportSet(lbl_1_data_FEC[arg0], arg1[0], arg1[1], arg1[2], arg1[3], 0, 1);\n    Hu3DCameraScissorSet(lbl_1_data_FEC[arg0], arg1[0], arg1[1], arg1[2], arg1[3]);\n    temp_r30 = &lbl_1_bss_130[arg0];\n    temp_r30->unk8 = 0.9f * (arg1[0] + (arg1[2] / 2));\n    temp_r30->unkC = arg1[1] + (arg1[3] / 2);\n    temp_r30->unk10 = arg1[2] / 316;\n    temp_r30->unk14 = arg1[3] / 236;\n}",
       "m2cCtx": true,
@@ -2107,7 +2128,9 @@
         "pointer",
         "array",
         "variable-index",
-        "global"
+        "global",
+        "struct",
+        "field"
       ],
       "funcC": "void fn_1_12D74(void)\n{\n    M430PlayerBss160Struct *var_r31;\n    s32 var_r30;\n    s32 var_r29;\n\n    for (var_r31 = lbl_1_bss_160, var_r29 = 0; var_r29 < 2; var_r29++, var_r31++) {\n        for (var_r30 = 0; var_r30 < 6; var_r30++) {\n            espKill(var_r31->unk_10[var_r30]);\n        }\n    }\n}",
       "m2cCtx": true,
@@ -2126,8 +2149,10 @@
       "features": [
         "matrix",
         "float",
-        "stack-addr",
-        "inlined-callee"
+        "inlined-callee",
+        "struct",
+        "field",
+        "stack-addr"
       ],
       "funcC": "void fn_1_52B8(UnkM432DllBss0SubStruct *arg0, Vec *arg1)\n{\n    Mtx sp8;\n\n    fn_1_52B8_inline(arg1, 0.0f, 0.0f, arg0->unk_1C);\n    MTXRotRad(sp8, 0x79, 0.017453292f * arg0->unk_18);\n    MTXMultVec(sp8, arg1, arg1);\n    VECAdd(&arg0->unk_2C, arg1, arg1);\n}",
       "m2cCtx": true,
@@ -2170,7 +2195,6 @@
         "mod-pow2",
         "array",
         "variable-index",
-        "guard-init",
         "global"
       ],
       "funcC": "void fn_1_83C8(s32 arg0)\n{\n    s32 temp_r31;\n    s32 temp_r30;\n    s32 temp_r29;\n    s32 temp_r28;\n    s32 temp_r27;\n    s32 sp8[9][2] = { -1, -1, 0, -1, 1, -1, -1, 0, 0, 0, 1, 0, -1, 1, 0, 1, 1, 1 };\n    if (arg0 < 0 || arg0 >= 1024) {\n        return;\n    }\n    temp_r28 = arg0 % 32;\n    temp_r27 = (arg0 - temp_r28) / 32;\n    for (temp_r31 = 0; temp_r31 < 9; temp_r31++) {\n        temp_r30 = temp_r28 + sp8[temp_r31][0];\n        temp_r29 = temp_r27 + sp8[temp_r31][1];\n        if (temp_r30 >= 0 && temp_r30 < 32 && temp_r29 >= 0 && temp_r29 < 32) {\n            lbl_1_bss_5880[temp_r30 + (32 * temp_r29)]--;\n        }\n    }\n}",
@@ -2205,7 +2229,10 @@
       "features": [
         "multi-arg",
         "sparse",
-        "stack-addr"
+        "stack-addr",
+        "struct",
+        "field",
+        "switch-arms"
       ],
       "funcC": "void fn_1_7D60(HSFBITMAP *arg0, HSFATTRIBUTE *arg1, s16 arg2)\n{\n    GXTexObj sp1C;\n    GXTlutObj sp10;\n    s32 sp8;\n    s16 temp_r29;\n    s16 temp_r28;\n    s16 var_r27;\n    s16 var_r26;\n\n    if (!arg0) {\n        OSReport(\"Error: No Texture\\n\");\n        return;\n    }\n    temp_r29 = arg0->sizeX;\n    temp_r28 = arg0->sizeY;\n    var_r27 = (arg1->wrapS == 1) ? 1 : 0;\n    var_r26 = (arg1->wrapT == 1) ? 1 : 0;\n    switch (arg0->dataFmt) {\n        case 6:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGBA8, var_r27, var_r26, GX_FALSE);\n            break;\n        case 4:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGB565, var_r27, var_r26, GX_FALSE);\n            break;\n        case 5:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGB5A3, var_r27, var_r26, GX_FALSE);\n            break;\n        case 9:\n            if (arg0->pixSize < 8) {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB565, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C4, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            else {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB565, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C8, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            break;\n        case 10:\n            if (arg0->pixSize < 8) {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB5A3, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C4, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            else {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB5A3, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C8, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            break;\n        default:\n            OSReport(\"Error: Texture format\\n\");\n            return;\n    }\n    GXInitTexObjLOD(&sp1C, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, 0, 0, GX_ANISO_1);\n    GXLoadTexObj(&sp1C, arg2);\n    return;\n}",
       "m2cCtx": true,
@@ -2225,7 +2252,8 @@
         "mask",
         "unsigned",
         "zero-extend",
-        "field"
+        "field",
+        "struct"
       ],
       "funcC": "void fn_1_F4D4(unkObjStruct *arg0, u16 arg1, u16 arg2)\n{\n    arg0->unk0 &= ~arg1;\n    arg0->unk0 |= arg2;\n}",
       "m2cCtx": true,
@@ -2262,7 +2290,9 @@
       "romDigest": "0b497acfdef6eba8a031ea7fe0b16624da0c62eed457a729de9210d180b81199",
       "features": [
         "pointer",
-        "struct"
+        "struct",
+        "field",
+        "global"
       ],
       "funcC": "void fn_1_3994(void)\n{\n    unkStruct4 *sp8;\n    unkStruct3 *var_r31;\n\n    var_r31 = lbl_1_bss_28;\n    if (var_r31) {\n        do {\n            sp8 = var_r31->unk0;\n            var_r31 = var_r31->unk8;\n        } while (var_r31);\n    }\n}",
       "m2cCtx": true,
@@ -2282,7 +2312,9 @@
         "fallthrough",
         "dense",
         "switch-arms",
-        "global"
+        "global",
+        "struct",
+        "field"
       ],
       "funcC": "static void SceneMain(OMOBJ *object)\n{\n    switch (object->mode) {\n        case 0:\n            object->mode = 1;\n            /* fallthrough */\n        case 1:\n            if (!omSysExitReq) {\n                break;\n            }\n            object->mode = 2;\n            /* fallthrough */\n        case 2:\n            WipeCreate(WIPE_MODE_OUT, WIPE_TYPE_NORMAL, 60);\n            HuAudFadeOut(1000);\n            object->mode = 3;\n            /* fallthrough */\n        case 3:\n            if (WipeStatGet() == 0) {\n                OptionStateKill(optionState);\n                if (rumbleF != GWGameStat.rumble) {\n                    omSysExitReq = 0;\n                    KillScene();\n                }\n                omOvlReturnEx(1, 1);\n            }\n            break;\n    }\n}",
       "m2cCtx": true,
@@ -2301,8 +2333,10 @@
       "features": [
         "fallthrough",
         "dense",
-        "break",
-        "switch-arms"
+        "switch-arms",
+        "struct",
+        "field",
+        "global"
       ],
       "funcC": "static void ExecState(OMOBJ *object)\n{\n    StateWork *work = object->data;\n\n    switch (object->mode) {\n        case 0:\n            object->mode = 1;\n            /* fallthrough */\n        case 1:\n            WipeCreate(WIPE_MODE_IN, WIPE_TYPE_PREV, 60);\n            object->mode = 2;\n            break;\n        case 2:\n            if (WipeStatGet() != 0 || work->window->state != 0) {\n                break;\n            }\n            OptionRoomExecModeSet(optionRoom, 1);\n            object->mode = 3;\n            /* fallthrough */\n        case 3:\n            if (OptionRoomExecModeGet(optionRoom) != 0) {\n                break;\n            }\n            object->mode = 4;\n            /* fallthrough */\n        case 4:\n            OptionWinAnimIn(work->window);\n            OptionWinMesSet(work->window, MAKE_MESSID(47, 167)); // Would you like to leave?\n            object->mode = 5;\n            /* fallthrough */\n        case 5:\n            if (work->window->state != 0) {\n                break;\n            }\n            OptionWinChoiceSet(work->window, 1);\n            object->mode = 6;\n            /* fallthrough */\n        case 6:\n            if (work->window->state != 0) {\n                break;\n            }\n            OptionWinAnimOut(work->window);\n            if (work->window->choice == 0) {\n                work->quitTimer = 0;\n                object->mode = 7;\n            }\n            else {\n                object->mode = 2;\n            }\n            break;\n        case 7:\n            object->mode = 8;\n            work->quitTimer = 0;\n            /* fallthrough */\n        case 8:\n            if (work->window->state == 0 && work->quitTimer++ >= 60) {\n                omSysExitReq = 1;\n            }\n            break;\n    }\n}",
       "m2cCtx": true,
@@ -2322,7 +2356,8 @@
         "table",
         "array",
         "variable-index",
-        "guard-init"
+        "struct",
+        "field"
       ],
       "funcC": "static void OptionSelHide(OMOBJ *object)\n{\n    static const s32 sprHideTbl[] = { 12, 0, 1, 2, 3, 4, 5 };\n    SoundWork *work = object->data;\n    s32 i;\n\n    for (i = 0; i < 7; i++) {\n        espDispOff(work->sprite[sprHideTbl[i]]);\n    }\n}",
       "m2cCtx": true,
@@ -2343,7 +2378,8 @@
         "mixed-width",
         "uninit-local",
         "switch-arms",
-        "macro"
+        "struct",
+        "field"
       ],
       "funcC": "static void HandleNote(OMOBJ *note)\n{\n    NoteWork *noteWork = note->data;\n    float time;\n    float scale;\n    float angle;\n    float zRot;\n    float radius;\n    float x;\n    float z;\n    float y;\n    float tplvl;\n\n    Hu3DModelAttrReset(note->mdlId[0], HU3D_ATTR_DISPOFF);\n    time = sind(45.0f * noteWork->pos);\n    time = time * time;\n    switch (noteWork->side) {\n        case NOTE_SIDE_LEFT:\n            angle = 174.5f + 7.0f * time;\n            zRot = -15.0 + 30.0 * sind(1440.0f * time);\n            break;\n        case NOTE_SIDE_RIGHT:\n            angle = 185.5f - (7.0f * time);\n            zRot = 15.0 - 30.0 * sind(1440.0f * time);\n            break;\n    }\n    tplvl = sind(180.0f * noteWork->pos);\n    radius = 500.0f - 25.0f * time;\n    x = radius * -sind(angle);\n    z = radius * cosd(angle);\n    y = 160.0f - 15.0f * noteWork->pos;\n    scale = 0.5 + 2.0 * sind(90.0f * time);\n    omSetTra(note, x, y, z);\n    Hu3DModelTPLvlSet(note->mdlId[0], tplvl);\n    omSetSca(note, scale, scale, scale);\n    omSetRot(note, 0.0f, 0.0f, zRot);\n    if ((noteWork->pos += noteWork->speed) < 1.0f) {\n        return;\n    }\n    noteWork->enabled = FALSE;\n    Hu3DModelAttrSet(note->mdlId[0], HU3D_ATTR_DISPOFF);\n    note->objFunc = NULL;\n    note->mode = 0;\n}",
       "m2cCtx": true,
@@ -2380,7 +2416,8 @@
         "array",
         "variable-index",
         "struct",
-        "global"
+        "global",
+        "field"
       ],
       "funcC": "static void CharRandomize(void)\n{\n    s32 i;\n    s32 j;\n    s32 valid_cnt;\n    s32 valid_list[8];\n    for (i = 0; i < 4; i++) {\n        valid_cnt = 0;\n        for (j = 0; j < 8; j++) {\n            if (charSelProhibitF[j]) {\n                continue;\n            }\n            valid_list[valid_cnt++] = j;\n        }\n        if (smPlayerCfg[i].iscom == 1) {\n            smPlayerCfg[i].character = valid_list[rand8() % valid_cnt];\n            charSelProhibitF[smPlayerCfg[i].character] = 1;\n        }\n    }\n}",
       "m2cCtx": true,
@@ -2401,7 +2438,10 @@
         "bitfield",
         "array",
         "variable-index",
-        "guard-init"
+        "guard-init",
+        "struct",
+        "field",
+        "macro"
       ],
       "funcC": "s32 fn_1_233C(m02GenDice *arg0)\n{\n    s32 temp_r31;\n    WorkGenDiceNum *temp_r30;\n    for (temp_r31 = 0; temp_r31 < arg0->unk00; temp_r31++) {\n        if (!arg0->unk50[temp_r31]) {\n            continue;\n        }\n        temp_r30 = omObjGetWork(arg0->unk50[temp_r31], WorkGenDiceNum);\n        if (temp_r30->field0_bit2) {\n            return 0;\n        }\n    }\n    return 1;\n}",
       "m2cCtx": true,
@@ -2416,7 +2456,8 @@
         "bitfield",
         "struct",
         "field",
-        "global"
+        "global",
+        "macro"
       ],
       "funcC": "void fn_1_4A9C(void)\n{\n    omObjGetWork(lbl_1_bss_74, w03UnkStruct4)->unk00_bit0 = 1;\n}",
       "m2cCtx": true,
@@ -2458,7 +2499,11 @@
         "stack-addr",
         "bitfield",
         "float-to-int",
-        "global"
+        "global",
+        "struct",
+        "field",
+        "array",
+        "variable-index"
       ],
       "funcC": "static void fn_1_B5C(OMOBJ *arg0) {\n    Bss8Work *temp_r30;\n    Vec sp14;\n    Vec sp8;\n    s16 temp_r28;\n    s16 var_r29;\n    s16 i;\n\n    temp_r30 = omObjGetWork(arg0, Bss8Work);\n    if (temp_r30->unk00_field0 != 0 || BoardIsKill()) {\n        HuAudFXListnerKill();\n        lbl_1_bss_8 = NULL;\n        omDelObjEx(HuPrcCurrentGet(), arg0);\n        return;\n    }\n    temp_r28 = BoardModelMotionTimeGet(lbl_1_data_F0);\n    BoardCameraDirGet(&sp8);\n    BoardCameraTargetGet(&sp14);\n    sp14.y += 2000.0f;\n    if (!_CheckFlag(FLAG_ID_MAKE(1, 16))) {\n        if (lbl_1_bss_4 == 0) {\n            HuAudFXPauseAll(1);\n            lbl_1_bss_4 = 1;\n        }\n    } else if (lbl_1_bss_4 != 0) {\n        HuAudFXPauseAll(0);\n        lbl_1_bss_4 = 0;\n    }\n    if (!_CheckFlag(FLAG_ID_MAKE(1, 28))) {\n        for (var_r29 = i = 0; i < 10; i++) {\n            if (temp_r30->unk01[i] != 0) {\n                var_r29++;\n            } else if (temp_r28 == lbl_1_data_108[i].unk00) {\n                HuAudFXEmiterPlay(0x4A1, &lbl_1_data_108[i].unk04);\n                temp_r30->unk01[i] = 1;\n                goto block_20;\n            }\n        }\n        if (var_r29 < 10) {\n            return;\n        }\n        for (i = 0; i < 10; i++) {\n            temp_r30->unk01[i] = 0;\n        }\n    }\nblock_20:\n    HuAudFXListnerUpdate(&sp14, &sp8);\n}",
       "m2cCtx": true,
