@@ -12,7 +12,7 @@
 // once, aggregated, and skipped.
 import { ADDR_PATTERN, type FlagsFrom, type Identifiable } from '@asmlift/bench-schema';
 import { commandFlags } from '@asmlift/cli/flags';
-import { parseFlags, storedFlags } from '@asmlift/core/codegen-flags';
+import { parseFlags, storedFlags, unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -94,7 +94,11 @@ export interface RealFunction {
    *
    *  The SYNTHETIC tier is the opposite, deliberately: there NEITHER tool gets project data — the
    *  spec's `ctx` is prototypes only and its `proto` carries the same facts to asmlift, so both
-   *  must recover structure (see dataset/synthetic.ts). Do not read this note as applying there. */
+   *  must recover structure (see dataset/synthetic.ts). Do not read this note as applying there.
+   *
+   *  NOT AVAILABLE ON A C++ ROW, and validateManifest refuses it there: m2c's context parser is
+   *  pycparser, so a C++ unit's context makes m2c fail rather than degrade. The reason, the
+   *  measurement and what a C++ row gets instead are at that check. */
   m2cCtx?: boolean;
   proto?: Prototypes; // asmlift prototypes (void-ness / callee params)
   note?: string;
@@ -379,6 +383,24 @@ export function validateManifest(
             `${file}: ${JSON.stringify(f.sym)} "unit" ${f.unit} has no flags in "units" — run \`pnpm bench flags --project ${man.project} --write\``,
           );
         }
+      } else if (f.m2cCtx && unitLanguage(f.unit, (man.units[f.unit] as BuildUnit).cflags ?? []) === 'c++') {
+        // m2c's `--context` parser is pycparser: C, and only C. A C++ unit's vendored context IS a
+        // C++ translation unit — measured on Pikmin's `src/sysCommon/controller.cpp`, 25,892 bytes
+        // holding 36 `class` and 55 `virtual` — and m2c does not degrade on it, it FAILS:
+        // `Syntax error when parsing C context. before: AgeServer … class AgeServer;`. The row
+        // would publish `m2c=failed` for a harness decision, which is the one thing a comparative
+        // benchmark must not do.
+        //
+        // Given NO context the same function decompiles cleanly, because m2c's `ppc-mwcc-c++`
+        // target reads the class, the implicit `this` and the field offsets out of the MANGLED
+        // symbol itself (measured: `f32 getMainStickX__10ControllerFv(Controller *this) { return
+        // (f32) (s8) this->unk45 / 74.0f; }`, against a reference of `mMainStickX / 74.0f`). So a
+        // C++ row states its choice — a hand-written C-parseable `ctx`, or none — rather than
+        // inheriting a blob no version of m2c can read.
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} sets "m2cCtx" on a c++ unit — m2c's context parser is C-only and ` +
+            `fails outright on a C++ context; give the row a C-parseable "ctx", or neither`,
+        );
       }
       if (f.romDigest === undefined) {
         if (complete) {
