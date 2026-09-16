@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { runCli } from '../../src/main';
-import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey } from '../../src/module-elf';
+import { assertPlaced, globalSymbolKeys, moduleElfPath, placeModuleSections, symbolKey } from '../../src/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '../../src/symbols-provider';
 
 const ET_REL = 1;
@@ -157,6 +157,20 @@ const write = (name: string, bytes: Buffer): string => {
   writeFileSync(path, bytes);
   return path;
 };
+
+describe('moduleElfPath — the layout rule the CLI and the benchmark share', () => {
+  test("a module's ELF sits beside the base ELF, at <module>/<module>.plf", () => {
+    expect(moduleElfPath('/p/build/GMPE01_00/main.elf', 'm416Dll')).toBe('/p/build/GMPE01_00/m416Dll/m416Dll.plf');
+    expect(moduleElfPath('/p/build/GAFE01_00/static.elf', 'foresta')).toBe('/p/build/GAFE01_00/foresta/foresta.plf');
+  });
+
+  test("the base ELF's own name names no module: the base ELF IS its symbol source", () => {
+    // dtk prefixes the DOL's units too (`main/`, `static/`), so that prefix is a name a caller may
+    // hold — and there is no build/main/main.plf for it to look for.
+    expect(moduleElfPath('/p/build/GMPE01_00/main.elf', 'main')).toBeUndefined();
+    expect(moduleElfPath('/p/build/GAFE01_00/static.elf', 'static')).toBeUndefined();
+  });
+});
 
 describe('assertPlaced — an unplaced relocatable ELF is refused', () => {
   test('a module .plf, whose allocated sections all sit at 0, is refused by name and address', () => {

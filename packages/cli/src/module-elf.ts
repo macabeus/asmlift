@@ -12,6 +12,7 @@
 // This file works on bytes rather than through @gba-kit/debug-info because neither fact it needs is
 // in that package's surface: a symbol's SECTION (which base its value belongs to) and its BINDING
 // (which of a base ELF's symbols a module may be unioned with).
+import { basename, dirname, extname, join } from 'node:path';
 
 const ELF_MAGIC = 0x7f454c46;
 const ELFCLASS32 = 1;
@@ -95,6 +96,22 @@ function readElf32(bytes: Uint8Array): Elf32 | undefined {
     });
   }
   return { buf, littleEndian, type: u16(0x10), sections };
+}
+
+/** WHERE A MODULE'S ELF IS, given the base ELF beside it: dtk writes each module at
+ *  `<directory of the base ELF>/<module>/<module>.plf`, and that layout is the whole location
+ *  rule — a project's decomp.yaml says nothing about its modules.
+ *
+ *  Undefined when `module` names the BASE ELF itself. dtk gives the DOL's units a prefix too
+ *  (`main/`, `static/`), and the base ELF is named after it, so that prefix is a module name a
+ *  caller may hold; it selects the base ELF, which IS its own symbol source.
+ *
+ *  One rule, one home: the CLI's `--module` and the benchmark's REL rows resolve the same module
+ *  through this, so a project laid out one way cannot answer them differently. */
+export function moduleElfPath(baseElfPath: string, module: string): string | undefined {
+  return module === basename(baseElfPath, extname(baseElfPath))
+    ? undefined
+    : join(dirname(baseElfPath), module, `${module}.plf`);
 }
 
 /** Allocated sections that hold something. An EMPTY allocated section also sits at 0 in a `.plf`,
