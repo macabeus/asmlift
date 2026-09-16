@@ -29,6 +29,58 @@ export { KNOWN_FEATURES };
  *  aggregate's brace — so the members would otherwise be counted as declaration statements. */
 const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b[^{;]*\{[^{}]*\}/g, ' ');
 
+/** A preprocessor directive, blanked to spaces so the text keeps its length and its line breaks.
+ *  A function-like macro's replacement list is a `)` followed by a brace, which is a function
+ *  definition to anything reading punctuation; a `#define` continued with a backslash keeps going
+ *  onto the next line. */
+const withoutDirectives = (s: string): string =>
+  s.replace(/^[ \t]*#(?:[^\n\\]|\\[\s\S])*/gm, (d) => d.replace(/[^\n]/g, ' '));
+
+/** Anything that takes a parenthesis and a brace without being a declarator. */
+const NOT_A_DECLARATOR = /\b(?:if|else|while|for|switch|do|catch|return|sizeof)\s*$/;
+
+/** The function's own definition: the declarator that names it, and the body that declarator opens.
+ *
+ *  A row's source is not a declarator followed by a body. A spec opens with the typedefs, macros
+ *  and aggregate definitions its signature needs, so the first `{` in the text is routinely not the
+ *  function's — which leaves "everything before it" a preamble rather than a signature, and
+ *  "everything after it" wider than the one function. So: the body opens at the first top-level `{`
+ *  that closes a parameter list, the signature is what stands between the preceding top-level `;`
+ *  or `}` and that brace, and the body ends at the brace's match — a file-scope declaration after
+ *  it is not part of this function and neither is one before it. */
+export function definitionOf(whole: string): { signature: string; body: string } {
+  const scan = withoutDirectives(whole);
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < scan.length; i++) {
+    const ch = scan[i];
+    if (ch === '{') {
+      const head = scan.slice(start, i);
+      if (
+        depth === 0 &&
+        /\)\s*(?:const\s+|volatile\s+)*$/.test(head) &&
+        !NOT_A_DECLARATOR.test(head.slice(0, head.lastIndexOf('(')))
+      ) {
+        let d = 0;
+        for (let j = i; j < scan.length; j++) {
+          if (scan[j] === '{') d++;
+          else if (scan[j] === '}' && --d === 0)
+            return { signature: whole.slice(start, i), body: whole.slice(i, j + 1) };
+        }
+        return { signature: whole.slice(start, i), body: whole.slice(i) };
+      }
+      depth++;
+    } else if (ch === '}') {
+      if (--depth === 0) start = i + 1;
+    } else if (ch === ';' && depth === 0) {
+      start = i + 1;
+    }
+  }
+  // No declarator: a vocabulary `example.c` is often a fragment. Read it whole.
+  const at = whole.indexOf('{');
+  return { signature: at < 0 ? whole : whole.slice(0, at), body: at < 0 ? whole : whole.slice(at) };
+}
+
 /** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
  *
  *  "Is this *bulk* memory movement?" cannot be decided by a regex, so the sufficient condition
@@ -134,6 +186,42 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   },
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
+
+  // A vtable dispatch is an INDIRECT call, on every ISA the benchmark runs — PowerPC through the
+  // count or link register, MIPS `jalr`, ARM `blx` or agbcc's `_call_via_rN` thunk. Whether the
+  // callee came out of a vtable rather than a function-pointer field is the judgement, and `fnptr`
+  // is the tag for the other answer. (Deliberately NOT the same predicate as `fnptr`'s floor,
+  // which has no PowerPC form; widening that one would change which rows can claim `fnptr`.)
+  'virtual-call': (_b, asm) => /\bbctrl\b|\bblrl\b|\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+
+  // A constructor's declarator repeats the class name — `Thing::Thing(`. The SIGNATURE carries it
+  // and the body never does, so like `double` this reads the whole function.
+  ctor: (_b, _asm, whole) => /\b(\w+)\s*::\s*\1\s*\(/.test(definitionOf(whole).signature),
+  // …and a destructor's is the same name behind a `~`.
+  dtor: (_b, _asm, whole) => /~\s*\w+\s*\(/.test(definitionOf(whole).signature),
+
+  // A reference PARAMETER: an `&` between a type and a name, in the parameter list. Read from the
+  // signature and not the body, where a binary `a & b` is the same three tokens. A reference local
+  // is the same construct and cannot pass this floor — the same narrowing `double` accepts.
+  reference: (_b, _asm, whole) => /[\w>\]]\s*&\s*\**\s*\w+\s*[,)=]/.test(definitionOf(whole).signature),
+
+  // A hardware float ABI needs a floating-point type in the SIGNATURE — a float that only ever
+  // exists inside the body is never passed or returned. Which projects spell it `f32`/`f64`
+  // rather than `float`/`double` is why all four are accepted.
+  'hw-float-abi': (_b, _asm, whole) => /\b(?:float|double|f32|f64)\b/.test(definitionOf(whole).signature),
+
+  // A by-value struct assignment is an assignment whose right-hand side is a WHOLE OBJECT — `*a =
+  // *b;`, `p->pos = q->pos;`, `v = w;` — and not an expression, which would be a scalar store. It
+  // has to be a PLAIN assignment: `a += b` reads and writes, and `a == b` does neither, so the `=`
+  // is required to stand alone. That the object is an aggregate is what no scan can decide — the
+  // types are the project's — so `v = w` between two scalars passes, and must.
+  'struct-copy': (b) =>
+    /(?<![-+*/%&|^!<>=])=(?!=)\s*\*?\s*[A-Za-z_]\w*(?:\s*(?:->|\.)\s*\w+|\s*\[[^\]]*\])*\s*;/.test(b),
+
+  // For a callee to have been inlined, the body has to spell a call. The keywords that take a
+  // parenthesis are excluded, or every `if (` would pass — and the lookahead closes on a word
+  // boundary, or `forward(x)` is refused for beginning with one of them.
+  'inlined-callee': (b) => /\b(?!(?:if|while|for|switch|return|sizeof|do|catch)\b)[A-Za-z_]\w*\s*\(/.test(b),
   'switch-arms': (b) => /\bswitch\s*\(/.test(b),
   dense: (b) => /\bswitch\s*\(/.test(b),
   sparse: (b) => /\bswitch\s*\(/.test(b),
@@ -184,6 +272,15 @@ function neutralizeDoWhileZero(body: string): string {
   }
   return out.join('');
 }
+
+/** A local aggregate declaration with a brace initialiser, its storage class captured rather than
+ *  skipped: `static u8 t[] = { … }` and `u8 t[] = { … }` are different shapes, and only the second
+ *  costs a copy into the frame. Qualifiers before the type are optional and any number, the
+ *  declarator may carry several extents (`s16 m[2][2]`) or NONE — a struct is an aggregate and
+ *  takes the same copy, which is what the tag is about — and the whole thing is anchored at a
+ *  statement boundary so an initialiser inside an expression cannot pass. */
+const LOCAL_AGGREGATE_INIT =
+  /(?:^|[;{}])\s*(?<storage>static\s+)?(?:(?:const|volatile|unsigned|signed|struct|union|enum)\s+)*[A-Za-z_]\w*\s+\**\s*[A-Za-z_]\w*\s*(?:\[[^\];]*\]\s*)*=\s*\{/g;
 
 /** A real do-while loop — `do { … } while (0)` has already been neutralized by the caller. */
 function hasRealDoWhile(body: string): boolean {
@@ -302,8 +399,11 @@ const hasControllingConnective = (body: string): boolean => {
 
 /** Which `source` tags the function's own C supports. */
 export function sourceEvidence(funcC: string): Set<string> {
-  const b = stripLiterals(funcC);
-  const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));
+  const def = definitionOf(stripLiterals(funcC));
+  const body = neutralizeDoWhileZero(def.body);
+  // Some tags are facts about the SIGNATURE and leave no trace in the body at all — the same
+  // reason the `double` floor is handed the whole function rather than the body.
+  const signature = def.signature;
   const out = new Set<string>();
   if (/\bswitch\s*\(/.test(body)) out.add('switch');
   if (/\bgoto\s+\w+\s*;/.test(body)) out.add('goto');
@@ -314,6 +414,26 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (/\?[^;{}]*:/.test(body)) out.add('ternary');
   if (hasControllingConnective(body)) out.add('short-circuit');
   if (/\bsizeof\b/.test(body)) out.add('sizeof');
+  // A declaration statement whose storage class is `static` — anchored at a statement boundary, so
+  // a `static` in a comment or mid-expression cannot pass, and read from the body alone, so the
+  // `static` that makes the FUNCTION file-scope is not one of these.
+  if (/(?:^|[;{}])\s*static\b/.test(body)) out.add('static-local');
+  // `...` can only be the ellipsis of a parameter list here: the signature holds no expressions.
+  if (/\.\.\.\s*\)/.test(signature)) out.add('varargs-def');
+  // A `new`/`delete` EXPRESSION, which needs an operand after the keyword. Written so that an
+  // identifier merely spelled `new` (`s->new`, `new_value`) cannot pass: `\bnew\b` already refuses
+  // the second, and a leading `.`/`->` is excluded for the first.
+  if (/(?<![.\w]|->)\bnew\b\s*[\w([]|(?<![.\w]|->)\bdelete\b\s*(?:\[\s*\]\s*)?[\w(*]/.test(body)) {
+    out.add('new-delete');
+  }
+  // A local aggregate with a brace initialiser — a declaration statement carrying `= {`.
+  // Only an AUTOMATIC one counts, so the storage class is CAPTURED rather than skipped: a `static`
+  // aggregate lives in .rodata and is merely referenced, where an automatic one is copied into the
+  // frame on every call, and that copy is the shape the tag is about. The static case is
+  // `static-local`, so a body holding both declarations gets both tags and neither takes the other's.
+  if ([...body.matchAll(LOCAL_AGGREGATE_INIT)].some((m) => m.groups?.storage === undefined)) {
+    out.add('local-aggregate-init');
+  }
   if (/<<|>>/.test(body)) out.add('shift');
   // require a LEFT operand so `&x` (address-of) and `&&`/`||` do not count. A cast's closing
   // paren is NOT a left operand — `(u32)&tmp` is address-of — so casts come out first. (A
@@ -330,10 +450,78 @@ export function sourceEvidence(funcC: string): Set<string> {
 
 const DIV_HELPERS = /__(u?divsi3|u?modsi3|divdi3|moddi3)/;
 
+/** Every symbol the compiled code CALLS BY NAME.
+ *
+ *  Two spellings, because objdump renders a call differently depending on where the callee is. One
+ *  inside the object is printed on the branch itself (`bl __divsi3`); an external one leaves the
+ *  branch pointing at its own address and names the callee on the relocation line under it
+ *  (`10: R_PPC_REL24 _savegpr_25`). Only BRANCH relocations are read — `R_PPC_ADDR16_HA` names a
+ *  datum, not a callee.
+ *
+ *  MIPS has neither spelling: the harness's objdump flags emit no MIPS relocation and an external
+ *  `jal` renders against the enclosing symbol, so this returns nothing there. That is the same
+ *  limit `call` documents, and it is why every tag below is a claim about the calls it CAN see.
+ *
+ *  Two things are deliberately unreadable. `bctrl` and `blrl` take no operand, so anything after
+ *  them is the next line rather than a callee. And an unresolved branch prints its own ADDRESS
+ *  followed by the enclosing symbol in angle brackets (`jal 0 <atans_table>`, `bl c <call1+0xc>`);
+ *  the address can be all hex letters and read as a name, and the bracketed symbol is the caller,
+ *  not the callee — so an operand followed by `<` names nothing and is skipped. */
+const CALL_TARGET =
+  /(?:\b(?:bl|bla|jal|jalx)\s+|\bR_(?:PPC_(?:REL24|PLTREL24)|ARM_(?:CALL|PC24|THM_CALL|THM_XPC22)|MIPS_26)\s+)([A-Za-z_][\w$.]*)(?![\w$.])(?!\s*<)/g;
+
+const calledSymbols = (asm: string): Set<string> => new Set([...asm.matchAll(CALL_TARGET)].map((m) => m[1]));
+
+/** The four helpers `soft-div` already names. */
+const SOFT_DIV_HELPER = /^__(?:u?divsi3|u?modsi3|divdi3|moddi3)$/;
+
+/** A helper the COMPILER generated, for an operation the target has no instruction for. Two runtime
+ *  families appear in this corpus: libgcc's `__<op><mode>` names (agbcc, ido, kmc — soft float,
+ *  64-bit shifts and multiplies, conversions) and the Metrowerks runtime's `__cvt_*`, `__va_arg`
+ *  and `__<op>2<sign>`. Matched as WHOLE symbol names, so a project function that merely starts
+ *  with two underscores is not one. */
+const RUNTIME_HELPER =
+  /^__(?:u?(?:div|mod)(?:si|di)3|(?:ash[lr]|lshr|mul|neg)di3|(?:add|sub|mul|div)[sd]f3|neg[sd]f2|float(?:un)?si[sd]f|fix(?:uns)?[sd]fsi|extendsfdf2|truncdfsf2|(?:eq|ne|lt|le|gt|ge|cmp|unord)[sd]f2|(?:div|mod|shl|shr)2[iu]?|cvt_\w+|va_arg|aeabi_\w+)$/;
+
+/** The soft-float comparison helpers — a float compare on a target with no FPU. */
+const SOFT_FLOAT_COMPARE = /^__(?:eq|ne|lt|le|gt|ge|cmp|unord)[sd]f2$/;
+
+/** The C standard maths library, with its `f` and `l` spellings. */
+const LIBM =
+  /^(?:sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|exp|log|log10|pow|sqrt|fmod|ceil|floor|fabs|ldexp|frexp|modf|hypot)[fl]?$/;
+
+/** The PowerPC EABI's out-of-line prologue helpers. */
+const SAVE_GPR_HELPER = /^_(?:save|rest)(?:gpr|fpr)_\d+$/;
+
+/** A floating-point comparison in hardware: PowerPC into a condition register, MIPS into the FP
+ *  condition flag the `bc1` branches read (`bc1tl`/`bc1fl` are the likely forms). */
+const FLOAT_COMPARE =
+  /\bfcmp[ou]\b|\bc\.(?:f|un|eq|ueq|olt|ult|ole|ule|sf|ngle|seq|ngl|lt|nge|le|ngt)\.[sd]\b|\bbc1[tf]l?\b/;
+
+/** A callee-saved floating-point register written to the frame: PowerPC f14–f31 (`psq_st` is
+ *  Gekko's paired-single store), MIPS $f20–$f31. The store must be `(r1)`/`(sp)` — the same
+ *  register used as a scratch elsewhere is not a save. */
+const FLOAT_CALLEE_SAVE =
+  /\b(?:stfd|psq_st)\s+f(?:1[4-9]|2\d|3[01]),\s*-?\d+\(r1\)|\b(?:sdc1|swc1)\s+\$f(?:2\d|3[01]),\s*-?\d+\(sp\)/;
+
+/** The PowerPC EABI's variadic-call marker: CR bit 6 says whether any float was passed in an FP
+ *  register, and the caller sets or clears it at EVERY variadic call, including one passing none. */
+const VARARG_CALL = /\bcr(?:clr|set)\s+4\*cr1\+eq\b/;
+
 /** The `codegen` tags decidable from the assembly ALONE (no source needed). */
 function asmEvidence(targetAsm: string): Set<string> {
   const out = new Set<string>();
   if (DIV_HELPERS.test(targetAsm)) out.add('soft-div');
+  const called = calledSymbols(targetAsm);
+  // `soft-div` says more about the same call, so the division helpers are its own and not counted
+  // here — the two tags partition the runtime rather than doubling up on it.
+  if ([...called].some((s) => RUNTIME_HELPER.test(s) && !SOFT_DIV_HELPER.test(s))) out.add('runtime-helper-call');
+  if ([...called].some((s) => LIBM.test(s))) out.add('libm-call');
+  if ([...called].some((s) => SAVE_GPR_HELPER.test(s))) out.add('savegpr-helper');
+  if (FLOAT_COMPARE.test(targetAsm) || [...called].some((s) => SOFT_FLOAT_COMPARE.test(s))) out.add('float-compare');
+  if (FLOAT_CALLEE_SAVE.test(targetAsm)) out.add('float-callee-save');
+  if (VARARG_CALL.test(targetAsm)) out.add('vararg-call');
+  if (/\bR_PPC_EMB_SDA21\b/.test(targetAsm)) out.add('sda-global');
   // direct (`bl`/`jal`) and indirect (`jalr`/`blx`, agbcc's `_call_via_rN` thunk) alike
   if (/^\s*\S*\s*\b(bl|jal|jalr|blx)\b|_call_via_r/m.test(targetAsm)) out.add('call');
   const addrs = [...targetAsm.matchAll(/0x0?4[0-9a-f]{6}\b/gi)].map((m) => parseInt(m[0], 16));

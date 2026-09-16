@@ -2,7 +2,15 @@
 // @asmlift/bench-schema and the detectors in src/cases/features.ts; these assert that they and the
 // dataset agree — published tags are defined, definitions are used and well-formed, derived tags
 // match their evidence in both directions, and authored tags stay above their floor.
-import { FEATURES, FEATURE_BY_ID, GROUP_ORDER, KNOWN_FEATURES, featuresByEvidence } from '@asmlift/bench-schema';
+import {
+  FEATURES,
+  FEATURE_BY_ID,
+  type FeatureDef,
+  GROUP_ORDER,
+  KNOWN_FEATURES,
+  definitionsOutOfStep,
+  featuresByEvidence,
+} from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +21,7 @@ import {
   JUDGEMENT_FLOOR,
   SOURCE_CHECKED,
   codegenEvidence,
+  definitionOf,
   sourceEvidence,
   stripLiterals,
 } from '../src/cases/features';
@@ -59,10 +68,8 @@ describe('the vocabulary is closed over the published data', () => {
     expect([...undefined_].sort()).toEqual([]);
   });
 
-  it('every definition is carried by at least one row', () => {
-    const published = new Set(rows.flatMap((r) => r.features));
-    const unused = FEATURES.filter((f) => !f.deprecated && !published.has(f.id)).map((f) => f.id);
-    expect(unused.sort()).toEqual([]);
+  it('every definition is carried by a row, and every pending definition still waits for one', () => {
+    expect(definitionsOutOfStep(new Set(rows.flatMap((r) => r.features)))).toEqual([]);
   });
 
   it('every AUTHORED tag has a definition', () => {
@@ -74,6 +81,42 @@ describe('the vocabulary is closed over the published data', () => {
 
   it('gives every row at least one tag', () => {
     expect(rows.filter((r) => r.features.length === 0).map((r) => r.id)).toEqual([]);
+  });
+});
+
+// A tag can be defined before the rows that carry it exist, so that its detector and its floor are
+// wired and tested when the first row lands. `pending` is how a definition says so, and it is a
+// promise with an expiry: these hold that the exemption works in one direction only.
+describe('a definition and the rows that carry it', () => {
+  const def = (id: string, extra: Partial<FeatureDef> = {}): FeatureDef => ({
+    id,
+    label: id,
+    group: 'meta',
+    evidence: 'judgement',
+    summary: id,
+    ...extra,
+  });
+
+  it('reports a live definition no row carries', () => {
+    expect(definitionsOutOfStep(new Set(['carried']), [def('carried'), def('orphan')])).toEqual([
+      'orphan: defined, but no row carries it',
+    ]);
+  });
+
+  it('lets a pending definition wait', () => {
+    expect(definitionsOutOfStep(new Set(), [def('later', { pending: true })])).toEqual([]);
+  });
+
+  it('refuses a pending definition the rows have caught up with', () => {
+    expect(definitionsOutOfStep(new Set(['later']), [def('later', { pending: true })])).toEqual([
+      'later: marked pending, but rows carry it — drop the flag',
+    ]);
+  });
+
+  it('exempts a deprecated definition either way', () => {
+    const gone = [def('gone', { deprecated: true })];
+    expect(definitionsOutOfStep(new Set(), gone)).toEqual([]);
+    expect(definitionsOutOfStep(new Set(['gone']), gone)).toEqual([]);
   });
 });
 
@@ -104,25 +147,36 @@ describe('the definitions are well-formed', () => {
       'bitwise',
       'do-while',
       'goto',
+      'local-aggregate-init',
       'loop',
       'nested-loop',
+      'new-delete',
       'shift',
       'short-circuit',
       'sizeof',
+      'static-local',
       'switch',
       'ternary',
+      'varargs-def',
     ]);
     expect([...CODEGEN_DERIVED].sort()).toEqual([
       'branchless',
       'call',
       'comparison-tree',
       'dma',
+      'float-callee-save',
+      'float-compare',
       'hw-div',
       'jump-table',
+      'libm-call',
       'magic-div',
       'mmio',
+      'runtime-helper-call',
+      'savegpr-helper',
+      'sda-global',
       'soft-div',
       'strength-reduce',
+      'vararg-call',
     ]);
   });
 });
@@ -175,7 +229,7 @@ describe('tags match their evidence', () => {
     const bad = authored
       .flatMap(({ where, tags, src }) => {
         const stripped = stripLiterals(src);
-        const body = stripped.slice(stripped.indexOf('{'));
+        const body = definitionOf(stripped).body;
         const asm = asmOf.get(where) ?? '';
         return tags
           .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped))
@@ -312,6 +366,163 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR['merge-chain']('{ void *a; void *b; if (s) a = p; else b = p; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; if (a) { x = 1; y = 2; } return x + y; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '', '')).toBe(true);
+  });
+
+  it('holds the C++ floors to the signature, where their evidence is', () => {
+    const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
+    // a constructor repeats the class name; a destructor puts a `~` in front of it
+    expect(floor('ctor', 'Thing::Thing(int n) { this->count = n; }')).toBe(true);
+    expect(floor('ctor', 'void Thing::reset(int n) { this->count = n; }')).toBe(false);
+    expect(floor('dtor', 'System::~System() { free(this->buf); }')).toBe(true);
+    expect(floor('dtor', 'System::System() { this->buf = 0; }')).toBe(false);
+    // a reference parameter, NOT a binary `&` in the body — which is why this reads the signature
+    expect(floor('reference', 'void add(Vec& dst, const Vec& src) { dst.x += src.x; }')).toBe(true);
+    expect(floor('reference', 'void add(Vec *dst) { dst->x = a & b; }')).toBe(false);
+    // a float in the signature is what travels in an FP register; one confined to the body is not
+    expect(floor('hw-float-abi', 'f32 lerp(f32 a, f32 b) { return a + b; }')).toBe(true);
+    expect(floor('hw-float-abi', 'int n(int a) { float t = a; return (int)t; }')).toBe(false);
+    // and the signature is the DECLARATOR's, not whatever stands before the first brace in the
+    // file — a C++ row opens with the class the declarator names
+    expect(floor('ctor', 'class Thing { int n; };\n\nThing::Thing(int n) { this->n = n; }')).toBe(true);
+    expect(floor('dtor', 'class Sys { u8 *buf; };\n\nSys::~Sys() { free(this->buf); }')).toBe(true);
+    expect(floor('reference', 'struct Vec { f32 x; };\n\nvoid add(Vec& d, const Vec& s) { d.x += s.x; }')).toBe(true);
+    expect(floor('hw-float-abi', 'class Camera { f32 t; };\n\nvoid Camera::step(f32 dt) { this->t += dt; }')).toBe(
+      true,
+    );
+  });
+
+  it('holds the remaining new floors without pretending to decide them', () => {
+    const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
+    // an indirect call, on all four ISAs — not the same predicate as `fnptr`, which has no PPC form
+    expect(floor('virtual-call', '{ o->draw(); }', '  14:\tbctrl')).toBe(true);
+    expect(floor('virtual-call', '{ o->draw(); }', '  14:\tjalr\tv0')).toBe(true);
+    expect(floor('virtual-call', '{ draw(o); }', '  14:\tbl\tdraw')).toBe(false);
+    // an assignment whose right-hand side is a whole object, not an expression
+    expect(floor('struct-copy', '{ *a = *b; }')).toBe(true);
+    expect(floor('struct-copy', '{ p->pos = q->pos; }')).toBe(true);
+    expect(floor('struct-copy', '{ p->x = q->x + 1; }')).toBe(false);
+    expect(floor('struct-copy', '{ p->x = f(q); }')).toBe(false);
+    // a compound assignment reads and writes, and a comparison does neither: the `=` stands alone
+    expect(floor('struct-copy', '{ a += b; }')).toBe(false);
+    expect(floor('struct-copy', '{ return a == b; }')).toBe(false);
+    // a callee can only have been inlined if the body spells a call; `if (` is not one
+    expect(floor('inlined-callee', '{ return fabsf(x); }')).toBe(true);
+    expect(floor('inlined-callee', '{ if (x > 0) { return x; } return -x; }')).toBe(false);
+    // …and a call whose name merely BEGINS with one of those keywords is still a call
+    expect(floor('inlined-callee', '{ forward(x); }')).toBe(true);
+    expect(floor('inlined-callee', '{ doit(x); }')).toBe(true);
+  });
+
+  it('reads a static local, and does not read the aggregate it initialises as an automatic one', () => {
+    // `static` puts the object in .rodata and there is no per-call copy — the shape
+    // `local-aggregate-init` is about — so the two tags are exclusive on the same declaration
+    expect(src('void f(u8 h){ static const u8 t[] = { 1, 1, 0 }; use(t[h]); }')).toEqual(['static-local']);
+    expect(src('void f(u8 h){ static u8 t[] = { 1, 1, 0 }; use(t[h]); }')).toEqual(['static-local']);
+    expect(src('void f(void){ s16 dx[4] = { 0, -1, 0, 1 }; g(dx[k]); }')).toEqual(['local-aggregate-init']);
+    expect(src('void f(void){ const s16 m[2][2] = { { 0, 1 }, { 2, 3 } }; g(m[a][b]); }')).toEqual([
+      'local-aggregate-init',
+    ]);
+    // a body holding both declarations carries both tags, and neither takes the other's
+    expect(src('void f(void){ static u8 s[] = { 1 }; u8 a[] = { 2 }; g(s[i], a[i]); }').sort()).toEqual([
+      'local-aggregate-init',
+      'static-local',
+    ]);
+    // a brace initialiser is a DECLARATION, not any `= {`
+    expect(src('void f(void){ p->cb = h; if (a) { b(); } }')).toEqual([]);
+  });
+
+  it('reads the ellipsis from the signature, where the body cannot show it', () => {
+    expect(src('void f(const char *fmt, ...) { g(fmt); }')).toEqual(['varargs-def']);
+    expect(src('void f(const char *fmt) { g(fmt); }')).toEqual([]);
+  });
+
+  it('finds the declarator past a preamble, and the body between its own braces', () => {
+    // The first `{` in a row's source is routinely an aggregate's, a macro's or another
+    // function's. Reading the signature up to it makes every signature tag blind, and reading the
+    // body from it makes every body tag read the whole file.
+    expect(src('struct P { int x; };\n\nvoid log(const char *fmt, ...) { g(fmt); }')).toEqual(['varargs-def']);
+    // …and the other direction, which is the quiet one: a variadic callee merely DECLARED in the
+    // preamble is not this function's ellipsis
+    expect(src('void printf(const char *fmt, ...);\n\nvoid f(int a) { g(a); }')).toEqual([]);
+    // a `static` that makes the FUNCTION file-scope is not a static local, whatever precedes it
+    expect(src('struct Bg { u16 h; u16 v; };\nstatic void f(u32 m){ g(m); }')).toEqual([]);
+    expect(src('enum E { A, B };\nstatic void f(void){ g(); }')).toEqual([]);
+    // …nor is one in a declaration that FOLLOWS the body
+    expect(src('void f(int a) { g(a); }\nstatic const u8 tbl[] = { 1, 2 };')).toEqual([]);
+    expect(src('void f(int a) { g(a); }\n\nstatic void h(void) { static int n; k(n); }')).toEqual([]);
+    // a function-like macro is a `)` followed by a brace, and is not a definition
+    expect(src('#define SET(a, b) { p[0] = (a); p[1] = (b); }\nvoid f(s32 n){ do { n--; } while (n); }')).toEqual([
+      'do-while',
+      'loop',
+    ]);
+  });
+
+  it('reads a local struct initialiser, which needs no array extent', () => {
+    expect(src('void f(void){ Vec3f v = { 0, 1, 2 }; g(&v); }')).toEqual(['local-aggregate-init']);
+    expect(src('void f(void){ struct Vec v = { 0, 1 }; g(&v); }')).toEqual(['local-aggregate-init']);
+    expect(src('void f(void){ static Vec3f v = { 0, 1, 2 }; g(&v); }')).toEqual(['static-local']);
+  });
+
+  it('separates a `new` expression from an identifier spelled `new`', () => {
+    expect(src('void f(void){ p = new Thing(3); }')).toEqual(['new-delete']);
+    expect(src('void f(void){ delete[] p; }')).toEqual(['new-delete']);
+    expect(src('void f(void){ x = s->new; }')).toEqual([]);
+    expect(src('void f(void){ x = new_value; }')).toEqual([]);
+  });
+
+  it('names the runtime helpers the compiler generated, and leaves the division ones to soft-div', () => {
+    const f = 'float f(float a, float b){ return a + b; }';
+    expect(cg(f, '\tbl\t__addsf3')).toEqual(['call', 'runtime-helper-call']);
+    expect(cg(f, '  10:\tbl\t10 <f+0x10>\n\t\t\t10: R_PPC_REL24\t__shl2i')).toEqual(['call', 'runtime-helper-call']);
+    // `soft-div` says more about the same call, so it is not doubled up
+    expect(cg('int f(int a){ return a/10; }', '\tbl\t__divsi3')).toEqual(['call', 'soft-div']);
+    // a project symbol that merely begins with two underscores is not a helper
+    expect(cg(f, '\tbl\t__osDisableInt')).toEqual(['call']);
+    // a DATA relocation names a datum, not a callee
+    expect(cg(f, '   8:\tlis\tr4,0\n\t\t\t8: R_PPC_ADDR16_HA\t__addsf3')).toEqual([]);
+    // an unresolved branch prints its OWN address and then the enclosing symbol: neither is a
+    // callee, and a hex address can be spelled entirely in letters
+    expect(cg(f, '   c:\tbl\tc <f+0xc>')).toEqual(['call']);
+    expect(cg('f32 f(f32 a){ return sqrtf(a); }', '  10:\tjal\t0 <sqrtf>')).toEqual(['call']);
+    // `bctrl` takes no operand, so what follows it is the next line
+    expect(cg('void f(Obj *o){ o->draw(); }', '   8:\tbctrl\n\tsqrtf:\n')).toEqual([]);
+  });
+
+  it('reads the maths library and the out-of-line register save off the call, not the text', () => {
+    expect(cg('f32 f(f32 a){ return sqrtf(a); }', '\tbl\tsqrtf')).toEqual(['call', 'libm-call']);
+    expect(cg('void f(void){ g(); }', '  10:\tbl\t10 <f+0x10>\n\t\t\t10: R_PPC_REL24\t_savegpr_25')).toEqual([
+      'call',
+      'savegpr-helper',
+    ]);
+  });
+
+  it('reads a float comparison on all three of its spellings', () => {
+    const s = 'f32 f(f32 a, f32 b){ if (a < b) { return a; } return b; }';
+    expect(cg(s, '  14:\tc.lt.s\t$f14,$f0\n  1c:\tbc1fl\t30 <f+0x30>')).toEqual(['float-compare']);
+    expect(cg(s, '   8:\tfcmpo\tcr0,f1,f2\n   c:\tbge\t20 <f+0x20>')).toEqual(['float-compare']);
+    // no FPU: the comparison is a helper call, and it is still a comparison
+    expect(cg(s, '\tbl\t__ltsf2\n\tcmp\tr0, #0\n\tbge\t.L3')).toEqual(['call', 'float-compare', 'runtime-helper-call']);
+    expect(cg('int f(int a,int b){ if (a<b) { return a; } return b; }', '\tcmp\tr0, r1\n\tbge\t.L3')).toEqual([]);
+  });
+
+  it('reads a float callee-save only where the register is written to the FRAME', () => {
+    const s = 'f32 f(f32 a){ return a; }';
+    expect(cg(s, '   4:\tsdc1\t$f20,16(sp)')).toEqual(['float-callee-save']);
+    expect(cg(s, '   4:\tstfd\tf14,8(r1)')).toEqual(['float-callee-save']);
+    expect(cg(s, '   4:\tpsq_st\tf31,192(r1),0,0')).toEqual(['float-callee-save']);
+    // a volatile register, and a callee-saved one used as a scratch against someone else's pointer
+    expect(cg(s, '   4:\tstfd\tf1,8(r1)')).toEqual([]);
+    expect(cg(s, '   4:\tsdc1\t$f20,0(a0)')).toEqual([]);
+  });
+
+  it('reads the variadic-call marker and the small-data relocation', () => {
+    expect(cg('void f(void){ printf(s); }', '   8:\tcrclr\t4*cr1+eq\n   c:\tbl\tprintf')).toEqual([
+      'call',
+      'vararg-call',
+    ]);
+    expect(cg('f32 f(f32 x){ return x * gScale; }', '   c:\tlfs\tf0,0(r2)\n\t\t\tc: R_PPC_EMB_SDA21\t@6')).toEqual([
+      'sda-global',
+    ]);
   });
 
   it('separates I/O registers from other hardware address ranges', () => {
