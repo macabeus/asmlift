@@ -2086,7 +2086,8 @@
         "macro",
         "arithmetic",
         "hw-float-abi",
-        "branch"
+        "branch",
+        "double"
       ],
       "prependC": "#include \"c_keyframe.h\"\n#include \"MSL_C/w_math.h\"\n#include \"graph.h\"\n#include \"libultra/libultra.h\"\n#include \"sys_math3d.h\"\n#include \"sys_matrix.h\"\n\ntypedef struct {\n    s16 frame;\n    s16 value;\n    s16 tangent;\n} cKF_AnimKey_c;",
       "funcC": "static s16 cKF_KeyCalc(s16 start_idx, s16 n_frames, s16* data_src, f32 frame) {\n    int now;\n    int next;\n    cKF_AnimKey_c* key_p = (cKF_AnimKey_c*)&data_src[start_idx * 3];\n\n    /* If the first frame is greater than the current frame then the first value is held */\n    if (key_p[0].frame >= frame) {\n        return key_p[0].value;\n    }\n\n    /* If the current frame is greater than the last frame then the last value is held */\n    if (key_p[n_frames - 1].frame <= frame) {\n        return key_p[n_frames - 1].value;\n    }\n\n    // Search through all frames\n    now = 0;\n    next = 1;\n\n    while (TRUE) {\n        if (key_p[next].frame > frame) {\n            f32 delta_frame = key_p[next].frame - key_p[now].frame;\n\n            if (!(F32_IS_ZERO(delta_frame))) {\n                f32 t = (frame - key_p[now].frame) / delta_frame; // progress towards the next frame\n                f32 tension = delta_frame * (1.0f / 30.0f);\n                f32 calc = cKF_HermitCalc(t, tension, key_p[now].value, key_p[next].value, key_p[now].tangent,\n                                          key_p[next].tangent);\n                int key = calc + 0.5; // Always round up\n\n                return key;\n            } else {\n                return key_p[now].value;\n            }\n        }\n\n        now++;\n        next++;\n    }\n}",

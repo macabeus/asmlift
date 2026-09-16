@@ -400,6 +400,14 @@ describe('the detectors themselves', () => {
     // `double` reads the type, not the keyword: `f64` is the same type (ac-decomp:Matrix_MtxtoMtxF)
     expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f64)0x10000); }')).toBe(true);
     expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f32)0x10000); }')).toBe(false);
+    // …and an unsuffixed literal is the type too: `calc` is an f32 and the addition is still a
+    // double one (ac-decomp:cKF_KeyCalc, whose object holds `lfd`/`fadd`/`fctiwz`)
+    expect(JUDGEMENT_FLOOR.double('', '', 'int f(f32 calc) { return calc + 0.5; }')).toBe(true);
+    // the suffix is what settles it: a function that only ever writes `f` literals is not
+    expect(JUDGEMENT_FLOOR.double('', '', 'f32 f(f32 d) { return d * (1.0f / 30.0f); }')).toBe(false);
+    expect(JUDGEMENT_FLOOR.double('', '', 'f32 f(f32 d) { return d * 30.0F; }')).toBe(false);
+    // …and neither a subscript nor a member reached through one is a literal
+    expect(JUDGEMENT_FLOOR.double('', '', 'int f(K* k) { return k[0].frame + k[10].value; }')).toBe(false);
     // a variable subscript ANYWHERE in the chain: the `k` here follows a `]`, not a name, which
     // the first form of this floor could not see (synthetic:pmarrrow)
     expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][k]; }', '', '')).toBe(true);

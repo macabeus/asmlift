@@ -40,6 +40,11 @@ const withoutDirectives = (s: string): string =>
  *  MIPS `jalr`, ARM `blx`, and agbcc's `_call_via_rN` thunk. */
 const INDIRECT_CALL = /\bbctrl\b|\bblrl\b|\bjalr\b|\bblx\b|_call_via_r/;
 
+/** A floating-point literal with no `f` suffix, which has type `double` whatever surrounds it.
+ *  The lookahead refuses `1.0f`, `1.0F`, `1.0l` and a version-like `1.0.3`; the leading class
+ *  refuses the fraction of a hex constant. */
+const UNSUFFIXED_FLOAT = /(?<![\w.])(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])/;
+
 /** Anything that takes a parenthesis and a brace without being a declarator. */
 const NOT_A_DECLARATOR = /\b(?:if|else|while|for|switch|do|catch|return|sizeof)\s*$/;
 
@@ -191,8 +196,10 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // a TYPE tag: the evidence is in the whole function, not just its body. `f64` is the spelling
   // three of the seven projects use for the type, and a row that never writes the keyword is
   // still using it — Animal Crossing's `Matrix_MtxtoMtxF` scales by `1 / (f64)0x10000` sixteen
-  // times. `f32` is deliberately absent: it is the OTHER type.
-  double: (_b, _asm, whole) => /\bdouble\b|\bf64\b/.test(whole),
+  // times. `f32` is deliberately absent: it is the OTHER type. An UNSUFFIXED floating literal is
+  // the third spelling: `calc + 0.5` is a double addition however the operands were declared,
+  // which is why the suffix has to be absent — `1.0f / 30.0f` in the same function is not.
+  double: (_b, _asm, whole) => /\bdouble\b|\bf64\b/.test(whole) || UNSUFFIXED_FLOAT.test(whole),
 
   // The floor of `fnptr` above and of this one is the same instruction, because the necessary
   // condition of both tags is the same: the call is INDIRECT. Which of the two the row claims —
