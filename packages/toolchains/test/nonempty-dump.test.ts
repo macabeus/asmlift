@@ -54,6 +54,16 @@ describe('the dump steps this package runs', () => {
     expect(mipsObjdumpText(anObject(), fakeBin('objdump', dump), 'f')).toBe(dump);
   });
 
+  // An object that carries a big data table dumps to more than a mebibyte of hex: Pikmin's
+  // `system.cpp` includes `bigFont.h`, and its target's `objdump -s -r -t` is past Node's default
+  // spawn buffer. The spawn then fails ENOBUFS, and every caller that treats a dump as best-effort
+  // published the row with no dump at all.
+  test('a dump larger than a mebibyte reaches the caller whole', () => {
+    const dump = `a.o:     file format elf32-powerpc\n${' 0000 00000000 00000000 00000000 00000000  ................\n'.repeat(40_000)}`;
+    expect(dump.length).toBeGreaterThan(2 * 1024 * 1024);
+    expect(mipsObjdumpText(anObject(), fakeBin('objdump', dump), 'f')).toBe(dump);
+  });
+
   // THE REFERENCE-BUILD DISASSEMBLY IS A DIFFERENT OBJDUMP INVOCATION from the asmdata dump above
   // (`-d` versus `-s -r -t`), and it is the one whose silent failure reached a content-keyed cache
   // as a zero-byte `.asm` and surfaced days later as `disasmToM2c: could not parse objdump output`.

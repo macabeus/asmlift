@@ -38,6 +38,9 @@ export function spawnFailure(cmd: string, e: NodeJS.ErrnoException): string {
   if (e.code === 'ETIMEDOUT') {
     return `'${cmd}' timed out`;
   }
+  if (e.code === 'ENOBUFS') {
+    return `'${cmd}' wrote more output than the ${SPAWN_BUFFER / (1024 * 1024)} MiB this harness reads`;
+  }
   return (
     `cannot run '${cmd}' (${e.code ?? e.message}) — not installed, or its pinned-toolchain ` +
     `default path doesn't exist on this machine. Toolchain binaries resolve from ASMLIFT_* env ` +
@@ -45,11 +48,20 @@ export function spawnFailure(cmd: string, e: NodeJS.ErrnoException): string {
   );
 }
 
+/** How much output one spawn may write. Node's default is a mebibyte, and an object carrying a big
+ *  data table dumps past it: Pikmin's `system.cpp` includes `bigFont.h`, whose target's
+ *  `objdump -s -r -t` is over 1 MiB of hex. */
+const SPAWN_BUFFER = 256 * 1024 * 1024;
+
 /** Spawn helper shared by every toolchain invocation (asmdata.ts uses it too). Throws the
  *  named setup error above when the binary itself couldn't run; compile failures (nonzero
  *  status, real stderr) still return for the caller to diagnose. */
 export function run(cmd: string, args: string[], env?: Record<string, string>) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env });
+  const r = spawnSync(cmd, args, {
+    encoding: 'utf8',
+    env: env ? { ...process.env, ...env } : process.env,
+    maxBuffer: SPAWN_BUFFER,
+  });
   if (r.error) {
     throw new Error(spawnFailure(cmd, r.error));
   }
