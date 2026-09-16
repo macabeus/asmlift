@@ -283,6 +283,8 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // `sda` is one more, for a listing that reads a small-data EXTERN: the normalizer left its operand as
   // `0(0)`, which m2c reads as `*NULL`, and now names it.
   //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
+  //   cppLadder 2: m2c's receiver parameter is renamed off the C++ keyword `this` (eval/m2c.ts),
+  //      so a c++ entry written before it replays a `noncompile` whose only defect was the word.
   // `sliced` is that register for the normalizer reading the row's own function out of the target
   // disassembly (m2c-normalizer.ts `disasmToM2c`). Its input changes only where that disassembly
   // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
@@ -304,7 +306,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       asm,
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
-      ...(lang === 'c++' && { lang, cppLadder: 1 }),
+      ...(lang === 'c++' && { lang, cppLadder: 2 }),
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
       ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),

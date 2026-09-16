@@ -15,7 +15,7 @@ import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
 import { type Scorer, runAsmlift } from './asmlift';
 import { countCompileErrors } from './asmlift';
-import { runM2c } from './m2c';
+import { m2cCandidates, runM2c } from './m2c';
 import { compilerErrorLines, declineMarkersIn } from './outcome';
 import { assessQuality } from './quality';
 
@@ -185,30 +185,39 @@ function evaluateM2c(
       errorMarkers: declines,
     };
   }
-  try {
-    const s = scoreM2c(score, m.source, sym, obj, m2cDeclarationsFor(spec));
-    return {
-      decompiler: 'm2c',
-      outcome: s.match ? 'match' : 'nonmatch',
-      source: m.source,
-      score: s.score,
-      maxScore: s.rows,
-      compileErrors: null,
-      breakdown: s.breakdown,
-      quality: assessQuality(m.source),
-    };
-  } catch (e) {
-    return {
-      decompiler: 'm2c',
-      outcome: 'noncompile',
-      source: m.source,
-      score: null,
-      maxScore: null,
-      compileErrors: countCompileErrors((e as Error).message ?? ''),
-      quality: assessQuality(m.source),
-      errorMarkers: compilerErrorLines((e as Error).message ?? ''),
-    };
+  // m2c's mwcc C++ target names the implicit receiver `this`, a KEYWORD in the dialect a C++ row
+  // compiles in. The source AS EMITTED is scored first, so a row that compiles anywhere today is
+  // untouched; only one that compiles NOWHERE is retried with the receiver renamed, and the text
+  // that scored is the text published — a reproduction compiles what the benchmark graded.
+  let failure: Error | undefined;
+  for (const source of m2cCandidates(m.source, sym, language)) {
+    try {
+      const s = scoreM2c(score, source, sym, obj, m2cDeclarationsFor(spec));
+      return {
+        decompiler: 'm2c',
+        outcome: s.match ? 'match' : 'nonmatch',
+        source,
+        score: s.score,
+        maxScore: s.rows,
+        compileErrors: null,
+        breakdown: s.breakdown,
+        quality: assessQuality(source),
+      };
+    } catch (e) {
+      failure ??= e as Error;
+    }
   }
+  const message = failure?.message ?? '';
+  return {
+    decompiler: 'm2c',
+    outcome: 'noncompile',
+    source: m.source,
+    score: null,
+    maxScore: null,
+    compileErrors: countCompileErrors(message),
+    quality: assessQuality(m.source),
+    errorMarkers: compilerErrorLines(message),
+  };
 }
 
 function firstLine(s: string): string {

@@ -32,6 +32,35 @@ export function assertM2cPinned(): void {
   }
 }
 
+/** m2c's `ppc-mwcc-c++` target names the implicit receiver `this`, which is a KEYWORD in the dialect
+ *  a C++ row is compiled in: `'(' expected`, on every member function it decompiles. That is an
+ *  artifact of the harness's choice of front end, not of m2c's code — the same reason every rung
+ *  re-provides `#define NULL` — so the receiver is renamed where it is DECLARED as a parameter of
+ *  this function. A source that merely uses `this->` is a genuine member definition and is left
+ *  alone: renaming there would change what the code means.
+ *
+ *  The caller scores the source AS EMITTED first and reaches for this only when nothing compiles
+ *  (`m2cCandidates`): the plain-C fallback dialect accepts the word, and a row that already scores
+ *  through it must not be re-scored in a different front end. */
+export function renameReceiver(source: string, sym: string): string {
+  const declared = new RegExp(`\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(([^)]*)\\)`).exec(source);
+  if (declared === null || !/(^|[\s*(])this\s*(,|$)/.test(declared[1])) {
+    return source;
+  }
+  let name = 'this_';
+  while (new RegExp(`\\b${name}\\b`).test(source)) {
+    name += '_';
+  }
+  return source.replace(/\bthis\b/g, name);
+}
+
+/** The texts m2c's output is scored as, in order. The first that compiles is the measurement AND
+ *  what the row publishes, so a reproduction compiles the text the benchmark graded. */
+export function m2cCandidates(source: string, sym: string, language: 'c' | 'c++'): string[] {
+  const renamed = language === 'c++' ? renameReceiver(source, sym) : source;
+  return renamed === source ? [source] : [source, renamed];
+}
+
 export interface M2cResult {
   failed: boolean; // NO usable output: nonzero exit, empty stdout+stderr, or m2c's failure report
   source: string; // the C m2c emitted (or, when failed, the failure text)
