@@ -162,4 +162,23 @@ describe('validateManifest: a C++ row and m2c', () => {
       problems(manifest({ units: { 'src/f.c': { ...CPP_UNIT, cflags: ['-O4,s', '-lang=c'] } } }, { m2cCtx: true })),
     ).toBe('');
   });
+
+  // CodeWarrior is the only C++ front end here. On any other toolchain a c++ unit builds a C
+  // object with an UNMANGLED symbol and publishes a number about a language the compiler never
+  // read — compile/real.ts refuses the pairing, but only by toolchain and only once a case is
+  // being constructed, which names neither the project nor the unit.
+  test('a c++ unit needs a CodeWarrior toolchain, and the manifest says which unit', () => {
+    expect(problems(manifest({ units: { 'src/f.c': { ...UNIT, cflags: [...UNIT.cflags, '-lang=c++'] } } }))).toMatch(
+      /unit src\/f.c is C\+\+, and agbcc has no C\+\+ front end/,
+    );
+    // …and the extension alone is enough, because that is what the front end itself would read.
+    expect(
+      problems(
+        manifest(
+          { units: { 'src/f.cpp': UNIT } },
+          { unit: 'src/f.cpp', sourceUrl: 'https://github.com/macabeus/fakeproj/blob/0123456/src/f.cpp#L1-L1' },
+        ),
+      ),
+    ).toMatch(/unit src\/f.cpp is C\+\+, and agbcc has no C\+\+ front end/);
+  });
 });

@@ -222,9 +222,10 @@ const COMMIT = /^[0-9a-f]{40}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const SHA256 = /^[0-9a-f]{64}$/;
 
-/** A unit's problems: a known toolchain, flags its family parses and that are already in normal form, and
- *  a typed `flagsFrom`. */
-function unitProblems(where: string, u: Partial<BuildUnit> | undefined): string[] {
+/** A unit's problems: a known toolchain, flags its family parses and that are already in normal form,
+ *  a dialect that toolchain has a front end for, and a typed `flagsFrom`. */
+function unitProblems(file: string, path: string, u: Partial<BuildUnit> | undefined): string[] {
+  const where = `${file}: unit ${path}`;
   const problems: string[] = [];
   if (typeof u?.toolchain !== 'string' || !(u.toolchain in TOOLCHAINS)) {
     return [`${where} has unknown toolchain ${JSON.stringify(u?.toolchain)}`];
@@ -238,6 +239,14 @@ function unitProblems(where: string, u: Partial<BuildUnit> | undefined): string[
         problems.push(`${where} "cflags" are not in normal form: ${storedFlags(family, u.cflags).join(' ')}`);
       }
       parseFlags(family, u.cflags);
+      // CodeWarrior is the only C++ front end here. On any other toolchain a c++ unit reaches a
+      // `buildTarget` that ignores the dialect, builds a C object with an UNMANGLED symbol and
+      // publishes a number about a language the compiler never read. compile/real.ts refuses the
+      // pairing too, but it does so while a case is being constructed and can only name the
+      // TOOLCHAIN; the manifest is where a reader can act on it, so it is named here by unit.
+      if (family !== 'mwcc' && unitLanguage(path, u.cflags) === 'c++') {
+        problems.push(`${where} is C++, and ${u.toolchain} has no C++ front end — a c++ unit needs CodeWarrior`);
+      }
     } catch (e) {
       problems.push(`${where} "cflags": ${(e as Error).message}`);
     }
@@ -318,7 +327,7 @@ export function validateManifest(
   } else {
     const named = new Set((Array.isArray(man.functions) ? man.functions : []).map((f) => f.unit));
     for (const [path, u] of Object.entries(man.units ?? {})) {
-      problems.push(...unitProblems(`${file}: unit ${path}`, u));
+      problems.push(...unitProblems(file, path, u));
       if (!named.has(path)) {
         problems.push(`${file}: unit ${path} is named by no row`);
       }

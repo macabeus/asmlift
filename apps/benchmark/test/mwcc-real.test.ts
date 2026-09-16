@@ -19,7 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
-import { candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
+import { buildRealTarget, candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
 
@@ -41,6 +41,18 @@ test('the real tier is wired for CodeWarrior', () => {
   // already holds: every toolchain a row can name has a compile module.
   expect(typeof mwcc.buildTarget).toBe('function');
   expect(typeof mwcc.preprocess).toBe('function');
+});
+
+test('…and it is the only C++ front end: every other toolchain refuses a c++ row', () => {
+  // agbcc, IDO and the two GCCs implement the C parameters alone, so a c++ row would reach a
+  // buildTarget that ignores the dialect and build a C object with an UNMANGLED symbol — which
+  // scores, and publishes a number about a language the toolchain never read. No container: the
+  // refusal happens while the case is built, before anything compiles.
+  for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {
+    expect(() => makeRealCompile(id, [], '', '', 'c++'), id).toThrow(/has no C\+\+ front end/);
+    expect(() => buildRealTarget(id, 'f', [], 'int f(void){return 0;}', 'c++'), id).toThrow(/has no C\+\+ front end/);
+  }
+  expect(() => makeRealCompile('agbcc', [], '', '', 'c')).not.toThrow();
 });
 
 // WHICH BINARY A ROW'S TOOLCHAIN ID ACTUALLY RUNS. Three CodeWarrior builds share one module, one
@@ -154,7 +166,7 @@ const exportedFunctions = (obj: string): string[] =>
     .filter((l) => / F .*\.text\t/.test(l))
     .map((l) => l.trim().split(/\s+/).pop()!);
 
-describe.runIf(ppcDockerAvailable())('a C++ row', () => {
+describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
   test(
     'compiles its candidates in the C++ dialect, whatever the scratch file is called',
     () => {
@@ -212,6 +224,27 @@ describe.runIf(ppcDockerAvailable())('a C++ row', () => {
       const asCpp = mwcc.compileCandidate(candidateLinkage('c++', noThis), 'dot__3VecFP3Vec', CFLAGS, 'c++');
       const asC = mwcc.compileCandidate(candidateLinkage('c', noThis), 'dot__3VecFP3Vec', CFLAGS, 'c');
       expect(readFileSync(asCpp).equals(readFileSync(asC))).toBe(true);
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "publishes the row's OWN front end's complaint when nothing compiles, not the fallback's",
+    () => {
+      // A row that compiles nowhere publishes this text as its `errorMarkers`. The fallback dialect
+      // runs last, and a C++ candidate handed to the C parser dies on the word `class` — a
+      // diagnostic about the harness's ladder, which would bury the one sentence describing the
+      // decompiler's output. Same defect class as cache.ts's v17.
+      const broken = `${VEC}int Vec::dot(Vec * o) { return x * o->x + undeclared_thing; }\n`;
+      const compile = makeRealCompile('mwcc_242_81', CFLAGS, '', '', 'c++');
+      let message = '';
+      try {
+        compile(broken, 'dot__3VecFP3Vec');
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/undeclared_thing/);
+      expect(message).not.toMatch(/declaration syntax error/);
     },
     CONTAINER_BUDGET,
   );

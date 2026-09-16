@@ -159,7 +159,11 @@ export function makeRealCompile(
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
     // without this. The rest of the synthesized block stays dropped: the context owns it.
     const macros = macroDefinesOf(declarations);
-    let lastErr = '';
+    // Each dialect's last complaint, because a row that compiles nowhere PUBLISHES this text as its
+    // error markers and only the row's OWN front end is talking about the candidate. The fallback
+    // dialect is a harness convenience, and a C++ candidate handed to the C parser fails on the
+    // word `class` — a diagnostic about the harness's ladder, not about the decompiler's output.
+    const failed = new Map<'c' | 'c++', string>();
     // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
     // all: a richer context is the ordinary reason a candidate compiles, and paying for the
     // fallback first would double every C++ row's compiles to answer a rarer question.
@@ -169,10 +173,11 @@ export function makeRealCompile(
         try {
           return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
         } catch (e) {
-          lastErr = (e as Error).message;
+          failed.set(dialect, (e as Error).message);
         }
       }
     }
+    const lastErr = failed.get(language) ?? '';
     throw new Error(lastErr || 'candidate did not compile in any context');
   };
 }
