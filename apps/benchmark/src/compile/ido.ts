@@ -6,6 +6,7 @@ import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
@@ -34,6 +35,7 @@ const candScratch = scratchSlot('bench-cand-');
 const vendorScratch = scratchSlot('bench-vendor-');
 
 export const idoReal: RealCompile = {
+  undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('ido', cflags, iText);
     const iPath = join(dir, 'u.i'),

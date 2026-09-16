@@ -39,4 +39,8 @@ export interface RealCompile {
   compileCandidate(tu: string, sym: string, cflags: readonly string[], language: 'c' | 'c++'): string;
   /** Preprocess a raw TU against a live checkout — vendor/verify time only. */
   preprocess(cfg: RealProjectCfg, tu: string): string;
+  /** The functions a PREPROCESSED translation unit calls with no declaration in scope, sorted, each once —
+   *  answered in the unit's own dialect. A call without one compiles as a C89 implicit declaration (an
+   *  `int` return, promoted arguments), which is not the unit the project built. */
+  undeclaredCallees(tu: string, cflags: readonly string[], language: 'c' | 'c++'): string[];
 }

@@ -40,7 +40,6 @@ import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
 import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
-import { undeclaredCallees } from './implicit-declarations';
 import {
   MODULE_MAP_DIR,
   REAL_DIR,
@@ -227,7 +226,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
           throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
         }
       }
-      const undeclared = undeclaredCallees(tuI);
+      const undeclared = rc.undeclaredCallees(tuI, unit.cflags, unitLanguage(f.unit, unit.cflags));
       if (undeclared.length > 0) {
         refusals.push(
           `${f.sym}: the vendored TU calls ${undeclared.join(', ')} with no declaration in scope — ` +

@@ -8,6 +8,7 @@ import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
@@ -35,6 +36,7 @@ function disasm(oPath: string, sym: string): string {
 }
 
 export const gcc272Real: RealCompile = {
+  undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');

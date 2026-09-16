@@ -53,6 +53,20 @@ function compile(
   }
 }
 
+/** The calls a failed `-requireprotos -msgstyle parseable` compile of `tu` refused for having no
+ *  prototype, by name. Each diagnostic record is a `tool|Compiler|Error` line, a `(file|line|column|length|
+ *  offset|length)` line and the message; the name is read out of `tu` at the record's byte offset, never
+ *  out of the echoed source line, which CodeWarrior windows around a long line. */
+export function noPrototypeCalls(output: string, tu: string): string[] {
+  const names = new Set<string>();
+  for (const m of output.matchAll(
+    /\|Compiler\|Error\r?\n\([^|]*\|\d+\|\d+\|\d+\|(\d+)\|(\d+)\)\r?\n(?:=.*\r?\n)?>function has no prototype/g,
+  )) {
+    names.add(tu.slice(Number(m[1]), Number(m[1]) + Number(m[2])));
+  }
+  return [...names].sort();
+}
+
 /** The real tier for ONE CodeWarrior build. Three of them compile GameCube rows and they differ in
  *  codegen, so the build is bound here rather than defaulted: a row's target and its candidates
  *  must be the same compiler, and a scratch directory keyed by flags and text alone would let two
@@ -75,6 +89,30 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     writeFileSync(join(dir, 'c.c'), stripPrototype(tu, sym));
     compile(mwcc, dir, 'c.c', 'c.o', [...cflags, langFlag(language)], false);
     return join(dir, 'c.o');
+  },
+  undeclaredCallees(tu, cflags, language): string[] {
+    // C++ has no implicit declaration to find: the front end refuses the call outright, and the target
+    // build says so.
+    if (language === 'c++') {
+      return [];
+    }
+    // THE COMPILER THAT READS THE UNIT ANSWERS, not the host's: a CodeWarrior unit calls intrinsics no
+    // host compiler declares (`__fabs`, `__frsqrte`, which Animal Crossing's `math.h` inlines into every
+    // unit) and is written in a dialect a host C parser only half reads. `-requireprotos` makes each
+    // unprototyped call an error — the first of each function body, which is where CodeWarrior stops
+    // reading that body.
+    const dir = mkdtempSync(join('/tmp', 'bench-ppc-protos-'));
+    writeFileSync(join(dir, 'u.c'), tu);
+    try {
+      ppcCompile(mwcc, dir, 'u.c', 'u.o', [...cflags, langFlag(language), '-requireprotos', '-msgstyle', 'parseable']);
+      return [];
+    } catch (e) {
+      const names = noPrototypeCalls((e as Error).message, tu);
+      if (names.length === 0) {
+        throw new Error(`mwcceppc failed: ${compilerDiagnostics((e as Error).message)}`);
+      }
+      return names;
+    }
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-vendor-'));

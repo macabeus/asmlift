@@ -7,6 +7,7 @@ import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
@@ -34,6 +35,7 @@ function disasm(oPath: string, sym: string): string {
 }
 
 export const kmcReal: RealCompile = {
+  undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc', cflags, iText);
     const iPath = join(dir, 'u.i'),
