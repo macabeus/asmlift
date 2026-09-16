@@ -36,6 +36,7 @@ function disasm(oPath: string, sym: string): string {
 
 export const kmcReal: RealCompile = {
   undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
+  vendoredContext: (preprocessed) => preprocessed,
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc', cflags, iText);
     const iPath = join(dir, 'u.i'),

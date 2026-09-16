@@ -53,6 +53,10 @@ function compile(
   }
 }
 
+/** A CodeWarrior declaration attribute, `__declspec(section "forcestrip")` or `__declspec(weak)`, as a
+ *  preprocessed unit spells it. */
+const DECLSPEC = /__declspec\s*\([^()]*\)\s*/g;
+
 /** The calls a failed `-requireprotos -msgstyle parseable` compile of `tu` refused for having no
  *  prototype, by name. Each diagnostic record is a `tool|Compiler|Error` line, a `(file|line|column|length|
  *  offset|length)` line and the message; the name is read out of `tu` at the record's byte offset, never
@@ -113,6 +117,16 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
       }
       return names;
     }
+  },
+  vendoredContext(preprocessed): string {
+    // WITHOUT CodeWarrior's declaration attributes. m2c reads the context with a C parser that refuses
+    // `__declspec` outright — `Syntax error when parsing C context. before: "forcestrip"` on 29 of
+    // Animal Crossing's 38 C contexts, which are otherwise clean — and every row would publish
+    // `m2c=failed` for a spelling of its headers. On a DECLARATION the attribute says where another
+    // unit's definition is linked, or that it may be absent, and nothing about its type, so a candidate
+    // compiled against the context without it compiles to the same object. The target's own unit keeps
+    // it: that blob is the unit the project compiled.
+    return preprocessed.replace(DECLSPEC, '');
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-vendor-'));

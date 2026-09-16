@@ -39,6 +39,9 @@ export interface RealCompile {
   compileCandidate(tu: string, sym: string, cflags: readonly string[], language: 'c' | 'c++'): string;
   /** Preprocess a raw TU against a live checkout — vendor/verify time only. */
   preprocess(cfg: RealProjectCfg, tu: string): string;
+  /** The context a row vendors, out of its unit preprocessed with the body removed: what a candidate
+   *  compiles against and what m2c reads as `--context`, so it has to be text m2c's C parser accepts. */
+  vendoredContext(preprocessed: string): string;
   /** The functions a PREPROCESSED translation unit calls with no declaration in scope, sorted, each once —
    *  answered in the unit's own dialect. A call without one compiles as a C89 implicit declaration (an
    *  `int` return, promoted arguments), which is not the unit the project built. */

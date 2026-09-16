@@ -37,6 +37,7 @@ function disasm(oPath: string, sym: string): string {
 
 export const gcc272Real: RealCompile = {
   undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
+  vendoredContext: (preprocessed) => preprocessed,
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('gcc272', cflags, iText);
     const oPath = join(dir, 'u.o');

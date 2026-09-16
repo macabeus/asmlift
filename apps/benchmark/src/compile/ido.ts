@@ -36,6 +36,7 @@ const vendorScratch = scratchSlot('bench-vendor-');
 
 export const idoReal: RealCompile = {
   undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
+  vendoredContext: (preprocessed) => preprocessed,
   buildTarget(iText, sym, cflags): BuiltTarget {
     const dir = contentDir('ido', cflags, iText);
     const iPath = join(dir, 'u.i'),

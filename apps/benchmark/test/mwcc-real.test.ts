@@ -99,6 +99,23 @@ describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each C
   );
 });
 
+test("a vendored context drops CodeWarrior's declaration attributes, which m2c's C parser refuses", () => {
+  // Animal Crossing's headers, as mwcceppc preprocesses them. The attribute says where another unit's
+  // definition is linked; the declaration keeps its type.
+  const ctx = [
+    'extern __declspec(section "forcestrip") void mFRm_PrintErrInfo(gfxprint_t* gfxprint);',
+    'extern __declspec(weak) int OSReport(const char* fmt, ...);',
+    'typedef struct { int declspec_is_not_a_word_here; } S;',
+  ].join('\n');
+  expect(mwcc.vendoredContext(ctx)).toBe(
+    [
+      'extern void mFRm_PrintErrInfo(gfxprint_t* gfxprint);',
+      'extern int OSReport(const char* fmt, ...);',
+      'typedef struct { int declspec_is_not_a_word_here; } S;',
+    ].join('\n'),
+  );
+});
+
 test('a call refused for having no prototype is named from the unit at its byte offset', () => {
   // CodeWarrior's parseable diagnostics, as a -requireprotos compile of the unit below printed them: a
   // WARNING for each definition with no prior prototype, and an ERROR for each unprototyped call. The
