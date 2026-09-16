@@ -85,13 +85,20 @@ export function discInputs(root: string, version: string): { objectBase: string;
   return { objectBase, inputs };
 }
 
-/** Whatever sits in `orig/<version>/` that dtk did not extract there: the disc image. */
+/** No disc image of any container dtk reads is smaller than this; the smallest here is a 19 MB
+ *  rvz. A `.gitkeep`, a Finder `.DS_Store`, an AppleDouble or a stray README is kilobytes — and
+ *  each of those passing as "the image is there" would cost an hour of building to find out. */
+const SMALLEST_DISC_IMAGE = 1_000_000;
+
+/** Whatever sits in `orig/<version>/` that dtk did not extract there and is big enough to be a
+ *  disc image. Size rather than a list of extensions: the containers are dtk's to support. */
 function discImages(dir: string, inputs: readonly DiscInput[]): string[] {
   const extracted = new Set(inputs.map((i) => i.object.split('/')[0]));
   return existsSync(dir)
     ? readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isFile() && e.name !== '.gitkeep' && !extracted.has(e.name))
+        .filter((e) => e.isFile() && !extracted.has(e.name))
         .map((e) => e.name)
+        .filter((name) => statSync(join(dir, name)).size >= SMALLEST_DISC_IMAGE)
     : [];
 }
 

@@ -113,9 +113,18 @@ describe('the disc a dtk build cuts its targets from', () => {
 
   test('accepts a part-extracted checkout that still has its image', () => {
     const root = discProject({ 'sys/main.dol': 'dol' });
-    write(root, 'orig/GAFE01_00/Animal Crossing (USA).rvz', 'an image');
+    write(root, 'orig/GAFE01_00/Animal Crossing (USA).rvz', 'x'.repeat(2_000_000));
     expect(requireDisc(root, 'GAFE01_00')).toBe(1);
   });
+
+  test.each(['.gitkeep', '.DS_Store', '._Animal Crossing (USA).rvz', 'README.md'])(
+    'does not take a %s for a disc image',
+    (stray) => {
+      const root = discProject({ 'sys/main.dol': 'dol' });
+      write(root, join('orig/GAFE01_00', stray), 'not 470 MB of disc');
+      expect(() => requireDisc(root, 'GAFE01_00')).toThrow(/put the GAFE01_00 disc image in/);
+    },
+  );
 
   test('refuses a checkout with neither the objects nor an image, naming the directory', () => {
     const root = discProject({ 'sys/main.dol': 'dol' });
