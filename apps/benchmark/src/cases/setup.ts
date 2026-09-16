@@ -199,8 +199,10 @@ export function fetchGcc272(): string {
 }
 
 /** `--build`: the project's full verified build + its `elfMake` target. BENCH-OWNED checkouts
- *  only — an env-override checkout is the user's to build. */
-function buildProject(man: RealManifest): string[] {
+ *  only — an env-override checkout is the user's to build. A dtk recipe builds ASYNCHRONOUSLY
+ *  (it supervises ninja), so the build is awaited here: a rejected one is this project's BUILD
+ *  FAILED, not an unhandled rejection that leaves setup reporting success. */
+export async function buildProject(man: RealManifest): Promise<string[]> {
   const problems: string[] = [];
   if (projectEnvOverride(man) !== undefined) {
     console.log(`[${man.project}] env-override checkout — skipping the bench-owned build`);
@@ -214,7 +216,7 @@ function buildProject(man: RealManifest): string[] {
   }
   try {
     console.log(`\n[${man.project}] building at ${dir}`);
-    recipe.build(dir);
+    await recipe.build(dir);
     if (man.elfMake) {
       console.log(`[${man.project}] gmake ${man.elfMake}`);
       execSync(`gmake ${man.elfMake}`, { cwd: dir, stdio: 'inherit' });
@@ -238,7 +240,7 @@ export async function setup(filterProject?: string, opts: { build?: boolean } = 
         problems.push(`${m.project}: skipped build (clone/prepare failed)`);
         continue;
       }
-      problems.push(...buildProject(m));
+      problems.push(...(await buildProject(m)));
     }
   }
   const failed = rows.filter(

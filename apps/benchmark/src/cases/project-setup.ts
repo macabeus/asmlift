@@ -13,12 +13,16 @@
 //     preprocessor here defines __APPLE__, which the project's headers act on;
 //   - af needs mips-linux-gnu binutils under /opt/cross and Rosetta (x86_64 IDO recomp);
 //   - snowboardkids2 builds inside a linux/amd64 Docker container;
-//   - the KMC gcc 2.7.2 mac binaries (marioparty3) are x86_64 → Rosetta as well.
-import { execSync } from 'node:child_process';
+//   - the KMC gcc 2.7.2 mac binaries (marioparty3) are x86_64 → Rosetta as well;
+//   - the GameCube projects build with dtk and ninja rather than gmake, under wine on macOS, and
+//     their disc images are never committed: each goes in the checkout's own `orig/<version>/`
+//     (src/cases/dtk-project.ts holds the whole dtk story).
+import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { type DtkOptions, dtkBuild, dtkPrepare } from './dtk-project';
 import { benchCheckoutsDir } from './manifests';
 
 export interface ProjectRecipe {
@@ -27,7 +31,7 @@ export interface ProjectRecipe {
   /** idempotent post-clone preparation (cheap no-op when already prepared) */
   prepare?: (dir: string) => void;
   /** the full build; MUST end in the project's own byte-compare gate */
-  build: (dir: string) => void;
+  build: (dir: string) => void | Promise<void>;
 }
 
 const sh = (cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): void => {
@@ -111,8 +115,46 @@ const hasDocker = (): boolean => {
   return true;
 };
 
+const onPath = (tool: string): boolean => spawnSync(tool, ['--version'], { stdio: 'ignore' }).status === 0;
+
+/** The CodeWarrior compilers are Windows binaries. dtk-template wraps them in wibo, which it
+ *  downloads only on linux/x86; every other host but Windows itself runs them under wine
+ *  (tools/project.py, `use_wibo`). */
+const needsWine = (): boolean =>
+  process.platform !== 'win32' &&
+  !(process.platform === 'linux' && (process.arch === 'x64' || process.arch === 'ia32'));
+
+/** A GameCube project: `python3 configure.py && ninja`, supervised. Nothing is copied in: the disc
+ *  image is the maintainer's, and `dtkPrepare` refuses with the directory to put it in. */
+function dtkRecipe(opts: DtkOptions): ProjectRecipe {
+  return {
+    baseroms: [],
+    prepare: (dir) => {
+      requireHost(() => onPath('python3'), 'python3 (dtk-template configures with it)', 'brew install python');
+      requireHost(() => onPath('ninja'), 'ninja (dtk projects build with it)', 'brew install ninja');
+      dtkPrepare(dir, opts);
+    },
+    // wine is demanded here and not in `prepare`, which is also the plain `bench setup` path that
+    // only reports on the checkouts: nothing before the build itself runs a compiler
+    build: (dir) => {
+      if (needsWine()) {
+        requireHost(
+          () => onPath('wine'),
+          'wine (the CodeWarrior compilers are Windows binaries)',
+          'brew install --cask wine-stable',
+        );
+      }
+      return dtkBuild(dir, { ...opts, ninjaArgs: [...(opts.ninjaArgs ?? []), jobs()] });
+    },
+  };
+}
+
 /** Recipes keyed by manifest `project`. */
 export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
+  'ac-decomp': dtkRecipe({ version: 'GAFE01_00' }),
+  marioparty4: dtkRecipe({ version: 'GMPE01_00' }),
+  pikmin: dtkRecipe({ version: 'GPIE01_01' }),
+
   marioparty3: {
     baseroms: ['baserom.us.z64'],
     prepare: (dir) => {
