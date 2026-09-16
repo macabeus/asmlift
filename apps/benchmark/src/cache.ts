@@ -278,6 +278,11 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // `sda` is one more, for a listing that reads a small-data EXTERN: the normalizer left its operand as
   // `0(0)`, which m2c reads as `*NULL`, and now names it.
   //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
+  // `sliced` is that register for the normalizer reading the row's own function out of the target
+  // disassembly (m2c-normalizer.ts `disasmToM2c`). Its input changes only where that disassembly
+  // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
+  //   sliced 1: a multi-function entry written before the slice fed m2c every function of the
+  //      object under the row's one `glabel`.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
@@ -297,6 +302,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       ...(lang === 'c++' && { lang, cppLadder: 1 }),
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
+      ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

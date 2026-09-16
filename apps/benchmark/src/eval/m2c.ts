@@ -59,7 +59,8 @@ export function runM2c(tc: Toolchain, sym: string, asm: string, opts: M2cOptions
         `and point ASMLIFT_M2C_DIR at it (sibling-checkout default: ../m2c)`,
     );
   }
-  const asmText = tc.asmKind === 'objdump' ? disasmToM2c(asm, tc.isa === 'ppc' ? 'ppc' : 'mips', opts.asmDump) : asm; // agbcc .s is already GNU-as
+  const asmText =
+    tc.asmKind === 'objdump' ? disasmToM2c(asm, tc.isa === 'ppc' ? 'ppc' : 'mips', sym, opts.asmDump) : asm; // agbcc .s is already GNU-as
   const dir = m2cScratch();
   const asmPath = join(dir, 'in.s');
   writeFileSync(asmPath, asmText);

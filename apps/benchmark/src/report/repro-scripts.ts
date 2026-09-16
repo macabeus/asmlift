@@ -146,7 +146,7 @@ function m2cInput(fn: FunctionResult): string {
     return fn.targetAsm;
   }
   try {
-    return disasmToM2c(fn.targetAsm, fn.isa, fn.asmDump);
+    return disasmToM2c(fn.targetAsm, fn.isa, fn.sym, fn.asmDump);
   } catch {
     return fn.targetAsm; // unparseable stored asm: embed verbatim rather than hide the function
   }

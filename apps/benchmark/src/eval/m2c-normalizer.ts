@@ -4,9 +4,9 @@
 // asmlift's MIPS/PPC frontends consume objdump directly; m2c does NOT (it wants spimdisasm/GNU-as
 // text). To keep BOTH decompilers reading from the SAME reference `.o`, we disassemble once with
 // objdump and translate that text here. The translation is faithful (same instructions, same
-// order) — it only reshapes syntax: drop the ELF header + address columns, turn `ADDR <sym>:`
-// into a `glabel`, synthesize `.LADDR` labels for intra-function branch targets, and (MIPS)
-// `$`-prefix registers.
+// order) — it only reshapes syntax: keep the row's own function, drop the ELF header + address
+// columns, turn `ADDR <sym>:` into a `glabel`, synthesize `.LADDR` labels for intra-function
+// branch targets, and (MIPS) `$`-prefix registers.
 //
 // When the object's `objdump -s -r -t` dump is provided, DATA the code references is fed too —
 // m2c is starved otherwise: jump tables live in data sections `-d` never shows, and mwcc names
@@ -18,6 +18,7 @@
 //   • splice real callee names onto MIPS `jal`s (their relocs are only in `-r`).
 // Handled reloc types are a WHITELIST — anything else (notably IDO's PIC GOT16/CALL16 family)
 // leaves the instruction untouched, preserving the exact no-dump text for those rows.
+import { sliceSymbol } from '@asmlift/core/frontend/disasm';
 
 export type Isa = 'mips' | 'ppc';
 
@@ -416,12 +417,17 @@ function rewriteData(e: DataEmission, ins: Insn, r: Reloc): string | null {
   }
 }
 
-export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string {
-  const parsed = parse(disasm);
+/** `sym`'s function alone, as m2c's GNU-as input. A target object can hold more than the row's
+ *  function: a C++ unit emits the header inlines it did not inline as weak functions after it, and a
+ *  unit whose callee the compiler inlined defines that callee first. Read whole, every function's
+ *  instructions would land under one `glabel`, where asmlift's frontend reads `sym` alone
+ *  (core's `sliceSymbol`, which this shares, absent symbol refused). */
+export function disasmToM2c(disasm: string, isa: Isa, sym: string, asmDump?: string): string {
+  const parsed = parse(sliceSymbol(disasm, sym));
   if (!parsed) {
     throw new Error('disasmToM2c: could not parse objdump output');
   }
-  const { sym, start, insns } = parsed;
+  const { start, insns } = parsed;
   const fn = { sym, start };
   const dump = asmDump ? parseAsmDump(asmDump) : null;
   const emission: DataEmission | null = dump

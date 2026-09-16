@@ -29,19 +29,29 @@ const MIPS_MEM_OUT =
 
 describe('m2c-normalizer (pinned)', () => {
   test('ppc counted loop: bdnz back-edge gets its label', () => {
-    expect(disasmToM2c(PPC_LOOP_IN, 'ppc')).toBe(PPC_LOOP_OUT);
+    expect(disasmToM2c(PPC_LOOP_IN, 'ppc', 'breakloop')).toBe(PPC_LOOP_OUT);
   });
 
   test('ppc call: reloc symbol spliced, no fabricated label', () => {
-    expect(disasmToM2c(PPC_CALL_IN, 'ppc')).toBe(PPC_CALL_OUT);
+    expect(disasmToM2c(PPC_CALL_IN, 'ppc', 'call2')).toBe(PPC_CALL_OUT);
   });
 
   test('mips: register prefixing, memory operands, branch labels', () => {
-    expect(disasmToM2c(MIPS_MEM_IN, 'mips')).toBe(MIPS_MEM_OUT);
+    expect(disasmToM2c(MIPS_MEM_IN, 'mips', 'arraysum')).toBe(MIPS_MEM_OUT);
+  });
+
+  test("reads the row's own function out of an object that holds several", () => {
+    // A C++ unit's target: the row's function, then a header inline the compiler emitted as a weak
+    // function after it. Before and after, only the named function's instructions may reach m2c.
+    const inline = '00000030 <get__4ItemFv>:\n  30:\tlwz     r3,4(r3)\n  34:\tblr\n';
+    const twoAfter = PPC_CALL_IN.replace(/\n$/, `\n\n${inline}`);
+    expect(disasmToM2c(twoAfter, 'ppc', 'call2')).toBe(PPC_CALL_OUT);
+    expect(disasmToM2c(twoAfter, 'ppc', 'get__4ItemFv')).toBe('glabel get__4ItemFv\n    lwz     r3,4(r3)\n    blr\n');
+    expect(() => disasmToM2c(twoAfter, 'ppc', 'absent')).toThrow(/symbol 'absent' not found/);
   });
 
   test('unparseable input throws (never silently feeds m2c garbage)', () => {
-    expect(() => disasmToM2c('not objdump output', 'mips')).toThrow(/could not parse/);
+    expect(() => disasmToM2c('not objdump output', 'mips', 'f')).toThrow(/could not parse/);
   });
 });
 
@@ -72,25 +82,25 @@ const MIPS_JTBL_OUT =
 
 describe('disasm-to-m2c data-section emission (pinned)', () => {
   test('ppc jump table: @N named jtbl_, @ha/@l operands, .word .L entries', () => {
-    expect(disasmToM2c(PPC_JTBL_IN, 'ppc', PPC_JTBL_DUMP)).toBe(PPC_JTBL_OUT);
+    expect(disasmToM2c(PPC_JTBL_IN, 'ppc', 'sw_jt', PPC_JTBL_DUMP)).toBe(PPC_JTBL_OUT);
     expect(PPC_JTBL_OUT).toContain('jtbl_15@ha');
     expect(PPC_JTBL_OUT).toContain('.word .L20');
   });
 
   test('ppc sda21 constant: named data block + @sda21(r2) operand', () => {
-    expect(disasmToM2c(PPC_SDA_IN, 'ppc', PPC_SDA_DUMP)).toBe(PPC_SDA_OUT);
+    expect(disasmToM2c(PPC_SDA_IN, 'ppc', 'i2f', PPC_SDA_DUMP)).toBe(PPC_SDA_OUT);
     expect(PPC_SDA_OUT).toContain('data_6@sda21(r2)');
     expect(PPC_SDA_OUT).toContain('.word 0x43300000');
   });
 
   test('mips jump table: %hi/%lo operands, REL addends read from section words', () => {
-    expect(disasmToM2c(MIPS_JTBL_IN, 'mips', MIPS_JTBL_DUMP)).toBe(MIPS_JTBL_OUT);
+    expect(disasmToM2c(MIPS_JTBL_IN, 'mips', 'sw_jt', MIPS_JTBL_DUMP)).toBe(MIPS_JTBL_OUT);
     expect(MIPS_JTBL_OUT).toContain('%hi(jtbl_rodata_0)');
     expect(MIPS_JTBL_OUT).toContain('.word .L20');
   });
 
   test('the dump is optional — text-only behavior is unchanged', () => {
-    expect(disasmToM2c(PPC_JTBL_IN, 'ppc')).not.toContain('.rodata');
+    expect(disasmToM2c(PPC_JTBL_IN, 'ppc', 'sw_jt')).not.toContain('.rodata');
   });
 });
 
