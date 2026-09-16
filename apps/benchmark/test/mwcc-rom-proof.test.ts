@@ -22,7 +22,7 @@
 //
 // Checkout-gated: `bench setup --build` materializes and builds these projects, and CI has
 // neither. Where a checkout is absent the claim is not weakened, it is simply not asked.
-import { storedFlags, tokenizeFlags } from '@asmlift/core/codegen-flags';
+import { storedFlags, tokenizeFlags, unitLanguage } from '@asmlift/core/codegen-flags';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -157,14 +157,16 @@ describe('a CodeWarrior build compiles its own game', () => {
           defines,
         };
         const rc = realCompilerFor(p.toolchain);
+        // the dialect the project's own edge builds this unit in — `preprocess` reads the same word
+        const language = unitLanguage(p.unit, cflags);
         const iText = rc.preprocess(cfg, readFileSync(join(root, p.unit), 'utf8'));
-        const target = rc.buildTarget(iText, p.sym, cflags);
+        const target = rc.buildTarget(iText, p.sym, cflags, language);
         const elf = readFileSync(join(root, p.elf));
         expect(compareWithRom(readFileSync(target.obj), p.sym, elf, p.addr)).toMatchObject({ equal: true });
 
         // …and the same text through a build the project does NOT name is not these bytes. Without
         // this half the proof passes just as happily with every id bound to one binary.
-        const other = realCompilerFor(p.separatedFrom).buildTarget(iText, p.sym, cflags);
+        const other = realCompilerFor(p.separatedFrom).buildTarget(iText, p.sym, cflags, language);
         expect(
           compareWithRom(readFileSync(other.obj), p.sym, elf, p.addr),
           `${p.separatedFrom} must not reproduce ${p.project}'s ${p.sym}`,

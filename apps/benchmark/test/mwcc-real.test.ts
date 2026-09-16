@@ -70,7 +70,7 @@ describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each C
     'is the binary its own toolchain id names — three ids, three different objects',
     () => {
       const digests = MWCC_TOOLCHAIN_IDS.map((id) => {
-        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS, 'c');
         return createHash('sha256').update(readFileSync(built.obj)).digest('hex');
       });
       // Pairwise distinct, not pinned constants: what is being claimed is that the ids do not
@@ -88,7 +88,7 @@ describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each C
       // dump and what a row needs is the dump's CONTENT. A build the table missed answered
       // `undefined`, which `evaluate` catches into a row published with no `asmDump` at all.
       for (const id of MWCC_TOOLCHAIN_IDS) {
-        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS);
+        const built = realCompilerFor(id).buildTarget(SEPARATOR, 'sep', CFLAGS, 'c');
         const dump = cachedAsmDumpText(built.obj, id, 'sep');
         expect(dump, `${id} published no asmDump`).toBeDefined();
         expect(dump, `${id}'s dump names no section`).toContain('Contents of section');
