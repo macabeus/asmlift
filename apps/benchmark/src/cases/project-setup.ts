@@ -117,26 +117,35 @@ const hasDocker = (): boolean => {
 
 const onPath = (tool: string): boolean => spawnSync(tool, ['--version'], { stdio: 'ignore' }).status === 0;
 
-/** A GameCube project: `python3 configure.py && ninja`, supervised. The CodeWarrior compilers are
- *  Windows binaries, and dtk-template runs them under wibo only on linux/x86 — everywhere else,
- *  wine. Nothing is copied in: the disc image is the maintainer's, and `dtkPrepare` refuses with
- *  the directory to put it in. */
+/** The CodeWarrior compilers are Windows binaries. dtk-template wraps them in wibo, which it
+ *  downloads only on linux/x86; every other host but Windows itself runs them under wine
+ *  (tools/project.py, `use_wibo`). */
+const needsWine = (): boolean =>
+  process.platform !== 'win32' &&
+  !(process.platform === 'linux' && (process.arch === 'x64' || process.arch === 'ia32'));
+
+/** A GameCube project: `python3 configure.py && ninja`, supervised. Nothing is copied in: the disc
+ *  image is the maintainer's, and `dtkPrepare` refuses with the directory to put it in. */
 function dtkRecipe(opts: DtkOptions): ProjectRecipe {
   return {
     baseroms: [],
     prepare: (dir) => {
       requireHost(() => onPath('python3'), 'python3 (dtk-template configures with it)', 'brew install python');
       requireHost(() => onPath('ninja'), 'ninja (dtk projects build with it)', 'brew install ninja');
-      if (process.platform !== 'linux') {
+      dtkPrepare(dir, opts);
+    },
+    // wine is demanded here and not in `prepare`, which is also the plain `bench setup` path that
+    // only reports on the checkouts: nothing before the build itself runs a compiler
+    build: (dir) => {
+      if (needsWine()) {
         requireHost(
           () => onPath('wine'),
           'wine (the CodeWarrior compilers are Windows binaries)',
           'brew install --cask wine-stable',
         );
       }
-      dtkPrepare(dir, opts);
+      return dtkBuild(dir, { ...opts, ninjaArgs: [...(opts.ninjaArgs ?? []), jobs()] });
     },
-    build: (dir) => dtkBuild(dir, { ...opts, ninjaArgs: [jobs()] }),
   };
 }
 

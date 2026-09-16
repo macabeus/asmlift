@@ -61,6 +61,12 @@ describe('the version a checkout builds', () => {
     expect(() => requireVersion(root, 'GPIE01_01')).toThrow(/builds GPIE01_00 by default, not GPIE01_01/);
   });
 
+  test('is refused when configure.py declares only one of the two', () => {
+    const root = dir();
+    write(root, 'configure.py', 'VERSIONS = [\n    "GPIE01_00",\n]\n');
+    expect(() => configuredVersions(root)).toThrow(/does not declare both DEFAULT_VERSION and VERSIONS/);
+  });
+
   test('is refused when the index names no version', () => {
     const root = dir();
     write(root, 'configure.py', configurePy(7, ['GPIE01_00']));
@@ -238,6 +244,22 @@ describe('ninja under supervision', () => {
     await expect(
       runNinja({ ...supervised, attempts: 2, timeoutMs: 400, stallMs: 5_000, dir: root, log: join(root, 'log'), exe }),
     ).rejects.toThrow(/did not finish in 2 attempts \(timeout .*; timeout .*\)/);
+  });
+
+  test('does not resume a ninja that is not there, and says what went wrong', async () => {
+    const root = dir();
+    await expect(
+      runNinja({ ...supervised, dir: root, log: join(root, 'log'), exe: join(root, 'no-such-ninja') }),
+    ).rejects.toThrow(/could not be run in .*: spawn .*ENOENT/);
+  });
+
+  test('starts each run from an empty log', async () => {
+    const root = dir();
+    const log = join(root, 'log');
+    const exe = fakeNinja(root, 'echo "[1/1] CHECK build.sha1"\nexit 0');
+    await runNinja({ ...supervised, dir: root, log, exe });
+    await runNinja({ ...supervised, dir: root, log, exe });
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual(['[1/1] CHECK build.sha1']);
   });
 
   test('names the log when the attempts run out', async () => {

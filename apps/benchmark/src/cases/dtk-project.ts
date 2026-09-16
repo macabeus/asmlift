@@ -19,7 +19,17 @@
 import { readObjdiffUnits } from '@asmlift/cli/dtk-unit';
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import YAML from 'yaml';
 
@@ -31,7 +41,7 @@ export function configuredVersions(root: string): { versions: string[]; fallback
   const index = /^DEFAULT_VERSION\s*=\s*(\d+)\s*$/m.exec(source)?.[1];
   const list = /^VERSIONS\s*=\s*\[([\s\S]*?)^\]/m.exec(source)?.[1];
   if (index === undefined || list === undefined) {
-    throw new Error(`${root}/configure.py declares no DEFAULT_VERSION and VERSIONS`);
+    throw new Error(`${root}/configure.py does not declare both DEFAULT_VERSION and VERSIONS`);
   }
   // one entry per line, and only the string that OPENS the line: Pikmin comments several of its
   // versions with the disc path they came from, in quotes
@@ -141,7 +151,8 @@ export interface NinjaAttempt {
 
 export interface NinjaOptions {
   dir: string;
-  /** the build's whole output, appended to across attempts — never a pipe (see the file header) */
+  /** the run's whole output: emptied when it starts, appended to by each attempt — and never a
+   *  pipe (see the file header) */
   log: string;
   exe?: string;
   args?: readonly string[];
@@ -226,7 +237,9 @@ export async function runNinja(opts: NinjaOptions): Promise<NinjaAttempt[]> {
   const { dir, log, exe = 'ninja', args = [] } = opts;
   const { attempts = 3, timeoutMs = 3_600_000, stallMs = 300_000, pollMs = 1_000, graceMs = 10_000 } = opts;
   mkdirSync(dirname(log), { recursive: true });
+  rmSync(log, { force: true }); // one build's output, not every build this checkout has ever run
   const runs: NinjaAttempt[] = [];
+  let unstartable: string | undefined;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const started = Date.now();
     let shown = existsSync(log) ? statSync(log).size : 0;
@@ -241,7 +254,7 @@ export async function runNinja(opts: NinjaOptions): Promise<NinjaAttempt[]> {
       exit = { status, signal };
     });
     child.on('error', (e) => {
-      process.stdout.write(`${exe}: ${e.message}\n`);
+      unstartable ??= e.message;
       exit ??= { status: null, signal: null };
     });
     let grew = Date.now();
@@ -268,6 +281,10 @@ export async function runNinja(opts: NinjaOptions): Promise<NinjaAttempt[]> {
     echo(log, shown);
     const run: NinjaAttempt = { ...exit, stopped, seconds: (Date.now() - started) / 1000 };
     runs.push(run);
+    if (unstartable !== undefined) {
+      // a resume cannot heal a command that is not there
+      throw new Error(`${exe} could not be run in ${dir}: ${unstartable}`);
+    }
     if (stopped === undefined && run.status === 0) {
       return runs;
     }
