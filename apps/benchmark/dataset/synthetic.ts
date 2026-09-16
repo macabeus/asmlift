@@ -2307,11 +2307,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // attributed to the placement rule the other three satisfy. It separates a placement rule keyed
   // on strict dominance from one keyed on arm count.
   //
-  // agbcc only. The mechanism above is a fact about THIS compiler, established by reading its
-  // pass list and confirmed by compiling both spellings. Whether ido7.1, gcc2.7.2kmc and
-  // mwcc_242_81 move a read the same way was NOT measured, so those lanes are left off rather
-  // than assumed: each needs its own read-it-then-compile-it pair before these rows mean
-  // anything there.
+  // The four below are agbcc only. The mechanism above is a fact about THAT compiler, established
+  // by reading its pass list and confirmed by compiling both spellings. Whether ido7.1 and
+  // gcc2.7.2kmc move a read the same way is still NOT measured, so those lanes are left off
+  // rather than assumed: each needs its own read-it-then-compile-it pair before these rows mean
+  // anything there. `readppc` is the one lane that HAS had its pair — see its own comment.
   {
     sym: 'readshare',
     src:
@@ -2370,6 +2370,30 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
     proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
+  },
+  // The PowerPC lane, and the ONLY row of this family that is not agbcc. `read-once` has no
+  // machine floor, so the one thing that can keep it honest is an exemplar per compiler it is
+  // claimed on — and the Animal Crossing rows claim it on CodeWarrior. The claim was measured
+  // rather than transferred (`packages/cli/test/matching/ppc-read-once.test.ts` holds it): at
+  // mwcc_242_81's canonical flags the read spelled once above the branch is emitted once above it
+  // into r3, a register live across the branch, and the read spelled per arm is emitted twice into
+  // the scratch r0 — 0x24 bytes against 0x28, so the placement is decidable here too. agbcc's pass
+  // list is not the reason; it says nothing about CodeWarrior.
+  //
+  // Parameters rather than absolute addresses: the GBA address macros the four rows above use are
+  // a GBA memory map, and on PowerPC they would add a `lis/ori` address materialisation — a second
+  // moving part in a row whose whole point is one read's placement. Two output pointers rather
+  // than a subscripted one, for the same reason: `a[0]`/`a[1]` would make the row an `array` row
+  // as well.
+  {
+    sym: 'readppc',
+    src:
+      'void readppc(u32 *p, u32 *a, u32 *b, u32 c){ u32 s = *p;' +
+      ' if (c & 1){ *a = s << 3; } else { *b = s << 4; } }',
+    features: ['read-once', 'branch'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'void readppc(u32 *p, u32 *a, u32 *b, u32 c);',
+    proto: { readppc: { returnsVoid: true } },
   },
 
   // WHICH ARMS, IN WHICH ORDER. The read-once family above asks where a value is COMPUTED; this
