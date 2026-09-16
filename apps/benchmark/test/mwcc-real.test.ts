@@ -19,7 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
-import { noPrototypeCalls } from '../src/compile/mwcc';
+import { noPrototypeCalls, sizeofBounds } from '../src/compile/mwcc';
 import { buildRealTarget, candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
@@ -107,13 +107,25 @@ test("a vendored context drops CodeWarrior's declaration attributes, which m2c's
     'extern __declspec(weak) int OSReport(const char* fmt, ...);',
     'typedef struct { int declspec_is_not_a_word_here; } S;',
   ].join('\n');
-  expect(mwcc.vendoredContext(ctx)).toBe(
+  expect(mwcc.vendoredContext(ctx, CFLAGS, 'c')).toBe(
     [
       'extern void mFRm_PrintErrInfo(gfxprint_t* gfxprint);',
       'extern int OSReport(const char* fmt, ...);',
       'typedef struct { int declspec_is_not_a_word_here; } S;',
     ].join('\n'),
   );
+});
+
+test('the array bounds a context spells with sizeof are found once each, whatever else is bracketed', () => {
+  const ctx = [
+    'typedef union { OthersSave_c save; u8 __align[((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))]; } A;',
+    'typedef union { Save_t save; u8 __align[((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))]; } B;',
+    'typedef struct { void* p[(0x108 - 0x0FC) / sizeof(void*)]; u8 plain[4]; } C;',
+  ].join('\n');
+  expect(sizeofBounds(ctx)).toEqual([
+    '((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))',
+    '(0x108 - 0x0FC) / sizeof(void*)',
+  ]);
 });
 
 test('a call refused for having no prototype is named from the unit at its byte offset', () => {
@@ -135,6 +147,19 @@ test('a call refused for having no prototype is named from the unit at its byte 
 });
 
 describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', () => {
+  test(
+    'a context bound spelled with sizeof becomes the number CodeWarrior gives it',
+    () => {
+      // m2c evaluates an array bound itself and has no `sizeof`; Animal Crossing's m_card.h spells one
+      // in a union 28 of its contexts carry, and m2c fails the whole row on it.
+      const ctx = 'typedef struct { short s; char c; } T;\ntypedef union { T t; char pad[sizeof(T) * 2]; } U;\n';
+      expect(mwcc.vendoredContext(ctx, CFLAGS, 'c')).toBe(
+        'typedef struct { short s; char c; } T;\ntypedef union { T t; char pad[8]; } U;\n',
+      );
+    },
+    CONTAINER_BUDGET,
+  );
+
   test(
     "names an undeclared call in the unit's own dialect, and not the intrinsics CodeWarrior declares itself",
     () => {

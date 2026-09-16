@@ -670,6 +670,12 @@ export function ppcDisasmText(mwcc: MwccToolchainId, dir: string, objName: strin
   const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`);
   return nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${objName}`);
 }
+/** `objdump -t` on an object already in `dir`: its symbol table, sizes included. */
+export function ppcSymbolTableText(mwcc: MwccToolchainId, dir: string, objName: string): string {
+  const t = MWCC_PPC_TOOLCHAIN;
+  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} -t ${W}/${objName}`);
+  return nonEmptyDump(out, `ppc objdump -t (${via}) on ${dir}/${objName}`);
+}
 // CodeWarrior flags carry spaces (e.g. `msg_show_realref off`), so quote each token for the shell.
 function shq(s: string): string {
   return /[^\w/.,=-]/.test(s) ? `'${s.replace(/'/g, "'\\''")}'` : s;

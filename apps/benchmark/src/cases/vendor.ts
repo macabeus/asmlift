@@ -246,7 +246,11 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       };
       const rc = realCompilerFor(unit.toolchain);
       const tuI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
-      const ctxI = rc.vendoredContext(rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', '')));
+      const ctxI = rc.vendoredContext(
+        rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', '')),
+        unit.cflags,
+        unitLanguage(f.unit, unit.cflags),
+      );
       for (const [what, text] of [
         ['tu', tuI],
         ['ctx', ctxI],

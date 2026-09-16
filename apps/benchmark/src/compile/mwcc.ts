@@ -13,7 +13,13 @@
 // itself (`ppcPreprocess`), run with the checkout mounted, under the wrapper the unit's own build
 // rule runs it under.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
-import { type MwccToolchainId, ppcCompile, ppcPreprocess, ppcSectionScoped } from '@asmlift/toolchains';
+import {
+  type MwccToolchainId,
+  ppcCompile,
+  ppcPreprocess,
+  ppcSectionScoped,
+  ppcSymbolTableText,
+} from '@asmlift/toolchains';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -56,6 +62,14 @@ function compile(
 /** A CodeWarrior declaration attribute, `__declspec(section "forcestrip")` or `__declspec(weak)`, as a
  *  preprocessed unit spells it. */
 const DECLSPEC = /__declspec\s*\([^()]*\)\s*/g;
+
+/** A bracketed expression holding no bracket of its own. */
+const BRACKETED = /\[([^[\]]*)\]/g;
+
+/** The distinct array bounds in `text` that `sizeof` spells, as written between their brackets. */
+export function sizeofBounds(text: string): string[] {
+  return [...new Set([...text.matchAll(BRACKETED)].map((m) => m[1]).filter((b) => /\bsizeof\b/.test(b)))];
+}
 
 /** The calls a failed `-requireprotos -msgstyle parseable` compile of `tu` refused for having no
  *  prototype, by name. Each diagnostic record is a `tool|Compiler|Error` line, a `(file|line|column|length|
@@ -118,15 +132,42 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
       return names;
     }
   },
-  vendoredContext(preprocessed): string {
-    // WITHOUT CodeWarrior's declaration attributes. m2c reads the context with a C parser that refuses
-    // `__declspec` outright — `Syntax error when parsing C context. before: "forcestrip"` on 29 of
-    // Animal Crossing's 38 C contexts, which are otherwise clean — and every row would publish
-    // `m2c=failed` for a spelling of its headers. On a DECLARATION the attribute says where another
-    // unit's definition is linked, or that it may be absent, and nothing about its type, so a candidate
-    // compiled against the context without it compiles to the same object. The target's own unit keeps
-    // it: that blob is the unit the project compiled.
-    return preprocessed.replace(DECLSPEC, '');
+  vendoredContext(preprocessed, cflags, language): string {
+    // m2c reads the context with a C parser, and two spellings a CodeWarrior unit is full of stop it
+    // outright. Both are rewritten here into what the compiler itself makes of them; the row's own TU
+    // blob keeps its text, because that blob is the unit the project compiled.
+    //
+    // `__declspec(section "forcestrip")`, `__declspec(weak)`: the parser refuses the keyword —
+    // `Syntax error when parsing C context. before: "forcestrip"` on 29 of Animal Crossing's 38 C
+    // contexts. On a DECLARATION the attribute says where another unit's definition is linked, or that
+    // it may be absent, and nothing about its type, so a candidate compiled against the context
+    // without it compiles to the same object.
+    const ctx = preprocessed.replace(DECLSPEC, '');
+    // An array bound spelled with `sizeof`: m2c evaluates a bound itself and has no `sizeof` —
+    // `Failed to evaluate expression (OthersSave_c) … at compile time` on 28 of them, for m_card.h's
+    // `u8 __align[ALIGN_NEXT(sizeof(OthersSave_c), mCD_MEMCARD_SECTORSIZE)]`. Each such bound is
+    // replaced by the number CodeWarrior gives it at the unit's flags, which the layout depends on.
+    const bounds = sizeofBounds(ctx);
+    if (bounds.length === 0) {
+      return ctx;
+    }
+    const dir = mkdtempSync(join('/tmp', 'bench-ppc-bounds-'));
+    const probe = bounds.map((b, i) => `char __asmlift_bound_${i}[${b}];`).join('\n');
+    writeFileSync(join(dir, 'u.c'), `${ctx}\n${probe}\n`);
+    compile(mwcc, dir, 'u.c', 'u.o', [...cflags, langFlag(language)], false);
+    const sizes = new Map(
+      [...ppcSymbolTableText(mwcc, dir, 'u.o').matchAll(/\s([0-9a-f]{8})\s+__asmlift_bound_(\d+)\s*$/gm)].map((m) => [
+        bounds[Number(m[2])],
+        Number.parseInt(m[1], 16),
+      ]),
+    );
+    return ctx.replace(BRACKETED, (whole, inner: string) => {
+      const size = sizes.get(inner);
+      if (size === undefined && /\bsizeof\b/.test(inner)) {
+        throw new Error(`mwcceppc gave the array bound [${inner}] no size`);
+      }
+      return size === undefined ? whole : `[${size}]`;
+    });
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-vendor-'));
