@@ -98,7 +98,7 @@ import { loadCompleteManifests, loadManifests, resolveProjectRoot } from './case
 import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
 import { syntheticCases } from './cases/synthetic';
-import { resolveScoringPrelude, scoringPreludes } from './compile/real';
+import { resolveScoringPrelude, richestRung, scoringLadder } from './compile/real';
 import { RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
@@ -184,9 +184,6 @@ if (opts.tier !== 'both' && opts.tier !== 'synthetic' && opts.tier !== 'real') {
   console.error(`unknown --tier ${opts.tier}`);
   process.exit(2);
 }
-
-/** Human names for compile/real.ts's escalation rungs, for the `bench target` log line. */
-const RUNG_NAMES = ['bare typedefs', '+ manifest prependC', 'vendored ctx'];
 
 /** The published WINNING source for one real row — but only when asmlift's outcome was actually
  *  SCORED (a declined/noncompile/failed row's stored text compiles nowhere, so it pins nothing).
@@ -449,7 +446,7 @@ switch (command) {
     // the row's published source is the evidence of where escalation stopped — so replay the
     // ladder against it. (Synthetic rows have no context: they are scored bare, config stays bare.)
     let ctxFile: string | undefined;
-    let ctxRung = 0;
+    let ctxRung = '';
     // The dialect the row's CANDIDATE was scored in, which is not the dialect its TARGET was built
     // in: a synthetic row's candidates all go through benchScorer, which compiles them as C whatever
     // the target's language, and only the real tier's ladder below can land on C++.
@@ -460,7 +457,7 @@ switch (command) {
         const { ctxI } = man.vendored(c.sym);
         const prependC = man.functions.find((f) => f.sym === c.sym)?.prependC ?? '';
         const source = publishedAsmliftSource(rowId);
-        const ladder = scoringPreludes(prependC, ctxI, c.sym);
+        const ladder = scoringLadder(man.tu, prependC, ctxI, c.sym);
         // Address-cast macro defines the published source NAMES. Every rung needs them (the
         // scoring compile prepends them too), and the reproduction context must carry them or
         // the published script cannot build the source the benchmark published.
@@ -470,11 +467,21 @@ switch (command) {
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.
         const picked = source
-          ? resolveScoringPrelude(c.toolchain.id, c.codegen.cflags, prependC, ctxI, c.sym, source, c.language, macros)
-          : { prelude: ladder[ladder.length - 1], rung: ladder.length, language: c.language };
-        ctxRung = picked.rung;
+          ? resolveScoringPrelude(
+              c.toolchain.id,
+              c.codegen.cflags,
+              man.tu,
+              prependC,
+              ctxI,
+              c.sym,
+              source,
+              c.language,
+              macros,
+            )
+          : { rung: richestRung(man.tu, ladder), language: c.language };
+        ctxRung = picked.rung.name;
         ctxLanguage = picked.language;
-        ctxFile = materializeScoringContext(picked.prelude + macros, out);
+        ctxFile = materializeScoringContext(picked.rung.prelude + macros, out);
       }
     }
     writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: ctxLanguage });
@@ -483,7 +490,7 @@ switch (command) {
         c.tier === 'real' ? `, the flags of ${c.unit}` : ''
       }${elf ? ' + symbol-map ELF' : ''}${
         symbolsFile ? ' + authored symbol map' : ''
-      }${ctxFile ? ` + scoring context (escalation rung ${ctxRung}: ${RUNG_NAMES[ctxRung - 1]})` : ''})`,
+      }${ctxFile ? ` + scoring context (escalation rung: ${ctxRung})` : ''})`,
     );
     break;
   }

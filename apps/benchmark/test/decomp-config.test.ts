@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import YAML from 'yaml';
 
-import { scoringPreludes } from '../src/compile/real';
+import { scoringLadder } from '../src/compile/real';
 import { shq } from '../src/compile/util';
 import { materializeScoringContext, renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
@@ -151,7 +151,7 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
 // Real rows are SCORED inside ONE rung of compile/real.ts's escalation ladder — `bench target`
 // materializes that exact prelude as ctx.i and the generated compile command concatenates it
 // ahead of every candidate, so the repro scripts grade in the same world the benchmark did.
-// The ctx.i CONTENT is scoringPreludes' business (one definition, shared with the scorer);
+// The ctx.i CONTENT is scoringLadder's business (one definition, shared with the scorer);
 // materializeScoringContext only puts the chosen rung on disk under the agreed name.
 describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
   interface Doc {
@@ -167,12 +167,27 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
   };
   /** the richest rung — what `bench target` materializes for all but the escalation-stopped rows */
   const vendoredRung = (ctxI: string, sym: string, prependC = ''): string =>
-    scoringPreludes(prependC, ctxI, sym).at(-1)!;
+    scoringLadder('assembled', prependC, ctxI, sym).at(-1)!.prelude;
 
   test('every rung re-provides NULL (the vendored context is preprocessed — the macro is gone)', () => {
-    for (const p of scoringPreludes('', 'typedef short s16;\n', 'f')) {
-      expect(p.startsWith('#define NULL ((void *)0)\n')).toBe(true);
+    for (const tu of ['assembled', 'unit'] as const) {
+      for (const { prelude } of scoringLadder(tu, '', 'typedef short s16;\n', 'f')) {
+        expect(prelude.startsWith('#define NULL ((void *)0)\n')).toBe(true);
+      }
     }
+  });
+
+  // A unit row's function was compiled in its unit, and a poorer world compiles the same source to other
+  // code: Mario Party 4's `BoardRandMod` calls under bare typedefs what its unit inlines.
+  test("a unit row tries its unit's context first, and bare typedefs only after it", () => {
+    const ladder = scoringLadder('unit', '', 'u32 BoardRand(void) { return 1; }\n', 'BoardRandMod');
+    expect(ladder.map((r) => r.name)).toEqual(['unit context', 'bare typedefs']);
+    expect(ladder[0].prelude).toContain('u32 BoardRand(void) { return 1; }');
+    expect(scoringLadder('assembled', '', 'x;\n', 'f').map((r) => r.name)).toEqual([
+      'bare typedefs',
+      '+ manifest prependC',
+      'vendored ctx',
+    ]);
   });
 
   test("the vendored rung strips the function's own prototype and keeps the rest verbatim", () => {
@@ -204,7 +219,7 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     inDir((dir) => {
       // the rung is not always the richest: a project prototype can reject what bare typedefs
       // accept, and materializing the vendored ctx for such a row leaves NO scorable candidate
-      const rung1 = scoringPreludes('', 'u32 thunk(void);\n', 'f')[0];
+      const rung1 = scoringLadder('assembled', '', 'u32 thunk(void);\n', 'f')[0].prelude;
       expect(materializeScoringContext(rung1, dir)).toBe('ctx.i');
       expect(readFileSync(join(dir, 'ctx.i'), 'utf8')).toBe(rung1);
       expect(readFileSync(join(dir, 'ctx.i'), 'utf8')).not.toContain('u32 thunk(void);');

@@ -16,7 +16,7 @@ import { gcc272Real } from './gcc272';
 import { idoReal } from './ido';
 import { kmcReal } from './kmc';
 import { mwccReal } from './mwcc';
-import type { RealCompile, RealProjectCfg } from './types';
+import type { RealCompile, RealProjectCfg, TuModel } from './types';
 import { ctxTypedefPrelude } from './util';
 
 export type { RealProjectCfg } from './types';
@@ -93,15 +93,33 @@ export function buildRealTarget(
 // not a decompiler weakness. The scorer therefore escalates context, up to the function's
 // VENDORED preprocessed context (the same text the target compiled against).
 
-/** The escalation ladder for ONE real function: complete prelude texts, cheapest → richest,
- *  each ready to be concatenated ahead of a candidate.
+/** One context a candidate may be compiled in: a complete prelude, ready to be concatenated ahead of it. */
+export interface ScoringRung {
+  name: string;
+  prelude: string;
+}
+
+/** The escalation ladder for ONE real function, tried in order: the first rung a candidate compiles in is the
+ *  world it is scored in. What the ladder is depends on the row's translation unit (`tu`):
  *
- *    1. bare C_TYPEDEFS — enough for a candidate that names nothing of the project;
- *    2. + the manifest's prependC (skipping C_TYPEDEFS when that prelude owns `u8` already);
- *    3. the function's VENDORED preprocessed context — its real types + extern globals, with the
- *       prototype of `sym` itself stripped (the candidate's definition must be the only one) and
- *       the typedefs that context does not itself define added back (ctxTypedefPrelude — the SAME
- *       helper decomp-config.ts materializes into the reproduction's ctx.i).
+ *  ASSEMBLED — cheapest → richest:
+ *    1. bare typedefs: C_TYPEDEFS, enough for a candidate that names nothing of the project;
+ *    2. + manifest prependC (skipping C_TYPEDEFS when that prelude owns `u8` already);
+ *    3. vendored ctx: the function's preprocessed context — its real types + extern globals, with the
+ *       prototype of `sym` itself stripped (the candidate's definition must be the only one) and the
+ *       typedefs that context does not itself define added back (ctxTypedefPrelude — the SAME helper
+ *       decomp-config.ts materializes into the reproduction's ctx.i).
+ *
+ *  UNIT — the unit first, because the unit is where the game's function was compiled and a poorer world
+ *  compiles the same source to other code. Measured on Mario Party 4: `BoardRandMod`'s own source
+ *  compiles under bare typedefs, with `BoardRand` implicitly declared and CALLED where the game inlines
+ *  it (score 16), and matches only in its unit; `fn_1_77A4`'s scores 1 and 0 the same way. So:
+ *    1. unit context: the vendored context VERBATIM, with the typedefs it lacks added. The function's own
+ *       prototype stays: the unit's earlier code calls the function through it (`HuDvdErrorWatch` twice,
+ *       `fn_1_C2BC` four times), and without it each call declares the function implicitly and its
+ *       definition is `redeclared`. A candidate compiles where the project would compile it, so a
+ *       signature the project's own header contradicts does not compile there;
+ *    2. bare typedefs, for a candidate the unit refuses.
  *
  *  Every rung re-provides `NULL`: the vendored context is PREPROCESSED, so the standard macro is
  *  expanded away, and a candidate spelling a null check the idiomatic way (`p != NULL`, as m2c
@@ -110,15 +128,20 @@ export function buildRealTarget(
  *
  *  EXPORTED because the reproduction scripts must materialize the very rung the harness used —
  *  see resolveScoringPrelude. */
-export function scoringPreludes(prependC: string, ctxI: string, sym: string): string[] {
+export function scoringLadder(tu: TuModel, prependC: string, ctxI: string, sym: string): ScoringRung[] {
+  const bare = { name: 'bare typedefs', prelude: `${C_TYPEDEFS}\n` };
+  if (tu === 'unit') {
+    return [{ name: 'unit context', prelude: `${ctxTypedefPrelude(ctxI)}${ctxI}\n` }, bare].map(withNull);
+  }
   const proDefsU8 = /typedef\s+unsigned\s+char\s+u8\b/.test(prependC);
-  const rungs = [
-    `${C_TYPEDEFS}\n`,
-    `${proDefsU8 ? '' : C_TYPEDEFS}\n${prependC}\n`,
-    ...(ctxI ? [`${ctxTypedefPrelude(ctxI)}${stripPrototype(ctxI, sym)}\n`] : []),
-  ];
-  return rungs.map((r) => `#define NULL ((void *)0)\n${r}`);
+  return [
+    bare,
+    { name: '+ manifest prependC', prelude: `${proDefsU8 ? '' : C_TYPEDEFS}\n${prependC}\n` },
+    ...(ctxI ? [{ name: 'vendored ctx', prelude: `${ctxTypedefPrelude(ctxI)}${stripPrototype(ctxI, sym)}\n` }] : []),
+  ].map(withNull);
 }
+
+const withNull = (r: ScoringRung): ScoringRung => ({ ...r, prelude: `#define NULL ((void *)0)\n${r.prelude}` });
 
 /** THE CANDIDATE, GIVEN THE LINKAGE ITS TARGET SYMBOL HAS — the C++ row's half of the ladder.
  *
@@ -163,6 +186,7 @@ const candidateDialects = (language: 'c' | 'c++'): readonly ('c' | 'c++')[] =>
 export function makeRealCompile(
   toolchain: ToolchainId,
   cflags: readonly string[],
+  tu: TuModel,
   prependC: string,
   ctxI: string,
   language: 'c' | 'c++',
@@ -184,7 +208,7 @@ export function makeRealCompile(
     // fallback first would double every C++ row's compiles to answer a rarer question.
     for (const dialect of candidateDialects(language)) {
       const body = candidateLinkage(dialect, candC);
-      for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
+      for (const { prelude } of scoringLadder(tu, prependC, ctxI, sym)) {
         try {
           return rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
         } catch (e) {
@@ -207,6 +231,7 @@ export function makeRealCompile(
 export function resolveScoringPrelude(
   toolchain: ToolchainId,
   cflags: readonly string[],
+  tu: TuModel,
   prependC: string,
   ctxI: string,
   sym: string,
@@ -215,36 +240,41 @@ export function resolveScoringPrelude(
   /** the candidate's address-cast macro defines — every rung needs them (see makeRealCompile),
    *  and replaying the ladder WITHOUT them would fail every rung and pick the wrong one */
   macros = '',
-): { prelude: string; rung: number; language: 'c' | 'c++' } {
+): { rung: ScoringRung; language: 'c' | 'c++' } {
   const rc = compilerFor(toolchain, language);
-  const preludes = scoringPreludes(prependC, ctxI, sym);
+  const ladder = scoringLadder(tu, prependC, ctxI, sym);
   // The DIALECT is replayed with the rung, for the same reason the rung is replayed at all: a C++
   // row whose source only compiles as C was scored as C, and a reproduction that states the row's
   // dialect would refuse the very source the benchmark published.
   for (const dialect of candidateDialects(language)) {
     const body = candidateLinkage(dialect, candC);
-    for (const [i, prelude] of preludes.entries()) {
+    for (const rung of ladder) {
       try {
-        rc.compileCandidate(`${prelude}${macros}${body}`, sym, cflags, dialect);
-        return { prelude, rung: i + 1, language: dialect };
+        rc.compileCandidate(`${rung.prelude}${macros}${body}`, sym, cflags, dialect);
+        return { rung, language: dialect };
       } catch {
         // next rung
       }
     }
   }
-  return { prelude: preludes[preludes.length - 1], rung: preludes.length, language };
+  return { rung: richestRung(tu, ladder), language };
 }
+
+/** The richest rung of a ladder: the project's own context where the row has one. */
+export const richestRung = (tu: TuModel, ladder: readonly ScoringRung[]): ScoringRung =>
+  tu === 'unit' ? ladder[0] : ladder[ladder.length - 1];
 
 /** A context-aware Scorer (real tier): compile the candidate in project context, then objdiff it
  *  against the target. Shares makeRealCompile so asmlift and m2c compile in the identical context. */
 export function makeRealScorer(
   toolchain: ToolchainId,
   cflags: readonly string[],
+  tu: TuModel,
   prependC: string,
   ctxI: string,
   language: 'c' | 'c++',
 ) {
-  const compile = makeRealCompile(toolchain, cflags, prependC, ctxI, language);
+  const compile = makeRealCompile(toolchain, cflags, tu, prependC, ctxI, language);
   return (candC: string, sym: string, targetObj: string): MatchScore =>
     scoreObjects(targetObj, compile(candC, sym), sym);
 }

@@ -10,6 +10,9 @@
 // trees and no cpp configuration — those exist only at vendor/verify time (RealProjectCfg).
 import type { BuiltTarget, ToolchainId } from '../toolchains';
 
+/** What a real row's translation unit is, before preprocessing (cases/manifests.ts `tu`). */
+export type TuModel = 'assembled' | 'unit';
+
 /** Vendor/verify-time description of a live project checkout (never used by the runner). */
 export interface RealProjectCfg {
   project: string;

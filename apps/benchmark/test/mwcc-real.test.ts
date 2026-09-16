@@ -20,7 +20,13 @@ import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
 import { noPrototypeCalls, sizeofBounds } from '../src/compile/mwcc';
-import { buildRealTarget, candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
+import {
+  buildRealTarget,
+  candidateLinkage,
+  makeRealCompile,
+  realCompilerFor,
+  scoringLadder,
+} from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
 
@@ -50,10 +56,10 @@ test('…and it is the only C++ front end: every other toolchain refuses a c++ r
   // scores, and publishes a number about a language the toolchain never read. No container: the
   // refusal happens while the case is built, before anything compiles.
   for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {
-    expect(() => makeRealCompile(id, [], '', '', 'c++'), id).toThrow(/has no C\+\+ front end/);
+    expect(() => makeRealCompile(id, [], 'assembled', '', '', 'c++'), id).toThrow(/has no C\+\+ front end/);
     expect(() => buildRealTarget(id, 'f', [], 'int f(void){return 0;}', 'c++'), id).toThrow(/has no C\+\+ front end/);
   }
-  expect(() => makeRealCompile('agbcc', [], '', '', 'c')).not.toThrow();
+  expect(() => makeRealCompile('agbcc', [], 'assembled', '', '', 'c')).not.toThrow();
 });
 
 // WHICH BINARY A ROW'S TOOLCHAIN ID ACTUALLY RUNS. Three CodeWarrior builds share one module, one
@@ -204,6 +210,21 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
     },
     CONTAINER_BUDGET,
   );
+
+  // A unit row's candidate compiles after its unit's earlier code, which can call the function: Mario Party 4's
+  // `HuDvdErrorWatch` is called twice before its definition. With the function's own prototype stripped, those
+  // calls declare it implicitly and the definition is `redeclared`, so the candidate never reaches its unit.
+  test(
+    "a unit row's candidate compiles after the unit's own callers of it",
+    () => {
+      const ctx = 'void f(void);\nvoid g(void) { f(); }\n';
+      const [unit] = scoringLadder('unit', '', ctx, 'f');
+      expect(unit.name).toBe('unit context');
+      const obj = mwcc.compileCandidate(`${unit.prelude}void f(void) {}\n`, 'f', CFLAGS, 'c');
+      expect(exportedFunctions(obj).sort()).toEqual(['f', 'g']);
+    },
+    CONTAINER_BUDGET,
+  );
 });
 
 // ── a C++ row ──────────────────────────────────────────────────────────────────────────────
@@ -288,7 +309,7 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
       // The ladder reaches it, and — the reason the fallback is sound rather than convenient — a C
       // compile exports the name the candidate is WRITTEN with, which on a C++ row is the mangled
       // symbol itself. No linkage block, and the same alignment key.
-      const compile = makeRealCompile('mwcc_242_81', CFLAGS, '', '', 'c++');
+      const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'assembled', '', '', 'c++');
       expect(exportedFunctions(compile(withThis, 'dot__3VecFP3Vec'))).toEqual(['dot__3VecFP3Vec']);
 
       // …and the two routes are the same OBJECT for a C-shaped body, which is what makes scoring
@@ -309,7 +330,7 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
       // diagnostic about the harness's ladder, which would bury the one sentence describing the
       // decompiler's output. Same defect class as cache.ts's v17.
       const broken = `${VEC}int Vec::dot(Vec * o) { return x * o->x + undeclared_thing; }\n`;
-      const compile = makeRealCompile('mwcc_242_81', CFLAGS, '', '', 'c++');
+      const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'assembled', '', '', 'c++');
       let message = '';
       try {
         compile(broken, 'dot__3VecFP3Vec');

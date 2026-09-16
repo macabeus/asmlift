@@ -25,7 +25,6 @@ import { join } from 'node:path';
 
 import { unitCompileWrapper } from '../cases/dtk-project';
 import type { BuiltTarget } from '../toolchains';
-import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir } from './util';
 
@@ -99,12 +98,14 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     // address 0: the decompiler reads the one that defines this row's function.
     return { obj: join(dir, 'u.o'), asm: ppcSectionScoped(mwcc, dir, 'u.o', sym, asm) };
   },
-  compileCandidate(tu, sym, cflags, language): string {
+  compileCandidate(tu, _sym, cflags, language): string {
     // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same
     // measured reason: a path reused across compiles that the container reaches through the shared
     // /tmp mount fails ~30% of the time with `c.o: No such file or directory`.
     const dir = mkdtempSync(join('/tmp', 'bench-ppc-cand-'));
-    writeFileSync(join(dir, 'c.c'), stripPrototype(tu, sym));
+    // The TU arrives whole: the ladder (compile/real.ts `scoringLadder`) decides what a context keeps of
+    // the function's own prototype, and a unit context has to keep it.
+    writeFileSync(join(dir, 'c.c'), tu);
     compile(mwcc, dir, 'c.c', 'c.o', [...cflags, langFlag(language)], false);
     return join(dir, 'c.o');
   },

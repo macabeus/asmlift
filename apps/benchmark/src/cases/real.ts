@@ -83,8 +83,22 @@ export function realCases(filter: RealFilter = {}): Case[] {
             unit.toolchain,
             buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI, language),
           ),
-        scorer: makeRealScorer(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI, language),
-        compile: makeRealCompile(unit.toolchain, codegen.cflags, f.prependC ?? '', man.vendored(f.sym).ctxI, language),
+        scorer: makeRealScorer(
+          unit.toolchain,
+          codegen.cflags,
+          man.tu,
+          f.prependC ?? '',
+          man.vendored(f.sym).ctxI,
+          language,
+        ),
+        compile: makeRealCompile(
+          unit.toolchain,
+          codegen.cflags,
+          man.tu,
+          f.prependC ?? '',
+          man.vendored(f.sym).ctxI,
+          language,
+        ),
       });
     }
   }

@@ -20,6 +20,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
+import type { TuModel } from '../compile/types';
 import { WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 
@@ -149,7 +150,7 @@ export interface RealManifest {
    *  different branch-prediction bits after their unit's file-scope declarations than after the unit's
    *  earlier function DEFINITIONS, and only the second is the game's function. A candidate compiles in
    *  that same prefix, so the scoring world is the one the game's function was compiled in too. */
-  tu: 'assembled' | 'unit';
+  tu: TuModel;
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
   defines?: string[]; // extra -D macros
