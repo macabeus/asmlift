@@ -33,11 +33,16 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 335 of the 336 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+context**: 335 of the 378 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
 vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
 a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 `test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
-cannot be handed to m2c's C parser at all (residual 5). Synthetic rows carry the prototype in
+cannot be handed to m2c's C parser at all (residual 5). The 42 C++ rows of pikmin carry NO m2c
+context, and the reason is m2c's rather than the dataset's: its `--context` parser is pycparser — C,
+and only C — so a C++ unit's own vendored context does not degrade it, it makes it FAIL
+(`manifests.ts`). Neither tool is given that unit's declarations there, so the row is symmetric as
+it stands; whether to hand-write C declarations for those 42 instead, as residual 5's row does, is
+open. Synthetic rows carry the prototype in
 the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
 what that translation unit preprocesses to, **never an invented type** (where a project types a
 global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
@@ -205,8 +210,8 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
   control), each run on its assigned toolchains: 215 functions → 671 cases.
-- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from seven decomp projects (af, kleod, marioparty3, marioparty4, pokeemerald, sa3, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 336 cases
+- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from eight decomp projects (af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
+  with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
   from asmlift's mwcc_242, so byte-match is not defined there.)
 
