@@ -39,7 +39,7 @@ import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
-import { flagsStatus, unitDeriver } from './derive-flags';
+import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
 import { undeclaredCallees } from './implicit-declarations';
 import {
   MODULE_MAP_DIR,
@@ -177,6 +177,12 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     const deriver = unitDeriver(man.project, root);
     const refusals: string[] = [];
     const flagsWrite = `run \`pnpm bench flags --project ${man.project} --write\``;
+    for (const f of man.functions) {
+      const unit = deriver.unitOf(f);
+      if (f.unit !== unit) {
+        refusals.push(`${f.sym}: the build compiles ${citedFile(f)} in ${unit}, not ${f.unit} — ${flagsWrite}`);
+      }
+    }
     for (const unit of new Set(man.functions.map((f) => f.unit))) {
       const stored = unit === undefined ? undefined : man.units?.[unit];
       if (unit === undefined || stored === undefined) {

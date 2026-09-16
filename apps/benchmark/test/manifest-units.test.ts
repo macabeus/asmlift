@@ -55,6 +55,14 @@ describe('validateManifest: build units', () => {
     );
   });
 
+  test('a row citing a part its unit includes may name that unit, and a row citing a source file may not', () => {
+    const inc = 'https://github.com/macabeus/fakeproj/blob/0123456/src/f_move.c_inc#L1-L1';
+    expect(problems(manifest({}, { sourceUrl: inc }))).toBe('');
+    expect(problems(manifest({ units: { 'src/g.c': UNIT } }, { unit: 'src/g.c' }))).toMatch(
+      /is not the file its sourceUrl cites/,
+    );
+  });
+
   test('a unit no row names is refused', () => {
     expect(problems(manifest({ units: { 'src/f.c': UNIT, 'src/old.c': UNIT } }))).toMatch(
       /unit src\/old.c is named by no row/,

@@ -15,7 +15,7 @@ import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
 import { existsSync, readFileSync } from 'node:fs';
 
 import { provenanceCommit } from '../cases/checkout';
-import { flagsStatus, unitDeriver, unitOf } from '../cases/derive-flags';
+import { flagsStatus, unitDeriver } from '../cases/derive-flags';
 import {
   type BuildUnit,
   type RealFunction,
@@ -81,7 +81,8 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
 
   const units = new Map<string, RealFunction[]>();
   for (const fn of rows) {
-    units.set(unitOf(fn), [...(units.get(unitOf(fn)) ?? []), fn]);
+    const unit = deriver.unitOf(fn);
+    units.set(unit, [...(units.get(unit) ?? []), fn]);
   }
   const table: string[][] = [];
   const notes: string[] = [];
@@ -165,7 +166,7 @@ function reportProject(man: RealManifest, rows: readonly RealFunction[], opts: F
       ...m,
       units: { ...m.units, ...Object.fromEntries(written) },
       functions: m.functions.map((f) =>
-        selected.has(f.sym) && written.has(unitOf(f)) ? { ...f, unit: unitOf(f) } : f,
+        selected.has(f.sym) && written.has(deriver.unitOf(f)) ? { ...f, unit: deriver.unitOf(f) } : f,
       ),
     }));
     console.log(`  wrote ${written.size} unit(s) to dataset/real/${man.project}.json`);

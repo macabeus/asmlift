@@ -10,7 +10,7 @@ import { storedFlags, tokenizeFlags } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS, type ToolchainId, isToolchainId } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { CACHE_DIR } from '../config';
@@ -19,13 +19,54 @@ import type { BuildUnit, RealFunction } from './manifests';
 import { gnuMake } from './project-elf';
 import { PROJECT_RECIPES } from './project-setup';
 
-/** The build unit a row's function is compiled in: the source file its permalink cites. */
-export function unitOf(fn: Pick<RealFunction, 'sym' | 'sourceUrl'>): string {
+/** The file a row's permalink cites: the source file its `funcC` was copied from. */
+export function citedFile(fn: Pick<RealFunction, 'sym' | 'sourceUrl'>): string {
   const path = /^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/[0-9a-f]+\/([^#]+)/.exec(fn.sourceUrl ?? '')?.[1];
   if (path === undefined) {
     throw new Error(`${fn.sym}: its sourceUrl names no unit`);
   }
   return path;
+}
+
+/** `ninja -t deps` output as the files each output's compile read, relative to `root` (the checkout the
+ *  build ran in, as its real path) where they lie inside it. */
+export function parseNinjaDeps(text: string, root: string): Map<string, string[]> {
+  const deps = new Map<string, string[]>();
+  let read: string[] | undefined;
+  for (const line of text.split('\n')) {
+    const output = /^(\S.*): #deps \d+/.exec(line)?.[1];
+    if (output !== undefined) {
+      read = [];
+      deps.set(output, read);
+    } else if (read !== undefined && /^\s+\S/.test(line)) {
+      const path = line.trim();
+      read.push(path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path);
+    }
+  }
+  return deps;
+}
+
+/** The dtk unit `cited` is compiled in: the unit `objdiff.json` builds from it, or, for a file no unit is
+ *  built from, the one unit whose compile READ it — a body a unit `#include`s (Animal Crossing's 550
+ *  `.c_inc` files) is compiled only inside that unit, and only at its flags. `deps` are what the project's
+ *  build recorded each object's compile reading (`parseNinjaDeps`), keyed by `base_path`. */
+export function dtkUnitOf(
+  units: readonly ObjdiffSourceUnit[],
+  cited: string,
+  deps: () => ReadonlyMap<string, readonly string[]>,
+): string {
+  if (units.some((u) => u.metadata?.source_path === cited)) {
+    return cited;
+  }
+  const including = units.filter((u) => deps().get(String(u.base_path))?.includes(cited));
+  if (including.length !== 1) {
+    throw new Error(
+      including.length === 0
+        ? `no objdiff.json unit is built from ${cited}, and the build records no unit reading it — build the project first`
+        : `${cited} is read by ${including.length} units: ${including.map((u) => String(u.metadata?.source_path)).join(', ')}`,
+    );
+  }
+  return String(including[0].metadata?.source_path);
 }
 
 export type BuildSystem = 'makefile' | 'dtk';
@@ -224,21 +265,39 @@ export function deriveDtkFlags(root: string, commit: string, unit: string): Buil
 /** Every unit of one project, derived at its checkout's HEAD: the build system is read once, and a Makefile
  *  project is read in one clone, with one walk over the objects its build wrote. A Makefile names no
  *  compiler asmlift can tell apart (`gcc` is two toolchains), so its unit takes `toolchain`; a dtk unit
- *  names its own. */
+ *  names its own. `unitOf` is the unit a row's function is compiled in: a Makefile project's is the file
+ *  the row cites, and a dtk project's the unit that file is built in or read by (`dtkUnitOf`). */
 export function unitDeriver(
   project: string,
   root: string,
-): { build: BuildSystem; commit: string; derive: (unit: string, toolchain: ToolchainId | undefined) => BuildUnit } {
+): {
+  build: BuildSystem;
+  commit: string;
+  unitOf: (fn: Pick<RealFunction, 'sym' | 'sourceUrl'>) => string;
+  derive: (unit: string, toolchain: ToolchainId | undefined) => BuildUnit;
+} {
   const build = buildSystemOf(root);
   const commit = git(root, ['rev-parse', 'HEAD']);
   if (build === 'dtk') {
-    return { build, commit, derive: (unit) => deriveDtkFlags(root, commit, unit) };
+    const units = (readObjdiffUnits(root)?.units ?? []) as readonly ObjdiffSourceUnit[];
+    let deps: Map<string, string[]> | undefined;
+    const recorded = () => {
+      deps ??= ninjaDeps(root);
+      return deps;
+    };
+    return {
+      build,
+      commit,
+      unitOf: (fn) => dtkUnitOf(units, citedFile(fn), recorded),
+      derive: (unit) => deriveDtkFlags(root, commit, unit),
+    };
   }
   const clone = flagsClone(project, root, commit);
   const objects = objectFiles(root);
   return {
     build,
     commit,
+    unitOf: citedFile,
     derive: (unit, toolchain) => {
       if (toolchain === undefined) {
         throw new Error(`no unit of ${project} names its toolchain yet: pass --toolchain`);
@@ -246,6 +305,15 @@ export function unitDeriver(
       return deriveMakefileFlags({ clone, commit, unit, object: unitObject(unit, objects), toolchain });
     },
   };
+}
+
+/** What the project's ninja build recorded each compile reading. */
+function ninjaDeps(root: string): Map<string, string[]> {
+  const r = spawnSync('ninja', ['-t', 'deps'], { cwd: root, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
+  if (r.error || r.status !== 0) {
+    throw new Error(`ninja -t deps failed in ${root}: ${r.error?.message ?? r.stderr}`);
+  }
+  return parseNinjaDeps(r.stdout, realpathSync(root));
 }
 
 export type FlagsStatus = { kind: 'ok' } | { kind: 'DRIFT'; changes: string[] } | { kind: 'MISSING' };
