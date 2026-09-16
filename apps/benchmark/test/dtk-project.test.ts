@@ -5,7 +5,7 @@
 // reproduced here without wine.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
@@ -186,6 +186,38 @@ describe('ninja under supervision', () => {
     expect(runs).toHaveLength(2);
     expect(runs[0].stopped).toBe('stalled');
     expect(runs[1].status).toBe(0);
+  });
+
+  test('kills the compilers a stopped ninja was running, not only ninja', async () => {
+    const root = dir();
+    const kids = join(root, 'kids');
+    // a ninja too wedged to answer SIGTERM, holding two compiles
+    const exe = fakeNinja(
+      root,
+      [
+        'if [ "$n" = 1 ]; then',
+        "  trap '' TERM",
+        `  sleep 30 & echo $! >> "${kids}"`,
+        `  sleep 30 & echo $! >> "${kids}"`,
+        '  echo "[1/2] MWCC npc_1_landing1.o"',
+        '  wait',
+        'fi',
+        'exit 0',
+      ].join('\n'),
+    );
+    const runs = await runNinja({ ...supervised, stallMs: 1_000, dir: root, log: join(root, 'log'), exe });
+    expect(runs[0].stopped).toBe('stalled');
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const compiles = readFileSync(kids, 'utf8').trim().split('\n').map(Number);
+    expect(compiles).toHaveLength(2);
+    expect(compiles.filter(alive)).toEqual([]);
   });
 
   test('does not call a slow but talking ninja stalled', async () => {

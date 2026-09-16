@@ -175,14 +175,46 @@ function echo(log: string, from: number): number {
   }
 }
 
+/** Every process descended from `pid`, parents before children. Read from `ps`: a process GROUP
+ *  would not do, because ninja puts each edge in a group of its own. */
+function descendants(pid: number): number[] {
+  const ps = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' });
+  const children = new Map<number, number[]>();
+  for (const line of (ps.stdout ?? '').split('\n')) {
+    const [child, parent] = line.trim().split(/\s+/).map(Number);
+    if (Number.isInteger(child) && Number.isInteger(parent) && child !== parent) {
+      children.set(parent, [...(children.get(parent) ?? []), child]);
+    }
+  }
+  const found: number[] = [];
+  for (const queue = [pid]; queue.length > 0;) {
+    for (const child of children.get(queue.shift() as number) ?? []) {
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+
 async function stop(child: ChildProcess, exited: () => boolean, graceMs: number, pollMs: number): Promise<void> {
   child.kill('SIGTERM'); // ninja puts every edge in its own process group and takes them down with it
   for (let waited = 0; waited < graceMs && !exited(); waited += pollMs) {
     await sleep(pollMs);
   }
-  if (!exited()) {
-    child.kill('SIGKILL');
+  if (exited()) {
+    return;
   }
+  // SIGTERM did not get through, which is the case the stall detector exists for: a ninja too
+  // wedged to reap leaves its running edges behind, and those are wine processes burning a core
+  // each for as long as the machine is up. Kill what it started before killing it.
+  for (const pid of descendants(child.pid as number).reverse()) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // already gone with its parent
+    }
+  }
+  child.kill('SIGKILL');
 }
 
 const describeAttempt = (run: NinjaAttempt): string =>
