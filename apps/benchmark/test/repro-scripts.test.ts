@@ -42,6 +42,15 @@ describe('m2cScript (pinned)', () => {
     expect(bare).not.toContain('--context');
   });
 
+  // A C++ row whose receiver m2c spelled `this` is judged on the RENAMED text, so the script must
+  // produce that text: `bench fidelity` compares its stdout with the row's published source.
+  test('a renamed-receiver row replays the rename; every other row pipes nothing', () => {
+    const plain = row('synthetic:add:agbcc');
+    expect(m2cScript(plain)).not.toContain('perl -pe');
+    const renamed: FunctionResult = { ...plain, m2c: { ...plain.m2c, receiverRenamed: 'this__' } };
+    expect(m2cScript(renamed)).toContain("in.s | perl -pe 's/\\bthis\\b/this__/g'");
+  });
+
   test('MIPS/PPC rows embed the normalized GNU-as text, not raw objdump', () => {
     const fn = row('synthetic:add:mwcc_242_81');
     const s = m2cScript(fn);
