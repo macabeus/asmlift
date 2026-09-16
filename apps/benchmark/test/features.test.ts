@@ -226,13 +226,26 @@ describe('tags match their evidence', () => {
       const k = `${r.project}:${r.sym}`;
       asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
     }
+    const floors = (tags: string[], src: string, asm: string) => {
+      const stripped = stripLiterals(src);
+      const body = definitionOf(stripped).body;
+      return tags.filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped));
+    };
+    // The floors the ASSEMBLY decides: measured over the published rows rather than listed, as the
+    // tags some row passes with its assembly and fails without it. `results.json` is a published
+    // artifact, so a row the last `bench run` has not met carries no assembly here — it is held to
+    // every other floor, and to these as soon as the next run publishes it.
+    const assemblyDecides = new Set(
+      authored.flatMap(({ where, tags, src }) => {
+        const asm = asmOf.get(where);
+        return asm === undefined ? [] : floors(tags, src, '').filter((t) => !floors([t], src, asm).length);
+      }),
+    );
     const bad = authored
       .flatMap(({ where, tags, src }) => {
-        const stripped = stripLiterals(src);
-        const body = definitionOf(stripped).body;
-        const asm = asmOf.get(where) ?? '';
-        return tags
-          .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped))
+        const asm = asmOf.get(where);
+        return floors(tags, src, asm ?? '')
+          .filter((t) => asm !== undefined || !assemblyDecides.has(t))
           .map((t) => `${where} claims ${t}`);
       })
       .sort();
