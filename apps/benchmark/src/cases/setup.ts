@@ -25,7 +25,7 @@ import { type RemoteLookup, checkoutStatus, git, provenanceCommit, remoteBranchH
 import {
   type RealManifest,
   benchCheckoutsDir,
-  loadManifestsForVendor,
+  loadManifestsForRepair,
   projectEnvOverride,
   resolveProjectRoot,
 } from './manifests';
@@ -228,7 +228,7 @@ export async function buildProject(man: RealManifest): Promise<string[]> {
 }
 
 export async function setup(filterProject?: string, opts: { build?: boolean } = {}): Promise<void> {
-  const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
+  const manifests = loadManifestsForRepair().filter((m) => !filterProject || m.project === filterProject);
   const rows = manifests.map((m) => setupProject(m));
   printTable(rows);
   console.log(`\n${fetchGcc272()}`);

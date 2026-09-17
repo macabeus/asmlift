@@ -145,6 +145,8 @@ const MP4_MAP: Unit = {
     file: 'objdiff.json',
     sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     unit: 'm427Dll/map',
+    cFlags:
+      '-nodefaults -O4,p -inline auto -pragma "scheduling off" -str reuse, readonly -maxerrors 1 -nosyspath -O0,p',
   },
 };
 

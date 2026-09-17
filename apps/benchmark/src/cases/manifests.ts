@@ -12,7 +12,7 @@
 // once, aggregated, and skipped.
 import { ADDR_PATTERN, type FlagsFrom, type Identifiable } from '@asmlift/bench-schema';
 import { commandFlags } from '@asmlift/cli/flags';
-import { parseFlags, storedFlags, unitLanguage } from '@asmlift/core/codegen-flags';
+import { parseFlags, storedFlags, tokenizeFlags, unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -291,26 +291,41 @@ function unitProblems(file: string, path: string, u: Partial<BuildUnit> | undefi
     typeof from.sha256 === 'string' &&
     SHA256.test(from.sha256) &&
     ((from.from === 'makefile' && typeof from.command === 'string' && from.command !== '') ||
-      (from.from === 'objdiff' && typeof from.unit === 'string' && from.unit !== ''));
+      (from.from === 'objdiff' &&
+        typeof from.unit === 'string' &&
+        from.unit !== '' &&
+        typeof from.cFlags === 'string' &&
+        from.cFlags !== ''));
   if (!typed) {
     problems.push(
-      `${where} "flagsFrom" must be {from: "makefile", commit, file, sha256, command} or {from: "objdiff", commit, file, sha256, unit}`,
+      `${where} "flagsFrom" must be {from: "makefile", commit, file, sha256, command} or {from: "objdiff", commit, file, sha256, unit, cFlags}`,
     );
-  } else if (from.from === 'makefile' && problems.length === 0) {
-    // `cflags` are the flags `flagsFrom.command` compiles with, read the way `bench flags` derived them, so
-    // the two fields cannot drift apart: a word edited out of `cflags` alone can leave every target
-    // ROM-equal and still move every candidate. The build itself is re-read only by `bench flags`.
+  } else if (problems.length === 0) {
+    // `cflags` are the flags the BUILD'S OWN TEXT gives the compiler — the Makefile recipe line, or the
+    // objdiff unit's `c_flags` — read here the way `bench flags` derived them, so the two fields cannot
+    // drift apart. Two ways they would, both caught by this one re-derivation and neither by the ROM:
+    // a word edited out of `cflags` alone can leave every target ROM-equal and still move every
+    // candidate, and a word RE-CLASSIFIED in core's flag table silently invalidates every stored unit at
+    // once, without touching a dataset file. It is pure, so it runs with no checkout: in CI over the
+    // committed manifests, and at the head of every bench command that loads the real tier.
+    // What it cannot see is the build TEXT itself going stale, or a hand-edit of both fields at once —
+    // `flagsFrom.sha256` is not re-derived from the text stored beside it. Only `bench flags`, which
+    // re-reads the project and re-proves the ROM, answers that.
     const family = TOOLCHAIN_TARGETS[u.toolchain].family;
     const cflags = u.cflags as string[];
+    const field = from.from === 'makefile' ? 'command' : 'cFlags';
     try {
-      const recipe = commandFlags(from.command as string, family);
-      if (recipe === undefined) {
+      const built =
+        from.from === 'makefile'
+          ? commandFlags(from.command as string, family)
+          : storedFlags(family, tokenizeFlags(from.cFlags as string));
+      if (built === undefined) {
         problems.push(`${where} "flagsFrom.command" runs no ${u.toolchain} compiler`);
-      } else if (recipe.join('\0') !== cflags.join('\0')) {
-        problems.push(`${where} "cflags" are not the flags its flagsFrom.command compiles with: ${recipe.join(' ')}`);
+      } else if (built.join('\0') !== cflags.join('\0')) {
+        problems.push(`${where} "cflags" are not the flags its flagsFrom.${field} compiles with: ${built.join(' ')}`);
       }
     } catch (e) {
-      problems.push(`${where} "flagsFrom.command": ${(e as Error).message}`);
+      problems.push(`${where} "flagsFrom.${field}": ${(e as Error).message}`);
     }
   }
   return problems;
@@ -321,13 +336,20 @@ export interface ManifestValidation {
   /** false: a row's `unit`, its `units` entry and its `romDigest` may be absent (each is still checked
    *  when present) */
   complete: boolean;
+  /** false: the stored `units` are not policed at all. Only the two commands that REPAIR them pass it —
+   *  `bench setup`, which clones the checkouts, and `bench flags`, which rewrites the units from those
+   *  checkouts — because neither may be locked out by the very staleness it exists to fix: a
+   *  re-classification in core's flag table invalidates every stored unit at once, and on a machine with
+   *  no checkouts the only way back is `bench setup` then `bench flags --write`. Neither command reads a
+   *  stored `cflags`, and `bench flags` reports each unit's status itself and exits 1 while any drifts. */
+  units?: boolean;
 }
 
 /** Validate one manifest's shape. Returns the problems (empty = valid). */
 export function validateManifest(
   m: unknown,
   file: string,
-  { complete }: ManifestValidation = { complete: true },
+  { complete, units = true }: ManifestValidation = { complete: true },
 ): string[] {
   const problems: string[] = [];
   const man = m as Partial<RealManifest>;
@@ -376,7 +398,9 @@ export function validateManifest(
   } else {
     const named = new Set((Array.isArray(man.functions) ? man.functions : []).map((f) => f.unit));
     for (const [path, u] of Object.entries(man.units ?? {})) {
-      problems.push(...unitProblems(file, path, u));
+      if (units) {
+        problems.push(...unitProblems(file, path, u));
+      }
       if (!named.has(path)) {
         problems.push(`${file}: unit ${path} is named by no row`);
       }
@@ -588,6 +612,12 @@ export function loadManifests(): VendoredManifest[] {
  *  `bench flags`, `bench vendor`); live checkouts required by the caller. */
 export function loadManifestsForVendor(): RealManifest[] {
   return loadRaw({ complete: false });
+}
+
+/** Manifests for `bench setup` and `bench flags`, the two commands that repair the stored units — the
+ *  one that fetches the builds and the one that re-derives from them: see `ManifestValidation.units`. */
+export function loadManifestsForRepair(): RealManifest[] {
+  return loadRaw({ complete: false, units: false });
 }
 
 /** Complete manifests without their vendored inputs: what a reader of published rows needs. */

@@ -12,10 +12,13 @@ export type { ToolchainId };
 export type DecompilerId = 'asmlift' | 'm2c';
 
 /** Where a real unit's compiler flags were copied from, at the project commit its TUs were vendored from:
- *  the Makefile recipe line that compiles the unit, or the dtk `objdiff.json` unit, with that file's sha256. */
+ *  the Makefile recipe line that compiles the unit, or the dtk `objdiff.json` unit, with that file's sha256.
+ *  Each form carries the build's OWN text verbatim — the recipe line, or the unit's `c_flags` — and not
+ *  merely a pointer to it, so that the stored `cflags` can be re-derived from what is committed, with no
+ *  checkout. */
 export type FlagsFrom =
   | { from: 'makefile'; commit: string; file: string; sha256: string; command: string }
-  | { from: 'objdiff'; commit: string; file: string; sha256: string; unit: string };
+  | { from: 'objdiff'; commit: string; file: string; sha256: string; unit: string; cFlags: string };
 
 /** How a single decompiler fared on one function — ONE classifier, applied identically to both
  *  decompilers (apps/benchmark/src/eval/outcome.ts). */

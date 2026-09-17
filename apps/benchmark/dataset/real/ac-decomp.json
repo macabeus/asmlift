@@ -46,6 +46,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -62,7 +64,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/lb_reki"
+        "unit": "foresta/lb_reki",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_cporiginal_ovl.c": {
@@ -80,6 +83,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -96,7 +101,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_cporiginal_ovl"
+        "unit": "foresta/game/m_cporiginal_ovl",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/npc/ac_npc_rcn_guide2.c": {
@@ -114,6 +120,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -130,7 +138,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/npc/ac_npc_rcn_guide2"
+        "unit": "foresta/actor/npc/ac_npc_rcn_guide2",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_field_info.c": {
@@ -148,6 +157,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -164,7 +175,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_field_info"
+        "unit": "foresta/game/m_field_info",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_event.c": {
@@ -182,6 +194,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -198,7 +212,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_event"
+        "unit": "foresta/game/m_event",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_collision_bg.c": {
@@ -216,6 +231,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -232,7 +249,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_collision_bg"
+        "unit": "foresta/game/m_collision_bg",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_mail_check_ovl.c": {
@@ -250,6 +268,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -266,7 +286,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_mail_check_ovl"
+        "unit": "foresta/game/m_mail_check_ovl",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/ac_insect.c": {
@@ -284,6 +305,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -300,7 +323,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/ac_insect"
+        "unit": "foresta/actor/ac_insect",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_bgm.c": {
@@ -318,6 +342,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -334,7 +360,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_bgm"
+        "unit": "foresta/game/m_bgm",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_view.c": {
@@ -352,6 +379,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -368,7 +397,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_view"
+        "unit": "foresta/game/m_view",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_room_type.c": {
@@ -386,6 +416,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -402,7 +434,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_room_type"
+        "unit": "foresta/game/m_room_type",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/system/sys_math3d.c": {
@@ -420,6 +453,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -436,7 +471,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/system/sys_math3d"
+        "unit": "foresta/system/sys_math3d",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/npc/ac_npc_post_man.c": {
@@ -454,6 +490,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -470,7 +508,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/npc/ac_npc_post_man"
+        "unit": "foresta/actor/npc/ac_npc_post_man",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_kankyo.c": {
@@ -488,6 +527,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -504,7 +545,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_kankyo"
+        "unit": "foresta/game/m_kankyo",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_lib.c": {
@@ -522,6 +564,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -538,7 +582,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_lib"
+        "unit": "foresta/game/m_lib",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_island.c": {
@@ -556,6 +601,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -572,7 +619,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_island"
+        "unit": "foresta/game/m_island",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/ac_gyoei.c": {
@@ -590,6 +638,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -606,7 +656,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/ac_gyoei"
+        "unit": "foresta/actor/ac_gyoei",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_card.c": {
@@ -624,6 +675,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -640,7 +693,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_card"
+        "unit": "foresta/game/m_card",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/evw_anime.c": {
@@ -658,6 +712,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -674,7 +730,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/evw_anime"
+        "unit": "foresta/evw_anime",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/npc/ac_npc_guide.c": {
@@ -692,6 +749,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -708,7 +767,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/npc/ac_npc_guide"
+        "unit": "foresta/actor/npc/ac_npc_guide",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_melody.c": {
@@ -726,6 +786,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -742,7 +804,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_melody"
+        "unit": "foresta/game/m_melody",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/effect/ef_dash_asimoto.c": {
@@ -760,6 +823,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -776,7 +841,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/effect/ef_dash_asimoto"
+        "unit": "foresta/effect/ef_dash_asimoto",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_mushroom.c": {
@@ -794,6 +860,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -810,7 +878,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_mushroom"
+        "unit": "foresta/game/m_mushroom",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_actor_shadow.c": {
@@ -828,6 +897,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -844,7 +915,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_actor_shadow"
+        "unit": "foresta/game/m_actor_shadow",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/static/jsyswrap.cpp": {
@@ -862,6 +934,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-O4,s",
@@ -878,7 +952,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "static/jsyswrap"
+        "unit": "static/jsyswrap",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -O4,s -sdata 0 -sdata2 0 -inline on -lang=c++"
       }
     },
     "src/game/m_skin_matrix.c": {
@@ -896,6 +971,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -912,7 +989,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_skin_matrix"
+        "unit": "foresta/game/m_skin_matrix",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/system/sys_matrix.c": {
@@ -930,6 +1008,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -946,7 +1026,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/system/sys_matrix"
+        "unit": "foresta/system/sys_matrix",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/ac_quest_talk_normal_init.c": {
@@ -964,6 +1045,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -980,7 +1063,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/ac_quest_talk_normal_init"
+        "unit": "foresta/actor/ac_quest_talk_normal_init",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/static/GBA2/JoyBoot.c": {
@@ -998,6 +1082,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-O4,s",
@@ -1014,7 +1100,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "static/GBA2/JoyBoot"
+        "unit": "static/GBA2/JoyBoot",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -O4,s -sdata 0 -sdata2 0 -inline on -lang=c"
       }
     },
     "src/effect/ef_night15_moon.c": {
@@ -1032,6 +1119,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1048,7 +1137,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/effect/ef_night15_moon"
+        "unit": "foresta/effect/ef_night15_moon",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/ac_effectbg.c": {
@@ -1066,6 +1156,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1082,7 +1174,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/ac_effectbg"
+        "unit": "foresta/actor/ac_effectbg",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_design_ovl.c": {
@@ -1100,6 +1193,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1116,7 +1211,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_design_ovl"
+        "unit": "foresta/game/m_design_ovl",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/game/m_private.c": {
@@ -1134,6 +1230,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1150,7 +1248,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/game/m_private"
+        "unit": "foresta/game/m_private",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/c_keyframe.c": {
@@ -1168,6 +1267,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1184,7 +1285,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/c_keyframe"
+        "unit": "foresta/c_keyframe",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/lb_rtc.c": {
@@ -1202,6 +1304,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1218,7 +1322,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/lb_rtc"
+        "unit": "foresta/lb_rtc",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/actor/ac_ball.c": {
@@ -1236,6 +1341,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-sdata",
@@ -1252,7 +1359,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "foresta/actor/ac_ball"
+        "unit": "foresta/actor/ac_ball",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -sdata 0 -sdata2 0 -d IS_REL -requireprotos -sym on -O4,s -lang=c"
       }
     },
     "src/static/initial_menu.c": {
@@ -1270,6 +1378,8 @@
         "hardware",
         "-Cpp_exceptions",
         "off",
+        "-pragma",
+        "cats off",
         "-sym",
         "on",
         "-O4,s",
@@ -1286,7 +1396,8 @@
         "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
         "file": "objdiff.json",
         "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
-        "unit": "static/initial_menu"
+        "unit": "static/initial_menu",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -multibyte -char unsigned -fp hardware -Cpp_exceptions off -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -DVERSION=0 -sym on -DDEBUG=0 -DNDEBUG -d _LANGUAGE_C -d F3DEX_GBI_2 -d MUST_MATCH -O4,s -sdata 0 -sdata2 0 -inline on -lang=c"
       }
     }
   },

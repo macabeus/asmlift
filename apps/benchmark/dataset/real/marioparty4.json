@@ -38,6 +38,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -56,7 +58,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/main"
+        "unit": "main/game/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/dvd.c": {
@@ -75,6 +78,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -93,7 +98,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/dvd"
+        "unit": "main/game/dvd",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/memory.c": {
@@ -112,6 +118,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -130,7 +138,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/memory"
+        "unit": "main/game/memory",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/hsfdraw.c": {
@@ -149,6 +158,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -167,7 +178,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/hsfdraw"
+        "unit": "main/game/hsfdraw",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/window.c": {
@@ -186,6 +198,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -204,7 +218,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/window"
+        "unit": "main/game/window",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/saveload.c": {
@@ -223,6 +238,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -241,7 +258,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/saveload"
+        "unit": "main/game/saveload",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/board/main.c": {
@@ -260,6 +278,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -278,7 +298,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/board/main"
+        "unit": "main/game/board/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/board/space.c": {
@@ -297,6 +318,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -315,7 +338,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/board/space"
+        "unit": "main/game/board/space",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/game/board/char_wheel.c": {
@@ -334,6 +358,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -352,7 +378,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "main/game/board/char_wheel"
+        "unit": "main/game/board/char_wheel",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -lang=c"
       }
     },
     "src/REL/E3setupDLL/main.c": {
@@ -371,6 +398,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -395,7 +424,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "E3setupDLL/REL/E3setupDLL/main"
+        "unit": "E3setupDLL/REL/E3setupDLL/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m401Dll/main.c": {
@@ -414,6 +444,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -438,7 +470,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m401Dll/REL/m401Dll/main"
+        "unit": "m401Dll/REL/m401Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m405Dll/main.c": {
@@ -457,6 +490,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -481,7 +516,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m405Dll/REL/m405Dll/main"
+        "unit": "m405Dll/REL/m405Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m410Dll/game.c": {
@@ -500,6 +536,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -524,7 +562,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m410Dll/REL/m410Dll/game"
+        "unit": "m410Dll/REL/m410Dll/game",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m416Dll/main.c": {
@@ -543,6 +582,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -567,7 +608,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m416Dll/REL/m416Dll/main"
+        "unit": "m416Dll/REL/m416Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m416Dll/map.c": {
@@ -586,6 +628,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -610,7 +654,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m416Dll/REL/m416Dll/map"
+        "unit": "m416Dll/REL/m416Dll/map",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m420dll/player.c": {
@@ -629,6 +674,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -653,7 +700,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m420dll/REL/m420dll/player"
+        "unit": "m420dll/REL/m420dll/player",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m420dll/map.c": {
@@ -672,6 +720,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -696,7 +746,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m420dll/REL/m420dll/map"
+        "unit": "m420dll/REL/m420dll/map",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m427Dll/map.c": {
@@ -715,6 +766,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -739,7 +792,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m427Dll/REL/m427Dll/map"
+        "unit": "m427Dll/REL/m427Dll/map",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m427Dll/player.c": {
@@ -758,6 +812,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -782,7 +838,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m427Dll/REL/m427Dll/player"
+        "unit": "m427Dll/REL/m427Dll/player",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m429Dll/main.c": {
@@ -801,6 +858,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -825,7 +884,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m429Dll/REL/m429Dll/main"
+        "unit": "m429Dll/REL/m429Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m430Dll/water.c": {
@@ -844,6 +904,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -868,7 +930,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m430Dll/REL/m430Dll/water"
+        "unit": "m430Dll/REL/m430Dll/water",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m430Dll/player.c": {
@@ -887,6 +950,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -911,7 +976,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m430Dll/REL/m430Dll/player"
+        "unit": "m430Dll/REL/m430Dll/player",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m432Dll/main.c": {
@@ -930,6 +996,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -954,7 +1022,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m432Dll/REL/m432Dll/main"
+        "unit": "m432Dll/REL/m432Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m434Dll/map.c": {
@@ -973,6 +1042,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -997,7 +1068,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m434Dll/REL/m434Dll/map"
+        "unit": "m434Dll/REL/m434Dll/map",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m434Dll/fish.c": {
@@ -1016,6 +1088,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1040,7 +1114,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m434Dll/REL/m434Dll/fish"
+        "unit": "m434Dll/REL/m434Dll/fish",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m437Dll/main.c": {
@@ -1059,6 +1134,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1083,7 +1160,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m437Dll/REL/m437Dll/main"
+        "unit": "m437Dll/REL/m437Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m440Dll/main.c": {
@@ -1102,6 +1180,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1126,7 +1206,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m440Dll/REL/m440Dll/main"
+        "unit": "m440Dll/REL/m440Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m440Dll/object.c": {
@@ -1145,6 +1226,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1169,7 +1252,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m440Dll/REL/m440Dll/object"
+        "unit": "m440Dll/REL/m440Dll/object",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m446Dll/card.c": {
@@ -1188,6 +1272,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1212,7 +1298,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m446dll/REL/m446Dll/card"
+        "unit": "m446dll/REL/m446Dll/card",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/m446Dll/table.c": {
@@ -1231,6 +1318,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1255,7 +1344,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "m446dll/REL/m446Dll/table"
+        "unit": "m446dll/REL/m446Dll/table",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/option/scene.c": {
@@ -1274,6 +1364,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1298,7 +1390,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "option/REL/option/scene"
+        "unit": "option/REL/option/scene",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/option/state.c": {
@@ -1317,6 +1410,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1341,7 +1436,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "option/REL/option/state"
+        "unit": "option/REL/option/state",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/option/sound.c": {
@@ -1360,6 +1456,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1384,7 +1482,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "option/REL/option/sound"
+        "unit": "option/REL/option/sound",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/option/record.c": {
@@ -1403,6 +1502,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1427,7 +1528,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "option/REL/option/record"
+        "unit": "option/REL/option/record",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/selmenuDll/main.c": {
@@ -1446,6 +1548,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1470,7 +1574,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "selmenuDll/REL/selmenuDll/main"
+        "unit": "selmenuDll/REL/selmenuDll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/w02Dll/gendice.c": {
@@ -1489,6 +1594,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1513,7 +1620,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "w02Dll/REL/w02Dll/gendice"
+        "unit": "w02Dll/REL/w02Dll/gendice",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/w03Dll/condor.c": {
@@ -1532,6 +1640,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1556,7 +1666,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "w03Dll/REL/w03Dll/condor"
+        "unit": "w03Dll/REL/w03Dll/condor",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/w03Dll/mg_coin.c": {
@@ -1575,6 +1686,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1599,7 +1712,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "w03Dll/REL/w03Dll/mg_coin"
+        "unit": "w03Dll/REL/w03Dll/mg_coin",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/w06Dll/main.c": {
@@ -1618,6 +1732,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1642,7 +1758,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "w06Dll/REL/w06Dll/main"
+        "unit": "w06Dll/REL/w06Dll/main",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     },
     "src/REL/w10Dll/host.c": {
@@ -1661,6 +1778,8 @@
         "-O4,p",
         "-inline",
         "auto",
+        "-pragma",
+        "cats off",
         "-RTTI",
         "off",
         "-fp_contract",
@@ -1685,7 +1804,8 @@
         "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
         "file": "objdiff.json",
         "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
-        "unit": "w10Dll/REL/w10Dll/host"
+        "unit": "w10Dll/REL/w10Dll/host",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract on -str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned -fp_contract off -sdata 0 -sdata2 0 -pool off -DMATH_EXPORT_CONST -lang=c"
       }
     }
   },
