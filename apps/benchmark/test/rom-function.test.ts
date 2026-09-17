@@ -451,6 +451,46 @@ describe('what a relocation points at', () => {
     });
   });
 
+  // A RELOCATION AGAINST A SECTION SYMBOL. IDO writes one for every reference to a file-local datum,
+  // and the section it names is whichever one holds that datum in THAT file: the object's own
+  // `.rodata`, the linked image's `.ovl_play`. Where in the section is the addend, which a REL table
+  // keeps in the field this comparison masks — so such a relocation states its offset and type and
+  // nothing else, and comparing the names refuses every Animal Forest row.
+  describe('a relocation against a section symbol', () => {
+    const MIPS_TEXT = [0x3c, 0x02, 0x00, 0x00, 0x8c, 0x42, 0x00, 0x00, 0x03, 0xe0, 0x00, 0x08];
+    const sectionRef = (sectionName: string, data: number[]) =>
+      elf32({
+        machine: EM_MIPS,
+        littleEndian: false,
+        textAddr: 0,
+        text: MIPS_TEXT,
+        data,
+        dataName: sectionName,
+        symbols: [
+          { name: 'p', value: 0, size: MIPS_TEXT.length },
+          { name: sectionName, value: 0, size: 0, type: 3, section: 'data', bind: 'local' as const },
+        ],
+        relocs: [
+          { offset: 0, type: 5, sym: sectionName },
+          { offset: 4, type: 6, sym: sectionName },
+        ],
+      });
+
+    test('the section a datum lives in is not compared, on either side', () => {
+      const object = sectionRef('.rodata', [0x3f, 0x80, 0x00, 0x00]);
+      const rom = sectionRef('.ovl_play', [0x3f, 0x80, 0x00, 0x00]);
+      expect(compareWithRom(object, 'p', rom, 0)).toEqual({ equal: true, digest: targetDigest(object, 'p') });
+    });
+
+    test('the code around it is still compared', () => {
+      const object = sectionRef('.rodata', [0x3f, 0x80, 0x00, 0x00]);
+      const rom = sectionRef('.ovl_play', [0x3f, 0x80, 0x00, 0x00]);
+      const changed = Buffer.from(object);
+      changed[52 + 8] = 0x00; // the `jr ra` opcode, outside every relocated field
+      expect(compareWithRom(changed, 'p', rom, 0)).toMatchObject({ equal: false });
+    });
+  });
+
   // A REL MODULE is read through `romLocation`, which PLACES it: every section gets a base of its own
   // so the module reads like a linked image. Placement rebases the section-relative coordinates, and a
   // relocation's offset is one of them — leave it behind and the module's own relocations fall outside

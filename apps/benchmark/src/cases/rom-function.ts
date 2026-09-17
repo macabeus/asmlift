@@ -25,6 +25,7 @@ const SHF_EXECINSTR = 0x4;
 const SHN_LORESERVE = 0xff00;
 const STB_LOCAL = 0;
 const STT_NOTYPE = 0;
+const STT_SECTION = 3;
 const STT_FUNC = 2;
 const EM_MIPS = 8;
 const EM_PPC = 20;
@@ -247,6 +248,8 @@ interface Referent {
   name: string;
   /** a definition with file-local linkage — the case whose name is not comparable */
   local: boolean;
+  /** the referent is a SECTION, not a datum in it — the case nothing about is comparable */
+  sectionSymbol?: true;
   addend: number;
   section?: string;
   size?: number;
@@ -282,6 +285,15 @@ function referentOf(elf: Elf32, entry: RelocationEntry): Referent {
   const section = sym.shndx > 0 && sym.shndx < SHN_LORESERVE ? elf.sections[sym.shndx] : undefined;
   if (section === undefined) {
     return { name: sym.name, local: false, addend: entry.addend };
+  }
+  if (sym.type === STT_SECTION) {
+    // A RELOCATION AGAINST A SECTION SYMBOL NAMES NO DATUM. Which section a datum ends up in is the
+    // linker's choice — Animal Forest's object relocates against its own `.rodata` and the linked
+    // image against the `.ovl_play` that absorbed it — and WHERE in the section is the addend, which
+    // a REL table (the MIPS and ARM projects') keeps in the very field this comparison masks. Offset
+    // and type are all such a relocation states on either side. IDO writes them for every reference
+    // to a file-local datum; CodeWarrior writes none.
+    return { name: section.name, local: true, sectionSymbol: true, addend: entry.addend };
   }
   const referent: Referent = {
     name: sym.name,
@@ -449,6 +461,9 @@ function comparePointedAt(object: readonly Relocation[], held: readonly Relocati
       return `object relocates ${label(a)}, ROM ${label(b)}`;
     }
     const [x, y] = [a.referent, b.referent];
+    if (x.sectionSymbol || y.sectionSymbol) {
+      continue;
+    }
     const [nx, ny] = [comparableName(x), comparableName(y)];
     const anonymous = nx === undefined && ny === undefined;
     if (x.addend !== y.addend || (!anonymous && nx !== ny)) {

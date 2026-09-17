@@ -440,8 +440,11 @@ the round that first ran it.
   comparison, all stated in the code: a file that keeps NO relocations (a fully linked image — the ARM
   and MIPS projects) is compared on its code alone; the words of a datum the file itself relocates (a
   `bctr` jump table) state no value either side and are masked, so what such a datum points at is not
-  followed; and a literal pool's compiler-assigned number (`@1135`) is not a fact about the game, so it
-  is compared by what it holds. It writes each row's `romDigest`, and `bench run` refuses a row whose
+  followed; a literal pool's compiler-assigned number (`@1135`) is not a fact about the game, so it is
+  compared by what it holds; and a relocation against a SECTION SYMBOL — which IDO writes for every
+  reference to a file-local datum, and CodeWarrior for none — states its offset and type and nothing
+  else, because which section holds a datum is the linker's choice and where in it is the addend a REL
+  table keeps in the masked field. It writes each row's `romDigest`, and `bench run` refuses a row whose
   target has another digest — that digest is the masked CODE, so it is the vendor-time check above, not
   the digest, that covers the referents. A pin bump is therefore `bench flags --write`, then
   `bench vendor`, and `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were

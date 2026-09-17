@@ -9,8 +9,11 @@ export interface ElfSpec {
   /** the code section's name, `.text` unless stated — a REL module's function is found by it */
   textName?: string;
   text: number[];
-  /** a `.data` section's bytes, where the test's relocations point at data */
+  /** a data section's bytes, where the test's relocations point at data */
   data?: number[];
+  /** the data section's name, `.data` unless stated — which section holds a datum is the linker's
+   *  choice, so the object's and the game's need not agree */
+  dataName?: string;
   /** the data section's address, 0 unless stated — a LINKED image places its data where the game
    *  loads it, and a referent's bytes are only found by converting that back to a file offset */
   dataAddr?: number;
@@ -103,11 +106,19 @@ export function elf32(spec: ElfSpec): Buffer {
     { name: textName, type: 1, flags: 0x6, addr: spec.textAddr, body: Buffer.from(spec.text) },
     ...(spec.data === undefined
       ? []
-      : [{ name: '.data', type: 1, flags: 0x3, addr: spec.dataAddr ?? 0, body: Buffer.from(spec.data) }]),
+      : [
+          {
+            name: spec.dataName ?? '.data',
+            type: 1,
+            flags: 0x3,
+            addr: spec.dataAddr ?? 0,
+            body: Buffer.from(spec.data),
+          },
+        ]),
     { name: '.symtab', type: 2, flags: 0, addr: 0, body: symtab, link: '.strtab' },
     { name: '.strtab', type: 3, flags: 0, addr: 0, body: names },
     ...(spec.relocs === undefined ? [] : [relSection(spec.relocs, textName)]),
-    ...(spec.dataRelocs === undefined ? [] : [relSection(spec.dataRelocs, '.data')]),
+    ...(spec.dataRelocs === undefined ? [] : [relSection(spec.dataRelocs, spec.dataName ?? '.data')]),
     ...(spec.moreSections ?? []).map((m) => ({
       name: m.name,
       type: 1,
