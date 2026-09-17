@@ -102,6 +102,29 @@ describe('the two witnesses must agree, and a disagreement declines naming what 
       TAIL('0x4');
     expect(() => src(leftover, P5)).toThrow(/reaches a return unconsumed/);
   });
+
+  test('a LOAD off a licensed slot refuses — the callee owns that word across the call', () => {
+    // The word is staged, the call takes it, and then this function reads the offset back. What
+    // the `ldr` sees is whatever the CALLEE left there (AAPCS lets a callee assign to a stack
+    // parameter), so it is a GAP — but the staging store is still its reaching def, and without
+    // this refusal the `ldr` arm renders the value the CALLER passed, an `a0` standing in for an
+    // unknown. Neither the per-offset exemption nor the pending-set dataflow can see it: the call
+    // already consumed the offset, so the load clears nothing.
+    const reload =
+      HEAD + '\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tfive\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' + TAIL('0x4');
+    expect(() => src(reload, P5)).toThrow(
+      /\[sp,#0\] is an outgoing stack-argument slot .* but this function also LOADS it/,
+    );
+  });
+
+  test('…and so does a load BEFORE the staging store, on the layout the licence rests on', () => {
+    // ACCUMULATE_OUTGOING_ARGS puts the locals ABOVE the area, so an offset this function loads is
+    // not an argument offset. Reading it as a local AND handing it to a callee are two claims
+    // about one word; the licence is the thing that would have to be wrong, so it refuses.
+    const before =
+      HEAD + '\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tstr\tr1, [sp]\n\tbl\tfive\n' + TAIL('0x4');
+    expect(() => src(before, P5)).toThrow(/but this function also LOADS it/);
+  });
 });
 
 describe('an argument slot is owned storage that this function does not DECLARE', () => {

@@ -3581,6 +3581,25 @@ export function lift(
         }
       }
     }
+    // A LICENSED WORD THIS FUNCTION ALSO LOADS. The area belongs to the CALLEE — which may assign
+    // to a stack parameter — so after the `bl` the word holds whatever the callee left, and an
+    // `ldr` off that offset reads a GAP. The dataflow above cannot catch it: the call consumes the
+    // offset, so the load meets an empty pending set and clears nothing. Left alone, the ordinary
+    // `ldr` arm answers it from the staging store's reaching def and renders the value the CALLER
+    // passed in — a plausible identifier standing in for an unknown, which is the `unksp0` failure
+    // mode this whole analysis exists to avoid. It is the same contradiction
+    // `capturedObjectIsTheWholeFrame` refuses: one word carrying two incompatible claims, with
+    // nothing here able to decide between them. A load BEFORE the staging store is the same verdict
+    // for the same reason — under ACCUMULATE_OUTGOING_ARGS the locals sit ABOVE the area, so a
+    // caller-side load of an argument offset contradicts the layout the licence rests on.
+    for (const off of asc(licensed)) {
+      if (reloaded.has(off)) {
+        return refuse(
+          `[sp,#${off}] is an outgoing stack-argument slot of one of this function's calls, but this function also LOADS it — ` +
+            'the callee owns that word across the call, so nothing here can say what the load reads',
+        );
+      }
+    }
     for (const off of asc(storedAnywhere)) {
       if (!licensed.has(off) && !reloaded.has(off) && prefixStored(off, storedAnywhere)) {
         return refuse(
