@@ -895,7 +895,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Local aggregate initialiser',
     group: 'data-types',
     evidence: 'source',
-    pending: true,
     summary: 'an automatic local array or struct declared with a brace initialiser',
     detail:
       '`int v[4] = { 1, 2, 3, 4 };` inside a function is not a declaration the compiler can fold ' +
@@ -1129,7 +1128,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Struct copy',
     group: 'memory',
     evidence: 'judgement',
-    pending: true,
     summary: 'a struct is assigned BY VALUE, and the compiler emits the copy',
     detail:
       '`*a = *b;` on a struct is not one store. The compiler emits a run of loads and stores — or ' +
@@ -1344,7 +1342,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Struct returned by value',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: 'a struct or class is returned BY VALUE, through a hidden pointer',
     detail:
       'No ABI here returns an aggregate in a register. The CALLER allocates the space and passes ' +
@@ -1362,7 +1359,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Hardware float ABI',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: 'floating-point arguments and results travel in floating-point registers',
     detail:
       'A target with an FPU has a SECOND register file in its calling convention: PowerPC passes ' +
@@ -1382,7 +1378,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Inlined callee',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: 'a call the source spells that the compiler expanded in place',
     detail:
       'The source says `fabsf(x)`, or calls a small static helper in the same unit, and the object ' +
@@ -1486,7 +1481,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Variadic call',
     group: 'calls',
     evidence: 'codegen',
-    pending: true,
     summary: 'a call to a variadic function, marked by the PowerPC EABI’s CR bit 6',
     detail:
       'A variadic callee cannot know from its arguments whether any float arrived in an FP ' +
