@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { unitCompileWrapper } from '../cases/dtk-project';
 import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
+import { declarationsOnly } from './declarations';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir } from './util';
 
@@ -66,7 +67,12 @@ const DECLSPEC = /__declspec\s*\([^()]*\)\s*/g;
 /** A bracketed expression holding no bracket of its own. */
 const BRACKETED = /\[([^[\]]*)\]/g;
 
-/** The distinct array bounds in `text` that `sizeof` spells, as written between their brackets. */
+/** The distinct array bounds in `text` that `sizeof` spells, as written between their brackets.
+ *
+ *  A DECLARATION's text, never a whole unit's: `[...]` around a `sizeof` is an array bound in a
+ *  declarator and a SUBSCRIPT in an expression, and only the first is a constant the compiler can be
+ *  asked for. A unit prefix is mostly function bodies, and Mario Party 4's `SLSerialNoCheck` reaches
+ *  three of them — `[(i) * sizeof(PlayerState) + …]` among them, which is not a constant at all. */
 export function sizeofBounds(text: string): string[] {
   return [...new Set([...text.matchAll(BRACKETED)].map((m) => m[1]).filter((b) => /\bsizeof\b/.test(b)))];
 }
@@ -150,7 +156,7 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     // `Failed to evaluate expression (OthersSave_c) … at compile time` on 28 of them, for m_card.h's
     // `u8 __align[ALIGN_NEXT(sizeof(OthersSave_c), mCD_MEMCARD_SECTORSIZE)]`. Each such bound is
     // replaced by the number CodeWarrior gives it at the unit's flags, which the layout depends on.
-    const bounds = sizeofBounds(ctx);
+    const bounds = sizeofBounds(declarationsOnly(ctx));
     if (bounds.length === 0) {
       return ctx;
     }
@@ -164,11 +170,12 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
         Number.parseInt(m[1], 16),
       ]),
     );
+    const missing = bounds.filter((b) => !sizes.has(b));
+    if (missing.length > 0) {
+      throw new Error(`mwcceppc gave the array bound [${missing[0]}] no size`);
+    }
     return ctx.replace(BRACKETED, (whole, inner: string) => {
       const size = sizes.get(inner);
-      if (size === undefined && /\bsizeof\b/.test(inner)) {
-        throw new Error(`mwcceppc gave the array bound [${inner}] no size`);
-      }
       return size === undefined ? whole : `[${size}]`;
     });
   },

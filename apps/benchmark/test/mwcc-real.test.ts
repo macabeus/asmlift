@@ -19,6 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
+import { declarationsOnly } from '../src/compile/declarations';
 import { noPrototypeCalls, sizeofBounds } from '../src/compile/mwcc';
 import {
   buildRealTarget,
@@ -132,6 +133,21 @@ test('the array bounds a context spells with sizeof are found once each, whateve
     '((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))',
     '(0x108 - 0x0FC) / sizeof(void*)',
   ]);
+});
+
+// A `"tu": "unit"` project's context is its unit PREFIX, so it is mostly function bodies, and a bracket
+// there is a SUBSCRIPT, not an array bound. Mario Party 4's `SLSerialNoCheck` reaches three that spell
+// `sizeof` — `[(i) * sizeof(PlayerState) + …]` among them, which is not a constant at all and made
+// CodeWarrior refuse the probe with `undefined identifier 'i'`.
+test('a subscript in a function body is not an array bound', () => {
+  const ctx = [
+    'typedef struct { u8 pad[sizeof(Save_t)]; } A;',
+    'static int f(int i) {',
+    '  return buf[(i) * sizeof(PlayerState)] + other[sizeof(SaveBufData)];',
+    '}',
+  ].join('\n');
+  expect(sizeofBounds(ctx)).toEqual(['sizeof(Save_t)', '(i) * sizeof(PlayerState)', 'sizeof(SaveBufData)']);
+  expect(sizeofBounds(declarationsOnly(ctx))).toEqual(['sizeof(Save_t)']);
 });
 
 test('a call refused for having no prototype is named from the unit at its byte offset', () => {
