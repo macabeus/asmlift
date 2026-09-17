@@ -221,9 +221,20 @@ describe('committed real-tier manifests', () => {
       // provenance is part of the dataset
       const prov = JSON.parse(readFileSync(join(dir, 'PROVENANCE.json'), 'utf8'));
       expect(typeof prov.commit).toBe('string');
-      // and nothing else: a blob no row reads is one a re-vendor orphaned
-      const named = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx]));
-      expect(readdirSync(dir).filter((b) => b.endsWith('.i.gz') && !named.has(b))).toEqual([]);
+      // …and the directory holds exactly the blobs the index names, both ways. An EXTRA blob is one a
+      // re-vendor orphaned and the dataset would carry for ever; a MISSING one is a row whose input is
+      // not in the repository at all, which no other gate reads — a sweep that forgot a blob kind
+      // (the index gained `m2c` after the sweep was written) deleted 37 of pikmin's.
+      const named = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx, e.m2c]));
+      const onDisk = new Set(readdirSync(dir).filter((b) => b.endsWith('.i.gz')));
+      expect(
+        [...onDisk].filter((b) => !named.has(b)),
+        `${man.project}: blobs no row reads`,
+      ).toEqual([]);
+      expect(
+        [...named].filter((b) => !onDisk.has(b)),
+        `${man.project}: blobs the index names`,
+      ).toEqual([]);
     });
 
     // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that

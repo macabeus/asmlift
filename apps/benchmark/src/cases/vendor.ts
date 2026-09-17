@@ -351,12 +351,6 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       cpp: execSync(`${CPP} --version`, { encoding: 'utf8' }).split('\n')[0],
       generatedAt: new Date().toISOString(),
     };
-    // A vendor run leaves the directory its index describes: a row whose context changed orphans the
-    // blob it used to share, and an orphan nothing reads is a file the dataset carries for ever.
-    const named = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx]));
-    for (const stale of readdirSync(outDir).filter((f) => f.endsWith('.i.gz') && !named.has(f))) {
-      rmSync(join(outDir, stale));
-    }
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
     console.log(
