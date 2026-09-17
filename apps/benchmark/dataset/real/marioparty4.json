@@ -1,0 +1,2538 @@
+{
+  "project": "marioparty4",
+  "repoDir": "marioparty4",
+  "repo": "macabeus/marioparty4",
+  "branch": "asmlift-benchmark",
+  "tu": "unit",
+  "cppIncludes": [
+    "-nodefaults",
+    "-nosyspath",
+    "-i",
+    "include",
+    "-i",
+    "extern/musyx/include",
+    "-i",
+    "build/GMPE01_00/include",
+    "-multibyte"
+  ],
+  "headers": [],
+  "defines": [
+    "-DVERSION=0",
+    "-DMUSY_TARGET=MUSY_TARGET_DOLPHIN",
+    "-DNDEBUG=1"
+  ],
+  "units": {
+    "src/game/main.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/main"
+      }
+    },
+    "src/game/dvd.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/dvd"
+      }
+    },
+    "src/game/memory.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/memory"
+      }
+    },
+    "src/game/hsfdraw.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/hsfdraw"
+      }
+    },
+    "src/game/window.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/window"
+      }
+    },
+    "src/game/saveload.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/saveload"
+      }
+    },
+    "src/game/board/main.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/board/main"
+      }
+    },
+    "src/game/board/space.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/board/space"
+      }
+    },
+    "src/game/board/char_wheel.c": {
+      "toolchain": "mwcc_247_107",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "main/game/board/char_wheel"
+      }
+    },
+    "src/REL/E3setupDLL/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "E3setupDLL/REL/E3setupDLL/main"
+      }
+    },
+    "src/REL/m401Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m401Dll/REL/m401Dll/main"
+      }
+    },
+    "src/REL/m405Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m405Dll/REL/m405Dll/main"
+      }
+    },
+    "src/REL/m410Dll/game.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m410Dll/REL/m410Dll/game"
+      }
+    },
+    "src/REL/m416Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m416Dll/REL/m416Dll/main"
+      }
+    },
+    "src/REL/m416Dll/map.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m416Dll/REL/m416Dll/map"
+      }
+    },
+    "src/REL/m420dll/player.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m420dll/REL/m420dll/player"
+      }
+    },
+    "src/REL/m420dll/map.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m420dll/REL/m420dll/map"
+      }
+    },
+    "src/REL/m427Dll/map.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m427Dll/REL/m427Dll/map"
+      }
+    },
+    "src/REL/m427Dll/player.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m427Dll/REL/m427Dll/player"
+      }
+    },
+    "src/REL/m429Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m429Dll/REL/m429Dll/main"
+      }
+    },
+    "src/REL/m430Dll/water.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m430Dll/REL/m430Dll/water"
+      }
+    },
+    "src/REL/m430Dll/player.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m430Dll/REL/m430Dll/player"
+      }
+    },
+    "src/REL/m432Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m432Dll/REL/m432Dll/main"
+      }
+    },
+    "src/REL/m434Dll/map.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m434Dll/REL/m434Dll/map"
+      }
+    },
+    "src/REL/m434Dll/fish.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m434Dll/REL/m434Dll/fish"
+      }
+    },
+    "src/REL/m437Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m437Dll/REL/m437Dll/main"
+      }
+    },
+    "src/REL/m440Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m440Dll/REL/m440Dll/main"
+      }
+    },
+    "src/REL/m440Dll/object.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m440Dll/REL/m440Dll/object"
+      }
+    },
+    "src/REL/m446Dll/card.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m446dll/REL/m446Dll/card"
+      }
+    },
+    "src/REL/m446Dll/table.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "m446dll/REL/m446Dll/table"
+      }
+    },
+    "src/REL/option/scene.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "option/REL/option/scene"
+      }
+    },
+    "src/REL/option/state.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "option/REL/option/state"
+      }
+    },
+    "src/REL/option/sound.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "option/REL/option/sound"
+      }
+    },
+    "src/REL/option/record.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "option/REL/option/record"
+      }
+    },
+    "src/REL/selmenuDll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "selmenuDll/REL/selmenuDll/main"
+      }
+    },
+    "src/REL/w02Dll/gendice.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "w02Dll/REL/w02Dll/gendice"
+      }
+    },
+    "src/REL/w03Dll/condor.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "w03Dll/REL/w03Dll/condor"
+      }
+    },
+    "src/REL/w03Dll/mg_coin.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "w03Dll/REL/w03Dll/mg_coin"
+      }
+    },
+    "src/REL/w06Dll/main.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "w06Dll/REL/w06Dll/main"
+      }
+    },
+    "src/REL/w10Dll/host.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-O4,p",
+        "-inline",
+        "auto",
+        "-RTTI",
+        "off",
+        "-fp_contract",
+        "on",
+        "-str",
+        "reuse",
+        "-O0,p",
+        "-char",
+        "unsigned",
+        "-fp_contract",
+        "off",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-pool",
+        "off",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "4f59dfdee1f75dfcd29ba3127af677aaea9e5a24",
+        "file": "objdiff.json",
+        "sha256": "05d0de0bb7d424c6cd20c8ac425e0731ef6d5a9810a21e46c4c27b8364156ee8",
+        "unit": "w10Dll/REL/w10Dll/host"
+      }
+    }
+  },
+  "functions": [
+    {
+      "sym": "HuSysVWaitSet",
+      "addr": "0x800059ec",
+      "unit": "src/game/main.c",
+      "romDigest": "e1daf1bb02795a740593bfabd06638a7792897acff96032d0bd7b3143b5a6bf7",
+      "features": [
+        "int-to-float",
+        "float",
+        "global",
+        "sign-extend",
+        "store"
+      ],
+      "funcC": "void HuSysVWaitSet(s16 vcount)\n{\n    minimumVcount = vcount;\n    minimumVcountf = vcount;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HuSysVWaitSet": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/main.c#L123-L127"
+    },
+    {
+      "sym": "HuSysVWaitGet",
+      "addr": "0x80005a24",
+      "unit": "src/game/main.c",
+      "romDigest": "3005f90cce0bc9597b4cdc50da8df4ef56379eea815875465340a47aff3f3485",
+      "features": [
+        "global",
+        "sign-extend",
+        "cast",
+        "narrow"
+      ],
+      "funcC": "s16 HuSysVWaitGet(s16 param)\n{\n    return (s16) minimumVcount;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/main.c#L129-L132"
+    },
+    {
+      "sym": "HuDvdErrorWatch",
+      "addr": "0x80006d7c",
+      "unit": "src/game/dvd.c",
+      "romDigest": "1f18941c938595433cf0d734cf651ee173edf9ce64719ea9719e6af04a461075",
+      "features": [
+        "global",
+        "branch",
+        "sparse",
+        "switch-arms"
+      ],
+      "funcC": "void HuDvdErrorWatch()\n{\n    int status = DVDGetDriveStatus();\n    if(status == beforeDvdStatus) {\n        return;\n    }\n    beforeDvdStatus = status;\n    switch(status+1) {\n        case 0:\n            OSReport(\"DVD ERROR:Fatal error occurred\\n***HALT***\");\n            while(1);\n            break;\n            \n        case 5:\n            OSReport(\"DVD ERROR:No disk\\n\");\n            break;\n            \n        case 6:\n            OSReport(\"DVD ERROR:Cover open\\n\");\n            break;\n            \n        case 7:\n            OSReport(\"DVD ERROR:Wrong disk\\n\");\n            break;\n            \n        case 12:\n            OSReport(\"DVD ERROR:Please retry\\n\");\n            break;\n            \n        default:\n            break;\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HuDvdErrorWatch": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/dvd.c#L158-L190"
+    },
+    {
+      "sym": "HuMemHeapDump",
+      "addr": "0x8000ad48",
+      "unit": "src/game/memory.c",
+      "romDigest": "f6dc3021046cab7c972501e4c9f9a380fbd450f44fb67550c0e13e79b0ef6577",
+      "features": [
+        "multi-arg",
+        "branch",
+        "narrow",
+        "struct",
+        "field"
+      ],
+      "funcC": "void HuMemHeapDump(void *heap_ptr, s16 status)\n{\n    struct memory_block *block = heap_ptr;\n    s32 size = 0;\n    s32 inactive_size = 0;\n    s32 num_blocks = 0;\n    s32 num_unused_blocks = 0;\n    u8 dump_type;\n\n    if(status < 0) {\n        dump_type = 10;\n    } else if(status == 0) {\n        dump_type = 0;\n    } else {\n        dump_type = 1;\n    }\n    OSReport(\"======== HuMem heap dump %08x ========\\n\", heap_ptr);\n    OSReport(\"MCB-----+Size----+MG+FL+Prev----+Next----+UNum----+Body----+Call----\\n\");\n    do {\n        if(dump_type == 10 || block->flag == dump_type) {\n            OSReport(\"%08x %08x %02x %02x %08x %08x %08x %08x %08x\\n\", block, block->size, block->magic, block->flag,\n                block->prev, block->next, block->num, BLOCK_GET_DATA(block), block->retaddr);\n        }\n        if(block->flag == 1) {\n            size += block->size;\n            num_blocks++;\n        } else {\n            inactive_size += block->size;\n            num_unused_blocks++;\n        }\n        \n        block = block->next;\n    } while(block != heap_ptr);\n    OSReport(\"MCB:%d(%d/%d) MEM:%08x(%08x/%08x)\\n\", num_blocks+num_unused_blocks, num_blocks, num_unused_blocks, \n        size+inactive_size, size, inactive_size);\n    OSReport(\"======== HuMem heap dump %08x end =====\\n\", heap_ptr);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HuMemHeapDump": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/memory.c#L153-L189"
+    },
+    {
+      "sym": "mtxRot",
+      "addr": "0x8001e118",
+      "unit": "src/game/hsfdraw.c",
+      "romDigest": "afeba278149ef68b3405d6b8021763d60231b828191d767fa22077aef4211602",
+      "features": [
+        "matrix",
+        "float",
+        "branch",
+        "hw-float-abi"
+      ],
+      "funcC": "void mtxRot(Mtx mtx, float x, float y, float z) {\n    Mtx rotY;\n    Mtx rotZ;\n\n    if (x != 0.0f) {\n        MTXRotRad(mtx, 'X', MTXDegToRad(x));\n    } else {\n        MTXIdentity(mtx);\n    }\n    if (y != 0.0f) {\n        MTXRotRad(rotY, 'Y', MTXDegToRad(y));\n        MTXConcat(rotY, mtx, mtx);\n    }\n    if (z != 0.0f) {\n        MTXRotRad(rotZ, 'Z', MTXDegToRad(z));\n        MTXConcat(rotZ, mtx, mtx);\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "mtxRot": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/hsfdraw.c#L2874-L2891"
+    },
+    {
+      "sym": "HuWinMesMaxSizeGet",
+      "addr": "0x80046f04",
+      "unit": "src/game/window.c",
+      "romDigest": "738e947e1bc41e0e3ca231b960ac5cb56a1b8ce15e6634685d9e81125d6c06c0",
+      "features": [
+        "narrow-counter",
+        "mask",
+        "int-to-float",
+        "global",
+        "array",
+        "variable-index"
+      ],
+      "funcC": "void HuWinMesMaxSizeGet(s16 mess_num, float *size, ...)\n{\n    s16 i;\n    u32 mess;\n    va_list list;\n\n    winInsertF = 0;\n    va_start(list, size);\n    winMaxWidth = winMaxHeight = 0;\n    for (i = 0; i < mess_num; i++) {\n        mess = va_arg(list, u32);\n        GetMesMaxSizeSub(mess);\n    }\n    for (i = 0; i < 8; i++) {\n        mesWInsert[i] = 0;\n    }\n    winTabSize = 24;\n    cancelCRF = 0;\n    size[0] = (winMaxWidth + 0x1F) & 0xFFF0;\n    size[1] = winMaxHeight + 0x10;\n    va_end(list);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HuWinMesMaxSizeGet": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/window.c#L1604-L1625"
+    },
+    {
+      "sym": "SLSerialNoCheck",
+      "addr": "0x80059870",
+      "unit": "src/game/saveload.c",
+      "romDigest": "2d01a0546b43d8703d1d1707f014466088bb960d6a408746b4a107687ba00d62",
+      "features": [
+        "int64",
+        "stack-addr",
+        "global",
+        "branch"
+      ],
+      "funcC": "BOOL SLSerialNoCheck(void)\n{\n    s32 result;\n    u64 serialNo;\n\n    if (SLSerialNo == 0) {\n        return TRUE;\n    }\n    result = CARDGetSerialNo(curSlotNo, &serialNo);\n    if (result < 0) {\n        return TRUE;\n    }\n    if (serialNo != SLSerialNo) {\n        return FALSE;\n    }\n    return TRUE;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/saveload.c#L594-L610"
+    },
+    {
+      "sym": "BoardRandMod",
+      "addr": "0x8005fb40",
+      "unit": "src/game/board/main.c",
+      "romDigest": "69f210d360aec81d7f76428b12c44d42496e79fc7d015bb3d88391135ee2f69b",
+      "features": [
+        "mod-reg",
+        "unsigned",
+        "mask",
+        "inlined-callee"
+      ],
+      "funcC": "u32 BoardRandMod(u32 value)\n{\n    return (BoardRand() & 0x7FFFFFFF)%value;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/board/main.c#L1441-L1444"
+    },
+    {
+      "sym": "BoardSpaceBlockPosSet",
+      "addr": "0x8007721c",
+      "unit": "src/game/board/space.c",
+      "romDigest": "c188ba1658a04822f2def28315e516260aea1fa9570cff77f7a633820ebd6c0f",
+      "features": [
+        "branch",
+        "global",
+        "struct",
+        "inlined-callee",
+        "field"
+      ],
+      "funcC": "void BoardSpaceBlockPosSet(void)\n{\n    BoardSpace *space;\n    s32 block_pos;\nbegin:\n    if (boardTutorialBlockF) {\n        GWSystem.block_pos = boardTutorialBlockPos;\n        return;\n    }\n    block_pos = BoardRandMod(spaceCnt[0]) + 1;\n    if (block_pos == GWSystem.block_pos) {\n        goto begin;\n    }\n    space = BoardSpaceGet(0, block_pos);\n    if (space->type != 1) {\n        goto begin;\n    }\n    GWSystem.block_pos = block_pos;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "BoardSpaceBlockPosSet": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/board/space.c#L986-L1004"
+    },
+    {
+      "sym": "BoardCharWheelSpeedSet",
+      "addr": "0x80081884",
+      "unit": "src/game/board/char_wheel.c",
+      "romDigest": "7e4eb2beae48f3719c39cd04355fedd6977595cad4c9e96c7b583797326036f2",
+      "features": [
+        "float",
+        "global",
+        "branch",
+        "hw-float-abi"
+      ],
+      "funcC": "void BoardCharWheelSpeedSet(float arg0) {\n    if (arg0 <= 0.0f) {\n        arg0 = 18.0f;\n    }\n    wheelSpeed = arg0;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "BoardCharWheelSpeedSet": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/game/board/char_wheel.c#L122-L127"
+    },
+    {
+      "sym": "GetStickX",
+      "addr": "E3setupDLL:.text+0x00001ba4",
+      "unit": "src/REL/E3setupDLL/main.c",
+      "romDigest": "69a3a5b650c3a464f81a61d7b38c975dcc211302660b0ce3448f2bb271fb5908",
+      "features": [
+        "int-to-float",
+        "float",
+        "sign-extend",
+        "branch",
+        "hw-float-abi"
+      ],
+      "funcC": "static float GetStickX(s8 value)\n{\n\tfloat new_value;\n\tif(value > 69) {\n\t\tvalue = 69;\n\t} else if(value < -69) {\n\t\tvalue = -69;\n\t}\n\tnew_value = value;\n\tnew_value /= 69;\n\treturn new_value;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/E3setupDLL/main.c#L229-L240"
+    },
+    {
+      "sym": "fn_2_E66C",
+      "addr": "m401Dll:.text+0x0000e66c",
+      "unit": "src/REL/m401Dll/main.c",
+      "romDigest": "28dd6eff6867cecc3a30af9bb7965ff0af755dd1970a7fdabc5afdcf05daf1d9",
+      "features": [
+        "struct",
+        "field",
+        "pointer",
+        "struct-copy"
+      ],
+      "funcC": "void fn_2_E66C(OMOBJ *object, Vec *pos)\n{\n    WorkE6E8 *temp_r31 = object->data;\n    temp_r31->unk4 = *pos;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_2_E66C": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m401Dll/main.c#L3224-L3228"
+    },
+    {
+      "sym": "fn_1_5D3C",
+      "addr": "m405Dll:.text+0x00005d3c",
+      "unit": "src/REL/m405Dll/main.c",
+      "romDigest": "3f0bc4902aaf7fa543d35168bc4fc975388491ab1b4d22474d5562a710607a89",
+      "features": [
+        "mod-const",
+        "arithmetic",
+        "struct",
+        "inlined-callee",
+        "field"
+      ],
+      "funcC": "void fn_1_5D3C(UnkBssA4Data *arg0, Vec *arg1)\n{\n    fn_1_5530(arg1, arg0->unk98 + arg0->unk108 * 20);\n    arg0->unk98 = (arg0->unk98 + 1) % 20;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_5D3C": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m405Dll/main.c#L1424-L1428"
+    },
+    {
+      "sym": "fn_1_77A4",
+      "addr": "m410Dll:.text+0x000077a4",
+      "unit": "src/REL/m410Dll/game.c",
+      "romDigest": "4ee2d805ec40e58b0e9c621a306c404c7e320af6b068495017a78e09f6a5b88d",
+      "features": [
+        "narrow",
+        "zero-extend"
+      ],
+      "funcC": "void fn_1_77A4(u16 arg0, u16 arg1, u16 arg2)\n{\n    OSReport(\"GOAL!!(%d , %d , %d)\\n\", arg0, arg1, arg2);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_77A4": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m410Dll/game.c#L1198-L1201"
+    },
+    {
+      "sym": "ObjectSetup",
+      "addr": "m416Dll:.text+0x000000a0",
+      "unit": "src/REL/m416Dll/main.c",
+      "romDigest": "43146bab576d1d06387cc2031df3d8ce9f90a2fd997591dbe9c390afdb71d342",
+      "features": [
+        "float",
+        "stack-addr",
+        "global",
+        "struct",
+        "field"
+      ],
+      "funcC": "void ObjectSetup(void)\n{\n    HUPROCESS *objman;\n    Vec pos;\n    Vec up;\n    Vec target;\n    OSReport(\"******* M416ObjectSetup *********\\n\");\n    objman = omInitObjMan(50, 8192);\n    omGameSysInit(objman);\n    Hu3DCameraCreate(1);\n    Hu3DCameraPerspectiveSet(1, 30, 20, 25000, 1.2);\n    Hu3DCameraViewportSet(1, 0, 0, 640, 480, 0, 1);\n    lbl_1_bss_950 = omAddObjEx(objman, 32730, 0, 0, -1, omOutView);\n    lbl_1_bss_958 = omAddObjEx(objman, 0, 0, 0, -1, fn_1_458);\n    fn_1_1260(objman);\n    lbl_1_bss_954 = omAddObjEx(objman, 10, 0, 0, -1, fn_1_6E5C);\n    pos.x = 0;\n    pos.y = 3000;\n    pos.z = 1;\n    up.x = 0;\n    up.y = 1;\n    up.z = 0;\n    target.x = 0;\n    target.y = 0;\n    target.z = 0;\n    Hu3DShadowCreate(30, 20, 25000);\n    Hu3DShadowTPLvlSet(0.9f);\n    Hu3DShadowPosSet(&pos, &up, &target);\n    Hu3DLightAllKill();\n    lbl_1_bss_91A[0] = Hu3DGLightCreate(-700, 1200, 700, 0, -0.5, -1, lbl_1_data_38.r, lbl_1_data_38.g, lbl_1_data_38.b);\n    Hu3DGLightStaticSet(lbl_1_bss_91A[0], 1);\n    Hu3DGLightInfinitytSet(lbl_1_bss_91A[0]);\n    lbl_1_bss_91A[1] = Hu3DGLightCreate(0, 0, 0, 0, 0, 0, 0, 0, 0);\n    Hu3DGLightStaticSet(lbl_1_bss_91A[1], 1);\n    Hu3DGLightPointSet(lbl_1_bss_91A[1], 0, 0, 3);\n    lbl_1_bss_918 = 0;\n    HuAudSndGrpSet(41);\n    Hu3DBGColorSet(0, 0, 0);\n    fn_1_79D0(objman);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "ObjectSetup": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m416Dll/main.c#L64-L103"
+    },
+    {
+      "sym": "fn_1_8FF4",
+      "addr": "m416Dll:.text+0x00008ff4",
+      "unit": "src/REL/m416Dll/map.c",
+      "romDigest": "0a83431a823c32d83e1bfeaa0a4f436ca9743210fd6a46350469a5e7ec5840ac",
+      "features": [
+        "float",
+        "float-to-int",
+        "narrow",
+        "global",
+        "hw-float-abi",
+        "struct",
+        "field"
+      ],
+      "funcC": "void fn_1_8FF4(float arg0)\n{\n    lbl_1_data_268.a = arg0 * 255;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_8FF4": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m416Dll/map.c#L317-L320"
+    },
+    {
+      "sym": "fn_1_1F14",
+      "addr": "m420dll:.text+0x00001f14",
+      "unit": "src/REL/m420dll/player.c",
+      "romDigest": "e35ade85b630e40c339ba8f66f7efcdde66bf460b331863b07fdcd7303b65573",
+      "features": [
+        "array",
+        "variable-index",
+        "global",
+        "struct",
+        "field"
+      ],
+      "funcC": "void fn_1_1F14(void)\n{\n    M420DllPlayerStruct *var_r31 = HuPrcCurrentGet()->user_data;\n    while (TRUE) {\n        lbl_1_data_EC[var_r31->unk_48](var_r31);\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_1F14": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m420dll/player.c#L269-L275"
+    },
+    {
+      "sym": "fn_1_67A4",
+      "addr": "m420dll:.text+0x000067a4",
+      "unit": "src/REL/m420dll/map.c",
+      "romDigest": "65db03c3fe8780ce6d87bafd56b85dbd377337aba6803bbf3249cbf528e18cb4",
+      "features": [
+        "bool",
+        "float",
+        "compare",
+        "array",
+        "variable-index",
+        "global",
+        "struct",
+        "field"
+      ],
+      "funcC": "s32 fn_1_67A4(s32 arg0)\n{\n    M420DllUnkMapStruct *var_r31 = &lbl_1_bss_C0[arg0];\n    return var_r31->unk_1C >= 200.0f;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m420dll/map.c#L684-L688"
+    },
+    {
+      "sym": "fn_1_C2BC",
+      "addr": "m427Dll:.text+0x0000c2bc",
+      "unit": "src/REL/m427Dll/map.c",
+      "romDigest": "a6d845f5cb6ed482dec9992e2a442fef20db0e206b3f6adda9bfedeafc6b6e29",
+      "features": [
+        "float",
+        "field",
+        "store",
+        "hw-float-abi",
+        "struct"
+      ],
+      "funcC": "void fn_1_C2BC(Vec2f *arg0, float arg8, float arg9)\n{\n    arg0->x = arg8;\n    arg0->y = arg9;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_C2BC": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m427Dll/map.c#L2510-L2514"
+    },
+    {
+      "sym": "fn_1_155E0",
+      "addr": "m427Dll:.text+0x000155e0",
+      "unit": "src/REL/m427Dll/player.c",
+      "romDigest": "b4088bd542ae9afc2d9271d8e63b2c267011d8d2c36739aab9690bc74c8dc5ce",
+      "features": [
+        "double",
+        "abs",
+        "float",
+        "break",
+        "hw-float-abi",
+        "struct",
+        "field",
+        "global",
+        "array",
+        "variable-index"
+      ],
+      "funcC": "s32 fn_1_155E0(float arg8, float arg9, float argA, float *arg0)\n{\n    float var_f31;\n    float var_f30;\n    double var_f29;\n    double var_f28;\n    M427DllBss590Struct *var_r31;\n    s32 var_r30;\n    M427DllBss590Struct *var_r29;\n\n    for (var_r30 = 0; var_r30 < (lbl_1_bss_580 - 1); var_r30++) {\n        var_r31 = &lbl_1_bss_590[var_r30];\n        var_r29 = &lbl_1_bss_590[var_r30 + 1];\n        if ((argA < var_r31->unk_80->z) && (argA >= var_r29->unk_80->z)) {\n            var_f31 = var_r29->unk_80->z - var_r31->unk_80->z;\n            if ((arg0 != NULL) && (var_f31 != 0.0f)) {\n                *arg0 = fabs((argA - var_r31->unk_80->z) / var_f31);\n            }\n            break;\n        }\n    }\n    return var_r30;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m427Dll/player.c#L1894-L1916"
+    },
+    {
+      "sym": "fn_1_7098",
+      "addr": "m429Dll:.text+0x00007098",
+      "unit": "src/REL/m429Dll/main.c",
+      "romDigest": "7df5095ccdc770ef15f9807d091a8b834056db4b3fc93eeb1eb34d25251acc56",
+      "features": [
+        "float",
+        "array",
+        "variable-index",
+        "struct",
+        "field",
+        "global"
+      ],
+      "funcC": "void fn_1_7098(s32 arg0, float *arg1)\n{\n    Bss130Struct *temp_r30;\n    Hu3DCameraViewportSet(lbl_1_data_FEC[arg0], arg1[0], arg1[1], arg1[2], arg1[3], 0, 1);\n    Hu3DCameraScissorSet(lbl_1_data_FEC[arg0], arg1[0], arg1[1], arg1[2], arg1[3]);\n    temp_r30 = &lbl_1_bss_130[arg0];\n    temp_r30->unk8 = 0.9f * (arg1[0] + (arg1[2] / 2));\n    temp_r30->unkC = arg1[1] + (arg1[3] / 2);\n    temp_r30->unk10 = arg1[2] / 316;\n    temp_r30->unk14 = arg1[3] / 236;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_7098": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m429Dll/main.c#L1784-L1794"
+    },
+    {
+      "sym": "fn_1_BB54",
+      "addr": "m430Dll:.text+0x0000bb54",
+      "unit": "src/REL/m430Dll/water.c",
+      "romDigest": "8ece552df4c08c1b542f75806e7d6c1688f48e61c108f85827bbcb30e1e83daa",
+      "features": [
+        "float",
+        "array",
+        "mask",
+        "variable-index",
+        "hw-float-abi"
+      ],
+      "funcC": "float fn_1_BB54(u32 arg0)\n{\n    float sp8[2] = { -450.0f, 450.0f };\n\n    return sp8[arg0 & 1];\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m430Dll/water.c#L1801-L1806"
+    },
+    {
+      "sym": "fn_1_12D74",
+      "addr": "m430Dll:.text+0x00012d74",
+      "unit": "src/REL/m430Dll/player.c",
+      "romDigest": "736387b095a03ccd828e29b7f675508aea4552c7aa662999e1631988f78a313d",
+      "features": [
+        "pointer",
+        "array",
+        "variable-index",
+        "global",
+        "struct",
+        "field"
+      ],
+      "funcC": "void fn_1_12D74(void)\n{\n    M430PlayerBss160Struct *var_r31;\n    s32 var_r30;\n    s32 var_r29;\n\n    for (var_r31 = lbl_1_bss_160, var_r29 = 0; var_r29 < 2; var_r29++, var_r31++) {\n        for (var_r30 = 0; var_r30 < 6; var_r30++) {\n            espKill(var_r31->unk_10[var_r30]);\n        }\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_12D74": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m430Dll/player.c#L2304-L2315"
+    },
+    {
+      "sym": "fn_1_52B8",
+      "addr": "m432Dll:.text+0x000052b8",
+      "unit": "src/REL/m432Dll/main.c",
+      "romDigest": "c95eae7d2345c4e0470b9b2c6e37af31d19fbd3f4f9e88b436e36459d06320a6",
+      "features": [
+        "matrix",
+        "float",
+        "inlined-callee",
+        "struct",
+        "field",
+        "stack-addr"
+      ],
+      "funcC": "void fn_1_52B8(UnkM432DllBss0SubStruct *arg0, Vec *arg1)\n{\n    Mtx sp8;\n\n    fn_1_52B8_inline(arg1, 0.0f, 0.0f, arg0->unk_1C);\n    MTXRotRad(sp8, 0x79, 0.017453292f * arg0->unk_18);\n    MTXMultVec(sp8, arg1, arg1);\n    VECAdd(&arg0->unk_2C, arg1, arg1);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_52B8": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m432Dll/main.c#L1305-L1313"
+    },
+    {
+      "sym": "fn_1_43AC",
+      "addr": "m434Dll:.text+0x000043ac",
+      "unit": "src/REL/m434Dll/map.c",
+      "romDigest": "2df3351f48ac7c6053552e6aab6852ac513187e0bd0ef2c6b3ab811034f1e892",
+      "features": [
+        "mod-pow2",
+        "field",
+        "struct",
+        "global",
+        "array",
+        "variable-index"
+      ],
+      "funcC": "void fn_1_43AC(Vec *arg0)\n{\n    Bss2468Data *temp_r31;\n    temp_r31 = &lbl_1_bss_2468[lbl_1_bss_2464];\n    if (temp_r31->unkC == 0) {\n        temp_r31->unk0.x = arg0->x;\n        temp_r31->unk0.y = arg0->y;\n        temp_r31->unk0.z = arg0->z;\n        temp_r31->unkC = REFRESH_RATE;\n        lbl_1_bss_2464 = (lbl_1_bss_2464 + 1) % 64;\n        return;\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_43AC": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m434Dll/map.c#L545-L557"
+    },
+    {
+      "sym": "fn_1_83C8",
+      "addr": "m434Dll:.text+0x000083c8",
+      "unit": "src/REL/m434Dll/fish.c",
+      "romDigest": "28c7eb1c286e127602e938088d237bb131b361de4801895633fe217847428239",
+      "features": [
+        "div-pow2",
+        "mod-pow2",
+        "array",
+        "variable-index",
+        "global"
+      ],
+      "funcC": "void fn_1_83C8(s32 arg0)\n{\n    s32 temp_r31;\n    s32 temp_r30;\n    s32 temp_r29;\n    s32 temp_r28;\n    s32 temp_r27;\n    s32 sp8[9][2] = { -1, -1, 0, -1, 1, -1, -1, 0, 0, 0, 1, 0, -1, 1, 0, 1, 1, 1 };\n    if (arg0 < 0 || arg0 >= 1024) {\n        return;\n    }\n    temp_r28 = arg0 % 32;\n    temp_r27 = (arg0 - temp_r28) / 32;\n    for (temp_r31 = 0; temp_r31 < 9; temp_r31++) {\n        temp_r30 = temp_r28 + sp8[temp_r31][0];\n        temp_r29 = temp_r27 + sp8[temp_r31][1];\n        if (temp_r30 >= 0 && temp_r30 < 32 && temp_r29 >= 0 && temp_r29 < 32) {\n            lbl_1_bss_5880[temp_r30 + (32 * temp_r29)]--;\n        }\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_83C8": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m434Dll/fish.c#L511-L531"
+    },
+    {
+      "sym": "fn_1_3990",
+      "addr": "m437Dll:.text+0x00003990",
+      "unit": "src/REL/m437Dll/main.c",
+      "romDigest": "7c6229bf72ca1b1cd3a384799068b8178c627e6332702339fee169362430a70d",
+      "features": [
+        "float",
+        "compare",
+        "global",
+        "branch"
+      ],
+      "funcC": "s32 fn_1_3990(void)\n{\n    if (lbl_1_bss_15C <= lbl_1_bss_158) {\n        return 1;\n    }\n    else {\n        return 0;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m437Dll/main.c#L1180-L1188"
+    },
+    {
+      "sym": "fn_1_7D60",
+      "addr": "m440Dll:.text+0x00007d60",
+      "unit": "src/REL/m440Dll/main.c",
+      "romDigest": "cc415170c24fde17b4ac020f8f54e9a2d2c8bf167ef9f853d2495e98d8d92ad9",
+      "features": [
+        "multi-arg",
+        "sparse",
+        "stack-addr",
+        "struct",
+        "field",
+        "switch-arms"
+      ],
+      "funcC": "void fn_1_7D60(HSFBITMAP *arg0, HSFATTRIBUTE *arg1, s16 arg2)\n{\n    GXTexObj sp1C;\n    GXTlutObj sp10;\n    s32 sp8;\n    s16 temp_r29;\n    s16 temp_r28;\n    s16 var_r27;\n    s16 var_r26;\n\n    if (!arg0) {\n        OSReport(\"Error: No Texture\\n\");\n        return;\n    }\n    temp_r29 = arg0->sizeX;\n    temp_r28 = arg0->sizeY;\n    var_r27 = (arg1->wrapS == 1) ? 1 : 0;\n    var_r26 = (arg1->wrapT == 1) ? 1 : 0;\n    switch (arg0->dataFmt) {\n        case 6:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGBA8, var_r27, var_r26, GX_FALSE);\n            break;\n        case 4:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGB565, var_r27, var_r26, GX_FALSE);\n            break;\n        case 5:\n            GXInitTexObj(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_RGB5A3, var_r27, var_r26, GX_FALSE);\n            break;\n        case 9:\n            if (arg0->pixSize < 8) {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB565, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C4, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            else {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB565, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C8, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            break;\n        case 10:\n            if (arg0->pixSize < 8) {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB5A3, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C4, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            else {\n                GXInitTlutObj(&sp10, arg0->palData, GX_TL_RGB5A3, arg0->palSize);\n                GXLoadTlut(&sp10, arg2);\n                GXInitTexObjCI(&sp1C, arg0->data, temp_r29, temp_r28, GX_TF_C8, var_r27, var_r26, GX_FALSE, arg2);\n            }\n            break;\n        default:\n            OSReport(\"Error: Texture format\\n\");\n            return;\n    }\n    GXInitTexObjLOD(&sp1C, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, 0, 0, GX_ANISO_1);\n    GXLoadTexObj(&sp1C, arg2);\n    return;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_7D60": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m440Dll/main.c#L1794-L1853"
+    },
+    {
+      "sym": "fn_1_F4D4",
+      "addr": "m440Dll:.text+0x0000f4d4",
+      "unit": "src/REL/m440Dll/object.c",
+      "romDigest": "cfb242232b9f4287a151f790d845e4913aff2ab79bc8ce2d89600448c1c3ed88",
+      "features": [
+        "mask",
+        "unsigned",
+        "zero-extend",
+        "field",
+        "struct"
+      ],
+      "funcC": "void fn_1_F4D4(unkObjStruct *arg0, u16 arg1, u16 arg2)\n{\n    arg0->unk0 &= ~arg1;\n    arg0->unk0 |= arg2;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_F4D4": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m440Dll/object.c#L1200-L1204"
+    },
+    {
+      "sym": "fn_1_1F84",
+      "addr": "m446dll:.text+0x00001f84",
+      "unit": "src/REL/m446Dll/card.c",
+      "romDigest": "80b96f07fed2315875e58d1f2d647f7787396e1c416c5cecde051146fbf51317",
+      "features": [
+        "loop-preupdate",
+        "pointer",
+        "narrow"
+      ],
+      "funcC": "void fn_1_1F84(u8 *arg0, s8 arg1, s32 arg2)\n{\n    u8 *var_r30 = arg0;\n    if (arg2 <= 0) {\n        return;\n    }\n    while (arg2-- != 0) {\n        *var_r30 = arg1;\n        *var_r30++;\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_1F84": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m446Dll/card.c#L152-L162"
+    },
+    {
+      "sym": "fn_1_3994",
+      "addr": "m446dll:.text+0x00003994",
+      "unit": "src/REL/m446Dll/table.c",
+      "romDigest": "0b497acfdef6eba8a031ea7fe0b16624da0c62eed457a729de9210d180b81199",
+      "features": [
+        "pointer",
+        "struct",
+        "field",
+        "global"
+      ],
+      "funcC": "void fn_1_3994(void)\n{\n    unkStruct4 *sp8;\n    unkStruct3 *var_r31;\n\n    var_r31 = lbl_1_bss_28;\n    if (var_r31) {\n        do {\n            sp8 = var_r31->unk0;\n            var_r31 = var_r31->unk8;\n        } while (var_r31);\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_3994": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/m446Dll/table.c#L30-L42"
+    },
+    {
+      "sym": "SceneMain",
+      "addr": "option:.text+0x000005ec",
+      "unit": "src/REL/option/scene.c",
+      "romDigest": "23eb3a348b6ae64cbe895928527003aeaa010ffb2d57b4f843450b13d5fd8169",
+      "features": [
+        "fallthrough",
+        "dense",
+        "switch-arms",
+        "global",
+        "struct",
+        "field"
+      ],
+      "funcC": "static void SceneMain(OMOBJ *object)\n{\n    switch (object->mode) {\n        case 0:\n            object->mode = 1;\n            /* fallthrough */\n        case 1:\n            if (!omSysExitReq) {\n                break;\n            }\n            object->mode = 2;\n            /* fallthrough */\n        case 2:\n            WipeCreate(WIPE_MODE_OUT, WIPE_TYPE_NORMAL, 60);\n            HuAudFadeOut(1000);\n            object->mode = 3;\n            /* fallthrough */\n        case 3:\n            if (WipeStatGet() == 0) {\n                OptionStateKill(optionState);\n                if (rumbleF != GWGameStat.rumble) {\n                    omSysExitReq = 0;\n                    KillScene();\n                }\n                omOvlReturnEx(1, 1);\n            }\n            break;\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "SceneMain": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/option/scene.c#L160-L188"
+    },
+    {
+      "sym": "ExecState",
+      "addr": "option:.text+0x00002fb0",
+      "unit": "src/REL/option/state.c",
+      "romDigest": "68ffe6d17044be3aa34f2e2ad7c114651f68d09b98a2f0f729937009b4ddc0dc",
+      "features": [
+        "fallthrough",
+        "dense",
+        "switch-arms",
+        "struct",
+        "field",
+        "global"
+      ],
+      "funcC": "static void ExecState(OMOBJ *object)\n{\n    StateWork *work = object->data;\n\n    switch (object->mode) {\n        case 0:\n            object->mode = 1;\n            /* fallthrough */\n        case 1:\n            WipeCreate(WIPE_MODE_IN, WIPE_TYPE_PREV, 60);\n            object->mode = 2;\n            break;\n        case 2:\n            if (WipeStatGet() != 0 || work->window->state != 0) {\n                break;\n            }\n            OptionRoomExecModeSet(optionRoom, 1);\n            object->mode = 3;\n            /* fallthrough */\n        case 3:\n            if (OptionRoomExecModeGet(optionRoom) != 0) {\n                break;\n            }\n            object->mode = 4;\n            /* fallthrough */\n        case 4:\n            OptionWinAnimIn(work->window);\n            OptionWinMesSet(work->window, MAKE_MESSID(47, 167)); // Would you like to leave?\n            object->mode = 5;\n            /* fallthrough */\n        case 5:\n            if (work->window->state != 0) {\n                break;\n            }\n            OptionWinChoiceSet(work->window, 1);\n            object->mode = 6;\n            /* fallthrough */\n        case 6:\n            if (work->window->state != 0) {\n                break;\n            }\n            OptionWinAnimOut(work->window);\n            if (work->window->choice == 0) {\n                work->quitTimer = 0;\n                object->mode = 7;\n            }\n            else {\n                object->mode = 2;\n            }\n            break;\n        case 7:\n            object->mode = 8;\n            work->quitTimer = 0;\n            /* fallthrough */\n        case 8:\n            if (work->window->state == 0 && work->quitTimer++ >= 60) {\n                omSysExitReq = 1;\n            }\n            break;\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "ExecState": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/option/state.c#L73-L133"
+    },
+    {
+      "sym": "OptionSelHide",
+      "addr": "option:.text+0x00006a0c",
+      "unit": "src/REL/option/sound.c",
+      "romDigest": "176bd609332220f072a8ef2e2e2a058f7ecb703bd304cf5346d80d2e19281027",
+      "features": [
+        "table",
+        "array",
+        "variable-index",
+        "struct",
+        "field"
+      ],
+      "funcC": "static void OptionSelHide(OMOBJ *object)\n{\n    static const s32 sprHideTbl[] = { 12, 0, 1, 2, 3, 4, 5 };\n    SoundWork *work = object->data;\n    s32 i;\n\n    for (i = 0; i < 7; i++) {\n        espDispOff(work->sprite[sprHideTbl[i]]);\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "OptionSelHide": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/option/sound.c#L1398-L1407"
+    },
+    {
+      "sym": "HandleNote",
+      "addr": "option:.text+0x00007310",
+      "unit": "src/REL/option/sound.c",
+      "romDigest": "e8bd6abf1cf0914b348a18695059cd5964cc9ea44285ae3c3e962c386e2c0caa",
+      "features": [
+        "float",
+        "mixed-width",
+        "uninit-local",
+        "switch-arms",
+        "struct",
+        "field"
+      ],
+      "funcC": "static void HandleNote(OMOBJ *note)\n{\n    NoteWork *noteWork = note->data;\n    float time;\n    float scale;\n    float angle;\n    float zRot;\n    float radius;\n    float x;\n    float z;\n    float y;\n    float tplvl;\n\n    Hu3DModelAttrReset(note->mdlId[0], HU3D_ATTR_DISPOFF);\n    time = sind(45.0f * noteWork->pos);\n    time = time * time;\n    switch (noteWork->side) {\n        case NOTE_SIDE_LEFT:\n            angle = 174.5f + 7.0f * time;\n            zRot = -15.0 + 30.0 * sind(1440.0f * time);\n            break;\n        case NOTE_SIDE_RIGHT:\n            angle = 185.5f - (7.0f * time);\n            zRot = 15.0 - 30.0 * sind(1440.0f * time);\n            break;\n    }\n    tplvl = sind(180.0f * noteWork->pos);\n    radius = 500.0f - 25.0f * time;\n    x = radius * -sind(angle);\n    z = radius * cosd(angle);\n    y = 160.0f - 15.0f * noteWork->pos;\n    scale = 0.5 + 2.0 * sind(90.0f * time);\n    omSetTra(note, x, y, z);\n    Hu3DModelTPLvlSet(note->mdlId[0], tplvl);\n    omSetSca(note, scale, scale, scale);\n    omSetRot(note, 0.0f, 0.0f, zRot);\n    if ((noteWork->pos += noteWork->speed) < 1.0f) {\n        return;\n    }\n    noteWork->enabled = FALSE;\n    Hu3DModelAttrSet(note->mdlId[0], HU3D_ATTR_DISPOFF);\n    note->objFunc = NULL;\n    note->mode = 0;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HandleNote": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/option/sound.c#L1558-L1601"
+    },
+    {
+      "sym": "GetDigit",
+      "addr": "option:.text+0x00008ef8",
+      "unit": "src/REL/option/record.c",
+      "romDigest": "d47e6b833d75252af3e1a3a17eb97ba74c85b6a2dd92004348f21c0821cccc90",
+      "features": [
+        "mod-reg",
+        "div-reg",
+        "loop-preupdate",
+        "arithmetic"
+      ],
+      "funcC": "static s32 GetDigit(s32 value, s32 place)\n{\n    s32 i;\n\n    i = 1;\n    while (place-- != 0) {\n        i *= 10;\n    }\n    return (value % (i * 10)) / i;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/option/record.c#L559-L568"
+    },
+    {
+      "sym": "CharRandomize",
+      "addr": "selmenuDll:.text+0x00001fd4",
+      "unit": "src/REL/selmenuDll/main.c",
+      "romDigest": "31d68f9bd41384f2e38585c6370a1eb23ceac661be7e47779ee07622c8e8fb69",
+      "features": [
+        "continue",
+        "mod-reg",
+        "array",
+        "variable-index",
+        "struct",
+        "global",
+        "field"
+      ],
+      "funcC": "static void CharRandomize(void)\n{\n    s32 i;\n    s32 j;\n    s32 valid_cnt;\n    s32 valid_list[8];\n    for (i = 0; i < 4; i++) {\n        valid_cnt = 0;\n        for (j = 0; j < 8; j++) {\n            if (charSelProhibitF[j]) {\n                continue;\n            }\n            valid_list[valid_cnt++] = j;\n        }\n        if (smPlayerCfg[i].iscom == 1) {\n            smPlayerCfg[i].character = valid_list[rand8() % valid_cnt];\n            charSelProhibitF[smPlayerCfg[i].character] = 1;\n        }\n    }\n}",
+      "m2cCtx": true,
+      "proto": {
+        "CharRandomize": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/selmenuDll/main.c#L535-L554"
+    },
+    {
+      "sym": "fn_1_233C",
+      "addr": "w02Dll:.text+0x0000233c",
+      "unit": "src/REL/w02Dll/gendice.c",
+      "romDigest": "89c0f4df9f319a18dfc055569baab64817ceb88a05f1e820a85940b0236fb98e",
+      "features": [
+        "continue",
+        "bitfield",
+        "array",
+        "variable-index",
+        "guard-init",
+        "struct",
+        "field",
+        "macro"
+      ],
+      "funcC": "s32 fn_1_233C(m02GenDice *arg0)\n{\n    s32 temp_r31;\n    WorkGenDiceNum *temp_r30;\n    for (temp_r31 = 0; temp_r31 < arg0->unk00; temp_r31++) {\n        if (!arg0->unk50[temp_r31]) {\n            continue;\n        }\n        temp_r30 = omObjGetWork(arg0->unk50[temp_r31], WorkGenDiceNum);\n        if (temp_r30->field0_bit2) {\n            return 0;\n        }\n    }\n    return 1;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/w02Dll/gendice.c#L387-L401"
+    },
+    {
+      "sym": "fn_1_4A9C",
+      "addr": "w03Dll:.text+0x00004a9c",
+      "unit": "src/REL/w03Dll/condor.c",
+      "romDigest": "73e9ab0bf247a804c25fe541bbbccb59c6e63408ea937463e208eee206d77f90",
+      "features": [
+        "bitfield",
+        "struct",
+        "field",
+        "global",
+        "macro"
+      ],
+      "funcC": "void fn_1_4A9C(void)\n{\n    omObjGetWork(lbl_1_bss_74, w03UnkStruct4)->unk00_bit0 = 1;\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_4A9C": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/w03Dll/condor.c#L691-L694"
+    },
+    {
+      "sym": "fn_1_91B8",
+      "addr": "w03Dll:.text+0x000091b8",
+      "unit": "src/REL/w03Dll/mg_coin.c",
+      "romDigest": "c65d4eb061ef77fdca45b472365a9248b4b34e6e4b1cb7d23e5eefcd504ffe89",
+      "features": [
+        "div-const",
+        "narrow",
+        "array",
+        "variable-index",
+        "global"
+      ],
+      "funcC": "void fn_1_91B8(void)\n{\n    s8 temp_r3;\n\n    if (lbl_1_bss_14E == 0) {\n        lbl_1_bss_14E = 1;\n    }\n\n    temp_r3 = lbl_1_bss_14E / 6;\n    lbl_1_bss_14C = lbl_1_data_4C8[temp_r3];\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_91B8": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/w03Dll/mg_coin.c#L610-L620"
+    },
+    {
+      "sym": "fn_1_B5C",
+      "addr": "w06Dll:.text+0x00000b5c",
+      "unit": "src/REL/w06Dll/main.c",
+      "romDigest": "5e5065bd699c5f884a90cecd74f13a158a215a185a68fbdbca9da92905224b9b",
+      "features": [
+        "narrow-counter",
+        "stack-addr",
+        "bitfield",
+        "float-to-int",
+        "global",
+        "struct",
+        "field",
+        "array",
+        "variable-index"
+      ],
+      "funcC": "static void fn_1_B5C(OMOBJ *arg0) {\n    Bss8Work *temp_r30;\n    Vec sp14;\n    Vec sp8;\n    s16 temp_r28;\n    s16 var_r29;\n    s16 i;\n\n    temp_r30 = omObjGetWork(arg0, Bss8Work);\n    if (temp_r30->unk00_field0 != 0 || BoardIsKill()) {\n        HuAudFXListnerKill();\n        lbl_1_bss_8 = NULL;\n        omDelObjEx(HuPrcCurrentGet(), arg0);\n        return;\n    }\n    temp_r28 = BoardModelMotionTimeGet(lbl_1_data_F0);\n    BoardCameraDirGet(&sp8);\n    BoardCameraTargetGet(&sp14);\n    sp14.y += 2000.0f;\n    if (!_CheckFlag(FLAG_ID_MAKE(1, 16))) {\n        if (lbl_1_bss_4 == 0) {\n            HuAudFXPauseAll(1);\n            lbl_1_bss_4 = 1;\n        }\n    } else if (lbl_1_bss_4 != 0) {\n        HuAudFXPauseAll(0);\n        lbl_1_bss_4 = 0;\n    }\n    if (!_CheckFlag(FLAG_ID_MAKE(1, 28))) {\n        for (var_r29 = i = 0; i < 10; i++) {\n            if (temp_r30->unk01[i] != 0) {\n                var_r29++;\n            } else if (temp_r28 == lbl_1_data_108[i].unk00) {\n                HuAudFXEmiterPlay(0x4A1, &lbl_1_data_108[i].unk04);\n                temp_r30->unk01[i] = 1;\n                goto block_20;\n            }\n        }\n        if (var_r29 < 10) {\n            return;\n        }\n        for (i = 0; i < 10; i++) {\n            temp_r30->unk01[i] = 0;\n        }\n    }\nblock_20:\n    HuAudFXListnerUpdate(&sp14, &sp8);\n}",
+      "m2cCtx": true,
+      "proto": {
+        "fn_1_B5C": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/w06Dll/main.c#L278-L325"
+    },
+    {
+      "sym": "HostWinExec",
+      "addr": "w10Dll:.text+0x00000ba0",
+      "unit": "src/REL/w10Dll/host.c",
+      "romDigest": "38ef1366d8622c52e7ef195c0df1996723512af4633c02ebb2a2bc7dd6fdff0f",
+      "features": [
+        "uninit-local",
+        "switch-arms",
+        "sign-extend",
+        "global"
+      ],
+      "funcC": "void HostWinExec(s32 arg0) {\n    s16 pos;\n\n    switch (hostPos) {\n    case 0:\n        pos = 5;\n        break;\n    case 1:\n        pos = 6;\n        break;\n    }\n    BoardWinCreate(pos, arg0, -1);\n    BoardWinWait();\n    BoardWinKill();\n}",
+      "m2cCtx": true,
+      "proto": {
+        "HostWinExec": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/marioparty4/blob/4f59dfdee1f75dfcd29ba3127af677aaea9e5a24/src/REL/w10Dll/host.c#L38-L52"
+    }
+  ]
+}

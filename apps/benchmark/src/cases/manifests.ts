@@ -20,6 +20,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
+import type { TuModel } from '../compile/types';
 import { WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 
@@ -66,7 +67,9 @@ export interface RealFunction {
    *  the vendored context below. */
   ctx?: string;
   /** Feed m2c the function's VENDORED project context: the exact bytes the project's own
-   *  preprocessor produced for this function's translation unit with the body removed. Passed
+   *  preprocessor produced for this function's translation unit with the body removed — and, where that
+   *  preprocessor is CodeWarrior's, with every other function body removed too, because m2c reads only
+   *  declarations and cannot parse CodeWarrior's inline `asm` (compile/real.ts `m2cContext`). Passed
    *  VERBATIM — the row publishes the file path (ctxRef), not the text.
    *
    *  WHAT EACH TOOL IS GIVEN ON THE REAL TIER, stated here once because it was previously stated
@@ -136,6 +139,18 @@ export interface RealManifest {
    *  to reproduce them from a map the rows were not measured with. Gated in
    *  `test/real-manifests.test.ts` against the checkout's own Makefile. */
   elfMake?: string;
+  /** What a row's translation unit is, before preprocessing (cases/vendor.ts `rowSources`):
+   *
+   *    assembled  the manifest's `headers`, then the row's `prependC`, then its `funcC`.
+   *    unit       the row's own unit, from its first line through the last line its `sourceUrl` cites —
+   *               a span that must be `funcC` verbatim. `headers` is empty and no row has a `prependC`.
+   *
+   *  `unit` exists because a function's code is not always decided by the declarations in scope alone.
+   *  CodeWarrior GC/2.6 at -O0,p compiles Mario Party 4's `HuMemHeapDump` and `HuDvdErrorWatch` to
+   *  different branch-prediction bits after their unit's file-scope declarations than after the unit's
+   *  earlier function DEFINITIONS, and only the second is the game's function. A candidate compiles in
+   *  that same prefix, so the scoring world is the one the game's function was compiled in too. */
+  tu: TuModel;
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
   defines?: string[]; // extra -D macros
@@ -144,11 +159,20 @@ export interface RealManifest {
   functions: RealFunction[];
 }
 
+/** One row's vendored blobs (`index.json`), each a file name under `tu/<project>/`: the preprocessed target
+ *  TU, the context its candidates compile in, and the context m2c's `--context` reads — the same file as
+ *  `ctx` wherever m2c can read that one (compile/real.ts `m2cContext`). */
+export interface VendoredEntry {
+  tu: string;
+  ctx: string;
+  m2c: string;
+}
+
 /** A manifest paired with its vendored compiler inputs (the runtime shape — no checkout). */
 export interface VendoredManifest extends RealManifest {
-  /** sym → gunzip'd preprocessed texts (target TU + candidate context). */
-  vendored: (sym: string) => { tuI: string; ctxI: string };
-  /** sym → repo-relative path of the vendored context blob (for the row's ctxRef). */
+  /** sym → gunzip'd preprocessed texts: the target TU, the candidate context, and m2c's context. */
+  vendored: (sym: string) => { tuI: string; ctxI: string; m2cI: string };
+  /** sym → repo-relative path of m2c's vendored context blob (the row's ctxRef). */
   ctxPath: (sym: string) => string;
   /** The vendored symbol map (names + declaration shapes) a row of `module` is read with: the
    *  project's own for a row with a linked address (`undefined` module), and the REL module's —
@@ -325,6 +349,25 @@ export function validateManifest(
   if (!Array.isArray(man.cppIncludes) || !Array.isArray(man.headers)) {
     problems.push(`${file}: "cppIncludes"/"headers" must be arrays`);
   }
+  if (man.tu !== 'assembled' && man.tu !== 'unit') {
+    problems.push(`${file}: "tu" must be "assembled" or "unit"`);
+  } else if (man.tu === 'unit') {
+    if (Array.isArray(man.headers) && man.headers.length > 0) {
+      problems.push(`${file}: a "unit" translation unit is the unit's own text, so "headers" must be empty`);
+    }
+    for (const f of Array.isArray(man.functions) ? man.functions : []) {
+      if (f.prependC !== undefined) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} has a "prependC", which a "unit" translation unit never reads`,
+        );
+      }
+      if (typeof f.sourceUrl !== 'string' || !/#L\d+-L\d+$/.test(f.sourceUrl)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "sourceUrl" must cite the line span funcC is (#L<first>-L<last>)`,
+        );
+      }
+    }
+  }
   if (man.units !== undefined && !isRecord(man.units)) {
     problems.push(`${file}: "units" must map each unit's source path to its toolchain and flags`);
   } else if (complete && (man.units === undefined || Object.keys(man.units).length === 0)) {
@@ -476,7 +519,7 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
   const dir = join(REAL_DIR, 'tu', man.project);
   const indexPath = join(dir, 'index.json');
   const index = existsSync(indexPath)
-    ? (JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, { tu: string; ctx: string }>)
+    ? (JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, VendoredEntry>)
     : {};
   const entryOf = (sym: string) => {
     const entry = index[sym];
@@ -499,9 +542,10 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
       return {
         tuI: gunzipSync(readFileSync(join(dir, entry.tu))).toString('utf8'),
         ctxI: gunzipSync(readFileSync(join(dir, entry.ctx))).toString('utf8'),
+        m2cI: gunzipSync(readFileSync(join(dir, entry.m2c))).toString('utf8'),
       };
     },
-    ctxPath: (sym) => `apps/benchmark/dataset/real/tu/${man.project}/${entryOf(sym).ctx}`,
+    ctxPath: (sym) => `apps/benchmark/dataset/real/tu/${man.project}/${entryOf(sym).m2c}`,
   };
 }
 

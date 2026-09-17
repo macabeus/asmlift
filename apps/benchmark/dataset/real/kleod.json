@@ -4,6 +4,7 @@
   "repo": "macabeus/kleod",
   "branch": "asmlift-benchmark",
   "elfMake": "asmlift-elf",
+  "tu": "assembled",
   "cppIncludes": [
     "-nostdinc",
     "-I",

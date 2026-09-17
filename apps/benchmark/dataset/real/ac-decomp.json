@@ -4,6 +4,7 @@
   "repoDir": "ac-decomp",
   "repo": "macabeus/ac-decomp",
   "branch": "asmlift-benchmark",
+  "tu": "assembled",
   "cppIncludes": [
     "-nosyspath",
     "-i",

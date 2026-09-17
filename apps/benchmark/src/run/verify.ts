@@ -5,9 +5,11 @@
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { decompile } from '@asmlift/core/pipeline';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { type RealManifest, resolveProjectRoot, validateManifest } from '../cases/manifests';
-import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
+import { rowSources } from '../cases/vendor';
+import { buildRealTarget, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { codegenFor } from '../toolchains';
 
@@ -43,7 +45,8 @@ export function verify(manifestPath: string): void {
     const codegen = codegenFor(unit.toolchain, unit.cflags);
     let asm: string;
     try {
-      const tuI = realCompilerFor(unit.toolchain).preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
+      const { tu } = rowSources(m.tu, cfg, f, () => readFileSync(join(root, f.unit), 'utf8'));
+      const tuI = realCompilerFor(unit.toolchain).preprocess(cfg, tu);
       asm = buildRealTarget(unit.toolchain, f.sym, codegen.cflags, tuI, unitLanguage(f.unit, unit.cflags)).asm;
     } catch (e) {
       console.log(`✗ COMPILE ${f.sym}: ${(e as Error).message.split('\n')[0]}`);

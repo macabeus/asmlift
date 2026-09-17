@@ -36,6 +36,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync
 import { join } from 'node:path';
 
 import { CACHE_DIR, M2C_DIR } from './config';
+import { functionScopedDump } from './eval/function-scope';
+import { functionStart } from './eval/m2c-normalizer';
 import { type BuiltTarget, type Toolchain, type ToolchainId, checkedTarget } from './toolchains';
 
 const enabled = () => process.env.ASMLIFT_BENCH_CACHE !== '0';
@@ -140,6 +142,11 @@ export function ppcDumpCacheEntry(obj: string, sym: string): { scoped: string; p
  *  entry written before that guard existed is a well-formed, TTL-less file that would be served
  *  forever, so an empty one READS AS A MISS and is rebuilt. */
 function cachedPpcDumpText(obj: string, sym: string): string {
+  return functionScopedDump(cachedObjectDumpText(obj, sym), sym);
+}
+
+/** The whole section's dump, as the cache stores it; `cachedPpcDumpText` narrows it to the function. */
+function cachedObjectDumpText(obj: string, sym: string): string {
   if (!enabled()) {
     return ppcObjdumpText(obj, sym);
   }
@@ -263,6 +270,14 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      which is how the ladder was found: `pikmin:getMainStickX__10ControllerFv` replayed
   //      `noncompile` out of a warm store while a direct `scoreM2c` on the same arguments returned
   //      MATCH 0/14.
+  // `placed` is the same kind of register, for a function that starts past its section's start — one
+  // compiled in its own unit. The normalizer read a branch's `<fn+0xNN>` annotation as a section address,
+  // which is the same number only at the section's start, so no entry keyed on such a listing can be
+  // served from before it read the function's own start.
+  //   placed 1: a Mario Party 4 row replayed `Cannot find branch target .L4c` out of a warm store.
+  // `sda` is one more, for a listing that reads a small-data EXTERN: the normalizer left its operand as
+  // `0(0)`, which m2c reads as `*NULL`, and now names it.
+  //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
@@ -280,6 +295,8 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
       ...(lang === 'c++' && { lang, cppLadder: 1 }),
+      ...(functionStart(asm) !== 0 && { placed: 1 }),
+      ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

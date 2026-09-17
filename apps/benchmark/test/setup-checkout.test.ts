@@ -17,6 +17,7 @@ const base: RealManifest = {
   repoDir: 'fakeproj',
   repo: 'macabeus/fakeproj',
   branch: 'asmlift-benchmark',
+  tu: 'assembled',
   cppIncludes: [],
   headers: [],
   units: {

@@ -182,10 +182,11 @@ ${
   fn.ctxRef
     ? `
 # The project context the benchmark passed via --context: the VERBATIM vendored blob — this
-# function's translation unit run through the project's own preprocessor with the function body
-# removed, i.e. whatever that TU's headers and the manifest's prependC declare, and nothing
-# added. How much that is varies by project (a full header tree for some, a handful of typedefs
-# for others); the file below is the exact bytes, so read it rather than this comment.${
+# function's translation unit run through the project's own preprocessor without the function, and
+# nothing added (where that preprocessor is CodeWarrior's, every other function body is removed too,
+# because m2c reads only declarations and cannot parse CodeWarrior's inline asm). How much that is
+# varies by project (a full header tree for some, a handful of typedefs for others); the file below
+# is the exact bytes, so read it rather than this comment.${
         fn.ctxProto
           ? `
 # One line is appended: the function's own prototype, and ONLY because the project's headers do

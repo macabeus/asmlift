@@ -33,7 +33,7 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 293 of the 294 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+context**: 335 of the 336 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
 vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
 a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 `test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
@@ -97,16 +97,18 @@ seven it is name, kind and size alone: residual 6 measures it.
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
 transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
-How m2c learns the row's own declaration, over the 294 real rows. Every count here is re-derived
+How m2c learns the row's own declaration, over the 336 real rows. Every count here is re-derived
 from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
-| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |   77 |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  109 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   91 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   98 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
-| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  124 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  127 |
+
+What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -151,7 +153,7 @@ _Favouring m2c._
    `{name, kind, size}` and nothing else (its linked ELF has no DWARF; 6,173 base entries and
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
    gets that row's ~650 KB preprocessed context with every struct and every prototype. 42 of the
-   294 real rows are on that footing. The other six projects carry the shape family (`declared`:
+   336 real rows are on that footing. The other six projects carry the shape family (`declared`:
    pokeemerald 24,539, marioparty3 902, sa3 148, kleod 113, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
@@ -167,6 +169,30 @@ _Favouring asmlift._
    `sa3:sub_8001FD4` `[]`, i.e. arity 0) — while m2c is told nothing: `proto` carries no return
    type to state, and inventing one would not be parity.
 
+_Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
+
+10. **No types at all in asmlift's map.** Mario Party 4's ELFs carry no DWARF (`main.elf`'s `.debug` is
+    empty and no `.plf` has a debug section), so its vendored maps are names, addresses and sizes: no
+    declaration shapes, no signatures, no layouts. m2c's context is the unit's full declarations.
+11. **Every earlier function's signature.** A unit row's context is its unit before the function, so m2c
+    reads the declarator of every function the unit defines above it — not only its callees — where an
+    assembled row's context holds the headers and a `prependC`.
+
+_Favouring m2c, across the tier._
+
+12. **The row's own signature, where its project declares it.** On 74 of the 110 rows whose context
+    already declares the function, that declaration carries a PARAMETER LIST — the full signature,
+    return type and parameter types (`u32 BoardRandMod(u32 value);`,
+    `static s32 GetDigit(s32 value, s32 place);`) — while asmlift's `proto` states void-ness and,
+    on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 13, ac-decomp 12,
+    sa3 8, pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
+    `u32 BoardRandMod(u32 value);` from the context and re-running m2c: it then emits
+    `s32 BoardRandMod(u32 arg0)`, same body. Not closed for the reason residual 4 is not: the
+    declaration is the project's own header text, and removing it re-vendors the blob asmlift's
+    candidate scorer compiles against. What it no longer decides is an OUTCOME: a candidate whose
+    signature contradicts the unit's is scored in the unit ladder's second rung
+    (`compile/real.ts`), not published as a noncompile.
+
 **A context is not one uniform thing**, and the repro scripts say so per row rather than
 generalising. It is whatever that TU preprocesses to: af's manifest has `headers: []` — its
 headers do not survive a host `cpp` — so an af row's entire context is that row's own `prependC`,
@@ -179,8 +205,8 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
   control), each run on its assigned toolchains: 215 functions → 671 cases.
-- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from six decomp projects (af, kleod, marioparty3, pokeemerald, sa3, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 252 cases
+- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from seven decomp projects (af, kleod, marioparty3, marioparty4, pokeemerald, sa3, snowboardkids2), compiled standalone
+  with asmlift's canonical toolchain flags using each project's headers as context: 336 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
   from asmlift's mwcc_242, so byte-match is not defined there.)
 
@@ -406,18 +432,31 @@ the round that first ran it.
   project through `gmake -n` in a clone of the checkout, a dtk project from `objdiff.json` checked
   against `build.ninja`) and never typed; each unit's `flagsFrom` names the build file at the commit.
   `pnpm bench vendor --project <p>` refuses a unit whose stored flags are not the build's at the
-  checkout's HEAD, and any row whose target is not the function the linked ELF holds at its address
-  (relocations masked; a REL row's module ELF, below); it writes each row's `romDigest`, and `bench run` refuses a row whose target
-  has another digest. A pin bump is therefore `bench flags --write`, then `bench vendor`, and
-  `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were vendored from.
+  checkout's HEAD, and any row whose target is not the function the game holds at its address — its
+  bytes with every relocated field masked, AND what each of those relocations points at, one for one:
+  same offset and type, same symbol and addend, and the same bytes where the file carries the datum
+  (`cases/rom-function.ts`). On PowerPC the second half is the whole of a function's constant data,
+  since every float literal, string and table lives outside it. Three things are still outside the
+  comparison, all stated in the code: a file that keeps NO relocations (a fully linked image — the ARM
+  and MIPS projects) is compared on its code alone; the words of a datum the file itself relocates (a
+  `bctr` jump table) state no value either side and are masked, so what such a datum points at is not
+  followed; a literal pool's compiler-assigned number (`@1135`) is not a fact about the game, so it is
+  compared by what it holds; and a relocation against a SECTION SYMBOL — which IDO writes for every
+  reference to a file-local datum, and CodeWarrior for none — states its offset and type and nothing
+  else, because which section holds a datum is the linker's choice and where in it is the addend a REL
+  table keeps in the masked field. It writes each row's `romDigest`, and `bench run` refuses a row whose
+  target has another digest — that digest is the masked CODE, so it is the vendor-time check above, not
+  the digest, that covers the referents. A pin bump is therefore `bench flags --write`, then
+  `bench vendor`, and `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were
+  vendored from.
 - **A REL row is proved against its module's ELF.** The linked ELF holds no module's bytes, so a row
   keyed by a module location is compared with the `.plf` the build turns into the disc's module,
   its sections placed at addresses of their own (`cases/rom-function.ts` `romLocation`); the
   module's bytes are unrelocated there, and every relocated field is masked by the object's own
-  relocations as for any other row. Before that, `bench vendor` proves the row is where it says it
-  is: its module ELF must define that symbol at that section and that offset
-  (`cases/vendor.ts` `moduleIdentityRefusal`). CI holds only the OFFSET, out of the vendored module
-  map (`test/real-manifests.test.ts`); the module and the section are decidable only against the
+  relocations — and compared for what it points at — as for any other row. Before that, `bench vendor`
+  proves the row is where it says it is: its module ELF must define that symbol at that section and
+  that offset (`cases/vendor.ts` `moduleIdentityRefusal`). CI holds only the OFFSET, out of the vendored
+  module map (`test/real-manifests.test.ts`); the module and the section are decidable only against the
   checkout, because a symbol map records a section INDEX and unions the base ELF's globals into
   every module's map.
 - **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
@@ -447,7 +486,16 @@ the round that first ran it.
   census and is not a derived order, so the fidelity check below is what vouches for it; `proto`
   gives `returnsVoid` exactly where the return type is `void`; tags are the judgement tags that pass
   `JUDGEMENT_FLOOR` on the new body. Then check fidelity the harness's way: every row, compiled
-  standalone, equals the ROM function bytes (relocations masked).
+  standalone, equals the ROM function bytes (relocations masked). That is a manifest with
+  `"tu": "assembled"`.
+- **Or compile each row in its own unit** (`"tu": "unit"`, Mario Party 4): the translation unit is the
+  unit's own text from its first line through the last line `sourceUrl` cites, read from the checkout by
+  `bench vendor`, which refuses a row whose `funcC` is not that span verbatim; `headers` is empty and no
+  row has a `prependC`. A declarations-only preamble is not enough: rebuilt after their unit's
+  DECLARATIONS alone (`declarationsOnly` over each row's vendored context), 23 of the 42 Mario Party 4
+  rows are still the game's function, 12 no longer compile at all — the unit's earlier definitions are
+  what a row inlines — and 7 compile to other bytes, among them `HuMemHeapDump` and `HuDvdErrorWatch`,
+  which CodeWarrior GC/2.6 at `-O0,p` gives other branch-prediction bits.
 - **Pins.** A fork branch is the upstream commit plus one integration commit. kleod's is
   `macabeus/kleod@6f149e3` on upstream `testyourmine/kleod@64a83ad`; the upstream sha is otherwise
   only in the fork's README.

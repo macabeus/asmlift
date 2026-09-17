@@ -4,6 +4,7 @@
   "repo": "macabeus/af",
   "branch": "asmlift-benchmark",
   "elfMake": "asmlift-elf",
+  "tu": "assembled",
   "cppIncludes": [
     "-nostdinc"
   ],

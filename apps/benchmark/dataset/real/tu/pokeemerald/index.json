@@ -1,170 +1,212 @@
 {
   "MathUtil_Mul16": {
     "tu": "MathUtil_Mul16.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "MathUtil_Mul16Shift": {
     "tu": "MathUtil_Mul16Shift.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "MathUtil_Mul32": {
     "tu": "MathUtil_Mul32.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "MathUtil_Div16": {
     "tu": "MathUtil_Div16.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "MathUtil_Div16Shift": {
     "tu": "MathUtil_Div16Shift.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "MathUtil_Inv16": {
     "tu": "MathUtil_Inv16.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StoreWordInTwoHalfwords": {
     "tu": "StoreWordInTwoHalfwords.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "LoadWordFromTwoHalfwords": {
     "tu": "LoadWordFromTwoHalfwords.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "CountTrailingZeroBits": {
     "tu": "CountTrailingZeroBits.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "CalcByteArraySum": {
     "tu": "CalcByteArraySum.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "CalcCRC16": {
     "tu": "CalcCRC16.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "Random": {
     "tu": "Random.i.gz",
-    "ctx": "ctx-d7b4f615b5ba.i.gz"
+    "ctx": "ctx-d7b4f615b5ba.i.gz",
+    "m2c": "ctx-d7b4f615b5ba.i.gz"
   },
   "StringLength": {
     "tu": "StringLength.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StringCompare": {
     "tu": "StringCompare.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StringCompareN": {
     "tu": "StringCompareN.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StringCopy": {
     "tu": "StringCopy.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StringAppend": {
     "tu": "StringAppend.i.gz",
-    "ctx": "ctx-9801ce0c65ce.i.gz"
+    "ctx": "ctx-9801ce0c65ce.i.gz",
+    "m2c": "ctx-9801ce0c65ce.i.gz"
   },
   "IsStringLengthAtLeast": {
     "tu": "IsStringLengthAtLeast.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "StringCopyN": {
     "tu": "StringCopyN.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "CalcCRC16WithTable": {
     "tu": "CalcCRC16WithTable.i.gz",
-    "ctx": "ctx-dbb6d12e4277.i.gz"
+    "ctx": "ctx-dbb6d12e4277.i.gz",
+    "m2c": "ctx-dbb6d12e4277.i.gz"
   },
   "ModifyStatByNature": {
     "tu": "ModifyStatByNature.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "GetGenderFromSpeciesAndPersonality": {
     "tu": "GetGenderFromSpeciesAndPersonality.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "Sin2": {
     "tu": "Sin2.i.gz",
-    "ctx": "ctx-3b544fd3decb.i.gz"
+    "ctx": "ctx-3b544fd3decb.i.gz",
+    "m2c": "ctx-3b544fd3decb.i.gz"
   },
   "Cos2": {
     "tu": "Cos2.i.gz",
-    "ctx": "ctx-7611fc42abc5.i.gz"
+    "ctx": "ctx-7611fc42abc5.i.gz",
+    "m2c": "ctx-7611fc42abc5.i.gz"
   },
   "PutMemBlockHeader": {
     "tu": "PutMemBlockHeader.i.gz",
-    "ctx": "ctx-fbaccdeef3a1.i.gz"
+    "ctx": "ctx-fbaccdeef3a1.i.gz",
+    "m2c": "ctx-fbaccdeef3a1.i.gz"
   },
   "PutFirstMemBlockHeader": {
     "tu": "PutFirstMemBlockHeader.i.gz",
-    "ctx": "ctx-92d4b72c07b6.i.gz"
+    "ctx": "ctx-92d4b72c07b6.i.gz",
+    "m2c": "ctx-92d4b72c07b6.i.gz"
   },
   "StopScript": {
     "tu": "StopScript.i.gz",
-    "ctx": "ctx-6b8054819029.i.gz"
+    "ctx": "ctx-6b8054819029.i.gz",
+    "m2c": "ctx-6b8054819029.i.gz"
   },
   "SetupBytecodeScript": {
     "tu": "SetupBytecodeScript.i.gz",
-    "ctx": "ctx-6b8054819029.i.gz"
+    "ctx": "ctx-6b8054819029.i.gz",
+    "m2c": "ctx-6b8054819029.i.gz"
   },
   "TranslateBigMonSizeTableIndex": {
     "tu": "TranslateBigMonSizeTableIndex.i.gz",
-    "ctx": "ctx-10a1589370ba.i.gz"
+    "ctx": "ctx-10a1589370ba.i.gz",
+    "m2c": "ctx-10a1589370ba.i.gz"
   },
   "FeebasRandom": {
     "tu": "FeebasRandom.i.gz",
-    "ctx": "ctx-398e4284d4ad.i.gz"
+    "ctx": "ctx-398e4284d4ad.i.gz",
+    "m2c": "ctx-398e4284d4ad.i.gz"
   },
   "CalculatePPWithBonus": {
     "tu": "CalculatePPWithBonus.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "GiveBerryPowder": {
     "tu": "GiveBerryPowder.i.gz",
-    "ctx": "ctx-264361caa05e.i.gz"
+    "ctx": "ctx-264361caa05e.i.gz",
+    "m2c": "ctx-264361caa05e.i.gz"
   },
   "TrySetCantSelectMoveBattleScript": {
     "tu": "TrySetCantSelectMoveBattleScript.i.gz",
-    "ctx": "ctx-78a6659be413.i.gz"
+    "ctx": "ctx-78a6659be413.i.gz",
+    "m2c": "ctx-78a6659be413.i.gz"
   },
   "SetMauvilleOldManLanguage": {
     "tu": "SetMauvilleOldManLanguage.i.gz",
-    "ctx": "ctx-625d4a302eb2.i.gz"
+    "ctx": "ctx-625d4a302eb2.i.gz",
+    "m2c": "ctx-625d4a302eb2.i.gz"
   },
   "AcroBikeHandleInputTurning": {
     "tu": "AcroBikeHandleInputTurning.i.gz",
-    "ctx": "ctx-4bcee929a307.i.gz"
+    "ctx": "ctx-4bcee929a307.i.gz",
+    "m2c": "ctx-4bcee929a307.i.gz"
   },
   "DoForcedMovement": {
     "tu": "DoForcedMovement.i.gz",
-    "ctx": "ctx-980dabfe1959.i.gz"
+    "ctx": "ctx-980dabfe1959.i.gz",
+    "m2c": "ctx-980dabfe1959.i.gz"
   },
   "GetMoveTarget": {
     "tu": "GetMoveTarget.i.gz",
-    "ctx": "ctx-78a6659be413.i.gz"
+    "ctx": "ctx-78a6659be413.i.gz",
+    "m2c": "ctx-78a6659be413.i.gz"
   },
   "Cmd_tryconversiontypechange": {
     "tu": "Cmd_tryconversiontypechange.i.gz",
-    "ctx": "ctx-49ee5beb3f01.i.gz"
+    "ctx": "ctx-49ee5beb3f01.i.gz",
+    "m2c": "ctx-49ee5beb3f01.i.gz"
   },
   "AnimTask_FlashHealthboxOnLevelUp_Step": {
     "tu": "AnimTask_FlashHealthboxOnLevelUp_Step.i.gz",
-    "ctx": "ctx-f77ea1056385.i.gz"
+    "ctx": "ctx-f77ea1056385.i.gz",
+    "m2c": "ctx-f77ea1056385.i.gz"
   },
   "UpdateShoalTideFlag": {
     "tu": "UpdateShoalTideFlag.i.gz",
-    "ctx": "ctx-4f862b3e7af0.i.gz"
+    "ctx": "ctx-4f862b3e7af0.i.gz",
+    "m2c": "ctx-4f862b3e7af0.i.gz"
   },
   "GetAnchorCoord": {
     "tu": "GetAnchorCoord.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz",
+    "m2c": "ctx-b98da8e28d15.i.gz"
   },
   "EReader_Reset": {
     "tu": "EReader_Reset.i.gz",
-    "ctx": "ctx-501304b4a02f.i.gz"
+    "ctx": "ctx-501304b4a02f.i.gz",
+    "m2c": "ctx-501304b4a02f.i.gz"
   }
 }

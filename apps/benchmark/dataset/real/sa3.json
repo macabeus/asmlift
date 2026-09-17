@@ -4,6 +4,7 @@
   "repo": "macabeus/sa3",
   "branch": "asmlift-benchmark",
   "elfMake": "asmlift-elf",
+  "tu": "assembled",
   "cppIncludes": [
     "-iquote",
     "include",

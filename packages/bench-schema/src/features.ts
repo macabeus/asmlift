@@ -1418,7 +1418,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Maths library call',
     group: 'calls',
     evidence: 'codegen',
-    pending: true,
     summary: 'the compiled code calls the C maths library — `sin`, `sqrt`, `fmod` and friends',
     detail:
       'The mirror image of `runtime-helper-call`: a libm function is something the SOURCE asked ' +
@@ -1497,7 +1496,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Variadic definition',
     group: 'calls',
     evidence: 'source',
-    pending: true,
     summary: 'the function itself is variadic — its parameter list ends in `...`',
     detail:
       'The definition side of the same ABI. `va_start` has to walk the arguments as MEMORY, so a ' +
