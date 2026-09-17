@@ -3332,23 +3332,19 @@ export function lift(
       : Array.from({ length: arity - target.argRegs.length }, (_, i) => 4 * i);
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
-    blocks: asmBlocks.map((ab) => {
-      const last = ab.instrs[ab.instrs.length - 1];
-      return {
-        events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
-          const off = slotAcc(ins);
-          if (off !== null) {
-            return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
-          }
-          if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-            const callee = ins.ops[0] ?? '?';
-            return [{ kind: 'call', call: ins, callee, declared: declaredBlock(callee) }];
-          }
-          return [];
-        }),
-        returns: last !== undefined && classifyXfer(last) === 'return',
-      };
-    }),
+    blocks: asmBlocks.map((ab) => ({
+      events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
+        const off = slotAcc(ins);
+        if (off !== null) {
+          return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
+        }
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+          const callee = ins.ops[0] ?? '?';
+          return [{ kind: 'call', call: ins, callee, declared: declaredBlock(callee) }];
+        }
+        return [];
+      }),
+    })),
     preds,
     live: entryReachable,
     localArea,

@@ -19,7 +19,7 @@ const call = (name: string, n: number): Ev => ({
   callee: name,
   declared: n === 0 ? null : Array.from({ length: n }, (_, i) => 4 * i),
 });
-const blk = (events: Ev[], returns = false): StackArgsBlock<string> => ({ events, returns });
+const blk = (events: Ev[]): StackArgsBlock<string> => ({ events });
 
 const run = (blocks: StackArgsBlock<string>[], preds: number[][], localArea: number, capturedWholeFrame = false) =>
   analyzeOutgoingArgs<string>({
@@ -30,20 +30,20 @@ const run = (blocks: StackArgsBlock<string>[], preds: number[][], localArea: num
     argRegs: 4,
     capturedWholeFrame,
   });
-/** A straight line of blocks, each falling through to the next, the last one returning. */
-const line = (...events: Ev[][]) => events.map((e, i) => blk(e, i === events.length - 1));
+/** A straight line of blocks, each falling through to the next; the last one ends the function. */
+const line = (...events: Ev[][]) => events.map(blk);
 const chain = (n: number) => Array.from({ length: n }, (_, i) => (i === 0 ? [] : [i - 1]));
 
 describe('the MUST set decides “nothing missing”, and it is an intersection over predecessors', () => {
   test('a store in both arms of a diamond licenses the call in the join', () => {
-    const r = run([blk([]), blk([st(0)]), blk([st(0)]), blk([call('five', 1)], true)], [[], [0], [0], [1, 2]], 4);
+    const r = run([blk([]), blk([st(0)]), blk([st(0)]), blk([call('five', 1)])], [[], [0], [0], [1, 2]], 4);
     expect(r.blocker).toBeNull();
     expect(r.blocks.get('five')).toEqual([0]);
     expect(r.area).toBe(4);
   });
 
   test('…and one arm not storing is a word the callee reads off a path that never wrote it', () => {
-    const r = run([blk([]), blk([st(0)]), blk([]), blk([call('five', 1)], true)], [[], [0], [0], [1, 2]], 4);
+    const r = run([blk([]), blk([st(0)]), blk([]), blk([call('five', 1)])], [[], [0], [0], [1, 2]], 4);
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
     expect(r.area).toBe(0);
   });
@@ -52,14 +52,14 @@ describe('the MUST set decides “nothing missing”, and it is an intersection 
     // Iteration 1 reaches the call with nothing staged. The back edge is the only predecessor that
     // stores, so the intersection over predecessors drops the slot — the answer a per-block or
     // flat-listing scan gets wrong.
-    const r = run([blk([]), blk([call('five', 1)]), blk([st(0)]), blk([], true)], [[], [0, 2], [1], [1]], 4);
+    const r = run([blk([]), blk([call('five', 1)]), blk([st(0)]), blk([])], [[], [0, 2], [1], [1]], 4);
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });
 
   test('a store BEFORE the loop, with the call inside it, is killed by the first iteration', () => {
     // The call consumes the block, so the second iteration arrives with it unstaged. This is the
     // one place the model already behaves as if the call ended the word's life.
-    const r = run([blk([st(0)]), blk([call('five', 1)]), blk([], true)], [[], [0, 1], [1]], 4);
+    const r = run([blk([st(0)]), blk([call('five', 1)]), blk([])], [[], [0, 1], [1]], 4);
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });
 });
@@ -68,16 +68,12 @@ describe('the MAY set decides “nothing extra”, and it is a union over predec
   test('a word staged on ONE path only still refuses the declaration that omits it', () => {
     // The variadic hole, path-sensitively: [sp,#4] reaches the call on one arm. The weakest thing
     // that could still be a word this call takes must be inside the declared block.
-    const r = run([blk([st(0)]), blk([st(4)]), blk([]), blk([call('five', 1)], true)], [[], [0], [0], [1, 2]], 8);
+    const r = run([blk([st(0)]), blk([st(4)]), blk([]), blk([call('five', 1)])], [[], [0], [0], [1, 2]], 8);
     expect(r.blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
   });
 
   test('…and a load on every path back out of the may set lets the call through', () => {
-    const r = run(
-      [blk([st(0)]), blk([st(4), ld(4)]), blk([ld(4)]), blk([call('five', 1)], true)],
-      [[], [0], [0], [1, 2]],
-      8,
-    );
+    const r = run([blk([st(0)]), blk([st(4), ld(4)]), blk([ld(4)]), blk([call('five', 1)])], [[], [0], [0], [1, 2]], 8);
     // The load is also the thing that refuses: [sp,#4] is not licensed, so it is a real local, and
     // the store to [sp,#0] beneath it is licensed. Both are consistent, and the lift is allowed.
     expect(r.blocker).toBeNull();
@@ -105,9 +101,27 @@ describe('a licensed call consumes its block, which is what lets one frame serve
     expect(r.area).toBe(12);
   });
 
-  test('a store the second call does not consume reaches the return and refuses', () => {
+  test('a store the second call does not consume is still staged where the function ends', () => {
     const r = run(line([st(0), call('five', 1), st(0)]), chain(1), 4);
-    expect(r.blocker).toMatch(/reaches a return unconsumed/);
+    expect(r.blocker).toMatch(/is still staged where this function ends/);
+  });
+
+  test('…and the check reads the CFG, not a terminator classification', () => {
+    // The exit block ends in no call, no store and no branch; nothing named it a return. What
+    // makes it the end is that no live block lists it as a predecessor.
+    const r = run([blk([st(0), call('five', 1), st(0)]), blk([])], [[], [0]], 4);
+    expect(r.blocker).toMatch(/is still staged where this function ends/);
+  });
+
+  test('ESCAPE, pinned: a path that never ends keeps the word pending and nothing here refuses', () => {
+    // Every block of an infinite loop has a live successor, so "where the function ends" is
+    // nowhere and the leftover store is invisible to this check. The loud answer survives, but it
+    // comes from ANOTHER family: lifting `str r1,[sp]` after a licensed `bl` into `.L1: b .L1`
+    // declines at L2 with "unrecovered back-edge into block #1". Closing it here needs a backward
+    // "can this word still be consumed?" pass, which no row in the corpus asks for.
+    const r = run([blk([st(0), call('five', 1), st(0)]), blk([])], [[], [0, 1]], 4);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('five')).toEqual([0]);
   });
 });
 
@@ -140,7 +154,7 @@ describe('the contiguity filter, and the frames that refuse outright', () => {
   });
 
   test('…and with the lower slot supplied it is a plausible argument block, so it refuses', () => {
-    const r = run([blk([st(0)]), blk([st(4), call('one', 0)], true)], [[], [0]], 8);
+    const r = run([blk([st(0)]), blk([st(4), call('one', 0)])], [[], [0]], 8);
     expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
   });
 
@@ -157,7 +171,7 @@ describe('the contiguity filter, and the frames that refuse outright', () => {
 
 describe('the fixpoint terminates and does not depend on block order', () => {
   test('an irreducible two-headed loop converges, and both orderings agree', () => {
-    const blocks = [blk([st(0)]), blk([]), blk([]), blk([call('five', 1)], true)];
+    const blocks = [blk([st(0)]), blk([]), blk([]), blk([call('five', 1)])];
     const preds = [[], [0, 2], [1], [1, 2]];
     const forward = run(blocks, preds, 4);
     // The same CFG with the two arms swapped: a flat-listing scan let BLOCK ORDER decide this.
@@ -168,7 +182,7 @@ describe('the fixpoint terminates and does not depend on block order', () => {
 
   test('a DEAD call refuses, naming the slot it never saw staged', () => {
     const r = analyzeOutgoingArgs<string>({
-      blocks: [blk([st(0), call('five', 1)], true), blk([call('five2', 1)], true)],
+      blocks: [blk([st(0), call('five', 1)]), blk([call('five2', 1)])],
       preds: [[], []],
       live: new Set([0]),
       localArea: 4,

@@ -35,12 +35,10 @@ export interface StackArgsCall<C> {
   readonly declared: readonly number[] | null;
 }
 
-/** One basic block's events, plus the one fact about its terminator the analysis needs. */
+/** One basic block's events. Where control goes afterwards is read out of `preds`, so a block is
+ *  nothing but its slot-level events. */
 export interface StackArgsBlock<C> {
   readonly events: readonly StackArgsEvent<C>[];
-  /** Whether control leaves the function here. A word still staged at such a block is spoken for
-   *  by no call, which the "nothing left over" check refuses. */
-  readonly returns: boolean;
 }
 
 export interface StackArgsInput<C> {
@@ -118,6 +116,16 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 //     the frame happened to hold. m2c renders that case as `ErrorExpr("Unable to find stack arg
 //     0x0 in block")`; here it is a decline, and for the same reason — it is a GAP, and a gap
 //     must never render as a plausible value.
+//
+// WHAT "NOTHING EXTRA" COSTS, because the reach is narrower than the disappearance of the old
+// decline suggests. A genuine SPILL that is live across a licensed call sits in the may set and is
+// not in the declared block, so the call refuses — and that is agbcc's commonest frame with an
+// outgoing area. Tolerating it means arguing that a pending word which is RELOADED later is a
+// local rather than argument n+1, which needs a gate and a row that gate protects; none exists.
+// The cost is in attribution, not correctness: such a function used to decline on "consuming stack
+// call arguments is not implemented", which named the capability, and now declines on "[sp,#k] also
+// reaches the call unread", which names a store. Anyone reading a gap histogram for this class
+// should look for the latter.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
 // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
 // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same
@@ -145,7 +153,9 @@ export function analyzeOutgoingArgs<C>({
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
   // dataflow below never finds its block and it refuses — which is the verdict it had before
   // consumption existed. An unreachable `bl` is not evidence about the frame either way, and
-  // the loud answer is the one that does not depend on deciding which.
+  // the loud answer is the one that does not depend on deciding which. The message a reader gets
+  // is the dataflow fact ("[sp,#0] is not stored on every path to the call"), not "this block is
+  // dead", and deliberately so: which blocks run is the question being refused, not an answer.
   const calls = asmBlocks.flatMap((ab) => ab.events.filter(isCallEvent));
   // ONLY FOR A FUNCTION THAT CALLS. With no call there is no outgoing area to mistake a local
   // for, and a never-reloaded store is then an ordinary dead local — which PR #30 modelled and
@@ -362,17 +372,38 @@ export function analyzeOutgoingArgs<C>({
     }
   }
   // NOTHING LEFT OVER. The exclusion above is per OFFSET, so it would also excuse a store to a
-  // licensed offset that no call ever reads — a write into the argument area that reaches a
-  // return still pending. That is not an argument and not a local anyone reloads, so nothing
+  // licensed offset that no call ever reads — a write into the argument area that is still pending
+  // where the function ENDS. That is not an argument and not a local anyone reloads, so nothing
   // here can say what it is: decline rather than let it drop as a dead def.
+  //
+  // "WHERE THE FUNCTION ENDS" IS A LIVE BLOCK WITH NO LIVE SUCCESSOR, read off `preds`, not a
+  // terminator the caller classified. Under Thumb the two coincide — a computed PC write has no
+  // static successor and the frontend throws on one long before here — but asking the CFG costs
+  // nothing and removes a fact the caller could get wrong.
+  //
+  // WHAT IT STILL DOES NOT REACH, stated because the escape is real: a store into the licensed area
+  // on a path that never ends. Every block of an infinite loop has a live successor, so the word
+  // stays pending forever and nothing here refuses it. Measured rather than assumed — a `str` into
+  // the area after a licensed `bl`, falling into `.L1: b .L1`, passes this analysis and then
+  // declines at L2: "unrecovered back-edge into block #1 (loop-recovery declined this shape)". So
+  // the loud answer is preserved by a DIFFERENT family's refusal, not by this one. Closing it needs
+  // a backward "can this word still be consumed?" pass, which no row in the corpus asks for.
+  const hasLiveSucc = asmBlocks.map(() => false);
   for (let b = 0; b < asmBlocks.length; b++) {
-    if (!live.has(b) || !asmBlocks[b].returns) {
+    if (live.has(b)) {
+      for (const q of preds[b]) {
+        hasLiveSucc[q] = true;
+      }
+    }
+  }
+  for (let b = 0; b < asmBlocks.length; b++) {
+    if (!live.has(b) || hasLiveSucc[b]) {
       continue;
     }
     for (const off of asc(mayOut[b])) {
       if (licensed.has(off)) {
         return refuse(
-          `the store to [sp,#${off}] is inside the outgoing stack-argument area but reaches a return unconsumed — no call this function makes accounts for it`,
+          `the store to [sp,#${off}] is inside the outgoing stack-argument area but is still staged where this function ends — no call it makes accounts for it`,
         );
       }
     }

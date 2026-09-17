@@ -84,6 +84,12 @@ the third reaches `bl sub_0804EE34` before reading the store at `[sp,#0]`. None 
 allocator behind those gates. Their rows already exist, so this study adds no duplicate decline
 rows and makes no claim that an unexecuted future fix would match them.
 
+2026-09-17: the first row's blocker is gone. `sub_0804C300` lifts — `pnpm bench run --tier real
+--only sub_0804C300` reports `asmlift=diff:43/78` where it reported `declined(1 gap(s))` — because
+the frontend now consumes a call's outgoing stack arguments where the callee's declared arity and
+this function's own staging stores agree word for word. The allocator behind that gate is still
+unmeasured, and the residual belongs to another family. The other two rows are unchanged.
+
 ## What this does and does not establish
 
 The two largest-category allocation residuals support the published generality finding; they do

@@ -95,12 +95,12 @@ describe('the two witnesses must agree, and a disagreement declines naming what 
 
   test('a store into the licensed area that no call reads refuses instead of dropping', () => {
     // The exemption that lets a licensed offset past condition (a) is per OFFSET, so on its own it
-    // would also excuse a write into the argument area that reaches a return still pending.
+    // would also excuse a write into the argument area still staged where the function ends.
     const leftover =
       HEAD +
       '\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tstr\tr0, [sp]\n\tbl\tfive\n\tb\t.L2\n.L1:\n\tstr\tr1, [sp]\n.L2:\n' +
       TAIL('0x4');
-    expect(() => src(leftover, P5)).toThrow(/reaches a return unconsumed/);
+    expect(() => src(leftover, P5)).toThrow(/is still staged where this function ends/);
   });
 
   test('a LOAD off a licensed slot refuses — the callee owns that word across the call', () => {
