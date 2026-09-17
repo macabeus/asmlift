@@ -8,7 +8,8 @@
 // the function the ROM holds exactly when it has that digest (`targetDigest`).
 //
 // ELF32 only, ARM, MIPS and PowerPC: the machines the real tier builds for.
-import { moduleOf } from '@asmlift/bench-schema';
+import { moduleLocation } from '@asmlift/bench-schema';
+import { placedSectionAddress } from '@asmlift/cli/module-elf';
 import { createHash } from 'node:crypto';
 
 const SHT_RELA = 4;
@@ -253,15 +254,31 @@ export function compareWithRom(object: Buffer, sym: string, linked: Buffer, addr
   return { equal: false, detail: `object ${objBytes.length} B, ROM ${romBytes.length} B, equal over the shorter` };
 }
 
-/** The address in the project's linked ELF the ROM gate reads a row's function at.
+/** Where the ROM gate reads a row's function: the ELF holding the game's bytes for it, and the
+ *  address they sit at in that ELF.
  *
- *  A row keyed by a REL MODULE LOCATION has none, and gets null rather than an address parsed out
- *  of a spelling that holds no address: a module is placed by the game's loader, the linked ELF
- *  holds none of its bytes, and the module's own ELF holds them with its relocations unresolved —
- *  which this gate, whose masks cover ARM and MIPS, cannot compare. Null so the caller refuses the
- *  row by name instead of comparing against a NaN address. */
-export const romAddress = (addr: string): number | null =>
-  moduleOf(addr) === undefined ? Number.parseInt(addr, 16) : null;
+ *  A row with a linked address is read out of the project's linked ELF at that address. A row keyed
+ *  by a REL MODULE LOCATION is read out of its MODULE's ELF — the `.plf` the project's build links
+ *  the module from and turns into the disc's `.rel`, which is to a module what the linked ELF is to
+ *  the DOL — PLACED (cli/module-elf `placeModuleSections`), so that its section sits at an address
+ *  of its own and the function at that address plus its offset. The module's bytes are unrelocated
+ *  there, which is no obstacle: so are the object's, and every relocated field is masked on both
+ *  sides by the object's own relocations.
+ *
+ *  `placedModule` hands back a module's placed ELF; a caller reading many rows of one module
+ *  places it once. */
+export function romLocation(
+  addr: string,
+  linked: Buffer,
+  placedModule: (module: string) => Buffer,
+): { elf: Buffer; at: number } {
+  const loc = moduleLocation(addr);
+  if (loc === undefined) {
+    return { elf: linked, at: Number.parseInt(addr, 16) };
+  }
+  const elf = placedModule(loc.module);
+  return { elf, at: placedSectionAddress(elf, loc.section) + loc.offset };
+}
 
 /** The digest of function `sym` in a relocatable object, the value `compareWithRom` records for a target it
  *  proves. Throws when the object does not define `sym`. */

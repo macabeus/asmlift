@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SYNTHETIC } from '../dataset/synthetic';
 import {
+  ASSEMBLY_ONLY_FLOOR,
   CODEGEN_DERIVED,
   JUDGEMENT_FLOOR,
   SOURCE_CHECKED,
@@ -218,25 +219,62 @@ describe('tags match their evidence', () => {
     expect(bad.sort()).toEqual([]);
   });
 
-  it('keeps every judgement tag above its floor', () => {
-    // EVERY toolchain's assembly for the symbol: a tag defensible on the row that branches must
-    // not be failed by the row the compiler made branchless.
-    const asmOf = new Map<string, string>();
-    for (const r of rows) {
-      const k = `${r.project}:${r.sym}`;
-      asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
-    }
-    const bad = authored
+  // EVERY toolchain's assembly for the symbol: a tag defensible on the row that branches must
+  // not be failed by the row the compiler made branchless.
+  const asmOf = new Map<string, string>();
+  for (const r of rows) {
+    const k = `${r.project}:${r.sym}`;
+    asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
+  }
+  const floors = (tags: string[], src: string, asm: string) => {
+    const stripped = stripLiterals(src);
+    const body = definitionOf(stripped).body;
+    return tags.filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped));
+  };
+  /** Every floor a row fails, minus the ones only its object could have met while `results.json`
+   *  — a published artifact — has not met the row yet. A row the next `bench run` publishes is
+   *  held to those too, and to every source-reading floor it is held on the spot. */
+  const floorFailures = (entries: typeof authored) =>
+    entries
       .flatMap(({ where, tags, src }) => {
-        const stripped = stripLiterals(src);
-        const body = definitionOf(stripped).body;
-        const asm = asmOf.get(where) ?? '';
-        return tags
-          .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped))
+        const asm = asmOf.get(where);
+        return floors(tags, src, asm ?? '')
+          .filter((t) => asm !== undefined || !ASSEMBLY_ONLY_FLOOR.has(t))
           .map((t) => `${where} claims ${t}`);
       })
       .sort();
-    expect(bad).toEqual([]);
+
+  it('keeps every judgement tag above its floor', () => {
+    expect(floorFailures(authored)).toEqual([]);
+  });
+
+  it('holds a row the artifact has not met to every floor the SOURCE decides', () => {
+    // `branch` reads the source first and the assembly second, so a row with no assembly is still
+    // answerable — and a body with no conditional in it cannot claim the tag.
+    const fabricated = [{ where: 'unpublished:f', tags: ['branch'], src: 'int f(void) { return K; }' }];
+    expect(floorFailures(fabricated)).toEqual(['unpublished:f claims branch']);
+    expect(floorFailures([{ ...fabricated[0], src: 'int f(void) { return a ? K : J; }' }])).toEqual([]);
+    // …while the two floors nothing in the C can meet wait for the row to be published
+    expect(floorFailures([{ where: 'unpublished:g', tags: ['fnptr'], src: 'void g(S* s) { s->proc(); }' }])).toEqual(
+      [],
+    );
+  });
+
+  it('excuses only floors that no source can meet', () => {
+    // The direction that can hide a fabrication: a deferred floor that the C could have decided.
+    // Measured over every source the dataset holds and the vocabulary's own example for the tag —
+    // if any of them meets the floor with no assembly at all, the floor does not belong here.
+    const sources = [
+      ...authored.map((a) => a.src),
+      ...[...ASSEMBLY_ONLY_FLOOR].map((t) => FEATURE_BY_ID.get(t)?.example?.c ?? ''),
+    ];
+    const met = [...ASSEMBLY_ONLY_FLOOR].filter((t) =>
+      sources.some((src) => {
+        const stripped = stripLiterals(src);
+        return JUDGEMENT_FLOOR[t](definitionOf(stripped).body, '', stripped);
+      }),
+    );
+    expect(met).toEqual([]);
   });
 
   it('every judgement tag with a floor is actually a judgement tag', () => {
@@ -355,6 +393,21 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0', '')).toBe(true);
+    // a PowerPC indirect call is `bctrl`, and `fnptr` is the tag for a call through a pointer on
+    // every ISA the benchmark runs (ac-decomp:mCoBG_MakeJumpFlag, ac-decomp:aBALL_actor_move)
+    expect(JUDGEMENT_FLOOR.fnptr('{ p->proc(a); }', '  9c:\tbctrl', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.fnptr('{ draw(o); }', '  9c:\tbl\tdraw', '')).toBe(false);
+    // `double` reads the type, not the keyword: `f64` is the same type (ac-decomp:Matrix_MtxtoMtxF)
+    expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f64)0x10000); }')).toBe(true);
+    expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f32)0x10000); }')).toBe(false);
+    // …and an unsuffixed literal is the type too: `calc` is an f32 and the addition is still a
+    // double one (ac-decomp:cKF_KeyCalc, whose object holds `lfd`/`fadd`/`fctiwz`)
+    expect(JUDGEMENT_FLOOR.double('', '', 'int f(f32 calc) { return calc + 0.5; }')).toBe(true);
+    // the suffix is what settles it: a function that only ever writes `f` literals is not
+    expect(JUDGEMENT_FLOOR.double('', '', 'f32 f(f32 d) { return d * (1.0f / 30.0f); }')).toBe(false);
+    expect(JUDGEMENT_FLOOR.double('', '', 'f32 f(f32 d) { return d * 30.0F; }')).toBe(false);
+    // …and neither a subscript nor a member reached through one is a literal
+    expect(JUDGEMENT_FLOOR.double('', '', 'int f(K* k) { return k[0].frame + k[10].value; }')).toBe(false);
     // a variable subscript ANYWHERE in the chain: the `k` here follows a `]`, not a name, which
     // the first form of this floor could not see (synthetic:pmarrrow)
     expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][k]; }', '', '')).toBe(true);
@@ -393,7 +446,7 @@ describe('the detectors themselves', () => {
 
   it('holds the remaining new floors without pretending to decide them', () => {
     const floor = (id: string, c: string, asm = '') => JUDGEMENT_FLOOR[id](stripLiterals(c), asm, stripLiterals(c));
-    // an indirect call, on all four ISAs — not the same predicate as `fnptr`, which has no PPC form
+    // an indirect call, on all four ISAs — the same necessary condition as `fnptr`
     expect(floor('virtual-call', '{ o->draw(); }', '  14:\tbctrl')).toBe(true);
     expect(floor('virtual-call', '{ o->draw(); }', '  14:\tjalr\tv0')).toBe(true);
     expect(floor('virtual-call', '{ draw(o); }', '  14:\tbl\tdraw')).toBe(false);

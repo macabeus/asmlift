@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
@@ -235,6 +236,8 @@ function cacheFor(cflags: readonly string[]): CandCache {
 export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
 export const agbccReal: RealCompile = {
+  undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
+  vendoredContext: (preprocessed) => preprocessed,
   buildTarget(iText, _sym, cflags): BuiltTarget {
     const dir = contentDir('arm', cflags, iText);
     const sPath = join(dir, 'u.s'),

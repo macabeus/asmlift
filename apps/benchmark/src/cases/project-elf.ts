@@ -12,7 +12,7 @@
 // than producing a wrong ELF, but the failure names the wrong thing. Hence the precondition
 // below, and `gmake` where there is one.
 import { loadDecompConfig } from '@asmlift/cli/config';
-import { moduleElfPath } from '@asmlift/cli/module-elf';
+import { moduleElfPath, placeModuleSections } from '@asmlift/cli/module-elf';
 import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -63,6 +63,25 @@ export function resolveProjectElf(project: string, root: string, module?: string
         elfRel,
         reason: `module ${module} has no ELF at ${elfRel} — run \`pnpm bench setup --project ${project} --build\``,
       };
+}
+
+/** The comparison base of a REL row's ROM gate (cases/rom-function `romLocation`): its module's ELF,
+ *  PLACED, read and placed once per module — Animal Crossing's is 19 MB and every row of the project
+ *  shares it. Throws, naming where the module's ELF was looked for, when the build did not write it. */
+export function placedModuleElves(project: string, root: string): (module: string) => Buffer {
+  const placed = new Map<string, Buffer>();
+  return (module) => {
+    let elf = placed.get(module);
+    if (elf === undefined) {
+      const mod = resolveProjectElf(project, root, module);
+      if (mod.elf === null) {
+        throw new Error(`${project}: rows live in module ${module}, but ${mod.reason}`);
+      }
+      elf = placeModuleSections(readFileSync(mod.elf), mod.elf);
+      placed.set(module, elf);
+    }
+    return elf;
+  };
 }
 
 /** The ELF `tools.asmlift.elf` names; if it is not built and the Makefile has an `asmlift-elf`

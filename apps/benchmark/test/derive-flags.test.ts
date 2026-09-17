@@ -9,14 +9,16 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
 import {
+  citedFile,
   deriveDtkFlags,
   deriveMakefileFlags,
+  dtkUnitOf,
   flagsClone,
   flagsStatus,
   ninjaCflags,
   objectFiles,
+  parseNinjaDeps,
   unitObject,
-  unitOf,
 } from '../src/cases/derive-flags';
 import type { BuildUnit } from '../src/cases/manifests';
 
@@ -119,7 +121,7 @@ describe("a unit's object", () => {
 
   test("is named by the row's permalink", () => {
     expect(
-      unitOf({
+      citedFile({
         sym: 'AbsMax',
         sourceUrl: 'https://github.com/macabeus/sa3/blob/a069e81b/src/game/math.c#L10-L20',
       }),
@@ -177,6 +179,59 @@ describe('a dtk unit', () => {
     const ninja = readFileSync(join(edited, 'build.ninja'), 'utf8');
     writeFileSync(join(edited, 'build.ninja'), ninja.replaceAll('-sdata 0 -sdata2 0', '-sdata 8 -sdata2 0'));
     expect(() => deriveDtkFlags(edited, commit, 'src/REL/m427Dll/map.c')).toThrow("are not build.ninja's");
+  });
+
+  // Animal Crossing keeps 550 function bodies in `.c_inc` files a unit `#include`s. No objdiff.json unit is
+  // built from one, so a row citing it compiles in the unit whose compile read it — and at that unit's flags.
+  describe('whose row cites a part the unit includes', () => {
+    const units = [
+      {
+        name: 'foresta/actor/ac_insect',
+        base_path: 'build/G/src/actor/ac_insect.o',
+        metadata: { source_path: 'src/actor/ac_insect.c' },
+      },
+      {
+        name: 'foresta/actor/ac_gyoei',
+        base_path: 'build/G/src/actor/ac_gyoei.o',
+        metadata: { source_path: 'src/actor/ac_gyoei.c' },
+      },
+    ];
+    const deps = parseNinjaDeps(
+      [
+        'build/G/src/actor/ac_insect.o: #deps 3, deps mtime 1789315693002779993 (VALID)',
+        '    src/actor/ac_insect.c',
+        '    /work/ac-decomp/include/types.h',
+        '    /work/ac-decomp/src/actor/ac_insect_move.c_inc',
+        '',
+        'build/G/src/actor/ac_gyoei.o: #deps 2, deps mtime 1789315693002779993 (VALID)',
+        '    src/actor/ac_gyoei.c',
+        '    /work/ac-decomp/include/types.h',
+        '',
+      ].join('\n'),
+      '/work/ac-decomp',
+    );
+
+    test('ninja deps are read relative to the checkout', () => {
+      expect(deps.get('build/G/src/actor/ac_insect.o')).toEqual([
+        'src/actor/ac_insect.c',
+        'include/types.h',
+        'src/actor/ac_insect_move.c_inc',
+      ]);
+    });
+
+    test('a source file is its own unit, and an included part is the unit that read it', () => {
+      expect(dtkUnitOf(units, 'src/actor/ac_gyoei.c', () => deps)).toBe('src/actor/ac_gyoei.c');
+      expect(dtkUnitOf(units, 'src/actor/ac_insect_move.c_inc', () => deps)).toBe('src/actor/ac_insect.c');
+    });
+
+    test('a part no unit read, or several did, names no unit', () => {
+      expect(() => dtkUnitOf(units, 'src/actor/ac_gyoei_move.c_inc', () => deps)).toThrow(
+        'no objdiff.json unit is built from src/actor/ac_gyoei_move.c_inc, and the build records no unit reading it',
+      );
+      expect(() => dtkUnitOf(units, 'include/types.h', () => deps)).toThrow(
+        'include/types.h is read by 2 units: src/actor/ac_insect.c, src/actor/ac_gyoei.c',
+      );
+    });
   });
 
   test('build.ninja values join their continuations and undo their escapes', () => {

@@ -20,19 +20,17 @@
 // project's linked ELF holds at the row's address. The proof is stored as the row's `romDigest`,
 // which the runner's `build()` checks; a project with any refused row writes nothing.
 //
-// ONE ROW SHAPE IS PROVED DIFFERENTLY, and it is named in the output every time: a row keyed by a
-// REL MODULE LOCATION has no address in the linked ELF (the module's bytes are not in it) and its
-// own module's bytes are unrelocated, which rom-function's ARM/MIPS masks cannot compare. Such a row
-// is instead proved to be where it says it is — its module ELF holds that symbol at that section and
-// offset — and its `romDigest` pins the target's own bytes rather than the game's. GC-6 owns the
-// PowerPC masks that let a REL row be compared against the game too.
+// A row keyed by a REL MODULE LOCATION is compared with its MODULE's ELF rather than the linked one,
+// which holds no module's bytes (cases/rom-function `romLocation`); before that it is proved to be
+// where it says it is — its module ELF defines that symbol at that section and offset — so a wrong
+// location is refused by name rather than as a byte difference.
 import { moduleLocation, moduleOf } from '@asmlift/bench-schema';
 import { moduleFunctionLocations } from '@asmlift/cli/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -41,8 +39,7 @@ import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
 import { enforceCheckoutPin, git } from './checkout';
-import { flagsStatus, unitDeriver } from './derive-flags';
-import { undeclaredCallees } from './implicit-declarations';
+import { citedFile, flagsStatus, unitDeriver } from './derive-flags';
 import {
   MODULE_MAP_DIR,
   REAL_DIR,
@@ -52,8 +49,8 @@ import {
   rewriteManifest,
   vendoredMapFile,
 } from './manifests';
-import { resolveProjectElf } from './project-elf';
-import { compareWithRom, romAddress, targetDigest } from './rom-function';
+import { placedModuleElves, resolveProjectElf } from './project-elf';
+import { compareWithRom, romLocation } from './rom-function';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 
@@ -150,6 +147,35 @@ function moduleIdentityProver(project: string, root: string): (sym: string, addr
   };
 }
 
+/** Write each row's TU blob and its context blob, one file per distinct context, into `outDir`, and remove
+ *  every blob there this vendoring did not write: a row that left, or a context that changed, must not keep
+ *  a file nothing reads. Returns the index `index.json` records and how many contexts were written. */
+export function writeVendoredBlobs(
+  outDir: string,
+  prepared: readonly { sym: string; tuI: string; ctxI: string }[],
+): { index: Record<string, { tu: string; ctx: string }>; contexts: number } {
+  mkdirSync(outDir, { recursive: true });
+  const index: Record<string, { tu: string; ctx: string }> = {};
+  const ctxSeen = new Map<string, string>(); // content sha → file name
+  for (const { sym, tuI, ctxI } of prepared) {
+    const tuName = `${sym}.i.gz`;
+    writeFileSync(join(outDir, tuName), gzipSync(tuI));
+    const ctxSha = sha(ctxI).slice(0, 12);
+    let ctxName = ctxSeen.get(ctxSha);
+    if (!ctxName) {
+      ctxName = `ctx-${ctxSha}.i.gz`;
+      writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
+      ctxSeen.set(ctxSha, ctxName);
+    }
+    index[sym] = { tu: tuName, ctx: ctxName };
+  }
+  const written = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx]));
+  for (const stale of readdirSync(outDir).filter((f) => f.endsWith('.i.gz') && !written.has(f))) {
+    rmSync(join(outDir, stale));
+  }
+  return { index, contexts: ctxSeen.size };
+}
+
 /** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
  *  index.json and PROVENANCE.json byte-for-byte as committed. The two halves of the vendored
  *  dataset have DIFFERENT sources — the TUs come from cpp over the checkout's headers, the map
@@ -179,6 +205,12 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     const deriver = unitDeriver(man.project, root);
     const refusals: string[] = [];
     const flagsWrite = `run \`pnpm bench flags --project ${man.project} --write\``;
+    for (const f of man.functions) {
+      const unit = deriver.unitOf(f);
+      if (f.unit !== unit) {
+        refusals.push(`${f.sym}: the build compiles ${citedFile(f)} in ${unit}, not ${f.unit} — ${flagsWrite}`);
+      }
+    }
     for (const unit of new Set(man.functions.map((f) => f.unit))) {
       const stored = unit === undefined ? undefined : man.units?.[unit];
       if (unit === undefined || stored === undefined) {
@@ -198,8 +230,8 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
 
     const outDir = join(REAL_DIR, 'tu', man.project);
     const prepared: { sym: string; tuI: string; ctxI: string; romDigest: string }[] = [];
-    const skipped: string[] = []; // rows whose ROM comparison was skipped, named below
     const moduleIdentity = moduleIdentityProver(man.project, root);
+    const placedModule = placedModuleElves(man.project, root);
     for (const f of man.functions) {
       const unit = man.units[f.unit];
       const cfg: RealProjectCfg = {
@@ -214,7 +246,11 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
       };
       const rc = realCompilerFor(unit.toolchain);
       const tuI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC));
-      const ctxI = rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', ''));
+      const ctxI = rc.vendoredContext(
+        rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', '')),
+        unit.cflags,
+        unitLanguage(f.unit, unit.cflags),
+      );
       for (const [what, text] of [
         ['tu', tuI],
         ['ctx', ctxI],
@@ -223,7 +259,7 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
           throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
         }
       }
-      const undeclared = undeclaredCallees(tuI);
+      const undeclared = rc.undeclaredCallees(tuI, unit.cflags, unitLanguage(f.unit, unit.cflags));
       if (undeclared.length > 0) {
         refusals.push(
           `${f.sym}: the vendored TU calls ${undeclared.join(', ')} with no declaration in scope — ` +
@@ -231,53 +267,29 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         );
         continue;
       }
-      const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI, unitLanguage(f.unit, unit.cflags));
-      const at = romAddress(f.addr);
-      if (at === null) {
-        // A REL row has no address in the linked ELF to compare against, and its own module's
-        // bytes are unrelocated, which this gate's ARM/MIPS masks cannot read. So the ROM
-        // comparison is SKIPPED — by name, out loud, and only for a module location — and the row
-        // is proved on the half that IS decidable here: that its module ELF really does hold this
-        // symbol at this section and offset. `romDigest` then pins the target's own bytes, so a
-        // row still cannot change what it builds without the dataset saying so; what it does not
-        // yet pin is that those bytes are the game's. GC-6 owns the PowerPC masks that close it.
+      if (moduleOf(f.addr) !== undefined) {
         const wrong = moduleIdentity(f.sym, f.addr);
         if (wrong !== null) {
           refusals.push(wrong);
           continue;
         }
-        skipped.push(f.sym);
-        prepared.push({ sym: f.sym, tuI, ctxI, romDigest: targetDigest(readFileSync(target.obj), f.sym) });
-        continue;
       }
-      const rom = compareWithRom(readFileSync(target.obj), f.sym, linked, at);
-      if (!rom.equal) {
+      const target = buildRealTarget(unit.toolchain, f.sym, unit.cflags, tuI, unitLanguage(f.unit, unit.cflags));
+      const { elf: rom, at } = romLocation(f.addr, linked, placedModule);
+      const proof = compareWithRom(readFileSync(target.obj), f.sym, rom, at);
+      if (!proof.equal) {
         refusals.push(
-          `${f.sym} (unit ${f.unit}, ${unit.cflags.join(' ')}): not the function the ROM holds, ${rom.detail}`,
+          `${f.sym} (unit ${f.unit}, ${unit.cflags.join(' ')}): not the function the ROM holds, ${proof.detail}`,
         );
         continue;
       }
-      prepared.push({ sym: f.sym, tuI, ctxI, romDigest: rom.digest });
+      prepared.push({ sym: f.sym, tuI, ctxI, romDigest: proof.digest });
     }
     if (refusals.length > 0) {
       throw new Error(`${man.project}: refused, nothing written:\n  ${refusals.join('\n  ')}`);
     }
 
-    mkdirSync(outDir, { recursive: true });
-    const index: Record<string, { tu: string; ctx: string }> = {};
-    const ctxSeen = new Map<string, string>(); // content sha → file name
-    for (const { sym, tuI, ctxI } of prepared) {
-      const tuName = `${sym}.i.gz`;
-      writeFileSync(join(outDir, tuName), gzipSync(tuI));
-      const ctxSha = sha(ctxI).slice(0, 12);
-      let ctxName = ctxSeen.get(ctxSha);
-      if (!ctxName) {
-        ctxName = `ctx-${ctxSha}.i.gz`;
-        writeFileSync(join(outDir, ctxName), gzipSync(ctxI));
-        ctxSeen.set(ctxSha, ctxName);
-      }
-      index[sym] = { tu: tuName, ctx: ctxName };
-    }
+    const { index, contexts } = writeVendoredBlobs(outDir, prepared);
     const romDigests = new Map(prepared.map((p) => [p.sym, p.romDigest]));
     rewriteManifest(man.project, (m) => ({
       ...m,
@@ -293,11 +305,8 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
     console.log(
-      `${man.project}: vendored ${prepared.length} TUs (${ctxSeen.size} unique context(s)) → ${outDir}; ` +
-        (skipped.length === 0
-          ? 'every row EQ to the ROM'
-          : `${prepared.length - skipped.length} row(s) EQ to the ROM, ${skipped.length} module-located row(s) ` +
-            `NOT compared against it (${skipped.join(', ')}) — each proved at its module's <section>+<offset> instead`),
+      `${man.project}: vendored ${prepared.length} TUs (${contexts} unique context(s)) → ${outDir}; ` +
+        'every row EQ to the ROM',
     );
     await vendorSymbols(man, root, outDir);
   }

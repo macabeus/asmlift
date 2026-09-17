@@ -206,6 +206,26 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
   return out;
 }
 
+/** Where a module ELF placed by {@link placeModuleSections} put the section `name`: the address a
+ *  `<module>:<section>+0x<offset>` location reads as in that copy, less its offset. Throws for a
+ *  section the module does not hold, or holds more than once — either way the location names no
+ *  one place.
+ *
+ *  This is what lets a REL function be read like a linked one: placed, the module's own bytes sit
+ *  at `base + offset` with its symbols beside them, exactly the shape a linked ELF has. */
+export function placedSectionAddress(placed: Uint8Array, name: string): number {
+  const elf = readElf32(placed);
+  const found = elf === undefined ? [] : placeable(elf).filter((s) => s.name === name);
+  if (found.length !== 1) {
+    throw new Error(
+      found.length === 0
+        ? `the module ELF has no allocated section ${name}`
+        : `the module ELF has ${found.length} allocated sections named ${name}`,
+    );
+  }
+  return found[0].addr;
+}
+
 /** How a symbol is identified across the two readers here: the name it is known by and the address
  *  the map keys it at. FUNC values carry a Thumb low bit that @gba-kit/debug-info clears, and the
  *  map is keyed by what that reader produced, so the same normalization has to happen here. */

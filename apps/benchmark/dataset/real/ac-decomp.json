@@ -1,0 +1,2192 @@
+{
+  "project": "ac-decomp",
+  "note": "Animal Crossing (GameCube, GAFE01_00) matched functions, compiled with CodeWarrior GC/1.3.2 at each unit's own flags (foresta.rel game code -O4,s -sdata 0 -sdata2 0; DOL game code -O4,s -sdata 0 -sdata2 0 -inline on). mwcceppc itself preprocesses the project's headers. Units include different headers, so `headers` is empty and each row's prependC carries its unit's own #include lines, then what the function needs from the rest of its unit: types, enums, macros and sized static data copied verbatim, and a static callee or an initialised datum declared. initial_menu.c's data preamble is copied whole, because step0_make_dl addresses its string literals from the start of the unit's .data.",
+  "repoDir": "ac-decomp",
+  "repo": "macabeus/ac-decomp",
+  "branch": "asmlift-benchmark",
+  "cppIncludes": [
+    "-nosyspath",
+    "-i",
+    "include",
+    "-i",
+    "include/dolphin",
+    "-i",
+    "include/libc",
+    "-i",
+    "src/static/dolphin",
+    "-i",
+    "build/GAFE01_00/include"
+  ],
+  "headers": [],
+  "defines": [
+    "-DVERSION=0",
+    "-DDEBUG=0",
+    "-DNDEBUG",
+    "-d",
+    "_LANGUAGE_C",
+    "-d",
+    "F3DEX_GBI_2",
+    "-d",
+    "MUST_MATCH"
+  ],
+  "units": {
+    "src/lb_reki.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/lb_reki"
+      }
+    },
+    "src/game/m_cporiginal_ovl.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_cporiginal_ovl"
+      }
+    },
+    "src/actor/npc/ac_npc_rcn_guide2.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/npc/ac_npc_rcn_guide2"
+      }
+    },
+    "src/game/m_field_info.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_field_info"
+      }
+    },
+    "src/game/m_event.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_event"
+      }
+    },
+    "src/game/m_collision_bg.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_collision_bg"
+      }
+    },
+    "src/game/m_mail_check_ovl.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_mail_check_ovl"
+      }
+    },
+    "src/actor/ac_insect.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/ac_insect"
+      }
+    },
+    "src/game/m_bgm.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_bgm"
+      }
+    },
+    "src/game/m_view.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_view"
+      }
+    },
+    "src/game/m_room_type.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_room_type"
+      }
+    },
+    "src/system/sys_math3d.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/system/sys_math3d"
+      }
+    },
+    "src/actor/npc/ac_npc_post_man.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/npc/ac_npc_post_man"
+      }
+    },
+    "src/game/m_kankyo.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_kankyo"
+      }
+    },
+    "src/game/m_lib.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_lib"
+      }
+    },
+    "src/game/m_island.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_island"
+      }
+    },
+    "src/actor/ac_gyoei.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/ac_gyoei"
+      }
+    },
+    "src/game/m_card.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_card"
+      }
+    },
+    "src/evw_anime.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/evw_anime"
+      }
+    },
+    "src/actor/npc/ac_npc_guide.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/npc/ac_npc_guide"
+      }
+    },
+    "src/game/m_melody.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_melody"
+      }
+    },
+    "src/effect/ef_dash_asimoto.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/effect/ef_dash_asimoto"
+      }
+    },
+    "src/game/m_mushroom.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_mushroom"
+      }
+    },
+    "src/game/m_actor_shadow.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_actor_shadow"
+      }
+    },
+    "src/static/jsyswrap.cpp": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-inline",
+        "on",
+        "-lang=c++"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "static/jsyswrap"
+      }
+    },
+    "src/game/m_skin_matrix.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_skin_matrix"
+      }
+    },
+    "src/system/sys_matrix.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/system/sys_matrix"
+      }
+    },
+    "src/actor/ac_quest_talk_normal_init.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/ac_quest_talk_normal_init"
+      }
+    },
+    "src/static/GBA2/JoyBoot.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-inline",
+        "on",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "static/GBA2/JoyBoot"
+      }
+    },
+    "src/effect/ef_night15_moon.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/effect/ef_night15_moon"
+      }
+    },
+    "src/actor/ac_effectbg.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/ac_effectbg"
+      }
+    },
+    "src/game/m_design_ovl.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_design_ovl"
+      }
+    },
+    "src/game/m_private.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/game/m_private"
+      }
+    },
+    "src/c_keyframe.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/c_keyframe"
+      }
+    },
+    "src/lb_rtc.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/lb_rtc"
+      }
+    },
+    "src/actor/ac_ball.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "foresta/actor/ac_ball"
+      }
+    },
+    "src/static/initial_menu.c": {
+      "toolchain": "mwcc_242_81",
+      "cflags": [
+        "-proc",
+        "gekko",
+        "-align",
+        "powerpc",
+        "-enum",
+        "int",
+        "-char",
+        "unsigned",
+        "-fp",
+        "hardware",
+        "-Cpp_exceptions",
+        "off",
+        "-sym",
+        "on",
+        "-O4,s",
+        "-sdata",
+        "0",
+        "-sdata2",
+        "0",
+        "-inline",
+        "on",
+        "-lang=c"
+      ],
+      "flagsFrom": {
+        "from": "objdiff",
+        "commit": "9e928f8e638c8170add15b0de3026424ad8a075e",
+        "file": "objdiff.json",
+        "sha256": "98caaadbf4d26974d3e47183efad44dbce3b9b5101531909217abea1b9a4aba9",
+        "unit": "static/initial_menu"
+      }
+    }
+  },
+  "functions": [
+    {
+      "sym": "lbRk_SeirekiDays",
+      "addr": "foresta:.text+0x00097284",
+      "unit": "src/lb_reki.c",
+      "romDigest": "0ca4a0315e06ba174ff3f40545f2fb6851927834093c170ed470160e6371f56a",
+      "features": [
+        "mod-pow2",
+        "array",
+        "variable-index",
+        "branch",
+        "arithmetic",
+        "signed"
+      ],
+      "note": "AF-PAIR: same source as af row lbRk_SeirekiDays @ 0x800d5e70; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
+      "prependC": "#include \"lb_reki.h\"\n#include \"types.h\"",
+      "funcC": "static int lbRk_SeirekiDays(int year, int month) {\n  // Table containing the number of days for each month in standard and leap years in the Seiyo Reki (Gregorian calendar)\n  static lbRTC_day_t t_seiyo_days_tbl[][lbRTC_MONTHS_MAX + 1] = {\n      {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}, /* Standard days for each month */\n      {0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31} /* Days for each month during leap year */\n  };\n\n  int idx = 0;\n  if ((year % 4) == 0) {\n    idx = 1;\n  }\n\n  return t_seiyo_days_tbl[idx][month];\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/lb_reki.c#L42-L55"
+    },
+    {
+      "sym": "mCO_pat_idx_to_idx",
+      "addr": "foresta:.text+0x0025d070",
+      "unit": "src/game/m_cporiginal_ovl.c",
+      "romDigest": "4a7e09a974211c3ade7d3f2e3275e8c2fb0737a5412ea5387a7083badfe0b58e",
+      "features": [
+        "mod-const",
+        "arithmetic",
+        "signed"
+      ],
+      "prependC": "#include \"m_cporiginal_ovl.h\"\n#include \"m_submenu_ovl.h\"\n#include \"m_common_data.h\"\n#include \"sys_matrix.h\"\n#include \"m_font.h\"\n#include \"m_editEndChk_ovl.h\"\n#include \"m_editor_ovl.h\"\n#include \"m_needlework_ovl.h\"\n#include \"m_tag_ovl.h\"\n#include \"m_hand_ovl.h\"\n#include \"m_malloc.h\"",
+      "funcC": "static int mCO_pat_idx_to_idx(int pat_idx) {\n    return (pat_idx - 8) % mCO_ORIGINAL_NUM;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_cporiginal_ovl.c#L47-L49"
+    },
+    {
+      "sym": "aNRG2_setup_j11_cont",
+      "addr": "foresta:.text+0x00201800",
+      "unit": "src/actor/npc/ac_npc_rcn_guide2.c",
+      "romDigest": "0f2e9d67c016f3e2fa27904412ded58cf633028924b9a28d21b83f778018de18",
+      "features": [
+        "baseline"
+      ],
+      "prependC": "#include \"ac_npc_rcn_guide2.h\"\n#include \"m_common_data.h\"\n#include \"m_bgm.h\"\n#include \"m_player_lib.h\"\n#include \"m_font.h\"\n#include \"m_msg.h\"\n#include \"m_soncho.h\"\n#include \"ac_intro_demo.h\"\n\nenum {\n    aNRG2_NORM_TALK_JOB1_START,\n    aNRG2_NORM_TALK_JOB2_START,\n    aNRG2_NORM_TALK_JOB3_START,\n    aNRG2_NORM_TALK_JOB4_START,\n    aNRG2_NORM_TALK_JOB5_START,\n    aNRG2_NORM_TALK_JOB5_2_START,\n    aNRG2_NORM_TALK_JOB6_START,\n    aNRG2_NORM_TALK_JOB7_START,\n    aNRG2_NORM_TALK_JOB10_START,\n    aNRG2_NORM_TALK_JOB11_START,\n\n    aNRG2_NORM_TALK_JOB1_REFUSE,\n    aNRG2_NORM_TALK_JOB2_REFUSE,\n    aNRG2_NORM_TALK_JOB3_REFUSE,\n    aNRG2_NORM_TALK_JOB4_REFUSE,\n    aNRG2_NORM_TALK_JOB5_REFUSE,\n    aNRG2_NORM_TALK_JOB5_2_REFUSE,\n    aNRG2_NORM_TALK_JOB6_REFUSE,\n    aNRG2_NORM_TALK_JOB7_REFUSE,\n\n    aNRG2_NORM_TALK_J1_CONT1,\n    aNRG2_NORM_TALK_J1_CONT2,\n    aNRG2_NORM_TALK_J1_CONT3,\n\n    aNRG2_NORM_TALK_J2_CONT1,\n\n    aNRG2_NORM_TALK_J3_CONT1,\n    aNRG2_NORM_TALK_J3_CONT2,\n\n    aNRG2_NORM_TALK_J4_CONT1,\n    aNRG2_NORM_TALK_J4_CONT2,\n    aNRG2_NORM_TALK_J5_CONT3,\n\n    aNRG2_NORM_TALK_J5_CONT1,\n    aNRG2_NORM_TALK_J5_CONT2,\n\n    aNRG2_NORM_TALK_J6_CONT1,\n    aNRG2_NORM_TALK_J6_CONT2,\n\n    aNRG2_NORM_TALK_J7_CONT1,\n\n    aNRG2_NORM_TALK_J10_CONT1,\n\n    aNRG2_NORM_TALK_J11_CONT1,\n\n    aNRG2_NORM_TALK_J1_END,\n    aNRG2_NORM_TALK_J2_END,\n    aNRG2_NORM_TALK_J3_END,\n    aNRG2_NORM_TALK_J4_END,\n    aNRG2_NORM_TALK_J5_END,\n    aNRG2_NORM_TALK_J6_END,\n    aNRG2_NORM_TALK_J7_END,\n    aNRG2_NORM_TALK_J10_END,\n    aNRG2_NORM_TALK_J11_END,\n\n    aNRG2_NORM_TALK_AGAIN,\n\n    aNRG2_NORM_TALK_NUM\n};",
+      "funcC": "static int aNRG2_setup_j11_cont(NPC_RCN_GUIDE2_ACTOR* rcn_guide2) {\n    return aNRG2_NORM_TALK_J11_CONT1;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/npc/ac_npc_rcn_guide2_schedule.c_inc#L91-L93"
+    },
+    {
+      "sym": "mFI_BGDisplayListTop",
+      "addr": "foresta:.text+0x00035b80",
+      "unit": "src/game/m_field_info.c",
+      "romDigest": "e30ded18eac52bd7de8340667b37c37ca3aa7afd83ba44525d76958eb12f5f0a",
+      "features": [
+        "load",
+        "global",
+        "field",
+        "struct"
+      ],
+      "prependC": "#include \"m_field_info.h\"\n#include \"m_scene_table.h\"\n#include \"m_random_field.h\"\n#include \"m_common_data.h\"\n#include \"m_name_table.h\"\n#include \"m_play.h\"\n#include \"libultra/libultra.h\"\n#include \"m_player_lib.h\"\n#include \"m_bg_type.h\"\n#include \"m_fg_type.h\"",
+      "funcC": "extern mFM_field_draw_info_c* mFI_BGDisplayListTop() {\n    return g_fdinfo->bg_draw_info;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_field_info.c#L492-L494"
+    },
+    {
+      "sym": "mEv_clear_status",
+      "addr": "foresta:.text+0x0002d8c0",
+      "unit": "src/game/m_event.c",
+      "romDigest": "cbb434ea183d15dbfac4eed878e8de50cf10d3fdc65d5202283f7f07e51e7fd3",
+      "features": [
+        "read-once",
+        "array",
+        "variable-index",
+        "global",
+        "narrow",
+        "mask",
+        "field",
+        "branch",
+        "struct"
+      ],
+      "prependC": "#include \"m_event.h\"\n#include \"libultra/libultra.h\"\n#include \"_mem.h\"\n#include \"lb_reki.h\"\n#include \"ac_aprilfool_control_h.h\"\n#include \"m_common_data.h\"\n#include \"m_player_lib.h\"\n#include \"m_play.h\"\n#include \"m_scene_table.h\"\n#include \"m_soncho.h\"\n\nstatic mEv_event_today_c event_today[mEv_TODAY_EVENT_NUM];\nstatic u8 index_today[mEv_EVENT_NUM];",
+      "funcC": "extern void mEv_clear_status(int event, s16 status) {\n    u8 index = index_today[event];\n    mEv_event_today_c* ev_today = &event_today[index];\n\n    if (index != 0xFF) {\n        ev_today->status &= ~status;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_event.c#L2163-L2170",
+      "proto": {
+        "mEv_clear_status": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mCoBG_MakeJumpFlag",
+      "addr": "foresta:.text+0x00018ae0",
+      "unit": "src/game/m_collision_bg.c",
+      "romDigest": "b8787009b2ce292ab31b9014e5bd32869f6bc34ee0427104d48e4643b05638fa",
+      "features": [
+        "array",
+        "variable-index",
+        "mask",
+        "float",
+        "hw-float-abi",
+        "struct",
+        "field",
+        "fnptr"
+      ],
+      "prependC": "#include \"m_collision_bg.h\"\n#include \"m_field_info.h\"\n#include \"m_name_table.h\"\n#include \"m_actor.h\"\n#include \"libultra/libultra.h\"\n#include \"m_common_data.h\"\n#include \"m_random_field.h\"\n#include \"sys_matrix.h\"\n\nstatic void mCoBG_MakeJumpFlag_NotOldOnGround(mCoBG_CheckResult_c* result, mCoBG_ActorInf_c* actor_info, xyz_t* rev, f32 ground_normal_y);\nstatic void mCoBG_MakeJumpFlag_OldOnGround(mCoBG_CheckResult_c* result, mCoBG_ActorInf_c* actor_info, xyz_t* rev, f32 ground_normal_y);\ntypedef void (*mCoBG_MAKE_JUMP_FLAG_PROC)(mCoBG_CheckResult_c* result, mCoBG_ActorInf_c* actor_info, xyz_t* rev, f32 ground_normal_y);",
+      "funcC": "static void mCoBG_MakeJumpFlag(mCoBG_CheckResult_c* result, mCoBG_ActorInf_c* actor_info, xyz_t* rev, f32 ground_normal_y) {\n    static mCoBG_MAKE_JUMP_FLAG_PROC make_jump_flag_proc[] = { &mCoBG_MakeJumpFlag_NotOldOnGround, &mCoBG_MakeJumpFlag_OldOnGround };\n\n    (*make_jump_flag_proc[actor_info->old_on_ground & 1])(result, actor_info, rev, ground_normal_y);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_collision_bg.c#L1390-L1394",
+      "proto": {
+        "mCoBG_MakeJumpFlag": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mMck_strlen",
+      "addr": "foresta:.text+0x0019edc4",
+      "unit": "src/game/m_mail_check_ovl.c",
+      "romDigest": "796cb9ce8bba9794e242b1c7e8fd55021805106495a8c7df5ea13f4b1d6ae231",
+      "features": [
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "prependC": "#include \"m_mail_check_ovl.h\"\n#include \"m_mail.h\"\n#include \"m_font.h\"\n#include \"m_msg.h\"",
+      "funcC": "static int mMck_strlen(u8* str, int len) {\n  u8* end_p = str + len;\n  \n  while (len != 0) {\n    len--;\n\n    if (*end_p != CHAR_SPACE) {\n      goto end; /* Don't like this */\n    }\n\n    end_p--;\n  }\n\n  len--;\n\nend:\n  return len + 1;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_mail_check_ovl.c#L7-L24"
+    },
+    {
+      "sym": "aINS_get_catch_range_sub",
+      "addr": "foresta:.text+0x002251ec",
+      "unit": "src/actor/ac_insect.c",
+      "romDigest": "ef20ad2e025d30d34e520af7678edc60b5c9f85d2212d99f597eb4a1fe7ad334",
+      "features": [
+        "abs",
+        "macro",
+        "narrow",
+        "sign-extend",
+        "float",
+        "compare",
+        "cast",
+        "field",
+        "branch",
+        "hw-float-abi",
+        "struct"
+      ],
+      "prependC": "#include \"ac_insect.h\"\n#include \"m_name_table.h\"\n#include \"m_common_data.h\"\n#include \"ac_set_ovl_insect.h\"\n#include \"m_player_lib.h\"\n#include \"m_actor_shadow.h\"\n#include \"libultra/libultra.h\"\n#include \"m_skin_matrix.h\"\n#include \"sys_matrix.h\"\n#include \"m_rcp.h\"",
+      "funcC": "static f32 aINS_get_catch_range_sub(ACTOR* actorx) {\n    f32 range = 24.0f;\n    s16 dAngleY = ABS((s16)(actorx->world.angle.y - actorx->player_angle_y));\n\n    /* Player must be facing within 90 degrees of the insect */\n    if (dAngleY > DEG2SHORT_ANGLE2(90.0f)) {\n        range = 0.0f;\n    }\n\n    return range;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_insect_move.c_inc#L285-L295"
+    },
+    {
+      "sym": "mBGM_check_ignore_collect_insects_volume",
+      "addr": "foresta:.text+0x000087c0",
+      "unit": "src/game/m_bgm.c",
+      "romDigest": "f847d0ffa150d38cd116d4af63974b12a9c1cc2122111d82cdf67d8a1f46fc55",
+      "features": [
+        "bool",
+        "compare",
+        "zero-extend",
+        "branch"
+      ],
+      "prependC": "#include \"m_bgm.h\"\n#include \"game.h\"\n#include \"libultra/libultra.h\"\n#include \"m_common_data.h\"\n#include \"m_event.h\"\n#include \"m_lib.h\"\n#include \"m_melody.h\"\n#include \"m_player_lib.h\"",
+      "funcC": "static int mBGM_check_ignore_collect_insects_volume(u8 bgm_num) {\n    if (bgm_num == 40) {\n        return TRUE;\n    }\n\n    return FALSE;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_bgm.c#L268-L274"
+    },
+    {
+      "sym": "setScissorView",
+      "addr": "foresta:.text+0x00083da8",
+      "unit": "src/game/m_view.c",
+      "romDigest": "ba5328c09efb2950022591d984ef71864cd7622ef945ae4c140473995e6c3a2b",
+      "features": [
+        "store",
+        "field",
+        "struct",
+        "struct-copy"
+      ],
+      "prependC": "#include \"m_view.h\"\n#include \"main.h\"\n#include \"m_common_data.h\"\n#include \"m_field_info.h\"\n#include \"sys_matrix.h\"\n#include \"libultra/libultra.h\"",
+      "funcC": "extern void setScissorView(View* view, rect* screen) {\n  view->screen = *screen;\n\n  view->flag |= VIEW_UPDATE_SCISSOR;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_view.c#L92-L96",
+      "proto": {
+        "setScissorView": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mRmTp_SetNowSceneOriginalWallStatus",
+      "addr": "foresta:.text+0x00077550",
+      "unit": "src/game/m_room_type.c",
+      "romDigest": "4c275b412e598725b79cd04865358693b6e794cf2978dc83377d527938a6afa6",
+      "features": [
+        "bitfield",
+        "store",
+        "field",
+        "branch",
+        "struct"
+      ],
+      "prependC": "#include \"m_room_type.h\"\n#include \"m_name_table.h\"\n#include \"m_common_data.h\"\n#include \"ac_my_room.h\"\n#include \"m_melody.h\"\n#include \"padmgr.h\"\n#include \"game.h\"\n#include \"m_house.h\"\n#include \"dolphin/os/OSCache.h\"\n#include \"jsyswrap.h\"\n#include \"m_player_lib.h\"\n\nstatic mHm_fllot_bit_c* mRmTp_GetNowSceneFloorBitInfoP();",
+      "funcC": "extern void mRmTp_SetNowSceneOriginalWallStatus(int enabled) {\n    mHm_fllot_bit_c* floor_bit_info = mRmTp_GetNowSceneFloorBitInfoP();\n\n    if (floor_bit_info != NULL) {\n        floor_bit_info->wall_original = enabled;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_room_type.c#L2449-L2455",
+      "proto": {
+        "mRmTp_SetNowSceneOriginalWallStatus": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "Math3DLengthPlaneAndPos",
+      "addr": "foresta:.text+0x0009909c",
+      "unit": "src/system/sys_math3d.c",
+      "romDigest": "16b91d2785a011be93332b05b07d12d4bd6edbb701fe3946459f4b365fa2b64f",
+      "features": [
+        "abs",
+        "float",
+        "hw-float-abi",
+        "inlined-callee"
+      ],
+      "prependC": "#include \"sys_math3d.h\"",
+      "funcC": "extern f32 Math3DLengthPlaneAndPos(f32 nox, f32 noy, f32 noz, f32 odist, const xyz_t* pl) {\n    f32 res = fabsf(Math3DSignedLengthPlaneAndPos(nox, noy, noz, odist, pl));\n    return res;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/system/sys_math3d.c#L259-L262"
+    },
+    {
+      "sym": "aPMAN_set_move_idx",
+      "addr": "foresta:.text+0x001fdf70",
+      "unit": "src/actor/npc/ac_npc_post_man.c",
+      "romDigest": "98d996e5209c028a2f5dabcec7823d64dfa09238316008861cbfa9eb7f751343",
+      "features": [
+        "array",
+        "variable-index",
+        "sign-extend",
+        "field",
+        "struct"
+      ],
+      "prependC": "#include \"ac_npc_post_man.h\"\n#include \"m_common_data.h\"\n#include \"m_player_lib.h\"\n#include \"m_house.h\"\n#include \"ac_mailbox.h\"\n#include \"m_melody.h\"",
+      "funcC": "static s8 aPMAN_set_move_idx(NPC_POST_MAN* actor) {\n    // clang-format off\n    static s8 move_idx[mHS_HOUSE_NUM][7] = {\n        {0, 0, 4, 4, 0, 1, 4},\n        {1, 1, 5, 5, 1, 1, 5},\n        {4, 5, 2, 2, 2, 2, 2},\n        {4, 5, 3, 3, 3, 3, 3},\n    };\n    // clang-format on\n\n    return move_idx[actor->delivery_idx][actor->now_idx];\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/npc/ac_npc_post_man_move.c_inc#L126-L137"
+    },
+    {
+      "sym": "mKK_windowlight_alpha_get",
+      "addr": "foresta:.text+0x00049690",
+      "unit": "src/game/m_kankyo.c",
+      "romDigest": "cd53dd24fc2c2a4260089fe5053c1f181f8b3b4ec12f45f1560f09045856c35e",
+      "features": [
+        "load",
+        "float",
+        "global",
+        "field",
+        "hw-float-abi",
+        "struct"
+      ],
+      "prependC": "#include \"m_kankyo.h\"\n#include \"m_room_type.h\"\n#include \"m_scene_table.h\"\n#include \"m_common_data.h\"\n#include \"m_debug.h\"\n#include \"m_npc_schedule.h\"\n#include \"m_player_lib.h\"\n#include \"libultra/libultra.h\"\n\ntypedef struct electric_light_s {\n    f32 point_light_percent;\n    u8 point_light_color[3];\n    s16 _08;\n    s16 now_weather;\n    s16 next_weather;\n    f32 change_weather_env_rate;\n    s16 light_animating_on;\n    s16 light_anime_frame;\n    int point_light_on_type;\n    int point_light_off_type;\n    f32 point_light_off_step;\n    s16 point_light_is_flame; /* flickering effect when non-zero */\n    f32 staffroll_fade_rate;\n    f32 sun_percent;\n    f32 shadow_adjust;\n    f32 windowlight_alpha;\n    Light_list* current_point_light;\n    s16 add_moon_color[3];\n    Light_list* point_light_list_buf[mEnv_POINT_LIGHT_NUM];\n    Lights point_lights[mEnv_POINT_LIGHT_NUM];\n    int switch_status;\n    f32 point_light_min;\n    f32 diffuse_light_effect_rate;\n    s16 _98;\n    s16 shadow_alpha;\n    f32 diffuse_adjust;\n    u8 shadow_alpha_adjust;\n} mEnv_electric_light_c;\nstatic mEnv_electric_light_c l_mEnv_electric_light;",
+      "funcC": "extern f32 mKK_windowlight_alpha_get() {\n    return l_mEnv_electric_light.windowlight_alpha;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_kankyo.c#L2379-L2381"
+    },
+    {
+      "sym": "chase_angle",
+      "addr": "foresta:.text+0x0004a984",
+      "unit": "src/game/m_lib.c",
+      "romDigest": "6d0d334986ef2720d04f9bcbde787c35a53cfb15cf1e8e682b295b2c0af7c8ec",
+      "features": [
+        "float",
+        "float-to-int",
+        "int-to-float",
+        "narrow",
+        "sign-extend",
+        "cast",
+        "global",
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "note": "AF-PAIR: same source as af row chase_angle @ 0x80099ad4; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
+      "prependC": "#include \"m_lib.h\"\n#include \"game.h\"\n#include \"m_actor.h\"\n#include \"m_play.h\"\n#include \"main.h\"\n#include \"libultra/libultra.h\"\n#include \"MSL_C/w_math.h\"\n#include \"libc64/qrand.h\"\n#include \"sys_matrix.h\"\n#include \"sys_math.h\"\n#include \"sys_math3d.h\"",
+      "funcC": "extern int chase_angle(s16* const pValue, const s16 target, s16 step) {\n    if (step) {\n        f32 updateScale = game_GameFrame_2F;\n\n        if ((s16)(*pValue - target) > 0) {\n            step = -step;\n        }\n\n        *pValue += (s16)(step * updateScale);\n\n        if (((s16)(*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else if (*pValue == target) {\n        return TRUE;\n    }\n\n    return FALSE;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_lib.c#L138-L157"
+    },
+    {
+      "sym": "check_percent_abs",
+      "addr": "foresta:.text+0x0004b3a8",
+      "unit": "src/game/m_lib.c",
+      "romDigest": "e18e066bad325db3a5c517d4a54556f4c1399a8412487ae9ced316b3254c21ea",
+      "features": [
+        "float",
+        "compare",
+        "branch",
+        "hw-float-abi"
+      ],
+      "note": "AF-PAIR: same source as af row check_percent_abs @ 0x8009ae60; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
+      "prependC": "#include \"m_lib.h\"\n#include \"game.h\"\n#include \"m_actor.h\"\n#include \"m_play.h\"\n#include \"main.h\"\n#include \"libultra/libultra.h\"\n#include \"MSL_C/w_math.h\"\n#include \"libc64/qrand.h\"\n#include \"sys_matrix.h\"\n#include \"sys_math.h\"\n#include \"sys_math3d.h\"",
+      "funcC": "extern f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, int shift_by_min) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shift_by_min) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_lib.c#L699-L718"
+    },
+    {
+      "sym": "mISL_GetFlatCheckSum",
+      "addr": "foresta:.text+0x000453cc",
+      "unit": "src/game/m_island.c",
+      "romDigest": "e849fe7be9efcd89b0d7a1782c0d2d3af03280dde300016bcb421b0c21d4773e",
+      "features": [
+        "promotion",
+        "mixed-width",
+        "narrow",
+        "zero-extend",
+        "arithmetic",
+        "cast"
+      ],
+      "prependC": "#include \"m_island.h\"\n#include \"m_field_info.h\"\n#include \"m_common_data.h\"\n#include \"m_random_field.h\"\n#include \"m_malloc.h\"\n#include \"libultra/libultra.h\"\n#include \"jsyswrap.h\"\n\nstatic int mISL_ReturnCheckSum(u8* data, int size);",
+      "funcC": "static u8 mISL_GetFlatCheckSum(u8* data, int size, u8 now_checksum, int ignored_section_checksum) {\n    int checksum = mISL_ReturnCheckSum(data, size);\n    u8 diff = (u8)(checksum - now_checksum) - ignored_section_checksum;\n\n    diff = ~diff;\n    diff = diff + 1;\n\n    return diff;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_island.c#L673-L681"
+    },
+    {
+      "sym": "bite_check",
+      "addr": "foresta:.text+0x00232458",
+      "unit": "src/actor/ac_gyoei.c",
+      "romDigest": "53c3ff5f6a6f118ca11d8ae9d5b00b1066701f6934acc30c5c2424e3b670dc2e",
+      "features": [
+        "narrow-counter",
+        "guard-init",
+        "break",
+        "bool",
+        "mask",
+        "pointer",
+        "field",
+        "global",
+        "struct",
+        "branch"
+      ],
+      "prependC": "#include \"ac_gyoei.h\"\n#include \"m_common_data.h\"\n#include \"m_actor_shadow.h\"\n#include \"libultra/libultra.h\"\n#include \"m_malloc.h\"\n#include \"sys_matrix.h\"\n#include \"m_skin_matrix.h\"\n#include \"m_rcp.h\"\n#include \"m_player_lib.h\"\n\nstatic ACTOR* aGYO_ctrlActor = NULL;",
+      "funcC": "static u8 bite_check(void) {\n    GYOEI_ACTOR* gyoei = (GYOEI_ACTOR*)aGYO_ctrlActor;\n    aGYO_CTRL_ACTOR* ctrl = gyoei->ctrl;\n    s16 i;\n    u8 ret = FALSE;\n\n    for (i = 0; i < aGYO_MAX_GYOEI; i++) {\n        if ((ctrl->gyo_flags & 2) != 0) {\n            ret = TRUE;\n            break;\n        }\n\n        ctrl++;\n    }\n\n    return ret;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_gyoei_move.c_inc#L47-L63"
+    },
+    {
+      "sym": "mCD_set_number_str",
+      "addr": "foresta:.text+0x0008b1ec",
+      "unit": "src/game/m_card.c",
+      "romDigest": "06427d1768c38f57dc9dd34ac2c05107736dd934ee81ed3c587f1ce3c6f177b6",
+      "features": [
+        "div-const",
+        "mod-const",
+        "array",
+        "variable-index",
+        "guard-init",
+        "pointer",
+        "arithmetic",
+        "narrow",
+        "signed",
+        "branch"
+      ],
+      "prependC": "#include \"m_card.h\"\n#include \"card.h\"\n#include \"card/CARDBios.h\"\n#include \"card/CARDCheck.h\"\n#include \"card/CARDMount.h\"\n#include \"card/__card.h\"\n#include \"graph.h\"\n#include \"lb_rtc.h\"\n#include \"libultra/libultra.h\"\n#include \"m_actor_type.h\"\n#include \"m_all_grow_ovl.h\"\n#include \"m_event.h\"\n#include \"m_flashrom.h\"\n#include \"m_home.h\"\n#include \"m_island.h\"\n#include \"m_land.h\"\n#include \"m_land_h.h\"\n#include \"m_mail.h\"\n#include \"m_malloc.h\"\n#include \"libc64/sleep.h\"\n#include \"m_common_data.h\"\n#include \"m_font.h\"\n#include \"jsyswrap.h\"\n#include \"m_name_table.h\"\n#include \"m_npc.h\"\n#include \"m_private.h\"\n#include \"m_private_h.h\"\n#include \"m_quest.h\"\n#include \"m_time.h\"\n#include \"types.h\"\n#include \"zurumode.h\"\n#include \"m_house.h\"\n#include \"m_cockroach.h\"\n#include \"m_start_data_init.h\"\n#include <string.h>",
+      "funcC": "static void mCD_set_number_str(char* str, u8 num) {\n    int n = num;\n    int f = FALSE;\n    int fig_table[3];\n    int i;\n    \n    bzero(fig_table, sizeof(fig_table));\n    \n    for (i = 0; i < 3; i++) {\n        const int remain = n % 10;\n        const int div = n / 10;\n        \n        fig_table[i] = remain;\n        n = div;\n    }\n\n    for (i = 2; i > 0; i--) {\n        if (fig_table[i] > 0 || f == TRUE) {\n            *str++ = fig_table[i] + '0';\n            f = TRUE;\n        }\n    }\n\n    *str = fig_table[0] + '0';\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_card.c#L2382-L2406",
+      "proto": {
+        "mCD_set_number_str": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "evw_anime_colreg_manual",
+      "addr": "foresta:.text+0x00002c88",
+      "unit": "src/evw_anime.c",
+      "romDigest": "51e038d062c5ebb2a94eb0c414146187e70a4fa4572f79d77efa50bb1ecc0e58",
+      "features": [
+        "mod-reg",
+        "pointer",
+        "struct",
+        "field",
+        "arithmetic",
+        "unsigned"
+      ],
+      "prependC": "#include \"evw_anime.h\"\n#include \"m_play.h\"\n#include \"libforest/gbi_extensions.h\"\n#include \"m_rcp.h\"\n\nstatic void evw_color_set(GAME_PLAY* play, int segment, const EVW_ANIME_COL_PRIM* prim, const EVW_ANIME_COL_ENV* env);",
+      "funcC": "static void evw_anime_colreg_manual(GAME_PLAY* play, int segment, void* evw_data) {\n    EVW_ANIME_COLREG* color_reg = (EVW_ANIME_COLREG*)evw_data;\n\n    int frame_idx = play->game_frame % color_reg->frame_count;\n    EVW_ANIME_COL_PRIM* prim = color_reg->prim_colors;\n    EVW_ANIME_COL_ENV* env = color_reg->env_colors;\n\n    prim += frame_idx;\n    env += frame_idx;\n\n    evw_color_set(play, segment, prim, env);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/evw_anime.c#L73-L84",
+      "proto": {
+        "evw_anime_colreg_manual": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "aNGD_check_talk_msg_no",
+      "addr": "foresta:.text+0x001e314c",
+      "unit": "src/actor/npc/ac_npc_guide.c",
+      "romDigest": "4a93e7470be51df4ff14f8ef9eeabda1eba625931ae56204c003c95373511129",
+      "features": [
+        "dense",
+        "field",
+        "branch",
+        "struct"
+      ],
+      "prependC": "#include \"ac_npc_guide.h\"\n#include \"m_play.h\"\n#include \"m_common_data.h\"\n#include \"ac_train_door.h\"\n#include \"m_player_lib.h\"\n#include \"m_font.h\"\n#include \"m_msg.h\"\n#include \"m_timeIn_ovl.h\"\n#include \"m_ledit_ovl.h\"\n#include \"libultra/libultra.h\"\n#include \"m_bgm.h\"\n#include \"m_soncho.h\"",
+      "funcC": "static void aNGD_check_talk_msg_no(NPC_GUIDE_ACTOR* guide) {\n    if (mDemo_Check(mDemo_TYPE_SPEAK, &guide->npc_class.actor_class) == TRUE) {\n        int msg_no = mMsg_GET_MSG_NUM();\n        int flags;\n\n        switch (msg_no) {\n            case 0x2AC9:\n                flags = (1 << 3);\n                break;\n            case 0x2ACD:\n                flags = (1 << 2);\n                break;\n            case 0x2ACF:\n                flags = (1 << 1);\n                break;\n            case 0x2AD3:\n                flags = (1 << 0);\n                break;\n            default:\n                flags = 0;\n                break;\n        }\n\n        guide->answer_flags |= flags;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/npc/ac_npc_guide_move.c_inc#L180-L205",
+      "proto": {
+        "aNGD_check_talk_msg_no": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mMld_TransformMelodyData_u64_2_u8",
+      "addr": "foresta:.text+0x0004ef90",
+      "unit": "src/game/m_melody.c",
+      "romDigest": "e58d973a80a9d65841079fef8e7ba809ac39754961164f1cfbef21df2213989e",
+      "features": [
+        "int64",
+        "mask",
+        "guard-init",
+        "narrow",
+        "pointer",
+        "arithmetic"
+      ],
+      "prependC": "#include \"m_melody.h\"\n#include \"ac_npc.h\"\n#include \"m_common_data.h\"",
+      "funcC": "extern void mMld_TransformMelodyData_u64_2_u8(u8* dst, u64 src) {\n  int i;\n\n  for (i = 0; i < mMld_MELODY_LEN; i++) {\n    *dst++ = (src >> (60 - i * 4)) & 0xF;\n  }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_melody.c#L15-L21",
+      "proto": {
+        "mMld_TransformMelodyData_u64_2_u8": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mMck_search_sep",
+      "addr": "foresta:.text+0x0019ee5c",
+      "unit": "src/game/m_mail_check_ovl.c",
+      "romDigest": "16e8c393445a5a245d252efec2f2e3032737a54a709609dbe68d8dcf319b4c65",
+      "features": [
+        "loop-preupdate",
+        "break",
+        "narrow",
+        "pointer",
+        "branch"
+      ],
+      "prependC": "#include \"m_mail_check_ovl.h\"\n#include \"m_mail.h\"\n#include \"m_font.h\"\n#include \"m_msg.h\"\n\nstatic int mMck_cmp_sep(u8 c);",
+      "funcC": "static u8* mMck_search_sep(u8* str, u8 len) {\n  while (len-- != 0) {\n\n    /* Only accept the separator if the next character is also not a separator */\n    if (mMck_cmp_sep(str[0]) == TRUE && mMck_cmp_sep(str[1]) == FALSE) {\n      break;\n    }\n\n    str++;\n  }\n\n  return str;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_mail_check_ovl.c#L42-L54"
+    },
+    {
+      "sym": "eDahsAsimoto_GetMakeOffset",
+      "addr": "foresta:.text+0x00298544",
+      "unit": "src/effect/ef_dash_asimoto.c",
+      "romDigest": "2daa136cb0a7899bb2598c80e687757f767680add47ba6e6abe845a0f9616796",
+      "features": [
+        "float",
+        "int-to-float",
+        "sign-extend",
+        "macro",
+        "struct-return"
+      ],
+      "prependC": "#include \"ef_effect_control.h\"\n#include \"m_common_data.h\"",
+      "funcC": "static xyz_t eDahsAsimoto_GetMakeOffset(xyz_t pos, s16 angle_y) {\n    xyz_t base_ofs = { 0.0f, 0.0f, 10.0f };\n\n    sMath_RotateY(&base_ofs, SHORTANGLE2RAD(angle_y));\n    xyz_t_add(&pos, &base_ofs, &pos);\n    return pos;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/effect/ef_dash_asimoto.c#L22-L28"
+    },
+    {
+      "sym": "aINS_destruct",
+      "addr": "foresta:.text+0x0022433c",
+      "unit": "src/actor/ac_insect.c",
+      "romDigest": "b9660ba0076a947c828d1aaf61bec9fb261a516ee12dbeb3b15aa0b6098cea1f",
+      "features": [
+        "fallthrough",
+        "switch-arms",
+        "field",
+        "branch",
+        "struct"
+      ],
+      "prependC": "#include \"ac_insect.h\"\n#include \"m_name_table.h\"\n#include \"m_common_data.h\"\n#include \"ac_set_ovl_insect.h\"\n#include \"m_player_lib.h\"\n#include \"m_actor_shadow.h\"\n#include \"libultra/libultra.h\"\n#include \"m_skin_matrix.h\"\n#include \"sys_matrix.h\"\n#include \"m_rcp.h\"\n\nstatic void aINS_regist_set_block_table(ACTOR* actorx);",
+      "funcC": "static void aINS_destruct(ACTOR* actorx, GAME* game) {\n    aINS_INSECT_ACTOR* insect = (aINS_INSECT_ACTOR*)actorx;\n    GAME_PLAY* play = (GAME_PLAY*)game;\n\n    switch (insect->type) {\n        case aINS_INSECT_TYPE_SPIRIT:\n            /* If we didn't catch the spirit, update it's location */\n            if ((ACTOR*)mPlib_Get_item_net_catch_label() != actorx) {\n                aINS_regist_set_block_table(actorx);\n            }\n        /* fallthrough spirit -> firefly */\n        case aINS_INSECT_TYPE_FIREFLY:\n            if (insect->light_flag) {\n                Global_light_list_delete(&play->global_light, insect->light_list);\n                insect->light_flag = FALSE;\n            }\n            break;\n    }\n\n    insect->exist_flag = FALSE;\n    ClObjPipe_dt(game, &insect->col_pipe);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_insect_clip.c_inc#L63-L84",
+      "proto": {
+        "aINS_destruct": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mMsr_Rtc2MushTime",
+      "addr": "foresta:.text+0x00057e6c",
+      "unit": "src/game/m_mushroom.c",
+      "romDigest": "9454e1f3171b3178bbf5d4ac22558896df1ebd5968e1326c688b151a0628f56e",
+      "features": [
+        "bitfield",
+        "div-const",
+        "store",
+        "field",
+        "struct",
+        "zero-extend",
+        "signed"
+      ],
+      "prependC": "#include \"m_mushroom.h\"\n#include \"m_time.h\"\n#include \"m_event.h\"\n#include \"m_actor_type.h\"\n#include \"m_field_make.h\"\n#include \"m_field_info.h\"\n#include \"m_scene_table.h\"\n#include \"m_name_table.h\"\n#include \"m_common_data.h\"\n#include \"libultra/libultra.h\"\n#include \"m_lib.h\"\n#include \"libc64/qrand.h\"",
+      "funcC": "static void mMsr_Rtc2MushTime(mMsr_time_c* dst, lbRTC_time_c* src) {\n    dst->year = src->year;\n    dst->month = src->month;\n    dst->day = src->day;\n    dst->hour = src->hour;\n    dst->hour_quarter = src->min / 15;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_mushroom.c#L39-L45",
+      "proto": {
+        "mMsr_Rtc2MushTime": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mAc_ActorShadowEllipse",
+      "addr": "foresta:.text+0x00006dc8",
+      "unit": "src/game/m_actor_shadow.c",
+      "romDigest": "6462c1e65096e5149a72e5c5f7d70ec0b51197d0093f8b673846827d5a7f257a",
+      "features": [
+        "struct",
+        "float",
+        "global",
+        "branch",
+        "field"
+      ],
+      "prependC": "#include \"m_actor_shadow.h\"\n#include \"m_collision_bg.h\"\n#include \"m_common_data.h\"\n#include \"m_rcp.h\"\n#include \"sys_matrix.h\"\n#include \"m_lib.h\"\n#include \"m_lights.h\"\n#include \"libultra/libultra.h\"\n\nextern xyz_t mActorShadow_offset0;",
+      "funcC": "void mAc_ActorShadowEllipse(ACTOR* actor, LightsN* lights, GAME_PLAY* play) {\n\n    static xyz_t tunekiti_offset = { 0.0f, 1.0f, 0.0f };\n\n    if (actor->id == 0x79) {\n        mAc_ActorShadowDraw(actor, play, 0, tunekiti_offset, 1.0f);\n\n    } else {\n        mAc_ActorShadowDraw(actor, play, 0, mActorShadow_offset0, 1.0f);\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_actor_shadow.c#L390-L400",
+      "proto": {
+        "mAc_ActorShadowEllipse": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "JW_JUTGamePad_read",
+      "addr": "0x800068e8",
+      "unit": "src/static/jsyswrap.cpp",
+      "romDigest": "aad9b1b4bc3c4defc554971a8df77f169e58c21f89b490b244e1d6e41c38594d",
+      "features": [
+        "int64",
+        "compare",
+        "macro",
+        "global",
+        "branch"
+      ],
+      "prependC": "#include \"jsyswrap_cpp.h\"\n#include \"JSystem/JSystem.h\"\n#include \"JSystem/JUtility/JUTGamePad.h\"\n#include \"JSystem/JUtility/TColor.h\"\n#include \"libforest/emu64.h\"\n#include \"_mem.h\"\n#include \"m_lib.h\"\n#include \"dolphin/os/OSArena.h\"\n#include \"libc64/malloc.h\"",
+      "funcC": "extern void JW_JUTGamePad_read() {\n    static OSTime last_pad_read;\n    OSTime now = OSGetTime();\n\n    if (now > last_pad_read + OSMillisecondsToTicks(16) || now < last_pad_read) {\n        last_pad_read = now;\n        JC_JUTGamePad_read();\n    }\n}",
+      "ctx": "typedef s64 OSTime;\nOSTime OSGetTime(void);\nextern void JC_JUTGamePad_read(void);\nextern void JW_JUTGamePad_read(void);\n",
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/static/jsyswrap.cpp#L281-L289",
+      "proto": {
+        "JW_JUTGamePad_read": {
+          "returnsVoid": true
+        },
+        "OSGetTime": {
+          "params": []
+        },
+        "JC_JUTGamePad_read": {
+          "returnsVoid": true,
+          "params": []
+        }
+      }
+    },
+    {
+      "sym": "Skin_Matrix_MulMatrix",
+      "addr": "foresta:.text+0x00081364",
+      "unit": "src/game/m_skin_matrix.c",
+      "romDigest": "d5f3883896e60b9045754ec40cd9033595394072f3a00373ae2f53d916fd2b5a",
+      "features": [
+        "matrix",
+        "float",
+        "struct",
+        "field"
+      ],
+      "note": "AF-PAIR: same source as af row Skin_Matrix_MulMatrix @ 0x800c7018; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
+      "prependC": "#include \"m_skin_matrix.h\"\n#include \"m_lib.h\"",
+      "funcC": "extern void Skin_Matrix_MulMatrix(MtxF* mfA, MtxF* mfB, MtxF* dest) {\n  f32 cx;\n  f32 cy;\n  f32 cz;\n  f32 cw;\n  //---ROW1---\n  f32 rx = mfA->xx;\n  f32 ry = mfA->xy;\n  f32 rz = mfA->xz;\n  f32 rw = mfA->xw;\n  //--------\n\n  cx = mfB->xx;\n  cy = mfB->yx;\n  cz = mfB->zx;\n  cw = mfB->wx;\n  dest->xx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xy;\n  cy = mfB->yy;\n  cz = mfB->zy;\n  cw = mfB->wy;\n  dest->xy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xz;\n  cy = mfB->yz;\n  cz = mfB->zz;\n  cw = mfB->wz;\n  dest->xz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xw;\n  cy = mfB->yw;\n  cz = mfB->zw;\n  cw = mfB->ww;\n  dest->xw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  //---ROW2---\n  rx = mfA->yx;\n  ry = mfA->yy;\n  rz = mfA->yz;\n  rw = mfA->yw;\n  //--------\n  cx = mfB->xx;\n  cy = mfB->yx;\n  cz = mfB->zx;\n  cw = mfB->wx;\n  dest->yx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xy;\n  cy = mfB->yy;\n  cz = mfB->zy;\n  cw = mfB->wy;\n  dest->yy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xz;\n  cy = mfB->yz;\n  cz = mfB->zz;\n  cw = mfB->wz;\n  dest->yz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xw;\n  cy = mfB->yw;\n  cz = mfB->zw;\n  cw = mfB->ww;\n  dest->yw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  //---ROW3---\n  rx = mfA->zx;\n  ry = mfA->zy;\n  rz = mfA->zz;\n  rw = mfA->zw;\n  //--------\n  cx = mfB->xx;\n  cy = mfB->yx;\n  cz = mfB->zx;\n  cw = mfB->wx;\n  dest->zx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xy;\n  cy = mfB->yy;\n  cz = mfB->zy;\n  cw = mfB->wy;\n  dest->zy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xz;\n  cy = mfB->yz;\n  cz = mfB->zz;\n  cw = mfB->wz;\n  dest->zz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xw;\n  cy = mfB->yw;\n  cz = mfB->zw;\n  cw = mfB->ww;\n  dest->zw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  //---ROW4---\n  rx = mfA->wx;\n  ry = mfA->wy;\n  rz = mfA->wz;\n  rw = mfA->ww;\n  //--------\n  cx = mfB->xx;\n  cy = mfB->yx;\n  cz = mfB->zx;\n  cw = mfB->wx;\n  dest->wx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xy;\n  cy = mfB->yy;\n  cz = mfB->zy;\n  cw = mfB->wy;\n  dest->wy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xz;\n  cy = mfB->yz;\n  cz = mfB->zz;\n  cw = mfB->wz;\n  dest->wz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n  cx = mfB->xw;\n  cy = mfB->yw;\n  cz = mfB->zw;\n  cw = mfB->ww;\n  dest->ww = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_skin_matrix.c#L16-L141",
+      "proto": {
+        "Skin_Matrix_MulMatrix": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "add_calc_short_angle3",
+      "addr": "foresta:.text+0x0004b27c",
+      "unit": "src/game/m_lib.c",
+      "romDigest": "97a70b55444ed1c8704ffe17499800e1ad2f6f3de33d3eea69b13dbe760ec08b",
+      "features": [
+        "float",
+        "int-to-float",
+        "float-to-int",
+        "zero-extend",
+        "mixed-width",
+        "cast",
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "note": "AF-PAIR: same source as af row add_calc_short_angle3 @ 0x8009aad8; compare IDO 7.1 vs MWCC GC/1.3.2 -O4,s",
+      "prependC": "#include \"m_lib.h\"\n#include \"game.h\"\n#include \"m_actor.h\"\n#include \"m_play.h\"\n#include \"main.h\"\n#include \"libultra/libultra.h\"\n#include \"MSL_C/w_math.h\"\n#include \"libc64/qrand.h\"\n#include \"sys_matrix.h\"\n#include \"sys_math.h\"\n#include \"sys_math3d.h\"",
+      "funcC": "extern s16 add_calc_short_angle3(s16* pValue, s16 target, f32 fraction, s16 maxStep, s16 minStep) {\n    f32 stepSize;\n    s32 uTarget;\n    s32 newValue;\n    s32 uValue;\n\n    if (target != *pValue) {\n        uValue = (u16)*pValue;\n        uTarget = (u16)target;\n\n        if (uValue > uTarget) {\n            uTarget += 65536; /* Add 360 short degrees */\n        }\n\n        stepSize = (uTarget - uValue) * fraction;\n\n        if (stepSize > maxStep) {\n            stepSize = maxStep;\n        } else if (stepSize < minStep) {\n            stepSize = minStep;\n        }\n\n        newValue = uValue + (s32)stepSize;\n        if (newValue > uTarget) {\n            newValue = uTarget;\n        }\n        *pValue = newValue;\n    }\n\n    return target - *pValue;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_lib.c#L611-L641"
+    },
+    {
+      "sym": "Matrix_MtxtoMtxF",
+      "addr": "foresta:.text+0x0009d440",
+      "unit": "src/system/sys_matrix.c",
+      "romDigest": "6b8ec476e6870502bf4a4136a59f889ff518aa56764f29d19265b2351d9ea18b",
+      "features": [
+        "promotion",
+        "int-to-float",
+        "matrix",
+        "float",
+        "array",
+        "pointer",
+        "cast",
+        "struct",
+        "field",
+        "double",
+        "union"
+      ],
+      "prependC": "#include \"sys_matrix.h\"\n#include \"TwoHeadArena.h\"\n#include \"m_skin_matrix.h\"\n#include \"graph.h\"\n#include \"libc64/math64.h\"\n#include \"MSL_C/w_math.h\"\n#include \"libforest/gbi_extensions.h\"",
+      "funcC": "void Matrix_MtxtoMtxF(Mtx* src, MtxF* dest) {\n    u16* m1 = (u16*)&src->m[0][0];\n    u16* m2 = (u16*)&src->m[2][0];\n\n    dest->xx = ((m1[0] << 0x10) | m2[0]) * (1 / (f64)0x10000);\n    dest->yx = ((m1[1] << 0x10) | m2[1]) * (1 / (f64)0x10000);\n    dest->zx = ((m1[2] << 0x10) | m2[2]) * (1 / (f64)0x10000);\n    dest->wx = ((m1[3] << 0x10) | m2[3]) * (1 / (f64)0x10000);\n    dest->xy = ((m1[4] << 0x10) | m2[4]) * (1 / (f64)0x10000);\n    dest->yy = ((m1[5] << 0x10) | m2[5]) * (1 / (f64)0x10000);\n    dest->zy = ((m1[6] << 0x10) | m2[6]) * (1 / (f64)0x10000);\n    dest->wy = ((m1[7] << 0x10) | m2[7]) * (1 / (f64)0x10000);\n    dest->xz = ((m1[8] << 0x10) | m2[8]) * (1 / (f64)0x10000);\n    dest->yz = ((m1[9] << 0x10) | m2[9]) * (1 / (f64)0x10000);\n    dest->zz = ((m1[10] << 0x10) | m2[10]) * (1 / (f64)0x10000);\n    dest->wz = ((m1[11] << 0x10) | m2[11]) * (1 / (f64)0x10000);\n    dest->xw = ((m1[12] << 0x10) | m2[12]) * (1 / (f64)0x10000);\n    dest->yw = ((m1[13] << 0x10) | m2[13]) * (1 / (f64)0x10000);\n    dest->zw = ((m1[14] << 0x10) | m2[14]) * (1 / (f64)0x10000);\n    dest->ww = ((m1[15] << 0x10) | m2[15]) * (1 / (f64)0x10000);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/system/sys_matrix.c#L674-L694",
+      "proto": {
+        "Matrix_MtxtoMtxF": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "aQMgr_decide_idx_prob_table",
+      "addr": "foresta:.text+0x00121208",
+      "unit": "src/actor/ac_quest_talk_normal_init.c",
+      "romDigest": "758861e3c2f421b04dc4a0602d585745f879106262562886ad2db4e5f6fddf8e",
+      "features": [
+        "narrow-counter",
+        "loop-preupdate",
+        "break",
+        "float-to-int",
+        "array",
+        "variable-index",
+        "macro",
+        "narrow",
+        "branch"
+      ],
+      "prependC": "#include \"ac_quest_talk_normal_init.h\"\n#include \"m_font.h\"\n#include \"m_msg.h\"\n#include \"m_shop.h\"\n#include \"m_string.h\"\n#include \"m_handbill.h\"\n#include \"m_common_data.h\"\n#include \"m_player_lib.h\"\n#include \"lb_reki.h\"\n#include \"m_house.h\"\n#include \"m_melody.h\"\n#include \"m_ledit_ovl.h\"\n#include \"libultra/libultra.h\"",
+      "funcC": "static int aQMgr_decide_idx_prob_table(u8* prob_table, int count) {\n    static u8 decide_table[100];\n    int idx0;\n    int idx1;\n    u8 prob;\n    int res = 0;\n    int idx;\n    int i;\n    u8 j;\n    int k;\n\n    bzero(decide_table, 100);\n    j = 0;\n    for (i = 0; i < count; i++) {\n        for (prob = prob_table[i]; prob != 0; j++, prob--) {\n            if (j >= 100) {\n                break;\n            }\n\n            decide_table[j] = i;\n        }\n    }\n\n    k = 30;\n    while (k-- != 0) {\n        idx0 = RANDOM(100);\n        idx1 = RANDOM(100);\n        j = decide_table[idx0];\n        decide_table[idx0] = decide_table[idx1];\n        decide_table[idx1] = j;\n    }\n\n    idx = RANDOM(100);\n    if (idx >= 0 && idx < 100) {\n        res = decide_table[idx];\n    }\n\n    return res;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_quest_talk_normal_init.c#L176-L214"
+    },
+    {
+      "sym": "mGcgba_IsTypes",
+      "addr": "0x80049d4c",
+      "unit": "src/static/GBA2/JoyBoot.c",
+      "romDigest": "1ea50c44f0d549a7346f3b732b89376b42c01a0b1fdad84181dd4b386fb49a9e",
+      "features": [
+        "uninit-local",
+        "stack-addr",
+        "mask",
+        "branch",
+        "global",
+        "struct",
+        "field"
+      ],
+      "prependC": "#include \"GBA2/gba2.h\"\n#include \"_mem.h\"\n#include \"MSL_C/printf.h\"\n\nstatic u32 mJOYSIO_ConvData(u8* data);",
+      "funcC": "static int mGcgba_IsTypes(Joy_wrk_c* joywork, u32 load_type, u32 program_type) {\n  int gba_status = GBA2_GBA_STATE_TRANSMITTING;\n  u8 status;\n  u32 send;\n\n  if (GBAGetStatus(Port, &status) != GBA_READY) {\n    gba_status = GBA2_GBA_STATE_ERROR;\n  }\n  else {\n    if (status & GBA_JSTAT_SEND) {\n        u32 recv;\n        u8 readStatus;\n        \n        if (GBARead(Port, (u8*)&recv, &readStatus) != GBA_READY) {\n          gba_status = GBA2_GBA_STATE_ERROR;\n          goto exit;\n        }\n        else {\n            if (joywork->scan_state == 1) {\n              if (load_type == mJOYSIO_ConvData((u8*)&recv)) {\n                gba_status = GBA2_GBA_STATE_SUCCESS;\n                goto exit;\n              }\n        \n              if (program_type == mJOYSIO_ConvData((u8*)&recv)) {\n                gba_status = GBA2_GBA_STATE_ALREADY_EXIST;\n                goto exit;\n              }\n        \n              gba_status = GBA2_GBA_STATE_ERROR;\n              goto exit;\n            }\n            \n            joywork->cmd_attempts = 0;\n        }\n      }\n\n    send = 0xFFFE0105;\n    send = mJOYSIO_ConvData((u8*)&send);\n\n    if (GBAWrite(Port, (u8*)&send, &status) == GBA_READY) {\n      joywork->scan_state = 1;\n    }\n    else {\n      gba_status = GBA2_GBA_STATE_ERROR;\n    }\n  }\n\n  exit:\n  return gba_status;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/static/GBA2/JoyBoot.c#L243-L293"
+    },
+    {
+      "sym": "eNight15Moon_GetNowMoonPos",
+      "addr": "foresta:.text+0x002a938c",
+      "unit": "src/effect/ef_night15_moon.c",
+      "romDigest": "15f19df27b1c84fc3f3b8a7b3e23760f0155d98dbc3791e48e6a115f5a8d0668",
+      "features": [
+        "struct",
+        "float",
+        "int-to-float",
+        "branch",
+        "arithmetic",
+        "global",
+        "macro",
+        "struct-return",
+        "struct-copy",
+        "field"
+      ],
+      "prependC": "#include \"ef_effect_control.h\"\n#include \"m_common_data.h\"\n#include \"sys_matrix.h\"\n#include \"m_rcp.h\"",
+      "funcC": "static xyz_t eNight15Moon_GetNowMoonPos(xyz_t center_pos) {\n    f32 right_x = center_pos.x + 100.0f;\n    lbRTC_time_c rtc_time = Common_Get(time.rtc_time);\n    xyz_t pos;\n\n    if (rtc_time.hour >= 18 && rtc_time.hour < 21) {\n        f32 sec = (rtc_time.min * 60.0f + rtc_time.sec) * (1.0f / 54.0f);\n\n        pos.x = right_x - (rtc_time.hour - 18) * 66.666666f;\n        pos.x -= sec;\n    } else if (rtc_time.hour < 18) {\n        pos.x = right_x;\n    } else {\n        pos.x = center_pos.x - 100.0f;\n    }\n\n    pos.z = center_pos.z;\n    pos.y = center_pos.y;\n    return pos;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/effect/ef_night15_moon.c#L41-L60"
+    },
+    {
+      "sym": "EffectBG_object_before_display_xlu",
+      "addr": "foresta:.text+0x000a8694",
+      "unit": "src/actor/ac_effectbg.c",
+      "romDigest": "f988031df1bbf1df88ce514d0b27feb9a6ca2556a7f61ca80b30f6411aa5415f",
+      "features": [
+        "mod-const",
+        "float-to-int",
+        "int-to-float",
+        "macro",
+        "store",
+        "field",
+        "global",
+        "cast",
+        "narrow",
+        "struct",
+        "unsigned",
+        "branch"
+      ],
+      "prependC": "#include \"ac_effectbg.h\"\n#include \"m_name_table.h\"\n#include \"m_field_info.h\"\n#include \"m_common_data.h\"\n#include \"m_debug.h\"\n#include \"sys_matrix.h\"\n#include \"m_rcp.h\"\n\n#define EffectBg_STATUS_ACTIVE (1 << 0)\n#define EffectBg_STATUS_1 (1 << 1)\n#define EffectBg_STATUS_XMAS (1 << 2)\n#define EffectBg_STATUS_PALM (1 << 3)\n#define EffectBg_STATUS_CEDAR (1 << 4)\n#define EffectBg_STATUS_GOLD (1 << 5)\n#define EffectBg_STATUS_6 (1 << 6)\n#define EffectBg_STATUS_7 (1 << 7)\n\n#define EffectBG_IS_SHAKE(t) \\\n    ((t) == EffectBG_EFFECT_SHAKE || (t) == EffectBG_EFFECT_SHAKE_SMALL || (t) == EffectBG_EFFECT_SHAKE_LARGE)",
+      "funcC": "static int EffectBG_object_before_display_xlu(GAME* game, cKF_SkeletonInfo_R_c* keyframe, int joint_idx,\n                                              Gfx** joint_shape, u8* joint_flags, void* arg, s_xyz* joint_rot,\n                                              xyz_t* joint_pos) {\n    EffectBg_c* efbg = (EffectBg_c*)arg;\n\n    if (joint_idx == 3) {\n        joint_rot->y += (int)((f32)efbg->leaf_angle * sin_s(efbg->add_angle));\n        joint_rot->z += (int)((f32)efbg->leaf_angle * cos_s(efbg->add_angle));\n    }\n\n    if (efbg->variant == EffectBG_VARIANT_TREE_FULL && Common_Get(time).season == mTM_SEASON_WINTER &&\n        ((!EffectBG_IS_SHAKE(efbg->type) && joint_idx == 4) || (EffectBG_IS_SHAKE(efbg->type) && joint_idx == 2))) {\n        if ((Common_Get(time).term_idx != mTM_TERM_16 && Common_Get(time).term_idx != mTM_TERM_15) ||\n            ((efbg->status & EffectBg_STATUS_XMAS) == 0)) {\n            *joint_shape = NULL;\n        } else {\n            GAME_PLAY* play = (GAME_PLAY*)game;\n            int type = ((play->game_frame & ~0x1F) + efbg->block_ux + efbg->block_uz) % 3;\n            f32 remain = efbg->timer_max - efbg->timer;\n            f32 divisor = efbg->timer_max - 70;\n            u8 alpha = (u8)(255.0f * (remain / divisor));\n\n            OPEN_DISP(game->graph);\n            if (type == 0) {\n                gDPSetPrimColor(NEXT_POLY_XLU_DISP, 0, alpha, 255, 255, 100, 0);\n            } else if (type == 1) {\n                gDPSetPrimColor(NEXT_POLY_XLU_DISP, 0, alpha, 100, 255, 255, 0);\n            } else {\n                gDPSetPrimColor(NEXT_POLY_XLU_DISP, 0, alpha, 255, 100, 255, 0);\n            }\n\n            CLOSE_DISP(game->graph);\n        }\n    }\n\n    *joint_flags = TRUE;\n    return TRUE;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_effectbg.c#L956-L993"
+    },
+    {
+      "sym": "mDE_waku_circle_write",
+      "addr": "foresta:.text+0x00262d80",
+      "unit": "src/game/m_design_ovl.c",
+      "romDigest": "7ee240c2912c6e4f036d4e1962a5515aba7b61e1d72a9e7aee4fd1d9c669e8a8",
+      "features": [
+        "div-reg",
+        "narrow-counter",
+        "fixed-point",
+        "abs",
+        "macro",
+        "uninit-local",
+        "stack-addr",
+        "arithmetic",
+        "struct",
+        "field",
+        "signed",
+        "branch"
+      ],
+      "prependC": "#include \"m_design_ovl.h\"\n#include \"m_debug.h\"\n#include \"padmgr.h\"\n#include \"libultra/libultra.h\"\n#include \"audio.h\"\n#include \"m_common_data.h\"\n#include \"sys_matrix.h\"\n#include \"m_needlework_ovl.h\"\n#include \"m_editEndChk_ovl.h\"\n\nextern u16 mDE_SinCosTBL[];\n#define MDE_SIN(x) (mDE_SinCosTBL[(x)])\n#define MDE_COS(x) (mDE_SinCosTBL[(x) + 0x40])\n#define MDE_90DEG (0x40)\nstatic void mDE_set_pal_on_cursor(mDE_Ovl_c* design_ovl, int x, int y, int pal);\nvoid mDE_waku_set_main_start_end(mDE_Ovl_c* design_ovl, int* x_start, int* y_start, int* x_end, int* y_end);",
+      "funcC": "void mDE_waku_circle_write(mDE_Ovl_c* design_ovl, u8 fill) {\n    // stack variables\n    int x_start;\n    int y_start;\n    int x_end;\n    int y_end;\n\n    // registers\n    int v1;\n    int v2;\n    int x_width;\n    int y_width;\n    int mid_x;\n    int mid_y;\n    int half_x_width;\n    int half_y_width;\n    s16 i;\n\n    if (GETREG(NMREG, 2)) {\n        v1 = GETREG(NMREG, 2);\n    } else {\n        v1 = 45;\n    }\n    mDE_waku_set_main_start_end(design_ovl, &x_start, &y_start, &x_end, &y_end);\n    x_width = ABS(x_end - x_start);\n    y_width = ABS(y_end - y_start);\n    half_x_width = x_width >> 1;\n    half_y_width = y_width >> 1;\n    mid_x = x_start + half_x_width;\n    mid_y = y_start + half_y_width;\n    v2 = ((half_x_width + half_y_width) >> 1) - ((half_x_width + half_y_width) >> 3) -\n         (ABS(half_x_width - half_y_width) >> 1) - 1;\n\n    if (GETREG(NMREG, 3)) {\n        v2 -= GETREG(NMREG, 3);\n    } else {\n        v2 -= 4;\n    }\n\n    for (i = 0; i < MDE_90DEG; i += MDE_90DEG / (s16)((half_x_width + half_y_width - v2) | 1)) {\n        int cos_v = (v1 + half_x_width * MDE_COS(i)) >> 8;\n        int sin_v = (v1 + half_y_width * MDE_SIN(i)) >> 8;\n        if (fill) {\n            int j;\n            for (j = mid_x - cos_v; j <= mid_x + cos_v + (x_width & 1); j++) {\n                mDE_set_pal_on_cursor(design_ovl, j, mid_y - sin_v, design_ovl->_6A4);\n                mDE_set_pal_on_cursor(design_ovl, j, mid_y + sin_v + (y_width & 1), design_ovl->_6A4);\n            }\n        } else {\n            mDE_set_pal_on_cursor(design_ovl, mid_x + cos_v + (x_width & 1), mid_y + sin_v + (y_width & 1),\n                                  design_ovl->_6A4);\n            mDE_set_pal_on_cursor(design_ovl, mid_x + cos_v + (x_width & 1), mid_y - sin_v, design_ovl->_6A4);\n            mDE_set_pal_on_cursor(design_ovl, mid_x - cos_v, mid_y + sin_v + (y_width & 1), design_ovl->_6A4);\n            mDE_set_pal_on_cursor(design_ovl, mid_x - cos_v, mid_y - sin_v, design_ovl->_6A4);\n        }\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_design_ovl.c#L1212-L1268",
+      "proto": {
+        "mDE_waku_circle_write": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "mPr_SetPossessionItem",
+      "addr": "foresta:.text+0x00070c68",
+      "unit": "src/game/m_private.c",
+      "romDigest": "c1337d61c7aa97023f156333ed99372a0a59b591135d580a256662b0890ca0b1",
+      "features": [
+        "sparse",
+        "mask",
+        "unsigned",
+        "array",
+        "variable-index",
+        "field",
+        "branch",
+        "struct"
+      ],
+      "prependC": "#include \"m_private.h\"\n#include \"m_land.h\"\n#include \"m_font.h\"\n#include \"m_lib.h\"\n#include \"libultra/libultra.h\"\n#include \"m_player_lib.h\"\n#include \"m_name_table.h\"\n#include \"libc64/qrand.h\"\n#include \"m_field_info.h\"\n#include \"m_house.h\"\n#include \"m_mail.h\"\n#include \"m_handbill.h\"\n#include \"m_post_office.h\"\n#include \"m_event.h\"\n#include \"m_npc.h\"\n#include \"m_submenu.h\"\n#include \"m_room_type.h\"\n#include \"m_common_data.h\"",
+      "funcC": "extern void mPr_SetPossessionItem(Private_c* priv, int idx, mActor_name_t item, u32 cond) {\n    switch (item) {\n        case ITM_PRESENT: {\n            item = mPr_DummyPresentToTruePresent();\n            cond = mPr_ITEM_COND_PRESENT;\n            break;\n        }\n\n        case ITM_GOLDEN_NET_PRESENT: {\n            item = ITM_GOLDEN_NET;\n            cond = mPr_ITEM_COND_PRESENT;\n            break;\n        }\n\n        case ITM_GOLDEN_AXE_PRESENT: {\n            item = ITM_GOLDEN_AXE;\n            cond = mPr_ITEM_COND_PRESENT;\n            break;\n        }\n\n        case ITM_GOLDEN_SHOVEL_PRESENT: {\n            item = ITM_GOLDEN_SHOVEL;\n            cond = mPr_ITEM_COND_PRESENT;\n            break;\n        }\n\n        case ITM_GOLDEN_ROD_PRESENT: {\n            item = ITM_GOLDEN_ROD;\n            cond = mPr_ITEM_COND_PRESENT;\n            break;\n        }\n    }\n\n    priv->inventory.pockets[idx] = item;\n    priv->inventory.item_conditions =\n        ((priv->inventory.item_conditions & (~(u32)(mPr_ITEM_COND_NUM << (idx * 2)))) | (cond << (idx * 2)));\n\n    if (cond == mPr_ITEM_COND_NORMAL) {\n        mPr_SetItemCollectBit(item);\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_private.c#L608-L648",
+      "proto": {
+        "mPr_SetPossessionItem": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "cKF_KeyCalc",
+      "addr": "foresta:.text+0x00000594",
+      "unit": "src/c_keyframe.c",
+      "romDigest": "c3c2c90eb816bfd907dd70094202a5416385ef307c50a5035cfaead57e48f137",
+      "features": [
+        "float-to-int",
+        "int-to-float",
+        "sign-extend",
+        "narrow",
+        "float",
+        "array",
+        "variable-index",
+        "struct",
+        "field",
+        "macro",
+        "arithmetic",
+        "hw-float-abi",
+        "branch",
+        "double"
+      ],
+      "prependC": "#include \"c_keyframe.h\"\n#include \"MSL_C/w_math.h\"\n#include \"graph.h\"\n#include \"libultra/libultra.h\"\n#include \"sys_math3d.h\"\n#include \"sys_matrix.h\"\n\ntypedef struct {\n    s16 frame;\n    s16 value;\n    s16 tangent;\n} cKF_AnimKey_c;",
+      "funcC": "static s16 cKF_KeyCalc(s16 start_idx, s16 n_frames, s16* data_src, f32 frame) {\n    int now;\n    int next;\n    cKF_AnimKey_c* key_p = (cKF_AnimKey_c*)&data_src[start_idx * 3];\n\n    /* If the first frame is greater than the current frame then the first value is held */\n    if (key_p[0].frame >= frame) {\n        return key_p[0].value;\n    }\n\n    /* If the current frame is greater than the last frame then the last value is held */\n    if (key_p[n_frames - 1].frame <= frame) {\n        return key_p[n_frames - 1].value;\n    }\n\n    // Search through all frames\n    now = 0;\n    next = 1;\n\n    while (TRUE) {\n        if (key_p[next].frame > frame) {\n            f32 delta_frame = key_p[next].frame - key_p[now].frame;\n\n            if (!(F32_IS_ZERO(delta_frame))) {\n                f32 t = (frame - key_p[now].frame) / delta_frame; // progress towards the next frame\n                f32 tension = delta_frame * (1.0f / 30.0f);\n                f32 calc = cKF_HermitCalc(t, tension, key_p[now].value, key_p[next].value, key_p[now].tangent,\n                                          key_p[next].tangent);\n                int key = calc + 0.5; // Always round up\n\n                return key;\n            } else {\n                return key_p[now].value;\n            }\n        }\n\n        now++;\n        next++;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/c_keyframe.c#L214-L253"
+    },
+    {
+      "sym": "mEnv_ChangeRGBLight",
+      "addr": "foresta:.text+0x00047208",
+      "unit": "src/game/m_kankyo.c",
+      "romDigest": "bedbf824460be5bd5d470c18b063e579e328679aa6e328f0682c17b66e7fc8b3",
+      "features": [
+        "int-to-float",
+        "float-to-int",
+        "zero-extend",
+        "float",
+        "guard-init",
+        "pointer",
+        "global",
+        "hw-float-abi",
+        "struct",
+        "field"
+      ],
+      "prependC": "#include \"m_kankyo.h\"\n#include \"m_room_type.h\"\n#include \"m_scene_table.h\"\n#include \"m_common_data.h\"\n#include \"m_debug.h\"\n#include \"m_npc_schedule.h\"\n#include \"m_player_lib.h\"\n#include \"libultra/libultra.h\"\n\ntypedef struct electric_light_s {\n    f32 point_light_percent;\n    u8 point_light_color[3];\n    s16 _08;\n    s16 now_weather;\n    s16 next_weather;\n    f32 change_weather_env_rate;\n    s16 light_animating_on;\n    s16 light_anime_frame;\n    int point_light_on_type;\n    int point_light_off_type;\n    f32 point_light_off_step;\n    s16 point_light_is_flame; /* flickering effect when non-zero */\n    f32 staffroll_fade_rate;\n    f32 sun_percent;\n    f32 shadow_adjust;\n    f32 windowlight_alpha;\n    Light_list* current_point_light;\n    s16 add_moon_color[3];\n    Light_list* point_light_list_buf[mEnv_POINT_LIGHT_NUM];\n    Lights point_lights[mEnv_POINT_LIGHT_NUM];\n    int switch_status;\n    f32 point_light_min;\n    f32 diffuse_light_effect_rate;\n    s16 _98;\n    s16 shadow_alpha;\n    f32 diffuse_adjust;\n    u8 shadow_alpha_adjust;\n} mEnv_electric_light_c;\nstatic mEnv_electric_light_c l_mEnv_electric_light;",
+      "funcC": "static void mEnv_ChangeRGBLight(u8* dst, u8* src_nxt_w0, u8* src_nxt_w1, u8* src_now_w0, u8* src_now_w1, f32 f0,\n                                f32 f1) {\n    f32 weather_change_bias = l_mEnv_electric_light.change_weather_env_rate;\n    f32 inverse_weather_change_bias = 1.0f - weather_change_bias;\n    int i;\n\n    for (i = 0; i < 3; i++) {\n        *dst =\n            weather_change_bias * (f1 * (*src_nxt_w0 + f0 * ((f32)*src_nxt_w1 - (f32)*src_nxt_w0))) +\n            inverse_weather_change_bias * (f1 * (*src_now_w0 + f0 * ((f32)*src_now_w1 - (f32)*src_now_w0)));\n\n        dst++;\n        src_nxt_w0++;\n        src_nxt_w1++;\n        src_now_w0++;\n        src_now_w1++;\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/game/m_kankyo.c#L1500-L1517",
+      "proto": {
+        "mEnv_ChangeRGBLight": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "lbRTC_RTCTimeToTicks",
+      "addr": "foresta:.text+0x00096258",
+      "unit": "src/lb_rtc.c",
+      "romDigest": "eaf8cb07ad297c63f3456edc2989423c19d2b36184e0dcfe1a9915f82a21ea9b",
+      "features": [
+        "int64",
+        "stack-addr",
+        "struct",
+        "field",
+        "narrow",
+        "arithmetic"
+      ],
+      "prependC": "#include \"lb_rtc.h\"\n#include \"m_common_data.h\"\n#include \"m_lib.h\"\n#include \"types.h\"\n#include \"dolphin/os.h\"",
+      "funcC": "static OSTime lbRTC_RTCTimeToTicks(const lbRTC_time_c* time)  {\n  OSCalendarTime ctime;\n  int i;\n  int month = time->month;\n\n  // Copy the lbRTC_time_c structure fields to OSCalendarTime fields\n  ctime.sec = time->sec;\n  ctime.min = time->min;\n  ctime.hour = time->hour;\n  ctime.mday = time->day;\n  ctime.mon = month - 1;\n  ctime.year = time->year;\n  ctime.wday = month;\n  ctime.yday = 0;\n        \n  // Get calendar year-day to start of current month\n  for (i = 1; i < month; i++) {\n    ctime.yday += lbRTC_GetDaysByMonth(time->year, (lbRTC_month_t)i);\n  }\n\n  ctime.yday += time->day;\n  ctime.yday -= 1;\n  ctime.msec = 0;\n  ctime.usec = 0;\n\n  // Convert the OSCalendarTime structure to ticks and return it\n  return OSCalendarTimeToTicks(&ctime);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/lb_rtc.c#L110-L137"
+    },
+    {
+      "sym": "aBALL_actor_move",
+      "addr": "foresta:.text+0x000a396c",
+      "unit": "src/actor/ac_ball.c",
+      "romDigest": "e4f2fbc19d8419dcc8ab055edce04152f01b308d067be7f8a30e4441a45c1992",
+      "features": [
+        "float",
+        "mask",
+        "global",
+        "field",
+        "macro",
+        "branch",
+        "struct",
+        "fnptr"
+      ],
+      "prependC": "#include \"ac_ball.h\"\n#include \"m_actor_shadow.h\"\n#include \"m_common_data.h\"\n#include \"m_debug.h\"\n#include \"m_field_info.h\"\n#include \"m_lib.h\"\n#include \"m_name_table.h\"\n#include \"m_npc.h\"\n#include \"m_player_lib.h\"\n#include \"m_quest.h\"\n#include \"m_random_field.h\"\n#include \"m_roll_lib.h\"\n#include \"sys_matrix.h\"\n#include \"m_collision_bg.h\"\n\nstatic void aBALL_position_move(BALL_ACTOR* actor);\nstatic void aBALL_BGcheck(BALL_ACTOR* actor);\nstatic void aBALL_OBJcheck(BALL_ACTOR* actor, GAME*);\nstatic void aBALL_House_Tree_Rev_Check(BALL_ACTOR* actor);\nstatic void aBALL_calc_axis(ACTOR* actor);\nstatic void aBALL_status_check(ACTOR* actor, GAME* game);",
+      "funcC": "static void aBALL_actor_move(ACTOR* actor, GAME* game) {\n    BALL_ACTOR* ball = (BALL_ACTOR*)actor;\n    GAME_PLAY* play = (GAME_PLAY*)game;\n\n    aBALL_House_Tree_Rev_Check(ball);\n\n    if (!(actor->state_bitfield & ACTOR_STATE_NO_CULL)) {\n        if (actor->bg_collision_check.result.is_in_water || (ball->state_flags & aBALL_STATE_IN_HOLE)) {\n            Actor_delete(actor);\n        }\n        if (actor->speed == 0.0f) {\n            return;\n        }\n    }\n    Common_Set(ball_pos, actor->world.position);\n    aBALL_position_move(ball);\n    ball->process_proc(actor, game);\n    aBALL_BGcheck(ball);\n    aBALL_OBJcheck(ball, game);\n\n    CollisionCheck_Uty_ActorWorldPosSetPipeC(&ball->actor_class, &ball->ball_pipe);\n    CollisionCheck_setOC(game, &play->collision_check, &ball->ball_pipe.collision_obj);\n    aBALL_calc_axis(actor);\n    aBALL_status_check(actor, game);\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/actor/ac_ball.c#L736-L760",
+      "proto": {
+        "aBALL_actor_move": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "step0_make_dl",
+      "addr": "0x80007188",
+      "unit": "src/static/initial_menu.c",
+      "romDigest": "9e7cd6dbabb751b18061550ca1e045f0a20baefa2332aa51d3d86bf08c66c74d",
+      "features": [
+        "macro",
+        "pointer",
+        "field",
+        "branch",
+        "store",
+        "struct"
+      ],
+      "prependC": "#include \"initial_menu.h\"\n#include \"PR/mbi.h\"\n#include \"libforest/gbi_extensions.h\"\n#include \"m_nmibuf.h\"\n#include \"dolphin/dvd.h\"\n#include \"jsyswrap.h\"\n#include \"boot.h\"\n#include \"dolphin/os/OSFont.h\"\n#include \"bootdata.h\"\n#include \"libultra/libultra.h\"\n#include \"libforest/emu64/emu64_wrapper.h\"\n#include \"dolphin/vi.h\"\n#include \"dolphin/os/OSMessage.h\"\n#include \"dolphin/os/OSResetSW.h\"\n#include \"dolphin/os/OSReset.h\"\n#include \"dolphin/os.h\"\n#include \"m_controller.h\"\n#include \"dvderr.h\"\n\n#define G_CC_LOGO 0, 0, 0, PRIMITIVE, TEXEL0, 0, PRIMITIVE, 0\n\nstatic Mtx model_cursor;\nstatic u8 progressive_mode;\n\nstatic Gfx gam_win1_cursor_setup[] = {\n  gsSPTexture(0, 0, 0, 0, G_OFF),\n  gsDPSetCombineMode(G_CC_PRIMITIVE, G_CC_PRIMITIVE),\n  gsDPSetRenderMode(G_RM_AA_OPA_SURF, G_RM_AA_OPA_SURF2),\n  gsSPLoadGeometryMode(G_SHADE | G_SHADING_SMOOTH),\n  gsSPEndDisplayList(),\n};\n\nstatic Gfx gam_win1_moji_setup[] = {\n  gsSPTexture(0, 0, 0, 0, G_ON),\n  gsDPSetCombineMode(G_CC_BLENDPRIMDECALA, G_CC_BLENDPRIMDECALA),\n  gsDPSetRenderMode(G_RM_XLU_SURF, G_RM_XLU_SURF2),\n  gsSPLoadGeometryMode(G_SHADE | G_SHADING_SMOOTH),\n  gsSPEndDisplayList(),\n};\n\nstatic Vp viewport = {\n  1280, 960, 511, 0,\n  1280, 960, 511, 0\n};\n\nstatic Mtx projection = {\n  0x00000000, 0x00000000, 0x00000000, 0x00000000,\n  0x00000000, 0xFFFF0000, 0x00000000, 0xFFFF0001,\n  0x00CC0000, 0x00000000, 0x00000111, 0x00000000,\n  0x00000000, 0xFFFF0000, 0x00000000, 0x00000000\n};\n\nstatic Mtx lookat = {\n  0x10000, 0x00000, 0x00001, 0x00000,\n  0x00000, 0x10000, 0x00000, 0x00001,\n  0x00000, 0x00000, 0x00000, 0x00000,\n  0x00000, 0x00000, 0x00000, 0x00000\n};\n\nstatic Mtx default_model_scale = {\n  0x20000, 0x00000, 0x00002, 0x00000,\n  0x00000, 0x10000, 0x00000, 0x00001,\n  0x00000, 0x00000, 0x00000, 0x00000,\n  0x00000, 0x00000, 0x00000, 0x00000\n};\n\nstatic Mtx logo_projection = {\n  0x00000000, 0x00000000, 0x00000000, 0x00000000,\n  0x00000000, 0xFFFF0000, 0x00000000, 0x00000001,\n  0x00CC0000, 0x00000000, 0x000000F9, 0x00000000,\n  0x00000000, 0x00000000, 0x0000007C, 0x00000000\n};\n\nstatic Mtx logo_model_scale = {\n  0x10000, 0x00000, 0x00001, 0x00000,\n  0x00000, 0x10000, 0x00000, 0x00001,\n  0x00000, 0x00000, 0x00000, 0x00000,\n  0x00000, 0x00000, 0x00000, 0x00000\n};\n\nstatic Gfx initial_dl[] = {\n  gsDPSetScissor(G_SC_NON_INTERLACE, 0, 0, 640, 480),\n  gsSPClipRatio(FRUSTRATIO_2),\n  gsSPViewport(&viewport),\n  gsSPMatrix(&projection, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION),\n  gsSPMatrix(&lookat, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION),\n  gsSPMatrix(&default_model_scale, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW),\n  gsDPSetOtherMode(G_AD_DISABLE | G_CD_DISABLE | G_CK_NONE | G_TC_FILT | G_TF_BILERP | G_TT_NONE | G_TL_TILE | G_TD_CLAMP | G_TP_PERSP | G_CYC_1CYCLE | G_PM_NPRIMITIVE, G_AC_NONE | G_ZS_PIXEL | G_RM_NOOP | G_RM_NOOP2),\n  gsSPEndDisplayList(),\n};\n\nstatic Gfx logo_initial_dl[] = {\n  gsDPSetScissor(G_SC_NON_INTERLACE, 0, 0, 640, 480),\n  gsSPClipRatio(FRUSTRATIO_2),\n  gsSPViewport(&viewport),\n  gsSPMatrix(&logo_projection, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION),\n  gsSPMatrix(&lookat, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION),\n  gsSPMatrix(&default_model_scale, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW),\n  gsDPSetOtherMode(G_AD_DISABLE | G_CD_DISABLE | G_CK_NONE | G_TC_FILT | G_TF_BILERP | G_TT_NONE | G_TL_TILE | G_TD_CLAMP | G_TP_PERSP | G_CYC_1CYCLE | G_PM_NPRIMITIVE, G_AC_NONE | G_ZS_PIXEL | G_RM_NOOP | G_RM_NOOP2),\n  gsSPEndDisplayList(),\n};\n\nstatic Gfx logo_draw_dl[] = {\n  gsSPDisplayList(logo_initial_dl),\n  gsSPDisplayList(gam_win1_moji_setup),\n  gsDPSetPrimColor(0, 255, 220, 0, 0, 255),\n  gsSPMatrix(&logo_model_scale, G_MTX_PUSH | G_MTX_LOAD | G_MTX_MODELVIEW),\n  gsSPDisplayList(logo_ninT_model),\n  gsSPPopMatrix(G_MTX_MODELVIEW),\n  gsSPEndDisplayList(),\n};\n\nstatic Gfx step1_draw_dl[] = {\n  gsSPDisplayList(initial_dl),\n  gsSPDisplayList(gam_win1_moji_setup),\n  gsSPDisplayList(gam_win1_winT_model),\n  gsSPDisplayList(gam_win1_moji_model),\n  gsDPSetPrimColor(0, 255, 90, 90, 155, 255),\n  gsSPDisplayList(0x08000000),\n  gsDPSetPrimColor(0, 255, 50, 30, 150, 255),\n  gsSPDisplayList(0x09000000),\n  gsSPDisplayList(gam_win1_cursor_setup),\n  gsSPMatrix(&model_cursor, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW),\n  gsSPDisplayList(gam_win1_cursor_model),\n  gsSPPopMatrix(G_MTX_MODELVIEW),\n  gsSPEndDisplayList(),\n};\n\nstatic Gfx step2_draw_dl[] = {\n  gsSPDisplayList(initial_dl), /* call initial dl */\n  gsSPDisplayList(gam_win1_moji_setup), /* call gam_win1_moji_setup */\n  gsDPSetPrimColor(0, 255, 225, 255, 255, 255), /* set primitive color to off-white */\n  gsSPDisplayList(gam_win2_winT_model), /* call gam_win2_winT_model */\n  gsDPSetPrimColor(0, 255, 50, 50, 60, 255), /* set primitive color to dark blue-gray */\n  gsSPDisplayList(0x08000000), /* call progressive mode model set in step2_make_dl */\n  gsSPEndDisplayList(),\n};\n\nstatic int pad_good_frame_count = -1;",
+      "funcC": "static void step0_make_dl(Gfx** gpp) {\n  Gfx* g = *gpp;\n\n  if (APPNMI_TESTMODE_GET()) {\n    DVDDiskID* diskId = DVDGetCurrentDiskID();\n    if (boot_copyDate != NULL) {\n      JW_JUTReport(150, 400, 1, \"COPYDATE: %.17s\", boot_copyDate);\n    }\n\n    if (diskId != NULL) {\n      JW_JUTReport(150, 330, 1, \"<DISK ID>\");\n      JW_JUTReport(150, 342, 1, \"GAMENAME: %.4s\", diskId->gameName);\n      JW_JUTReport(150, 354, 1, \" COMPANY: %.2s\", diskId->company);\n      JW_JUTReport(150, 366, 1, \" VERSION: 0x%02X(%d)\", diskId->gameVersion, diskId->gameVersion);\n    }\n\n    JW_JUTReport(150, 330, 1, \"<DISK ID>\"); /* I belive the above <DISK ID> is a 'bug', because this is the exact same print */\n    JW_JUTReport(150, 50, 1, \"SDK VERSION: 12Dec2001 Patch4\");\n\n    if (OSGetFontEncode() == OS_FONT_ENCODE_SJIS) {\n      JW_JUTReport(150, 100, 1, \" ****** WARNING ******\");\n      JW_JUTReport(150, 112, 1, \"The DISP SW is JAPAN MODE now\");\n      JW_JUTReport(150, 124, 1, \"but this GAME is NES version\");\n    }\n  }\n\n  if (APPNMI_SHOPPROMOVERSION_GET()) {\n    JW_JUTReport(150, 410, 1, \"SHOP PROMOTE VERSION\");\n  }\n\n  gSPDisplayList(g++, logo_draw_dl);\n  *gpp = g;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/ac-decomp/blob/9e928f8e638c8170add15b0de3026424ad8a075e/src/static/initial_menu.c#L142-L174",
+      "proto": {
+        "step0_make_dl": {
+          "returnsVoid": true
+        }
+      }
+    }
+  ]
+}

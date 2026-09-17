@@ -100,20 +100,20 @@ describe('every authored fact agrees with the function the compiler actually saw
   });
 });
 
-describe('the prototype line appended to a vendored m2c context', () => {
-  /** The vendored CONTEXT blob of every function in one manifest (the `--context` m2c is given,
-   *  before the prototype line). */
-  function vendoredCtxs(man: RealManifest): Map<string, string> {
-    const dir = join(REAL_DIR, 'tu', man.project);
-    const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<
-      string,
-      { tu: string; ctx: string }
-    >;
-    return new Map(
-      man.functions.map((fn) => [fn.sym, gunzipSync(readFileSync(join(dir, index[fn.sym].ctx))).toString('utf8')]),
-    );
-  }
+/** The vendored CONTEXT blob of every function in one manifest (the `--context` m2c is given,
+ *  before the prototype line). */
+function vendoredCtxs(man: RealManifest): Map<string, string> {
+  const dir = join(REAL_DIR, 'tu', man.project);
+  const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<
+    string,
+    { tu: string; ctx: string }
+  >;
+  return new Map(
+    man.functions.map((fn) => [fn.sym, gunzipSync(readFileSync(join(dir, index[fn.sym].ctx))).toString('utf8')]),
+  );
+}
 
+describe('the prototype line appended to a vendored m2c context', () => {
   const lines = manifests.flatMap(({ man }) => {
     const ctxs = vendoredCtxs(man);
     return man.functions
@@ -191,6 +191,59 @@ describe('the prototype line appended to a vendored m2c context', () => {
       .map(({ where }) => where)
       .sort();
     expect(self).toEqual(['pokeemerald:AcroBikeHandleInputTurning']);
+  });
+
+  // THE OTHER UNCAPPED PATH. A C++ unit's vendored context is not C, so m2c cannot be handed it,
+  // and the row hand-writes a `ctx` instead — which `m2cOwnPrototype` never sees. Pinned by name
+  // for the same reason as the rule above: a new row on this path is a decision, not a detail.
+  // README residual 5 states what it costs, and what no `proto` field can carry back.
+  test('only the known rows hand-write the context m2c reads', () => {
+    const hand = manifests
+      .flatMap(({ man }) => man.functions.filter((fn) => !fn.m2cCtx).map((fn) => `${man.project}:${fn.sym}`))
+      .sort();
+    expect(hand).toEqual(['ac-decomp:JW_JUTGamePad_read']);
+  });
+});
+
+// The README tells a reader how the row's own declaration reaches m2c, row by row, as five
+// numbers. Nothing held them to the manifests and they went stale: they were published as
+// 31/8/84/123 over 252 rows and the manifests said 63/1/81/107. Re-derived here instead, through
+// the SAME predicates cases/real.ts provisions with, so the prose cannot drift from the data again.
+describe("the README's account of what m2c is told", () => {
+  const declares = (text: string, sym: string): boolean => new RegExp(`\\b${sym}\\s*\\(`).test(text);
+
+  test('states how many rows learn their own declaration each way', () => {
+    const tally = { header: 0, prependC: 0, ownProto: 0, handCtx: 0, nothing: 0 };
+    for (const { man } of manifests) {
+      const ctxs = vendoredCtxs(man);
+      for (const fn of man.functions) {
+        if (!fn.m2cCtx) {
+          tally.handCtx++;
+          continue;
+        }
+        const ctx = ctxs.get(fn.sym)!;
+        if (declares(ctx, fn.sym)) {
+          declares(fn.prependC ?? '', fn.sym) ? tally.prependC++ : tally.header++;
+        } else if (m2cOwnPrototype(fn.sym, fn.proto, ctx)) {
+          tally.ownProto++;
+        } else {
+          tally.nothing++;
+        }
+      }
+    }
+    const readme = readFileSync(join(REAL_DIR, '..', '..', 'README.md'), 'utf8');
+    const cell = (what: string): number => {
+      const row = readme.split('\n').find((l) => l.startsWith('|') && l.includes(what));
+      return Number(row?.split('|').at(-2)?.trim());
+    };
+    expect(tally).toEqual({
+      header: cell('the vendored context already declares it'),
+      prependC: cell("a manifest's `prependC` needs to compile the reference standalone"),
+      ownProto: cell('the one line `proto` also gives asmlift'),
+      handCtx: cell("the row's own hand-written `ctx`"),
+      nothing: cell('nothing is appended, and m2c infers the signature as asmlift does'),
+    });
+    expect(Object.values(tally).reduce((a, b) => a + b)).toBe(manifests.flatMap(({ man }) => man.functions).length);
   });
 });
 

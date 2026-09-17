@@ -117,10 +117,14 @@ describe('committed real-tier manifests', () => {
     // (kleod, before this gate: 593 addrs / 0 volatile against the 675 / 81 the rows used).
     test(`${f} names the derived-ELF make target`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
-      // Checkout-free half — true of all six projects today, because all six declare a DERIVED
-      // `tools.asmlift.elf`. Relax it only for a project whose plain build produces its declared
-      // ELF (and then the checkout-aware half below is the one that must stay green).
-      expect(man.elfMake, `${f}: every real project derives its symbol-source ELF today`).toBe(ELF_MAKE_TARGET);
+      // Checkout-free half. Every Makefile project declares a DERIVED `tools.asmlift.elf`; a dtk project
+      // (every unit's flags read from `objdiff.json`) names the ELF its ordinary ninja build links and
+      // has no Makefile to derive one with.
+      const dtk = Object.values(man.units).every((u) => u.flagsFrom.from === 'objdiff');
+      expect(
+        man.elfMake,
+        `${f}: ${dtk ? 'a dtk project derives no ELF' : 'a Makefile project derives its symbol-source ELF'}`,
+      ).toBe(dtk ? undefined : ELF_MAKE_TARGET);
       // Checkout-aware half — the real invariant, exact in both directions. Vacuous where the
       // checkout is absent (CI clones none), which is why the half above exists.
       const root = resolveProjectRoot(man);

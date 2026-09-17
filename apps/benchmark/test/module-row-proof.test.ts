@@ -1,27 +1,77 @@
-// How a GameCube REL row is proved by `bench vendor`, and why it is proved differently.
+// How a GameCube REL row is proved by `bench vendor`.
 //
 // A row keyed by a linked address is proved against the ROM: the target it builds must be the
-// function the project's linked ELF holds there. A row keyed by a REL MODULE LOCATION cannot be —
-// the linked ELF holds no module's bytes, and the module's own are unrelocated, which the gate's
-// ARM/MIPS masks cannot read. So `romAddress` hands the caller null instead of parsing an address
-// out of a spelling that holds none, and the row is proved on what IS decidable against the
-// checkout: that its module really does put that symbol at that section and that offset.
+// function the project's linked ELF holds there. A row keyed by a REL MODULE LOCATION is proved the
+// same way against its MODULE's ELF — the linked ELF holds no module's bytes — with the module's
+// sections placed so its function has an address (`romLocation`). Before that, it is proved to be
+// where it says it is: its module really does put that symbol at that section and that offset.
+import { placeModuleSections } from '@asmlift/cli/module-elf';
 import { describe, expect, test } from 'vitest';
 
-import { romAddress } from '../src/cases/rom-function';
+import { compareWithRom, romLocation, targetDigest } from '../src/cases/rom-function';
 import { moduleIdentityRefusal } from '../src/cases/vendor';
+import { elf32 } from './elf32';
 
-describe('romAddress', () => {
-  test('a linked address is the address the ROM gate reads', () => {
-    expect(romAddress('0x0800d188')).toBe(0x0800d188);
-    expect(romAddress('0x801d3a04')).toBe(0x801d3a04);
+const EM_PPC = 20;
+
+describe('romLocation', () => {
+  // `bl 0 ; lis r3,0 ; lwz r3,0(r3) ; blr`, as the compiler writes it: a branch and an address pair
+  // left for the linker
+  const code = [0x48, 0x00, 0x00, 0x01, 0x3c, 0x60, 0x00, 0x00, 0x80, 0x63, 0x00, 0x00, 0x4e, 0x80, 0x00, 0x20];
+  const relocs = [
+    { offset: 0, type: 10 },
+    { offset: 6, type: 6 },
+    { offset: 10, type: 4 },
+  ];
+  const object = elf32({
+    machine: EM_PPC,
+    littleEndian: false,
+    textAddr: 0,
+    text: code,
+    symbols: [{ name: 'p', value: 0, size: code.length }],
+    relocs,
+  });
+  const linked = elf32({ machine: EM_PPC, littleEndian: false, textAddr: 0x80003000, text: [], symbols: [] });
+  /** A module ELF as dtk links one: `.text` and `.data` both at 0, `p` at `.text+0x4` behind another
+   *  function, and its relocated fields holding whatever the module link left in them. */
+  const module = (pText: number[]) =>
+    elf32({
+      machine: EM_PPC,
+      littleEndian: false,
+      textAddr: 0,
+      text: [0x4e, 0x80, 0x00, 0x20, ...pText],
+      symbols: [
+        { name: 'other', value: 0, size: 4 },
+        { name: 'p', value: 4, size: pText.length },
+      ],
+      moreSections: [{ name: '.data', size: 0x20 }],
+    });
+  const placed = (bytes: Buffer) => () => placeModuleSections(bytes, 'foresta.plf');
+
+  test('a linked address is read out of the linked ELF, at that address', () => {
+    expect(romLocation('0x801d3a04', linked, () => expect.unreachable())).toEqual({ elf: linked, at: 0x801d3a04 });
   });
 
-  // Before this returned null it returned NaN, and the row failed with "the linked ELF has no
-  // function at 0xNaN" — a refusal that named neither the row's shape nor the reason.
-  test('a module location has none, and is not parsed into one', () => {
-    expect(romAddress('m416Dll:.text+0x00001f20')).toBeNull();
-    expect(romAddress('foresta:.text+0x001a0cf0')).toBeNull();
+  test("a module location is read out of the module's own ELF, at its section's placed base plus its offset", () => {
+    const asLinked = [0x48, 0x00, 0x12, 0x35, 0x3c, 0x60, 0x80, 0x0a, 0x80, 0x63, 0x12, 0x34, 0x4e, 0x80, 0x00, 0x20];
+    const { elf, at } = romLocation('foresta:.text+0x00000004', linked, placed(module(asLinked)));
+    expect(compareWithRom(object, 'p', elf, at)).toEqual({ equal: true, digest: targetDigest(object, 'p') });
+  });
+
+  // What the module comparison adds over proving the location alone: a target that is not the
+  // module's function is refused even at the right section and offset.
+  test("a target that is not the module's function is refused", () => {
+    const otherRegister = [
+      0x48, 0x00, 0x12, 0x35, 0x3c, 0x80, 0x80, 0x0a, 0x80, 0x63, 0x12, 0x34, 0x4e, 0x80, 0x00, 0x20,
+    ];
+    const { elf, at } = romLocation('foresta:.text+0x00000004', linked, placed(module(otherRegister)));
+    expect(compareWithRom(object, 'p', elf, at)).toMatchObject({ equal: false });
+  });
+
+  test('a section the module does not hold names no place, and says so', () => {
+    expect(() => romLocation('foresta:.rodata+0x00000004', linked, placed(module(code)))).toThrow(
+      /no allocated section \.rodata/,
+    );
   });
 });
 

@@ -1,6 +1,6 @@
 // Pin tests for the Function Explorer's reproduction scripts — real rows from the committed
 // results.json, so the scripts are exercised against exactly what the page renders.
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { type BenchOutput, type FunctionResult, moduleOf } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -193,7 +193,12 @@ describe('asmliftScript (pinned)', () => {
     expect(withMap.length).toBeGreaterThan(0); // the dataset does carry symbol-fed real rows
     for (const fn of withMap) {
       const s = asmliftScript(fn);
-      expect(s, fn.id).toContain(`apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`);
+      // WHICH map, per row: a row in a REL module was read with that module's map, and naming the
+      // project's map beside it would be naming a map the row was not measured with. The test used
+      // to assert the base blob for every row, which held only while no real row lived in a module.
+      const module = moduleOf(fn.addr);
+      const blob = module === undefined ? 'symbols.json.gz' : `symbols/${module}.json.gz`;
+      expect(s, fn.id).toContain(`apps/benchmark/dataset/real/tu/${fn.project}/${blob}`);
       expect(s, fn.id).toMatch(/sha256 of the decompressed map JSON: [0-9a-f]{64}/);
       expect(s, fn.id).toContain('decomp.yaml (tools.asmlift.elf)');
     }
@@ -218,15 +223,20 @@ describe('asmliftScript (pinned)', () => {
   });
 
   test("a row in a REL module names THAT module's map and passes --module", () => {
-    // No GameCube row exists yet, so the row is a committed symbol-fed one moved into a module:
-    // what is pinned is the script's reading of the identity, which is all this owes.
-    const base = rows.find((r) => r.asmlift.symbolMap && r.tier === 'real')!;
-    const s = asmliftScript({ ...base, addr: 'm416Dll:.text+0x00001f20' });
-    expect(s).toContain(`apps/benchmark/dataset/real/tu/${base.project}/symbols/m416Dll.json.gz`);
+    // The CONTROL has to be a row that is not itself in a module. It used to be "the first
+    // symbol-fed real row", which stopped being module-free the moment real REL rows landed.
+    const flat = rows.find((r) => r.asmlift.symbolMap && r.tier === 'real' && moduleOf(r.addr) === undefined)!;
+    expect(flat, 'no module-free symbol-fed real row to use as the control').toBeDefined();
+    const s = asmliftScript({ ...flat, addr: 'm416Dll:.text+0x00001f20' });
+    expect(s).toContain(`apps/benchmark/dataset/real/tu/${flat.project}/symbols/m416Dll.json.gz`);
     expect(s).toContain('--module m416Dll');
     // the module's map is what the row was read with — never the project's beside it
-    expect(s).not.toContain(`tu/${base.project}/symbols.json.gz`);
-    expect(asmliftScript(base)).not.toContain('--module');
+    expect(s).not.toContain(`tu/${flat.project}/symbols.json.gz`);
+    expect(asmliftScript(flat)).not.toContain('--module');
+    // and a row that really is in a module reads its module out of its own identity, not a graft
+    const inModule = rows.find((r) => r.asmlift.symbolMap && r.tier === 'real' && moduleOf(r.addr) !== undefined)!;
+    expect(inModule, 'no real row lives in a REL module').toBeDefined();
+    expect(asmliftScript(inModule)).toContain(`--module ${moduleOf(inModule.addr)}`);
   });
 
   test('symbol-fed rows LOAD the map: PROJECT_PATH placeholder + --project-root on the pre-step', () => {

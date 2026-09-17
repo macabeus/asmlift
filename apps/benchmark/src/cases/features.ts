@@ -36,6 +36,15 @@ const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b
 const withoutDirectives = (s: string): string =>
   s.replace(/^[ \t]*#(?:[^\n\\]|\\[\s\S])*/gm, (d) => d.replace(/[^\n]/g, ' '));
 
+/** An indirect call, on every ISA the benchmark runs: PowerPC through the count or link register,
+ *  MIPS `jalr`, ARM `blx`, and agbcc's `_call_via_rN` thunk. */
+const INDIRECT_CALL = /\bbctrl\b|\bblrl\b|\bjalr\b|\bblx\b|_call_via_r/;
+
+/** A floating-point literal with no `f` suffix, which has type `double` whatever surrounds it.
+ *  The lookahead refuses `1.0f`, `1.0F`, `1.0l` and a version-like `1.0.3`; the leading class
+ *  refuses the fraction of a hex constant. */
+const UNSUFFIXED_FLOAT = /(?<![\w.])(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])/;
+
 /** Anything that takes a parenthesis and a brace without being a declarator. */
 const NOT_A_DECLARATOR = /\b(?:if|else|while|for|switch|do|catch|return|sizeof)\s*$/;
 
@@ -108,7 +117,7 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
     ),
   struct: (b) => /\bstruct\b|\bunion\b|->|\.\s*[A-Za-z_]/.test(b),
   field: (b) => /->|\.\s*[A-Za-z_]/.test(b),
-  fnptr: (_b, asm) => /\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+  fnptr: (_b, asm) => INDIRECT_CALL.test(asm),
   // `&&`/`||` count: a short-circuit is conditional control flow, and the compiler branches on it
   branch: (b, asm) =>
     /\bif\b|\bswitch\b|\?|\bfor\b|\bwhile\b|&&|\|\|/.test(b) ||
@@ -184,15 +193,18 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
         .reduce((n, stmt) => n + stmt.split(',').length, 0) >= 2
     );
   },
-  // a TYPE tag: the evidence is in the signature, not the body
-  double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
+  // a TYPE tag: the evidence is in the whole function, not just its body. `f64` is the spelling
+  // three of the seven projects use for the type, and a row that never writes the keyword is
+  // still using it — Animal Crossing's `Matrix_MtxtoMtxF` scales by `1 / (f64)0x10000` sixteen
+  // times. `f32` is deliberately absent: it is the OTHER type. An UNSUFFIXED floating literal is
+  // the third spelling: `calc + 0.5` is a double addition however the operands were declared,
+  // which is why the suffix has to be absent — `1.0f / 30.0f` in the same function is not.
+  double: (_b, _asm, whole) => /\bdouble\b|\bf64\b/.test(whole) || UNSUFFIXED_FLOAT.test(whole),
 
-  // A vtable dispatch is an INDIRECT call, on every ISA the benchmark runs — PowerPC through the
-  // count or link register, MIPS `jalr`, ARM `blx` or agbcc's `_call_via_rN` thunk. Whether the
-  // callee came out of a vtable rather than a function-pointer field is the judgement, and `fnptr`
-  // is the tag for the other answer. (Deliberately NOT the same predicate as `fnptr`'s floor,
-  // which has no PowerPC form; widening that one would change which rows can claim `fnptr`.)
-  'virtual-call': (_b, asm) => /\bbctrl\b|\bblrl\b|\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+  // The floor of `fnptr` above and of this one is the same instruction, because the necessary
+  // condition of both tags is the same: the call is INDIRECT. Which of the two the row claims —
+  // a vtable slot or a function-pointer value — is the judgement, and it is not in the encoding.
+  'virtual-call': (_b, asm) => INDIRECT_CALL.test(asm),
 
   // A constructor's declarator repeats the class name — `Thing::Thing(`. The SIGNATURE carries it
   // and the body never does, so like `double` this reads the whole function.
@@ -236,6 +248,14 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   'mod-pow2': (b) => /%/.test(b),
   'mod-reg': (b) => /%/.test(b),
 };
+
+/** The floors NOTHING in the C can meet: an indirect call exists only in the object, so these two
+ *  read the assembly and ignore the source entirely. A row the last `bench run` has not published
+ *  yet carries no assembly, so it cannot be held to these until it does — and to every OTHER floor
+ *  it is held on the spot, because every other floor reads the source. Declared here rather than
+ *  inferred from which tags some published row needs its assembly for: `branch` passes on either
+ *  evidence, and inferring swept it in and stopped checking the half the source decides. */
+export const ASSEMBLY_ONLY_FLOOR = new Set(['fnptr', 'virtual-call']);
 
 /** Strip comments and string/char literals so operator scans cannot match inside them. */
 export function stripLiterals(c: string): string {

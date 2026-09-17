@@ -37,17 +37,18 @@ export interface RealFunction {
    *  unit — 6 of Mario Party 4's 99 — can hold no row: the row would need `units` flags, and
    *  `bench flags` refuses it with `objdiff.json has no unit compiled from …`. */
   addr: string;
-  /** The build unit the function is compiled in: the source file its `sourceUrl` cites, and a key of the
-   *  manifest's `units`. Written by `bench flags --write`. */
+  /** The build unit the function is compiled in, and a key of the manifest's `units`: the source file its
+   *  `sourceUrl` cites — or, where that file is a part a unit `#include`s rather than a source file of its
+   *  own (Animal Crossing's `.c_inc` bodies), the unit whose compile reads it. Written by `bench flags
+   *  --write`, which takes that unit from what the project's build recorded reading; `bench vendor`
+   *  refuses a row naming any other. */
   unit: string;
   /** The digest of the function's target as `bench vendor` proved it equal to the function the project's
    *  linked ELF holds at `addr` (cases/rom-function.ts `targetDigest`). A target built with another
    *  digest is not the game's function, and its row is refused.
    *
-   *  For a row keyed by a REL MODULE LOCATION this pins the target's own bytes and NOT the game's:
-   *  the linked ELF holds no module's bytes, so `bench vendor` proves that row's module, section and
-   *  offset against the module ELF instead, and names the skipped ROM comparison in its output every
-   *  time. See cases/vendor.ts. */
+   *  A row keyed by a REL MODULE LOCATION is proved the same way against its MODULE's ELF, the one the
+   *  build turns into the disc's module (cases/rom-function.ts `romLocation`). */
   romDigest: string;
   /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
    *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
@@ -218,6 +219,10 @@ export function resolveProjectRoot(m: RealManifest): string {
   return existsSync(owned) ? owned : join(WORKSPACE, m.repoDir);
 }
 
+/** A cited file that is not a C or C++ source: a part some unit `#include`s, so the row's unit may be another
+ *  file. Which one is decidable only against the build (`bench flags`, `bench vendor`). */
+const isIncludedPart = (path: string | undefined): boolean =>
+  path !== undefined && !/\.(?:c|cc|cp|cpp|cxx)$/.test(path);
 const COMMIT = /^[0-9a-f]{40}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -382,7 +387,7 @@ export function validateManifest(
             `${file}: ${JSON.stringify(f.sym)} names no "unit" — run \`pnpm bench flags --project ${man.project} --write\``,
           );
         }
-      } else if (typeof f.unit !== 'string' || f.unit !== citedFile) {
+      } else if (typeof f.unit !== 'string' || (f.unit !== citedFile && !isIncludedPart(citedFile))) {
         problems.push(
           `${file}: ${JSON.stringify(f.sym)} "unit" ${JSON.stringify(f.unit)} is not the file its sourceUrl cites`,
         );

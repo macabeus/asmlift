@@ -19,6 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { cachedAsmDumpText } from '../src/cache';
 import { unitCompileWrapper } from '../src/cases/dtk-project';
 import { benchCheckoutsDir } from '../src/cases/manifests';
+import { noPrototypeCalls, sizeofBounds } from '../src/compile/mwcc';
 import { buildRealTarget, candidateLinkage, makeRealCompile, realCompilerFor } from '../src/compile/real';
 import type { RealProjectCfg } from '../src/compile/types';
 import { canonicalCodegen } from '../src/toolchains';
@@ -98,7 +99,79 @@ describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('each C
   );
 });
 
+test("a vendored context drops CodeWarrior's declaration attributes, which m2c's C parser refuses", () => {
+  // Animal Crossing's headers, as mwcceppc preprocesses them. The attribute says where another unit's
+  // definition is linked; the declaration keeps its type.
+  const ctx = [
+    'extern __declspec(section "forcestrip") void mFRm_PrintErrInfo(gfxprint_t* gfxprint);',
+    'extern __declspec(weak) int OSReport(const char* fmt, ...);',
+    'typedef struct { int declspec_is_not_a_word_here; } S;',
+  ].join('\n');
+  expect(mwcc.vendoredContext(ctx, CFLAGS, 'c')).toBe(
+    [
+      'extern void mFRm_PrintErrInfo(gfxprint_t* gfxprint);',
+      'extern int OSReport(const char* fmt, ...);',
+      'typedef struct { int declspec_is_not_a_word_here; } S;',
+    ].join('\n'),
+  );
+});
+
+test('the array bounds a context spells with sizeof are found once each, whatever else is bracketed', () => {
+  const ctx = [
+    'typedef union { OthersSave_c save; u8 __align[((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))]; } A;',
+    'typedef union { Save_t save; u8 __align[((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))]; } B;',
+    'typedef struct { void* p[(0x108 - 0x0FC) / sizeof(void*)]; u8 plain[4]; } C;',
+  ].join('\n');
+  expect(sizeofBounds(ctx)).toEqual([
+    '((sizeof(OthersSave_c) + (0x2000 - 1)) & (~(0x2000 - 1)))',
+    '(0x108 - 0x0FC) / sizeof(void*)',
+  ]);
+});
+
+test('a call refused for having no prototype is named from the unit at its byte offset', () => {
+  // CodeWarrior's parseable diagnostics, as a -requireprotos compile of the unit below printed them: a
+  // WARNING for each definition with no prior prototype, and an ERROR for each unprototyped call. The
+  // echoed source line is windowed on a long line, so the name is read out of the unit itself.
+  const tu = 'int x;\r\n\r\nint g(int x) {\r\n  return   some_long_name(x);\r\n}\r\n';
+  const output = [
+    'mwcceppc.exe|Compiler|Warning',
+    '(Z:\\w\\u.c|3|14|1|23|1)',
+    '= int g(int x) {',
+    '>function has no prototype',
+    'mwcceppc.exe|Compiler|Error',
+    '(Z:\\w\\u.c|4|12|14|37|14)',
+    '=   return   some_long_name(x);',
+    '>function has no prototype',
+  ].join('\r\n');
+  expect(noPrototypeCalls(output, tu)).toEqual(['some_long_name']);
+});
+
 describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', () => {
+  test(
+    'a context bound spelled with sizeof becomes the number CodeWarrior gives it',
+    () => {
+      // m2c evaluates an array bound itself and has no `sizeof`; Animal Crossing's m_card.h spells one
+      // in a union 28 of its contexts carry, and m2c fails the whole row on it.
+      const ctx = 'typedef struct { short s; char c; } T;\ntypedef union { T t; char pad[sizeof(T) * 2]; } U;\n';
+      expect(mwcc.vendoredContext(ctx, CFLAGS, 'c')).toBe(
+        'typedef struct { short s; char c; } T;\ntypedef union { T t; char pad[8]; } U;\n',
+      );
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    "names an undeclared call in the unit's own dialect, and not the intrinsics CodeWarrior declares itself",
+    () => {
+      // `__fabs` is CodeWarrior's own intrinsic, which Animal Crossing's math.h inlines into every unit; a
+      // host C compiler calls it undeclared. `h` is undeclared by anyone.
+      const tu = 'double f(double d) { return __fabs(d); }\nint g(int a) { return h(a); }\n';
+      expect(mwcc.undeclaredCallees(tu, CFLAGS, 'c')).toEqual(['h']);
+      expect(mwcc.undeclaredCallees('int h(int);\nint g(int a) { return h(a); }\n', CFLAGS, 'c')).toEqual([]);
+    },
+    CONTAINER_BUDGET,
+  );
+
   test(
     'compiles a preprocessed unit verbatim — no typedef prelude in front of it',
     () => {
@@ -293,6 +366,17 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81') && existsSync(join(AC, 'build.n
         // …and nothing of THIS machine: a vendored blob is committed
         expect(text).not.toMatch(/\/Users\/|\/home\/|\/private\/var\//);
         expect(text).not.toContain('#line');
+      },
+      CONTAINER_BUDGET,
+    );
+
+    test(
+      "expands __FILE__ to the unit's own name, not the name of the copy it is preprocessed from",
+      () => {
+        // mwcceppc expands `__FILE__` to the BASENAME, so the shadow copy the #pragma markers are
+        // written into must keep the unit's. A string literal's length is a fact about the object:
+        // the ROM gate cannot see it move, because its address is a masked relocation.
+        expect(mwcc.preprocess(AC_CFG, 'const char* f(void) { return __FILE__; }\n')).toContain('"u.c"');
       },
       CONTAINER_BUDGET,
     );
