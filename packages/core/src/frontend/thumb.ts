@@ -21,7 +21,7 @@
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, protoArity } from '../proto';
+import { type FnProto, type Prototypes, declaredWidth, protoArity } from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -3325,11 +3325,57 @@ export function lift(
     const a = spMemAccess(ins);
     return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
   };
-  const declaredBlock = (callee: string): number[] | null => {
-    const arity = protoArity(prototypes[callee]) ?? protoArity(RUNTIME_HELPERS[callee]);
-    return arity === undefined || arity <= target.argRegs.length
-      ? null
-      : Array.from({ length: arity - target.argRegs.length }, (_, i) => 4 * i);
+  // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. The analysis below and the
+  // `bl` lowering both come through here, so the arity that LICENSED a block and the arity that
+  // CONSUMES it cannot drift apart; a disagreement between two spellings of this lookup would read
+  // `r4` as argument 5 or throw a slot-model error naming the wrong thing.
+  //
+  // THE BLOCK IS WORDS AND THE ARITY IS PARAMETERS, which are the same number only while every
+  // parameter occupies exactly one word: AAPCS lays arguments 5..n at [sp,#0] upward, one word
+  // each, and the lowering maps parameter k to word k - |argRegs|. A `double`, a `long long` or a
+  // by-value struct breaks both halves at once — it adds words AND moves every later argument's
+  // home — so the premise is checked here rather than assumed from a distant module.
+  //
+  // WHAT THE CHECK CAN SEE. Only the TYPED form of `params` carries spellings, and `declaredWidth`
+  // answers for every type asmlift can spell; a width it cannot read is the only evidence that a
+  // parameter may be wider than a word, so such a declaration sizes no block and refuses
+  // (`unsizableDeclaration`). That is not merely a message: with a wide parameter the two witnesses
+  // can AGREE by coincidence — `void fd(s32, s32, s32, s32, double)` staged as two words matches a
+  // six-parameter list whose fifth entry is `double`, and consuming it would hand the callee six
+  // arguments. The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word
+  // for how many WORDS the call takes, and a count that lies is garbage in — `validatePrototypes`
+  // can no more check it than it can check `returnsVoid`.
+  //
+  // The machine-derived side upholds the premise at its source: `prototypesFromSymbols` drops a
+  // whole entry rather than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
+  const wideParam = (p: FnProto | undefined): string | null =>
+    (Array.isArray(p?.params) ? p.params : []).find((t) => {
+      const w = declaredWidth(t);
+      return w === undefined || w > 32;
+    }) ?? null;
+  // `block` is null for the two cases that license nothing: an arity that fits in registers (there
+  // IS no outgoing block) and one this frontend cannot lay out (`wide` names the parameter, and
+  // `unsizableDeclaration` below turns it into the refusal). The analysis is told null for both —
+  // it may license neither — and only the second is an error to report.
+  const declaredCall = (
+    callee: string,
+  ): { arity: number; block: readonly number[] | null; wide: string | null } | null => {
+    const own = prototypes[callee];
+    const proto = protoArity(own) !== undefined ? own : RUNTIME_HELPERS[callee];
+    const arity = protoArity(proto);
+    if (arity === undefined) {
+      return null;
+    }
+    const words = arity - target.argRegs.length;
+    if (words <= 0) {
+      return { arity, block: null, wide: null }; // it all fits in registers: no outgoing block exists
+    }
+    const wide = wideParam(proto);
+    return {
+      arity,
+      block: wide === null ? Array.from({ length: words }, (_, i) => 4 * i) : null,
+      wide,
+    };
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
@@ -3340,7 +3386,7 @@ export function lift(
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          return [{ kind: 'call', call: ins, callee, declared: declaredBlock(callee) }];
+          return [{ kind: 'call', call: ins, callee, declared: declaredCall(callee)?.block ?? null }];
         }
         return [];
       }),
@@ -3352,7 +3398,31 @@ export function lift(
     capturedWholeFrame: capturedObjectIsTheWholeFrame,
   });
 
-  const slotsOffReason = slotModelBlocker(outgoingArgs);
+  // A DECLARATION THIS FRONTEND CANNOT LAY OUT refuses for the whole function, ahead of every other
+  // slot-model refusal, because it is the most specific thing that was seen. The analysis is never
+  // told a block for such a call, so it can license nothing either way; what this adds is the
+  // message, which names the parameter rather than a staged word that happened to disagree.
+  const unsizableDeclaration = ((): string | null => {
+    for (const ab of asmBlocks) {
+      for (const ins of ab.instrs) {
+        if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
+          continue;
+        }
+        const callee = ins.ops[0] ?? '?';
+        const declared = declaredCall(callee);
+        if (declared !== null && declared.wide !== null) {
+          return (
+            `callee \`${callee}\` is declared with ${declared.arity} arguments and its parameter type \`${declared.wide}\` ` +
+            'is one asmlift cannot size — a parameter wider than one word moves every later argument home, ' +
+            "so this frame's outgoing stack-argument block cannot be laid out"
+          );
+        }
+      }
+    }
+    return null;
+  })();
+
+  const slotsOffReason = unsizableDeclaration ?? slotModelBlocker(outgoingArgs);
   const slotsOk = slotsOffReason === null;
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
@@ -4039,8 +4109,8 @@ export function lift(
           const targetSym = a;
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
-          const declared = protoArity(prototypes[targetSym]) ?? protoArity(RUNTIME_HELPERS[targetSym]);
-          const argc = declared ?? fallbackArgcHere(bi);
+          const declared = declaredCall(targetSym);
+          const argc = declared?.arity ?? fallbackArgcHere(bi);
           // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
           // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
           // `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack argument can
@@ -4067,7 +4137,7 @@ export function lift(
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
           // the argument registers this guess just read.
-          if (declared === undefined) {
+          if (declared === null) {
             ssa.recordGuessedCall(callOp, bi, target);
           }
           writeData('r0', bi, res); // the callee defines r0 …

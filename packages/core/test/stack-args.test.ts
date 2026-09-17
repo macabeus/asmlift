@@ -19,9 +19,9 @@ import { ARMV4T_AGBCC } from '../src/target';
 
 const HEAD = 'f:\n\tpush\t{r4, lr}\n';
 const TAIL = (n: string) => `\tadd\tsp, sp, #${n}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
-const src = (asm: string, prototypes: Record<string, { params?: number; returnsVoid?: boolean }>) =>
-  decompile('f', asm, ARMV4T_AGBCC, { prototypes }).source;
-const slotOffsets = (asm: string, prototypes: Record<string, { params?: number; returnsVoid?: boolean }>) =>
+type Protos = Record<string, { params?: number | string[]; returnsVoid?: boolean }>;
+const src = (asm: string, prototypes: Protos) => decompile('f', asm, ARMV4T_AGBCC, { prototypes }).source;
+const slotOffsets = (asm: string, prototypes: Protos) =>
   [...(lift('f', asm, ARMV4T_AGBCC, prototypes).slotHomes ?? new Map()).values()]
     .flatMap((s: Set<number>) => [...s])
     .sort((a, b) => a - b);
@@ -146,5 +146,50 @@ describe('an argument slot is owned storage that this function does not DECLARE'
       's32 f(s32 a0, s32 a1, s32 a2, s32 a3) {\n    return five(a0, a1, a2, a3, a0);\n}\n',
     );
     expect(slotOffsets(spillAbove, P5)).toEqual([4]);
+  });
+});
+
+describe('the declaration must say how many WORDS, and a parameter list is parameters', () => {
+  // The block is words; the arity is parameters; the lowering maps parameter k to word
+  // k - |argRegs|. All three are the same counting only while every parameter occupies one word,
+  // and a `double`, a `long long` or a by-value struct breaks it. asmlift cannot SPELL such a
+  // parameter — `prototypesFromSymbols` drops a whole entry rather than try — so a spelling whose
+  // width cannot be read is the only evidence the premise is at risk, and it sizes no block.
+  const TWO = HEAD + '\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tfd\n' + TAIL('0x8');
+
+  test('an unreadable parameter width refuses even where the WORDS agree', () => {
+    // The dangerous case, because the two witnesses agree by coincidence: six declared parameters
+    // size a two-word block and the code stages two words, so the equality holds — and consuming
+    // it hands `fd` six arguments where the fifth `double` spans both staged words. Read for its
+    // LENGTH alone (which is all a typed list used to be read for) this lifts to
+    // `fd(a0, a1, a0, a1, a2, a3)`.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double', 's32'] } })).toThrow(
+      /parameter type `double` is one asmlift cannot size/,
+    );
+  });
+
+  test('…and the truthful five-parameter form refuses naming the parameter, not a staged word', () => {
+    // Same assembly, the declaration `void fd(s32, s32, s32, s32, double)` that really produced it.
+    // The word counts disagree here, so the may-set check would refuse anyway — but on `[sp,#4]
+    // also reaches the call unread`, which sends a reader hunting for a store when the fact to
+    // know is the parameter.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
+      /parameter type `double` is one asmlift cannot size/,
+    );
+  });
+
+  test('every spelling asmlift can width is one word, and those are consumed', () => {
+    expect(src(TWO, { fd: { params: ['s32', 'u16', 'void *', 'char', 'int', 'unsigned'] } })).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3) {\n    return fd(a0, a1, a2, a3, a0, a1);\n}\n',
+    );
+  });
+
+  test('a COUNT declaration carries no spellings, so it is taken at its word', () => {
+    // `{ params: 6 }` states six WORDS and nothing checkable about their types — the same trust
+    // `returnsVoid` gets. A count that lies is garbage in, and it is the reason the typed form is
+    // the one that can be checked at all.
+    expect(src(TWO, { fd: { params: 6 } })).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3) {\n    return fd(a0, a1, a2, a3, a0, a1);\n}\n',
+    );
   });
 });
