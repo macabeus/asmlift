@@ -2747,6 +2747,33 @@ export const SYNTHETIC: SynthSpec[] = [
   // m2c compiles none of the three address-taken rows: it renames the slot `unksp0` and never
   // declares it, on the identical `ctx` asmlift receives. It declines `stkarg` outright
   // (`Unable to find stack arg 0x0`), which is the same blocker asmlift names there.
+  //
+  // `stkwide` is the DECLINING row for the other side of that licence — a declaration that does
+  // not account for every word staged. `void fived(s32, s32, s32, s32, double)` truthfully
+  // declares five parameters and agbcc stages TWO words for the fifth: `ldr r4, .L3` /
+  // `ldr r5, .L3+0x4` / `str r4, [sp]` / `str r5, [sp, #0x4]`, the literal sitting in the pool as
+  // `.long 0x3ff80000, 0x0`. One declared word against two staged ones is the may-set
+  // disagreement, and asmlift declines: `stack pointer used as data — callee \`fived\` is declared
+  // with 5 arguments, so its outgoing stack-argument block is [sp,#0] — but [sp,#4] also reaches
+  // the call unread, so the declaration does not account for every word staged here`. `stkarg` is
+  // the ACCEPTING control for that licence and this row is the REFUSING one: without it nothing
+  // in the corpus notices an acceptance widened back to "a declared arity is enough", which is
+  // the shape that used to delete a variadic call's uncovered arguments.
+  //
+  // m2c renders it with SIX arguments, the double split into the two words the ABI staged —
+  // `fived(a, b, a + b, a - b, /* f64+0x0 */ 0x3FF80000, /* f64+0x4 */ 0)`, a nonmatch. So the
+  // row also records that the one decompiler here that does consume outgoing arguments today
+  // counts WORDS as parameters, which is exactly what the two-witness licence refuses to do.
+  {
+    sym: 'stkwide',
+    src:
+      'void fived(s32 a, s32 b, s32 c, s32 d, double e);\n' +
+      'void stkwide(s32 a, s32 b){ fived(a, b, a + b, a - b, 1.5); }',
+    features: ['multi-arg', 'double'],
+    toolchains: ['agbcc'],
+    ctx: 'void fived(s32 a, s32 b, s32 c, s32 d, double e); void stkwide(s32 a, s32 b);',
+    proto: { fived: { params: 5, returnsVoid: true }, stkwide: { returnsVoid: true } },
+  },
   {
     sym: 'stkaddr',
     src:
