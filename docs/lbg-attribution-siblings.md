@@ -88,7 +88,15 @@ rows and makes no claim that an unexecuted future fix would match them.
 --only sub_0804C300` reports `asmlift=diff:43/78` where it reported `declined(1 gap(s))` — because
 the frontend now consumes a call's outgoing stack arguments where the callee's declared arity and
 this function's own staging stores agree word for word. The allocator behind that gate is still
-unmeasured, and the residual belongs to another family. The other two rows are unchanged.
+unmeasured, and the residual belongs to another family. The other two rows of THIS table are
+unchanged — `pokeemerald:GetMoveTarget`, which the dataset names alongside them, also stopped
+declining on the stack and now declines in the structurer.
+
+The table is no longer reproducible with the instrumentation patch linked above: `git apply --check
+scripts/lbg-attribution/sibling-decline-trace.patch` fails (`patch does not apply`), because the
+declared-arity `return` it instruments at thumb.ts:2371 is the line that consuming outgoing
+arguments deleted. Re-measuring these blockers means re-deriving the instrumentation against the
+current lifter.
 
 ## What this does and does not establish
 

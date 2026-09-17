@@ -357,6 +357,11 @@ export function analyzeOutgoingArgs<C>({
   // the equality above already answered this; what is left are the calls no declaration sizes,
   // where a plausible argument block reaching one unread is an argument this analysis cannot
   // size, and the answer is the decline.
+  //
+  // THE OFFSET THIS NAMES IS THE LOWEST PENDING ONE, because `may` is reported through `asc`. The
+  // verdict does not depend on it — any one of them refuses — but the message is what a gap
+  // histogram keys on, and scanning a Set in insertion order named whichever offset the code stored
+  // FIRST instead (pokeemerald's `PickLotteryCornerTicket` stores [sp,#4] before [sp,#0]).
   for (const ev of calls) {
     if (ev.declared !== null) {
       continue;

@@ -2699,6 +2699,24 @@ export const SYNTHETIC: SynthSpec[] = [
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
   //
+  // 2026-09-17 — EVERYTHING ABOVE IS THE STATE BEFORE OUTGOING STACK ARGUMENTS WERE CONSUMED, and
+  // three of its claims the artifact now contradicts. Each measured by running the row named:
+  //   * `pokeemerald:GetMoveTarget:agbcc` no longer declines on anything about the stack. Its
+  //     blocker MOVED to the structurer — `pnpm bench run --tier real --only GetMoveTarget` reports
+  //     `structure: cannot structure 'GetMoveTarget': unrecovered back-edge into block #8
+  //     (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a
+  //     conditional continue, or an unsafe break)`. The other half of that sentence holds:
+  //     `sa3:ProcessOamBuffers:agbcc` still declines on `the address of a stack local is computed
+  //     (\`add r0, sp, #0x4\`)`.
+  //   * `stkarg` is a MATCH, so it is no longer the control that keeps a refusal honest. The
+  //     declared-arity refusal it controlled is gone: a call whose callee's declaration and whose
+  //     staging stores agree word for word is consumed, and every disagreement declines naming what
+  //     it saw. `stkwide` below is the refusing control now.
+  //   * the message quoted below — `callee \`SetupOAMSprite\` is declared with 9 arguments` — no
+  //     longer exists in `packages/core/src`. The klonoa sibling counts in this block were taken
+  //     against that spelling and are NOT re-measured here; a function of that shape now either
+  //     lifts or declines on whichever way its declaration and its stores disagree.
+  //
   // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
   // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read
   // across a `callee(i)` loop, no address taken anywhere. agbcc gives three user locals a frame
