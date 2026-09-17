@@ -3330,6 +3330,11 @@ export function lift(
   // CONSUMES it cannot drift apart; a disagreement between two spellings of this lookup would read
   // `r4` as argument 5 or throw a slot-model error naming the wrong thing.
   //
+  // WHERE THE BLOCK IS is `compilerBehaviors.stagesOutgoingArgsInFrame`, not an assumption: the
+  // area sits at the bottom of the frame this function reserved because agbcc's thumb.h defines
+  // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
+  // call keeps the refusal it had before the licence existed.
+  //
   // THE BLOCK IS WORDS AND THE ARITY IS PARAMETERS, which are the same number only while every
   // parameter occupies exactly one word: AAPCS lays arguments 5..n at [sp,#0] upward, one word
   // each, and the lowering maps parameter k to word k - |argRegs|. A `double`, a `long long` or a
@@ -3367,8 +3372,10 @@ export function lift(
       return null;
     }
     const words = arity - target.argRegs.length;
-    if (words <= 0) {
-      return { arity, block: null, wide: null }; // it all fits in registers: no outgoing block exists
+    if (words <= 0 || target.compilerBehaviors.stagesOutgoingArgsInFrame !== true) {
+      // No outgoing block exists to lay out: it all fits in registers, or this compiler does not
+      // claim to stage arguments inside the caller's own frame at all.
+      return { arity, block: null, wide: null };
     }
     const wide = wideParam(proto);
     return {

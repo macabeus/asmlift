@@ -193,3 +193,18 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     );
   });
 });
+
+describe('the outgoing area is a COMPILER fact the target declares', () => {
+  // `compilerBehaviors.stagesOutgoingArgsInFrame` is agbcc's ACCUMULATE_OUTGOING_ARGS: arguments
+  // 5+ go into an area the CALLER reserved at the bottom of its own frame. A compiler that pushes
+  // them at the call site instead stages nothing inside the frame, so the licence — whose evidence
+  // is an agbcc compile table — must not be inherited by a second armv4t compiler.
+  test('a target that does not claim the area licenses nothing, and refuses as before', () => {
+    const { stagesOutgoingArgsInFrame, ...rest } = ARMV4T_AGBCC.compilerBehaviors;
+    const pushes = { ...ARMV4T_AGBCC, compilerBehaviors: rest };
+    expect(stagesOutgoingArgsInFrame).toBe(true);
+    expect(() => decompile('f', FIVE, pushes, { prototypes: P5 }).source).toThrow(
+      /the store to \[sp,#0\] is never reloaded and its lower slots are supplied/,
+    );
+  });
+});
