@@ -4,6 +4,7 @@
   "repoDir": "pikmin",
   "repo": "macabeus/pikmin",
   "branch": "asmlift-benchmark",
+  "tu": "assembled",
   "cppIncludes": [
     "-nodefaults",
     "-nosyspath",

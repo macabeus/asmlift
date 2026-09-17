@@ -133,7 +133,7 @@ describe('a function that starts past its section start', () => {
     text.replace(/\.L([0-9a-f]+)/g, (_m, at: string) => `.L${hex(START + parseInt(at, 16))}`);
 
   test('its branches and its jump table land on the labels its instructions carry', () => {
-    expect(disasmToM2c(moved, 'ppc', movedDump)).toBe(labelsMoved(PPC_JTBL_OUT));
+    expect(disasmToM2c(moved, 'ppc', 'sw_jt', movedDump)).toBe(labelsMoved(PPC_JTBL_OUT));
   });
 });
 
@@ -146,7 +146,7 @@ describe('a small-data extern', () => {
     '\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000264 g     F .text\t0000000c get\n00000000         *UND*\t00000000 minimumVcount\n00000000         *UND*\t00000000 correctDiskID\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000264 R_PPC_EMB_SDA21   minimumVcount\n00000268 R_PPC_EMB_SDA21   correctDiskID\n\n\n';
 
   test('is read through its name, in both the memory and the address form', () => {
-    expect(disasmToM2c(IN, 'ppc', DUMP)).toBe(
+    expect(disasmToM2c(IN, 'ppc', 'get', DUMP)).toBe(
       'glabel get\n    lwz     r0,minimumVcount@sda21(r13)\n    addi      r3,r13,correctDiskID@sda21\n    blr\n',
     );
   });
