@@ -2631,6 +2631,21 @@ function auditFrameObjects({
   }
 }
 
+/** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
+ *  agbcc's ACCUMULATE_OUTGOING_ARGS reserves there for arguments 5+ of the calls it makes. Built by
+ *  `analyzeOutgoingArgs`, which is where the licence and every refusal are written out. */
+interface OutgoingArgs {
+  /** Why no call here may be consumed, or null. `slotModelBlocker` returns it, so a function whose
+   *  area cannot be licensed declines at its first `[sp,#k]` access instead of lifting. */
+  blocker: string | null;
+  /** Per call instruction, the frame offsets that call's stack arguments occupy — ascending and
+   *  contiguous from zero. A call absent from the map passes everything in registers. */
+  blocks: ReadonlyMap<Instr, readonly number[]>;
+  /** The largest licensed block's extent. `[0, area)` is storage this function owns and does NOT
+   *  declare, so it is where `LiveInModel.declaredLocals` starts. */
+  area: number;
+}
+
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
  *  declared parameter count (from the project's headers); it is authoritative for recovering
  *  how many argument registers a `bl` passes (falling back to a heuristic when absent). */
@@ -2853,16 +2868,15 @@ export function lift(
   // local the compiler was entitled to put in place with no prologue at all.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
-    // THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here an
-    // uninitialised local?"; `declaredLocals` answers "is a spill here a DECLARATION RANK?", which
-    // `ir/core.ts` `SlotHomes` and `l3/slotorder.ts` consume. Under agbcc's
-    // ACCUMULATE_OUTGOING_ARGS the outgoing stack-argument area sits at the BOTTOM of `localArea`
-    // (see the decline below), so this range would be WRONG for the second question on any
-    // function that has one — and it is written as the same range only because `prefixStored`
-    // declines every such function before it gets here. Lifting that decline obliges narrowing
-    // THIS range above the argument block; the two fields exist apart so that obligation is
-    // visible where it is created rather than inferred from a guard in another module.
-    declaredLocals: { from: 0, to: localArea },
+    // NOT THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here
+    // an uninitialised local?" — and the outgoing stack-argument area IS owned, so it starts at 0.
+    // `declaredLocals` answers "is a spill here a DECLARATION RANK?", which `ir/core.ts`
+    // `SlotHomes` and `l3/slotorder.ts` consume, and an argument slot's offset is an ABI POSITION,
+    // not an `expand_decl` rank. Under agbcc's ACCUMULATE_OUTGOING_ARGS that area sits at the
+    // BOTTOM of `localArea`, so the declared range starts where the largest licensed block ends
+    // (`analyzeOutgoingArgs`). A function whose area cannot be licensed never reaches here — the
+    // analysis refuses it — so `area` is 0 exactly when there is provably nothing to skip.
+    declaredLocals: { from: outgoingArgs.area, to: localArea },
     ...(target.nonArgRegs
       ? {
           uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
@@ -3027,7 +3041,7 @@ export function lift(
   // which the sp declines append, so a refused function names the capability actually missing
   // instead of the generic "local stack frames". The gap histogram is the improvement loop's
   // work-list; a misattributed refusal sends that loop to build the wrong thing.
-  const slotModelBlocker = (): string | null => {
+  const slotModelBlocker = (outgoing: OutgoingArgs): string | null => {
     for (const ab of asmBlocks) {
       for (const ins of ab.instrs) {
         const acc = spMemAccess(ins);
@@ -3087,213 +3101,12 @@ export function lift(
         }
       }
     }
-    // OUTGOING ARGUMENTS. agbcc reserves the BOTTOM of the frame for arguments 5+ of the calls this
-    // function makes: `add sp,sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl callee`. Those
-    // offsets are inside the frame and nothing this function does ever reloads them, so modelling
-    // them as locals makes them dead defs and DCE deletes them — the arguments vanish from the call
-    // with no diagnostic. Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards
-    // SIX arguments and came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. "Inside my frame"
-    // does not mean "private": the outgoing area belongs to the callee, which may even assign to a
-    // stack parameter.
-    //
-    // How big is that area? A declared arity bounds it from BELOW — `4 * max(0, arity - 4)` — and
-    // that is all the facts available here can support. It is used in exactly one direction: to
-    // REFUSE. A callee declared with five parameters proves this frame has an outgoing area, and
-    // consuming those stores as call operands is the dual capability, unbuilt, so the model
-    // declines. A callee declared with four proves NOTHING, because a declaration is a lower bound
-    // on the words a call actually pushes:
-    //
-    //   * a parameter may occupy more than one word (`double`, `long long`, a struct by value),
-    //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
-    //   * a large struct return adds a hidden pointer argument that appears in no parameter list.
-    //
-    // None of those is recorded by `FnProto` or `SymbolSignature`, so no arity here can license an
-    // ACCEPTANCE. An earlier cut treated `arity <= 4` as proof of an empty area and had all three
-    // holes: supplying a TRUE fact (`{ sprintf: { params: 2 } }`) turned a correct decline into
-    // `return sprintf(a0, a1)` with both stack arguments deleted, where supplying nothing declined.
-    // A fact must only ever move a function toward refusal — never toward an acceptance the facts
-    // do not entail. Refusing on a lower bound is monotone in exactly that way: a true arity larger
-    // than declared can only make the area bigger, and the answer is already "decline".
-    //
-    // Measured, this costs nothing it was buying: forcing the old acceptance path off changed 0
-    // lift/decline verdicts across 2686 corpus functions (sa3's vendored map carries no signatures
-    // at all), so the path that carried those holes was never load-bearing. That sweep was run over
-    // the sa3/klonoa CHECKOUTS, which this repo does not vendor — it is not the benchmark's 404
-    // agbcc rows, and it has not been re-run since it was taken.
-    for (const ab of asmBlocks) {
-      for (const ins of ab.instrs) {
-        if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
-          continue;
-        }
-        const c = ins.ops[0] ?? '';
-        const arity = protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]);
-        if (arity !== undefined && arity > target.argRegs.length) {
-          return `callee \`${c}\` is declared with ${arity} arguments, so this frame has an outgoing stack-argument area — consuming stack call arguments is not implemented`;
-        }
-      }
-    }
-    // Nothing above could prove the area empty, so fall back to reading the CODE. Two conditions,
-    // covering different escapes:
-    //   (a) every slot store must be reloaded somewhere reachable. An outgoing argument is read by
-    //       the CALLEE, never by the caller, so a store never read back is the signature of one.
-    //   (b) no slot store may reach a `bl` unread ALONG A PATH.
-    //
-    // Neither is sound alone and the pair is not either, so keep two things straight. (a)'s real
-    // theorem is not "the callee reads it, the caller does not" — it is that agbcc's
-    // ACCUMULATE_OUTGOING_ARGS puts the outgoing area at the BOTTOM of localArea, disjoint from the
-    // locals, so no local load can land on an argument offset. That disjointness is what a
-    // tail-merged call site breaks, and agbcc DOES tail-merge: `Task_BonusFlower_Spawn` (sa3
-    // bonus_game_enemies) stores argument 5 in both predecessors with the `bl` in the join.
-    //
-    // A SECOND THING NOW DEPENDS ON THIS DECLINE, and it is not in this file. `SlotHomes`
-    // (ir/core.ts) reads a `[sp,#k]` spill as a DECLARATION RANK and `l3/slotorder.ts` orders the
-    // declaration list by it. The partition that admits an offset is `LiveInModel.declaredLocals`,
-    // which this frontend sets to `[0, localArea)` — a range that CONTAINS the outgoing area. The
-    // only thing keeping an argument slot from becoming a declaration rank is that this decline
-    // removes such functions from the population first. So lifting or narrowing this guard is not
-    // a local change: it must come with a narrowed `declaredLocals`, or the ordering starts
-    // ranking argument positions with no diagnostic. The class is populated — of 2,001 lifted real
-    // agbcc functions, 12 carry an L1 slot home AND call, and 11 of those home offset 0. "Real
-    // agbcc functions" there means a CHECKOUT sweep this repo does not vendor, not benchmark rows
-    // (the benchmark has 126 real agbcc rows in total), and it has not been re-run since.
-    //
-    // (b) is a forward may-analysis over the CFG, and it has been wrong twice in the other
-    // direction. Scanning per block let a LABEL decide accept versus refuse; scanning the flat
-    // listing let BLOCK ORDER decide, because a load in one arm of a branch cleared a store that
-    // reaches the call through the other arm — swap the arms in the listing, same CFG and same
-    // semantics, and the verdict flipped. Only the path-sensitive form is stable under layout.
-    //
-    // Only for a function that CALLS. With no call there is no outgoing area to mistake a local
-    // for, and a never-reloaded store there is an ordinary dead local — which PR #30 modelled and
-    // which must keep working.
-    //
-    // …and not when the WHOLE FRAME is an object whose address a callee holds
-    // (`capturedObjectIsTheWholeFrame` — a one-word frame, passed by a bare `mov rD, sp`). Both
-    // conditions hunt for an argument block; every argument block starts at [sp,#0] (that is what
-    // `prefixStored` encodes); and a one-word frame that is entirely an addressable local has no
-    // room for one. So there is no argument block to find and both conditions can only fire as
-    // FALSE ALARMS — which is what they did: the three address-taken rows in the synthetic tier
-    // declined at (a) on a store that is never reloaded for the ordinary reason, that the CALLEE
-    // reads it through the pointer.
-    //
-    // This is the only acceptance in this function, so keep straight what licenses it. NOT arity: a
-    // callee declared with four arguments proves nothing (see above), and the layout gate is
-    // deliberately independent of the declarations. The arity refusal still runs FIRST and still
-    // wins — in a one-word frame a declared fifth argument and an addressable local at offset 0 are
-    // contradictory claims about the same word, so the honest answer there is the decline, not a
-    // guess about which one to believe.
-    if (
-      !capturedObjectIsTheWholeFrame &&
-      asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'))
-    ) {
-      const slotAcc = (ins: Instr) => {
-        const a = spMemAccess(ins);
-        return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea
-          ? a.off
-          : null;
-      };
-      const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
-      // Entry-REACHABLE blocks only: a reload in dead code is not evidence that live code reads the
-      // slot back, and counting it lets an argument store satisfy (a) on the strength of an
-      // instruction that never executes.
-      const live = entryReachable;
-      const reloaded = new Set<number>();
-      for (const b of live) {
-        for (const ins of asmBlocks[b].instrs) {
-          const off = slotAcc(ins);
-          if (off !== null && !isStore(ins)) {
-            reloaded.add(off);
-          }
-        }
-      }
-      // CONTIGUITY. AAPCS lays the outgoing stack arguments at [sp,#0] upward, one word each, so an
-      // argument block is CONTIGUOUS FROM ZERO: a store at [sp,#4] can be argument 6 of a call only
-      // if argument 5 at [sp,#0] is also supplied on a path to that same call. A pending store
-      // whose lower slots are nowhere supplied is therefore provably not an argument block, and
-      // refusing it is a false alarm — the exact false alarm that blocked the commonest real shape,
-      // a value spilled at [sp,#4] and kept live across calls (kleod's ProcessInputAndUpdateEntities
-      // stores its `sp4` local and calls m4aSongNumStart 80 lines later, with offset 0 never stored
-      // in the whole function).
-      //
-      // The calibration in this: a conforming caller stores EVERY argument slot of a call it makes,
-      // so "slot 0 unsupplied" rules out "slot 4 is an argument". Hand-written asm could skip
-      // storing an argument the callee never reads; agbcc cannot (no interprocedural dead-argument
-      // elimination). That is the same producer assumption the reload conditions above already
-      // make, stated once here.
-      const prefixStored = (k: number, st: Set<number>): boolean => {
-        for (let j = 0; j < k; j += 4) {
-          if (!st.has(j)) {
-            return false;
-          }
-        }
-        return true;
-      };
-      // (a), contiguity-filtered: a store never reloaded ANYWHERE is an argument's signature only
-      // if its lower slots are supplied somewhere too; otherwise it is an ordinary dead local.
-      const storedAnywhere = new Set<number>();
-      for (const b of live) {
-        for (const ins of asmBlocks[b].instrs) {
-          const off = slotAcc(ins);
-          if (off !== null && isStore(ins)) {
-            storedAnywhere.add(off);
-          }
-        }
-      }
-      for (const off of storedAnywhere) {
-        if (!reloaded.has(off) && prefixStored(off, storedAnywhere)) {
-          return `the store to [sp,#${off}] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument of one of this function's calls`; // (a)
-        }
-      }
-      // (b): `pendingOut[b]` = offsets stored and not yet reloaded on SOME path through b;
-      // `storedOut[b]` = offsets stored on SOME path through b (a reload does not remove the value
-      // from memory, so it does not remove the offset from this set — the callee would still read
-      // what the store put there).
-      const pendingOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
-      const storedOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
-      for (let changed = true; changed;) {
-        changed = false;
-        for (let b = 0; b < asmBlocks.length; b++) {
-          if (!live.has(b)) {
-            continue;
-          }
-          const pend = new Set<number>();
-          const st = new Set<number>();
-          for (const q of preds[b]) {
-            for (const off of pendingOut[q]) {
-              pend.add(off);
-            }
-            for (const off of storedOut[q]) {
-              st.add(off);
-            }
-          }
-          for (const ins of asmBlocks[b].instrs) {
-            const off = slotAcc(ins);
-            if (off !== null) {
-              if (isStore(ins)) {
-                pend.add(off);
-                st.add(off);
-              } else {
-                pend.delete(off);
-              }
-            } else if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-              for (const k of pend) {
-                if (prefixStored(k, st)) {
-                  // (b) — a plausible argument block reaches this call unread
-                  return `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`;
-                }
-              }
-            }
-          }
-          const grow = (out: Array<Set<number>>, cur: Set<number>): void => {
-            if (cur.size !== out[b].size || [...cur].some((o) => !out[b].has(o))) {
-              out[b] = cur;
-              changed = true;
-            }
-          };
-          grow(pendingOut, pend);
-          grow(storedOut, st);
-        }
-      }
+    // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
+    // (below `capturedObjectIsTheWholeFrame`, which it needs) decides per call whether the words
+    // staged at the bottom of the frame are a callee's arguments; everything it cannot license
+    // refuses here, so a `[sp,#k]` access in such a function still declines loud.
+    if (outgoing.blocker !== null) {
+      return outgoing.blocker;
     }
     // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
     // taken while the local area is still reserved reads a slot this model has retargeted into SSA
@@ -3514,7 +3327,307 @@ export function lift(
   // widened to `localArea >= 4` (measured). No answer to the frame size moves it.
   const capturedObjectIsTheWholeFrame = target.compiler === 'agbcc' && frameBasePassedToCallee && localArea === 4;
 
-  const slotsOffReason = slotModelBlocker();
+  // THE OUTGOING STACK-ARGUMENT AREA, AND WHO MAY CONSUME IT.
+  //
+  // agbcc's ACCUMULATE_OUTGOING_ARGS reserves the BOTTOM of the frame for arguments 5+ of the calls
+  // this function makes: `add sp,sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl callee`. Those
+  // offsets are inside the frame and nothing this function does ever reloads them. "Inside my
+  // frame" does not mean "private": the area belongs to the CALLEE, which may even assign to a
+  // stack parameter. Model those words as locals and they are dead defs that DCE deletes — the
+  // arguments vanish from the call with no diagnostic. Ground truth: sa3's
+  // CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and came out as
+  // `CreateEntity_Platform(0, 0, a0, (u16)a1)`.
+  //
+  // TWO INDEPENDENT WITNESSES MUST AGREE, and that agreement is the whole licence:
+  //   * the DECLARATION says how many words a call takes. AAPCS lays arguments 5..n at [sp,#0]
+  //     upward, one word each, so the block is `[0, 4*(n - |argRegs|))`, contiguous from zero.
+  //   * the CODE says which words are staged for it — the offsets stored and not yet reloaded when
+  //     the `bl` executes.
+  // Equal ⇒ consume. Anything else ⇒ decline, naming what was seen.
+  //
+  // WHY NEITHER WITNESS IS ENOUGH ALONE, because each has been trusted alone here and each was
+  // wrong. A declared parameter list is a LOWER bound on the words a call pushes:
+  //
+  //   * a parameter may occupy more than one word (`double`, `long long`, a struct by value),
+  //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
+  //   * a large struct return adds a hidden pointer argument that appears in no parameter list.
+  //
+  // None of those is recorded by `FnProto` or `SymbolSignature`, so an ARITY-ONLY acceptance had
+  // all three holes: supplying a TRUE fact (`{ sprintf: { params: 2 } }`) turned a correct decline
+  // into `return sprintf(a0, a1)` with both stack arguments deleted. Under the rule here the four
+  // words `sprintf` is really handed are four offsets reaching the call that its declaration does
+  // not account for, the witnesses disagree, and the answer is the decline again. And the CODE
+  // alone cannot say where a block ENDS — a store never reloaded is an argument's signature, but
+  // so is a dead local, which is why reading the code alone could only ever refuse (conditions (a)
+  // and (b) below, kept for every call no declaration covers).
+  //
+  // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
+  //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
+  //     weakest thing that could still be a word this call takes must be inside the block.
+  //   * NOTHING MISSING is checked against the MUST set (on EVERY path): a slot the callee reads
+  //     must have been written on every path that reaches the call, or the argument is whatever
+  //     the frame happened to hold. m2c renders that case as `ErrorExpr("Unable to find stack arg
+  //     0x0 in block")`; here it is a decline, and for the same reason — it is a GAP, and a gap
+  //     must never render as a plausible value.
+  // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
+  // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
+  // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same
+  // shape with one predecessor not storing — is missing on a path and refuses.
+  //
+  // PATH-SENSITIVE, because the weaker forms have been wrong twice in the other direction:
+  // scanning per block let a LABEL decide accept versus refuse; scanning the flat listing let
+  // BLOCK ORDER decide, because a load in one arm of a branch cleared a store that reaches the
+  // call through the other arm — swap the arms, same CFG and same semantics, and the verdict
+  // flipped.
+  //
+  // A LICENSED CALL CONSUMES ITS BLOCK, which is what lets a function make several calls: the
+  // callee reads those words, so they stop being pending after it, exactly as a reload would end
+  // them. The deletion is driven by the DECLARATION alone, never by the licence, so the fixpoint
+  // cannot depend on its own outcome.
+  const analyzeOutgoingArgs = (): OutgoingArgs => {
+    const refuse = (blocker: string): OutgoingArgs => ({ blocker, blocks: new Map(), area: 0 });
+    const isCall = (ins: Instr) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
+    // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
+    // dataflow below never finds its block and it refuses — which is the verdict it had before
+    // consumption existed. An unreachable `bl` is not evidence about the frame either way, and
+    // the loud answer is the one that does not depend on deciding which.
+    const calls = asmBlocks.flatMap((ab) => ab.instrs.filter(isCall));
+    // ONLY FOR A FUNCTION THAT CALLS. With no call there is no outgoing area to mistake a local
+    // for, and a never-reloaded store is then an ordinary dead local — which PR #30 modelled and
+    // which must keep working.
+    if (calls.length === 0) {
+      return { blocker: null, blocks: new Map(), area: 0 };
+    }
+    // The DECLARED block per call. `blx rN` names a REGISTER in the operand slot, so it matches no
+    // prototype and falls to the code-reading conditions, which is correct: nothing here knows
+    // what an indirect call takes.
+    const declaredBlock = new Map<Instr, number[]>();
+    for (const ins of calls) {
+      const arity = protoArity(prototypes[ins.ops[0] ?? '']) ?? protoArity(RUNTIME_HELPERS[ins.ops[0] ?? '']);
+      if (arity === undefined || arity <= target.argRegs.length) {
+        continue;
+      }
+      declaredBlock.set(
+        ins,
+        Array.from({ length: arity - target.argRegs.length }, (_, i) => 4 * i),
+      );
+    }
+    const say = (offs: readonly number[]) => offs.map((o) => `[sp,#${o}]`).join(', ');
+    const arityOf = (offs: readonly number[]) => target.argRegs.length + offs.length;
+
+    // THE ONE-WORD CAPTURED FRAME. `capturedObjectIsTheWholeFrame` says the whole frame is an
+    // object whose address a callee holds; a declared fifth argument says [sp,#0] is a DIFFERENT
+    // callee's argument slot. Two contradictory claims about the same word, and nothing here can
+    // decide which to believe, so the honest answer is the decline it has always been.
+    if (capturedObjectIsTheWholeFrame) {
+      for (const ins of calls) {
+        const offs = declaredBlock.get(ins);
+        if (offs !== undefined) {
+          return refuse(
+            `callee \`${ins.ops[0] ?? '?'}\` is declared with ${arityOf(offs)} arguments, so [sp,#0] is its outgoing stack argument — ` +
+              'but this one-word frame is an object whose address is passed to a callee, and the two name the same word',
+          );
+        }
+      }
+      // Conditions (a) and (b) hunt for an argument block; every block starts at [sp,#0]; and a
+      // one-word frame that is entirely an addressable local has no room for one. So here they can
+      // only fire as FALSE ALARMS — which is what they did, declining the three address-taken
+      // synthetic rows on a store never reloaded for the ordinary reason, that the CALLEE reads it
+      // through the pointer.
+      return { blocker: null, blocks: new Map(), area: 0 };
+    }
+
+    // A WHOLE WORD OF THE RESERVED LOCAL AREA — the same bytes `isOwnFrameWordSlot` models, minus
+    // `slotsOk`, which is the answer this analysis is being asked to help compute.
+    const slotAcc = (ins: Instr): number | null => {
+      const a = spMemAccess(ins);
+      return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
+    };
+    const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+    const live = entryReachable;
+    const everySlot: number[] = [];
+    for (let o = 0; o + 4 <= localArea; o += 4) {
+      everySlot.push(o);
+    }
+
+    // The forward dataflow, three sets per block. `may`/`must` are the pending stores (stored and
+    // not yet reloaded) on SOME / EVERY path; `stored` is every offset written on some path, which
+    // a reload does NOT remove — the callee would still read what the store put there, and it is
+    // what the contiguity filter asks. `must` is a meet-over-all-paths intersection, so it starts
+    // at every slot and shrinks (the entry block starts EMPTY: control arrives there from outside
+    // the function, storing nothing, whatever back edge also targets it).
+    const mayOut = asmBlocks.map(() => new Set<number>());
+    const mustOut = asmBlocks.map(() => new Set(everySlot));
+    const storedOut = asmBlocks.map(() => new Set<number>());
+    const mayAt = new Map<Instr, Set<number>>();
+    const mustAt = new Map<Instr, Set<number>>();
+    const storedAt = new Map<Instr, Set<number>>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = 0; b < asmBlocks.length; b++) {
+        if (!live.has(b)) {
+          continue;
+        }
+        const livePreds = preds[b].filter((q) => live.has(q));
+        const may = new Set<number>();
+        const stored = new Set<number>();
+        for (const q of livePreds) {
+          for (const off of mayOut[q]) {
+            may.add(off);
+          }
+          for (const off of storedOut[q]) {
+            stored.add(off);
+          }
+        }
+        const must = new Set(
+          b === 0 || livePreds.length === 0 ? [] : everySlot.filter((o) => livePreds.every((q) => mustOut[q].has(o))),
+        );
+        for (const ins of asmBlocks[b].instrs) {
+          const off = slotAcc(ins);
+          if (off !== null) {
+            if (isStore(ins)) {
+              may.add(off);
+              must.add(off);
+              stored.add(off);
+            } else {
+              may.delete(off);
+              must.delete(off);
+            }
+          } else if (isCall(ins)) {
+            mayAt.set(ins, new Set(may));
+            mustAt.set(ins, new Set(must));
+            storedAt.set(ins, new Set(stored));
+            for (const o of declaredBlock.get(ins) ?? []) {
+              may.delete(o);
+              must.delete(o);
+            }
+          }
+        }
+        const grow = (out: Array<Set<number>>, cur: Set<number>): void => {
+          if (cur.size !== out[b].size || [...cur].some((o) => !out[b].has(o))) {
+            out[b] = cur;
+            changed = true;
+          }
+        };
+        grow(mayOut, may);
+        grow(mustOut, must);
+        grow(storedOut, stored);
+      }
+    }
+
+    // CONTIGUITY. An argument block is contiguous from zero, so a store at [sp,#4] can be argument
+    // 6 of a call only if argument 5 at [sp,#0] is supplied on a path to that same call. A pending
+    // store whose lower slots are nowhere supplied is provably not an argument block, and refusing
+    // it is a false alarm — the exact false alarm that blocked the commonest real shape, a value
+    // spilled at [sp,#4] and kept live across calls (kleod's ProcessInputAndUpdateEntities stores
+    // its `sp4` local and calls m4aSongNumStart 80 lines later, with offset 0 never stored in the
+    // whole function). The calibration: a conforming caller stores EVERY argument slot of a call it
+    // makes, so "slot 0 unsupplied" rules out "slot 4 is an argument". Hand-written asm could skip
+    // storing an argument the callee never reads; agbcc cannot (no interprocedural dead-argument
+    // elimination). That is the producer assumption both code-reading conditions make.
+    const prefixStored = (k: number, st: ReadonlySet<number>): boolean => {
+      for (let j = 0; j < k; j += 4) {
+        if (!st.has(j)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const asc = (s: Iterable<number>) => [...s].sort((x, y) => x - y);
+
+    // THE LICENCE, call by call. Every declared block must match what the code staged for it,
+    // exactly — and the three conditions after this one then run knowing which words are spoken for.
+    const blocks = new Map<Instr, readonly number[]>();
+    let area = 0;
+    for (const ins of calls) {
+      const offs = declaredBlock.get(ins);
+      if (offs === undefined) {
+        continue;
+      }
+      const may = mayAt.get(ins) ?? new Set<number>();
+      const must = mustAt.get(ins) ?? new Set<number>();
+      const missing = offs.filter((o) => !must.has(o));
+      const extra = asc(may).filter((o) => !offs.includes(o));
+      if (missing.length > 0 || extra.length > 0) {
+        return refuse(
+          `callee \`${ins.ops[0] ?? '?'}\` is declared with ${arityOf(offs)} arguments, so its outgoing stack-argument block is ${say(offs)} — but ` +
+            (missing.length > 0
+              ? `${say(missing)} is not stored on every path to the call`
+              : `${say(extra)} also reaches the call unread, so the declaration does not account for every word staged here`),
+        );
+      }
+      blocks.set(ins, offs);
+      area = Math.max(area, 4 * offs.length);
+    }
+
+    const licensed = new Set<number>();
+    for (const offs of blocks.values()) {
+      for (const o of offs) {
+        licensed.add(o);
+      }
+    }
+    // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
+    // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
+    // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
+    // local load can land on an argument offset), which is why it is a whole-function question.
+    // Offsets a call above LICENSED are excluded: their never being reloaded is now explained.
+    const reloaded = new Set<number>();
+    const storedAnywhere = new Set<number>();
+    for (const b of live) {
+      for (const ins of asmBlocks[b].instrs) {
+        const off = slotAcc(ins);
+        if (off !== null) {
+          (isStore(ins) ? storedAnywhere : reloaded).add(off);
+        }
+      }
+    }
+    for (const off of asc(storedAnywhere)) {
+      if (!licensed.has(off) && !reloaded.has(off) && prefixStored(off, storedAnywhere)) {
+        return refuse(
+          `the store to [sp,#${off}] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument of one of this function's calls`,
+        );
+      }
+    }
+    // (b) — no slot store may reach a `bl` unread ALONG A PATH. For a call the licence covered,
+    // the equality above already answered this; what is left are the calls no declaration sizes,
+    // where a plausible argument block reaching one unread is an argument this analysis cannot
+    // size, and the answer is the decline.
+    for (const ins of calls) {
+      if (declaredBlock.has(ins)) {
+        continue;
+      }
+      const may = mayAt.get(ins) ?? new Set<number>();
+      const stored = storedAt.get(ins) ?? new Set<number>();
+      for (const k of asc(may)) {
+        if (prefixStored(k, stored)) {
+          return refuse(
+            `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`,
+          );
+        }
+      }
+    }
+    // NOTHING LEFT OVER. The exclusion above is per OFFSET, so it would also excuse a store to a
+    // licensed offset that no call ever reads — a write into the argument area that reaches a
+    // return still pending. That is not an argument and not a local anyone reloads, so nothing
+    // here can say what it is: decline rather than let it drop as a dead def.
+    for (let b = 0; b < asmBlocks.length; b++) {
+      const last = asmBlocks[b].instrs[asmBlocks[b].instrs.length - 1];
+      if (!live.has(b) || last === undefined || classifyXfer(last) !== 'return') {
+        continue;
+      }
+      for (const off of asc(mayOut[b])) {
+        if (licensed.has(off)) {
+          return refuse(
+            `the store to [sp,#${off}] is inside the outgoing stack-argument area but reaches a return unconsumed — no call this function makes accounts for it`,
+          );
+        }
+      }
+    }
+    return { blocker: null, blocks, area };
+  };
+  const outgoingArgs = analyzeOutgoingArgs();
+
+  const slotsOffReason = slotModelBlocker(outgoingArgs);
   const slotsOk = slotsOffReason === null;
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
@@ -4203,9 +4316,25 @@ export function lift(
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const declared = protoArity(prototypes[targetSym]) ?? protoArity(RUNTIME_HELPERS[targetSym]);
           const argc = declared ?? fallbackArgcHere(bi);
+          // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
+          // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
+          // `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack argument can
+          // only come from a declaration, and the analysis has already refused that function;
+          // reaching here with no block means the slot model is off for another reason, and the
+          // decline names it rather than reading `r4` as if it were argument 5.
+          const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
           for (let k = 0; k < argc; k++) {
-            args.push(readVar(`r${k}`, bi));
+            if (k < target.argRegs.length) {
+              args.push(readVar(`r${k}`, bi));
+              continue;
+            }
+            const off = stackArgs?.[k - target.argRegs.length];
+            if (off === undefined) {
+              throw spAsDataError();
+            }
+            usedSlotOffsets.add(off);
+            args.push(readVar(slotKey(off), bi));
           }
           const res = mkValue(T.unk(32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
