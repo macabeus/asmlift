@@ -15,7 +15,7 @@ import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
 import { type Scorer, runAsmlift } from './asmlift';
 import { countCompileErrors } from './asmlift';
-import { runM2c } from './m2c';
+import { m2cCandidates, runM2c } from './m2c';
 import { compilerErrorLines, declineMarkersIn } from './outcome';
 import { assessQuality } from './quality';
 
@@ -148,9 +148,10 @@ function m2cDeclarationsFor(spec: EvalSpec): string | undefined {
 }
 
 /** Classify m2c through the same rule set as asmlift (outcome.ts): no usable output ⇒ failed;
- *  marker-bearing output ⇒ declined (never compiled); else compile+score, keeping the source +
- *  real compiler error on noncompile. */
-function evaluateM2c(
+ *  marker-bearing output ⇒ declined (never compiled); else compile+score, keeping the DECIDING
+ *  candidate's source + its own compiler error on noncompile. Exported for `m2c-deciding.test.ts`,
+ *  which pins that rule. */
+export function evaluateM2c(
   tc: Toolchain,
   spec: EvalSpec,
   obj: string,
@@ -185,30 +186,51 @@ function evaluateM2c(
       errorMarkers: declines,
     };
   }
-  try {
-    const s = scoreM2c(score, m.source, sym, obj, m2cDeclarationsFor(spec));
-    return {
-      decompiler: 'm2c',
-      outcome: s.match ? 'match' : 'nonmatch',
-      source: m.source,
-      score: s.score,
-      maxScore: s.rows,
-      compileErrors: null,
-      breakdown: s.breakdown,
-      quality: assessQuality(m.source),
-    };
-  } catch (e) {
-    return {
-      decompiler: 'm2c',
-      outcome: 'noncompile',
-      source: m.source,
-      score: null,
-      maxScore: null,
-      compileErrors: countCompileErrors((e as Error).message ?? ''),
-      quality: assessQuality(m.source),
-      errorMarkers: compilerErrorLines((e as Error).message ?? ''),
-    };
+  // m2c's mwcc C++ target names the implicit receiver `this`, a KEYWORD in the dialect a C++ row
+  // compiles in. The source AS EMITTED is scored first, so a row that compiles anywhere today is
+  // untouched; only one that compiles NOWHERE is retried with the receiver renamed.
+  //
+  // THE ROW PUBLISHES THE TEXT THAT DECIDED IT — the candidate that scored, or, when none compiled,
+  // the LAST one tried, with THAT candidate's own compiler error. This is `scoreM2c`'s rule one
+  // level up, and for its reason: the rename only REMOVES a harness artifact, never adds one, so
+  // the later candidate is the more informed attempt and its failure is the row's real one. Keeping
+  // the first instead publishes `')' expected` — the keyword artifact this retry exists to stop
+  // judging on — on ten of twelve Pikmin rows whose deciding failure is m2c's own
+  // (`undefined identifier 'unk520'`, `illegal function overloading`, `type mismatch`), which is a
+  // published cause the run does not have. `receiverRenamed` names the text, so `bench fidelity`
+  // and the reproduction script can reach it from m2c's output.
+  let last: { source: string; receiverRenamed?: string; failure: Error } | undefined;
+  for (const cand of m2cCandidates(m.source, sym, language)) {
+    try {
+      const s = scoreM2c(score, cand.source, sym, obj, m2cDeclarationsFor(spec));
+      return {
+        decompiler: 'm2c',
+        outcome: s.match ? 'match' : 'nonmatch',
+        source: cand.source,
+        score: s.score,
+        maxScore: s.rows,
+        compileErrors: null,
+        breakdown: s.breakdown,
+        quality: assessQuality(cand.source),
+        ...(cand.receiverRenamed === undefined ? {} : { receiverRenamed: cand.receiverRenamed }),
+      };
+    } catch (e) {
+      last = { ...cand, failure: e as Error };
+    }
   }
+  const message = last?.failure.message ?? '';
+  const source = last?.source ?? m.source;
+  return {
+    decompiler: 'm2c',
+    outcome: 'noncompile',
+    source,
+    score: null,
+    maxScore: null,
+    compileErrors: countCompileErrors(message),
+    quality: assessQuality(source),
+    errorMarkers: compilerErrorLines(message),
+    ...(last?.receiverRenamed === undefined ? {} : { receiverRenamed: last.receiverRenamed }),
+  };
 }
 
 function firstLine(s: string): string {

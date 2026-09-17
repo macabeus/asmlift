@@ -129,6 +129,55 @@ export function demangle(sym: string): CppSig | null {
   return { name, cls, params };
 }
 
+/** A class qualifier off the front of `s` — `12RefCountable`, or `Q23zen17particleGenerator` for a
+ *  nested one — as its scope names and the remaining string; null when `s` does not open with one. */
+function parseQualifier(s: string): { scopes: string[]; rest: string } | null {
+  const nested = /^Q(\d)/.exec(s);
+  let count = nested === null ? 1 : Number(nested[1]);
+  let rest = nested === null ? s : s.slice(2);
+  const scopes: string[] = [];
+  for (; count > 0; count--) {
+    const digits = /^(\d+)/.exec(rest);
+    if (digits === null) {
+      return null;
+    }
+    const len = Number(digits[1]);
+    const id = rest.slice(digits[1].length, digits[1].length + len);
+    if (len === 0 || id.length !== len) {
+      return null;
+    }
+    scopes.push(id);
+    rest = rest.slice(digits[1].length + len);
+  }
+  return { scopes, rest };
+}
+
+/** The name a CodeWarrior function symbol has in its SOURCE — `PlayerState::getStartHour` for
+ *  `getStartHour__11PlayerStateFv`, `zen::particleGenerator::RotAxisX` for a nested class, and the
+ *  constructor and destructor spelled as they are declared (`RefCountable::RefCountable`,
+ *  `System::~System`). Only the name: unlike `demangle` it reads no parameter code, so it answers
+ *  for the references, arrays and const qualifiers that one refuses. Null where `sym` is not a
+ *  mangled function, and for an operator, whose source name is not an identifier. */
+export function demangledName(sym: string): string | null {
+  for (let at = sym.indexOf('__', 1); at > 0; at = sym.indexOf('__', at + 1)) {
+    const name = sym.slice(0, at);
+    const rest = sym.slice(at + 2);
+    const qualified = /^[\dQ]/.test(rest) ? parseQualifier(rest) : { scopes: [], rest };
+    if (qualified === null || !/^C?F/.test(qualified.rest)) {
+      continue;
+    }
+    const { scopes } = qualified;
+    const cls = scopes.at(-1);
+    // every other special name — `__as`, `__nw`, `__pl` — is an operator
+    const member = name === '__ct' ? cls : name === '__dt' && cls !== undefined ? `~${cls}` : name;
+    if (member === undefined || member.startsWith('__')) {
+      return null;
+    }
+    return [...scopes, member].join('::');
+  }
+  return null;
+}
+
 /** Spell a CppType as C++ source (`Vec *`, `unsigned int`). */
 export function spellType(t: CppType): string {
   return t.base + (t.ptr ? ' ' + '*'.repeat(t.ptr) : '');

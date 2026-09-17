@@ -260,6 +260,11 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      Caught by reading this list before publishing a run, which is what it is for.
   // v18: the agbcc candidate compile names its translation unit `c.c`. The name is part of the
   //      compiler's diagnostics, which are this value's `errorMarkers`, and it is in no key field.
+  // v19: the outcome classifier reads an INDENTED `?` declaration as a decline — a local at the top
+  //      of a body, a field of a struct m2c inferred. `marioparty3:GWBoardRecordGet:gcc2.7.2`
+  //      moves from noncompile to declined, and a v18 entry replays the old label. The same
+  //      version covers the normalizer spelling a condition-register bit as a number
+  //      (`cror 2,1,2`), which no row published before it disassembles to.
   // `cppLadder` is the same register for a change no C row can see, and it bumps INSTEAD of `v`:
   // compile/real.ts's candidate ladder — C linkage on the candidate, then a plain-C fallback for
   // text the C++ front end refuses — reaches a c++ row only. A C row's candidate is the same text
@@ -278,13 +283,28 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // `sda` is one more, for a listing that reads a small-data EXTERN: the normalizer left its operand as
   // `0(0)`, which m2c reads as `*NULL`, and now names it.
   //   sda 1: `BoardRandMod` came out `*NULL = (s32) ((*NULL * 0x19660D) + 0x3C6EF35F)`.
+  //   cppLadder 2: m2c's receiver parameter is renamed off the C++ keyword `this` (eval/m2c.ts),
+  //      so a c++ entry written before it replays a `noncompile` whose only defect was the word.
+  //   cppLadder 3: a `noncompile` now publishes the DECIDING candidate's text and ITS error
+  //      (eval/evaluate.ts), so a cppLadder-2 entry replays the as-emitted attempt's `')' expected`
+  //      for a row whose real failure is m2c's own, plus a `source` with no `receiverRenamed`.
+  //      It also covers the caret-line fix in `pickDiagnostics` (compile/util.ts): an mwcc
+  //      diagnostic block that OPENS on a caret now hands over its explanation. That reaches a C
+  //      row in principle, and `v` is still not bumped for it, because it rewrites none: NO row of
+  //      the 1,068 published carries a wrapper-prefixed caret marker (measured over results.json),
+  //      so bumping `v` would recompute every entry to change nothing.
+  // `sliced` is that register for the normalizer reading the row's own function out of the target
+  // disassembly (m2c-normalizer.ts `disasmToM2c`). Its input changes only where that disassembly
+  // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
+  //   sliced 1: a multi-function entry written before the slice fed m2c every function of the
+  //      object under the row's one `glabel`.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 18,
+      v: 19,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),
@@ -294,9 +314,10 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       asm,
       ctx: ctx ?? null,
       obj: sha(readFileSync(obj)),
-      ...(lang === 'c++' && { lang, cppLadder: 1 }),
+      ...(lang === 'c++' && { lang, cppLadder: 3 }),
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
+      ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

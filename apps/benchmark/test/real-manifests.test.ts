@@ -17,9 +17,26 @@ import {
   vendoredMapFile,
 } from '../src/cases/manifests';
 import { ELF_MAKE_TARGET, makefileHasAsmliftElf } from '../src/cases/project-elf';
+import { MACHINE_PATH } from '../src/cases/vendor';
 
 const files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
-const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
+
+// The gate that keeps a vendoring machine's paths out of the committed blobs. A parallel round
+// vendors from a scratch checkout, and on macOS that is `/private/tmp/…` or `/var/folders/…` —
+// paths a gate written for home directories alone does not see.
+test('the machine-path gate matches every root a vendor run works out of', () => {
+  for (const path of [
+    '/Users/someone/decomp/src/f.c',
+    '/home/someone/decomp/src/f.c',
+    '/private/tmp/gc13-pikmin/include/types.h',
+    '/tmp/wt-gc13/include/types.h',
+    '/private/var/folders/qb/T/scratch/u.c',
+    '/var/folders/qb/T/scratch/u.c',
+  ]) {
+    expect(MACHINE_PATH.test(path), path).toBe(true);
+  }
+  expect(MACHINE_PATH.test('src/plugPikiNakata/nlibmath.cpp')).toBe(false);
+});
 
 type MapJson = Record<string, { name: string; kind?: string }[]>;
 
@@ -204,6 +221,20 @@ describe('committed real-tier manifests', () => {
       // provenance is part of the dataset
       const prov = JSON.parse(readFileSync(join(dir, 'PROVENANCE.json'), 'utf8'));
       expect(typeof prov.commit).toBe('string');
+      // …and the directory holds exactly the blobs the index names, both ways. An EXTRA blob is one a
+      // re-vendor orphaned and the dataset would carry for ever; a MISSING one is a row whose input is
+      // not in the repository at all, which no other gate reads — a sweep that forgot a blob kind
+      // (the index gained `m2c` after the sweep was written) deleted 37 of pikmin's.
+      const named = new Set(Object.values(index).flatMap((e) => [e.tu, e.ctx, e.m2c]));
+      const onDisk = new Set(readdirSync(dir).filter((b) => b.endsWith('.i.gz')));
+      expect(
+        [...onDisk].filter((b) => !named.has(b)),
+        `${man.project}: blobs no row reads`,
+      ).toEqual([]);
+      expect(
+        [...named].filter((b) => !onDisk.has(b)),
+        `${man.project}: blobs the index names`,
+      ).toEqual([]);
     });
 
     // A unit's flags are copied from the build at the commit its TUs were vendored from. A pin bump that

@@ -4,9 +4,9 @@
 // asmlift's MIPS/PPC frontends consume objdump directly; m2c does NOT (it wants spimdisasm/GNU-as
 // text). To keep BOTH decompilers reading from the SAME reference `.o`, we disassemble once with
 // objdump and translate that text here. The translation is faithful (same instructions, same
-// order) — it only reshapes syntax: drop the ELF header + address columns, turn `ADDR <sym>:`
-// into a `glabel`, synthesize `.LADDR` labels for intra-function branch targets, and (MIPS)
-// `$`-prefix registers.
+// order) — it only reshapes syntax: keep the row's own function, drop the ELF header + address
+// columns, turn `ADDR <sym>:` into a `glabel`, synthesize `.LADDR` labels for intra-function
+// branch targets, and (MIPS) `$`-prefix registers.
 //
 // When the object's `objdump -s -r -t` dump is provided, DATA the code references is fed too —
 // m2c is starved otherwise: jump tables live in data sections `-d` never shows, and mwcc names
@@ -18,6 +18,7 @@
 //   • splice real callee names onto MIPS `jal`s (their relocs are only in `-r`).
 // Handled reloc types are a WHITELIST — anything else (notably IDO's PIC GOT16/CALL16 family)
 // leaves the instruction untouched, preserving the exact no-dump text for those rows.
+import { sliceSymbol } from '@asmlift/core/frontend/disasm';
 
 export type Isa = 'mips' | 'ppc';
 
@@ -416,12 +417,17 @@ function rewriteData(e: DataEmission, ins: Insn, r: Reloc): string | null {
   }
 }
 
-export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string {
-  const parsed = parse(disasm);
+/** `sym`'s function alone, as m2c's GNU-as input. A target object can hold more than the row's
+ *  function: a C++ unit emits the header inlines it did not inline as weak functions after it, and a
+ *  unit whose callee the compiler inlined defines that callee first. Read whole, every function's
+ *  instructions would land under one `glabel`, where asmlift's frontend reads `sym` alone
+ *  (core's `sliceSymbol`, which this shares, absent symbol refused). */
+export function disasmToM2c(disasm: string, isa: Isa, sym: string, asmDump?: string): string {
+  const parsed = parse(sliceSymbol(disasm, sym));
   if (!parsed) {
     throw new Error('disasmToM2c: could not parse objdump output');
   }
-  const { sym, start, insns } = parsed;
+  const { start, insns } = parsed;
   const fn = { sym, start };
   const dump = asmDump ? parseAsmDump(asmDump) : null;
   const emission: DataEmission | null = dump
@@ -484,6 +490,24 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
   return out.join('\n') + '\n';
 }
 
+/** The bit numbers objdump names within one condition-register field. */
+const CR_FLAG_BIT: Record<string, number> = { lt: 0, gt: 1, eq: 2, so: 3, un: 3 };
+
+/** A condition-register logic instruction with its bit operands as numbers. objdump names a bit by
+ *  field and flag (`eq`, `4*cr1+eq`); m2c recognises a float `<=`/`>=` only as `fcmpo` followed by
+ *  `cror 2, N, 2`, and read the named spelling as an unknown instruction. */
+function numericCrBits(text: string): string {
+  const m = /^(cr(?:and|andc|clr|eqv|move|nand|nor|not|or|orc|set|xor)\s+)(\S+)$/.exec(text);
+  if (m === null) {
+    return text;
+  }
+  const bits = m[2].split(',').map((op) => {
+    const bit = /^(?:4\*cr([0-7])\+)?(lt|gt|eq|so|un)$/.exec(op);
+    return bit === null ? op : String(4 * Number(bit[1] ?? 0) + CR_FLAG_BIT[bit[2]]);
+  });
+  return `${m[1]}${bits.join(',')}`;
+}
+
 function rewriteInsn(
   ins: Insn,
   isa: Isa,
@@ -526,7 +550,7 @@ function rewriteInsn(
       text = `${sp[1]}\t${ops}`;
     }
   }
-  return text;
+  return isa === 'ppc' ? numericCrBits(text) : text;
 }
 
 // GCC ATTRIBUTES ARE NOT STRIPPED, and there used to be a function here that stripped them on

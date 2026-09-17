@@ -118,18 +118,16 @@ const DECL_RESERVED = new Set<string>([
 
 /** The emitter's own NAME GRAMMAR for storage it invents: parameters `a0, a1, …` (structure.ts
  *  names them positionally, so no rename can move one) and coalesced/temp locals `v0…`/`t0…`
- *  (structure.ts's `localNames` accepts exactly `/^[vt]\d+$/`). A pool or map symbol with one of
- *  these names cannot be declared beside the C that spells it — see the refusal in `refsOf`, which
- *  is the one that kills the spelling rather than the line.
+ *  (structure.ts's `localNames` accepts exactly `/^[vt]\d+$/`). A global the target names with one
+ *  of these names cannot be declared beside the C that spells it — see the refusal in `refsOf`,
+ *  which is the one that kills the spelling rather than the line.
  *
  *  Checked as a grammar IN ADDITION to the tree's own bound names, because the collision that
  *  matters is the one the tree cannot show: `localNames` DROPS a local whose name a written
  *  global already claims, so where the global is stored `tree.locals` is silent about it. The
- *  price is refusing a real global that happens to be named `v3` in a function that never mints
- *  one — measured at zero: over the benchmark corpus, in each row's own symbol world, no candidate
- *  references such a name, and no vendored symbol map on that sweep's checkouts contained one. The
- *  map's own name total is deliberately not quoted — it is a property of the checkouts the sweep
- *  ran over rather than of this repo, so nothing here can re-derive it. */
+ *  price is refusing a global the target names `v3` in a function that never mints one. A map
+ *  global the target does NOT name pays nothing: Pikmin's map holds `v0` and `v1`, the only
+ *  grammar names in any vendored map, and no Pikmin row references either. */
 const EMITTER_NAME = /^[avt]\d+$/;
 
 /** Why a name the candidate's tree references got NO declaration. Reported rather than silently
@@ -201,10 +199,13 @@ export function makeRefCollector(ctx: {
   accessFacts: ReadonlyMap<string, { width: number; signed: boolean }>;
   /** the project map alone — a name it does NOT know makes the ref a `synthesized` hypothesis */
   mapSymbols: ReadonlyMap<string, SymbolInfo> | undefined;
+  /** the globals the TARGET names — the pool/reloc names and the shapes the asm evidences, before
+   *  the map is unioned in */
+  targetNames: ReadonlySet<string>;
   /** reports a refusal at most once per (name, reason); the caller owns the dedup */
   refuse: (name: string, reason: RefusedDeclarationReason) => void;
 }): (tree: SFn) => { symbolRefs?: SymbolRef[] } {
-  const { declSymbols, accessFacts, mapSymbols, refuse } = ctx;
+  const { declSymbols, accessFacts, mapSymbols, targetNames, refuse } = ctx;
   return (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
@@ -226,6 +227,13 @@ export function makeRefCollector(ctx: {
       // project trades nothing for — so the spelling dies here and `respellTree`'s catch reports it.
       // If every spelling of every tree dies, the row declines LOUDLY naming the collision.
       if (bound.has(r.name) || EMITTER_NAME.test(r.name)) {
+        // …but only a global the TARGET names can collide. A name that only the MAP supplies is a
+        // project global the function never touches, and the tree's `v0` is its own local: Pikmin
+        // holds `.sdata` statics named `v0` and `v1`, and refusing them killed every spelling of
+        // every function whose emitted C mints those locals.
+        if (!targetNames.has(r.name)) {
+          return [];
+        }
         refuse(r.name, 'emitter-name');
         throw new Error(
           `cannot spell '${tree.name}': the target names a global '${r.name}', which is a name the ` +

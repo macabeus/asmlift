@@ -51,7 +51,8 @@ describe('reading the flags a compile command spells', () => {
     const mwcc =
       "docker run --rm img wibo /mwcc/mwcceppc.exe '-pragma' 'msg_show_realref off' -c -nostdinc -stderr " +
       "-proc gekko -O4,p -pragma 'cats off' -str reuse,readonly -o {{outputPath}} {{inputPath}}";
-    expect(flagsOf(mwcc, 'mwcc')).toEqual(['-proc', 'gekko', '-O4,p', '-str', 'reuse,readonly']);
+    // `msg_show_realref` only steers diagnostics and goes; `cats` decides a section and stays
+    expect(flagsOf(mwcc, 'mwcc')).toEqual(['-proc', 'gekko', '-O4,p', '-pragma', 'cats off', '-str', 'reuse,readonly']);
   });
 
   // Recipe lines as `gmake -n` prints them for one unit of five benchmark projects (pokeemerald,

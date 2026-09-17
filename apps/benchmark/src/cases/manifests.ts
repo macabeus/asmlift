@@ -75,7 +75,7 @@ export interface RealFunction {
    *  WHAT EACH TOOL IS GIVEN ON THE REAL TIER, stated here once because it was previously stated
    *  wrongly ("prototypes only — no struct layouts, to match asmlift"):
    *
-   *    asmlift  the project's vendored SYMBOL MAP, on all 252 rows. Not name-and-address: sizes,
+   *    asmlift  the project's vendored SYMBOL MAP, on all 378 rows. Not name-and-address: sizes,
    *             declaration shapes, scalar/element signedness, array extents, volatility,
    *             const-ness, address-cast macro bodies, and — where the vendoring found them —
    *             callee signatures and struct tags with full field tables. The row's OWN
@@ -86,8 +86,9 @@ export interface RealFunction {
    *             exception, README residual 4.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
-   *  against a tool handed layouts outright. This flag is set on every real row without a
-   *  hand-written `ctx`.
+   *  against a tool handed layouts outright. This flag is set on every real C row without a
+   *  hand-written `ctx`. A C++ row carries neither: the parser below is C-only, and 42 of the 378
+   *  real rows are C++.
    *
    *  IT IS NOT EXACT PARITY, and the residuals run in both directions — apps/benchmark/README.md
    *  lists them. Nor is a "project context" one uniform thing: it is whatever that project's TU
@@ -420,6 +421,25 @@ export function validateManifest(
         problems.push(
           `${file}: ${JSON.stringify(f.sym)} "sourceUrl" cites ${cited}, not this manifest's repo ${man.repo}`,
         );
+      }
+      // …AND THE SPAN, which nothing held against anything: a permalink with no `#L` range, or one
+      // too short to hold the function, cites a place the function is not. A reader follows that
+      // link to check the row is honest, so a range that cannot contain `funcC` is a broken claim
+      // even when the file is right. NOT an identity check on the text — the lines live in the
+      // checkout, not in the dataset, and 6 of the 378 real rows legitimately cite a span LONGER
+      // than their `funcC` (a doc comment above the signature). Vendoring, which does read the
+      // checkout, is where the body itself is proved.
+      const span =
+        typeof f.sourceUrl === 'string' ? /#L(\d+)-L(\d+)$/.exec(f.sourceUrl)?.slice(1).map(Number) : undefined;
+      if (cited !== undefined && span === undefined) {
+        problems.push(`${file}: ${JSON.stringify(f.sym)} "sourceUrl" names no #L<first>-L<last> line range`);
+      } else if (span !== undefined && typeof f.funcC === 'string') {
+        const lines = f.funcC.trimEnd().split('\n').length;
+        if (span[1] - span[0] + 1 < lines) {
+          problems.push(
+            `${file}: ${JSON.stringify(f.sym)} "sourceUrl" spans L${span[0]}-L${span[1]} — too few lines to hold its ${lines}-line "funcC"`,
+          );
+        }
       }
       // the unit: the file the permalink cites, with its flags in `units`
       const citedFile =

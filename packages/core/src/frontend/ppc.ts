@@ -167,7 +167,11 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (instrs[i].mnemonic !== 'bctr') {
       continue;
     }
-    const [lis, slwi, addi, lwzx, mtctr] = [instrs[i - 5], instrs[i - 4], instrs[i - 3], instrs[i - 2], instrs[i - 1]];
+    const [lis, lwzx, mtctr] = [instrs[i - 5], instrs[i - 2], instrs[i - 1]];
+    // The index is scaled and the table's low half formed in either order: mwcc 2.4.2 emits the
+    // `slwi` first, GC/1.2.5n the `addi`. The two instructions are independent.
+    const [slwi, addi] =
+      instrs[i - 4].mnemonic === 'slwi' ? [instrs[i - 4], instrs[i - 3]] : [instrs[i - 3], instrs[i - 4]];
     if (
       lis.mnemonic !== 'lis' ||
       slwi.mnemonic !== 'slwi' ||
@@ -376,7 +380,9 @@ export function lift(
       } // recovered switch dispatch
       throw new PpcUnsupportedError(
         `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`,
+          (ins.mnemonic === 'blrl' || ins.mnemonic === 'bctrl'
+            ? `(an indirect call — a virtual dispatch or a call through a pointer — is not yet supported)`
+            : `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`),
       );
     }
   }

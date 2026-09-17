@@ -26,6 +26,7 @@
 // function refutes. The one place a MISSING entry is a defect is between the two authored inputs
 // themselves — a callee a row declares to m2c in its own `ctx` and not to asmlift — and that
 // comparison lives in the test, on `declaredFunctionNames` below.
+import { demangledName } from '@asmlift/core/mangle';
 import type { Prototypes } from '@asmlift/core/proto';
 
 import type { RealFunction } from './manifests';
@@ -47,7 +48,7 @@ export interface CompiledSignature {
  *  check BY NAME and the fix is to add it here. A pattern that skipped anything ALL-CAPS would
  *  also skip `UNK_8085D14`, which is a type. The names listed here are reserved dataset-wide: the
  *  token is blanked wherever it appears in a signature, so one may not double as a parameter name. */
-export const ATTRIBUTE_MACROS: ReadonlySet<string> = new Set(['UNUSED']);
+export const ATTRIBUTE_MACROS: ReadonlySet<string> = new Set(['UNUSED', 'immut']);
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -223,13 +224,17 @@ function isDeclaratorHead(head: string): boolean {
   return head.split(/[\s*]+/).every((t) => !STATEMENT_KEYWORDS.has(t));
 }
 
-/** Every DEFINITION of `sym` in a preprocessed TU — a `sym (…)` whose parameter list is followed
- *  by `{`. The caller must handle "not exactly one": no oracle means nothing was checked, and
- *  that has to be said out loud rather than pass silently. */
-export function definitionsOf(tu: string, sym: string): CompiledSignature[] {
+/** A C++ constructor's name, `Thing::Thing`: the one definition whose parameter list may be followed
+ *  by its member initializers (`: Base(x) {`) rather than by its body. */
+const isConstructorName = (name: string): boolean => /(?:^|::)(\w+)::\1$/.test(name);
+
+/** Every DEFINITION of `name` in a preprocessed TU — a `name (…)` whose parameter list is followed
+ *  by `{`, or by a constructor's `:`. The caller must handle "not exactly one": no oracle means
+ *  nothing was checked, and that has to be said out loud rather than pass silently. */
+export function definitionsOf(tu: string, name: string): CompiledSignature[] {
   const found: CompiledSignature[] = [];
-  for (const o of occurrences(tu, sym)) {
-    if (o.next !== '{') {
+  for (const o of occurrences(tu, name)) {
+    if (o.next !== '{' && !(o.next === ':' && isConstructorName(name))) {
       continue; // a declaration or a call site
     }
     found.push({
@@ -262,7 +267,10 @@ export function declarationsOf(tu: string, sym: string): CompiledSignature[] {
  *  `null` when the quoted source has no signature at all. */
 export function quotedSignature(funcC: string): CompiledSignature | null {
   const brace = funcC.indexOf('{');
-  const sig = (brace < 0 ? funcC : funcC.slice(0, brace)).trim();
+  const beforeBody = brace < 0 ? funcC : funcC.slice(0, brace);
+  // a constructor's member initializers (`) : Base(x)`) are not its parameter list
+  const initializers = /\)\s*:(?!:)/.exec(beforeBody);
+  const sig = (initializers === null ? beforeBody : beforeBody.slice(0, initializers.index + 1)).trim();
   const close = sig.lastIndexOf(')');
   if (close < 0) {
     return null;
@@ -293,7 +301,8 @@ export function quotedSignature(funcC: string): CompiledSignature | null {
     }
     head = macroOpen < 0 ? head : head.slice(0, macroOpen).replace(/[A-Za-z_]\w*\s*$/, '');
   } else {
-    head = head.replace(/[A-Za-z_]\w*\s*$/, '');
+    // a C++ definition names its function qualified — `Vec::dot`, `System::~System`
+    head = head.replace(/(?:[A-Za-z_]\w*\s*::\s*)*~?[A-Za-z_]\w*\s*$/, '');
   }
   return { returnType: returnTypeOf(head), params: splitParams(sig.slice(open + 1, close)) };
 }
@@ -364,12 +373,19 @@ export function declaredFunctionNames(ctx: string): string[] {
 
 /** The compiled signature of `sym`, or the reason there is no oracle for it. Both tiers: the real
  *  tier's oracle is its vendored preprocessed TU, the synthetic tier's is the `src` it compiles
- *  verbatim. */
-export function oracleFor(where: string, sym: string, tu: string): CompiledSignature | string {
-  const defs = definitionsOf(tu, sym);
+ *  verbatim. A C++ unit defines a mangled symbol under its source name (`getStartHour__11PlayerStateFv`
+ *  is `PlayerState::getStartHour`), and that is the name looked for. */
+export function oracleFor(
+  where: string,
+  sym: string,
+  tu: string,
+  language: 'c' | 'c++' = 'c',
+): CompiledSignature | string {
+  const name = language === 'c++' ? (demangledName(sym) ?? sym) : sym;
+  const defs = definitionsOf(tu, name);
   return defs.length === 1
     ? defs[0]
-    : `${where}: the compiled source holds ${defs.length} definitions of \`${sym}\` — no oracle, so ` +
+    : `${where}: the compiled source holds ${defs.length} definitions of \`${name}\` — no oracle, so ` +
         `none of this row's authored facts were checked (real tier: re-run \`bench vendor\`)`;
 }
 
@@ -386,8 +402,9 @@ export function protoFactProblems(
   proto: Prototypes | undefined,
   tu: string,
   ctx = '',
+  language: 'c' | 'c++' = 'c',
 ): string[] {
-  const oracle = oracleFor(where, sym, tu);
+  const oracle = oracleFor(where, sym, tu, language);
   if (typeof oracle === 'string') {
     return [oracle];
   }
@@ -477,9 +494,9 @@ export function protoFactProblems(
  *  m2c. That last use is why the PARAMETER TYPES are compared and not merely counted: a parameter
  *  list the target refutes is spliced verbatim into m2c's context, which is the seed defect again
  *  with the other decompiler as the victim. */
-export function authoredFactProblems(project: string, fn: RealFunction, tu: string): string[] {
+export function authoredFactProblems(project: string, fn: RealFunction, tu: string, language: 'c' | 'c++'): string[] {
   const where = `${project}:${fn.sym}`;
-  const oracle = oracleFor(where, fn.sym, tu);
+  const oracle = oracleFor(where, fn.sym, tu, language);
   if (typeof oracle === 'string') {
     return [oracle];
   }
@@ -511,5 +528,5 @@ export function authoredFactProblems(project: string, fn: RealFunction, tu: stri
       });
     }
   }
-  return [...problems, ...protoFactProblems(where, fn.sym, fn.proto, tu, fn.ctx ?? '')];
+  return [...problems, ...protoFactProblems(where, fn.sym, fn.proto, tu, fn.ctx ?? '', language)];
 }

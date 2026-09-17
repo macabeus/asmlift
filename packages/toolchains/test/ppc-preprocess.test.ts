@@ -5,11 +5,18 @@
 // macros only mwcceppc declares. `ppcPreprocess` is that step, and the two things it must get right
 // are the DIALECT (the compiler's own front end, not the host's) and the WRAPPER (the words the
 // unit's own build rule runs the compiler under — `sjiswrap.exe` on a dtk project).
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { markPragmas, ppcDockerAvailable, ppcPreprocess, restorePragmas } from '../src/compile';
+import {
+  asciiLiterals,
+  markPragmas,
+  ppcCompile,
+  ppcDockerAvailable,
+  ppcPreprocess,
+  restorePragmas,
+} from '../src/compile';
 
 /** A throwaway "checkout": an `include/` the unit's `-i` resolves against, under /tmp so the
  *  container reaches it the same way a real checkout mounted read-only is reached. */
@@ -28,6 +35,28 @@ function fakeProject(): { root: string; scratch: string } {
   );
   return { root, scratch: mkdtempSync('/tmp/asmlift-ppcpp-scratch-') };
 }
+
+describe('a preprocessed unit as vendorable text', () => {
+  const bytes = (...parts: (string | number[])[]): Buffer =>
+    Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p) : Buffer.from(p))));
+
+  test('leaves an ASCII unit exactly as it is', () => {
+    const unit = 'char *s = "a\\"b"; char c = \'"\';\n';
+    expect(asciiLiterals(Buffer.from(unit))).toBe(unit);
+  });
+
+  test("escapes a narrow literal's non-ASCII bytes one byte at a time", () => {
+    // a byte-wise reader: the 0x5c after a lead byte is its own escape, not the lead byte's trail
+    expect(asciiLiterals(bytes('s = "', [0x83, 0x5c, 0x5c, 0xb1], '";'))).toBe('s = "\\203\\\\\\261";');
+  });
+
+  test('refuses a non-ASCII byte no escape can spell', () => {
+    expect(() => asciiLiterals(bytes('int ', [0x83, 0x4a], ';'))).toThrow(/outside any literal at \+0x4/);
+    expect(() => asciiLiterals(bytes("c = '", [0xb1], "';"))).toThrow(/in a character constant at \+0x5/);
+    expect(() => asciiLiterals(bytes('w = L"', [0x83, 0x4a], '";'))).toThrow(/in a wide string at \+0x6/);
+    expect(() => asciiLiterals(bytes('s = "\\', [0x83], '";'))).toThrow(/backslash before a non-ASCII byte at \+0x5/);
+  });
+});
 
 describe('mwcceppc preprocessing of a project include tree', () => {
   test('marks every #pragma directive, continued ones whole, and restores each where its marker stands', () => {
@@ -140,25 +169,37 @@ describe('mwcceppc preprocessing of a project include tree', () => {
     );
 
     test(
-      'refuses a unit whose expansion is not ASCII, rather than vendoring mojibake',
+      'vendors a Shift-JIS literal as escapes that compile to the object its raw bytes do',
       () => {
-        // The result is carried as a JS STRING — vendored, gzipped, and compiled back from it — and
-        // a dtk wrapper's whole job is to hand the compiler bytes that are NOT UTF-8 (`sjiswrap`
-        // rewrites every multibyte literal into Shift-JIS, which no string decoding round-trips).
-        // Returning one would compile to the wrong constants silently, so this is the loud form of
-        // the dataset's "benchmark a function whose unit is ASCII" decision.
+        // What `sjiswrap` hands the compiler for `"カーソル"`: カ ー ソ ル in Shift-JIS, with the trail
+        // byte of ソ (0x5c, a backslash) doubled so a byte-wise reader keeps it.
+        const literal = [0x83, 0x4a, 0x81, 0x5b, 0x83, 0x5c, 0x5c, 0x83, 0x8b];
+        const raw = Buffer.concat([
+          Buffer.from('const char label[] = "'),
+          Buffer.from(literal),
+          Buffer.from('";\nint len(void) { return sizeof(label); }\n'),
+        ]);
         const { root, scratch } = fakeProject();
-        const srcPath = join(scratch, 'wide.c');
-        writeFileSync(srcPath, 'const char *greeting = "こんにちは";\n');
-        expect(() =>
-          ppcPreprocess({
-            mwcc: 'mwcc_242_81',
-            root,
-            srcPath,
-            outPath: join(scratch, 'wide.i'),
-            argv: ['-nosyspath', '-i', 'include'],
-          }),
-        ).toThrow(/non-ASCII byte at \+0x[0-9a-f]+/);
+        writeFileSync(join(scratch, 'raw.c'), raw);
+        const text = ppcPreprocess({
+          mwcc: 'mwcc_242_81',
+          root,
+          srcPath: join(scratch, 'raw.c'),
+          outPath: join(scratch, 'raw.i'),
+          argv: ['-nosyspath'],
+        });
+        expect(text).toContain('"\\203J\\201[\\203\\\\\\203\\213"');
+        // one file name for both compiles, since the object records it
+        const [fromRaw, fromText] = [mkdtempSync('/tmp/asmlift-ppcpp-raw-'), mkdtempSync('/tmp/asmlift-ppcpp-text-')];
+        writeFileSync(join(fromRaw, 'u.c'), raw);
+        writeFileSync(join(fromText, 'u.c'), text);
+        const flags = ['-O4,p', '-lang=c'];
+        ppcCompile('mwcc_242_81', fromRaw, 'u.c', 'u.o', flags);
+        ppcCompile('mwcc_242_81', fromText, 'u.c', 'u.o', flags);
+        const object = readFileSync(join(fromText, 'u.o'));
+        expect(object.equals(readFileSync(join(fromRaw, 'u.o')))).toBe(true);
+        // …and the bytes that object holds are the game's: the doubled backslash reads back as one
+        expect(object.includes(Buffer.from([0x83, 0x4a, 0x81, 0x5b, 0x83, 0x5c, 0x83, 0x8b, 0x00]))).toBe(true);
       },
       CONTAINER_BUDGET,
     );

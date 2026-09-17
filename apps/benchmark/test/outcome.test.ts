@@ -18,6 +18,13 @@ describe('declineMarkersIn (pinned)', () => {
     expect(declineMarkersIn('? func_80031C50(s32);')).toEqual(['? placeholder']); // m2c extern fn decl
     expect(declineMarkersIn('void g(? *arg0) {}')).toEqual(['? placeholder']);
     expect(declineMarkersIn('static ? sCrc16Table;')).toEqual(['? placeholder']); // m2c static decl
+    // an INDENTED declaration: a local at the top of a body, and a field of a struct m2c inferred
+    expect(declineMarkersIn('void *f(s8 arg0) {\n    ? *var_v1;\n    return var_v1;\n}')).toEqual(['? placeholder']);
+    expect(
+      declineMarkersIn(
+        'typedef struct RefCountable {\n    /* 0x0 */ ? *unk0;                              /* inferred */\n} RefCountable;',
+      ),
+    ).toEqual(['? placeholder']);
   });
 
   test('legal single-line ternaries never false-positive, including at the anchors', () => {

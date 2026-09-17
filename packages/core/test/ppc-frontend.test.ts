@@ -116,6 +116,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
 
   test('an indirect branch (bctr) FAILS LOUD too', () => {
     expect(() => dis('jumptab', '0:\tbctr\n')).toThrow(/unmodelled control transfer 'bctr'/);
+    expect(() => dis('jumptab', '0:\tbctr\n')).toThrow(/CTR-counted loop or indirect branch/);
+  });
+
+  // An indirect CALL is neither of those, and a decline that named a loop-unrolling gap sent every
+  // reader of a C++ virtual dispatch looking for one.
+  test('an indirect call says so', () => {
+    expect(() => dis('virt', '0:\tblrl\n')).toThrow(/'blrl' at 0x0 \(an indirect call — a virtual dispatch/);
   });
 
   // `bl` with the callee recovered from the interleaved R_PPC_REL24 relocation (an unresolved bl in
@@ -264,6 +271,15 @@ test('a recovered jump table still lifts to a switch — its reloc lis/addi neve
     '  44:\tblr',
   ].join('\n');
   expect(decompile('swf', asm, PPC_MWCC, { asmData }).source).toContain('switch (');
+  // GC/1.2.5n forms the table's low half BEFORE it scales the index — Pikmin's four jump tables
+  // (Piki::doDoAI, TexImg::calcDataSize, P2DPrint::doCtrlCode, Light::setLightSpot) all read
+  // `lis; addi; slwi; lwzx; mtctr; bctr`. The two instructions are independent.
+  const addiFirst = asm.replace(
+    '   c:\tslwi    r0,r3,2\n  10:\taddi    r4,r4,0\n\t\t\t10: R_PPC_ADDR16_LO jtbl',
+    '   c:\taddi    r4,r4,0\n\t\t\tc: R_PPC_ADDR16_LO jtbl\n  10:\tslwi    r0,r3,2',
+  );
+  expect(addiFirst).not.toBe(asm);
+  expect(decompile('swf', addiFirst, PPC_MWCC, { asmData }).source).toContain('switch (');
 });
 
 test('li and ori carrying a data reloc are placeholders too — decline loud', () => {

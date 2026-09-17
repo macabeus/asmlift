@@ -868,7 +868,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'C++ reference',
     group: 'data-types',
     evidence: 'judgement',
-    pending: true,
     summary: 'a C++ reference — a pointer the source never spells as one',
     detail:
       '`void f(Vec& v)` and `void f(Vec* v)` compile to the same instructions. What differs is the ' +
@@ -1110,7 +1109,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Static data member',
     group: 'memory',
     evidence: 'judgement',
-    pending: true,
     summary: "a class's static data member is read or written",
     detail:
       'File-scope storage under a class-scope NAME. In the object it is an ordinary global — a ' +
@@ -1151,7 +1149,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'new / delete',
     group: 'memory',
     evidence: 'source',
-    pending: true,
     summary: 'a C++ `new` or `delete` expression',
     detail:
       'One keyword, several calls. `new T` calls the allocator (`__nw__FUl`) and then the ' +
@@ -1279,7 +1276,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Virtual call',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: "a call dispatched through the object's virtual table",
     detail:
       'Two dependent loads and an indirect branch: read the vtable pointer out of the object, read ' +
@@ -1304,7 +1300,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Constructor',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: 'a C++ constructor',
     detail:
       'A constructor is not a function whose source is all there. Before the first statement of ' +
@@ -1324,7 +1319,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Destructor',
     group: 'calls',
     evidence: 'judgement',
-    pending: true,
     summary: 'a C++ destructor',
     detail:
       'The mirror of `ctor` — member and base destructors run in REVERSE declaration order after ' +
@@ -1525,7 +1519,6 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Inline member',
     group: 'meta',
     evidence: 'judgement',
-    pending: true,
     summary: 'a header-defined member function, expanded into the body, is what the diff turns on',
     detail:
       'C++ game code spells its accessors, its operators and its small helpers as inline member ' +

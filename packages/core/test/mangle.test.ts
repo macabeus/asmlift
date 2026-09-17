@@ -5,7 +5,7 @@
 // will align to the target.
 import { describe, expect, test } from 'vitest';
 
-import { type CppSig, demangle, mangle, spellType } from '../src/mangle';
+import { type CppSig, demangle, demangledName, mangle, spellType } from '../src/mangle';
 
 // sym ↔ signature, golden from real mwcceppc output where noted.
 const CASES: { sym: string; sig: CppSig; note: string }[] = [
@@ -93,4 +93,18 @@ test('spellType spells pointers and builtins for C++ source', () => {
   expect(spellType({ base: 'Vec', ptr: 1 })).toBe('Vec *');
   expect(spellType({ base: 'int', ptr: 0 })).toBe('int');
   expect(spellType({ base: 'unsigned int', ptr: 0 })).toBe('unsigned int');
+});
+
+test('demangledName reads the source name of a real CodeWarrior symbol, including what demangle refuses', () => {
+  // Pikmin symbols: a member, a nested class with a reference-to-array parameter, a constructor, a
+  // destructor, a free function, and a const member
+  expect(demangledName('getStartHour__11PlayerStateFv')).toBe('PlayerState::getStartHour');
+  expect(demangledName('RotAxisX__Q23zen17particleGeneratorFRA3_A4_fRfRf')).toBe('zen::particleGenerator::RotAxisX');
+  expect(demangledName('__ct__12RefCountableFv')).toBe('RefCountable::RefCountable');
+  expect(demangledName('__dt__6SystemFv')).toBe('System::~System');
+  expect(demangledName('searchKanjiCode__FUs')).toBe('searchKanjiCode');
+  expect(demangledName('getX__4Vec3CFv')).toBe('Vec3::getX');
+  // a plain C name with a double underscore in it, and an operator
+  expect(demangledName('sa2__sub_808558C')).toBeNull();
+  expect(demangledName('__as__8Vector3fFR8Vector3f')).toBeNull();
 });

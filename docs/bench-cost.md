@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=92.3s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=440.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,20 +129,22 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-17: the ranked pass alone is **1,120 s over 165
-real rows** and **1,067 s over 678 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 343.3 s and 320.0 s. The 5 new ranked rows are the Mario Party 4 rows
-asmlift does not decline, and they are 4.0 s of the real total: the tier's price moved 1,341 s →
-1,120 s for reasons that have nothing to do with them, and the synthetic tier's moved 826 s →
-1,067 s while nothing about it changed at all. **A figure here is a price under a CACHE STATE and a
-MACHINE, not a property of the corpus.** This run's store had again just been pruned past its
-4,096 MB cap, and it ran alone on the machine where the artifact it replaces was generated beside
-two other worktrees. Earlier artifacts of the same corpus read 818 s and 417 s off a store the day's
-benches had filled, 941 s and 889 s off a cold one, and 1,742 s and 1,677 s while several rounds
-shared the machine. Read a figure beside the cache state AND the load of the run you are planning,
-not on its own.
+Summed out of the committed artifact of 2026-09-17: the ranked pass alone is **4,449 s over 168
+real rows** and **847 s over 678 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 2381.4 s and 389.6 s. The 3 new ranked rows are the Pikmin rows asmlift
+does not decline, and they are 1.6 s of the real total: the tier's price moved 1,120 s → 4,449 s for
+reasons that have nothing to do with them, and the synthetic tier's moved 1,067 s → 847 s while
+nothing about it changed at all. **A figure here is a price under a CACHE STATE and a MACHINE, not a
+property of the corpus** — and this pair is the loudest evidence of it in the file, because the
+enumeration that produced them is byte-identical: `bench diff` over the same pair reports **0 rows
+moved, 54,716 → 54,716** fan while the ranked pass reads 2.42×. That run was the first in a FRESH
+WORKTREE, so every candidate compile missed a cold store (one shard logged 82,490 misses against 157
+stores). Earlier artifacts of the same corpus read 818 s and 417 s off a store the day's benches had
+filled, 941 s and 889 s off a cold one, 1,120 s and 1,067 s off one just pruned, and 1,742 s and
+1,677 s while several rounds shared the machine. Read a figure beside the cache state AND the load of
+the run you are planning, not on its own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 222 s of that real total — **20% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,296 s of that real total — **52% of the tier
 in one row**, over a fan of 27,360. It is also the row that will strand a shard: in the previous
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 

@@ -146,7 +146,7 @@ function m2cInput(fn: FunctionResult): string {
     return fn.targetAsm;
   }
   try {
-    return disasmToM2c(fn.targetAsm, fn.isa, fn.asmDump);
+    return disasmToM2c(fn.targetAsm, fn.isa, fn.sym, fn.asmDump);
   } catch {
     return fn.targetAsm; // unparseable stored asm: embed verbatim rather than hide the function
   }
@@ -242,7 +242,15 @@ ${flagLine('--context ctx.h', fn.ctxRef ? 'the project context header written ab
   }
 ${flagLine('--no-cache', "bypass m2c's on-disk cache — always a fresh run")}
 )
-python3 "$M2C_PATH/m2c.py" "\${args[@]}" in.s
+${
+  fn.m2c.receiverRenamed === undefined
+    ? `python3 "$M2C_PATH/m2c.py" "\${args[@]}" in.s`
+    : `# m2c's C++ target spells the implicit receiver \`this\`, a KEYWORD in the dialect this row
+# compiles in, so the benchmark judged the row on m2c's output with that receiver renamed — and the
+# renamed text is what the row publishes. The rename is this one substitution, and nothing else in
+# the output is touched; drop the pipe to read m2c's own words.
+python3 "$M2C_PATH/m2c.py" "\${args[@]}" in.s | perl -pe 's/\\bthis\\b/${fn.m2c.receiverRenamed}/g'`
+}
 `;
 }
 

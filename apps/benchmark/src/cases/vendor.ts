@@ -56,7 +56,12 @@ import {
 import { placedModuleElves, resolveProjectElf } from './project-elf';
 import { compareWithRom, romLocation } from './rom-function';
 
-const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
+/** An absolute path of the machine that vendored, which a preprocessed TU must not carry: the blobs
+ *  are committed and read on every other machine. Home directories, and the three roots a scratch or
+ *  a temporary checkout lives under — macOS resolves `/tmp` to `/private/tmp` and `$TMPDIR` to
+ *  `/var/folders/…`, and a project root under any of them is what a parallel round actually vendors
+ *  from. The project's OWN root is refused, since it can be anywhere. */
+export const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/|\/tmp\/|\/var\/folders\//;
 
 /** A row's two texts before preprocessing: its translation unit, and the context its candidates compile in
  *  — the same text without the function. What the translation unit IS is the manifest's `tu`:
@@ -294,8 +299,9 @@ export async function vendor(filterProject?: string, opts: { symbolsOnly?: boole
         ['tu', tuI],
         ['ctx', ctxI],
       ] as const) {
-        if (MACHINE_PATH.test(text)) {
-          throw new Error(`${man.project}:${f.sym}: machine path leaked into the vendored ${what}`);
+        const leak = MACHINE_PATH.test(text) ? 'machine path' : text.includes(root) ? `the project root ${root}` : '';
+        if (leak) {
+          throw new Error(`${man.project}:${f.sym}: ${leak} leaked into the vendored ${what}`);
         }
       }
       // A unit's own text declares what the project's unit declares, implicit declarations included —

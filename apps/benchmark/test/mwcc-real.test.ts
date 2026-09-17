@@ -12,7 +12,7 @@
 import { MWCC_TOOLCHAIN_IDS, compilePpcTarget, ppcDockerAvailable } from '@asmlift/toolchains';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -67,9 +67,8 @@ test('…and it is the only C++ front end: every other toolchain refuses a c++ r
 // container image and one set of flags; what separates them is the directory `mwccReal(id)` binds,
 // and binding the wrong one produces a well-formed object that simply is not the ROM's. Nothing
 // else in the suite can see that: the toolchain id travels with the row, the compile succeeds, and
-// the only two ROM proofs are a checkout away (`mwcc-rom-proof.test.ts`) — one of them skipped on
-// every machine, the other, on Mario Party 4's DOL code, byte-identical under two of the three
-// builds by measurement. So the separation is asserted here, on a source chosen because all three
+// the only two ROM proofs are a checkout away (`mwcc-rom-proof.test.ts`), and one of them, on Mario
+// Party 4's DOL code, is byte-identical under two of the three builds by measurement. So the separation is asserted here, on a source chosen because all three
 // builds disagree about it, with no checkout and no ROM.
 const SEPARATOR = 'int sep(int x) { return x * 3 + (x >> 2); }\n';
 
@@ -166,6 +165,49 @@ test('a call refused for having no prototype is named from the unit at its byte 
     '>function has no prototype',
   ].join('\r\n');
   expect(noPrototypeCalls(output, tu)).toEqual(['some_long_name']);
+});
+
+// C++'S ALTERNATIVE OPERATOR SPELLINGS. Every CodeWarrior build compiles `#if 0 or 1` in a C++ unit
+// and refuses it under `-EP`, the mode a real row's unit is vendored through — so a project header
+// spelling one (Pikmin's `include/DebugLog.h`) stopped every unit of the project from vendoring.
+// Asserted on all three builds, because the refusal was measured on all three. The C half is the
+// other direction of the same rule: in C the words are identifiers, and must stay untouched.
+describe.runIf(MWCC_TOOLCHAIN_IDS.every((id) => ppcDockerAvailable(id)))('a unit preprocessed for vendoring', () => {
+  const unitIn = (language: 'c' | 'c++', toolchain: (typeof MWCC_TOOLCHAIN_IDS)[number]): RealProjectCfg => ({
+    project: 'alternative-tokens',
+    toolchain,
+    root: mkdtempSync(join('/tmp', 'bench-alt-tokens-')),
+    unit: language === 'c++' ? 'unit.cpp' : 'unit.c',
+    cflags: [`-lang=${language}`],
+    cppIncludes: [],
+    headers: [],
+    defines: ['-DWANTED'],
+  });
+
+  test(
+    "reads C++'s `or`, `and` and `not` the way the compile does, in a directive and in code",
+    () => {
+      const src =
+        '#if defined(ABSENT) or defined(WANTED)\nint taken;\n#endif\nint f(int a, int b) { return a and not b; }\n';
+      for (const id of MWCC_TOOLCHAIN_IDS) {
+        const text = realCompilerFor(id).preprocess(unitIn('c++', id), src);
+        expect(text, id).toContain('int taken;');
+        expect(text, id).toContain('return a && ! b;');
+        expect(text, id).not.toContain('#define');
+      }
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'leaves them as identifiers in a C unit',
+    () => {
+      const text = mwcc.preprocess(unitIn('c', 'mwcc_242_81'), 'int or = 1;\nint not(int and) { return and; }\n');
+      expect(text).toContain('int or = 1;');
+      expect(text).toContain('int not(int and) { return and; }');
+    },
+    CONTAINER_BUDGET,
+  );
 });
 
 describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', () => {

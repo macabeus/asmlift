@@ -229,11 +229,10 @@ export function candidateLinkage(language: 'c' | 'c++', candC: string): string {
  *
  *  A C++ row gets a second: PLAIN C. Its target's symbol is the mangled string, and a C compile
  *  exports whatever name the candidate is written with — so a C-shaped candidate named by the
- *  mangled symbol aligns either way. The fallback exists because m2c's `ppc-mwcc-c++` output names
- *  the implicit receiver `this` on EVERY member function, and `this` is a C++ keyword: compiled in
- *  the row's own dialect that is `'(' expected`, and m2c would go 0-for-42 on Pikmin for a spelling
- *  rather than for its code. Same policy as the `#define NULL` every rung re-provides — a
- *  decompiler is judged on the code, not on an artifact of the harness's choice of front end.
+ *  mangled symbol aligns either way. It catches text the C++ front end refuses for a reason nothing
+ *  upstream knew to spell around; it is NOT where a reserved word is answered, because this rung
+ *  cannot reach the row's own C++ context and a row that falls to it loses every class the context
+ *  declares. m2c's `this` receiver is renamed at the source instead (eval/m2c.ts `renameReceiver`).
  *
  *  SOUND, measured rather than assumed: on `pikmin:getFlag__11ResultFlagsFi` at that unit's real
  *  flags, the same C-shaped candidate compiled `-lang=c++` inside the linkage block and compiled

@@ -53,7 +53,7 @@ export interface DiffBreakdown {
 export interface DecompilerResult {
   decompiler: DecompilerId;
   outcome: Outcome;
-  source: string; // the C the decompiler emitted ("failed" rows: its failure text)
+  source: string; // the C the decompiler emitted ("failed" rows: its failure text), `receiverRenamed` applied
   score: number | null; // objdiff differences (differing instruction rows); 0 = match; null if it never compiled/ran
   maxScore: number | null; // objdiff instruction-row count (for normalization)
   compileErrors: number | null; // when outcome === "noncompile"
@@ -67,6 +67,12 @@ export interface DecompilerResult {
    *  shapes derived from its ELF — the analogue of m2c's context input). Absent ⇒ no map was
    *  available; the report must not read mixed tables as apples-to-apples. */
   symbolMap?: true;
+  /** m2c only, C++ rows: the identifier m2c's implicit receiver was renamed to before this row was
+   *  judged, because m2c spells it `this` — a KEYWORD in the dialect a C++ row compiles in. `source`
+   *  is that renamed text (the text that decided the row), so a reproduction reaches it by replacing
+   *  every `this` token of m2c's own output with this name. Absent ⇒ the row was judged on m2c's
+   *  output verbatim. */
+  receiverRenamed?: string;
   /** asmlift only, scored map rows: EVERY map symbol the WINNING candidate's output references
    *  (value references — call targets are excluded upstream), each with its declaration shape
    *  pre-formatted for display ("struct Unk_03004C20 (24 B)", "u16[]", "scalar u8", "code";

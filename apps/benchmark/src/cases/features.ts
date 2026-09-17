@@ -102,16 +102,46 @@ export function definitionOf(whole: string): { signature: string; body: string }
  *  kleod spells several globals as address macros (`#define gStreamPtr (*(u8**)0x03004D84)`),
  *  which emit a raw `.word` rather than a symbol, and `union`/`bitfield` need the project's
  *  headers to resolve. */
+/** The text inside each `[...]` of a body whose opening bracket follows `before` — a name for
+ *  `table`, a name or another subscript for `variable-index`. Brackets nest: `a[b[2]]` is indexed
+ *  by `b[2]`, and reading only the innermost pair would call that a constant index. */
+function subscripts(body: string, before: RegExp): string[] {
+  const out: string[] = [];
+  for (let open = 0; open < body.length; open++) {
+    if (body[open] !== '[') {
+      continue;
+    }
+    let depth = 1;
+    let close = open + 1;
+    for (; close < body.length && depth > 0; close++) {
+      depth += body[close] === '[' ? 1 : body[close] === ']' ? -1 : 0;
+    }
+    if (depth === 0 && before.test(body.slice(0, open))) {
+      out.push(body.slice(open + 1, close - 1));
+    }
+  }
+  return out;
+}
+
+/** A subscript that is not written out as a constant. THE WHOLE SUBSCRIPT decides it, not its first
+ *  character: `t[2 * i]` opens on a digit and is computed, which a floor reading that character
+ *  called a literal index — and it refused `variable-index` on a row that plainly has one. */
+const isComputed = (index: string): boolean => !/^\s*(?:0[xX][\da-fA-F]+|\d+)\s*$/.test(index);
+
 export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: string) => boolean> = {
   arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
   array: (b) => /\[/.test(b),
-  table: (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b), // indexed by something that is not a literal
+  table: (b) => subscripts(b, /\w\s*$/).some(isComputed), // indexed by something that is not a literal
   // ANY subscript in the chain, not only the first: `x[0][k]` is a variable index, and the `k`
   // there follows a `]` rather than a name. `table` deliberately keeps the tighter form — it is a
   // claim about the OBJECT being a constant lookup table, which its own first subscript shows.
-  'variable-index': (b) => /[\w\]]\s*\[\s*[^\]\d\s]/.test(b),
+  'variable-index': (b) => subscripts(b, /[\w\]]\s*$/).some(isComputed),
+  // C-style `(T)x` and C++'s four NAMED casts. A functional cast (`GXTexGenSrc(x)`) is deliberately
+  // absent: it is spelled exactly like a call, so a floor that admitted it would decide nothing —
+  // the same reason `field` has no floor for a member read through an implicit `this`.
   cast: (b) =>
     /\(\s*\w+\s*\*+\s*\)/.test(b) ||
+    /\b(?:reinterpret|static|const|dynamic)_cast\s*</.test(b) ||
     /\(\s*(?:struct|union|enum|const|unsigned|signed|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/.test(
       b,
     ),

@@ -41,7 +41,11 @@ export const CPP_PREPROCESS_FLAGS = ['-P', '-nostdinc'] as const;
  *  alone would surface only the `In function` banner. The word "failed" deliberately does NOT
  *  count: it selects harness wrapper banners (`agbcc failed:`), not compiler output. An mwcc
  *  caret line (`#   Error:    ^`) carries no message itself — the explanation is the NEXT line,
- *  so that line is kept too. Returns [] when nothing looks like a diagnostic. */
+ *  so that line is kept too. The caret line is matched wherever it sits IN the line, because the
+ *  first line of a captured message also carries the harness's own wrapper (`mwcceppc failed: `):
+ *  anchoring at the start dropped the explanation exactly when the diagnostic block opened on a
+ *  caret, and the row then published a bare `^` as its cause. Returns [] when nothing looks like
+ *  a diagnostic. */
 export function pickDiagnostics(lines: string[]): string[] {
   const picked = new Set<string>();
   for (let i = 0; i < lines.length; i++) {
@@ -50,7 +54,7 @@ export function pickDiagnostics(lines: string[]): string[] {
       continue;
     }
     picked.add(l);
-    if (/^#\s*Error:[\s^~]*$/i.test(l) && lines[i + 1]) {
+    if (/#\s*Error:[\s^~]*$/i.test(l) && lines[i + 1]) {
       picked.add(lines[i + 1]);
     }
   }

@@ -846,14 +846,17 @@ export function enumerateCandidates(
   // spelling needs one, and the declaration a candidate spelling `gTbl[i]` cannot compile
   // without), and the project map, which knows more than either.
   const mapSymbols = baseOpts.symbols;
-  const declSymbols = new Map<string, SymbolInfo>([
-    ...bareGlobalSymbols(sharedLift),
-    ...sharedLiftShapes,
-    ...(mapSymbols ?? []),
-  ]);
+  const targetSymbols = new Map<string, SymbolInfo>([...bareGlobalSymbols(sharedLift), ...sharedLiftShapes]);
+  const declSymbols = new Map<string, SymbolInfo>([...targetSymbols, ...(mapSymbols ?? [])]);
   // The four per-enumeration constants named at the seam rather than captured across 60 lines of
   // closure (rank-declare.ts states why they belong on one object).
-  const refsOf = makeRefCollector({ declSymbols, accessFacts, mapSymbols, refuse });
+  const refsOf = makeRefCollector({
+    declSymbols,
+    accessFacts,
+    mapSymbols,
+    targetNames: new Set(targetSymbols.keys()),
+    refuse,
+  });
   // THE RESPELL SET, as a function whose PARAMETER LIST is the invariant the tree skip below
   // rests on: every source here is a pure function of the structured tree and this call's own
   // constants, so a tree an earlier structure setting already produced can only re-emit sources

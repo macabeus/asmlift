@@ -32,6 +32,42 @@ export function assertM2cPinned(): void {
   }
 }
 
+/** m2c's `ppc-mwcc-c++` target names the implicit receiver `this`, which is a KEYWORD in the dialect
+ *  a C++ row is compiled in: `'(' expected`, on every member function it decompiles. That is an
+ *  artifact of the harness's choice of front end, not of m2c's code — the same reason every rung
+ *  re-provides `#define NULL` — so the receiver is renamed where it is DECLARED as a parameter of
+ *  this function. A source that merely uses `this->` is a genuine member definition and is left
+ *  alone: renaming there would change what the code means.
+ *
+ *  The caller scores the source AS EMITTED first and reaches for this only when nothing compiles
+ *  (`m2cCandidates`): the plain-C fallback dialect accepts the word, and a row that already scores
+ *  through it must not be re-scored in a different front end. */
+export function renameReceiver(source: string, sym: string): M2cCandidate {
+  const declared = new RegExp(`\\b${sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(([^)]*)\\)`).exec(source);
+  if (declared === null || !/(^|[\s*(])this\s*(,|$)/.test(declared[1])) {
+    return { source };
+  }
+  let name = 'this_';
+  while (new RegExp(`\\b${name}\\b`).test(source)) {
+    name += '_';
+  }
+  return { source: source.replace(/\bthis\b/g, name), receiverRenamed: name };
+}
+
+/** One text m2c's output is scored as, and — when it is not m2c's own — the name that made it. */
+export interface M2cCandidate {
+  source: string;
+  receiverRenamed?: string;
+}
+
+/** The texts m2c's output is scored as, in order: m2c's own first, so a row that compiles anywhere
+ *  today is untouched. The text that DECIDES the row is what the row publishes, alongside the name
+ *  it was renamed with, so a reproduction can reach it from m2c's output. */
+export function m2cCandidates(source: string, sym: string, language: 'c' | 'c++'): M2cCandidate[] {
+  const renamed = language === 'c++' ? renameReceiver(source, sym) : { source };
+  return renamed.receiverRenamed === undefined ? [{ source }] : [{ source }, renamed];
+}
+
 export interface M2cResult {
   failed: boolean; // NO usable output: nonzero exit, empty stdout+stderr, or m2c's failure report
   source: string; // the C m2c emitted (or, when failed, the failure text)
@@ -59,7 +95,8 @@ export function runM2c(tc: Toolchain, sym: string, asm: string, opts: M2cOptions
         `and point ASMLIFT_M2C_DIR at it (sibling-checkout default: ../m2c)`,
     );
   }
-  const asmText = tc.asmKind === 'objdump' ? disasmToM2c(asm, tc.isa === 'ppc' ? 'ppc' : 'mips', opts.asmDump) : asm; // agbcc .s is already GNU-as
+  const asmText =
+    tc.asmKind === 'objdump' ? disasmToM2c(asm, tc.isa === 'ppc' ? 'ppc' : 'mips', sym, opts.asmDump) : asm; // agbcc .s is already GNU-as
   const dir = m2cScratch();
   const asmPath = join(dir, 'in.s');
   writeFileSync(asmPath, asmText);
