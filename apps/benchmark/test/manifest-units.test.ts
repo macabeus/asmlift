@@ -111,6 +111,33 @@ describe('validateManifest: build units', () => {
     );
   });
 
+  // The incident this guards: #216 re-classified `-pragma "cats off"` from a diagnostic word to a codegen
+  // word, and every dtk unit stored before it kept flags the build no longer matched. Nothing was edited,
+  // so no diff showed it; the manifests carried only a POINTER to objdiff.json, so nothing could re-derive
+  // them without a checkout. Now they carry the build's own `c_flags`, and this re-derivation is the check.
+  test("a dtk unit's flags are the ones its objdiff c_flags compile with", () => {
+    const unit: BuildUnit = {
+      toolchain: 'mwcc_242_81',
+      cflags: ['-proc', 'gekko', '-O4,p', '-pragma', 'cats off', '-lang=c'],
+      flagsFrom: {
+        from: 'objdiff',
+        commit: 'a'.repeat(40),
+        file: 'objdiff.json',
+        sha256: 'b'.repeat(64),
+        unit: 'main/f',
+        cFlags: '-nodefaults -proc gekko -O4,p -pragma "cats off" -maxerrors 1 -lang=c',
+      },
+    };
+    expect(problems(manifest({ units: { 'src/f.c': unit } }))).toBe('');
+    // exactly the drift a re-classification produces: the word the build passes is gone from `cflags`
+    const stale = { ...unit, cflags: ['-proc', 'gekko', '-O4,p', '-lang=c'] };
+    expect(problems(manifest({ units: { 'src/f.c': stale } }))).toMatch(
+      /unit src\/f.c "cflags" are not the flags its flagsFrom.cFlags compiles with: -proc gekko -O4,p -pragma cats off -lang=c/,
+    );
+    const noText = { ...unit, flagsFrom: { ...unit.flagsFrom, cFlags: '' } };
+    expect(problems(manifest({ units: { 'src/f.c': noText } }))).toMatch(/"flagsFrom" must be/);
+  });
+
   test('a romDigest is a sha256', () => {
     expect(problems(manifest({}, { romDigest: 'C'.repeat(64) }))).toMatch(/"romDigest" must be a sha256/);
   });
@@ -139,6 +166,7 @@ describe('validateManifest: a C++ row and m2c', () => {
       file: 'objdiff.json',
       sha256: 'b'.repeat(64),
       unit: 'main/f',
+      cFlags: '-nodefaults -O4,p -maxerrors 1 -lang=c++',
     },
   };
   const cppRow = (row: Record<string, unknown> = {}) =>
@@ -168,7 +196,27 @@ describe('validateManifest: a C++ row and m2c', () => {
   // CodeWarrior toolchain builds Animal Crossing's 3,984 C units.
   test('a C unit of the same toolchain keeps the vendored context', () => {
     expect(
-      problems(manifest({ units: { 'src/f.c': { ...CPP_UNIT, cflags: ['-O4,s', '-lang=c'] } } }, { m2cCtx: true })),
+      problems(
+        manifest(
+          {
+            units: {
+              'src/f.c': {
+                ...CPP_UNIT,
+                cflags: ['-O4,s', '-lang=c'],
+                flagsFrom: {
+                  from: 'objdiff',
+                  commit: 'a'.repeat(40),
+                  file: 'objdiff.json',
+                  sha256: 'b'.repeat(64),
+                  unit: 'main/f',
+                  cFlags: '-nodefaults -O4,s -maxerrors 1 -lang=c',
+                },
+              },
+            },
+          },
+          { m2cCtx: true },
+        ),
+      ),
     ).toBe('');
   });
 

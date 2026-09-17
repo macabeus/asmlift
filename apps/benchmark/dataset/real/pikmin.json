@@ -59,7 +59,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/playerState"
+        "unit": "main/plugPikiKando/playerState",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/controller.cpp": {
@@ -97,7 +98,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/controller"
+        "unit": "main/sysCommon/controller",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/smartPtr.cpp": {
@@ -135,7 +137,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/smartPtr"
+        "unit": "main/plugPikiKando/smartPtr",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiColin/mapMgr.cpp": {
@@ -173,7 +176,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiColin/mapMgr"
+        "unit": "main/plugPikiColin/mapMgr",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/resultFlag.cpp": {
@@ -211,7 +215,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/resultFlag"
+        "unit": "main/plugPikiKando/resultFlag",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/viewPiki.cpp": {
@@ -249,7 +254,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/viewPiki"
+        "unit": "main/plugPikiKando/viewPiki",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiYamashita/particleGenerator.cpp": {
@@ -287,7 +293,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiYamashita/particleGenerator"
+        "unit": "main/plugPikiYamashita/particleGenerator",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/stdSystem.cpp": {
@@ -325,7 +332,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/stdSystem"
+        "unit": "main/sysCommon/stdSystem",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiColin/memoryCard.cpp": {
@@ -363,7 +371,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiColin/memoryCard"
+        "unit": "main/plugPikiColin/memoryCard",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiColin/animMgr.cpp": {
@@ -401,7 +410,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiColin/animMgr"
+        "unit": "main/plugPikiColin/animMgr",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiOgawa/ogMemChk.cpp": {
@@ -439,7 +449,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiOgawa/ogMemChk"
+        "unit": "main/plugPikiOgawa/ogMemChk",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/stream.cpp": {
@@ -477,7 +488,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/stream"
+        "unit": "main/sysCommon/stream",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/goalItem.cpp": {
@@ -515,7 +527,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/goalItem"
+        "unit": "main/plugPikiKando/goalItem",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/id32.cpp": {
@@ -553,7 +566,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/id32"
+        "unit": "main/sysCommon/id32",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysDolphin/system.cpp": {
@@ -591,7 +605,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysDolphin/system"
+        "unit": "main/sysDolphin/system",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/piki.cpp": {
@@ -629,7 +644,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/piki"
+        "unit": "main/plugPikiKando/piki",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/graphics.cpp": {
@@ -667,7 +683,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/graphics"
+        "unit": "main/sysCommon/graphics",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/cPlate.cpp": {
@@ -705,7 +722,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/cPlate"
+        "unit": "main/plugPikiKando/cPlate",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/gmWin.cpp": {
@@ -743,7 +761,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/gmWin"
+        "unit": "main/plugPikiKando/gmWin",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiNakata/nlibmath.cpp": {
@@ -781,7 +800,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiNakata/nlibmath"
+        "unit": "main/plugPikiNakata/nlibmath",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/sysMath.cpp": {
@@ -819,7 +839,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/sysMath"
+        "unit": "main/sysCommon/sysMath",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/aiPerf.cpp": {
@@ -857,7 +878,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/aiPerf"
+        "unit": "main/plugPikiKando/aiPerf",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiYamashita/TAIAeffect.cpp": {
@@ -895,7 +917,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiYamashita/TAIAeffect"
+        "unit": "main/plugPikiYamashita/TAIAeffect",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/pikiheadItem.cpp": {
@@ -933,7 +956,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/pikiheadItem"
+        "unit": "main/plugPikiKando/pikiheadItem",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiYamashita/TAIAreaction.cpp": {
@@ -971,7 +995,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiYamashita/TAIAreaction"
+        "unit": "main/plugPikiYamashita/TAIAreaction",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiYamashita/P2DPrint.cpp": {
@@ -1009,7 +1034,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiYamashita/P2DPrint"
+        "unit": "main/plugPikiYamashita/P2DPrint",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/grLight.cpp": {
@@ -1047,7 +1073,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/grLight"
+        "unit": "main/sysCommon/grLight",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/kio.cpp": {
@@ -1085,7 +1112,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/kio"
+        "unit": "main/plugPikiKando/kio",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiColin/cardutil.cpp": {
@@ -1123,7 +1151,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiColin/cardutil"
+        "unit": "main/plugPikiColin/cardutil",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/aiAction.cpp": {
@@ -1161,7 +1190,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/aiAction"
+        "unit": "main/plugPikiKando/aiAction",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/pelletMgr.cpp": {
@@ -1199,7 +1229,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/pelletMgr"
+        "unit": "main/plugPikiKando/pelletMgr",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysDolphin/dgxGraphics.cpp": {
@@ -1237,7 +1268,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysDolphin/dgxGraphics"
+        "unit": "main/sysDolphin/dgxGraphics",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/aiFree.cpp": {
@@ -1275,7 +1307,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/aiFree"
+        "unit": "main/plugPikiKando/aiFree",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/sysCommon/matMath.cpp": {
@@ -1313,7 +1346,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/sysCommon/matMath"
+        "unit": "main/sysCommon/matMath",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     },
     "src/plugPikiKando/searchSystem.cpp": {
@@ -1351,7 +1385,8 @@
         "commit": "69b7b1cada8a8bea72b144093d176ffbe08742bb",
         "file": "objdiff.json",
         "sha256": "b85400e874716af4b7d00714566b789400d60d1eee415ae42c047e8060f4cef4",
-        "unit": "main/plugPikiKando/searchSystem"
+        "unit": "main/plugPikiKando/searchSystem",
+        "cFlags": "-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto -pragma \"cats off\" -pragma \"warn_notinlined off\" -maxerrors 1 -nosyspath -RTTI off -fp_contract off -str reuse -multibyte -DBUILD_VERSION=5 -DVERSION_GPIE01_01 -DDTK_CONFIG_NONMATCHING=0 -DNDEBUG=1 -w off -RTTI on -char unsigned -lang=c++"
       }
     }
   },

@@ -459,6 +459,18 @@ the round that first ran it.
   the digest, that covers the referents. A pin bump is therefore `bench flags --write`, then
   `bench vendor`, and `test/real-manifests.test.ts` holds every unit's flags to the commit its TUs were
   vendored from.
+- **Stored flags can drift two ways, and each has its own check.** The BUILD may change — an upstream
+  commit, a different recipe — and only `bench flags` sees that, because only it re-reads the project;
+  it needs the checkouts, so it is a local command and not a CI step, and it costs one compile per row
+  (~9 min over all nine projects on this machine, every row re-proved against the ROM). Or the
+  CLASSIFIER may change: a word core's flag table re-reads as codegen, or stops reading, silently
+  invalidates every unit stored under the old table, with no dataset file edited and no ROM moved —
+  that is how `-pragma "cats off"` reached `main` in 77 units. So a unit stores the build's OWN TEXT
+  verbatim, the recipe line or the objdiff unit's `c_flags`, and `validateManifest` re-derives `cflags`
+  from it with today's table on every load. That is pure, needs no checkout, and runs in CI over the
+  committed manifests (`test/manifest-units.test.ts`, `test/real-manifests.test.ts`) and at the head of
+  every bench command that loads the real tier — the answer to a re-classification is a red test, not a
+  hand-off note.
 - **A REL row is proved against its module's ELF.** The linked ELF holds no module's bytes, so a row
   keyed by a module location is compared with the `.plf` the build turns into the disc's module,
   its sections placed at addresses of their own (`cases/rom-function.ts` `romLocation`); the

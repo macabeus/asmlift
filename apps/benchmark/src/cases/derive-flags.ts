@@ -258,6 +258,7 @@ export function deriveDtkFlags(root: string, commit: string, unit: string): Buil
       file: 'objdiff.json',
       sha256: fileSha256(join(root, 'objdiff.json')),
       unit: name,
+      cFlags: String(u.scratch?.c_flags),
     },
   };
 }
@@ -342,6 +343,7 @@ export function flagsStatus(stored: BuildUnit | undefined, derived: BuildUnit): 
   }
   if (a.from === 'objdiff' && b.from === 'objdiff') {
     moved('objdiff unit ', a.unit, b.unit);
+    moved('c_flags ', a.cFlags, b.cFlags);
   }
   return changes.length === 0 ? { kind: 'ok' } : { kind: 'DRIFT', changes };
 }

@@ -20,7 +20,7 @@ import {
   type BuildUnit,
   type RealFunction,
   type RealManifest,
-  loadManifestsForVendor,
+  loadManifestsForFlags,
   resolveProjectRoot,
   rewriteManifest,
   withVendoredInputs,
@@ -40,7 +40,7 @@ export interface FlagsOptions {
 export function flagsReport(opts: FlagsOptions): boolean {
   let clean = true;
   let reported = 0;
-  for (const man of loadManifestsForVendor().filter((m) => opts.project === undefined || m.project === opts.project)) {
+  for (const man of loadManifestsForFlags().filter((m) => opts.project === undefined || m.project === opts.project)) {
     const rows = man.functions.filter((f) => opts.only === undefined || f.sym.includes(opts.only));
     if (rows.length > 0) {
       reported++;
