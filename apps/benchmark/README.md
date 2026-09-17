@@ -470,7 +470,9 @@ the round that first ran it.
   from it with today's table on every load. That is pure, needs no checkout, and runs in CI over the
   committed manifests (`test/manifest-units.test.ts`, `test/real-manifests.test.ts`) and at the head of
   every bench command that loads the real tier — the answer to a re-classification is a red test, not a
-  hand-off note.
+  hand-off note. The way back out is `bench setup` (clone the checkouts) then `bench flags --write`
+  (re-derive from them) then `bench vendor`; those two are the only commands the stored units are not
+  policed for, since neither reads a stored `cflags` and both exist to repair them.
 - **A REL row is proved against its module's ELF.** The linked ELF holds no module's bytes, so a row
   keyed by a module location is compared with the `.plf` the build turns into the disc's module,
   its sections placed at addresses of their own (`cases/rom-function.ts` `romLocation`); the

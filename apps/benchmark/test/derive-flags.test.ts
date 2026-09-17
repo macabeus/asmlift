@@ -149,6 +149,8 @@ describe('a dtk unit', () => {
       file: 'objdiff.json',
       unit: 'm427Dll/REL/m427Dll/map',
     });
+    // The build's own words, verbatim: what `validateManifest` re-derives `cflags` from, with no checkout.
+    expect((map.flagsFrom as { cFlags: string }).cFlags).toBe(unit.scratch.c_flags);
   });
 
   test("a DOL unit's own CodeWarrior build is derived, not the project's most common one", () => {
@@ -158,7 +160,15 @@ describe('a dtk unit', () => {
     const main = deriveDtkFlags(root, commit, 'src/game/main.c');
     expect(main.toolchain).toBe('mwcc_247_107');
     expect(main.cflags).toContain('-O0,p');
-    expect(main.flagsFrom).toMatchObject({ from: 'objdiff', unit: 'main/game/main' });
+    expect(main.flagsFrom).toMatchObject({
+      from: 'objdiff',
+      unit: 'main/game/main',
+      cFlags:
+        '-nodefaults -proc gekko -align powerpc -enum int -fp hardware -Cpp_exceptions off -O4,p -inline auto ' +
+        '-pragma "cats off" -pragma "warn_notinlined off" -maxerrors 1 -nosyspath -RTTI off -fp_contract on ' +
+        '-str reuse -multibyte -DVERSION=0 -DMUSY_TARGET=MUSY_TARGET_DOLPHIN -DNDEBUG=1 -O0,p -char unsigned ' +
+        '-fp_contract off -lang=c',
+    });
   });
 
   test('a compiler asmlift has no toolchain for, a source several units compile, and no unit are refused', () => {

@@ -308,8 +308,9 @@ function unitProblems(file: string, path: string, u: Partial<BuildUnit> | undefi
     // candidate, and a word RE-CLASSIFIED in core's flag table silently invalidates every stored unit at
     // once, without touching a dataset file. It is pure, so it runs with no checkout: in CI over the
     // committed manifests, and at the head of every bench command that loads the real tier.
-    // Whether the build still says what it said is a different question, and only `bench flags` — which
-    // re-reads the project — answers it.
+    // What it cannot see is the build TEXT itself going stale, or a hand-edit of both fields at once —
+    // `flagsFrom.sha256` is not re-derived from the text stored beside it. Only `bench flags`, which
+    // re-reads the project and re-proves the ROM, answers that.
     const family = TOOLCHAIN_TARGETS[u.toolchain].family;
     const cflags = u.cflags as string[];
     const field = from.from === 'makefile' ? 'command' : 'cFlags';
@@ -335,11 +336,12 @@ export interface ManifestValidation {
   /** false: a row's `unit`, its `units` entry and its `romDigest` may be absent (each is still checked
    *  when present) */
   complete: boolean;
-  /** false: the stored `units` are not policed at all. Only `bench flags` passes it, because it is the
-   *  one command that REWRITES them from the build, and a command must not be locked out by the very
-   *  staleness it exists to fix — a re-classification in core's flag table invalidates every stored unit
-   *  at once, and the fix is `bench flags --write`. It still reports each unit's status itself, and exits
-   *  1 while any of them drifts. */
+  /** false: the stored `units` are not policed at all. Only the two commands that REPAIR them pass it —
+   *  `bench setup`, which clones the checkouts, and `bench flags`, which rewrites the units from those
+   *  checkouts — because neither may be locked out by the very staleness it exists to fix: a
+   *  re-classification in core's flag table invalidates every stored unit at once, and on a machine with
+   *  no checkouts the only way back is `bench setup` then `bench flags --write`. Neither command reads a
+   *  stored `cflags`, and `bench flags` reports each unit's status itself and exits 1 while any drifts. */
   units?: boolean;
 }
 
@@ -612,9 +614,9 @@ export function loadManifestsForVendor(): RealManifest[] {
   return loadRaw({ complete: false });
 }
 
-/** Manifests for `bench flags`, the one command that rewrites the stored units from the build: see
- *  `ManifestValidation.units`. */
-export function loadManifestsForFlags(): RealManifest[] {
+/** Manifests for `bench setup` and `bench flags`, the two commands that repair the stored units — the
+ *  one that fetches the builds and the one that re-derives from them: see `ManifestValidation.units`. */
+export function loadManifestsForRepair(): RealManifest[] {
   return loadRaw({ complete: false, units: false });
 }
 
