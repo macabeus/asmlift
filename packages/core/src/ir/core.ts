@@ -69,9 +69,10 @@ export interface Fn {
  *
  *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY: `ownedLocals`,
  *  the partition a def-less READ asks, admits agbcc's outgoing stack-argument area, and an offset
- *  there is an ABI position rather than an `expand_decl` rank. Under Thumb the two ranges are
- *  written equal, and a decline rather than a proof is what makes that safe — see `declaredLocals`
- *  (frontend/ssa.ts) for the dependency and what lifting it obliges.
+ *  there is an ABI position rather than an `expand_decl` rank. Under Thumb the declared range
+ *  therefore starts above that area, where the largest outgoing argument block the frontend could
+ *  LICENSE ends — see `declaredLocals` (frontend/ssa.ts) for what the licence proves and for the
+ *  frames it refuses outright.
  *
  *  ONE consumer reads it for its content — the structurer, which turns it into
  *  `SFn.locals[i].slots`; everything else only carries it (`replaceAllUsesWith`, the report's
