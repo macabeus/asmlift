@@ -12,8 +12,9 @@
  */
 
 /** One event the analysis reads, in block order. A load and a store are the only frame accesses
- *  that matter — a sub-word or register-offset access is not a slot and the frontend has already
- *  disabled the whole model over one. */
+ *  that matter — a sub-word or register-offset access is not a slot, and one anywhere turns the
+ *  whole word-slot model off at the same gate this analysis's `blocker` feeds, so no access that
+ *  could alias a licensed word is ever silently missing from the events. */
 export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C>;
 
 /** A whole-word access to a reserved frame slot at `off`, which must lie inside `[0, localArea)`. */
@@ -92,8 +93,8 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 //     the `bl` executes.
 // Equal ⇒ consume. Anything else ⇒ decline, naming what was seen.
 //
-// WHY NEITHER WITNESS IS ENOUGH ALONE, because each has been trusted alone here and each was
-// wrong. A declared parameter list is a LOWER bound on the words a call pushes:
+// WHY NEITHER WITNESS IS ENOUGH ALONE. A declared parameter list is a LOWER bound on the words a
+// call pushes:
 //
 //   * a parameter may occupy more than one word (`double`, `long long`, a struct by value),
 //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
@@ -122,10 +123,9 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 // not in the declared block, so the call refuses — and that is agbcc's commonest frame with an
 // outgoing area. Tolerating it means arguing that a pending word which is RELOADED later is a
 // local rather than argument n+1, which needs a gate and a row that gate protects; none exists.
-// The cost is in attribution, not correctness: such a function used to decline on "consuming stack
-// call arguments is not implemented", which named the capability, and now declines on "[sp,#k] also
-// reaches the call unread", which names a store. Anyone reading a gap histogram for this class
-// should look for the latter.
+// The cost is in attribution, not correctness: the decline such a function gets names a STORE
+// ("[sp,#k] also reaches the call unread") rather than the capability, so a gap histogram groups
+// this class under that message and not under anything about stack arguments.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
 // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
 // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same
@@ -283,7 +283,7 @@ export function analyzeOutgoingArgs<C>({
   const asc = (s: Iterable<number>) => [...s].sort((x, y) => x - y);
 
   // THE LICENCE, call by call. Every declared block must match what the code staged for it,
-  // exactly — and the three conditions after this one then run knowing which words are spoken for.
+  // exactly — and every refusal after this one then runs knowing which words are spoken for.
   const blocks = new Map<C, readonly number[]>();
   let area = 0;
   for (const ev of calls) {
@@ -313,11 +313,9 @@ export function analyzeOutgoingArgs<C>({
       licensed.add(o);
     }
   }
-  // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
-  // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
-  // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
-  // local load can land on an argument offset), which is why it is a whole-function question.
-  // Offsets a call above LICENSED are excluded: their never being reloaded is now explained.
+  // The two whole-function facts the next two refusals read: every offset live code stores, and
+  // every offset live code loads back. A reload in dead code is not evidence that anything reads
+  // the slot back, so it does not count.
   const reloaded = new Set<number>();
   const storedAnywhere = new Set<number>();
   for (const b of live) {
@@ -346,6 +344,11 @@ export function analyzeOutgoingArgs<C>({
       );
     }
   }
+  // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
+  // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
+  // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
+  // local load can land on an argument offset), which is why it is a whole-function question.
+  // A LICENSED offset is excluded: its never being reloaded is explained by the call that takes it.
   for (const off of asc(storedAnywhere)) {
     if (!licensed.has(off) && !reloaded.has(off) && prefixStored(off, storedAnywhere)) {
       return refuse(

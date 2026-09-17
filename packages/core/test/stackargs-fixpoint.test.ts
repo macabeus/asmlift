@@ -2,9 +2,9 @@
 //
 // `frontend/stackargs.ts` reads digested events, so a fixture here is a table of stores, loads and
 // calls over a CFG — no Thumb, no prototypes, no decoder. That is the point of the split: the
-// six-set fixpoint is the part of the licence most likely to be wrong, and asserting it through
+// fixpoint is the part of the licence most likely to be wrong, and asserting it through
 // `decompile()` means regexing a rendered message and reaching only the shapes agbcc happens to
-// emit. Every case below states which SET decides it.
+// emit. Every case below states which of the three SETS — may, must, stored — decides it.
 import { describe, expect, test } from 'vitest';
 
 import { type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from '../src/frontend/stackargs';

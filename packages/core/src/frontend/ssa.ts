@@ -94,7 +94,7 @@ export interface LiveInModel {
    *
    *  THE TWO RANGES DIFFER UNDER THUMB, AND A PROOF IS WHAT SEPARATES THEM. The frontend passes
    *  `{ from: area, to: localArea }`, where `area` is the largest outgoing block
-   *  `analyzeOutgoingArgs` (frontend/thumb.ts) LICENSED — the extent over which a callee's declared
+   *  `analyzeOutgoingArgs` (frontend/stackargs.ts) LICENSED — the extent over which a callee's declared
    *  parameter count and this function's own staging stores agree word for word. That licence, not
    *  a decline, is what keeps argument slots out of `SlotHomes`: a frame whose outgoing area cannot
    *  be licensed still declines in the frontend and never reaches here, and a frame with no call

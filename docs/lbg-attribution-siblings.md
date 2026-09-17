@@ -93,10 +93,10 @@ unchanged — `pokeemerald:GetMoveTarget`, which the dataset names alongside the
 declining on the stack and now declines in the structurer.
 
 The table is no longer reproducible with the instrumentation patch linked above: `git apply --check
-scripts/lbg-attribution/sibling-decline-trace.patch` fails (`patch does not apply`), because the
-declared-arity `return` it instruments at thumb.ts:2371 is the line that consuming outgoing
-arguments deleted. Re-measuring these blockers means re-deriving the instrumentation against the
-current lifter.
+scripts/lbg-attribution/sibling-decline-trace.patch` fails (`patch does not apply`). Both lines it
+instruments in `thumb.ts` are gone from that file — the declared-arity `return` was deleted by
+consuming outgoing arguments, and the `prefixStored` refusal moved to `frontend/stackargs.ts`.
+Re-measuring these blockers means re-deriving the instrumentation against the current lifter.
 
 ## What this does and does not establish
 

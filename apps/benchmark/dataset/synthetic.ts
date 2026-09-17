@@ -2700,7 +2700,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
   //
   // 2026-09-17 — EVERYTHING ABOVE IS THE STATE BEFORE OUTGOING STACK ARGUMENTS WERE CONSUMED, and
-  // three of its claims the artifact now contradicts. Each measured by running the row named:
+  // three of its claims the artifact now contradicts. Each measured, not read:
   //   * `pokeemerald:GetMoveTarget:agbcc` no longer declines on anything about the stack. Its
   //     blocker MOVED to the structurer — `pnpm bench run --tier real --only GetMoveTarget` reports
   //     `structure: cannot structure 'GetMoveTarget': unrecovered back-edge into block #8
@@ -2712,10 +2712,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     declared-arity refusal it controlled is gone: a call whose callee's declaration and whose
   //     staging stores agree word for word is consumed, and every disagreement declines naming what
   //     it saw. `stkwide` below is the refusing control now.
-  //   * the message quoted below — `callee \`SetupOAMSprite\` is declared with 9 arguments` — no
-  //     longer exists in `packages/core/src`. The klonoa sibling counts in this block were taken
-  //     against that spelling and are NOT re-measured here; a function of that shape now either
-  //     lifts or declines on whichever way its declaration and its stores disagree.
+  //   * the message quoted below — `callee \`SetupOAMSprite\` is declared with 9 arguments` — is
+  //     still emitted verbatim, and that is the trap: it is now the OPENING of a licence refusal
+  //     that goes on to name the disagreement, not a statement that the capability is missing. A
+  //     frame staging two of the five words nine parameters ask for continues `so its outgoing
+  //     stack-argument block is [sp,#0], … — but [sp,#8], [sp,#12], [sp,#16] is not stored on
+  //     every path to the call` (measured, `--proto '{"SetupOAMSprite":{"params":9}}'`). A
+  //     function whose declaration and stores AGREE emits no message at all, so the sibling
+  //     counts below are an upper bound on that shape and are NOT re-measured here.
   //
   // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
   // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read

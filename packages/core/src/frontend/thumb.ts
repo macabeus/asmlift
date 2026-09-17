@@ -2860,8 +2860,9 @@ export function lift(
     // `SlotHomes` and `l3/slotorder.ts` consume, and an argument slot's offset is an ABI POSITION,
     // not an `expand_decl` rank. Under agbcc's ACCUMULATE_OUTGOING_ARGS that area sits at the
     // BOTTOM of `localArea`, so the declared range starts where the largest licensed block ends
-    // (`analyzeOutgoingArgs`). A function whose area cannot be licensed never reaches here — the
-    // analysis refuses it — so `area` is 0 exactly when there is provably nothing to skip.
+    // (`frontend/stackargs.ts`). A refusal there licenses nothing and reports `area` 0, so the two
+    // ranges coincide exactly when no argument word was proved, and the narrowing can only ever
+    // skip offsets a callee's declaration and this function's own stores agreed on.
     declaredLocals: { from: outgoingArgs.area, to: localArea },
     ...(target.nonArgRegs
       ? {
@@ -3088,9 +3089,9 @@ export function lift(
       }
     }
     // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
-    // (below `capturedObjectIsTheWholeFrame`, which it needs) decides per call whether the words
-    // staged at the bottom of the frame are a callee's arguments; everything it cannot license
-    // refuses here, so a `[sp,#k]` access in such a function still declines loud.
+    // decides per call whether the words staged at the bottom of the frame are a callee's
+    // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
+    // function still declines loud.
     if (outgoing.blocker !== null) {
       return outgoing.blocker;
     }

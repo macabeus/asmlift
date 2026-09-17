@@ -161,8 +161,7 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     // The dangerous case, because the two witnesses agree by coincidence: six declared parameters
     // size a two-word block and the code stages two words, so the equality holds — and consuming
     // it hands `fd` six arguments where the fifth `double` spans both staged words. Read for its
-    // LENGTH alone (which is all a typed list used to be read for) this lifts to
-    // `fd(a0, a1, a0, a1, a2, a3)`.
+    // LENGTH alone this lifts to `fd(a0, a1, a0, a1, a2, a3)`.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double', 's32'] } })).toThrow(
       /parameter type `double` is one asmlift cannot size/,
     );
