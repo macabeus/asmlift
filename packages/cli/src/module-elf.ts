@@ -18,6 +18,8 @@ const ELF_MAGIC = 0x7f454c46;
 const ELFCLASS32 = 1;
 const ET_REL = 1;
 const SHT_SYMTAB = 2;
+const SHT_RELA = 4;
+const SHT_REL = 9;
 const SHF_ALLOC = 0x2;
 const STB_GLOBAL = 1;
 const STT_FUNC = 2;
@@ -52,6 +54,8 @@ interface Section {
   offset: number;
   size: number;
   link: number;
+  /** the section this one applies to — which section a relocation table relocates */
+  info: number;
   /** byte offset of this section HEADER, so a field can be written back */
   at: number;
 }
@@ -102,6 +106,7 @@ function readElf32(bytes: Uint8Array): Elf32 | undefined {
       offset: u32(h.at + 16),
       size: u32(h.at + 20),
       link: u32(h.at + 24),
+      info: u32(h.at + 28),
       at: h.at,
     });
   }
@@ -156,9 +161,10 @@ export function assertPlaced(bytes: Uint8Array, elfPath: string): void {
   }
 }
 
-/** A copy of a module ELF with every allocated section given a base of its own, and every symbol
- *  value rebased into it. The ordinary reader then sees an ordinary ELF: distinct addresses, one
- *  symbol per section offset, and {@link assertPlaced} satisfied by construction.
+/** A copy of a module ELF with every allocated section given a base of its own, and every
+ *  SECTION-RELATIVE coordinate rebased into it — symbol values and relocation offsets alike. The
+ *  ordinary reader then sees an ordinary ELF: distinct addresses, one symbol per section offset, a
+ *  function's relocations where the function is, and {@link assertPlaced} satisfied by construction.
  *
  *  The bases are synthetic — a REL module has no link-time address, and the game's loader picks a
  *  different one every run — so they are chosen only to be injective and readable, not to be where
@@ -192,15 +198,28 @@ export function placeModuleSections(bytes: Uint8Array, elfPath: string): Buffer 
   });
 
   for (const s of elf.sections) {
-    if (s.type !== SHT_SYMTAB) {
+    if (s.type === SHT_SYMTAB) {
+      for (let at = s.offset; at + SYMENT <= s.offset + s.size; at += SYMENT) {
+        const shndx = u16(at + 14);
+        const at32 = base.get(shndx);
+        if (shndx !== SHN_UNDEF && shndx < SHN_LORESERVE && at32 !== undefined) {
+          put32(at + 4, u32(at + 4) + at32); // st_value
+        }
+      }
       continue;
     }
-    for (let at = s.offset; at + SYMENT <= s.offset + s.size; at += SYMENT) {
-      const shndx = u16(at + 14);
-      const at32 = base.get(shndx);
-      if (shndx !== SHN_UNDEF && shndx < SHN_LORESERVE && at32 !== undefined) {
-        put32(at + 4, u32(at + 4) + at32); // st_value
-      }
+    // A RELOCATION'S OFFSET IS WRITTEN IN THE SAME COORDINATES AS A SYMBOL'S VALUE — its section's, which
+    // placement has just moved. Leave it and the file contradicts itself: a reader that finds a function at
+    // its placed address finds no relocations over it, because they still sit at their section-relative
+    // offsets. That is a silent answer of "this function relocates nothing", which is what a fully linked
+    // image looks like, so a caller comparing what a function's relocations point at compares none of them.
+    const at32 = base.get(s.info);
+    if ((s.type !== SHT_REL && s.type !== SHT_RELA) || at32 === undefined) {
+      continue;
+    }
+    const entsize = s.type === SHT_REL ? 8 : 12;
+    for (let at = s.offset; at + entsize <= s.offset + s.size; at += entsize) {
+      put32(at, u32(at) + at32); // r_offset
     }
   }
   return out;

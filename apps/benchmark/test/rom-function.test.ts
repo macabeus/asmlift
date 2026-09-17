@@ -1,8 +1,9 @@
 // The ROM gate's comparison (cases/rom-function.ts) over ELF32 files written here: a relocatable object and a
 // linked image holding the same function, with a relocated field, a byte outside it, or a tail changed.
+import { placeModuleSections } from '@asmlift/cli/module-elf';
 import { describe, expect, test } from 'vitest';
 
-import { compareWithRom, targetDigest } from '../src/cases/rom-function';
+import { compareWithRom, romLocation, targetDigest } from '../src/cases/rom-function';
 import { elf32 } from './elf32';
 
 const EM_ARM = 40;
@@ -444,6 +445,47 @@ describe('what a relocation points at', () => {
 
     test('another literal is refused, though every code byte is equal', () => {
       expect(compareWithRom(object([0xc3, 0xe1, 0x80, 0x00]), 'p', linked(FLOAT), TEXT_AT)).toEqual({
+        equal: false,
+        detail: "type 6 at +0x2 points at a local .data datum of 4 B, whose data differs from ROM's at +0x2",
+      });
+    });
+  });
+
+  // A REL MODULE is read through `romLocation`, which PLACES it: every section gets a base of its own
+  // so the module reads like a linked image. Placement rebases the section-relative coordinates, and a
+  // relocation's offset is one of them — leave it behind and the module's own relocations fall outside
+  // the function, which reads as a function that relocates nothing and compares no referent at all.
+  describe('a REL module, placed', () => {
+    const moduleElf = (data: number[]) =>
+      elf32({
+        machine: EM_PPC,
+        littleEndian: false,
+        textAddr: 0,
+        text: TEXT,
+        data,
+        symbols: [
+          { name: 'p', value: 0, size: TEXT.length },
+          { name: '@1135', value: 0, size: 4, type: 1, section: 'data', bind: 'local' as const },
+          { name: 'HuSprSet', value: 0, size: 0, section: 'undefined' as const },
+        ],
+        relocs: RELOCS,
+      });
+    const placedAt = (data: number[]) => {
+      const placed = placeModuleSections(moduleElf(data), '/p/m437Dll.plf');
+      return romLocation('m437Dll:.text+0x00000000', Buffer.alloc(0), () => placed);
+    };
+
+    test('the same literal is the same function', () => {
+      const { elf, at } = placedAt(FLOAT);
+      expect(compareWithRom(object(FLOAT), 'p', elf, at)).toEqual({
+        equal: true,
+        digest: targetDigest(object(FLOAT), 'p'),
+      });
+    });
+
+    test('another literal is refused, though every code byte is equal', () => {
+      const { elf, at } = placedAt(FLOAT);
+      expect(compareWithRom(object([0xc3, 0xe1, 0x80, 0x00]), 'p', elf, at)).toEqual({
         equal: false,
         detail: "type 6 at +0x2 points at a local .data datum of 4 B, whose data differs from ROM's at +0x2",
       });

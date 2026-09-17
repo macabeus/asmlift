@@ -40,6 +40,8 @@ interface SecSpec {
   flags?: number;
   addr?: number;
   size: number;
+  /** a RELA section's entries, and the 1-based index of the section they relocate */
+  rela?: { appliesTo: number; offsets: readonly number[] };
 }
 interface SymSpec {
   name: string;
@@ -78,8 +80,13 @@ function elf32(type: number, sections: readonly SecSpec[], symbols: readonly Sym
   const shstrtab = strings(names);
 
   // section 0 is the null entry; then the spec'd sections, .symtab, .strtab, .shstrtab
+  const relaBody = (s: SecSpec): Buffer => {
+    const buf = Buffer.alloc(12 * s.rela!.offsets.length);
+    s.rela!.offsets.forEach((o, i) => buf.writeUInt32BE(o, 12 * i));
+    return buf;
+  };
   const bodies = [
-    ...sections.map((s) => (s.type === SHT_NOBITS ? Buffer.alloc(0) : Buffer.alloc(s.size))),
+    ...sections.map((s) => (s.rela ? relaBody(s) : s.type === SHT_NOBITS ? Buffer.alloc(0) : Buffer.alloc(s.size))),
     symtab,
     strtab.buf,
     shstrtab.buf,
@@ -105,7 +112,16 @@ function elf32(type: number, sections: readonly SecSpec[], symbols: readonly Sym
   out.writeUInt16BE(shnum, 0x30);
   out.writeUInt16BE(shnum - 1, 0x32); // e_shstrndx
   bodies.forEach((b, i) => b.copy(out, offsets[i]));
-  const header = (i: number, name: string, secType: number, flags: number, addr: number, size: number, link = 0) => {
+  const header = (
+    i: number,
+    name: string,
+    secType: number,
+    flags: number,
+    addr: number,
+    size: number,
+    link = 0,
+    info = 0,
+  ) => {
     const sh = shoff + 40 * i;
     out.writeUInt32BE(shstrtab.at.get(name)!, sh);
     out.writeUInt32BE(secType, sh + 4);
@@ -114,9 +130,21 @@ function elf32(type: number, sections: readonly SecSpec[], symbols: readonly Sym
     out.writeUInt32BE(offsets[i - 1], sh + 16);
     out.writeUInt32BE(size, sh + 20);
     out.writeUInt32BE(link, sh + 24);
+    out.writeUInt32BE(info, sh + 28);
     out.writeUInt32BE(secType === 2 ? 16 : 0, sh + 36);
   };
-  sections.forEach((s, i) => header(i + 1, s.name, s.type ?? SHT_PROGBITS, s.flags ?? SHF_ALLOC, s.addr ?? 0, s.size));
+  sections.forEach((s, i) =>
+    header(
+      i + 1,
+      s.name,
+      s.type ?? SHT_PROGBITS,
+      s.flags ?? SHF_ALLOC,
+      s.addr ?? 0,
+      s.rela ? bodies[i].length : s.size,
+      s.rela ? sections.length + 1 : 0,
+      s.rela ? s.rela.appliesTo : 0,
+    ),
+  );
   header(sections.length + 1, '.symtab', 2, 0, 0, symtab.length, sections.length + 2);
   header(sections.length + 2, '.strtab', 3, 0, 0, strtab.buf.length);
   header(sections.length + 3, '.shstrtab', 3, 0, 0, shstrtab.buf.length);
@@ -165,6 +193,25 @@ const write = (name: string, bytes: Buffer): string => {
   writeFileSync(path, bytes);
   return path;
 };
+
+/** The `r_offset` of every entry in the named RELA section of an ELF32 big-endian image. */
+function relaOffsets(elf: Buffer, section: string): number[] {
+  const shoff = elf.readUInt32BE(0x20);
+  const shnum = elf.readUInt16BE(0x30);
+  const shentsize = elf.readUInt16BE(0x2e);
+  const shstr = elf.readUInt32BE(shoff + elf.readUInt16BE(0x32) * shentsize + 16);
+  for (let i = 0; i < shnum; i++) {
+    const sh = shoff + i * shentsize;
+    const nameAt = shstr + elf.readUInt32BE(sh);
+    if (elf.toString('latin1', nameAt, elf.indexOf(0, nameAt)) !== section) {
+      continue;
+    }
+    const at = elf.readUInt32BE(sh + 16);
+    const size = elf.readUInt32BE(sh + 20);
+    return Array.from({ length: size / 12 }, (_, k) => elf.readUInt32BE(at + 12 * k));
+  }
+  throw new Error(`no section ${section}`);
+}
 
 describe('moduleElfPath — the layout rule the CLI and the benchmark share', () => {
   test("a module's ELF sits beside the base ELF, at <module>/<module>.plf", () => {
@@ -245,6 +292,27 @@ describe('placeModuleSections — each section gets a base of its own', () => {
     expect([...globalSymbolKeys(placeModuleSections(big, '/p/big.plf'))].sort()).toEqual(
       [symbolKey('wide', 0x0100_0000), symbolKey('after', 0x0300_0000)].sort(),
     );
+  });
+
+  // A RELOCATION'S OFFSET is written in its section's coordinates, exactly as a symbol's value is.
+  // Rebasing only the symbols leaves the file contradicting itself: a reader that finds a function at
+  // its placed address finds NO relocations over it, which is indistinguishable from a function that
+  // relocates nothing — so the benchmark's game gate, which compares what each relocation points at,
+  // compared none of them on any REL row.
+  test("a relocation's offset is rebased with the section it relocates", () => {
+    const withRelocs = elf32(
+      ET_REL,
+      [
+        { name: '.text', size: 0x100, rela: undefined },
+        { name: '.data', size: 0x20 },
+        { name: '.rela.text', type: 4, flags: 0, size: 0, rela: { appliesTo: 1, offsets: [0x12, 0x46] } },
+      ],
+      [{ name: 'ObjectSetup', value: 0x40, shndx: 1 }],
+    );
+    const placed = placeModuleSections(withRelocs, '/p/m416Dll.plf');
+    expect(relaOffsets(placed, '.rela.text')).toEqual([0x0100_0012, 0x0100_0046]);
+    // unchanged in the module's own bytes, where the section sits at 0
+    expect(relaOffsets(withRelocs, '.rela.text')).toEqual([0x12, 0x46]);
   });
 
   test('a linked ELF is not a module ELF', () => {
