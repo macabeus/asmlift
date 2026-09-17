@@ -16,13 +16,17 @@
     "noEmit": true,
     "types": ["node"]
   },
-  // One root typecheck spans both packages and the benchmark harness (all CI-gated);
-  // apps/web is a separate vite app with its own tsconfig (its `tsc && vite build` is the gate).
+  // One root typecheck spans both packages and the benchmark harness (all CI-gated); apps/web is a
+  // separate vite app with its own two tsconfigs, and the root `typecheck` script chains all four
+  // so that nothing CI type-checks is invisible locally (packages/core/test/typecheck-coverage.test.ts
+  // fails when a tsconfig on disk, or one a package script compiles, is missing from that chain).
+  // `*.ts` is in scope for the vitest configs at the root: they reach into packages/*, and outside
+  // the typecheck a renamed export there would surface as a config that silently collects nothing.
   // `apps/benchmark/test` is in scope because its RANKING STUBS stand in for a core return type:
   // outside the typecheck, a stub that stopped satisfying `RankedResult` still compiled, and the
   // harness turned the resulting TypeError into a `noncompile` row.
   // `scripts` is in scope for the same reason one step out: the few .ts/.mts tools there reach
   // into `packages/*/src`, and outside the typecheck a signature they call could move without
   // anything saying so until someone reruns the tool by hand months later.
-  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src", "apps/benchmark/test", "scripts"]
+  "include": ["*.ts", "packages/*/src", "packages/*/test", "apps/benchmark/src", "apps/benchmark/test", "scripts"]
 }
