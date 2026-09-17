@@ -2699,6 +2699,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
   //
+  // 2026-09-17 — EVERYTHING ABOVE IS THE STATE BEFORE OUTGOING STACK ARGUMENTS WERE CONSUMED, and
+  // three of its claims the artifact now contradicts. Each measured, not read:
+  //   * `pokeemerald:GetMoveTarget:agbcc` no longer declines on anything about the stack. Its
+  //     blocker MOVED to the structurer — `pnpm bench run --tier real --only GetMoveTarget` reports
+  //     `structure: cannot structure 'GetMoveTarget': unrecovered back-edge into block #8
+  //     (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a
+  //     conditional continue, or an unsafe break)`. The other half of that sentence holds:
+  //     `sa3:ProcessOamBuffers:agbcc` still declines on `the address of a stack local is computed
+  //     (\`add r0, sp, #0x4\`)`.
+  //   * `stkarg` is a MATCH, so it is no longer the control that keeps a refusal honest. The
+  //     declared-arity refusal it controlled is gone: a call whose callee's declaration and whose
+  //     staging stores agree word for word is consumed, and every disagreement declines naming what
+  //     it saw. `stkwide` below is the refusing control now.
+  //   * the message quoted below — `callee \`SetupOAMSprite\` is declared with 9 arguments` — is
+  //     still emitted verbatim, and that is the trap: it is now the OPENING of a licence refusal
+  //     that goes on to name the disagreement, not a statement that the capability is missing. A
+  //     frame staging two of the five words nine parameters ask for continues `so its outgoing
+  //     stack-argument block is [sp,#0], … — but [sp,#8], [sp,#12], [sp,#16] is not stored on
+  //     every path to the call` (measured, `--proto '{"SetupOAMSprite":{"params":9}}'`). A
+  //     function whose declaration and stores AGREE emits no message at all, so the sibling
+  //     counts below are an upper bound on that shape and are NOT re-measured here.
+  //
   // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
   // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read
   // across a `callee(i)` loop, no address taken anywhere. agbcc gives three user locals a frame
@@ -2747,6 +2769,33 @@ export const SYNTHETIC: SynthSpec[] = [
   // m2c compiles none of the three address-taken rows: it renames the slot `unksp0` and never
   // declares it, on the identical `ctx` asmlift receives. It declines `stkarg` outright
   // (`Unable to find stack arg 0x0`), which is the same blocker asmlift names there.
+  //
+  // `stkwide` is the DECLINING row for the other side of that licence — a declaration that does
+  // not account for every word staged. `void fived(s32, s32, s32, s32, double)` truthfully
+  // declares five parameters and agbcc stages TWO words for the fifth: `ldr r4, .L3` /
+  // `ldr r5, .L3+0x4` / `str r4, [sp]` / `str r5, [sp, #0x4]`, the literal sitting in the pool as
+  // `.long 0x3ff80000, 0x0`. One declared word against two staged ones is the may-set
+  // disagreement, and asmlift declines: `stack pointer used as data — callee \`fived\` is declared
+  // with 5 arguments, so its outgoing stack-argument block is [sp,#0] — but [sp,#4] also reaches
+  // the call unread, so the declaration does not account for every word staged here`. `stkarg` is
+  // the ACCEPTING control for that licence and this row is the REFUSING one: without it nothing
+  // in the corpus notices an acceptance widened back to "a declared arity is enough", which is
+  // the shape that used to delete a variadic call's uncovered arguments.
+  //
+  // m2c renders it with SIX arguments, the double split into the two words the ABI staged —
+  // `fived(a, b, a + b, a - b, /* f64+0x0 */ 0x3FF80000, /* f64+0x4 */ 0)`, a nonmatch. So the
+  // row also records that the one decompiler here that does consume outgoing arguments today
+  // counts WORDS as parameters, which is exactly what the two-witness licence refuses to do.
+  {
+    sym: 'stkwide',
+    src:
+      'void fived(s32 a, s32 b, s32 c, s32 d, double e);\n' +
+      'void stkwide(s32 a, s32 b){ fived(a, b, a + b, a - b, 1.5); }',
+    features: ['multi-arg', 'double'],
+    toolchains: ['agbcc'],
+    ctx: 'void fived(s32 a, s32 b, s32 c, s32 d, double e); void stkwide(s32 a, s32 b);',
+    proto: { fived: { params: 5, returnsVoid: true }, stkwide: { returnsVoid: true } },
+  },
   {
     sym: 'stkaddr',
     src:

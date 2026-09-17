@@ -92,21 +92,22 @@ export interface LiveInModel {
    *  is right for that question — but its offset is an ABI position, not an `expand_decl` rank,
    *  and ranking a declaration list by it would be wrong with no diagnostic.
    *
-   *  TODAY THE TWO RANGES COINCIDE UNDER THUMB, AND THAT IS DELEGATED, NOT PROVED. What keeps
-   *  argument slots out of `SlotHomes` is `prefixStored` (frontend/thumb.ts): a function whose
-   *  frame has an outgoing area DECLINES before it reaches here, so every function that does
-   *  reach here has none. That guard's own comment says "Neither is sound alone and the pair is
-   *  not either", and lifting it is a named next step — so this field exists to make the
-   *  dependency TYPED and LOCAL rather than implicit and cross-module. Whoever lifts that decline
-   *  must narrow this range above the argument block; leaving it equal to `ownedLocals` would
-   *  start minting declaration ranks out of argument slots silently.
+   *  THE TWO RANGES DIFFER UNDER THUMB, AND A PROOF IS WHAT SEPARATES THEM. The frontend passes
+   *  `{ from: area, to: localArea }`, where `area` is the largest outgoing block
+   *  `analyzeOutgoingArgs` (frontend/stackargs.ts) LICENSED — the extent over which a callee's declared
+   *  parameter count and this function's own staging stores agree word for word. That licence, not
+   *  a decline, is what keeps argument slots out of `SlotHomes`: a frame whose outgoing area cannot
+   *  be licensed still declines in the frontend and never reaches here, and a frame with no call
+   *  taking stack arguments has `area` 0, so the ranges coincide exactly when there is provably
+   *  nothing to skip. The dependency is TYPED and LOCAL for that reason — the offsets a frontend
+   *  must not report as declarations are stated here rather than implied across modules.
    *
    *  The class is populated, not hypothetical. Over a sweep of every sa3 and klonoa listing, of
    *  2,001 lifted real agbcc functions 27 carry any L1 slot home, 12 of those also CALL, and 11 of
-   *  those carry a home at offset 0 — the exact offset `prefixStored` encodes as where an argument
-   *  block starts (`PackSaveSector` homes [0,4,…,72], `modf` [0,4,…,36], `RenderDialogSprites`
-   *  [0,4,…,36], and eight more). None reaches the ordering today, for an unrelated reason
-   *  (`l3/slotorder.ts`'s REACH note), so nothing downstream is guarding this.
+   *  those carry a home at offset 0 — the exact offset an outgoing argument block starts at
+   *  (`PackSaveSector` homes [0,4,…,72], `modf` [0,4,…,36], `RenderDialogSprites` [0,4,…,36], and
+   *  eight more). None reaches the ordering today, for an unrelated reason (`l3/slotorder.ts`'s
+   *  REACH note), so nothing downstream is guarding this.
    *
    *  ABSENT ⇒ NO STAMP. MIPS and PPC declare no frame partition at all, so they stamp nothing,
    *  which is the refusing direction. */
@@ -262,9 +263,9 @@ export function makeSsaBuilder(
     //
     // AND IT ASKS `declaredLocals`, NOT `ownedLocals`, which is a different question with a
     // different answer under agbcc — the outgoing stack-argument area is storage the function owns
-    // and does not declare. The two ranges are equal under Thumb today only because `prefixStored`
-    // declines every function with an outgoing area; see `declaredLocals`' own doc for the
-    // measurement and for what lifting that decline obliges.
+    // and does not declare. Under Thumb the declared range therefore starts where the largest
+    // LICENSED outgoing block ends, and the two coincide only when that block is empty; see
+    // `declaredLocals`' own doc for what earns the narrowing and for the frames still refused.
     if (!inRange(off, model().declaredLocals)) {
       return;
     }

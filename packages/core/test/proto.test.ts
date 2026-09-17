@@ -119,6 +119,24 @@ describe('prototypesFromSymbols — the project DWARF fills in what the caller d
     expect(prototypesFromSymbols(map)).toEqual({});
   });
 
+  test('a parameter WIDER THAN A WORD drops the entry — the premise the outgoing-argument licence rests on', () => {
+    // A `double`/`long long`/by-value-struct parameter occupies more than one word, which moves
+    // every later argument's home and breaks the "one word per parameter" counting the Thumb
+    // frontend's outgoing stack-argument block is laid out by (frontend/thumb.ts `declaredCall`).
+    // Nothing spells such a parameter here, so nothing derived from a symbol map can carry one:
+    // the entry goes, exactly as an unspellable NARROW one does.
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'Wide', {
+        returns: null,
+        params: [
+          { size: 4, signed: true },
+          { size: 8, signed: true },
+        ],
+      }),
+    ]);
+    expect(prototypesFromSymbols(map)).toEqual({});
+  });
+
   test('data symbols and unsignatured code symbols contribute nothing', () => {
     const map: SymbolMap = new Map([
       [0x03001000, [{ name: 'gData', kind: 'data' } as SymbolInfo]],

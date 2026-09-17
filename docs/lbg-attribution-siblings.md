@@ -84,6 +84,20 @@ the third reaches `bl sub_0804EE34` before reading the store at `[sp,#0]`. None 
 allocator behind those gates. Their rows already exist, so this study adds no duplicate decline
 rows and makes no claim that an unexecuted future fix would match them.
 
+2026-09-17: the first row's blocker is gone. `sub_0804C300` lifts — `pnpm bench run --tier real
+--only sub_0804C300` reports `asmlift=diff:43/78` where it reported `declined(1 gap(s))` — because
+the frontend now consumes a call's outgoing stack arguments where the callee's declared arity and
+this function's own staging stores agree word for word. The allocator behind that gate is still
+unmeasured, and the residual belongs to another family. The other two rows of THIS table are
+unchanged — `pokeemerald:GetMoveTarget`, which the dataset names alongside them, also stopped
+declining on the stack and now declines in the structurer.
+
+The table is no longer reproducible with the instrumentation patch linked above: `git apply --check
+scripts/lbg-attribution/sibling-decline-trace.patch` fails (`patch does not apply`). Both lines it
+instruments in `thumb.ts` are gone from that file — the declared-arity `return` was deleted by
+consuming outgoing arguments, and the `prefixStored` refusal moved to `frontend/stackargs.ts`.
+Re-measuring these blockers means re-deriving the instrumentation against the current lifter.
+
 ## What this does and does not establish
 
 The two largest-category allocation residuals support the published generality finding; they do

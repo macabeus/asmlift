@@ -220,6 +220,25 @@ export interface TargetDescription {
     // says so, but nothing in this bag could express it if they did not. Any behavior that can
     // differ between two toolchains sharing one description is mis-keyed by construction.
     spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
+    // Arguments past the argument registers are staged into an area this function RESERVES at the
+    // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call
+    // site. It is GCC's ACCUMULATE_OUTGOING_ARGS target macro, and it is what makes an outgoing
+    // argument INDISTINGUISHABLE by code alone from a dead local: the words sit inside this
+    // frame's reservation and nothing this function does ever reloads one.
+    //
+    // Absent ⇒ no outgoing area is claimed and the Thumb frontend's stack-argument licence never
+    // fires, so a `[sp,#k]` store reaching a call unread declines exactly as it did before that
+    // licence existed. Read off the target by the frontend (`frontend/thumb.ts` `declaredCall`),
+    // not by the structurer.
+    //
+    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured —
+    // the corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's
+    // `sub_0804C300` all stage their words at [sp,#0] upward inside the prologue's own
+    // reservation. NOT set anywhere else: a push-based caller would stage nothing inside the
+    // frame, and `docs/level-tower.md`'s rule for an unmeasured compiler behavior is to claim
+    // nothing. No other frontend calls the analysis today, so the field claims a premise rather
+    // than changing a verdict — which is the point: a second armv4t compiler must state it.
+    stagesOutgoingArgsInFrame?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -417,6 +436,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // control `synthetic:spillorder_rev` (the same body in the order asmlift already emits, which
     // must stay a MATCH), plus `synthetic:dma_fill_uninit`, a row this did not author.
     spillSlotOrder: 'ascending',
+    // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
+    // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
+    stagesOutgoingArgsInFrame: true,
   },
 };
 
