@@ -954,10 +954,15 @@ export function ppcPreprocess(opts: PpcPreprocessOptions): string {
   const unit = join(marked, basename(opts.srcPath));
   let r;
   try {
-    writeFileSync(unit, markPragmas(readFileSync(opts.srcPath, 'utf8'), pragmas));
+    // BYTE FOR BYTE, via latin1: a marked copy stands in for the project's own file, and what the
+    // compiler reads from it must be what it would have read from the original. A unit or header a
+    // dtk wrapper hands over in Shift-JIS is not UTF-8, and decoding it as UTF-8 turns every
+    // multibyte character into U+FFFD before mwcceppc ever sees it. latin1 is the one encoding that
+    // round-trips all 256 byte values, and a `#pragma` directive is ASCII either way.
+    writeFileSync(unit, markPragmas(readFileSync(opts.srcPath).toString('latin1'), pragmas), 'latin1');
     const shadowMounts = filesWithPragmas(opts.root).flatMap((rel, i) => {
       const copy = join(marked, `${i}-${basename(rel)}`);
-      writeFileSync(copy, markPragmas(readFileSync(join(opts.root, rel), 'utf8'), pragmas));
+      writeFileSync(copy, markPragmas(readFileSync(join(opts.root, rel)).toString('latin1'), pragmas), 'latin1');
       return ['-v', `${copy}:/proj/${rel}:ro`];
     });
     const argv = [...t.harnessFlags, ...opts.argv, '-EP', `/unit/${basename(unit)}`, '-o', out];
