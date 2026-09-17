@@ -33,7 +33,7 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 293 of the 294 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+context**: 335 of the 336 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
 vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
 a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 `test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
@@ -97,18 +97,18 @@ seven it is name, kind and size alone: residual 6 measures it.
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
 transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
-How m2c learns the row's own declaration, over the 294 real rows. Every count here is re-derived
+How m2c learns the row's own declaration, over the 336 real rows. Every count here is re-derived
 from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
-| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |   77 |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  109 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   91 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   98 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
-| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  124 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  127 |
 
-What those declarations SAY — a bare name, or the full signature — is residual 12.
+What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -153,7 +153,7 @@ _Favouring m2c._
    `{name, kind, size}` and nothing else (its linked ELF has no DWARF; 6,173 base entries and
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
    gets that row's ~650 KB preprocessed context with every struct and every prototype. 42 of the
-   294 real rows are on that footing. The other six projects carry the shape family (`declared`:
+   336 real rows are on that footing. The other six projects carry the shape family (`declared`:
    pokeemerald 24,539, marioparty3 902, sa3 148, kleod 113, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
@@ -180,12 +180,12 @@ _Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
 
 _Favouring m2c, across the tier._
 
-12. **The row's own signature, where its project declares it.** On 62 of the 96 rows whose context
+12. **The row's own signature, where its project declares it.** On 74 of the 110 rows whose context
     already declares the function, that declaration carries a PARAMETER LIST — the full signature,
     return type and parameter types (`u32 BoardRandMod(u32 value);`,
     `static s32 GetDigit(s32 value, s32 place);`) — while asmlift's `proto` states void-ness and,
-    on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 13, sa3 8,
-    pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
+    on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 13, ac-decomp 12,
+    sa3 8, pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
     `u32 BoardRandMod(u32 value);` from the context and re-running m2c: it then emits
     `s32 BoardRandMod(u32 arg0)`, same body. Not closed for the reason residual 4 is not: the
     declaration is the project's own header text, and removing it re-vendors the blob asmlift's
@@ -206,7 +206,7 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
   control), each run on its assigned toolchains: 215 functions → 671 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from seven decomp projects (af, kleod, marioparty3, marioparty4, pokeemerald, sa3, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 294 cases
+  with asmlift's canonical toolchain flags using each project's headers as context: 336 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
   from asmlift's mwcc_242, so byte-match is not defined there.)
 
