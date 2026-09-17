@@ -75,7 +75,7 @@ export interface RealFunction {
    *  WHAT EACH TOOL IS GIVEN ON THE REAL TIER, stated here once because it was previously stated
    *  wrongly ("prototypes only — no struct layouts, to match asmlift"):
    *
-   *    asmlift  the project's vendored SYMBOL MAP, on all 294 rows. Not name-and-address: sizes,
+   *    asmlift  the project's vendored SYMBOL MAP, on all 378 rows. Not name-and-address: sizes,
    *             declaration shapes, scalar/element signedness, array extents, volatility,
    *             const-ness, address-cast macro bodies, and — where the vendoring found them —
    *             callee signatures and struct tags with full field tables. The row's OWN
@@ -87,7 +87,7 @@ export interface RealFunction {
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
    *  against a tool handed layouts outright. This flag is set on every real C row without a
-   *  hand-written `ctx`. A C++ row carries neither: the parser below is C-only, and 42 of the 294
+   *  hand-written `ctx`. A C++ row carries neither: the parser below is C-only, and 42 of the 378
    *  real rows are C++.
    *
    *  IT IS NOT EXACT PARITY, and the residuals run in both directions — apps/benchmark/README.md
@@ -426,7 +426,7 @@ export function validateManifest(
       // too short to hold the function, cites a place the function is not. A reader follows that
       // link to check the row is honest, so a range that cannot contain `funcC` is a broken claim
       // even when the file is right. NOT an identity check on the text — the lines live in the
-      // checkout, not in the dataset, and 6 of the 294 real rows legitimately cite a span LONGER
+      // checkout, not in the dataset, and 6 of the 378 real rows legitimately cite a span LONGER
       // than their `funcC` (a doc comment above the signature). Vendoring, which does read the
       // checkout, is where the body itself is proved.
       const span =

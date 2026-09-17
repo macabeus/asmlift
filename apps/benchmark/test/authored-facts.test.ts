@@ -230,15 +230,31 @@ describe('the prototype line appended to a vendored m2c context', () => {
     expect(self).toEqual(['pokeemerald:AcroBikeHandleInputTurning']);
   });
 
-  // THE OTHER UNCAPPED PATH. A C++ unit's vendored context is not C, so m2c cannot be handed it,
-  // and the row hand-writes a `ctx` instead — which `m2cOwnPrototype` never sees. Pinned by name
-  // for the same reason as the rule above: a new row on this path is a decision, not a detail.
-  // README residual 5 states what it costs, and what no `proto` field can carry back.
+  // THE OTHER UNCAPPED PATH. A C++ unit's vendored context is not C, so m2c cannot be handed it.
+  // A row on that unit then makes one of TWO decisions, and they are not the same decision: it
+  // hand-writes a `ctx` — which `m2cOwnPrototype` never sees, README residual 5 — or it gives m2c
+  // NOTHING and lets it infer the signature from the asm, as asmlift does. Each is pinned on its
+  // own, for the same reason as the rule above: a new row on either path is a decision, not a
+  // detail. (They were one predicate, `!fn.m2cCtx`, while only one row was on either.)
   test('only the known rows hand-write the context m2c reads', () => {
     const hand = manifests
-      .flatMap(({ man }) => man.functions.filter((fn) => !fn.m2cCtx).map((fn) => `${man.project}:${fn.sym}`))
+      .flatMap(({ man }) => man.functions.filter((fn) => !fn.m2cCtx && fn.ctx).map((fn) => `${man.project}:${fn.sym}`))
       .sort();
     expect(hand).toEqual(['ac-decomp:JW_JUTGamePad_read']);
+  });
+
+  // A row given NO context at all is fair only where the SAME withholding applies to both tools:
+  // m2c infers the signature from the asm, and asmlift is given a symbol map with no layouts. What
+  // must never happen silently is a C row losing the context every other C row has — that is the
+  // #119 defect class — so the language is what this pins, and the count is in the README table.
+  test('a row given no m2c context at all is a C++ row', () => {
+    const cRows = manifests.flatMap(({ man }) =>
+      man.functions
+        .filter((fn) => !fn.m2cCtx && !fn.ctx)
+        .filter((fn) => unitLanguage(fn.unit, man.units[fn.unit].cflags) !== 'c++')
+        .map((fn) => `${man.project}:${fn.sym}`),
+    );
+    expect(cRows).toEqual([]);
   });
 });
 
@@ -250,12 +266,12 @@ describe("the README's account of what m2c is told", () => {
   const declares = (text: string, sym: string): boolean => new RegExp(`\\b${sym}\\s*\\(`).test(text);
 
   test('states how many rows learn their own declaration each way', () => {
-    const tally = { header: 0, prependC: 0, ownProto: 0, handCtx: 0, nothing: 0 };
+    const tally = { header: 0, prependC: 0, ownProto: 0, handCtx: 0, noContext: 0, nothing: 0 };
     for (const { man } of manifests) {
       const ctxs = vendoredCtxs(man);
       for (const fn of man.functions) {
         if (!fn.m2cCtx) {
-          tally.handCtx++;
+          fn.ctx ? tally.handCtx++ : tally.noContext++;
           continue;
         }
         const ctx = ctxs.get(fn.sym)!;
@@ -278,6 +294,7 @@ describe("the README's account of what m2c is told", () => {
       prependC: cell("a manifest's `prependC` needs to compile the reference standalone"),
       ownProto: cell('the one line `proto` also gives asmlift'),
       handCtx: cell("the row's own hand-written `ctx`"),
+      noContext: cell('no context at all — its C++ unit'),
       nothing: cell('nothing is appended, and m2c infers the signature as asmlift does'),
     });
     expect(Object.values(tally).reduce((a, b) => a + b)).toBe(manifests.flatMap(({ man }) => man.functions).length);

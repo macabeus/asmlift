@@ -102,7 +102,7 @@ seven it is name, kind and size alone: residual 6 measures it.
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
 transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
-How m2c learns the row's own declaration, over the 336 real rows. Every count here is re-derived
+How m2c learns the row's own declaration, over the 378 real rows. Every count here is re-derived
 from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
@@ -111,6 +111,7 @@ from the manifests by `test/authored-facts.test.ts`, so none of them can go stal
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
 | the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   98 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
+| no context at all — its C++ unit's own is not C, so m2c infers the signature from the asm, as asmlift does                                                                 |   42 |
 | nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  127 |
 
 What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
@@ -148,8 +149,10 @@ _Favouring m2c._
    `ac-decomp:JW_JUTGamePad_read`, declares `OSTime OSGetTime(void)` — so m2c is told the callee
    returns 64 bits, where asmlift's `proto` says only `{"params": []}`, and m2c's output uses it
    (`s64 temp_ret = OSGetTime();`). It is on that path because its unit is C++: the vendored
-   context is not C, so m2c's parser cannot be given it, and `authored-facts.test.ts` refuses a
-   row with no m2c context at all. Both tools decline the row on other causes today. The callee
+   context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given
+   NOTHING and infer its signature from the asm as asmlift does, which is what pikmin's 42 take;
+   `authored-facts.test.ts` pins each path by itself, and which of the two a C++ row should take is
+   open. Both tools decline the row on other causes today. The callee
    NAMES either side is told are already held equal by `test/authored-facts.test.ts`, and the same
    test pins the rows on this path by name.
 
@@ -157,8 +160,10 @@ _Favouring m2c._
    extents — is a property of the vendoring, not of every project. ac-decomp's maps carry
    `{name, kind, size}` and nothing else (its linked ELF has no DWARF; 6,173 base entries and
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
-   gets that row's ~650 KB preprocessed context with every struct and every prototype. 42 of the
-   336 real rows are on that footing. The other six projects carry the shape family (`declared`:
+   gets that row's ~650 KB preprocessed context with every struct and every prototype. pikmin's map
+   is the same shape (29,158 entries, names and sizes; its matching build carries no DWARF either),
+   so 84 of the 378 real rows are on that footing — and pikmin's rows are given no m2c context at
+   all, so there the asymmetry runs the other way. The other seven projects carry the shape family (`declared`:
    pokeemerald 24,539, marioparty3 902, sa3 148, kleod 113, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
@@ -210,7 +215,7 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
   control), each run on its assigned toolchains: 215 functions → 671 cases.
-- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from eight decomp projects (af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
+- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
   with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
   from asmlift's mwcc_242, so byte-match is not defined there.)
