@@ -52,7 +52,7 @@
 // HERE goes through the shared `ast.ts` ones, so at least the two models cannot disagree about what
 // a statement contains.
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, mapStmtExprs, mapStmtLists, stmtChildren, stmtLists, walkExprs } from './ast';
+import { isLoop, mapExprChildren, mapStmtExprs, mapStmtLists, stmtChildren, stmtLists, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 
@@ -160,7 +160,7 @@ function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean
   // body re-runs every iteration exactly as the body does, which is what `loop-region` refuses
   const walk = (list: Stmt[], path: number[], underLoop: boolean): void => {
     list.forEach((st, i) => {
-      const inside = underLoop || st.k === 'while' || st.k === 'dowhile' || st.k === 'for';
+      const inside = underLoop || isLoop(st);
       stmtLists(st).forEach((inner, j) => {
         const here = [...path, i, j];
         out.push({ at: here, list: inner, underLoop: inside });

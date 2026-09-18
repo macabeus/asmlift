@@ -12,12 +12,8 @@
 // and whether fall-through joins the two arms onto one path. `coalesceCandidates` offers both.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, isLoop, mapExprChildren, stmtChildren, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
-
-/** THE loop-kind test, shared by both admission paths in this file — the span model's enclosure
- *  walk and the arm path's `visit`. */
-const isLoop = (s: Stmt): boolean => s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
 
 function namesIn(e: Expr, out: Set<string>): void {
   // `addr` names a GLOBAL (`&gSym`) or a LOCAL — the structurer renders an `laddr` frame object

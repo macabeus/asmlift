@@ -81,7 +81,7 @@
 //     the promoted form.
 import { type IrType, scalarTypeForAccess } from '../ir/types';
 import { cellAddress } from './address';
-import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
+import { type Expr, type SFn, type Stmt, isLoop, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 import type { BaseInit } from './hoist';
 import { nameAllocator, placeBaseLocals } from './hoist';
@@ -230,7 +230,7 @@ function collectSites(body: readonly Stmt[]): { sites: Site[]; nestedAddrs: Set<
   };
   const walk = (stmts: readonly Stmt[], stmt: number, nested: boolean): void => {
     for (const s of stmts) {
-      const repeats = s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
+      const repeats = isLoop(s);
       for (const e of stmtExprs(s)) {
         visit(e, stmt, nested || repeats);
       }

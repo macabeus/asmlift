@@ -108,7 +108,7 @@
 import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, isLoop, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
@@ -240,7 +240,7 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
   for (const s of stmts) {
     // A loop's OWN condition (`stmtExprs` of a while/do-while/for) runs every iteration, so a base
     // there is loop-invariant just like a body use — visit it with `nested`, not the outer flag.
-    const nested = loop || s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
+    const nested = loop || isLoop(s);
     for (const e of stmtExprs(s)) {
       visitExpr(e, nested);
     }

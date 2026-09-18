@@ -731,6 +731,31 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
+/** Does this statement REPEAT what it contains? Its body and its own condition run once per
+ *  iteration, which is the fact half of `l3/` asks about: a hoist out of one is loop-invariant
+ *  code motion, a copy inside one re-runs, and a live range that crosses one is under pressure.
+ *
+ *  It lives here, exhaustive and with no `default`, for the reason {@link stmtLists} does: a new
+ *  `Stmt` kind that repeats is then a compile error at ONE site rather than a silent `false` in
+ *  each caller's own hand-spelled kind test. */
+export function isLoop(s: Stmt): boolean {
+  switch (s.k) {
+    case 'while':
+    case 'dowhile':
+    case 'for':
+      return true;
+    case 'if':
+    case 'switch':
+    case 'assign':
+    case 'store':
+    case 'exprstmt':
+    case 'return':
+    case 'break':
+    case 'continue':
+      return false;
+  }
+}
+
 /** The nested statement LISTS of a statement — the SCOPES it opens.
  *
  *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those

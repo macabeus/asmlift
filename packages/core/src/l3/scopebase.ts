@@ -69,7 +69,7 @@
 import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtExprs, stmtLists } from './ast';
+import { isLoop, mapExprChildren, stmtExprs, stmtLists } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator, takenNames } from './hoist';
 import { addressableGlobals } from './storage';
@@ -227,7 +227,7 @@ function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[
   };
   for (const [i, s] of body.entries()) {
     at = i;
-    const isLoop = s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
+    const repeats = isLoop(s);
     // A loop's OWN condition runs every iteration — a base there is loop-invariant exactly as a
     // body use is, and it lives at THIS list, which does not. basecse.ts and argbase.ts treat the
     // CONDITION the same way. They do NOT agree about a `for`'s `init`: basecse counts it in-loop
@@ -235,7 +235,7 @@ function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[
     // it at the enclosing cadence, which is the truthful reading — it runs once. Recorded because
     // the divergence is real and an extraction has to pick one; both readings are pinned in
     // test/addr-placement.test.ts so the pick is deliberate rather than whichever survives.
-    stmtExprs(s).forEach((e) => visit(e, isLoop));
+    stmtExprs(s).forEach((e) => visit(e, repeats));
     if (s.k === 'for') {
       // `init`/`inc` are typed as the full Stmt union, so a COMPOUND one is type-legal. `stmtExprs`
       // reaches only its own expressions while `rewriteStmt` descends into any nested list — the
@@ -257,7 +257,7 @@ function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of stmtLists(s)) {
-      collect(child, [...path, child], [...loop, isLoop], [...idxPath, i], st);
+      collect(child, [...path, child], [...loop, repeats], [...idxPath, i], st);
     }
   }
 }
