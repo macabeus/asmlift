@@ -57,13 +57,16 @@ test('a name of no known kind that is not an identifier is still refused, not pa
   expect(unspellableReason('foo.bar')).toMatch(/not a C identifier/);
 });
 
-test('a C++ mangled data symbol is refused — the name is a mangling, not a source spelling', () => {
+test('a C++ class-scoped data symbol is refused for the DECLARATION, not for the spelling', () => {
   // pikmin:initSoftReset__9StdSystemFv's relocation. Its lift is CORRECT: the global really is
-  // `CmdStream::statbuff`. But `statbuff__9CmdStream` is what the compiler named it, not what any
-  // source writes, and the row's context declares only the class member — so the candidate names
-  // something nothing declares. Measured: that row compiled to nothing until this rule existed.
+  // `CmdStream::statbuff`, and — measured in the shape the harness compiles, inside the
+  // `extern \"C\"` block a C++ row's candidate is wrapped in — `extern int statbuff__9CmdStream;`
+  // references EXACTLY that symbol. What is missing is the declaration: the row's own unit declares
+  // the member under its class scope, nothing here decodes that scope, and the row compiled to
+  // nothing until this rule existed. The refusal must say that, not claim the name is unspellable.
   expect(classifyRelocSymbol('statbuff__9CmdStream')).toBe('cpp-mangled');
-  expect(unspellableReason('statbuff__9CmdStream')).toMatch(/class scope/);
+  expect(unspellableReason('statbuff__9CmdStream')).toMatch(/can DECLARE it/);
+  expect(unspellableReason('statbuff__9CmdStream')).not.toMatch(/not what any source writes/);
 });
 
 test('an ordinary C name with a double underscore is NOT mistaken for a mangling', () => {

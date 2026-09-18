@@ -16,6 +16,19 @@
 // behaves differently: the decomp projects' generated labels (`lbl_1_bss_2464`, `fn_1_458`) are
 // ordinary identifiers that the project's own headers declare and its own sources spell, so they
 // are `plain` and get no entry of their own.
+//
+// THE SCOPE OF THIS POLICY IS THE NAME, AND ONLY ON A DATA RELOCATION.
+//  • Not the TYPE. A name this passes is still rendered at the width the asm implies, which is a
+//    different seam and fails loud in the compiler (docs/symbol-naming-policy.md).
+//  • Not the LINKAGE. A file-scope `static` and an `extern` of the same name compile to the same
+//    object under mwcc — same bytes, same named relocation — so the minted `extern` asserts
+//    nothing the reference did not already assert (measured; see the doc).
+//  • Not a `bl` CALLEE. Those reach the emitter through the call path and are NOT classified here:
+//    a C++ row's candidate is compiled inside an `extern \"C\"` block, where a mangled name written
+//    verbatim denotes exactly that symbol (apps/benchmark/src/compile/real.ts `candidateLinkage`),
+//    so a callee needs no policy the way a global that must be DECLARED does.
+//
+// The evidence, the counts and the corpus behind every rule are in docs/symbol-naming-policy.md.
 
 /** What sort of name a relocation carries. Everything but `plain` is unspellable in C. */
 export type RelocSymbolKind =
@@ -77,9 +90,10 @@ export function unspellableReason(sym: string): string | null {
       );
     case 'cpp-mangled':
       return (
-        `names a C++ mangled symbol ('${sym}') — the name is what the compiler made of a class ` +
-        `scope, not what any source writes, and the C emitted here cannot enter that scope to ` +
-        `spell it`
+        `names a C++ class-scoped symbol ('${sym}') — a reference spelled this way reaches exactly ` +
+        `that symbol, but nothing here can DECLARE it: the row's own unit declares the member under ` +
+        `its class scope, which this frontend does not decode, and the candidate would name an ` +
+        `identifier no declaration introduces`
       );
     case 'not-an-identifier':
       return `names '${sym}', which is not a C identifier`;
