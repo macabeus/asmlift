@@ -402,6 +402,10 @@ packages/core/            @asmlift/core — the pipeline
   src/frontend/           ISA frontends: thumb.ts, mips.ts, ppc.ts + shared disasm/ssa/opaque
                           reloc-symbol.ts decides which relocation names may be written into a
                           candidate at all — docs/symbol-naming-policy.md is the evidence
+                          high-half.ts is the fold MIPS and PowerPC share for a global address
+                          split across two instructions (`%hi`/`%lo`, `@ha`/`@l`): it pairs the
+                          halves BY SSA VALUE and refuses every path that would leave the
+                          link-time placeholder standing for the symbol
   src/ir/                 the IR substrate: types, ops, printer/parser, verifier
   src/pattern/            rewrite-patterns-as-data + the greedy driver
   src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, extscale, arrays,
