@@ -80,9 +80,9 @@ describe('functionScopedDump', () => {
   });
 });
 
-// The prologue split and the slice must read the same listing. A C++ template symbol carries `>` of
-// its own, so a `<[^>]+>` pattern cannot see its header — and this file held one while
-// `sliceSymbol` was fixed to a greedy `<(.+)>`. The two then disagreed.
+// The prologue split and the slice must read the same listing, which is why both come from
+// frontend/disasm.ts. A C++ template symbol carries `>` of its own, so a `<[^>]+>` pattern cannot
+// see its header, and a second copy of the pattern here would let the two readers disagree.
 test('a listing whose FIRST function carries a TEMPLATE symbol is still scoped to one copy of it', () => {
   const sym = 'invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane';
   const listing = [
@@ -102,7 +102,7 @@ test('a listing whose FIRST function carries a TEMPLATE symbol is still scoped t
   ].join('\n');
   // The prologue is everything BEFORE the first header, so a first header the pattern cannot see
   // puts the template function itself into the prologue — and `sliceSymbol` then appends it a
-  // second time. The row's listing held its own function twice.
+  // second time, leaving the row's listing holding its own function twice.
   const scoped = functionDisassembly(listing, sym);
   expect(scoped.split(`<${sym}>:`)).toHaveLength(2);
   expect(scoped).not.toContain('somewhere_else');

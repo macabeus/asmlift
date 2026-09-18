@@ -50,7 +50,7 @@ export interface SsaBuilder {
    *  `accept` says what counts as a definition. A frontend that defines a register with something
    *  that is NOT a value — PowerPC's `@ha` high half — passes a predicate rejecting it, because
    *  "a def reaches here" and "a value reaches here" are the same question only when every def is
-   *  a value. The distinction is the one `obligedParams` makes above, for the same consumer. */
+   *  a value. */
   hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing

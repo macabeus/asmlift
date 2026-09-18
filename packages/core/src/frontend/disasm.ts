@@ -2,18 +2,11 @@
 // parses GNU-as text, not objdump, so it does not route through here.
 import { FrontendUnsupportedError } from './errors';
 
-/** Slice a multi-symbol objdump listing down to ONE function's lines. objdump marks each
- *  function with an `ADDR <sym>:` header line; when headers are present the input is sliced to
- *  exactly the requested symbol — and an ABSENT symbol declines LOUD, because emitting some
- *  other function's body under the requested name is precisely the silent miscompile the
- *  cardinal rule forbids. Headerless input (a raw instruction fragment) passes through. */
-/** The objdump function-header line. GREEDY to the LAST `>`: a C++ template symbol contains `>` of
- *  its own (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header a pattern cannot see is
- *  worse than one it misreads — the PRECEDING function's slice runs on through it, which is exactly
- *  the "other function's body under the requested name" `sliceSymbol` refuses to do. ONE pattern,
- *  because a second copy is a second answer to the same question: the benchmark's own listing
- *  scoper held a `<[^>]+>` copy that decided whether `sliceSymbol` was called at all, so a scoped
- *  object whose only function was a template symbol handed back the whole dump. */
+/** The objdump function-header line, exported through the two readers below so that nothing can
+ *  disagree about where a function starts. GREEDY to the LAST `>`: a C++ template symbol contains
+ *  `>` of its own (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header a pattern cannot
+ *  see is worse than one it misreads — the PRECEDING function's slice runs on through it, and the
+ *  prologue split swallows it. */
 const HEADER_LINE = /^[0-9a-f]+\s+<(.+)>:\s*$/i;
 const HEADER_SEARCH = new RegExp(HEADER_LINE.source, 'im');
 
@@ -23,6 +16,11 @@ export function firstFunctionHeader(disasm: string): number {
   return disasm.search(HEADER_SEARCH);
 }
 
+/** Slice a multi-symbol objdump listing down to ONE function's lines. objdump marks each
+ *  function with an `ADDR <sym>:` header line; when headers are present the input is sliced to
+ *  exactly the requested symbol — and an ABSENT symbol declines LOUD, because emitting some
+ *  other function's body under the requested name is precisely the silent miscompile the
+ *  cardinal rule forbids. Headerless input (a raw instruction fragment) passes through. */
 export function sliceSymbol(disasm: string, symbol: string): string {
   const lines = disasm.split('\n');
   const headers: { line: number; sym: string }[] = [];

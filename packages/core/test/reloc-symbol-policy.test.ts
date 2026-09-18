@@ -62,8 +62,9 @@ test('a C++ class-scoped data symbol is refused for the DECLARATION, not for the
   // `CmdStream::statbuff`, and — measured in the shape the harness compiles, inside the
   // `extern \"C\"` block a C++ row's candidate is wrapped in — `extern int statbuff__9CmdStream;`
   // references EXACTLY that symbol. What is missing is the declaration: the row's own unit declares
-  // the member under its class scope, nothing here decodes that scope, and the row compiled to
-  // nothing until this rule existed. The refusal must say that, not claim the name is unspellable.
+  // the member under its class scope and nothing here decodes that scope, so the candidate would
+  // name an identifier no declaration introduces. The refusal must say that, not claim the name is
+  // unspellable.
   expect(classifyRelocSymbol('statbuff__9CmdStream')).toBe('cpp-mangled');
   expect(unspellableReason('statbuff__9CmdStream')).toMatch(/can DECLARE it/);
   expect(unspellableReason('statbuff__9CmdStream')).not.toMatch(/not what any source writes/);

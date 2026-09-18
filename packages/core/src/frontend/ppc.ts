@@ -195,15 +195,13 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       continue;
     } // rB = &table (lo) + 0
     const rT = addi.ops[1];
-    // The table's base is the SAME `@ha`/`@l` pair the address fold consumes, and it must show the
-    // same evidence: the high half's relocation type, the low half's, one symbol, one addend — so
-    // a dispatch is never recovered from two instructions that never addressed the table together.
-    // The two pairings stay separate deliberately: this one runs before the blocks exist, asks for
-    // the table's NAME rather than its address, and hands it to `readJumpTable` instead of a
-    // `gaddr`. It deliberately does NOT consult the naming policy, and that is the difference that
-    // matters: 292 of the corpus's `ADDR16` relocations name a `@N` or `.`-prefixed symbol, and a
-    // table base is READ as data here, never written into the candidate as an identifier. The
-    // address fold refuses those same names, because there it would have to spell them.
+    // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the same
+    // evidence — both relocation types, one symbol, one addend — so a dispatch is never recovered
+    // from two instructions that never addressed the table together. It stays a separate pairing:
+    // it runs before the blocks exist, and it wants the table's NAME, for `readJumpTable`, not its
+    // address. It skips the naming policy deliberately — a table base is read here as data, never
+    // written into the candidate as an identifier — so the `@N` and `.`-prefixed symbols the
+    // address fold must refuse (292 of the corpus's `ADDR16` relocations) are harmless here.
     const tableSym = lis.reloc?.sym;
     if (
       lis.ops[0] !== rT ||
@@ -389,14 +387,12 @@ export function lift(
   // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
   // waits on the fold. Saying which one a row hit is the whole value of the message.
   const relocSite = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
-  /** Whether the decode of the instruction in hand has TAKEN its relocation — asked once, at the
-   *  end of `decode`, so a relocation no case consumed refuses instead of being dropped. Every
-   *  consumer answers it by doing the one thing a consumer does: asking for the relocation's
-   *  symbol. Five cases used to ask the question for themselves, each guarding its own immediate
-   *  field, which left every OTHER modelled instruction silently ignoring a relocation it carried
-   *  (`andi. r3,r3,0` under an `R_PPC_EMB_SDA21` lifted to `a0 & 0`). An unmodelled instruction
-   *  still refuses earlier and for its own better reason — `lfs`/`lfd` under either relocation name
-   *  the float gap, not this one. */
+  /** Whether the decode of the instruction in hand has TAKEN its relocation. `decode` asks once, of
+   *  every modelled instruction, so a relocation no case consumed refuses instead of being dropped.
+   *  A per-case guard would only cover the cases that remember to carry one, and every other
+   *  instruction would lift its printed placeholder as a value (`andi. r3,r3,0` under an
+   *  `R_PPC_EMB_SDA21` is `a0 & 0`). An UNmodelled instruction refuses earlier and for a better
+   *  reason: `lfs`/`lfd` under either relocation name the float gap, not this one. */
   let relocTaken = false;
   /** The symbol a relocation names, once the naming policy has passed it. Every recovery below goes
    *  through here FIRST, so an unspellable name can never reach the declaration minter looking like
@@ -445,24 +441,23 @@ export function lift(
 
   /** The HIGH half of a relocated address, per value standing for one.
    *
-   *  frontend/mips.ts folds the same `%hi`/`%lo` pair, and this is NOT a copy of it. Two
-   *  divergences, and only the first is about dialects. MIPS reaches the fold through a pre-pass
+   *  frontend/mips.ts folds the same `%hi`/`%lo` pair, and this is NOT a copy of it. The first
+   *  divergence is only about dialects: MIPS reaches the fold through a pre-pass
    *  (`applyMipsGlobalRelocs`) because it has a SECOND input dialect — Splat text already spells
-   *  `%hi`/`%lo`, so the records must be pushed into the operands before the lift; PowerPC has one
-   *  dialect, objdump `-r`, so that bridge would be scaffolding with no inhabitant and the
-   *  relocation is read where it lands.
+   *  `%hi`/`%lo`, so the records must be pushed into the operands before the lift. PowerPC has one
+   *  dialect, objdump `-r`, so that bridge would be scaffolding with no inhabitant.
    *
-   *  The second divergence is the fold itself, and it is the one that matters. MIPS keys the high
-   *  half BY REGISTER, in a block-local map, with no guard on reading one as a value and no check
-   *  that none escaped the finished function. That is unsound in both of the ways this file guards
-   *  against, live on `main` and reproducible: an `R_MIPS_HI16` with no `LO16`, read as a value,
-   *  renders the printed placeholder as the number objdump printed (`return 0;`), and the diamond
-   *  below — a sibling definition on the path not taken — hands the half back as an ordinary entry
-   *  parameter. PowerPC refuses both. The route out is not a second copy of this code: `DisasmReloc`
+   *  The second divergence is the fold itself, and it is the one that matters. MIPS records a
+   *  pending high half BY REGISTER in a BLOCK-LOCAL map, and its `lui` writes no SSA value at all,
+   *  so its read-as-data guard reaches only the block that recorded the half. Two shapes walk past
+   *  it on `main` today: a `lui` whose register is read in a LATER block has no definition for SSA
+   *  to find, so the half comes back as a phantom entry parameter, and an `R_MIPS_HI16` with no
+   *  `LO16` is never rewritten into a `%hi` operand at all, so the `lui` lifts as the 0 objdump
+   *  printed. PowerPC refuses both. The route out is not a second copy of this code: `DisasmReloc`
    *  is already a shared carrier, and once `applyMipsGlobalRelocs` and the Splat parser both write
-   *  `ins.reloc` instead of rewriting operands to `%hi(SYM)` text, ONE value-keyed fold can serve
-   *  both ISAs and MIPS's two holes close as a consequence of the sharing. That is a round of its
-   *  own with an N64 bench bill this one cannot pay.
+   *  `ins.reloc` instead of rewriting operands to `%hi(SYM)` text, ONE value-keyed fold serves both
+   *  ISAs and MIPS's holes close as a consequence of the sharing — a round of its own, with an N64
+   *  bench bill this one cannot pay.
    *
    *  `lis rD,SYM@ha` produces no VALUE: `@ha` is `((SYM + 0x8000) >> 16) & 0xffff`, a number that
    *  means nothing until the sign-extended `@l` half completes it, and in a relocatable object both
@@ -477,10 +472,9 @@ export function lift(
    *  before the `lis`. `assertNoHighHalfEscaped` below closes the second half of the same hole,
    *  where the read lands on a block parameter MERGING a high half with an ordinary value. */
   const highHalf = new Map<Value, { sym: string; addend: number; addr: number; mnemonic: string; consumed: boolean }>();
-  /** Every register read in this frontend goes through here. A register holding a high half is not
-   *  a value, so reading it as one refuses loud rather than handing back a plausible number that
-   *  stands for an address. Only the `@l` consumer may look at it, and it does so through
-   *  `foldLoHalf`, never through a read. */
+  /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
+   *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
+   *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
   const readReg = (r: string, at: number): Value => {
     const v = readVar(r, at);
     const hi = highHalf.get(v);
@@ -504,19 +498,16 @@ export function lift(
   // makes `strlen(s)` into `strlen(s, <half>)` — which then refuses at the read. Measured on
   // `pikmin:searchKanjiCode__FUs`, whose `lis r4` at 0x4 pairs only at 0x28, past the `bl strlen`.
   //
-  // A GAP REFUSES. The count is contiguous, so a register with nothing reaching it ends it — and an
-  // argument register can be empty for two opposite reasons. Either the call really takes that few
-  // arguments, or the register still holds this function's own untouched incoming argument, which
-  // is a value the machine passes on and SSA has no definition for (nothing ever wrote it, so
-  // nothing is there to find). When a LATER argument register does hold a value, the second reading
-  // is the only one left — the caller set up r5 and left r3 alone — and taking the first silently
-  // drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` passes seven
-  // registers to `evw_color_set` and, with r4 left at its incoming value, emitted
-  // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. (Mario Party 4's
-  // checkout has the same shape carrying a recovered address: `fn_1_C4E4` in `m408Dll/stage.o`
-  // sets up six arguments and emitted `omAddObjEx()`.) Which of the two it is cannot be decided
-  // here — the function's own arity is exactly what is missing — so this refuses and names the gap
-  // rather than guessing at a count. A prototype answers it (`protoArity` is consulted first).
+  // A GAP REFUSES. The count is contiguous, so an argument register with nothing reaching it ends
+  // it — and one is empty for two opposite reasons. Either the call really takes that few
+  // arguments, or the register still holds this function's own untouched incoming argument, a value
+  // the machine passes on that SSA has no definition for because nothing ever wrote it. When a
+  // LATER argument register does hold a value the second reading is the only one left, and taking
+  // the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
+  // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
+  // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
+  // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
+  // and names the gap rather than guessing. A prototype answers it (`protoArity` is asked first).
   const fallbackArgc = (bi: number, at: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalf.has(v));
     let n = 0;
@@ -545,15 +536,15 @@ export function lift(
   //
   // THE REGISTER IS PART OF THE SLOT, not bookkeeping about it. `stw r3,8(r1)` / `lwz r4,8(r1)` is
   // mwcc spilling an incoming ARGUMENT and reading it back into another register — a real value
-  // moving through memory, not a save/restore pair. Dropping the reload leaves the destination with
-  // no definition at all, and then `fallbackArgc`'s contiguous scan finds nothing reaching that
-  // argument register and silently takes every LATER argument with it. An offset-only record cannot
-  // tell the two apart. `pikmin:__ct__7ActFreeFP4Piki` is the benchmark's inhabitant — it reads
-  // `this` back into r4 — and Mario Party 4's checkout has 28 more, `SLFileOpen` in `SLData.o`
-  // among them, each losing an argument the relocation fold had just recovered.
+  // moving through memory, not a save/restore pair, and an offset-only record cannot tell the two
+  // apart. Dropping that reload leaves the destination with no definition at all, and
+  // `fallbackArgc`'s contiguous scan then takes every LATER argument with it.
+  // `pikmin:__ct__7ActFreeFP4Piki` is the benchmark's inhabitant — it reads `this` back into r4 —
+  // and 28 Mario Party 4 checkout functions share the shape, each losing an argument the relocation
+  // fold recovered.
   const savedSlots = new Map<number, string>();
   // `stmw rS,D(r1)` saves rS..r31 into consecutive words from D; `lmw rD,D(r1)` restores the same
-  // range. One rule, spelled once for both.
+  // range.
   const frameRange = (firstReg: string, off: number): Array<{ off: number; reg: string }> => {
     const first = Number(firstReg.slice(1));
     const slots: Array<{ off: number; reg: string }> = [];
@@ -677,9 +668,8 @@ export function lift(
       return v;
     };
     const emitShImm = kit.shImm;
-    // Materialise the address of a named global — the same `gaddr` the MIPS and Thumb frontends
-    // emit, so the structurer's three lowerings (bare `SYM`, `((T *)&SYM)[i]`, `&SYM`) are reached
-    // from PowerPC by exactly the path they were built for.
+    // Materialise the address of a named global — the same `gaddr` op the MIPS and Thumb frontends
+    // emit, which the structurer lowers to `SYM`, `((T *)&SYM)[i]` or `&SYM`.
     const emitGaddr = (sym: string): Value => {
       const g = mkValue(T.unk(32));
       ops.push(mkOp('gaddr', { results: [g], attrs: { sym } }));
@@ -688,13 +678,9 @@ export function lift(
     // `lwz rD,0(0)` under an `R_PPC_EMB_SDA21` relocation is a SMALL-DATA access. Both printed
     // fields are link-time placeholders: the linker substitutes r13/r2 for the base register and a
     // section-relative displacement for the offset, so the address is exactly `&SYM` plus the
-    // relocation's own addend — and the printed `0(0)` carries no information at all.
-    //
-    // Unlike the `@ha`/`@l` pair this is a SINGLE site: there is no half to pair, no register to
-    // prove, and nothing that can drift between two instructions. That is why it is the simpler
-    // half of the same capability. Because the printed operand is discarded rather than read, an
-    // operand that is NOT the expected placeholder refuses instead — a field this code ignores
-    // must be one that provably says nothing.
+    // relocation's own addend. Because the printed operand is discarded rather than read, one that
+    // is NOT the expected placeholder refuses — a field this code ignores must be one that provably
+    // says nothing.
     const sdaAccess = (ins: Instr, mem: string): { base: Value; off: number } | null => {
       if (ins.reloc?.type !== 'R_PPC_EMB_SDA21') {
         return null;
@@ -726,17 +712,17 @@ export function lift(
     // Asking SSA for that value is what makes it a proof — a redefinition on any path that reaches
     // this read produces a different value (a block parameter, at a merge), which is not in
     // `highHalf` and so refuses. Nothing consults adjacency or distance, which is why a pair eleven
-    // instructions apart folds (26% of the corpus's pairs are not adjacent) while a register reused
-    // between the halves refuses.
+    // instructions apart folds — 26% of the corpus's pairs are not adjacent — while a register
+    // reused between the halves refuses.
     //
     // BLOCK IDENTITY IT DOES CONSULT, through SSA and not directly, and the refusal has to say so.
     // `readVar` during block FILLING answers from what is sealed: a chain of single-predecessor
     // blocks walks back to the `lis` and folds, but a read at a JOIN gets the block parameter that
     // stands for the merge, and in an unsealed loop header an incomplete one — neither is in
     // `highHalf`. So an `@ha` hoisted above a loop with its `@l` in the body refuses, and so does a
-    // pair split across a diamond even when BOTH paths carry the same half. Measured: over 29,850
-    // swept functions this refusal has 0 inhabitants (the merge guard below has 113), so the
-    // residual is written down rather than built.
+    // pair split across a diamond even when BOTH paths carry the same half. Over a 29,850-function
+    // sweep this refusal has 0 inhabitants (`assertNoHighHalfEscaped` has 113), so the residual is
+    // written down rather than built.
     const foldLoHalf = (ins: Instr, rHi: string, imm: string): Value => {
       relocTaken = true;
       const lo = ins.reloc!;
@@ -912,9 +898,8 @@ export function lift(
           break; // load immediate (addi rD,0,imm)
         case 'lis':
           // `lis rD,SYM@ha` is the high half of an absolute address, and the ONLY instruction that
-          // carries `R_PPC_ADDR16_HA` in this corpus. rD is defined as a PLACEHOLDER — see
-          // `highHalf` — so that the address is materialised once, where its low half lands, and
-          // every other reader of rD refuses.
+          // carries `R_PPC_ADDR16_HA` in this corpus. rD is defined as a placeholder — see
+          // `highHalf`.
           if (ins.reloc?.type === 'R_PPC_ADDR16_HA') {
             if (parseImm(s) !== 0) {
               throw new PpcUnsupportedError(
@@ -960,8 +945,7 @@ export function lift(
           // the `@l`-in-a-displacement form (1,935 integer load/store sites across the three
           // checkouts, plus the float loads) — are left unbuilt per docs/level-tower.md's "earn the
           // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
-          // high half none of them consumed is caught by `readReg` when it is read, or by the
-          // dangling-`@ha` check at the end of the lift when it is not.
+          // high half none of them consumed is caught by `readReg` or by the dangling-`@ha` check.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
             const g = foldLoHalf(ins, s, t);
             if (ins.reloc.addend === 0) {
@@ -976,8 +960,8 @@ export function lift(
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
         // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
         // pair recognizer is the only reloc-carrying consumer; an addis over a register is plain
-        // arithmetic, and a reloc-carrying one never gets here (the choke point at the end of
-        // `decode` takes it).
+        // arithmetic, and a reloc-carrying one never gets here — the choke point in `decode` takes
+        // it.
         case 'addis':
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
@@ -1325,10 +1309,9 @@ export function lift(
     ssa.markFilled(bi);
   });
   // A high half no `@l` ever completed. Its `lis` defines only a placeholder, so letting the lift
-  // finish would SILENTLY DROP the instruction — and the address it was building would simply be
-  // absent from the output. Every `@l` consumer this frontend does not model (`ori`, a float
-  // load's displacement) lands here, which is what keeps "not modelled" from turning into
-  // "not emitted".
+  // finish would SILENTLY DROP the address it was building. Every `@l` consumer this frontend does
+  // not model (`ori`, a float load's displacement) lands here, which is what keeps "not modelled"
+  // from turning into "not emitted".
   const dangling = [...highHalf.values()].filter((h) => !h.consumed).sort((a, b) => a.addr - b.addr)[0];
   if (dangling) {
     throw new PpcUnsupportedError(

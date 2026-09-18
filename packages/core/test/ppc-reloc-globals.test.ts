@@ -62,8 +62,8 @@ test('an SDA store writes the named global', () => {
 });
 
 test("the relocation's addend picks the word — SYM and SYM+0x4 are different accesses", () => {
-  // marioparty4:SLSerialNoCheck's shape. Before the addend was carried, both relocations read the
-  // same name and the second load silently read the wrong word.
+  // marioparty4:SLSerialNoCheck's shape. Without the addend both relocations read as the same name
+  // and the second load silently reads the wrong word.
   const asm =
     '   0:\tlwz     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tSLSerialNo\n' +
     '   4:\tlwz     r4,0(0)\n\t\t\t4: R_PPC_EMB_SDA21\tSLSerialNo+0x4\n' +
@@ -91,8 +91,8 @@ test('an SDA relocation whose printed operand is not the placeholder refuses, na
 });
 
 test('a `0(0)` base with NO relocation still refuses loudly', () => {
-  // The recovery is driven by the relocation, never by the printed placeholder: without a symbol
-  // there is nothing to name, and the old refusal must survive untouched.
+  // The recovery is driven by the relocation, never by the printed placeholder: with no symbol
+  // there is nothing to name, and the pre-existing refusal for `0(0)` must still fire.
   expect(() => dis('noreloc', '   0:\tstw     r3,0(0)\n   4:\tblr\n')).toThrow(
     /SDA\/global-relative access not supported/,
   );
@@ -265,9 +265,8 @@ test('an unspellable `@ha` symbol is refused by kind before anything is paired',
   expect(() => dis('poolpair', asm)).toThrow(/anonymous constant pool entry \('@1135'\)/);
 });
 
-// THE CHOKE POINT. Five cases used to guard their own immediate field against a relocation they
-// could not consume, which left every OTHER modelled instruction dropping one silently: the
-// question is now asked once, at the end of the decode, of whatever the decode did not take.
+// THE CHOKE POINT. The decode asks once, of whatever it did not take, whether an instruction still
+// carries a relocation — so an instruction with no guard of its own cannot drop one silently.
 test('a relocation on a modelled instruction no case consumes refuses, rather than being dropped', () => {
   // `andi. r3,r3,0` under a small-data relocation lifted to `a0 & 0` — the printed 0 read as the
   // mask, and the global it really names gone.
@@ -300,8 +299,8 @@ test('an `@ha` that reaches its `@l` only through a JOIN refuses, and the refusa
     '  18:\tblt     8 <join+0x8>\n' +
     '  1c:\tblr\n';
   expect(() => dis('join', loop)).toThrow(/through a merge or a loop header/);
-  // The same is true of a diamond both of whose paths carry the half — so the refusal must not
-  // blame a reused register, which is what it used to do.
+  // The same is true of a diamond both of whose paths carry the half, so the refusal must name the
+  // merge as one of the things it could be, not blame a reused register.
   const diamond =
     '   0:\tlis     r5,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_tbl\n' +
     '   4:\tcmpwi   r3,0\n' +

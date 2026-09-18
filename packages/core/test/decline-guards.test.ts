@@ -51,7 +51,7 @@ test('objdump: sliceSymbol cuts one function (delay slots intact), declines on a
 test('objdump: a C++ TEMPLATE header is a header — its `>` does not end the symbol', () => {
   // `<([^>]+)>` cannot see this header at all, and an invisible header is not a missing symbol: the
   // PRECEDING function's slice runs on through it, so `plain__Fv` lifts with the template's body
-  // glued to its own. 7 pikmin functions had that shape.
+  // glued to its own. 7 pikmin functions have that shape.
   const tpl =
     '00002600 <plain__Fv>:\n    2600:\tblr\n\n' +
     '0000260c <invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane>:\n    260c:\tli      r3,7\n    2610:\tblr\n';

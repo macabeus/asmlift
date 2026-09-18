@@ -52,13 +52,13 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   `CmdStream::statbuff`. This one is refused for the **declaration**, not for the spelling, and the
   refusal says so.
 
-  **Measured, not assumed:** before this rule existed, `pikmin:initSoftReset__9StdSystemFv` lifted
-  correctly to `statbuff__9CmdStream = 0;` and then failed to compile, because the row's context
-  declares the class member and the symbol map's knowing the mangled name suppresses the declaration
-  asmlift would otherwise mint.
+  **Measured, not assumed:** without this rule `pikmin:initSoftReset__9StdSystemFv` lifts correctly
+  to `statbuff__9CmdStream = 0;` and then fails to compile, because the row's context declares the
+  class member and the symbol map's knowing the mangled name suppresses the declaration asmlift
+  would otherwise mint.
 
-  **And measured the other way,** because the first version of this rule claimed the name could not
-  be written at all: compiled in the shape the harness really uses — a C++ row's candidate inside
+  **And measured the other way,** because it is tempting to call the name itself unwritable:
+  compiled in the shape the harness really uses — a C++ row's candidate inside
   the `extern "C"` block `apps/benchmark/src/compile/real.ts` wraps it in —
   `extern int statbuff__9CmdStream; int h(void){return statbuff__9CmdStream;}` emits
   `R_PPC_EMB_SDA21 statbuff__9CmdStream`: **exactly the target symbol**. So the spelling is right

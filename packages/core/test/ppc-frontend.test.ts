@@ -205,15 +205,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // A save slot is a register AND an offset. `stw r3,8(r1)` / `lwz r4,8(r1)` is mwcc reading an
   // incoming argument back into a different register, not a callee-saved save/restore pair: an
   // offset-only record calls it transparent, drops the load, leaves r4 with no definition, and the
-  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured on
-  // `pikmin:__ct__7ActFreeFP4Piki`, which reads `this` back into r4, and on 28 Mario Party 4
-  // checkout functions that each lost an address the relocation fold had just recovered.
+  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured
+  // on `pikmin:__ct__7ActFreeFP4Piki`, which reads `this` back into r4, and on 28 Mario Party 4
+  // checkout functions that each lose an address the relocation fold recovered.
   test('a reload into a register the slot was NOT saved from FAILS LOUD, not a dropped value', () => {
     expect(() =>
       dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n'),
     ).toThrow(/reload of '8\(r1\)' into r4, a slot r3 was saved into/);
   });
-  test('and the call argument it used to carry away is the reason', () => {
+  test('and the call argument an offset-only record carries away is the reason', () => {
     // Without the register in the slot this lifts to `return callee(1);` — r4's reload dropped, so
     // the recovered `&gObj` in r5 goes with it.
     const asm =
