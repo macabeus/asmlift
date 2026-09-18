@@ -25,20 +25,25 @@ import { PARAM_WIDTH_GATES, narrowEntryParams } from '../src/raise/paramwidth';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness } from '../src/target';
 
-const run = (ir: string, self?: FnProto) => {
+// The IR below is agbcc's prologue shape unless a test says otherwise, so the default witness is
+// the one agbcc declares — read OFF the target rather than spelled as a literal, so a round that
+// re-measures agbcc moves these tests with it.
+const AGBCC_WITNESS = ARMV4T_AGBCC.compilerBehaviors.narrowParamWitness!;
+
+const run = (ir: string, self?: FnProto, witness: NarrowParamWitness = AGBCC_WITNESS) => {
   const fn = parse(ir);
   verify(fn);
-  const n = narrowEntryParams(fn, self);
+  const n = narrowEntryParams(fn, witness, self);
   verify(fn);
   return { fn, n, ir: print(fn) };
 };
 /** the same pass with one gate dropped — the ablation each refusal below is measured against */
-const runWithout = (ir: string, gate: string, self?: FnProto): number => {
+const runWithout = (ir: string, gate: string, self?: FnProto, witness: NarrowParamWitness = AGBCC_WITNESS): number => {
   const fn = parse(ir);
   verify(fn);
-  return narrowEntryParams(fn, self, without(PARAM_WIDTH_GATES, gate));
+  return narrowEntryParams(fn, witness, self, without(PARAM_WIDTH_GATES, gate));
 };
 const emit = (ir: string): string => {
   const { fn } = run(ir);
@@ -281,5 +286,79 @@ describe("a narrow parameter is not a wide value's home", () => {
     const src = cBackend.emit(structure(fn));
     expect(src).not.toMatch(/\ba0 = /);
     expect(src).toContain('4660');
+  });
+});
+
+// ── WHICH FACT SETTLES THE WIDTH IS A PER-COMPILER QUESTION ───────────────────────────────────
+//
+// Everything above reads the extension's POSITION, which is evidence only where a declaration's
+// extension goes somewhere a body cast's never does. IDO 7.1 at -O2 leads the function with the
+// `sll` for BOTH spellings and emits the ABI argument-home store for the declaration alone; the
+// two MIPS GCCs emit one byte-identical object for both and so witness nothing at all.
+//
+// The SAME IR stands for all three cases below — one parameter, `sext`, `ret`, prologue-clean and
+// single-reader — which is the whole point: every gate above it passes, and only the witness and
+// the frontend's `Fn.deadParamHomes` stamp separate a narrowing from a miscompile.
+describe('the declaration witness', () => {
+  const PROLOGUE_SEXT = `fn f {
+^bb0(%0: unk32):
+  %1: unk32 = sext %0 {width=8}
+  ret %1
+}
+`;
+  /** the IR above with `p` stamped as homed, the way the MIPS frontend stamps `sw a0,0(sp)` */
+  const homedFn = () => {
+    const fn = parse(PROLOGUE_SEXT);
+    verify(fn);
+    fn.deadParamHomes = new Set([fn.blocks[0].params[0]]);
+    return fn;
+  };
+
+  test('agbcc narrows on POSITION — the prologue extension is its declaration', () => {
+    expect(run(PROLOGUE_SEXT).n).toBe(1);
+    expect(ARMV4T_AGBCC.compilerBehaviors.narrowParamWitness).toBe('prologue-extension');
+  });
+
+  test('a homing compiler narrows the parameter it HOMED', () => {
+    expect(narrowEntryParams(homedFn(), 'home-store')).toBe(1);
+  });
+
+  test('a homing compiler refuses the parameter it did not home — that is the body cast', () => {
+    // `synthetic:tos8:ido7.1`, a MATCH: its target is `sll v0,a0,0x18 / jr ra / sra v0,v0,0x18`,
+    // with no `sw`. Narrowed, it recompiles to the four-instruction homing form and the row is lost.
+    expect(run(PROLOGUE_SEXT, undefined, 'home-store').n).toBe(0);
+    expect(MIPS_IDO.compilerBehaviors.narrowParamWitness).toBe('home-store');
+  });
+
+  test('a compiler whose two spellings are one object refuses the narrowing, homed or not', () => {
+    expect(run(PROLOGUE_SEXT, undefined, 'none').n).toBe(0);
+    expect(narrowEntryParams(homedFn(), 'none')).toBe(0);
+    expect(MIPS_GCC.compilerBehaviors.narrowParamWitness).toBe('none');
+  });
+
+  test('a fn nobody stamped is NOT homed — absent reads as the refusing answer', () => {
+    const fn = parse(PROLOGUE_SEXT);
+    verify(fn);
+    expect(fn.deadParamHomes).toBeUndefined();
+    expect(narrowEntryParams(fn, 'home-store')).toBe(0);
+  });
+
+  test('both new refusals are load-bearing — each ablation alone narrows', () => {
+    expect(runWithout(PROLOGUE_SEXT, 'unhomed-param', undefined, 'home-store')).toBe(1);
+    expect(runWithout(PROLOGUE_SEXT, 'no-declaration-witness', undefined, 'none')).toBe(1);
+  });
+
+  test('the home stamp alone licenses nothing — every gate above still applies', () => {
+    // a second reader of the raw parameter proves the declaration was wide, homed or not
+    const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = sext %0 {width=8}
+  %2: unk32 = add %1, %0
+  ret %2
+}
+`);
+    verify(fn);
+    fn.deadParamHomes = new Set([fn.blocks[0].params[0]]);
+    expect(narrowEntryParams(fn, 'home-store')).toBe(0);
   });
 });

@@ -25,7 +25,7 @@ import { describe, expect, test } from 'vitest';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
-import { dce } from '../src/pattern/engine';
+import { CAST_PATTERNS, dce, patternApplies } from '../src/pattern/engine';
 import { applyIdiomPatterns, decompile } from '../src/pipeline';
 import { recognizeArrays } from '../src/raise/arrays';
 import {
@@ -143,17 +143,67 @@ describe('refusals — every other pair of shifts is left as it is', () => {
     ).toBe(0);
   });
 
-  test('the pass runs where the cast idiom does, and nowhere else', () => {
+  test('the pass runs where BOTH cast idioms do, and nowhere else', () => {
     const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'extscale')!;
     expect(pass.gate).toBe(foldsShiftPairCasts);
     expect(foldsShiftPairCasts(ARMV4T_AGBCC)).toBe(true);
-    // Both MIPS compilers zero-extend with `andi`, so a `sll; srl` there is not a cast's lowering.
+    // Both MIPS compilers zero-extend with `andi`, so a `sll; srl` there is not a cast's lowering
+    // — which is what keeps this conjunction false on MIPS even though the SIGNED cast folds there.
     // MIPS gcc is where the gate has inhabitants: with it ablated, the fold fires on 6 of the
     // benchmark's non-agbcc rows, all gcc2.7.2/gcc2.7.2kmc (`sll 16; sra 13` is a real shift pair
     // there), and on none under IDO or mwcc.
     expect(foldsShiftPairCasts(MIPS_GCC)).toBe(false);
     expect(foldsShiftPairCasts(MIPS_IDO)).toBe(false);
     expect(foldsShiftPairCasts(PPC_MWCC)).toBe(false);
+  });
+});
+
+// ── which compiler lowers which narrowing cast to a shift pair ────────────────────────────────
+//
+// A pair of disassemblies per claim, each at its row's own flags (engine.ts carries the listings):
+// `(s8)x` and `(s16)x` are `sll; sra` on agbcc, IDO 7.1, KMC gcc and gcc 2.7.2 alike; `(u8)x` is
+// `andi` on all three MIPS compilers and `lsl; lsr` only on agbcc. So the two halves of
+// CAST_PATTERNS carry different compiler lists, and this is where that asymmetry is pinned.
+describe('the cast idioms are gated per SIGNEDNESS, not per pattern set', () => {
+  const idOf = (t: typeof MIPS_IDO) =>
+    CAST_PATTERNS.filter((p) => patternApplies(p, t))
+      .map((p) => p.id)
+      .sort();
+
+  test('agbcc folds both — it has no byte move at all', () => {
+    expect(idOf(ARMV4T_AGBCC)).toEqual(['sext16', 'sext8', 'zext16', 'zext8']);
+  });
+
+  test('every MIPS compiler folds the SIGN-extend and refuses the zero-extend', () => {
+    expect(idOf(MIPS_IDO)).toEqual(['sext16', 'sext8']);
+    expect(idOf(MIPS_GCC)).toEqual(['sext16', 'sext8']);
+  });
+
+  test('mwcc folds neither — `extsb` lifts straight to `sext`, so no pair is ever there', () => {
+    expect(idOf(PPC_MWCC)).toEqual([]);
+  });
+
+  test('an IDO `sll 24; sra 24` folds to the cast it spells', () => {
+    const fn = parse(
+      'fn f {\n^bb0(%0: unk32):\n  %1: unk32 = shl %0 {imm=24}\n  %2: unk32 = shr_s %1 {imm=24}\n  ret %2\n}',
+    );
+    expect(applyIdiomPatterns(fn, MIPS_IDO)).toBe(1);
+    expect(print(fn)).toContain('sext %0 {width=8}');
+  });
+
+  test('an IDO `sll 24; srl 24` does NOT fold — the target spells that zero-extend `andi`', () => {
+    const fn = parse(
+      'fn f {\n^bb0(%0: unk32):\n  %1: unk32 = shl %0 {imm=24}\n  %2: unk32 = shr_u %1 {imm=24}\n  ret %2\n}',
+    );
+    expect(applyIdiomPatterns(fn, MIPS_IDO)).toBe(0);
+    expect(print(fn)).toContain('shr_u');
+  });
+
+  test('the fold is byte-neutral on MIPS: it only re-spells the pair it recompiles to', () => {
+    // `int f(s32 x){ return (s8)x; }` and `x << 24 >> 24` are the SAME object under IDO
+    // (`sll v0,a0,0x18 / jr ra / sra v0,v0,0x18`), so nothing is traded for the readable spelling.
+    const asm = '00000000 <f>:\n   0:\tsll\tv0,a0,0x18\n   4:\tjr\tra\n   8:\tsra\tv0,v0,0x18\n';
+    expect(decompile('f', asm, MIPS_IDO).source).toContain('(s8)');
   });
 });
 
@@ -311,7 +361,7 @@ describe('what nobody claimed goes back to the pair the frontend lifted', () => 
     const scales = emptyScaleRecord();
     foldScaledExtensions(fn, poolOrderOf(fn), scales);
     dce(fn);
-    expect(narrowEntryParams(fn)).toBe(1);
+    expect(narrowEntryParams(fn, 'prologue-extension')).toBe(1);
     expect(restoreUnclaimedScales(fn, scales)).toBe(0);
     expect(print(fn)).toMatch(/= shl %0 \{imm=3\}/);
   });

@@ -45,6 +45,10 @@
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
 import type { StructureOptions } from './structure/structure';
 
+/** What a compiler's OBJECT shows for a narrow declared parameter — see
+ *  `compilerBehaviors.narrowParamWitness` for the compiled pair behind each value. */
+export type NarrowParamWitness = 'prologue-extension' | 'home-store' | 'none';
+
 export interface TargetDescription {
   id: string; // the ISA — 'armv4t' / 'mips' / 'ppc'. Selects the frontend (registry.ts).
   // The COMPILER is a first-class field distinct from the ISA (matching = deoptimize to a specific
@@ -178,6 +182,33 @@ export interface TargetDescription {
     // compiler behavior is to claim nothing. The evidence a future round needs is one run of
     // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
     hoistsSingleSetArm?: boolean;
+    // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
+    // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
+    // the compilers measured give three, and the pass refuses wherever the object is silent.
+    //
+    //   • `'prologue-extension'` — the extension's POSITION decides it. agbcc has no byte move, so
+    //     a narrow-declared parameter widens at the very top of the function and a body cast widens
+    //     at its use; the `pa`/`pb` pair in raise/paramwidth.ts's header is the compiled evidence,
+    //     and mwcc's PowerPC prologue `extsb`/`extsh` is the same shape on another ISA.
+    //   • `'home-store'` — the position decides NOTHING and a DEAD ABI ARGUMENT HOME STORE decides
+    //     it instead. Measured on IDO 7.1 at `-mips2 -O2 -32 -non_shared -G 0`:
+    //
+    //         int f(s8  x){ return x;      }   sw a0,0(sp) / sll a0,a0,0x18 / jr ra / sra v0,a0,0x18
+    //         int f(s32 x){ return (s8)x;  }                 sll v0,a0,0x18 / jr ra / sra v0,v0,0x18
+    //         int f(s8  x){ return x;      }   `sll` FIRST in both, so the prologue test cannot tell
+    //
+    //     Both extensions lead the function, and only the declaration emits the store. `-O1`, `-O0`
+    //     and `-g` remove the store from BOTH spellings, so this is an `-O2` observable; a target
+    //     built at those flags would have to claim `'none'`.
+    //   • `'none'` — the object does not distinguish the two at all, so no reading of it licenses
+    //     the narrowing. Both MIPS GCCs answer this, and it is a MEASUREMENT rather than a
+    //     withholding: `int f(s8 x){return x;}` and `int f(s32 x){return (s8)x;}` compile to
+    //     BYTE-IDENTICAL objects under KMC gcc `-mips3 -O2` and gcc 2.7.2 `-mips3 -O1` alike
+    //     (`sll v0,a0,0x18 / jr ra / sra v0,v0,0x18`, the same four words).
+    //
+    // A compiler that sets nothing here also refuses, which is the right default for one nobody has
+    // compiled the pair with (docs/level-tower.md: claim nothing about an unmeasured behavior).
+    narrowParamWitness?: NarrowParamWitness;
     // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
     // pointer or cast base expands it last — so the instruction order in the target's own assembly
     // says which of the two the source wrote, and `raise/globalshape.ts` may derive an array shape
@@ -428,6 +459,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     hoistsSingleSetArm: true,
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
+    narrowParamWitness: 'prologue-extension',
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
     // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
     // (FRAME_GROWS_DOWNWARD is commented out in thumb.h). So the earlier-declared spilled local
@@ -462,6 +494,10 @@ export const MIPS_IDO: TargetDescription = {
     switchAllowsNeqCase: false,
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
+    // MEASURED: `int f(s8 x){return x;}` emits `sw a0,0(sp)` and `int f(s32 x){return (s8)x;}`
+    // does not, while the `sll` leads the function in BOTH — so the home store decides and the
+    // prologue position cannot. See `narrowParamWitness` for the disassemblies.
+    narrowParamWitness: 'home-store',
     // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
     // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
@@ -546,6 +582,10 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
+    // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
+    // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
+    // gcc2.7.2 at -O1 alike — so the object carries no witness at all and the pass refuses.
+    narrowParamWitness: 'none',
     // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
     // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same
     // reason as ido7.1: no row on either tier lifts with two or more spilled user locals. Both
@@ -584,6 +624,10 @@ export const PPC_MWCC: TargetDescription = {
     // `u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; }` under an `if (a)`
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
+    // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the
+    // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
+    // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through this pass.
+    narrowParamWitness: 'prologue-extension',
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at

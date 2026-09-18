@@ -8,10 +8,15 @@
 // offset: a never-reloaded home-slot spill has no uses and simply drops, and `sp` never
 // materializes as a value. These assertions lock the mislift out.
 //
-// NOTE: sextb/zextb do NOT byte-match the target — the reference's `sw a0,0(sp)` spill is emitted
-// by IDO only for a narrow (s8/u8) parameter, which asmlift does not yet recover (it emits `s32`),
-// so the recompile has no spill. Hence these tests pin the emitted source only, no objdiff score;
-// closing the gap is narrow-parameter recovery, not B2.
+// THE DROP IS NO LONGER SILENT, and that is what closes sextb here. The spill still has no uses and
+// still leaves no op — that part is B2 and is unchanged — but the SSA builder now records the
+// parameter it homed (`Fn.deadParamHomes`), and on a compiler whose object witnesses a narrow
+// declaration that way (`narrowParamWitness: 'home-store'`) raise/paramwidth.ts reads the record and
+// recovers `s8 a0`. `synthetic:sextb:ido7.1` byte-matches on it.
+//
+// zextb's half of the gap is still OPEN, and for a different reason: IDO spells `(u8)x` as `andi`,
+// not as a shift pair, so no `zext` op forms for the width pass to judge and the parameter stays
+// `u32`. The stamp is there; the fold that would give it something to read is not.
 import { decompile } from '@asmlift/core/pipeline';
 import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget } from '@asmlift/toolchains';
@@ -21,7 +26,7 @@ const CASES = [
   {
     sym: 'sextb',
     c: 'int sextb(signed char x){ return x; }',
-    expect: 's32 sextb(s32 a0) {\n    return a0 << 24 >> 24;\n}\n',
+    expect: 's32 sextb(s8 a0) {\n    return a0;\n}\n',
   },
   {
     sym: 'zextb',

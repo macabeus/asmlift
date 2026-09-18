@@ -21,6 +21,25 @@
 // narrow parameter with the `extsb`/`extsh` the frontend lifts to the same op, and the synthetic
 // `sextb`/`tos8` rows keep matching on that toolchain through this pass.
 //
+// BUT THE PROLOGUE TEST IS NOT UNIVERSAL EVIDENCE, AND ON MIPS IT IS NO EVIDENCE AT ALL. Everything
+// above reads the extension's POSITION, which works only where the compiler puts a declaration's
+// extension somewhere a body cast's never goes. IDO 7.1 at -O2 does not: it leads the function with
+// the `sll` for BOTH spellings, and emits the ABI argument-home store for the declaration alone.
+//
+//     int f(s8  x){ return x;     }   sw a0,0(sp) / sll a0,a0,0x18 / jr ra / sra v0,a0,0x18
+//     int f(s32 x){ return (s8)x; }                 sll v0,a0,0x18 / jr ra / sra v0,v0,0x18
+//
+// Both lift to one parameter, `shl 24`, `shr_s 24`, `ret` — the SAME graph — so `not-prologue`
+// passes on both and, ungated, this pass narrows the body cast too and loses
+// `synthetic:tos8:ido7.1`, a MATCH. The two MIPS GCCs are a third case again: their two spellings
+// are one BYTE-IDENTICAL object, so nothing in the asm decides the width and the honest answer is
+// to leave the extension standing.
+//
+// So which fact settles the width is a per-COMPILER question, asked as
+// `compilerBehaviors.narrowParamWitness` and answered by `no-declaration-witness` and
+// `unhomed-param` below. The store it reads is destroyed at lift and survives as the frontend's
+// `Fn.deadParamHomes` stamp (ir/core.ts).
+//
 // WHAT THE PROLOGUE TEST CANNOT SEE, and why the declaration settles it. The scan steps over the
 // pure materializations agbcc interleaves among the extensions, so a constant the scheduler HOISTED
 // above a mid-body cast leaves `pb` looking like `pa`:
@@ -57,6 +76,7 @@ import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaredWidth } from '../proto';
+import type { NarrowParamWitness } from '../target';
 
 /** What the gates below judge: one entry parameter and the extension that reads it. */
 export interface NarrowParamCandidate {
@@ -75,6 +95,10 @@ export interface NarrowParamCandidate {
   /** the extension is one raise/extscale.ts re-split from a fused pair whose `shl` the machine ran
    *  behind a pool load — see FUSED BEHIND A POOL LOAD */
   fusedBehindPool: boolean;
+  /** what this compiler's object shows for a narrow declaration (target.ts `narrowParamWitness`) */
+  witness: NarrowParamWitness;
+  /** the machine stored this parameter to a stack slot nothing reads back (`Fn.deadParamHomes`) */
+  homed: boolean;
 }
 
 export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
@@ -121,6 +145,20 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
     rejects: (c) => !c.inPrologue,
   },
   {
+    id: 'no-declaration-witness',
+    why: 'this compiler spells a narrow declaration and a body cast the same way, so the asm decides nothing',
+    sound: true,
+    guardedBy: 'param-width.test.ts: a compiler whose two spellings are one object refuses the narrowing, homed or not',
+    rejects: (c) => c.witness === 'none',
+  },
+  {
+    id: 'unhomed-param',
+    why: 'where the compiler HOMES a narrow declared parameter, the absent home store proves the declaration was wide',
+    sound: true,
+    guardedBy: 'param-width.test.ts: a homing compiler refuses the parameter it did not home',
+    rejects: (c) => c.witness === 'home-store' && !c.homed,
+  },
+  {
     id: 'fused-behind-pool',
     why: 'a fused cast behind a pool load is body code if unsigned, and either width is the same object if signed',
     sound: true,
@@ -144,15 +182,22 @@ function useCount(fn: Fn, v: Value): number {
 }
 
 /** Type an entry parameter at the width its prologue extension proves, and drop the extension.
- *  `self` is the prototype the caller supplied for THIS function, if any; `fusedBehindPool` is
- *  raise/extscale.ts's record of the extensions it re-split behind a pool load
+ *  `witness` is what this compiler's object shows for a narrow declaration (target.ts
+ *  `narrowParamWitness`) and leads the parameter list because it decides which of the gates below
+ *  can speak at all; `self` is the prototype the caller supplied for THIS function, if any;
+ *  `fusedBehindPool` is raise/extscale.ts's record of the extensions it re-split behind a pool load
  *  (`ScaleRecord.behindPool`). Returns the number of parameters narrowed. */
 export function narrowEntryParams(
   fn: Fn,
+  witness: NarrowParamWitness,
   self?: FnProto,
   gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES,
   fusedBehindPool: ReadonlySet<Op> = new Set(),
 ): number {
+  // ABSENT ⇒ NOT HOMED, and the direction is the refusing one on a homing target: a function nobody
+  // measured (parsed IR, a hand-built fn) keeps every parameter wide rather than being narrowed on
+  // a stamp that was never taken.
+  const homed = fn.deadParamHomes ?? new Set<Value>();
   const entry = fn.blocks[0];
   const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
@@ -188,6 +233,8 @@ export function narrowEntryParams(
       uses: useCount(fn, p),
       declared: declared[entry.params.indexOf(p)],
       fusedBehindPool: fusedBehindPool.has(op),
+      witness,
+      homed: homed.has(p),
     };
     if (firstRejection(gates, c) !== null) {
       continue;

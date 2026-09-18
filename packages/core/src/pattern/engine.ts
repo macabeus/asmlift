@@ -271,9 +271,28 @@ export const MUL_CONST_PATTERNS: RewritePattern[] = [MUL_SHIFT_ADD, MUL_SHIFT_SU
 // lsr/asr #24`). The naive lift prints `x << 24 >> 24` — but C's `>>` over the s32-typed value is
 // ARITHMETIC, so the UNSIGNED case recompiles with `asr` where the target has `lsr`: a miscompile
 // (tou8/zextb/tou16 nonmatch). Folding to a cast op both fixes that and reads correctly; recompiling
-// `(u8)x` reproduces `lsl;lsr`. Gated to agbcc: on IDO/GCC the zero-extend is `andi`/`and` (not a
-// shift pair) and `(u8)x` lowers to `andi` there — so this shift-pair shape is agbcc's alone, and the
-// fold must not touch the other compilers (where it would change `srl`↔`andi`). `k = 32 - w`.
+// `(u8)x` reproduces `lsl;lsr`. `k = 32 - w`.
+//
+// THE TWO SIGNEDNESSES ARE GATED SEPARATELY, because MIPS spells them differently and the pair of
+// gates is the measurement. Compiled at each row's own flags — IDO 7.1 `-mips2 -O2 -32 -non_shared
+// -G 0`, KMC gcc `-mips3 -O2`, gcc 2.7.2 `-mips3 -O1`:
+//
+//     (s8)x   sll v0,a0,0x18 ; sra v0,v0,0x18      (s16)x  sll 0x10 ; sra 0x10     all three
+//     (u8)x   andi v0,a0,0xff                                                      all three
+//
+// So the SIGN-extend is a shift pair on MIPS exactly as on agbcc, and folding it is byte-neutral
+// there: the fold changes the printed spelling from `x << 24 >> 24` to `(s8)x` and recompiles to
+// the same two instructions. The ZERO-extend is not — `andi` is not a shift pair, and folding an
+// IDO `srl` to a `zext` would re-spell it as `andi`, a miscompile. That is why `zextPat` keeps the
+// agbcc pin the two patterns used to share, with its reason narrowed to the half it was measured
+// for, and the row it protects is `synthetic:zextb:ido7.1` — whose target IS that `andi`.
+//
+// mwcc/PowerPC is in NEITHER list: it has `extsb`/`extsh`, which the frontend lifts straight to
+// `sext`, so the shift-pair shape is not one it emits and no measurement licenses the fold there.
+/** The compilers measured to lower a SIGNED narrowing cast to a shift pair — see the pair of
+ *  disassemblies above. A compiler outside this list keeps the raw shifts. */
+export const SEXT_SHIFT_PAIR_COMPILERS = ['agbcc', 'ido', 'gcc'];
+
 const zextPat = (w: number, k: number): RewritePattern => ({
   id: `zext${w}`,
   applies: { compilers: ['agbcc'] },
@@ -282,7 +301,7 @@ const zextPat = (w: number, k: number): RewritePattern => ({
 });
 const sextPat = (w: number, k: number): RewritePattern => ({
   id: `sext${w}`,
-  applies: { compilers: ['agbcc'] },
+  applies: { compilers: SEXT_SHIFT_PAIR_COMPILERS },
   match: { op: 'shr_s', attrEquals: { imm: k }, args: [{ op: 'shl', attrEquals: { imm: k }, args: [{ bind: 'X' }] }] },
   replaceWith: { op: 'sext', args: ['X'], attrs: { width: w } },
 });
@@ -296,7 +315,8 @@ const sextPat = (w: number, k: number): RewritePattern => ({
  *  and never reaches the bitfield member recognizer (structure.ts, which matches the raw
  *  `shr(shl(load))` shape only). Honest output, not a miscompile — the field just keeps the cast
  *  spelling at those widths. Teaching the recognizer a zext/sext arm is the coverage extension if
- *  a row ever needs it. */
+ *  a row ever needs it. The SIGNED half of that shadow now reaches MIPS as well, where the symbol
+ *  maps are: measured over the whole corpus, no row's emitted C moves for it (`pnpm bench sweep`). */
 export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16), sextPat(8, 24), sextPat(16, 16)];
 
 // ── boolean-negation idiom ───────────────────────────────────────────────────────────────────
