@@ -166,7 +166,7 @@ const INDEXED_CASES: { sym: string; c: string; proto?: Prototypes; expect: strin
     sym: 'aset',
     c: 'void aset(int *a, int i, int v){ a[i] = v; }',
     proto: { aset: { returnsVoid: true } }, // slwi + stwx
-    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n    return;\n}\n',
+    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
   },
   {
     sym: 'asget',

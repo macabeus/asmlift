@@ -165,6 +165,26 @@ describe('what the reading refuses to answer', () => {
 }
 `;
 
+  test('a fall-through out of an UNREACHABLE block is not evidence — no execution takes it', () => {
+    // The thumb frontend keeps unreachable blocks on purpose. One laid out just before the epilogue
+    // hands it a fall-through in-edge the machine never uses, and the only real arrival here is
+    // `^bb0`'s written branch: a `return;` the source wrote.
+    const fn = parse(`fn f {
+^bb0(%0: s32*):
+  %1: s32 = const {value=1}
+  store %0, %1 {off=0, width=4}
+  br ^bb2()
+^bb1():
+  %2: s32 = const {value=7}
+  br ^bb2()
+^bb2():
+  ret
+}
+`);
+    fn.blocks[1].ops[fn.blocks[1].ops.length - 1].attrs.fallthrough = true;
+    expect(unspelledEpilogues(fn).size).toBe(0);
+  });
+
   test('an epilogue that also holds STATEMENTS is not asked at all', () => {
     // Its in-edges answer how control reached those statements, not how it reached the epilogue,
     // so a fall-through into it is no evidence about a `return;`. The bare block is the control:

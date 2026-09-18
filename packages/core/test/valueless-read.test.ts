@@ -57,7 +57,10 @@ const lift = (asm: string, returnsVoid: boolean, symbols?: SymbolMap) =>
   }).source;
 
 /** the body of the emitted function, statements only — so a test can assert the WHOLE body and
- *  not merely the absence of one spelling it guessed the extra statement would take. */
+ *  not merely the absence of one spelling it guessed the extra statement would take.
+ *
+ *  None of these bodies ends in a `return;`: each asm is a single block with no branch in it, so
+ *  nothing transferred control to an epilogue and the source spelled none (`structure/retspell.ts`). */
 const body = (src: string): string[] =>
   src
     .split('\n')
@@ -65,7 +68,7 @@ const body = (src: string): string[] =>
     .filter((l) => l.length > 0 && !l.startsWith('void ') && l !== '}' && !l.startsWith('struct '));
 
 test('a void function’s trailing read at a DEVICE register is spelled as a statement, not dropped', () => {
-  expect(body(lift(DEVICE, true))).toEqual(['*(s32 *)67109076 = 1;', '*(s32 *)67109076;', 'return;']);
+  expect(body(lift(DEVICE, true))).toEqual(['*(s32 *)67109076 = 1;', '*(s32 *)67109076;']);
 });
 
 test('an ARITHMETIC leftover in r0 really is phantom, and stays dropped', () => {
@@ -83,7 +86,7 @@ test('an ARITHMETIC leftover in r0 really is phantom, and stays dropped', () => 
       pool('0x040000D4'),
     true,
   );
-  expect(body(src)).toEqual(['*(s32 *)67109076 = 1;', 'return;']);
+  expect(body(src)).toEqual(['*(s32 *)67109076 = 1;']);
 });
 
 test('a read something else consumes is spelled once, at its consumer', () => {
@@ -108,11 +111,11 @@ test('with a return VALUE to consume it, the read stays in the return', () => {
 
 test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is why that is not the test', () => {
   // 0x02000100 is EWRAM — outside `capabilities.deviceRegisters` [0x04000000, 0x04000400).
-  expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;', 'return;']);
+  expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;']);
   // 0x08117BCC is ROM. This is the population the refusal actually protects: a WRONG `returnsVoid`
   // in a dataset turns a function's RETURN VALUE into a dead read, and without the gate the
   // truncated body is replaced by confident-looking C that computes a table index and discards it.
-  expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;', 'return;']);
+  expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;']);
   // …and the reason stated is the one that HOLDS. Widen the same EWRAM address to the three-store
   // shape and `/volatile` mints `volatile s32 * p0;` over it — at EWRAM, exactly as at a device
   // register. So a REACHABILITY argument would admit ordinary RAM; only the EVIDENCE question
@@ -150,7 +153,7 @@ test('a RUNTIME-INDEXED read refuses — neither address query can answer for th
   const src = decompile('f', indexed, ARMV4T_AGBCC, {
     prototypes: { f: { params: ['s32'], returnsVoid: true } },
   }).source;
-  expect(body(src)).toEqual(['*(s32 *)67108864 = 1;', 'return;']);
+  expect(body(src)).toEqual(['*(s32 *)67108864 = 1;']);
 });
 
 test('a CALLER’S POINTER refuses — volatileptr admits a local, never a parameter', () => {
@@ -158,7 +161,7 @@ test('a CALLER’S POINTER refuses — volatileptr admits a local, never a param
     /void g/,
     'void f',
   );
-  expect(body(src)).toEqual(['a0[1] = 5;', 'return;']);
+  expect(body(src)).toEqual(['a0[1] = 5;']);
 });
 
 // ── the symbol-map admission ─────────────────────────────────────────────────────────────────
@@ -211,7 +214,6 @@ test('a map-declared VOLATILE register reached through a CAST refuses — the sp
     '*p0 = 1;',
     'p0[1] = 1;',
     'p0[2] = 1;',
-    'return;',
   ]);
 });
 
@@ -246,9 +248,9 @@ test('a volatile CONTAINER admits its named member; a `vu16` MEMBER refuses, bec
         ],
       ],
     ]);
-  expect(body(lift(asm, true, st(false, true)))).toEqual(['gState.ctl = 1;', 'gState.ctl;', 'return;']);
-  expect(body(lift(asm, true, st(true, false)))).toEqual(['((s32 *)&gState)[2] = 1;', 'return;']);
-  expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;', 'return;']);
+  expect(body(lift(asm, true, st(false, true)))).toEqual(['gState.ctl = 1;', 'gState.ctl;']);
+  expect(body(lift(asm, true, st(true, false)))).toEqual(['((s32 *)&gState)[2] = 1;']);
+  expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;']);
 });
 
 // ── the payoff a stranger needs to see ───────────────────────────────────────────────────────

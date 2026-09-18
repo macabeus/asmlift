@@ -41,7 +41,7 @@ int gfx_sum(struct Gfx *arr, int i){ return arr[i].f4 + arr[i].tiles; }`,
 void set_hp(struct Ent *arr, int i, int v){ arr[i].hp = v; }`,
     returnsVoid: true,
     expect:
-      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\nvoid set_hp(struct Elem0 * a0, s32 a1, s32 a2) {\n    a0[a1].field_0 = a2;\n    return;\n}\n',
+      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\nvoid set_hp(struct Elem0 * a0, s32 a1, s32 a2) {\n    a0[a1].field_0 = a2;\n}\n',
   },
 ];
 

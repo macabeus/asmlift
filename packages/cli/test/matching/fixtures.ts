@@ -153,7 +153,7 @@ export const FIXTURES: DecompFixture[] = [
     prototypes: { baseacrosscalls: { returnsVoid: true }, g: { params: 1 } },
     expectSource:
       'void baseacrosscalls(void) {\n    s32 * v0;\n    v0 = (s32 *)50353872;\n' +
-      '    g(v0[1]);\n    g(*v0);\n    g(v0[2]);\n    return;\n}\n',
+      '    g(v0[1]);\n    g(*v0);\n    g(v0[2]);\n}\n',
     note: 'const base live ACROSS calls — materialized into a local (the callee-saved register the compiler keeps it in), not re-inlined per use. A const NOT live across a call (small init immediate) must stay inlined — see sum_to.',
   },
   {
@@ -185,7 +185,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'setp',
     referenceC: 'void setp(int *p, int v){ *p = v; }',
     prototypes: { setp: { returnsVoid: true } },
-    expectSource: 'void setp(s32 * a0, s32 a1) {\n    *a0 = a1;\n    return;\n}\n',
+    expectSource: 'void setp(s32 * a0, s32 a1) {\n    *a0 = a1;\n}\n',
     note: 'memory — pointer store, void function',
   },
   {
@@ -193,7 +193,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'fieldw',
     referenceC: 'struct S{ int a; int b; }; void fieldw(struct S *s, int v){ s->b = v; }',
     prototypes: { fieldw: { returnsVoid: true } },
-    expectSource: 'void fieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n    return;\n}\n',
+    expectSource: 'void fieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n}\n',
     note: 'memory — word store at offset 4 (a0[1])',
   },
   {
@@ -202,7 +202,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'rmw',
     referenceC: 'struct S{ int a; int b; }; void rmw(struct S *s){ s->a += s->b; }',
     prototypes: { rmw: { returnsVoid: true } },
-    expectSource: 'void rmw(s32 * a0) {\n    *a0 = *a0 + a0[1];\n    return;\n}\n',
+    expectSource: 'void rmw(s32 * a0) {\n    *a0 = *a0 + a0[1];\n}\n',
     note: 'memory — read-modify-write (two loads + store)',
   },
 
@@ -367,7 +367,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'callvoid',
     referenceC: 'void v(int); void callvoid(int x){ v(x); }',
     prototypes: { v: { params: 1 }, callvoid: { returnsVoid: true } },
-    expectSource: 'void callvoid(s32 a0) {\n    v(a0);\n    return;\n}\n',
+    expectSource: 'void callvoid(s32 a0) {\n    v(a0);\n}\n',
     note: 'call — discarded void call is a statement, not dropped',
   },
   {

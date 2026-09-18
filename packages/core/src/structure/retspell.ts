@@ -23,7 +23,10 @@
 //
 // With no fall-through in-edge, a branch in-edge is the only evidence there is, and it says the
 // source wrote a `return;` — keep it. With neither, nothing reached the epilogue by a written
-// transfer at all and there is nothing to spell.
+// transfer at all and there is nothing to spell. NO in-edge at all says the same thing without
+// needing the epilogue to be a block of its own: a body that never branched anywhere ended by
+// running out. That is the single-block function, which on an OBJECT has no epilogue label to
+// split it — the shape the `.s` path never shows.
 //
 // A `ret` SUNK onto one edge (`raise/retsink.ts`, `raise/tailsink.ts`) carries that edge's own
 // fall-through fact and answers for itself, which beats anything its block's in-edges could say:
@@ -37,9 +40,14 @@
 // branch chains rather than about return spelling. It is kept, which is the side that can never
 // delete a return the object needs.
 //
+// The in-edges the reading is about are the ways the body ENDS, so only LIVE ones count. The thumb
+// frontend hands over unreachable blocks on purpose, and one laid out just before the epilogue would
+// otherwise contribute a fall-through no execution takes — deleting the `return;` every real edge
+// branched in with.
+//
 // This decides SPELLING only; `l3/tailret.ts` owns whether a marked return is safe to delete.
 import type { Block, Fn } from '../ir/core';
-import { predecessors } from '../ir/core';
+import { predecessors, reachableBlocks } from '../ir/core';
 
 /** The arrival an in-edge stands for: a `return;` the source wrote, or the body running out. */
 const isWrittenBranch = (p: Block): boolean => {
@@ -57,13 +65,20 @@ const isBareBranch = (p: Block): boolean => p.ops.length === 1 && isWrittenBranc
 /** The blocks whose `ret` the assembly shows no `return;` for. */
 export function unspelledEpilogues(fn: Fn): Set<Block> {
   const preds = predecessors(fn);
+  const live = reachableBlocks(fn);
   const out = new Set<Block>();
   for (const b of fn.blocks) {
     const term = b.ops[b.ops.length - 1];
     if (term?.opcode !== 'ret') {
       continue;
     }
-    const inEdges = preds.get(b) ?? [];
+    const inEdges = (preds.get(b) ?? []).filter((p) => live.has(p));
+    // Nothing arrived here from anywhere: the body never left its one block, so it transferred
+    // control to no epilogue and spelled no `return;`.
+    if (inEdges.length === 0) {
+      out.add(b);
+      continue;
+    }
     const fellIn = inEdges.some(isFallThrough) && !inEdges.some(isBareBranch);
     if (term.attrs.fallthrough === true || (b.ops.length === 1 && (fellIn || !inEdges.some(isWrittenBranch)))) {
       out.add(b);

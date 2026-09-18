@@ -503,6 +503,33 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void retjoin(void);',
     proto: { retjoin: { returnsVoid: true } },
   },
+  // `retsolo` — the same pin where there is NO EPILOGUE BLOCK to read. Both rows above are agbcc,
+  // and an agbcc `.s` carries the epilogue LABEL (`.L2:`) whether or not a `return;` branched to
+  // it, so the epilogue is always a block of its own there and the reading always has in-edges to
+  // weigh. On an OBJECT there is no label: a body that never branches is ONE block, the `ret` sits
+  // at the end of it, and nothing arrived from anywhere. That is the commonest shape in the corpus
+  // — a flat void body — and the `.s` path cannot speak for it.
+  //
+  // IDO 7.1 at -O0 is where it costs bytes, measured at the flags below:
+  //
+  //     void retsolo(void){ *gOutA = 3; }            li/lui/sw; jr ra; nop; jr ra; nop; nop
+  //     void retsolo(void){ *gOutA = 3; return; }    li/lui/sw; jr ra; nop; jr ra; nop; jr ra; nop
+  //
+  // ido7.1 only. agbcc is the path this row exists to get past, and mwcc cannot host it: written
+  // both ways, this body and an `if`/`else` over a void tail compile to BYTE-IDENTICAL `.text` on
+  // mwcc_242_81 and mwcc_247_107 at `-O0,p` AND at `-O4,p`, 8 of 8. That is also why the 42 rows
+  // the corpus already builds at -O0 — every one of them Mario Party 4, on those two builds — can
+  // never move on this question. Same `-O0` reasoning as the two rows above: at the canonical -O2
+  // the spellings are one object and no row there can tell the two decompilers apart.
+  {
+    sym: 'retsolo',
+    src: '#define gOutA ((u32 *)0x80003010)\nvoid retsolo(void){ *gOutA = 3; }',
+    cflags: ['-mips2', '-O0', '-32', '-non_shared', '-G', '0'],
+    features: ['baseline'],
+    toolchains: ['ido7.1'],
+    ctx: 'void retsolo(void);',
+    proto: { retsolo: { returnsVoid: true } },
+  },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },

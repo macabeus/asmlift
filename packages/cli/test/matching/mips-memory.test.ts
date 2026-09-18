@@ -40,13 +40,13 @@ const C_CASES: { sym: string; c: string; proto?: Prototypes; expect: string }[] 
     sym: 'msetp',
     c: 'void msetp(int *p, int v){ *p = v; }',
     proto: { msetp: { returnsVoid: true } },
-    expect: 'void msetp(s32 * a0, s32 a1) {\n    *a0 = a1;\n    return;\n}\n',
+    expect: 'void msetp(s32 * a0, s32 a1) {\n    *a0 = a1;\n}\n',
   }, // sw a1,0(a0)
   {
     sym: 'mfieldw',
     c: 'struct S{ int a; int b; }; void mfieldw(struct S *s, int v){ s->b = v; }',
     proto: { mfieldw: { returnsVoid: true } },
-    expect: 'void mfieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n    return;\n}\n',
+    expect: 'void mfieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n}\n',
   }, // sw a1,4(a0)
   // STRUCT RECOVERY: a HETEROGENEOUS-width access pattern on one base (`char`@0 + `int`@4) is
   // inconsistent with any homogeneous array, so the access-pattern discriminator
@@ -69,7 +69,7 @@ const C_CASES: { sym: string; c: string; proto?: Prototypes; expect: string }[] 
     sym: 'aset',
     c: 'void aset(int *a, int i, int v){ a[i] = v; }',
     proto: { aset: { returnsVoid: true } },
-    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n    return;\n}\n',
+    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
   }, // sll #2; addu; sw
   {
     sym: 'asget',
