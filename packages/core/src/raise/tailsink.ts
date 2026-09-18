@@ -119,11 +119,10 @@ export function sinkStoreTails(fn: Fn): boolean {
     const body = tail.ops.slice(0, -1);
     for (const src of sources) {
       const copies = body.map((o) => mkOp('store', { operands: o.operands.map(src.resolve), attrs: { ...o.attrs } }));
-      // Carry the replaced edge's fall-through fact onto the duplicated `ret`, exactly as
-      // `raise/retsink.ts` does — `structure/retspell.ts` reads it to tell a `return;` the source
-      // wrote from the machine running off the end. Only for a source that branches straight to the
-      // tail: seen THROUGH a forwarder the path is several edges and no one of them answers, so the
-      // copy is left unmarked and read as a branch, which keeps today's spelling.
+      // Carry the replaced edge's fall-through fact onto the duplicated `ret`, as `raise/retsink.ts`
+      // does. Only for a source that branches straight to the tail: seen THROUGH a forwarder the path
+      // is several edges and no one of them answers on its own, so the copy is left unmarked and
+      // read as a branch — the side that can never delete a return the object needs.
       const t = src.from.ops[src.from.ops.length - 1];
       const attrs = t.successors[0]?.block === tail ? fallThroughOf(t) : {};
       src.from.ops.splice(src.from.ops.length - 1, 1, ...copies, mkOp('ret', { attrs }));

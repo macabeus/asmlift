@@ -354,10 +354,9 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
  *  dead stores (whose empty-then peephole flips the arm the merge empties), then hoist each leaf
  *  base the DEFAULT gate table admits into a typed local pointer.
  *
- *  THE ORDER IS OBSERVABLE. `l3/tailmerge.ts` moves only `assign`/`store`/`exprstmt`, so a `return`
- *  at the end of an arm blocks its peel; dropping the returns first hands it arms it could not
- *  otherwise peel and empties both of them. `test/tailret.test.ts` pins the difference and pins
- *  which side of it this function is on.
+ *  THE ORDER IS OBSERVABLE, not a preference: drop the returns before the merge and the same arms
+ *  become peelable, emptying both of them. `l3/tailret.ts` states the mechanism, and
+ *  `test/tailret.test.ts` pins the difference and which side of it this function is on.
  *
  *  `hoistBaseLocals`' two arguments are SPELLED, defaults or not: this is the one call to that pass
  *  that is committed rather than offered, so it is the one whose gate table and whose placement can

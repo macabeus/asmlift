@@ -13,13 +13,20 @@
 //                                                  rerouted a branch the source did not write — and
 //                                                  by then both spellings are one object anyway.
 //
-// The statement being decided is the one at the END of the body, so a fall-through in-edge SETTLES
-// it: that edge is the body running out, and it wrote no `return;`. A branch in-edge alongside it
-// is a `return;`, just not this one — it ends an arm, and `l3/tailret.ts` may delete a return only
-// in TAIL position, so an arm the function continues past keeps its own. An arm that IS in tail
-// position is one the compiler must branch over regardless (the block laid out before the epilogue
-// is the one that falls in, and only one block can be), so its `return;` and its `}` compile to the
-// same instruction. That is what makes the answer safe per BLOCK.
+// The statement being decided is the one at the END of the body, so a fall-through in-edge normally
+// settles it: that edge is the body running out, and it wrote no `return;`. A branch in-edge
+// alongside it is a `return;`, just not this one — it ends an arm, and `l3/tailret.ts` may delete a
+// return only in TAIL position, so an arm the function continues past keeps its own. An arm that IS
+// in tail position is one the compiler must branch over regardless (the block laid out before the
+// epilogue is the one that falls in, and only one block can be), so its `return;` and its `}`
+// compile to the same instruction. That is what makes the answer safe per BLOCK.
+//
+// ONE KIND OF BRANCH IN-EDGE OVERRULES THE FALLING ONE: a branch out of an EMPTY block. That arm
+// holds nothing but the `return;`, so dropping it does not shorten a statement list, it flips the
+// branch sense — and the two senses are two different objects. Measured on `if (*p & 1) return; …`
+// at agbcc -O0: the sense that writes the `return;` is 40 bytes, `beq` over a `b <epilogue>`; the
+// flipped one is 36, `bne` over the body with no `b` at all. So that `b` is in the object because
+// the source wrote a `return;`, and the falling edge beside it licenses nothing.
 //
 // With no fall-through in-edge, a branch in-edge is the only evidence there is, and it says the
 // source wrote a `return;` — keep it. With neither, nothing reached the epilogue by a written

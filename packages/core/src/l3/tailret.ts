@@ -22,16 +22,15 @@
 //
 // THE REFUSALS ARE PROSE, NOT A `Gate` TABLE, and that is the second of the three answers
 // `docs/level-tower.md` sanctions rather than an omission. A table buys the ablation — drop this
-// rule and something breaks — as a test instead of a claim, and it is worth building for the
-// refusals a round has HAD to instrument. None of these three needed instrumenting: each is a
-// property of one candidate's position that `test/tailret.test.ts` already pins one test per
-// refusal, which is the same ablation a table would have bought. Convert them when a round has to
-// argue about one.
+// rule and something breaks — as a test instead of a claim, and it is worth building for a refusal a
+// round has HAD to instrument. None of these was: each is a property of one candidate's own
+// position, and `test/tailret.test.ts` holds a test per refusal, which is the ablation the table
+// would have bought. Convert them when a round has to argue about one.
 //
-// Ordering: after `l3/tailmerge.ts`, before `l3/dce.ts`. After tailmerge because that pass excludes
-// control flow from what it moves, so running first would hand it arms this pass had just made
-// mergeable and change what it does to rows that have nothing to do with returns; before dce so its
-// branch peephole sees the emptied `else`.
+// Ordering: after `l3/tailmerge.ts`, whose peel moves `assign`/`store`/`exprstmt` only, so a
+// `return` ending an arm blocks it — run first and this pass hands tailmerge arms it could not
+// otherwise peel, changing rows that have nothing to do with returns. Before `l3/dce.ts`, so its
+// branch peephole sees the `else` this pass empties. `pipeline.ts` commits that order.
 import type { SFn, Stmt } from './ast';
 
 /** Can this statement be deleted outright — a void return the asm did not spell? */

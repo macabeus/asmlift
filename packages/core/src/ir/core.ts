@@ -199,9 +199,9 @@ export function terminator(b: Block): Op | undefined {
  *  moves a `ret` ONTO an edge takes the edge's own stamp with it and nothing else: the rest of a
  *  terminator's attrs describe the branch, not the arrival.
  *
- *  A GUARD, not a fix: `fallthrough` is today the only attr anything sets on a `br`, so copying the
- *  whole bag would behave identically. It is spelled this way so that the next attr a frontend
- *  invents does not ride onto an edge it says nothing about. */
+ *  A GUARD rather than a fix — `fallthrough` is the only attr anything sets on a `br`, so copying
+ *  the whole bag would behave identically — spelled so that the next attr a frontend invents cannot
+ *  ride onto an edge it says nothing about. */
 export function fallThroughOf(term: Op): Op['attrs'] {
   return term.attrs.fallthrough === true ? { fallthrough: true } : {};
 }

@@ -448,31 +448,31 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['baseline'],
     toolchains: ['agbcc', 'mwcc_242_81'],
   },
-  // `retflat` — THE ROW THAT PINS `return;` SPELLING, and the only one in the tier that sets its
-  // own `cflags`. Every other synthetic row compiles at -O2, where a redundant trailing `return;`
-  // is free: written both ways, 124 of 125 agbcc sources give identical objects at -O2 and at -O1,
-  // so no row at the canonical flags can tell a decompiler that emits one from a decompiler that
-  // does not. At -O0 it is not free — every source `return;` becomes its own `b <epilogue>` — and
-  // this body is the smallest place that shows it. Compiled at the flags below, the two spellings
-  // of its own emitted C differ in the object:
+  // `retflat` — THE ROW THAT PINS `return;` SPELLING, first of the three rows that follow, the only
+  // rows in the tier that set their own `cflags`. Every other synthetic row compiles at -O2, where a
+  // redundant trailing `return;` is free: written both ways, 124 of 125 agbcc sources give identical
+  // objects at -O2 and at -O1, so no row at the canonical flags can tell a decompiler that emits one
+  // from a decompiler that does not. At -O0 it is not free — every source `return;` becomes its own
+  // `b <epilogue>` — and this body is the smallest place that shows it. Compiled at the flags below,
+  // the two spellings of its own emitted C differ in the object:
   //
   //     void retflat(void){ *(s32 *)50345024 = 3; }            ldr/mov/str; bx lr
   //     void retflat(void){ *(s32 *)50345024 = 3; return; }    ldr/mov/str; b .L2; bx lr
   //
-  // so the row is a MATCH for the spelling the assembly shows and a nonmatch for the other. It
-  // failed before `l3/tailret.ts` and matches after; that is the whole of what it measures.
+  // so the row is a MATCH for the spelling the assembly shows and a nonmatch for the other. That is
+  // the whole of what it witnesses.
   //
   // `-fomit-frame-pointer` is not decoration. agbcc's -O0 frame (`push {r7,lr}; mov r7,sp`) homes
   // every local on the stack and asmlift declines it outright ("stack pointer used as data"), so
   // an -O0 row with a frame measures the frame and never reaches the backend. A parameterless body
   // with no locals has no frame to omit, which leaves the return spelling as the only thing in it.
   //
-  // NO FEATURE TAG FOR THE LEVEL. The 42 rows already built at -O0 are real ones and carry none
-  // either — their level comes off their unit's flags, which the artifact publishes per row the
-  // same way it publishes these. A tag here would be a filter that matched this row and missed
-  // those, which is worse than no filter. `baseline` is what it does carry, and it is the truth
-  // about both -O0 rows rather than a placeholder: a trivial body carrying no other feature, which
-  // is also the one tag the vocabulary requires of every published row.
+  // NO FEATURE TAG FOR THE LEVEL, on any of the three. The 42 rows already built at -O0 are real
+  // ones and carry none either — their level comes off their unit's flags, which the artifact
+  // publishes per row the same way it publishes these. A tag here would be a filter that matched
+  // these three and missed those, which is worse than no filter. `baseline` is what all three carry,
+  // and it is the truth rather than a placeholder: a body with no other feature in it, which is also
+  // the one tag the vocabulary requires of every published row.
   {
     sym: 'retflat',
     src: '#define gOutA ((u32 *)0x03003440)\nvoid retflat(void){ *gOutA = 3; }',
@@ -486,7 +486,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // join sits on the epilogue at -O0: the `then` arm branches there (`b .L4`) and the `else` arm
   // falls in. A block-level reading that keeps a return whenever SOME path branches in keeps one
   // here, and the object says the source wrote none — an `if`/`else` over a void tail is the
-  // commonest shape in the corpus that the flat body above cannot speak for.
+  // commonest shape in the corpus that `retflat` cannot speak for.
   //
   //     void retjoin(void){ … }             b .L4; .L4: .L2: bx lr
   //     void retjoin(void){ …; return; }    b .L4; .L4: b .L2; .L2: bx lr
@@ -503,8 +503,8 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void retjoin(void);',
     proto: { retjoin: { returnsVoid: true } },
   },
-  // `retsolo` — the same pin where there is NO EPILOGUE BLOCK to read. Both rows above are agbcc,
-  // and an agbcc `.s` carries the epilogue LABEL (`.L2:`) whether or not a `return;` branched to
+  // `retsolo` — the same pin where there is NO EPILOGUE BLOCK to read. `retflat` and `retjoin` are
+  // agbcc, and an agbcc `.s` carries the epilogue LABEL (`.L2:`) whether or not a `return;` branched to
   // it, so the epilogue is always a block of its own there and the reading always has in-edges to
   // weigh. On an OBJECT there is no label: a body that never branches is ONE block, the `ret` sits
   // at the end of it, and nothing arrived from anywhere. That is the commonest shape in the corpus
@@ -519,8 +519,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // both ways, this body and an `if`/`else` over a void tail compile to BYTE-IDENTICAL `.text` on
   // mwcc_242_81 and mwcc_247_107 at `-O0,p` AND at `-O4,p`, 8 of 8. That is also why the 42 rows
   // the corpus already builds at -O0 — every one of them Mario Party 4, on those two builds — can
-  // never move on this question. Same `-O0` reasoning as the two rows above: at the canonical -O2
-  // the spellings are one object and no row there can tell the two decompilers apart.
+  // never move on this question. Same `-O0` reasoning as the other two: at the canonical -O2 the
+  // spellings are one object and no row there can tell the two decompilers apart.
   {
     sym: 'retsolo',
     src: '#define gOutA ((u32 *)0x80003010)\nvoid retsolo(void){ *gOutA = 3; }',

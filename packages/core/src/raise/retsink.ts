@@ -648,10 +648,9 @@ export function sinkReturns(
       const t = p.ops[p.ops.length - 1];
       const sunk = ret.operands.map((o) => t.successors[0].args[m.params.indexOf(o)]);
       // The `br` being replaced carries whether the machine BRANCHED to this epilogue or fell into
-      // it — the fact `structure/retspell.ts` reads to decide whether the source spelled a `return;`.
-      // Sinking puts the return ON that edge, so the edge's fact travels with it; without this the
-      // structurer would ask the new return block's in-edges instead, and they are about reaching
-      // the statements above the return, not about reaching the epilogue.
+      // it, which is what `structure/retspell.ts` reads. Sinking puts the return ON that edge, so
+      // the edge's fact travels with it; ask the new return block's in-edges instead and they answer
+      // how control reached the statements above the return, not how it reached the epilogue.
       p.ops[p.ops.length - 1] = mkOp('ret', { operands: sunk, attrs: fallThroughOf(t) });
       changed = true;
     }

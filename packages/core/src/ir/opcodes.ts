@@ -177,10 +177,10 @@ export const OPCODES = {
   // no more reapable than a dead `call`.
   opaque: { operands: 'variadic', results: 1, effects: true },
   // --- terminators ---
-  // `fallthrough: true` — OPTIONAL, and the same fact as on `br` below: a `ret` SUNK onto one edge
-  // (`raise/retsink.ts`, `raise/tailsink.ts`) replaces that edge's `br` and takes its stamp, so the
-  // reading in `structure/retspell.ts` can still tell a `return;` the source wrote from the machine
-  // running off the end. A `ret` the frontend built carries nothing and is read by its block.
+  // `fallthrough: true` — OPTIONAL, the same fact as on `br`: a `ret` SUNK onto one edge
+  // (`raise/retsink.ts`, `raise/tailsink.ts`) replaces that edge's `br` and takes its stamp, so
+  // `structure/retspell.ts` can still read how the machine arrived. A `ret` a frontend built carries
+  // nothing, and is read by its block's in-edges instead.
   ret: { operands: 'variadic', results: 0, terminator: true, successors: 0 },
   // `fallthrough: true` — OPTIONAL, set by a frontend when the block carried NO control-transfer
   // instruction and this `br` stands for the machine simply running into the next block. Its

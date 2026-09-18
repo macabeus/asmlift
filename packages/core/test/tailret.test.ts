@@ -49,9 +49,9 @@ describe('the asm decides which returns exist', () => {
 
   test('a branch out of an EMPTY arm keeps the return — it is the only statement that arm has', () => {
     // `retearly` is `if (gFlag & 1) return; *gOutA = 3;`. Its `b .L5` leaves a block with nothing
-    // else in it, so the `return;` it stands for has nowhere else to live: emptying that arm needs
-    // a branch-sense flip, and the object keeps the branch either way. The fall-through from the
-    // store block does not overrule it.
+    // else in it, so the `return;` it stands for has nowhere else to live: emptying that arm is a
+    // branch-sense flip, and the flipped sense compiles to a DIFFERENT object — 36 bytes, `bne` over
+    // the body, against 40 with the `b`. The fall-through from the store block does not overrule it.
     expect(lift('retearly', O0)).toContain('return;');
   });
 
@@ -121,11 +121,9 @@ describe('what the pass may drop', () => {
 });
 
 describe('the order the pipeline runs these two passes in', () => {
-  // `pipeline.ts` commits `dropUnspelledReturns(mergeCommonTails(raw))`, and `l3/tailret.ts` says
-  // why: `tailmerge` moves only `assign`/`store`/`exprstmt`, so a `return` at the end of an arm
-  // BLOCKS its peel. Drop the returns first and the same arms become peelable — which is a change
-  // to rows that have nothing to do with return spelling, and it empties both arms to do it. The
-  // order is therefore observable, not a preference, and this is its ablation.
+  // `pipeline.ts` commits `dropUnspelledReturns(mergeCommonTails(raw))`; `l3/tailret.ts` says why.
+  // Reverse them and the same arms become peelable, emptying both — a change to rows that have
+  // nothing to do with return spelling. The order is observable, and this is its ablation.
   const bothArmsReturn = (): SFn => fn([iff([asg('v0'), unspelled()], [asg('v0'), unspelled()])]);
   const shape = (f: SFn): string =>
     JSON.stringify(f.body.map((s) => (s.k === 'if' ? [kinds(s.then), kinds(s.else)] : s.k)));

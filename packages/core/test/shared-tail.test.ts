@@ -444,8 +444,8 @@ test('a tail that reads a forwarder parameter is copied with the value each path
 test('the sunk `ret` carries the edge it replaced, and a forwarded path carries nothing', () => {
   // The fall-through fact `structure/retspell.ts` reads is a fact about ONE edge. A source that
   // branches straight to the tail hands its own edge to the copy; a source seen THROUGH a forwarder
-  // hands an edge into the forwarder, which says nothing about reaching the epilogue, so its copy
-  // is left unmarked and read as a branch — the side that keeps today's spelling.
+  // hands an edge into the forwarder, which says nothing about reaching the epilogue, so its copy is
+  // left unmarked and read as a branch — the side that can never delete a return the object needs.
   const fn = parse(
     CROSS_JUMPED.replace(
       '  %8: s32 = const {value=9}\n  br ^bb5(%8)',
