@@ -731,14 +731,27 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
+/** A statement that REPEATS what it contains — what {@link isLoop} narrows to, so that a caller
+ *  which reaches `body` or `cond` afterwards does not have to spell the kind test out again.
+ *
+ *  Derived STRUCTURALLY, not from a second list of kinds: a repeating statement is exactly one that
+ *  carries both a `cond` and a `body`, and no other `Stmt` carries both (`if` has `cond` without
+ *  `body`, `switch` has neither). So a new repeating kind joins this type by construction, and the
+ *  type cannot fall out of step with the switch below — which a hand-written kind list would do
+ *  silently, because TypeScript does not check a predicate's body against the type it asserts. */
+export type Loop = Extract<Stmt, { cond: Expr; body: Stmt[] }>;
+
 /** Does this statement REPEAT what it contains? Its body and its own condition run once per
  *  iteration, which is the fact half of `l3/` asks about: a hoist out of one is loop-invariant
  *  code motion, a copy inside one re-runs, and a live range that crosses one is under pressure.
  *
  *  It lives here, exhaustive and with no `default`, for the reason {@link stmtLists} does: a new
  *  `Stmt` kind that repeats is then a compile error at ONE site rather than a silent `false` in
- *  each caller's own hand-spelled kind test. */
-export function isLoop(s: Stmt): boolean {
+ *  each caller's own hand-spelled kind test. It NARROWS to {@link Loop} rather than returning
+ *  `boolean`, because a caller that has to reach `body` afterwards cannot use a `boolean` one and
+ *  writes the kind test out again instead — which is how `l3/unreduce.ts` and `backend/pascal.ts`
+ *  survived the first migration to this function. */
+export function isLoop(s: Stmt): s is Loop {
   switch (s.k) {
     case 'while':
     case 'dowhile':

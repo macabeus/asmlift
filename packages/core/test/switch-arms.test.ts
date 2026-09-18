@@ -15,7 +15,7 @@ import type { Block } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
-import type { SFn, Stmt } from '../src/l3/ast';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
@@ -1140,6 +1140,59 @@ test('\u2026and a jump table that falls through fails LOUD for it, naming the ta
   // recovers the falling switch for C.
   expect(decompile('f', pasTable(false), ARMV4T_AGBCC, pas).source).toContain('case a0 of');
   expect(of(pasTable(true))).toMatch(/case 0:[\s\S]*?\n\s*case 1:/);
+});
+
+// The OTHER thing Pascal's `case-of` cannot spell: an early `return` inside an arm. `fnName := v`
+// then FALLS THROUGH into any post-switch code, so the backend loud-fails the whole function
+// rather than emit that. The walk looking for the `return` has to descend through every statement
+// an arm can contain — and the LOOP arm of that walk has no other witness, so a `return` reachable
+// only through a loop body is the shape that pins it. Dropping `isLoop(st) && hasReturn(st.body)`
+// from backend/pascal.ts reddens exactly this test and nothing else in the file.
+const retInArm = (wrap: 'none' | 'while' | 'dowhile' | 'for'): SFn => {
+  const ret: Stmt = { k: 'return', value: { k: 'const', value: 1 } };
+  const cond: Expr = { k: 'var', name: 'i' };
+  const body: Stmt[] =
+    wrap === 'none'
+      ? [ret]
+      : wrap === 'for'
+        ? [
+            {
+              k: 'for',
+              init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+              cond,
+              inc: { k: 'assign', name: 'i', value: cond },
+              body: [ret],
+            },
+          ]
+        : [{ k: wrap, cond, body: [ret] }];
+  return {
+    name: 'f',
+    params: [{ name: 'a0', type: T.u(32) }],
+    locals: [{ name: 'i', type: T.u(32) }],
+    globals: [],
+    retType: T.u(32),
+    body: [
+      {
+        k: 'switch',
+        scrutinee: { k: 'var', name: 'a0' },
+        cases: [{ values: [0], body, fallsThrough: false }],
+        default: undefined,
+      },
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+  };
+};
+
+test('a `return` inside a switch arm fails LOUD for Pascal, through a loop as well as directly', () => {
+  for (const wrap of ['none', 'while', 'dowhile', 'for'] as const) {
+    expect(() => pascalBackend.emit(retInArm(wrap))).toThrow(
+      /`return` inside a switch case has no faithful IDO Pascal spelling/,
+    );
+  }
+  // CONTROL: the same shapes print for C, so the refusal is Pascal's and not the fixture's.
+  for (const wrap of ['none', 'while', 'dowhile', 'for'] as const) {
+    expect(cBackend.emit(retInArm(wrap))).toContain('case 0:');
+  }
 });
 
 // ── where the `default:` label may be read off the layout ───────────────────────────────
