@@ -18,6 +18,7 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
+import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import type { FnProto } from '../src/proto';
@@ -369,6 +370,26 @@ describe('the declaration witness', () => {
       );
     expect(ablate('unhomed-param', measured(false, true))).toBe(1);
     expect(ablate('widened-elsewhere', measured(true, false))).toBe(1);
+  });
+
+  // The pair pins that a narrow declaration EXISTS; the extension pins the width. A wider mask on
+  // the extension's result leaves the two readings indistinguishable — `int f(u16 x){ x =
+  // (signed char)x; return x; }` and `int f(s8 x){ return x & 0xffff; }` compile to the same object
+  // — and the narrowing is the reading that keeps the home store, so it is taken and this pins it:
+  // a refusal here would fall back to `((a << 24) >> 24) & 0xffff`, four words with no `sw`.
+  test('a WIDER mask on the extension is not a contradiction — both readings are one object', () => {
+    const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = sext %0 {width=8}
+  %2: unk32 = const {value=65535}
+  %3: unk32 = and %1, %2
+  ret %3
+}
+`);
+    verify(fn);
+    fn.paramEvidence = new Map([[fn.blocks[0].params[0], { deadHome: true, selfRedefined: true }]]);
+    expect(narrowEntryParams(fn, 'home-store-and-in-place')).toBe(1);
+    expect(fn.blocks[0].params[0].type).toEqual(T.int(8, true));
   });
 
   test('the evidence alone licenses nothing — every gate above still applies', () => {

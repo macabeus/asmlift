@@ -46,6 +46,17 @@
 // so this pass leaves its parameter wide and re-spells the cast. That is a worse-reading answer,
 // not a wrong one.
 //
+// THE PAIR SAYS A NARROW DECLARATION EXISTS, NOT WHICH ONE. The WIDTH comes from the extension,
+// and where a wider mask sits on that extension's result the declaration could have been the wider
+// type — `int f(u16 x){ x = (signed char)x; return x; }` and `int f(s8 x){ return x & 0xffff; }`
+// are ONE object at the row's own flags (`sw a0,0(sp) / sll a0,a0,0x18 / sra a0,a0,0x18 / andi
+// v0,a0,0xffff`), so the asm decides nothing between them and this pass answers `s8`. Refusing on
+// that disagreement is not the repair, because the spelling a refusal falls back to is a DIFFERENT
+// object: `int f(int a){ return ((a << 24) >> 24) & 0xffff; }` is four words with no home store and
+// both shifts in `v0`, so the refusal would cost the byte match under BOTH readings. Where the
+// caller declares the parameter `proto-width` takes the tiebreak; where nobody does, the two
+// readings recompile alike and only a PROTOTYPED CALL SITE of this function could tell them apart.
+//
 // Ungated, this pass narrows the body cast too and loses `synthetic:tos8:ido7.1`, a MATCH. The two
 // MIPS GCCs are a third case again: their two spellings are one BYTE-IDENTICAL object, so nothing
 // in the asm decides the width and the honest answer is to leave the extension standing.
