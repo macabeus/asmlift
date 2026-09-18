@@ -88,7 +88,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 - **The L3 rewrites** ([`l3/`](../packages/core/src/l3)) then improve that tree _within_ the
   level — no lowering, so this is a stage rather than a fourth level. They are either committed or
   ranked, and the difference is architectural, not incidental:
-  - **Committed**, inside `structureChecked`: tail-merge → dead-store elimination → base-CSE.
+  - **Committed**, inside `structureChecked`: tail-merge → unspelled-`return` deletion → dead-store
+    elimination → base-CSE.
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked variations**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two kinds of them: RESPELL variations, which rewrite one structured

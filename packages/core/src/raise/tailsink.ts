@@ -39,7 +39,16 @@
 // NO GATE: which copy stays shared is the follow's question, and whether a sunk function is worth
 // a candidate is rank.ts's, asked with the follow's own predicate (`hasDivergentSharedRet`) rather
 // than a copy of it here.
-import { type Block, type Fn, type Value, mkOp, predecessors, reachableBlocks, terminator } from '../ir/core';
+import {
+  type Block,
+  type Fn,
+  type Value,
+  fallThroughOf,
+  mkOp,
+  predecessors,
+  reachableBlocks,
+  terminator,
+} from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 
 /** One edge that supplies the tail its arguments. `resolve` sends a value the tail reads to the
@@ -111,12 +120,12 @@ export function sinkStoreTails(fn: Fn): boolean {
     for (const src of sources) {
       const copies = body.map((o) => mkOp('store', { operands: o.operands.map(src.resolve), attrs: { ...o.attrs } }));
       // Carry the replaced edge's fall-through fact onto the duplicated `ret`, exactly as
-      // `raise/retsink.ts` does — `structure.ts` reads it to tell a `return;` the source wrote from
-      // the machine running off the end. Only for a source that branches straight to the tail: seen
-      // THROUGH a forwarder the path is several edges and no one of them answers, so the copy is
-      // left unmarked and read as a branch, which keeps today's spelling.
+      // `raise/retsink.ts` does — `structure/retspell.ts` reads it to tell a `return;` the source
+      // wrote from the machine running off the end. Only for a source that branches straight to the
+      // tail: seen THROUGH a forwarder the path is several edges and no one of them answers, so the
+      // copy is left unmarked and read as a branch, which keeps today's spelling.
       const t = src.from.ops[src.from.ops.length - 1];
-      const attrs = t.successors[0]?.block === tail ? { ...t.attrs } : {};
+      const attrs = t.successors[0]?.block === tail ? fallThroughOf(t) : {};
       src.from.ops.splice(src.from.ops.length - 1, 1, ...copies, mkOp('ret', { attrs }));
     }
     // By REACHABILITY, not predecessor count: the tail (unless a conditional edge keeps it) and

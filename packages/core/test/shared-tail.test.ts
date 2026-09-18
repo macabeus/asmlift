@@ -440,3 +440,29 @@ test('a tail that reads a forwarder parameter is copied with the value each path
   expect(errors).toEqual([]);
   expect(cands.some((c) => hasVariation(c.variations, 'shared-tail') && count(c.source, ' = 9;') === 1)).toBe(true);
 });
+
+test('the sunk `ret` carries the edge it replaced, and a forwarded path carries nothing', () => {
+  // The fall-through fact `structure/retspell.ts` reads is a fact about ONE edge. A source that
+  // branches straight to the tail hands its own edge to the copy; a source seen THROUGH a forwarder
+  // hands an edge into the forwarder, which says nothing about reaching the epilogue, so its copy
+  // is left unmarked and read as a branch — the side that keeps today's spelling.
+  const fn = parse(
+    CROSS_JUMPED.replace(
+      '  %8: s32 = const {value=9}\n  br ^bb5(%8)',
+      '  %8: s32 = const {value=9}\n  br ^bb6(%8)',
+    ).replace('^bb5(%9: s32):', '^bb6(%10: s32):\n  br ^bb5(%10)\n^bb5(%9: s32):'),
+  );
+  verify(fn);
+  const direct = fn.blocks[3]; // ^bb3, a `br` straight to the tail
+  const forwarded = fn.blocks[4]; // ^bb4, reaching the tail through ^bb6
+  for (const b of [direct, forwarded]) {
+    b.ops[b.ops.length - 1].attrs.fallthrough = true;
+  }
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  const retOf = (b: Fn['blocks'][number]) => b.ops[b.ops.length - 1];
+  expect(retOf(direct).opcode).toBe('ret');
+  expect(retOf(direct).attrs.fallthrough).toBe(true);
+  expect(retOf(forwarded).opcode).toBe('ret');
+  expect(retOf(forwarded).attrs.fallthrough).toBeUndefined();
+});
