@@ -232,6 +232,54 @@ test('a reloc-carrying addis is a link-time placeholder — declines loud, never
   expect(() => dis('lis_reloc', lis)).toThrow(/r4 holds the high half of 'gVal'/);
 });
 
+test('a jump-table base pair must carry the @ha/@l relocation TYPES, not just a shared symbol', () => {
+  // The dispatch recognizer pairs its own `lis`/`addi` — the same idea the `@ha`/`@l` fold
+  // implements, at a different time and for a different consumer (it wants the table's NAME, not
+  // its address). Keeping the two apart is only safe while both demand the same evidence, so the
+  // recognizer checks the relocation types the fold checks. Here the `lis` carries a SMALL-DATA
+  // relocation, which never forms a high half: the same symbol on both instructions is not a pair,
+  // and the dispatch declines at its `bctr` rather than reading a table the code never addressed.
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: [0x20, 0x28, 0x30, 0x38].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swt',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0 }],
+      ['swt', { section: '.text', value: 0 }],
+    ]),
+    bigEndian: true,
+  };
+  const asm = [
+    '00000000 <swt>:',
+    '   0:\tcmplwi  r3,3',
+    '   4:\tbgt     40 <swt+0x40>',
+    '   8:\tlis     r4,0',
+    '\t\t\t8: R_PPC_EMB_SDA21 jtbl', // not an `@ha` half — a small-data base
+    '   c:\tslwi    r0,r3,2',
+    '  10:\taddi    r4,r4,0',
+    '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+    '  14:\tlwzx    r0,r4,r0',
+    '  18:\tmtctr   r0',
+    '  1c:\tbctr',
+    '  20:\tli      r3,10',
+    '  24:\tblr',
+    '  28:\tli      r3,20',
+    '  2c:\tblr',
+    '  30:\tli      r3,30',
+    '  34:\tblr',
+    '  38:\tli      r3,40',
+    '  3c:\tblr',
+    '  40:\tli      r3,0',
+    '  44:\tblr',
+  ].join('\n');
+  expect(() => decompile('swt', asm, PPC_MWCC, { asmData })).toThrow(/unmodelled control transfer 'bctr'/);
+});
+
 test('a recovered jump table still lifts to a switch — its reloc lis/addi never reach the guards', () => {
   // The @tbl pair sits in the dispatch block, which a recovered JT prunes as unreachable before
   // decode (the bounds branch's successors are replaced by the cases). This pins that the

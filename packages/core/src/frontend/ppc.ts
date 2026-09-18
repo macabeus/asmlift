@@ -195,8 +195,21 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       continue;
     } // rB = &table (lo) + 0
     const rT = addi.ops[1];
-    const tableSym = lis.reloc?.sym; // ADDR16_HA/LO @tbl (from inline -r reloc)
-    if (lis.ops[0] !== rT || !tableSym || addi.reloc?.sym !== tableSym) {
+    // The table's base is the SAME `@ha`/`@l` pair the address fold consumes, and it must show the
+    // same evidence: the high half's relocation type, the low half's, one symbol, one addend. The
+    // two pairings stay separate deliberately — this one runs before the blocks exist, asks for the
+    // table's NAME rather than its address, and hands it to `readJumpTable` instead of a `gaddr` —
+    // but neither may accept a pair the other would refuse, or a dispatch could be recovered from
+    // two instructions that never addressed the table together.
+    const tableSym = lis.reloc?.sym;
+    if (
+      lis.ops[0] !== rT ||
+      !tableSym ||
+      lis.reloc?.type !== 'R_PPC_ADDR16_HA' ||
+      addi.reloc?.type !== 'R_PPC_ADDR16_LO' ||
+      addi.reloc.sym !== tableSym ||
+      addi.reloc.addend !== lis.reloc.addend
+    ) {
       continue;
     }
     // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard. The `bgt` is itself a
