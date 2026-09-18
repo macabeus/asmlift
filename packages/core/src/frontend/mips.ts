@@ -123,7 +123,19 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
     }
     const ins = byAddr.get(r.offset);
     if (!ins) {
-      continue; // a relocation in another function's slice, or on a pruned dispatch
+      // A `.text` record describes the whole section, so most of them belong to the OTHER functions
+      // in this object and are simply not this slice's business. One that lands INSIDE the slice and
+      // still matches no instruction is a different animal: the disassembly this fold reads and the
+      // relocation table it was handed disagree about addressing, and the half it describes would
+      // then stay raw — the placeholder 0 standing in for the symbol. Refuse, naming both.
+      if (r.offset >= instrs[0].addr && r.offset <= instrs[instrs.length - 1].addr) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': relocation '${r.type} ${r.sym}' at 0x${r.offset.toString(16)} falls inside the ` +
+            `function (0x${instrs[0].addr.toString(16)}..0x${instrs[instrs.length - 1].addr.toString(16)}) but on no ` +
+            `instruction — the relocation table and this disassembly disagree about addressing`,
+        );
+      }
+      continue;
     }
     if (r.addend !== 0) {
       throw new FrontendUnsupportedError(
@@ -684,6 +696,22 @@ export function lift(
             });
             write(d, hi);
             break;
+          }
+          // `lui rD, 0x0` WITHOUT a relocation is not code any compiler wrote. `lui` of zero
+          // writes zero, which `move rD,zero` says in one instruction; what does print it is a
+          // relocatable object's UNRELOCATED high half, whose symbol lives in a relocation record
+          // this lift was never handed — the side table was not supplied, or it does not line up
+          // with this disassembly (see attachMipsRelocs). Reading it as the number 0 is the
+          // forbidden class from the other side: the fold above closes every path a CARRIED
+          // relocation could drop, and this closes the path where the record never arrived, so
+          // `*(T *)0` cannot be this frontend's answer either way. A non-zero `lui` is a genuine
+          // absolute address or literal high half (a linked dump, `lui;ori`) and is unaffected.
+          if (imm(ins, s) === 0) {
+            throw new FrontendUnsupportedError(
+              `${site(ins)} loads the high half 0x0 with no relocation on it — that is an ` +
+                `unrelocated placeholder, not the value; the object's R_MIPS_HI16/LO16 records were not supplied ` +
+                `with this disassembly (pass the object's \`objdump -s -r -t\` side table)`,
+            );
           }
           write(d, constVal((imm(ins, s) << 16) >> 0));
           break;

@@ -29,8 +29,6 @@ test('a scalar global load recovers the named symbol via HI16/LO16 relocs (not *
     { off: 8, type: 'R_MIPS_LO16', sym: 'gByte' },
   ]);
   expect(decompile('getg', asm, MIPS_GCC, { asmData: rs }).source).toContain('return gByte;');
-  // without the relocs the symbol is invisible → the honest raw-address read
-  expect(decompile('getg', asm, MIPS_GCC).source).toContain('*(s8 *)0');
 });
 
 test('a global field access folds the LO16 instruction offset into the gaddr access offset', () => {
@@ -175,4 +173,47 @@ test('a high half READ AS DATA refuses, naming the lui that produced it', () => 
   const asm = '00000000 <asdata>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tjr\tra\n   c:\tnop\n';
   const rs = relocs([{ off: 0, type: 'R_MIPS_HI16', sym: 'gBase' }]);
   expect(() => decompile('asdata', asm, MIPS_GCC, { asmData: rs })).toThrow(/high half of 'gBase'/);
+});
+
+// ── The records never arrived ───────────────────────────────────────────────────────────────────
+// The fold above closes every path a CARRIED relocation could be dropped on. These close the other
+// side: the side table is OPTIONAL (`decompile` takes no `asmData` from the CLI on raw objdump
+// text, and the benchmark's own extraction degrades to `undefined` on a failed dump), and without
+// it the `lui` immediate is still the link-time placeholder. Rendering it as the number 0 is the
+// same silent wrong answer whether the record was dropped or never supplied.
+
+test('a lui of 0x0 with NO relocation table refuses instead of rendering address 0', () => {
+  // The scalar-load input of the first test, lifted with nothing on the side. `lui` of zero writes
+  // zero — which `move rD,zero` says in one instruction — so no compiler emits this; an unrelocated
+  // high half does. It used to lift `*(s8 *)0`, which compiles, so nothing downstream complained.
+  const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
+  expect(() => decompile('getg', asm, MIPS_GCC)).toThrow(/high half 0x0 with no relocation on it/);
+  // and the same input with an EMPTY table is the same case: a table that describes no half here
+  expect(() => decompile('getg', asm, MIPS_GCC, { asmData: relocs([]) })).toThrow(
+    /high half 0x0 with no relocation on it/,
+  );
+});
+
+test('a NON-zero lui high half is untouched by that guard', () => {
+  // A linked disassembly (or a `lui;ori` 32-bit literal) carries the real high half in the field,
+  // and needs no relocation to mean what it says. The guard must not reach it.
+  const asm = '00000000 <lit>:\n   0:\tlui\tv0,0x1234\n   4:\tjr\tra\n   8:\tori\tv0,v0,0x5678\n';
+  expect(decompile('lit', asm, MIPS_GCC).source).toContain('305419896');
+});
+
+test('a relocation INSIDE the function but on no instruction refuses, naming the disagreement', () => {
+  // A record whose offset lands in this slice and matches nothing means the table and the
+  // disassembly disagree about addressing. Records outside the slice belong to the object's other
+  // functions and are skipped, which is why the guard is bounded by the slice rather than global.
+  const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
+  const rs = relocs([
+    { off: 2, type: 'R_MIPS_HI16', sym: 'gByte' },
+    { off: 10, type: 'R_MIPS_LO16', sym: 'gByte' },
+  ]);
+  expect(() => decompile('getg', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /'R_MIPS_HI16 gByte' at 0x2 falls inside the function \(0x0\.\.0x8\) but on no instruction/,
+  );
+  // the LO16 at 0x a, past the last instruction, is another function's business and is skipped
+  const after = relocs([{ off: 10, type: 'R_MIPS_LO16', sym: 'gByte' }]);
+  expect(() => decompile('getg', asm, MIPS_GCC, { asmData: after })).toThrow(/high half 0x0 with no relocation on it/);
 });
