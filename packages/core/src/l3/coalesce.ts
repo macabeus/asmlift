@@ -345,11 +345,9 @@ export interface ArmPair {
  *  either can observe the other's write — no liveness reasoning needed. `branchArms` says what an
  *  arm is, and the argument holds for a `switch`'s case bodies exactly as it does for an `if`'s two.
  *
- *  TWO gates protect that argument, one per way it can fail. `loop`: a loop ancestor re-enters the
- *  branch, later entries can take a different arm, and a value written on one visit becomes readable
- *  on the next — note it wants ANY enclosing loop, not the span model's shared-loop rule, because
- *  never-coexisting is a claim about one entry. `fall-through`: a `switch` arm that runs on into
- *  another puts both on a single path, which defeats the argument WITHIN one entry. */
+ *  Two gates protect it, one per way it fails. `loop` covers a SECOND ENTRY, which is why it wants
+ *  ANY enclosing loop rather than the span model's shared-loop rule: never-coexisting is a claim
+ *  about one entry. `fall-through` covers the failure WITHIN one entry. */
 export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   {
     id: 'type',
@@ -494,18 +492,16 @@ function mentionIndex(): {
  *  An `if` has exactly two arms and no way to reach one from the other. A `switch`'s arms are its
  *  `case` bodies, and FALL-THROUGH is the one way two of them land on a single path: arm `i` runs
  *  into arm `j` exactly when every arm from `i` up to `j` falls through, so the reach is the
- *  TRANSITIVE chain and not merely the adjacent pair. `joined` reports it; the `fall-through` gate
- *  is what refuses it, so the reach stays a stated rule with a refusal rather than a silent skip.
+ *  TRANSITIVE chain and not merely the adjacent pair.
  *
  *  ITS REACH, MEASURED, because a soundness argument with no corpus witness should say so. Counted
- *  2026-09-18 with a throwaway counter in this walk, over `pnpm bench sweep --fan --map-modes
- *  harness,nomap` — 2,396 records over the 1,198-row corpus: 2,158 `switch` statements visited in
- *  25 functions, and the switch half ADMITS on exactly one of them (192 pairs, all
- *  `pokeemerald:SetMauvilleOldManLanguage:agbcc`). Every other pair is refused by `arm-init`
- *  (4,024) or `type` (1,346), and `fall-through` and `loop` refuse **zero** — so what bounds this
- *  extension corpus-wide today is a COST gate, while the rule carrying its soundness argument is
- *  witnessed only by the fixtures in `coalesce.test.ts`. Re-take the count rather than quoting it:
- *  a corpus that grows falsifies the number, not the argument.
+ *  2026-09-19 with a throwaway counter in this walk, over `pnpm bench sweep --fan --map-modes
+ *  harness,nomap` — 2,396 records over the 1,198-row corpus: the switch half ADMITS 192 pairs, all
+ *  on `pokeemerald:SetMauvilleOldManLanguage:agbcc` and none on any other function. Across all five
+ *  gates, `arm-init` refuses 4,024 and `type` 1,346, while `volatile`, `loop` and `fall-through`
+ *  refuse **zero** — so what bounds this extension corpus-wide is a COST gate, while both SOUND
+ *  rules are witnessed only by the fixtures in `coalesce.test.ts`. Re-take the count rather than
+ *  quoting it: a corpus that grows falsifies the number, not the argument.
  *
  *  A `switch`'s `default` body is deliberately NOT an arm. `defaultAt` may place the label between
  *  case labels, where the body is reachable both by dispatch and by running on into the arm below

@@ -1,12 +1,6 @@
-// A region copy of a pointer parameter (l3/argcopy.ts).
-//
-// A pointer parameter used across a whole function pins its incoming register for the whole body.
-// The source may instead copy it into a local that one region uses, which hands the allocator a
-// second name to home elsewhere and frees the parameter's register for something else — on
-// pokeemerald:SetMauvilleOldManLanguage that something else is the loop counter.
-//
-// WHICH region the source copied in is not derivable from the tree, so every legal region is
-// offered and the differ referees — the `/regcopy` idiom this file shares with l3/coalesce.ts.
+// A region copy of a pointer parameter — l3/argcopy.ts, whose header carries what the variation
+// is for. What these tests pin is which regions it offers, what each gate refuses, and that every
+// judgement and every rewrite sees the SAME statements.
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
@@ -116,8 +110,8 @@ describe('a region copy of a pointer parameter', () => {
   });
 
   test('a TOP-LEVEL loop is offered NOTHING — there is no region outside it to hold the copy', () => {
-    // the same two reads as the test above, with the loop at the function's own list instead of
-    // inside an arm. `regions()` does not offer that list, so the loop body is the only region
+    // the same two reads as the nested-arm case, with the loop at the function's own list instead
+    // of inside an arm. `regions()` does not offer that list, so the loop body is the only region
     // over the reads and `loop-region` refuses it: the pass declines the whole shape rather than
     // minting a per-iteration copy. The spelling this population wants — a copy BEFORE the loop,
     // repointing only the loop's reads — is a copy site separate from its region, which this pass

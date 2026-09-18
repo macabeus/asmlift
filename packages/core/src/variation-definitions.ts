@@ -1120,12 +1120,12 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "else, such as that block's loop counter. Uses outside the chosen region keep naming the parameter, " +
       'which is what makes the two ranges separable.',
     compilerBehavior:
-      'agbcc distinguishes the number of locals with disjoint lifetimes, not where they are declared, so the ' +
-      'copy is emitted as a plain local assigned in the region rather than a block-scoped declaration. ' +
-      'That is an agbcc fact and the variation carries no target gate, so the copy is offered on every ' +
-      'compiler — as /scopebase, /regionbase and /coalesce, which rest on the same allocator fact, also are. ' +
-      'A target gate here would have to claim the copy is INERT on some compiler, the way /advance claims it ' +
-      'of a target that folds a pointer advance; nobody has compiled the pair that would say so, and a gate ' +
+      'A braced declaration inside the region and a plain local assigned at its head were both taken through ' +
+      'agbcc on the row this variation was built for and produced the same bytes, so the copy is emitted as ' +
+      'a plain local and nothing here carries block scope. The variation has no target gate, so it is offered ' +
+      'on every compiler — as /scopebase, /regionbase and /coalesce, which rest on the same allocator fact, ' +
+      'also are. A target gate would have to claim the copy is INERT on some compiler, the way /advance claims ' +
+      'it of a target that folds a pointer advance; nobody has compiled the pair that would say so, and a gate ' +
       'withholding a candidate on an untested guess costs matches rather than fan.',
     offeredWhen: {
       judges: 'each pointer parameter, in each nested statement list that reads it',

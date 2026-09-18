@@ -731,14 +731,13 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
-/** A statement that REPEATS what it contains — what {@link isLoop} narrows to, so that a caller
- *  which reaches `body` or `cond` afterwards does not have to spell the kind test out again.
+/** A statement that REPEATS what it contains — what {@link isLoop} narrows to.
  *
  *  Derived STRUCTURALLY, not from a second list of kinds: a repeating statement is exactly one that
  *  carries both a `cond` and a `body`, and no other `Stmt` carries both (`if` has `cond` without
- *  `body`, `switch` has neither). So a new repeating kind joins this type by construction, and the
- *  type cannot fall out of step with the switch below — which a hand-written kind list would do
- *  silently, because TypeScript does not check a predicate's body against the type it asserts. */
+ *  `body`, `switch` has neither). A new repeating kind therefore joins this type by construction,
+ *  where a hand-written kind list falls out of step SILENTLY — TypeScript does not check a
+ *  predicate's body against the type it asserts. */
 export type Loop = Extract<Stmt, { cond: Expr; body: Stmt[] }>;
 
 /** Does this statement REPEAT what it contains? Its body and its own condition run once per
@@ -748,9 +747,10 @@ export type Loop = Extract<Stmt, { cond: Expr; body: Stmt[] }>;
  *  It lives here, exhaustive and with no `default`, for the reason {@link stmtLists} does: a new
  *  `Stmt` kind that repeats is then a compile error at ONE site rather than a silent `false` in
  *  each caller's own hand-spelled kind test. It NARROWS to {@link Loop} rather than returning
- *  `boolean`, because a caller that has to reach `body` afterwards cannot use a `boolean` one and
- *  writes the kind test out again instead — which is how `l3/unreduce.ts` and `backend/pascal.ts`
- *  survived the first migration to this function. */
+ *  `boolean`, because a caller that reaches `body` afterwards cannot use a `boolean` one and spells
+ *  the kind test out again instead. `backend/pascal.ts` is where that costs correctness: its
+ *  `hasReturn` walk decides a LOUD failure — Pascal's `case-of` cannot spell an early `return` — so
+ *  a repeating kind read as a non-loop turns the refusal into an emitted miscompile. */
 export function isLoop(s: Stmt): s is Loop {
   switch (s.k) {
     case 'while':

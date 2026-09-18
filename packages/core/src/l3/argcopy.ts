@@ -15,20 +15,18 @@
 // constant-address local, and `l3/parkfirst.ts` only reorders a copy the tree already has. None of
 // them mints `b = a0`.
 //
-// THE COPY IS A PLAIN LOCAL, NOT A SCOPED DECLARATION. A braced region declaration and a
-// function-top local assigned at the head of the region compile to the same bytes here (both
-// spellings were taken through the row's own agbcc), so this pass emits the one L3 already
-// spells and adds no block-scope representation to carry a distinction no object shows.
+// THE COPY IS A PLAIN LOCAL, NOT A SCOPED DECLARATION. Both spellings — a braced region
+// declaration, and a function-top local assigned at the head of the region — were taken through
+// this row's own agbcc and produce the same bytes, so this pass emits the one L3 already spells
+// and adds no block-scope representation to carry a distinction no object shows.
 //
 // WHAT IT GIVES UP, NAMED. A pointer parameter read only inside a loop that sits at FUNCTION TOP
 // LEVEL gets no candidate at all: `regions()` does not offer the function's own list, so the only
 // region over those reads is the loop body, and `loop-region` refuses it. That population — a base
-// live across a top-level loop — is `/livebase` and `/hipress`'s, and it is a DECLINE here rather
-// than an oversight, because the spelling it would want is a copy placed BEFORE the loop with only
-// the loop's reads repointed. This pass cannot express that: its copy goes at the head of the
-// region it repoints, so a copy outside the loop and a repoint inside it is a copy SITE separate
-// from its region, a representation nothing here has. Relaxing `loop-region` would not buy it — it
-// would buy the per-iteration copy, which is the spelling that rule exists to refuse.
+// live across a top-level loop — is `/livebase` and `/hipress`'s, and the decline is deliberate.
+// The spelling that shape wants is a copy placed BEFORE the loop with only the loop's reads
+// repointed: a copy SITE separate from its region, which nothing here represents. Relaxing
+// `loop-region` does not reach it — it mints the per-iteration copy that rule exists to refuse.
 //
 // WHAT IS ENUMERATED, AND WHY. Which region the source copied in is not derivable from the tree,
 // so every legal region is offered as its own candidate and the differ referees — the `/regcopy`
@@ -36,21 +34,16 @@
 // parameter, which is the point: the copy is what makes the two live ranges separable.
 //
 // IT KEEPS ITS OWN REGION WALK, AND THAT IS A SECOND REGION MODEL. `l3/scopebase.ts` ships one
-// already — `RegionSelector`, `runsPerIteration`/`underNestedLoop`, its counting rules and
-// `applyScopedBasePlan` — and the paragraph above argues only the ELIGIBILITY half of why this is
-// not that file. The machinery half is not argued, because there is no argument: it is a
-// duplicate, narrower than the original, and merging the two is the right end state.
-//
-// What blocks the merge today is not the region question but the SAFETY OBLIGATION behind it.
-// scopebase hoists a pure ADDRESS and discharges its obligation by PLACEMENT — `assertHoistsDominate`
-// re-walks the emitted tree to check the hoist dominates every use it repointed. This pass hoists a
-// VALUE the caller passed, and its obligation is a whole-function invariance fact (`assigned`,
-// `addressed`) that no placement check can see; conversely it needs no dominance check at all,
-// because uses outside the region are not repointed. Putting both behind one table would need
-// scopebase's `collect()` to admit a plain `var` read as a site and `AccessCtx`/`keyOf` to key a
-// parameter — a widening of a file four shipped variations rest on. Until that is done, every walk
-// HERE goes through the shared `ast.ts` ones, so at least the two models cannot disagree about what
-// a statement contains.
+// already, and this is a narrower duplicate; merging them is the right end state. What blocks that
+// is the SAFETY OBLIGATION, not the region question. scopebase hoists a pure ADDRESS and
+// discharges its obligation by PLACEMENT — `assertHoistsDominate` re-walks the emitted tree to
+// check the hoist dominates every use it repointed. This pass hoists a VALUE the caller passed:
+// its obligation is a whole-function invariance fact (`assigned`, `addressed`) that no placement
+// check can see, and it needs no dominance check at all, because uses outside the region are not
+// repointed. One table over both would need scopebase's `collect()` to admit a plain `var` read
+// as a site and `AccessCtx`/`keyOf` to key a parameter — a widening of a file four shipped
+// variations rest on. Until then every walk HERE goes through `ast.ts`'s shared ones, so the two
+// models at least cannot disagree about what a statement contains.
 import type { Expr, SFn, Stmt } from './ast';
 import { isLoop, mapExprChildren, mapStmtExprs, mapStmtLists, stmtChildren, stmtLists, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
@@ -177,10 +170,11 @@ function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean
  *  one's.
  *
  *  ONE walk: `mapStmtExprs` already recurses into every nested statement — a `for`'s `init`/`inc`
- *  included, which is what makes this symmetric with `countReads` — so driving it through
- *  `mapStmtLists` as well re-visited a statement at depth d once per level above it. Measured on a
- *  five-level tree (switch > for > do-while > if > store): 40 expression visits, now 13, same tree
- *  out. This runs once per region per parameter per candidate, and each candidate is a compile. */
+ *  included, which is what makes this symmetric with `countReads` — so a single `map` over the list
+ *  reaches the whole subtree. Driving it through `mapStmtLists` as well would visit a statement at
+ *  depth d once per level above it: 40 expression visits against 13 on a five-level tree (switch >
+ *  for > do-while > if > store). This runs once per region per parameter per candidate, and each
+ *  candidate is a compile. */
 function repoint(list: Stmt[], n: string, to: string): Stmt[] {
   const inExpr = (e: Expr): Expr => (e.k === 'var' && e.name === n ? { ...e, name: to } : mapExprChildren(e, inExpr));
   return list.map((s) => mapStmtExprs(s, inExpr));

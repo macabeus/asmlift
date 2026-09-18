@@ -1258,11 +1258,12 @@ export function enumerateCandidates(
       const v = regionVolatile();
       return v ? volStore(v) : null;
     });
-    /** The results of a multi-result variation, under the SAME guard `respell` puts around a
-     *  single-result one: a throw here costs this variation and nothing else. Running a candidate
-     *  source at statement level instead is the one way a variation can cost a match — the
-     *  paragraph above carries that argument — and a source is a `for`-loop subject rather than a
-     *  thunk, so it needs this helper rather than a thunk to stay inside a try. */
+    /** The results of a multi-result variation, under the same guard `respell` gives a
+     *  single-result one: a throw costs this variation and nothing else. Run at statement level
+     *  instead, a throwing source takes the WHOLE row with it — `reportThrow` never runs, so the
+     *  DEFAULT candidate is lost too and the row goes `noncompile`. A multi-result source is a
+     *  `for`-loop subject rather than a thunk, which is why the guard is a helper and not a try
+     *  inside `respell`. */
     const candidatesOf = (
       variations: readonly Variation[],
       from: () => SFn | null | undefined,
@@ -1642,14 +1643,12 @@ export function enumerateCandidates(
       respellEach([...variations, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
     }
     // `/argcopy` — a pointer parameter copied into a local for ONE region (l3/argcopy.ts): the
-    // copy frees the parameter's incoming register for that region. Which region the source copied
-    // in is not derivable from the tree, so every legal one is a candidate.
+    // copy frees the parameter's incoming register for that region, and every legal region is its
+    // own candidate.
     //
-    // PAIRED WITH `/coalesce`, because the freed register is only worth anything if something takes
-    // it: on pokeemerald:SetMauvilleOldManLanguage the copy frees r5 and the SHARED loop counter is
-    // what moves into it, and neither spelling alone reaches the bytes. The pairing is the existing
-    // two primitives composed — each `/argcopy` tree is re-offered as a `/coalesce` subject — not a
-    // new mechanism.
+    // PAIRED WITH `/coalesce`, because a freed register is worth nothing until something takes it:
+    // on pokeemerald:SetMauvilleOldManLanguage the copy frees r5 and the counter shared between two
+    // switch arms is what moves into it, and neither spelling alone reaches the bytes.
     if (offeredOn(target, ['argcopy'])) {
       for (const c of candidatesOf(['argcopy'], () => sfn, argCopyCandidates)) {
         const copied = withSubject('argcopy', c.merged);
