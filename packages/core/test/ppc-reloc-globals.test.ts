@@ -40,3 +40,63 @@ test('a spellable symbol still declines as a capability gap, not as an unspellab
   const asm = '   0:\tlis     r3,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_fdinfo\n   4:\tblr\n';
   expect(() => dis('plain', asm)).toThrow(/carries a data relocation \('g_fdinfo'\)/);
 });
+
+// ── the small-data (SDA) memory operand ────────────────────────────────────────────────────────
+// `R_PPC_EMB_SDA21` is the simpler half of the same capability: one relocation, one instruction,
+// nothing to pair. The printed `0(0)` says nothing — the linker substitutes r13/r2 for the base
+// register and a section-relative displacement for the offset — so the address is exactly the
+// relocation's symbol plus its addend.
+
+test('an SDA load recovers the named global rather than a read through a fabricated base', () => {
+  // marioparty4:HuSysVWaitGet, verbatim, whose reference source is `return (s16) minimumVcount;`.
+  const asm = '   0:\tlwz     r0,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tminimumVcount\n   4:\textsh   r3,r0\n   8:\tblr\n';
+  expect(dis('HuSysVWaitGet', asm)).toContain('minimumVcount');
+});
+
+test('an SDA store writes the named global', () => {
+  const asm = '   0:\tstw     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tboardRandSeed\n   4:\tblr\n';
+  expect(dis('setseed', asm)).toContain('boardRandSeed = ');
+});
+
+test("the relocation's addend picks the word — SYM and SYM+0x4 are different accesses", () => {
+  // marioparty4:SLSerialNoCheck's shape. Before the addend was carried, both relocations read the
+  // same name and the second load silently read the wrong word.
+  const asm =
+    '   0:\tlwz     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tSLSerialNo\n' +
+    '   4:\tlwz     r4,0(0)\n\t\t\t4: R_PPC_EMB_SDA21\tSLSerialNo+0x4\n' +
+    '   8:\tadd     r3,r3,r4\n   c:\tblr\n';
+  const src = dis('serial', asm);
+  expect(src).toContain('&SLSerialNo'); // the symbol is recovered…
+  expect(src).toContain('p0[1]'); // …and the +4 access is the NEXT word
+  // Rendering-independent: the same listing with BOTH relocations at +0 must differ, which is the
+  // whole content of "the addend is part of the address".
+  expect(src).not.toBe(dis('serial', asm.replace('SLSerialNo+0x4', 'SLSerialNo')));
+});
+
+test('`li rD,0` under the same relocation is the ADDRESS of the global', () => {
+  // SDA21 address formation encodes rA=0, so objdump prints `li rD,0`; the linker rewrites it to
+  // `addi rD,r13,SYM@sdarx`. Same relocation, same recovery — a different operand field.
+  const asm = '   0:\tli      r3,0\n\t\t\t0: R_PPC_EMB_SDA21\tgSda\n   4:\tblr\n';
+  expect(dis('addrof', asm)).toContain('&gSda');
+});
+
+test('an SDA relocation whose printed operand is not the placeholder refuses, naming what it saw', () => {
+  // The recovery DISCARDS the printed operand, so it must first prove the operand says nothing.
+  // A linked listing prints a real base and displacement; lifting that as `&SYM + 0` would be wrong.
+  const asm = '   0:\tlwz     r3,-32752(r2)\n\t\t\t0: R_PPC_EMB_SDA21\tgSda\n   4:\tblr\n';
+  expect(() => dis('linked', asm)).toThrow(/not the expected '0\(0\)' placeholder/);
+});
+
+test('a `0(0)` base with NO relocation still refuses loudly', () => {
+  // The recovery is driven by the relocation, never by the printed placeholder: without a symbol
+  // there is nothing to name, and the old refusal must survive untouched.
+  expect(() => dis('noreloc', '   0:\tstw     r3,0(0)\n   4:\tblr\n')).toThrow(
+    /SDA\/global-relative access not supported/,
+  );
+});
+
+test('an SDA relocation naming an unspellable symbol refuses by kind and recovers nothing', () => {
+  // The naming policy runs BEFORE the recovery, so `@6` never reaches the declaration minter.
+  const asm = '   0:\tlwz     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\t@6\n   4:\tblr\n';
+  expect(() => dis('pool', asm)).toThrow(/anonymous constant pool entry \('@6'\)/);
+});

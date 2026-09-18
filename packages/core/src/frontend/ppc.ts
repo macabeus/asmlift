@@ -372,15 +372,22 @@ export function lift(
   // the address perfectly would still leave a name no C source can write, so no amount of lifting
   // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
   // waits on the fold. Saying which one a row hit is the whole value of the message.
-  const relocPlaceholder = (ins: Instr): never => {
+  const relocSite = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  /** The symbol a relocation names, once the naming policy has passed it. Every recovery below goes
+   *  through here FIRST, so an unspellable name can never reach the declaration minter looking like
+   *  an ordinary identifier — recovering the address is only half of being able to write it down. */
+  const spellableSym = (ins: Instr): string => {
     const sym = ins.reloc?.sym ?? '';
-    const where = `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
-    const unspellable = unspellableReason(sym);
+    const why = unspellableReason(sym);
+    if (why) {
+      throw new PpcUnsupportedError(`${relocSite(ins)} ${why}`);
+    }
+    return sym;
+  };
+  const relocPlaceholder = (ins: Instr): never => {
     throw new PpcUnsupportedError(
-      unspellable
-        ? `${where} ${unspellable}`
-        : `${where} carries a data relocation ('${sym}') — the printed immediate is a link-time ` +
-            `placeholder, not the value`,
+      `${relocSite(ins)} carries a data relocation ('${spellableSym(ins)}') — the printed immediate ` +
+        `is a link-time placeholder, not the value`,
     );
   };
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -540,15 +547,55 @@ export function lift(
       return v;
     };
     const emitShImm = kit.shImm;
-    const emitLoad = (d: string, mem: string, width: number, signed: boolean) => {
-      assertOrdinaryMem(mem);
-      const { off, base } = parseMem(mem);
-      emit('load', d, [read(base)], { off, width, signed });
+    // Materialise the address of a named global — the same `gaddr` the MIPS and Thumb frontends
+    // emit, so the structurer's three lowerings (bare `SYM`, `((T *)&SYM)[i]`, `&SYM`) are reached
+    // from PowerPC by exactly the path they were built for.
+    const emitGaddr = (sym: string): Value => {
+      const g = mkValue(T.unk(32));
+      ops.push(mkOp('gaddr', { results: [g], attrs: { sym } }));
+      return g;
     };
-    const emitStore = (srcReg: string, mem: string, width: number) => {
+    // `lwz rD,0(0)` under an `R_PPC_EMB_SDA21` relocation is a SMALL-DATA access. Both printed
+    // fields are link-time placeholders: the linker substitutes r13/r2 for the base register and a
+    // section-relative displacement for the offset, so the address is exactly `&SYM` plus the
+    // relocation's own addend — and the printed `0(0)` carries no information at all.
+    //
+    // Unlike the `@ha`/`@l` pair this is a SINGLE site: there is no half to pair, no register to
+    // prove, and nothing that can drift between two instructions. That is why it is the simpler
+    // half of the same capability. Because the printed operand is discarded rather than read, an
+    // operand that is NOT the expected placeholder refuses instead — a field this code ignores
+    // must be one that provably says nothing.
+    const sdaAccess = (ins: Instr, mem: string): { base: Value; off: number } | null => {
+      if (ins.reloc?.type !== 'R_PPC_EMB_SDA21') {
+        return null;
+      }
+      if (mem !== '0(0)') {
+        throw new PpcUnsupportedError(
+          `${relocSite(ins)} carries a small-data relocation ('${ins.reloc.sym}') but its memory ` +
+            `operand is '${mem}', not the expected '0(0)' placeholder`,
+        );
+      }
+      return { base: emitGaddr(spellableSym(ins)), off: ins.reloc.addend };
+    };
+    // The base value + byte offset of a displacement memory operand: a small-data global, or an
+    // ordinary register base. Read BEFORE a store's source register, because read order decides
+    // block-parameter layout.
+    const memOperand = (ins: Instr, mem: string): { base: Value; off: number } => {
+      const sda = sdaAccess(ins, mem);
+      if (sda) {
+        return sda;
+      }
       assertOrdinaryMem(mem);
       const { off, base } = parseMem(mem);
-      ops.push(mkOp('store', { operands: [read(base), read(srcReg)], attrs: { off, width } }));
+      return { base: read(base), off };
+    };
+    const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
+      const { base, off } = memOperand(ins, mem);
+      emit('load', d, [base], { off, width, signed });
+    };
+    const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
+      const { base, off } = memOperand(ins, mem);
+      ops.push(mkOp('store', { operands: [base, read(srcReg)], attrs: { off, width } }));
     };
     // Register+register INDEXED addressing (`lwzx rD,rA,rB` = *(rA+rB), `stwx rS,rA,rB` = *(rA+rB)=rS).
     // This is how mwcc emits EVERY variable-index array access (scalar and struct) — with rB the scaled
@@ -661,7 +708,20 @@ export function lift(
           write(d, read(s));
           break; // move register (or rD,rS,rS)
         case 'li':
-          // SDA21 address formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21
+          // SDA21 ADDRESS formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21:
+          // the linker rewrites it to `addi rD,r13,SYM@sdarx`, i.e. rD = &SYM. Same relocation and
+          // same recovery as the memory form above — only the field it lands in differs.
+          if (ins.reloc?.type === 'R_PPC_EMB_SDA21') {
+            if (parseImm(s) !== 0) {
+              throw new PpcUnsupportedError(
+                `${relocSite(ins)} carries a small-data relocation ('${ins.reloc.sym}') but its ` +
+                  `immediate is '${s}', not the expected 0 placeholder`,
+              );
+            }
+            const g = emitGaddr(spellableSym(ins));
+            ins.reloc.addend === 0 ? write(d, g) : emitBin('add', d, g, constVal(ins.reloc.addend));
+            break;
+          }
           if (ins.reloc) {
             relocPlaceholder(ins);
           }
@@ -857,28 +917,28 @@ export function lift(
           if (frameLoad(s)) {
             break;
           }
-          emitLoad(d, s, 4, true);
+          emitLoad(ins, d, s, 4, true);
           break;
         case 'lha':
-          emitLoad(d, s, 2, true);
+          emitLoad(ins, d, s, 2, true);
           break;
         case 'lhz':
-          emitLoad(d, s, 2, false);
+          emitLoad(ins, d, s, 2, false);
           break;
         case 'lbz':
-          emitLoad(d, s, 1, false);
+          emitLoad(ins, d, s, 1, false);
           break;
         case 'stw':
           if (frameStore(d, s)) {
             break;
           }
-          emitStore(d, s, 4);
+          emitStore(ins, d, s, 4);
           break;
         case 'sth':
-          emitStore(d, s, 2);
+          emitStore(ins, d, s, 2);
           break;
         case 'stb':
-          emitStore(d, s, 1);
+          emitStore(ins, d, s, 1);
           break;
         // Register+register indexed forms (variable-index array access). Widths/signedness mirror the
         // displacement loads/stores above; `lhax` is the sign-extending halfword (algebraic).

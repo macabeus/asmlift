@@ -282,11 +282,9 @@ test('a recovered jump table still lifts to a switch — its reloc lis/addi neve
   expect(decompile('swf', addiFirst, PPC_MWCC, { asmData }).source).toContain('switch (');
 });
 
-test('li and ori carrying a data reloc are placeholders too — decline loud', () => {
-  // SDA21 address formation encodes rA=0, printed as `li rD,0` + R_PPC_EMB_SDA21; `ori` is the
-  // other @l half-former.
-  const li = '0:\tli      r3,0\n\t\t\t0: R_PPC_EMB_SDA21 gSda\n4:\tblr\n';
-  expect(() => dis('sda', li)).toThrow(/data relocation/);
+test('ori carrying a data reloc is a placeholder — decline loud', () => {
+  // `ori rD,rA,SYM@l` is an `@l` half-former this frontend does not model. Lifting its printed 0
+  // would build the address from the low half alone.
   const ori = '0:\tori     r4,r4,0\n\t\t\t0: R_PPC_ADDR16_LO gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
   expect(() => dis('orilo', ori)).toThrow(/data relocation/);
 });
