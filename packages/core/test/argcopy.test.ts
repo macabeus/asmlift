@@ -23,6 +23,10 @@ const fn = (body: Stmt[], locals: SFn['locals'] = []): SFn => ({
   retType: T.void(),
   body,
 });
+const bump = (n: string, by: Expr): Stmt => ({ k: 'assign', name: n, value: by });
+const plus1 = (n: string): Expr => ({ k: 'bin', op: '+', l: rd(n), r: { k: 'const', value: 1 } });
+/** a `for`, the one statement whose `init`/`inc` are statements rather than nested LISTS */
+const forLoop = (init: Stmt, inc: Stmt, body: Stmt[]): Stmt => ({ k: 'for', init, cond: rd('c'), inc, body });
 /** a two-armed `if`, the smallest thing with regions */
 const armIf = (thenS: Stmt[], elseS: Stmt[]): Stmt => ({ k: 'if', cond: rd('c'), then: thenS, else: elseS });
 
@@ -105,6 +109,40 @@ describe('a region copy of a pointer parameter', () => {
     // the arm HOLDING the loop is still offered; the loop's own body is not
     expect(candidates.map((c) => c.merged)).toEqual(['a0@0.0']);
     expect(refusals.get('loop-region')).toBeGreaterThan(0);
+  });
+
+  // ── the walk is the WHOLE tree, `for` headers included ──────────────────────────────────────
+  // `repoint` rewrites a `for`'s `init` and `inc` (mapStmtExprs recurses into both), so every
+  // judgement this pass makes has to see them. `stmtLists` — the walk over the SCOPES a statement
+  // opens — does not, by its own contract, and each of these three shapes is invisible to it.
+
+  test('a parameter a `for` header ADVANCES is never copied — the copy would not advance with it', () => {
+    // `for (a0 = a0 + 1; c; a0 = a0 + 1) …` — the assignment sits in the header, not in a list
+    const loop = forLoop(bump('a0', plus1('a0')), bump('a0', plus1('a0')), [call('g', rd('a0')), call('g', rd('a0'))]);
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn([armIf([loop, call('g', rd('a0'))], [])]));
+    expect(candidates).toEqual([]);
+    expect(refusals.get('assigned')).toBeGreaterThan(0);
+  });
+
+  test('a parameter whose ADDRESS is taken in a `for` header is never copied', () => {
+    const loop = forLoop(
+      { k: 'exprstmt', value: { k: 'call', fn: 'h', args: [{ k: 'addr', name: 'a0' } as Expr] } },
+      bump('i', plus1('i')),
+      [call('g', rd('a0')), call('g', rd('a0'))],
+    );
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn([armIf([loop], [])]));
+    expect(candidates).toEqual([]);
+    expect(refusals.get('addressed')).toBeGreaterThan(0);
+  });
+
+  test('reads in a `for` header COUNT — the rewrite touches them, so the region rule must see them', () => {
+    // the arm's only two reads of a0 are the loop header's init and inc; its body has none
+    const loop = forLoop(bump('p', rd('a0')), bump('p', rd('a0')), [call('g')]);
+    const { candidates } = argCopyUnder(ARGCOPY_GATES, fn([armIf([loop], [])]));
+    // the arm is offered (two reads, not one), and the copy repoints BOTH header reads
+    expect(candidates.map((c) => c.merged)).toContain('a0@0.0');
+    const arm = (candidates.find((c) => c.merged === 'a0@0.0')!.sfn.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(JSON.stringify(arm.slice(1))).not.toContain('"a0"');
   });
 
   test('every legal region is offered, each as its own tree', () => {

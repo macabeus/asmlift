@@ -25,7 +25,7 @@
 // idiom this file shares with `l3/coalesce.ts`. Uses OUTSIDE the chosen region keep naming the
 // parameter, which is the point: the copy is what makes the two live ranges separable.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapExprChildren, mapStmtExprs, mapStmtLists, stmtExprs, stmtLists } from './ast';
+import { mapExprChildren, mapStmtExprs, mapStmtLists, stmtChildren, stmtLists, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 
@@ -44,7 +44,11 @@ export interface ArgCopyCtx {
 /** The admission rules. The two SOUND ones are the whole soundness argument: with the parameter
  *  never assigned and never addressed, the copy holds the parameter's value at every point the
  *  region can reach, so repointing the region's reads at it renames a value rather than changing
- *  one. Drop either and the rewrite names different memory — C that compiles and scores. */
+ *  one. Drop either and the rewrite names different memory — C that compiles and scores.
+ *
+ *  Both are decided over the WHOLE tree — see `countReads` on why every walk in this file goes
+ *  through `stmtChildren`/`walkExprs`. A gate that called itself sound while judging a subset of the
+ *  statements `repoint` rewrites would be sound about a function nobody compiles. */
 export const ARGCOPY_GATES: readonly Gate<ArgCopyCtx>[] = [
   {
     id: 'non-pointer',
@@ -56,14 +60,14 @@ export const ARGCOPY_GATES: readonly Gate<ArgCopyCtx>[] = [
     id: 'assigned',
     why: 'the function assigns the parameter, so the copy would hold a value the parameter no longer has',
     sound: true,
-    guardedBy: 'argcopy.test.ts: a parameter the function ASSIGNS is never copied',
+    guardedBy: 'argcopy.test.ts: a parameter a `for` header ADVANCES is never copied',
     rejects: (c) => c.assigned,
   },
   {
     id: 'addressed',
     why: 'taking the parameter’s address names its own cell, and the copy is a different cell',
     sound: true,
-    guardedBy: 'argcopy.test.ts: a parameter whose ADDRESS is taken is never copied',
+    guardedBy: 'argcopy.test.ts: a parameter whose ADDRESS is taken in a `for` header is never copied',
     rejects: (c) => c.addressed,
   },
 ];
@@ -97,26 +101,22 @@ export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
   },
 ];
 
-/** Does this expression tree mention `n` as a VALUE (a `var` leaf)? */
-const readsVar = (e: Expr, n: string): boolean =>
-  (e.k === 'var' && e.name === n) || exprChildren(e).some((c) => readsVar(c, n));
-
-/** Does it take `&n`? */
-const addressesVar = (e: Expr, n: string): boolean =>
-  (e.k === 'addr' && e.name === n) || exprChildren(e).some((c) => addressesVar(c, n));
-
 /** How many `var n` leaves the region holds, nested statements included — the region rules'
- *  yardstick for whether a copy has a range to shorten. */
+ *  yardstick for whether a copy has a range to shorten.
+ *
+ *  `walkExprs` (ast.ts) is the whole-tree walk, which descends through `stmtChildren` and so sees a
+ *  `for`'s `init` and `inc`. That is the walk this file must use everywhere: `repoint` rewrites
+ *  those two statements (`mapStmtExprs` recurses into them), so a count taken with `stmtLists` —
+ *  which deliberately omits them, being a walk over the SCOPES a statement opens — would report
+ *  fewer reads than the rewrite touches. */
 function countReads(list: Stmt[], n: string): number {
-  const inExpr = (e: Expr): number =>
-    (e.k === 'var' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + inExpr(c), 0);
-  return list.reduce(
-    (a, st) =>
-      a +
-      stmtExprs(st).reduce((b, e) => b + inExpr(e), 0) +
-      stmtLists(st).reduce((b, inner) => b + countReads(inner, n), 0),
-    0,
-  );
+  let reads = 0;
+  for (const e of walkExprs(list)) {
+    if (e.k === 'var' && e.name === n) {
+      reads++;
+    }
+  }
+  return reads;
 }
 
 /** Every nested statement list in `body`, each with the path that reaches it — a REGION is any
@@ -179,22 +179,26 @@ export function argCopyUnder(
 ): { candidates: { merged: string; sfn: SFn }[]; refusals: Map<string, number> } {
   const refusals = new Map<string, number>();
   const out: { merged: string; sfn: SFn }[] = [];
-  /** does ANY expression anywhere in the function satisfy `pred`? */
-  const anyExpr = (pred: (e: Expr) => boolean): boolean => {
-    const walk = (list: Stmt[]): boolean => list.some((st) => stmtExprs(st).some(pred) || stmtLists(st).some(walk));
-    return walk(sfn.body);
+  /** `&n` anywhere in the function — every expression node, `for` header included. */
+  const addressed = (n: string): boolean => {
+    for (const e of walkExprs(sfn.body)) {
+      if (e.k === 'addr' && e.name === n) {
+        return true;
+      }
+    }
+    return false;
   };
-  const assignsTo = (n: string): boolean => {
-    const walk = (list: Stmt[]): boolean =>
-      list.some((st) => (st.k === 'assign' && st.name === n) || stmtLists(st).some(walk));
-    return walk(sfn.body);
-  };
+  /** The function assigns `n` anywhere. `stmtChildren`, never `stmtLists`: a `for`'s `init` and
+   *  `inc` are STATEMENTS rather than lists, and an induction step that advances the parameter is
+   *  exactly one of them — the shape `structure/structure.ts`'s `recognizeForLoops` mints. */
+  const assignsTo = (n: string, list: Stmt[] = sfn.body): boolean =>
+    list.some((st) => (st.k === 'assign' && st.name === n) || assignsTo(n, stmtChildren(st)));
   for (const p of sfn.params) {
     const refused = firstRejection(gates, {
       param: p.name,
       isPointer: p.type.kind === 'ptr',
       assigned: assignsTo(p.name),
-      addressed: anyExpr((e) => addressesVar(e, p.name)),
+      addressed: addressed(p.name),
     });
     if (refused !== null) {
       refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
