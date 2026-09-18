@@ -29,6 +29,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
+import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { isSplatMips, parseSplatMips } from './splat';
 import { abiSortEntryParams, stackSlotKey } from './ssa';
@@ -75,97 +76,44 @@ const isXfer = (ins: Instr) => isReturn(ins) || isUncond(ins) || isCond(ins);
 // `sll`+`addu` before the access, so no `base+index` addressing form appears in parseMem input.
 const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
 
-// A MIPS `%hi`/`%lo` relocation operand — the assembler's HI16/LO16 split that materialises the
-// address of a named global: `%hi(SYM)`, `%lo(SYM)`, `%hi(SYM + N)`, or the memory form
-// `%lo(SYM + N)(base)`. Splat spells global access this way and the Splat parser preserves it
-// verbatim (frontend/splat.ts); the objdump dialect hides the symbol in a relocation, which
-// `applyMipsGlobalRelocs` rewrites into the same `%hi`/`%lo` operands. Either way `lift` folds a
-// `lui %hi` + its consuming `%lo` into a single `gaddr(SYM)` (the op the Thumb frontend also emits
-// for a pool-loaded global), carrying the addend as the access offset. Returns null for a
-// non-`%hi/%lo` operand.
-function parseReloc(kind: 'hi' | 'lo', operand: string): { sym: string; addend: number; base?: string } | null {
-  const m = operand.match(
-    new RegExp(String.raw`^%${kind}\(\s*([A-Za-z_.$][\w.$]*)\s*(?:\+\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\w+)\))?$`),
-  );
-  if (!m) {
-    return null;
-  }
-  return { sym: m[1], addend: m[2] ? parseImm(m[2]) : 0, base: m[3] };
-}
-
-// Bridge objdump global-access relocations into the `%hi`/`%lo` operands `parseReloc` reads, so the
-// gaddr recognition recovers named globals from an object file the same way it does from Splat text.
-// In objdump a global load shows `lui rX,0x0` with the symbol ONLY in the `R_MIPS_HI16`/`LO16`
-// reloc records — without this the base decodes as address 0 and the access reads `*(T *)0`. Using
-// asmData, rewrite each `lui`'s immediate to `%hi(SYM)` and its paired consumer's operand to
-// `%lo(SYM[+N])`. Mirrors the harness's disasmToM2c rewrite, so asmlift and m2c recover the same
-// symbols. NAMED object symbols only — a reloc against a `.rodata`/`.data` SECTION is a jump-table
-// base (Regime B) or section-relative data, left untouched.
-function applyMipsGlobalRelocs(instrs: Instr[], ad: AsmData): void {
+// Bridge an object file's `.text` relocation records onto the instructions they fill, so the
+// high/low fold reads ONE carrier (`ins.reloc`) whichever dialect the input arrived in — the same
+// carrier frontend/ppc.ts reads, folded by the same shared invariant (frontend/high-half.ts). The
+// Splat dialect spells `%hi`/`%lo` in the operand text and writes its own records
+// (frontend/splat.ts); objdump hides the symbol in the relocation table, which is what this reads.
+//
+// TWO KINDS ARE CARRIED, AND ONLY TWO. `R_MIPS_HI16`/`R_MIPS_LO16` against a NAMED symbol are a
+// global's address and are this fold's business. Everything else is deliberately left off the
+// instruction:
+//   - a SECTION symbol (`.rodata`, `.data`) is a jump-table base or section-relative data, read
+//     through a different seam entirely (`asmdata.ts`'s table reader, Regime B). Carrying it would
+//     put a half nothing folds in front of the choke point and refuse a dispatch that works.
+//   - `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` are PIC/small-data access, already refused by
+//     the `gp`-as-data guard. Widening this carrier to them would trade those messages for worse
+//     ones without recovering an address, so they stay where they are.
+//
+// THE ADDEND IS NOT ON THE RECORD. MIPS objects are REL: the relocation has no addend field, and
+// the address's low bits live in the two instruction immediates (`(hi_imm << 16) + (s16)lo_imm`).
+// PowerPC is RELA and carries it on the record, which is the one place the two folds diverge. A
+// MIPS record that DOES carry an addend is therefore not the format assumed here, and refuses.
+function attachMipsRelocs(instrs: Instr[], ad: AsmData): void {
   const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
-  const his: { addr: number; sym: string }[] = [];
-  const los = new Map<number, string>(); // LO16 instruction addr → symbol
   for (const r of ad.relocs) {
-    if (r.section !== '.text' || r.sym.startsWith('.')) {
-      continue; // section-symbol relocs are jump tables / anonymous data — not named globals
-    }
-    if (r.type === 'R_MIPS_HI16') {
-      his.push({ addr: r.offset, sym: r.sym });
-    } else if (r.type === 'R_MIPS_LO16') {
-      los.set(r.offset, r.sym);
-    }
-  }
-  if (his.length === 0) {
-    return;
-  }
-  his.sort((a, b) => a.addr - b.addr);
-  const loAddrs = [...los.keys()].sort((a, b) => a - b);
-  const consumed = new Set<number>();
-  for (const hi of his) {
-    const lui = byAddr.get(hi.addr);
-    if (!lui || lui.mnemonic !== 'lui') {
+    if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16') || r.sym.startsWith('.')) {
       continue;
     }
-    // Pair with the first not-yet-consumed same-symbol LO16 after the lui (GCC emits the pair with
-    // the base register threaded, so a 1:1 by-symbol-and-order match is the observed shape).
-    const loAddr = loAddrs.find((a) => a > hi.addr && !consumed.has(a) && los.get(a) === hi.sym);
-    const lo = loAddr !== undefined ? byAddr.get(loAddr) : undefined;
-    if (!lo) {
-      continue;
+    const ins = byAddr.get(r.offset);
+    if (!ins) {
+      continue; // a relocation in another function's slice, or on a pruned dispatch
     }
-    // The addend N rides in the instruction fields, not the reloc record: `(HI16 imm << 16) + the
-    // LO16 instruction's signed immediate`. HI16 imm is 0 in a relocatable object.
-    const rw = rewriteLoReloc(lo, hi.sym, parseImm(lui.ops[1] ?? '0') << 16);
-    if (rw === null) {
-      continue; // an unmodelled consumer (FP load, …) — leave the pair raw; it declines downstream
+    if (r.addend !== 0) {
+      throw new FrontendUnsupportedError(
+        `relocation '${r.type} ${r.sym}' at 0x${r.offset.toString(16)} carries an addend (0x${r.addend.toString(16)}), ` +
+          `but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format`,
+      );
     }
-    lui.ops[1] = rw.n === 0 ? `%hi(${hi.sym})` : `%hi(${hi.sym} + 0x${rw.n.toString(16)})`;
-    consumed.add(loAddr!);
+    ins.reloc = { type: r.type, sym: r.sym, addend: 0 };
   }
-}
-
-// Rewrite a LO16 consumer's operand to `%lo(SYM[+N])`, returning the addend N, or null when the
-// instruction is not a modelled global consumer (leave it raw). `hiBase` is the HI16 imm << 16.
-function rewriteLoReloc(lo: Instr, sym: string, hiBase: number): { n: number } | null {
-  const macro = (n: number) => (n === 0 ? `%lo(${sym})` : `%lo(${sym} + 0x${n.toString(16)})`);
-  if (lo.mnemonic === 'addiu' || lo.mnemonic === 'addi') {
-    const n = hiBase + parseImm(lo.ops[2] ?? '0');
-    if (n < 0) {
-      return null; // a negative interior offset — unusual; leave raw
-    }
-    lo.ops[2] = macro(n);
-    return { n };
-  }
-  if (/^(lw|lh|lhu|lb|lbu|sw|sh|sb)$/.test(lo.mnemonic)) {
-    const mem = parseMem(lo.ops[lo.ops.length - 1] ?? '');
-    const n = hiBase + mem.off;
-    if (n < 0) {
-      return null;
-    }
-    lo.ops[lo.ops.length - 1] = `${macro(n)}(${mem.base})`;
-    return { n };
-  }
-  return null;
 }
 
 interface MipsBlock {
@@ -468,11 +416,11 @@ export function lift(
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
-  // Bridge global-access relocations into `%hi`/`%lo` operands (objdump dialect only — Splat text
-  // already carries them). Runs AFTER jump-table recovery so its raw `.rodata` table-base relocs are
-  // read pristine; global rewrites target NAMED symbols and never touch a jump-table base.
+  // Carry the object's relocations on the instructions they fill (objdump dialect only — Splat
+  // text spells the halves and writes its own records). Runs AFTER jump-table recovery so that
+  // reads `.text` relocs pristine; only NAMED HI16/LO16 are carried, so a table base is untouched.
   if (!splat && asmData) {
-    applyMipsGlobalRelocs(instrs, asmData);
+    attachMipsRelocs(instrs, asmData);
   }
   // TRUSTWORTHINESS: fail LOUD on a control transfer this frontend cannot model — the `opaque`
   // path cannot catch these (implicit or no register destination). `jal`/`jalr` clobber `v0`
@@ -533,6 +481,20 @@ export function lift(
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
 
+  // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
+  // defines — see frontend/high-half.ts for why a register-keyed map cannot answer the question,
+  // and frontend/ppc.ts for the other frontend folding the same invariant. FUNCTION-scoped, because
+  // a value is: SSA is what decides whether a half reaches a given `%lo`, so a pair split across
+  // blocks folds when the half provably reaches, and refuses when what arrives is the block
+  // parameter standing for a merge.
+  const highHalves = makeHighHalves({
+    hi: '%hi',
+    lo: '%lo',
+    fail: (message) => {
+      throw new FrontendUnsupportedError(message);
+    },
+  });
+
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
   // sp-relative access in the function is word-width. If a SUB-WORD sp access aliases a word slot
   // (`sw a0,4(sp)` then `lbu v0,4(sp)`), routing the word store to an SSA slot while the sub-word
@@ -556,10 +518,6 @@ export function lift(
 
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
-    // Pending `lui rX, %hi(SYM)` relocations awaiting their consuming `%lo` (a load/store base or an
-    // `addiu`). Block-local: the pair is emitted adjacently, so a `%lo` with no matching in-scope
-    // `%hi` (a cross-block or gp-relative access) declines LOUD rather than fabricating a base.
-    const hiReloc = new Map<string, { sym: string; addend: number }>();
     // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
     // structurer lowers a load/store through it to `SYM` (scalar) or `((T *)&SYM)[i]` (aggregate).
     const emitGaddr = (sym: string): Value => {
@@ -570,16 +528,6 @@ export function lift(
     const read = (r: string): Value => {
       if (isZero(r)) {
         return constVal(0);
-      }
-      // A `%hi(SYM)` register read as DATA before its `%lo` completes the address is a split hi/lo
-      // relocation (the high half used alone) this frontend does not model — decline rather than
-      // treat the partial address as a value. The legit consumers (load/store/addiu `%lo`) validate
-      // `hiReloc` directly and never route the base through `read`, so this fires only on misuse.
-      const hr = hiReloc.get(r);
-      if (hr) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': %hi(${hr.sym}) register used as data before a matching %lo — split hi/lo relocation not modelled`,
-        );
       }
       // Reading `sp` as a DATA operand means frame-pointer arithmetic or an address-taken local
       // (`addiu a0,sp,8` = `&local`) — not modellable without a stack abstraction. Fabricating a
@@ -600,7 +548,11 @@ export function lift(
           `cannot lift '${name}': gp used as data (PIC / small-data global access) — not supported`,
         );
       }
-      return readVar(r, bi);
+      // A register holding the high half of an address is NOT a value — `lui` defines only a
+      // link-time placeholder, and in a relocatable object the immediate it printed is 0. Refuse
+      // rather than hand back that 0 dressed as the program's answer. The legitimate consumers
+      // (`addiu %lo`, a `%lo` load/store base) reach the half through `foldLoHalf` instead.
+      return highHalves.guardRead(name, r, readVar(r, bi));
     };
     // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
     //
@@ -615,10 +567,6 @@ export function lift(
     // rD,%hi(SYM)` deliberately reassigns rD's meaning without it).
     const cmpDef = new Map<Value, { opcode: string; lhs: Value; rhs: Value }>();
     const write = (r: string, v: Value) => {
-      // Writing a register clears any pending `%hi` it held — the high-half address is gone once the
-      // register is reassigned (e.g. `lw rHi, %lo(SYM)(rHi)` reuses the base as the load dest). A
-      // `%hi` NOT overwritten persists across multiple `%lo` uses (the read-modify-write idiom).
-      hiReloc.delete(r);
       if (!isZero(r)) {
         writeVar(r, bi, v);
       }
@@ -643,8 +591,12 @@ export function lift(
       cmpDef.set(v, { opcode: opc, lhs, rhs });
     };
 
+    // Set by every case entitled to fold a relocation, cleared per instruction — see the choke
+    // point at the end of `decode`.
+    let relocTaken = false;
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
+      relocTaken = false;
       // The GOT/small-data base register `gp` is set up by IDO's PIC prologue (`lui gp; addiu gp,gp,lo;
       // addu gp,gp,t9`, an `_gp_disp` HI16/LO16 pair). It is a RELOCATION base, never program data — and
       // reading `t9` for the `addu` would fabricate a phantom leading parameter (like the sp/r1 guards).
@@ -667,20 +619,23 @@ export function lift(
         // and raise/const.ts folds the const/const pair into one 32-bit const — the form that
         // recompiles to this exact `lui;ori`.
         case 'lui':
-          // `lui rD, %hi(SYM)` is the high half of a global's address — record it, pending the `%lo`
-          // that completes it (below), instead of materialising a bogus numeric const. rD's SSA value
-          // is deliberately NOT written: the high half is meaningless alone, so the `gaddr` is emitted
-          // at the consuming `%lo`. A read of rD as data before that is caught by the `read` guard;
-          // an UNconsumed `%hi` (no `%lo`) is a dead `lui` whose rD is never read — the residual case
-          // (an unconsumed `%hi` reg read via a `readVar` bypass) does not occur in compiler output.
-          if (s.startsWith('%')) {
-            const hi = parseReloc('hi', s);
-            if (!hi) {
-              throw new FrontendUnsupportedError(`cannot lift '${name}': unsupported relocation immediate '${s}'`);
-            }
-            if (!isZero(d)) {
-              hiReloc.set(d, { sym: hi.sym, addend: hi.addend });
-            }
+          // `lui rD, %hi(SYM)` is the HIGH HALF of a global's address. rD is defined as a
+          // PLACEHOLDER value, not a number: in a relocatable object the immediate objdump printed
+          // is 0, and the address lives in the relocation records. Every way that placeholder could
+          // escape is closed in frontend/high-half.ts; the `gaddr` itself is emitted at the `%lo`
+          // that completes the address. The MIPS half contributes `hi_imm << 16` to the addend —
+          // MIPS relocations are REL, so the addend is in the fields (see attachMipsRelocs).
+          if (ins.reloc?.type === 'R_MIPS_HI16') {
+            relocTaken = true;
+            const hi = mkValue(T.unk(32));
+            highHalves.record(hi, {
+              sym: ins.reloc.sym,
+              addend: parseImm(s ?? '0') << 16,
+              addr: ins.addr,
+              mnemonic: ins.mnemonic,
+              consumed: false,
+            });
+            write(d, hi);
             break;
           }
           write(d, constVal((parseImm(s) << 16) >> 0));
@@ -693,22 +648,15 @@ export function lift(
           if (isStackPtr(d)) {
             break;
           }
-          // `addiu rD, rHi, %lo(SYM)` completes a global's address materialised by a `lui %hi(SYM)`:
-          // rD = &SYM (+ addend for a byte offset into the global). Emits the shared `gaddr` op.
-          if (t.startsWith('%')) {
-            const lo = parseReloc('lo', t);
-            const hr = lo ? hiReloc.get(s) : undefined;
-            if (!lo || !hr || hr.sym !== lo.sym || hr.addend !== lo.addend) {
-              throw new FrontendUnsupportedError(
-                `cannot lift '${name}': %lo relocation '${t}' with no matching in-scope %hi — split/cross-block hi/lo not modelled`,
-              );
-            }
-            // `&SYM` (addend 0), or `&SYM + N` for a byte offset into the global. The `add` tree is
+          // `addiu rD, rHi, %lo(SYM)` completes a global's address begun by a `lui %hi(SYM)`:
+          // rD = &SYM (+ a byte offset into it). Emits the shared `gaddr` op.
+          if (ins.reloc?.type === 'R_MIPS_LO16') {
+            const { base: g, off } = foldLoHalf(ins, s, parseImm(t));
+            // `&SYM` (offset 0), or `&SYM + N` for a byte offset into the global. The `add` tree is
             // folded byte-correctly by memAccess when this address is a load/store base; if it
             // instead ESCAPES as a value, `assertDerefsTyped` declines it (the byte offset would
             // element-scale in C) — see the interior-global-pointer guard there.
-            const g = emitGaddr(lo.sym);
-            lo.addend !== 0 ? emitBin('add', d, g, constVal(lo.addend)) : write(d, g);
+            off !== 0 ? emitBin('add', d, g, constVal(off)) : write(d, g);
             break;
           }
           if (isZero(s)) {
@@ -848,47 +796,62 @@ export function lift(
         // typed memory: `off(base)` addressing. Width/signedness come from the mnemonic; the
         // base is typed a pointer-to-element during recovery, mirroring the Thumb frontend.
         case 'lw':
-          emitLoad(d, s, 4, true);
+          emitLoad(ins, d, s, 4, true);
           break;
         case 'lh':
-          emitLoad(d, s, 2, true);
+          emitLoad(ins, d, s, 2, true);
           break;
         case 'lhu':
-          emitLoad(d, s, 2, false);
+          emitLoad(ins, d, s, 2, false);
           break;
         case 'lb':
-          emitLoad(d, s, 1, true);
+          emitLoad(ins, d, s, 1, true);
           break;
         case 'lbu':
-          emitLoad(d, s, 1, false);
+          emitLoad(ins, d, s, 1, false);
           break;
         case 'sw':
-          emitStore(d, s, 4);
+          emitStore(ins, d, s, 4);
           break; // d = source reg, s = off(base)
         case 'sh':
-          emitStore(d, s, 2);
+          emitStore(ins, d, s, 2);
           break;
         case 'sb':
-          emitStore(d, s, 1);
+          emitStore(ins, d, s, 1);
           break;
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
       }
+      // THE CHOKE POINT (mirrors the PPC frontend). Everything above either folded the relocation or
+      // threw; one still sitting here was DROPPED, and a dropped relocation leaves the immediate
+      // objdump printed — the literal 0 — standing in for the address. That is the forbidden class:
+      // it compiles, so nothing downstream ever complains. An unmodelled `%lo` consumer (`lwc1`,
+      // `swc1`, `ori`) lands here, which is what keeps "not modelled" from becoming "not emitted".
+      if (ins.reloc && !relocTaken) {
+        relocPlaceholder(ins);
+      }
+    };
+    // A relocation no case folded. The printed immediate is a link-time placeholder — the literal 0
+    // in a relocatable object — so finishing the lift would put that 0 where the symbol belongs.
+    const relocPlaceholder = (ins: Instr): never => {
+      const r = ins.reloc!;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries '${r.type}' against ` +
+          `'${r.sym}' but is not a modelled consumer of it — the printed immediate is a link-time ` +
+          `placeholder, not the value`,
+      );
     };
     // TRUSTWORTHINESS GUARD (mirrors the PPC frontend): an unmodelled instruction must not silently
     // drop its destination register — emit an honest `opaque`, which fails LOUD at assertResolved
     // whether or not anything reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
-      // A `%hi`/`%lo` operand on an instruction NOT modelled as a global consumer — an FP load/store
-      // (`lwc1`/`ldc1`), or any unmodelled op — reaches here (the modelled consumers handle their own
-      // `%hi`/`%lo` and return before the default case). Dropping it to an opaque would silently
-      // delete the global access (its base is not a bare register the opaque srcReg scan can see), so
-      // decline LOUD rather than lose it.
-      if (ins.ops.some((o) => o.startsWith('%'))) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': unmodelled instruction '${ins.mnemonic}' with a %hi/%lo global operand — not modelled`,
-        );
+      // THE RELOCATION FIRST. An unmodelled `%lo` consumer (`lwc1`, `swc1`) reaches here, and
+      // `opaqueDest` would refuse it for the lesser reason — "no register destination" — or, for a
+      // form that HAS one, degrade it to an opaque and lose the global access with it. Naming the
+      // relocation is what tells a reader which capability is missing.
+      if (ins.reloc) {
+        relocPlaceholder(ins);
       }
       // storeClass: unmodelled MIPS stores — incl. the unaligned pair swl/swr and the FPU stores,
       // whose FIRST token is a register (a SOURCE, not a dest) that would otherwise fabricate an
@@ -914,24 +877,51 @@ export function lift(
     };
     const emitUn = kit.un;
     const emitShImm = (opc: Opcode, d: string, x: Value, sa: string) => kit.shImm(opc, d, x, parseImm(sa));
-    // Resolve a `%lo(SYM + N)(rHi)` memory operand to a global address: validate it pairs with an
-    // in-scope `%hi`, emit the `gaddr`, and return it as the base with the addend as the access
-    // offset. A non-`%lo` operand returns null (the caller falls through to the normal off(base)).
-    const globalBase = (mem: string): { base: Value; off: number } | null => {
-      if (!mem.startsWith('%')) {
-        return null;
-      }
-      const lo = parseReloc('lo', mem);
-      const hr = lo && lo.base ? hiReloc.get(lo.base) : undefined;
-      if (!lo || !lo.base || !hr || hr.sym !== lo.sym || hr.addend !== lo.addend) {
+    // `%lo` completes the address a `lui %hi` began. THE PAIRING IS A PROOF, not a guess: the value
+    // `rHi` holds HERE must be the very placeholder a `lui` defined, and both relocations must name
+    // the same symbol. `readVar` — not `read`, which refuses a half — is what answers, so a pair
+    // separated by unrelated instructions folds while a register reused between the halves does not,
+    // and a half that reaches only through a merge or a loop header arrives as the block parameter
+    // standing for the join, which is not a half and refuses.
+    const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } => {
+      relocTaken = true;
+      const lo = ins.reloc!;
+      const hi = highHalves.get(readVar(rHi, bi));
+      if (!hi || hi.sym !== lo.sym) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': %lo access '${mem}' with no matching in-scope %hi — split/cross-block hi/lo not modelled`,
+          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries the '%lo' half of ` +
+            `'${lo.sym}' but ${rHi} ` +
+            (hi
+              ? `holds the high half of '${hi.sym}'`
+              : `holds no high half here — a reused register, a missing '%hi', or a '%hi' that reaches ` +
+                `this instruction only through a merge or a loop header, where what the register holds ` +
+                `is the block parameter standing for the join and not the half`) +
+            ` — this frontend will not guess at the pair`,
         );
       }
-      return { base: emitGaddr(lo.sym), off: lo.addend };
+      // The addend is split across the two instruction immediates because MIPS is REL.
+      const off = hi.addend + loImm;
+      if (off < 0) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} completes '${lo.sym}' at ` +
+            `byte offset ${off} — an address BELOW the symbol (an index-biased array base) is not yet modelled`,
+        );
+      }
+      hi.consumed = true;
+      return { base: emitGaddr(lo.sym), off };
     };
-    const emitLoad = (d: string, mem: string, width: number, signed: boolean) => {
-      const g = globalBase(mem);
+    // A displacement memory operand whose base is a `%hi` half: resolve it to the global's address
+    // plus the access offset. A non-`%lo` instruction returns null (the caller falls through to the
+    // ordinary `off(base)` path).
+    const globalBase = (ins: Instr, mem: string): { base: Value; off: number } | null => {
+      if (ins.reloc?.type !== 'R_MIPS_LO16') {
+        return null;
+      }
+      const { off, base } = parseMem(mem);
+      return foldLoHalf(ins, base, off);
+    };
+    const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
+      const g = globalBase(ins, mem);
       if (g) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [g.base], results: [res], attrs: { off: g.off, width, signed } }));
@@ -969,8 +959,8 @@ export function lift(
       ops.push(mkOp('load', { operands: [read(base)], results: [res], attrs: { off, width, signed } }));
       write(d, res);
     };
-    const emitStore = (srcReg: string, mem: string, width: number) => {
-      const g = globalBase(mem);
+    const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
+      const g = globalBase(ins, mem);
       if (g) {
         ops.push(mkOp('store', { operands: [g.base, read(srcReg)], attrs: { off: g.off, width } }));
         return;
@@ -1034,7 +1024,13 @@ export function lift(
     } // unconditional / return: delay slot just executes first
 
     if (!br || isReturn(br)) {
-      const retOps = ssa.hasReachingDef(RET, bi) ? [readVar(RET, bi)] : [];
+      // A HIGH HALF IN v0 IS NOT A RETURN VALUE. `v0` is both MIPS's return register and the
+      // register IDO most often parks a `lui %hi` base in, so a VOID function routinely ends with a
+      // half still sitting there (`lui v0,%hi(g); lw v1,%lo(g)(v0); … ; sw v1,%lo(g)(v0)`). Counting
+      // that def would make the function return the placeholder; rejecting it gives the honest void
+      // return. PowerPC needs no such predicate here — `r3` is not mwcc's habitual `lis` base — but
+      // it passes the same one to its call-arity count, for the same reason.
+      const retOps = ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v)) ? [readVar(RET, bi)] : [];
       if (!br) {
         ops.push(mkOp('br', { successors: [succ(succAddrs.get(b)![0])] }));
       } // fall-through
@@ -1051,7 +1047,9 @@ export function lift(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  highHalves.assertAllConsumed(name);
   ssa.finish();
+  highHalves.assertNoneEscaped(name, irBlocks);
 
   // ABI-ordered entry parameters (a0, a1, …) — a callee-saved copy can read a later argument
   // register first. Only the true entry (no predecessors) is sorted; a loop header's phis are

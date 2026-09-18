@@ -143,7 +143,7 @@ test('splat: an FP global load (lwc1 %lo) declines loud, never a silently droppe
     /* 10C 8000010C 00000000 */   nop
 endlabel getF
 `;
-  expect(() => decompile('getF', fp, MIPS_IDO)).toThrow(/unmodelled instruction 'lwc1' with a %hi\/%lo/);
+  expect(() => decompile('getF', fp, MIPS_IDO)).toThrow(/'lwc1'.*R_MIPS_LO16.*'gFloat'.*not a modelled consumer/s);
 });
 
 test('splat: an unpaired %lo (no matching %hi in scope) declines loud, never a fabricated base', () => {
@@ -153,7 +153,7 @@ test('splat: an unpaired %lo (no matching %hi in scope) declines loud, never a f
     /* 108 80000108 00000000 */   nop
 endlabel f
 `;
-  expect(() => decompile('f', unpaired, MIPS_IDO)).toThrow(/no matching in-scope %hi/);
+  expect(() => decompile('f', unpaired, MIPS_IDO)).toThrow(/a0 holds no high half here/);
 });
 
 test('splat: a GOT/PIC relocation operand still declines loud (small-data access not modelled)', () => {
