@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=93.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=99.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,25 +129,26 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-17: the ranked pass alone is **772 s over 169
-real rows** and **808 s over 679 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 297.3 s and 300.9 s. **A figure here is a price under a CACHE STATE and a
+Summed out of the committed artifact of 2026-09-18: the ranked pass alone is **813 s over 172
+real rows** and **419 s over 679 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 260.6 s and 142.8 s. **A figure here is a price under a CACHE STATE and a
 MACHINE, not a property of the corpus**, and this file's own history is the loudest evidence of it.
-The artifact before this one — taken the SAME day — read 1,028 s and 1,001 s: `bench diff` across the
-pair reports the fan **unmoved, 54,721 → 54,721 over the 846 comparable rows**, and the only rows
-whose published fields moved are the three that carried the outgoing-stack-argument decline, plus the
-one row the later artifact adds — while the ranked pass reads 0.78×. Two further rows rank here for
-0.3 s and ranked nowhere before, because a decline does not enumerate. Nothing about the corpus
-got 22% cheaper; the machine was quieter. The artifact before THAT one read 955 s and 857 s on the
+The artifact before this one read 772 s and 808 s over the same 679 synthetic rows and three fewer
+real ones: `bench diff` across the pair reports the fan **unmoved, 54,731 → 54,731 over the 846
+comparable rows**, with the ranked pass at 0.78× — the synthetic side alone nearly halved, on a
+machine that was quieter and a candidate store several rounds had filled that day. Its own
+predecessor — taken the SAME day as it — read 1,028 s and 1,001 s, 0.78× again, with the fan unmoved
+and only the rows carrying one decline's text moved. The one before THAT read 955 s and 857 s on the
 same 846 rows with **0 rows moved at all**, 1.12× the other way, differing in nothing but the m2c pin
-and the load. The one before THAT read 4,449 s over the real tier, 0.21× again — a re-derivation of
-two projects' flags, and a store the day's benches had filled against one that was cold. Earlier artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 889 s off
-a cold one, 1,120 s and 1,067 s off one just pruned, and 1,742 s and 1,677 s while several rounds
-shared the machine. Read a figure beside the cache state AND the load of the run you are planning,
-not on its own.
+and the load; the one before THAT read 4,449 s over the real tier, 0.21× again — a re-derivation of
+two projects' flags, and a store the day's benches had filled against one that was cold. Earlier
+artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 889 s off a cold one,
+1,120 s and 1,067 s off one just pruned, and 1,742 s and 1,677 s while several rounds shared the
+machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
+own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 210 s of that real total — **27% of the tier
-in one row**, over a fan of 27,360. It is also the row that will strand a shard: in the previous
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 203 s of that real total — **25% of the tier
+in one row**, over a fan of 27,360. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
 ## 4. How many full runs a round gets
