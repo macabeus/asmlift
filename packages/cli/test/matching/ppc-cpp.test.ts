@@ -52,7 +52,7 @@ const CASES: { cpp: string; spec: CppFnSpec; expect: string; note: string }[] = 
     cpp: 'struct Vec{int x;int y;void scale(int k);}; void Vec::scale(int k){ x = x*k; y = y*k; }',
     spec: { method: 'scale', cls: 'Vec', retType: VOID, params: [{ name: 'k', type: INT }], classes: { Vec: VEC } },
     expect:
-      'struct Vec { int x; int y; void scale(int k); };\nvoid Vec::scale(int k) {\n    x = x * k;\n    y = y * k;\n    return;\n}\n',
+      'struct Vec { int x; int y; void scale(int k); };\nvoid Vec::scale(int k) {\n    x = x * k;\n    y = y * k;\n}\n',
   },
   {
     note: 'free function with member access: dot(Vec*,Vec*) — no scope, both params use ->',

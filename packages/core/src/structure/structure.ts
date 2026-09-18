@@ -93,6 +93,7 @@ import {
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
+import { unspelledEpilogues } from './retspell';
 import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
@@ -4394,6 +4395,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Branch-sense sites, numbered as the walk below first reaches them (`branchSenseFlipSites`).
   const senseOrdinal = new Map<number, number>();
 
+  // Which `return;` statements the SOURCE wrote — the reading, and why it is decidable, live in
+  // `structure/retspell.ts`. `l3/tailret.ts` owns whether a marked return is safe to delete.
+  const unspelledRets = unspelledEpilogues(fn);
+
   const structureRegion = (b: Block, stop: Block | null): Stmt[] => {
     if (b === stop) {
       return [];
@@ -4456,7 +4461,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const term = b.ops[b.ops.length - 1];
     if (term.opcode === 'ret') {
       // A void function's `bx lr` leaves whatever in r0; suppress that phantom return value.
-      out.push({ k: 'return', value: returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]) });
+      const value = returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]);
+      // The `value === undefined` half is a GUARD: `l3/tailret.ts` re-checks it before deleting
+      // anything, so marking a value-carrying return would change no output. The mark claims the asm
+      // shows no `return;` STATEMENT here, which is a claim about a VOID return only.
+      out.push({ k: 'return', value, ...(value === undefined && unspelledRets.has(b) ? { unspelled: true } : {}) });
       return out;
     }
     if (term.opcode === 'br') {

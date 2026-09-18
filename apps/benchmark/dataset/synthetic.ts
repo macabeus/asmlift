@@ -39,6 +39,17 @@ export interface SynthSpec {
   ctx?: string; // m2c --context (C declarations)
   proto?: Prototypes; // asmlift prototypes (void-ness / callee params)
   note?: string;
+  /** THE FLAGS THIS ROW COMPILES AND DECOMPILES AT, when its own toolchain's canonical set is not
+   *  the thing being measured. Absent — which is every row but one — means the canonical set, so
+   *  the tier is unchanged by this field existing. What it buys is an OPTIMISATION LEVEL of the
+   *  row's own: a spelling the compiler erases at -O2 is invisible at the canonical flags, and a
+   *  row that cannot fix its level cannot pin one. Both sides get the same flags (`codegenFor`
+   *  resolves the target from them, exactly as the real tier does off its unit), so it is not a
+   *  channel one decompiler is told about and the other is not.
+   *
+   *  D9: a LEVEL TWIN TAKES ITS OWN `sym`. Two rows differing only in flags would collide on the
+   *  row id, and a reader comparing them wants to see two functions, not one name twice. */
+  cflags?: readonly string[];
   /** A SYMBOL MAP for this row, the same value the real tier feeds asmlift off a project
    *  manifest (`src/cases/real.ts`). Synthetic rows carry none by default and that is not a
    *  neutral default: `/no-bitfield`, `/no-ptr-elem` and `/raw-globals` are enumerated only when
@@ -436,6 +447,88 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int retone(void){ return 1; }',
     features: ['baseline'],
     toolchains: ['agbcc', 'mwcc_242_81'],
+  },
+  // `retflat` — THE ROW THAT PINS `return;` SPELLING, first of the three rows that follow, the only
+  // rows in the tier that set their own `cflags`. Every other synthetic row compiles at -O2, where a
+  // redundant trailing `return;` is free: written both ways, 124 of 125 agbcc sources give identical
+  // objects at -O2 and at -O1, so no row at the canonical flags can tell a decompiler that emits one
+  // from a decompiler that does not. At -O0 it is not free — every source `return;` becomes its own
+  // `b <epilogue>` — and this body is the smallest place that shows it. Compiled at the flags below,
+  // the two spellings of its own emitted C differ in the object:
+  //
+  //     void retflat(void){ *(s32 *)50345024 = 3; }            ldr/mov/str; bx lr
+  //     void retflat(void){ *(s32 *)50345024 = 3; return; }    ldr/mov/str; b .L2; bx lr
+  //
+  // so the row is a MATCH for the spelling the assembly shows and a nonmatch for the other. That is
+  // the whole of what it witnesses.
+  //
+  // `-fomit-frame-pointer` is not decoration. agbcc's -O0 frame (`push {r7,lr}; mov r7,sp`) homes
+  // every local on the stack and asmlift declines it outright ("stack pointer used as data"), so
+  // an -O0 row with a frame measures the frame and never reaches the backend. A parameterless body
+  // with no locals has no frame to omit, which leaves the return spelling as the only thing in it.
+  //
+  // NO FEATURE TAG FOR THE LEVEL, on any of the three. The 42 rows already built at -O0 are real
+  // ones and carry none either — their level comes off their unit's flags, which the artifact
+  // publishes per row the same way it publishes these. A tag here would be a filter that matched
+  // these three and missed those, which is worse than no filter. `baseline` is what all three carry,
+  // and it is the truth rather than a placeholder: a body with no other feature in it, which is also
+  // the one tag the vocabulary requires of every published row.
+  {
+    sym: 'retflat',
+    src: '#define gOutA ((u32 *)0x03003440)\nvoid retflat(void){ *gOutA = 3; }',
+    cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
+    features: ['baseline'],
+    toolchains: ['agbcc'],
+    ctx: 'void retflat(void);',
+    proto: { retflat: { returnsVoid: true } },
+  },
+  // `retjoin` — the same pin one shape up, where the epilogue is reached BOTH ways. Its `if`/`else`
+  // join sits on the epilogue at -O0: the `then` arm branches there (`b .L4`) and the `else` arm
+  // falls in. A block-level reading that keeps a return whenever SOME path branches in keeps one
+  // here, and the object says the source wrote none — an `if`/`else` over a void tail is the
+  // commonest shape in the corpus that `retflat` cannot speak for.
+  //
+  //     void retjoin(void){ … }             b .L4; .L4: .L2: bx lr
+  //     void retjoin(void){ …; return; }    b .L4; .L4: b .L2; .L2: bx lr
+  //
+  // Same flags as `retflat`, and for the same reason.
+  {
+    sym: 'retjoin',
+    src:
+      '#define gFlag ((u8 *)0x03003430)\n#define gOutA ((u32 *)0x03003440)\n#define gOutB ((u32 *)0x03003444)\n' +
+      'void retjoin(void){ if (*gFlag) *gOutA = 3; else *gOutB = 4; }',
+    cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
+    features: ['baseline'],
+    toolchains: ['agbcc'],
+    ctx: 'void retjoin(void);',
+    proto: { retjoin: { returnsVoid: true } },
+  },
+  // `retsolo` — the same pin where there is NO EPILOGUE BLOCK to read. `retflat` and `retjoin` are
+  // agbcc, and an agbcc `.s` carries the epilogue LABEL (`.L2:`) whether or not a `return;` branched to
+  // it, so the epilogue is always a block of its own there and the reading always has in-edges to
+  // weigh. On an OBJECT there is no label: a body that never branches is ONE block, the `ret` sits
+  // at the end of it, and nothing arrived from anywhere. That is the commonest shape in the corpus
+  // — a flat void body — and the `.s` path cannot speak for it.
+  //
+  // IDO 7.1 at -O0 is where it costs bytes, measured at the flags below:
+  //
+  //     void retsolo(void){ *gOutA = 3; }            li/lui/sw; jr ra; nop; jr ra; nop; nop
+  //     void retsolo(void){ *gOutA = 3; return; }    li/lui/sw; jr ra; nop; jr ra; nop; jr ra; nop
+  //
+  // ido7.1 only. agbcc is the path this row exists to get past, and mwcc cannot host it: written
+  // both ways, this body and an `if`/`else` over a void tail compile to BYTE-IDENTICAL `.text` on
+  // mwcc_242_81 and mwcc_247_107 at `-O0,p` AND at `-O4,p`, 8 of 8. That is also why the 42 rows
+  // the corpus already builds at -O0 — every one of them Mario Party 4, on those two builds — can
+  // never move on this question. Same `-O0` reasoning as the other two: at the canonical -O2 the
+  // spellings are one object and no row there can tell the two decompilers apart.
+  {
+    sym: 'retsolo',
+    src: '#define gOutA ((u32 *)0x80003010)\nvoid retsolo(void){ *gOutA = 3; }',
+    cflags: ['-mips2', '-O0', '-32', '-non_shared', '-G', '0'],
+    features: ['baseline'],
+    toolchains: ['ido7.1'],
+    ctx: 'void retsolo(void);',
+    proto: { retsolo: { returnsVoid: true } },
   },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },

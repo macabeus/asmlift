@@ -239,7 +239,7 @@
 //
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
-import { Block, Fn, Op, Value, defOpMap, isBodyless, mkOp, predecessors, terminator } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, fallThroughOf, isBodyless, mkOp, predecessors, terminator } from '../ir/core';
 import { NEGATED_ICMP } from '../ir/opcodes';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -645,9 +645,13 @@ export function sinkReturns(
       continue;
     }
     for (const p of brPreds) {
-      const args = p.ops[p.ops.length - 1].successors[0].args;
-      const sunk = ret.operands.map((o) => args[m.params.indexOf(o)]);
-      p.ops[p.ops.length - 1] = mkOp('ret', { operands: sunk });
+      const t = p.ops[p.ops.length - 1];
+      const sunk = ret.operands.map((o) => t.successors[0].args[m.params.indexOf(o)]);
+      // The `br` being replaced carries whether the machine BRANCHED to this epilogue or fell into
+      // it, which is what `structure/retspell.ts` reads. Sinking puts the return ON that edge, so
+      // the edge's fact travels with it; ask the new return block's in-edges instead and they answer
+      // how control reached the statements above the return, not how it reached the epilogue.
+      p.ops[p.ops.length - 1] = mkOp('ret', { operands: sunk, attrs: fallThroughOf(t) });
       changed = true;
     }
     // If no predecessor still branches to m (all were unconditional), it is unreachable — drop it.

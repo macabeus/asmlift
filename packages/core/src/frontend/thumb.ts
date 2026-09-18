@@ -4172,7 +4172,7 @@ export function lift(
     } else if (!last) {
       // an EMPTY block is only ever the synthetic entry preheader (decoded blocks are non-empty):
       // fall through to the real entry, whose loop-header phis take their entry operand from here.
-      irb.ops.push(mkOp('br', { successors: [succ(fallLabel(bi))] }));
+      irb.ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(fallLabel(bi))] }));
     } else if (kind === 'return') {
       // bx lr / pop {…,pc} / mov pc,lr
       //
@@ -4204,7 +4204,7 @@ export function lift(
       irb.ops.push(mkOp('cond_br', { operands: [cond], successors: [succ(last.ops[0]), succ(fallLabel(bi))] }));
     } else {
       // fallthrough (last instruction is a call / data op, no control transfer)
-      irb.ops.push(mkOp('br', { successors: [succ(fallLabel(bi))] }));
+      irb.ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(fallLabel(bi))] }));
     }
   };
 

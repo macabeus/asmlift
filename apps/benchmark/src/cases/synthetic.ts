@@ -2,11 +2,11 @@
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
-import { isCanonicalToolchainId } from '@asmlift/core/target';
+import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
-import { TOOLCHAINS, type ToolchainId, canonicalCodegen } from '../toolchains';
+import { TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
 import type { Case } from './types';
 
 /** THE MAP, RENDERED FOR THE OTHER DECOMPILER — the synthetic tier's symmetry, made structural.
@@ -60,13 +60,16 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         // only the mwcc adapter has a C++ build path; any other pairing would compile C++ as C
         throw new Error(`${spec.sym}: c++ specs must target mwcc_242_81 only, got ${tcId}`);
       }
-      // A synthetic row compiles at the toolchain's canonical flags, so a toolchain that has none
-      // has no synthetic tier at all — the two CodeWarrior builds whose only rows are real ones.
-      if (!isCanonicalToolchainId(tcId)) {
-        throw new Error(`${spec.sym}: ${tcId} has no canonical flags, so it can carry no synthetic row`);
+      // A synthetic row compiles at the toolchain's canonical flags unless it SPELLS its own, so a
+      // toolchain with neither has no synthetic tier at all — the two CodeWarrior builds whose only
+      // rows are real ones. ONE resolution serves both halves, as the real tier's unit flags do:
+      // the same set builds the reference and describes the target asmlift lifts against.
+      const cflags = spec.cflags ?? canonicalFlagsOf(tcId);
+      if (!cflags) {
+        throw new Error(`${spec.sym}: ${tcId} has no canonical flags, so it can carry no synthetic row of its own`);
       }
       const tc = TOOLCHAINS[tcId];
-      const codegen = canonicalCodegen(tcId);
+      const codegen = codegenFor(tcId, cflags);
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',

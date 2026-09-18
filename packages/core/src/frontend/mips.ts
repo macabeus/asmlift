@@ -1079,7 +1079,7 @@ export function lift(
       // the right one; it passes this same predicate to its call-arity count.
       const retOps = ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v)) ? [readVar(RET, bi)] : [];
       if (!br) {
-        ops.push(mkOp('br', { successors: [succ(succAddrs.get(b)![0])] }));
+        ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succAddrs.get(b)![0])] }));
       } // fall-through
       else {
         ops.push(mkOp('ret', { operands: retOps }));

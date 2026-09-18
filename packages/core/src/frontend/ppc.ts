@@ -1262,7 +1262,7 @@ export function lift(
     }
     if (!br || isReturn(br)) {
       if (!br && succIdx[bi].length) {
-        ops.push(mkOp('br', { successors: [succ(succIdx[bi][0])] }));
+        ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succIdx[bi][0])] }));
         return;
       }
       const retOps = ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];

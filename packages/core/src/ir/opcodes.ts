@@ -177,7 +177,16 @@ export const OPCODES = {
   // no more reapable than a dead `call`.
   opaque: { operands: 'variadic', results: 1, effects: true },
   // --- terminators ---
+  // `fallthrough: true` — OPTIONAL, the same fact as on `br`: a `ret` SUNK onto one edge
+  // (`raise/retsink.ts`, `raise/tailsink.ts`) replaces that edge's `br` and takes its stamp, so
+  // `structure/retspell.ts` can still read how the machine arrived. A `ret` a frontend built carries
+  // nothing, and is read by its block's in-edges instead.
   ret: { operands: 'variadic', results: 0, terminator: true, successors: 0 },
+  // `fallthrough: true` — OPTIONAL, set by a frontend when the block carried NO control-transfer
+  // instruction and this `br` stands for the machine simply running into the next block. Its
+  // absence therefore means a real branch instruction. The one reader is `structure/retspell.ts`,
+  // which needs to tell a `b <label>` (a transfer the source asked for) from layout; a pass that
+  // builds a fresh `br` leaves it off and is read as a branch, which is the conservative answer.
   br: { operands: 0, results: 0, terminator: true, successors: 1 },
   cond_br: { operands: 1, results: 0, terminator: true, successors: 2 },
   // Many-way switch dispatch (Regime B, jump table). The single operand is the scrutinee;

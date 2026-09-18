@@ -404,7 +404,12 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
     }
     return 'none';
   };
-  exec(sfn.body);
+  // FALLING OFF THE END OF A void FUNCTION IS A RETURN, and it is the SAME return the IR's `ret` op
+  // makes — `irTraceOf` records one on every path, so a tree that spells the trailing `return;` and
+  // a tree that does not must trace alike, or the differential reports a spelling as a clobber.
+  if (exec(sfn.body) !== 'return') {
+    trace.push({ fn: 'ret', args: [] });
+  }
   return trace;
 }
 

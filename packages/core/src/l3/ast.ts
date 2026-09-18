@@ -266,7 +266,13 @@ export type Stmt =
   // by instrumenting the printer. Both regimes produce them: the jump table spells `case 4:` of
   // `kleod:UpdateWorldMapNodeAnim`, the comparison tree `synthetic:sw_fallmem:agbcc`.
   | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
-  | { k: 'return'; value?: Expr };
+  // `unspelled` — the assembly shows no `return` STATEMENT behind this node: the machine reached
+  // the epilogue here by falling into it, or on a conditional branch's own edge, never by the
+  // `b <epilogue>` a source `return;` compiles to (structure.ts sets it; the reading is stated
+  // there). A void return is then a no-op wherever nothing follows it, and `l3/tailret.ts` drops
+  // it — which is not cosmetic: unoptimised code gives every source `return;` a branch of its own,
+  // so the redundant spelling costs bytes. Advice about SPELLING; nothing may read it as semantics.
+  | { k: 'return'; value?: Expr; unspelled?: true };
 
 /** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
  *  `fallsThrough` true ⇒ the body flows into the NEXT arm (no `break;`); see the non-neutrality note. */
