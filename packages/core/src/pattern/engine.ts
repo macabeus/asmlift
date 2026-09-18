@@ -100,14 +100,21 @@ export interface RewritePattern {
   recomputesSharedInterior?: string[];
 }
 
+/** What the pattern layer reads off a target. STRUCTURAL on purpose: the pattern set is
+ *  serializable data and does not import `target.ts`, so a `TargetDescription` satisfies this by
+ *  shape. It is the layer's ONE channel — `patternApplies` and `applyPattern` both take it, so a
+ *  caller that raises through the patterns cannot hand one of them a target and the other nothing. */
+export interface PatternTarget {
+  id: string;
+  compiler: string;
+  capabilities: { hwDivide: boolean; hwFloat: boolean };
+}
+
 /** Does this pattern apply to `target`? Every DECLARED field must match: the ISA (so an idiom can be
  *  pinned to one frontend), the compiler set (so an idiom fires only for the compilers that emit
  *  it — the reason MIPS+IDO and MIPS+GCC are distinguishable despite one frontend), and every
  *  declared capability. An omitted field is unconstrained. */
-export function patternApplies(
-  p: RewritePattern,
-  target: { id: string; compiler: string; capabilities: { hwDivide: boolean; hwFloat: boolean } },
-): boolean {
+export function patternApplies(p: RewritePattern, target: PatternTarget): boolean {
   if (p.applies.isa && p.applies.isa !== target.id) {
     return false;
   }
@@ -720,10 +727,11 @@ function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value,
 
 /** Apply one pattern greedily to a fixed point. Returns the number of rewrites.
  *
- *  `compiler` is the recompiling compiler's id (`pipeline.ts` passes the target's), read by exactly
- *  one refusal: `recomputesSharedInterior`. Absent means no compiler was named, and a refusal that
- *  names compilers claims nothing about one. */
-export function applyPattern(fn: Fn, pat: RewritePattern, compiler?: string): number {
+ *  `target` is the same one `patternApplies` filtered with, REQUIRED because exactly one refusal
+ *  reads it (`recomputesSharedInterior`, whose answer is per-compiler) and an optional argument is
+ *  a refusal a second caller can silently switch off: `trace.ts` did, and the traced tower emitted
+ *  a fold `decompile()` refuses. Required, that is a type error rather than a wrong answer. */
+export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget): number {
   validatePattern(pat);
   let count = 0,
     changed = true;
@@ -740,7 +748,7 @@ export function applyPattern(fn: Fn, pat: RewritePattern, compiler?: string): nu
         if (!tryMatch(pat.match, op.results[0], defs, binds)) {
           continue;
         }
-        if (pat.recomputesSharedInterior?.includes(compiler ?? '') && sharesInterior(fn, op, binds.interior, defs)) {
+        if (pat.recomputesSharedInterior?.includes(target.compiler) && sharesInterior(fn, op, binds.interior, defs)) {
           continue;
         }
         if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {

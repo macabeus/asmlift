@@ -221,7 +221,7 @@ function traceTower(
   let scoreBefore = opts.probeScore?.(fn, inferredSymbols);
   for (const p of active) {
     const beforeIr = irDump(fn);
-    const hits = applyPattern(fn, p);
+    const hits = applyPattern(fn, p, target);
     dce(fn);
     verify(fn);
     if (hits === 0) {

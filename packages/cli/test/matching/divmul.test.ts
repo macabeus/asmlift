@@ -31,7 +31,7 @@ const fold = (ir: string, pats: RewritePattern[]) => {
   const fn = parse(ir);
   let hits = 0;
   for (const p of pats) {
-    hits += applyPattern(fn, p);
+    hits += applyPattern(fn, p, MIPS_IDO);
   }
   dce(fn);
   verify(fn);
