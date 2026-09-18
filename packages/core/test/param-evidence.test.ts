@@ -120,6 +120,24 @@ test('only the FIRST write counts — a later one is the allocator reusing a fin
   expect(ssa.fn.paramEvidence?.get(a0)?.selfRedefined).toBe(false);
 });
 
+test('a write in a LATER block is not prologue work — the argument register is body state by then', () => {
+  const ssa = makeSsaBuilder('f', 2, [[], [0]]);
+  const [b0, b1] = ssa.irBlocks;
+  const a0 = ssa.readVar('a0', 0);
+  const scratch = val();
+  b0.ops.push(mkOp('shl', { operands: [a0], results: [scratch], attrs: { imm: 24 } })); // `sll v0,a0,0x18`
+  ssa.writeVar('v0', 0, scratch);
+  b0.ops.push(mkOp('br', { successors: [{ block: b1, args: [] }] }));
+  ssa.markFilled(0);
+  const later = val();
+  b1.ops.push(mkOp('shl', { operands: [a0], results: [later], attrs: { imm: 24 } }));
+  ssa.writeVar('a0', 1, later); // the argument register, written where body code has already run
+  b1.ops.push(mkOp('ret', { operands: [later] }));
+  ssa.markFilled(1);
+  ssa.finish();
+  expect(ssa.fn.paramEvidence?.get(a0)?.selfRedefined).toBe(false);
+});
+
 test('the record is PRESENT and all-false on a function that shows neither — this builder measured it', () => {
   const ssa = makeSsaBuilder('f', 1, [[]]);
   const [b0] = ssa.irBlocks;
