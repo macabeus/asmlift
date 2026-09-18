@@ -7,15 +7,27 @@ import { FrontendUnsupportedError } from './errors';
  *  exactly the requested symbol — and an ABSENT symbol declines LOUD, because emitting some
  *  other function's body under the requested name is precisely the silent miscompile the
  *  cardinal rule forbids. Headerless input (a raw instruction fragment) passes through. */
+/** The objdump function-header line. GREEDY to the LAST `>`: a C++ template symbol contains `>` of
+ *  its own (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header a pattern cannot see is
+ *  worse than one it misreads — the PRECEDING function's slice runs on through it, which is exactly
+ *  the "other function's body under the requested name" `sliceSymbol` refuses to do. ONE pattern,
+ *  because a second copy is a second answer to the same question: the benchmark's own listing
+ *  scoper held a `<[^>]+>` copy that decided whether `sliceSymbol` was called at all, so a scoped
+ *  object whose only function was a template symbol handed back the whole dump. */
+const HEADER_LINE = /^[0-9a-f]+\s+<(.+)>:\s*$/i;
+const HEADER_SEARCH = new RegExp(HEADER_LINE.source, 'im');
+
+/** Character offset of the FIRST function header in an objdump listing, or -1 — everything before
+ *  it is the listing's own prologue (`target.o: file format …`, section headings). */
+export function firstFunctionHeader(disasm: string): number {
+  return disasm.search(HEADER_SEARCH);
+}
+
 export function sliceSymbol(disasm: string, symbol: string): string {
   const lines = disasm.split('\n');
   const headers: { line: number; sym: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
-    // GREEDY to the LAST `>`: a C++ template symbol contains `>` of its own
-    // (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header this pattern cannot see is
-    // worse than one it misreads — the PRECEDING function's slice runs on through it, which is
-    // exactly the "other function's body under the requested name" this function refuses to do.
-    const m = lines[i].match(/^[0-9a-f]+\s+<(.+)>:\s*$/i);
+    const m = lines[i].match(HEADER_LINE);
     if (m) {
       headers.push({ line: i, sym: m[1] });
     }

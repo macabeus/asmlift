@@ -445,10 +445,24 @@ export function lift(
 
   /** The HIGH half of a relocated address, per value standing for one.
    *
-   *  frontend/mips.ts reaches the same fold through a pre-pass (`applyMipsGlobalRelocs`) because it
-   *  has a SECOND input dialect: Splat text already spells `%hi`/`%lo`, so the relocation records
-   *  must be pushed into the operands before the lift. PowerPC has one dialect — objdump `-r` — so
-   *  the bridge would be scaffolding with no inhabitant, and the relocation is read where it lands.
+   *  frontend/mips.ts folds the same `%hi`/`%lo` pair, and this is NOT a copy of it. Two
+   *  divergences, and only the first is about dialects. MIPS reaches the fold through a pre-pass
+   *  (`applyMipsGlobalRelocs`) because it has a SECOND input dialect — Splat text already spells
+   *  `%hi`/`%lo`, so the records must be pushed into the operands before the lift; PowerPC has one
+   *  dialect, objdump `-r`, so that bridge would be scaffolding with no inhabitant and the
+   *  relocation is read where it lands.
+   *
+   *  The second divergence is the fold itself, and it is the one that matters. MIPS keys the high
+   *  half BY REGISTER, in a block-local map, with no guard on reading one as a value and no check
+   *  that none escaped the finished function. That is unsound in both of the ways this file guards
+   *  against, live on `main` and reproducible: an `R_MIPS_HI16` with no `LO16`, read as a value,
+   *  renders the printed placeholder as the number objdump printed (`return 0;`), and the diamond
+   *  below — a sibling definition on the path not taken — hands the half back as an ordinary entry
+   *  parameter. PowerPC refuses both. The route out is not a second copy of this code: `DisasmReloc`
+   *  is already a shared carrier, and once `applyMipsGlobalRelocs` and the Splat parser both write
+   *  `ins.reloc` instead of rewriting operands to `%hi(SYM)` text, ONE value-keyed fold can serve
+   *  both ISAs and MIPS's two holes close as a consequence of the sharing. That is a round of its
+   *  own with an N64 bench bill this one cannot pay.
    *
    *  `lis rD,SYM@ha` produces no VALUE: `@ha` is `((SYM + 0x8000) >> 16) & 0xffff`, a number that
    *  means nothing until the sign-extended `@l` half completes it, and in a relocatable object both
@@ -496,11 +510,13 @@ export function lift(
   // is a value the machine passes on and SSA has no definition for (nothing ever wrote it, so
   // nothing is there to find). When a LATER argument register does hold a value, the second reading
   // is the only one left — the caller set up r5 and left r3 alone — and taking the first silently
-  // drops that argument and every one after it: `marioparty4:fn_1_C4E4` sets up six arguments, the
-  // sixth of them the `&fn_1_C530` this frontend just recovered, and read as a contiguous count of
-  // 0 it emitted `omAddObjEx()`. Which of the two it is cannot be decided here — the function's own
-  // arity is exactly what is missing — so this refuses and names the gap rather than guessing at a
-  // count. A prototype answers it (`protoArity` is consulted first and this is never reached).
+  // drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` passes seven
+  // registers to `evw_color_set` and, with r4 left at its incoming value, emitted
+  // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. (Mario Party 4's
+  // checkout has the same shape carrying a recovered address: `fn_1_C4E4` in `m408Dll/stage.o`
+  // sets up six arguments and emitted `omAddObjEx()`.) Which of the two it is cannot be decided
+  // here — the function's own arity is exactly what is missing — so this refuses and names the gap
+  // rather than guessing at a count. A prototype answers it (`protoArity` is consulted first).
   const fallbackArgc = (bi: number, at: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalf.has(v));
     let n = 0;
@@ -531,9 +547,10 @@ export function lift(
   // mwcc spilling an incoming ARGUMENT and reading it back into another register — a real value
   // moving through memory, not a save/restore pair. Dropping the reload leaves the destination with
   // no definition at all, and then `fallbackArgc`'s contiguous scan finds nothing reaching that
-  // argument register and silently takes every LATER argument with it: measured on
-  // `marioparty4:fn_1_C4E4`, whose `omAddObjEx(…, &fn_1_C530)` lost the recovered address this
-  // frontend had just built. An offset-only record cannot tell the two apart.
+  // argument register and silently takes every LATER argument with it. An offset-only record cannot
+  // tell the two apart. `pikmin:__ct__7ActFreeFP4Piki` is the benchmark's inhabitant — it reads
+  // `this` back into r4 — and Mario Party 4's checkout has 28 more, `SLFileOpen` in `SLData.o`
+  // among them, each losing an argument the relocation fold had just recovered.
   const savedSlots = new Map<number, string>();
   // `stmw rS,D(r1)` saves rS..r31 into consecutive words from D; `lmw rD,D(r1)` restores the same
   // range. One rule, spelled once for both.
@@ -619,8 +636,8 @@ export function lift(
         saved === undefined
           ? `cannot lift '${name}': reload of a stack local ('${mem}') — local stack frames not supported`
           : `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved} was saved into — ` +
-            `a load that does not restore the register the slot holds is a value read back through the ` +
-            `stack, which is a local stack frame this frontend does not model`,
+              `a load that does not restore the register the slot holds is a value read back through the ` +
+              `stack, which is a local stack frame this frontend does not model`,
       );
     };
     const write = (r: string, v: Value) => {
@@ -708,9 +725,18 @@ export function lift(
     // `lis` defined, and the two relocations must name the same symbol with the same addend.
     // Asking SSA for that value is what makes it a proof — a redefinition on any path that reaches
     // this read produces a different value (a block parameter, at a merge), which is not in
-    // `highHalf` and so refuses. Nothing consults adjacency, distance or block identity, which is
-    // why a pair eleven instructions apart folds (26% of the corpus's pairs are not adjacent)
-    // while a register reused between the halves refuses.
+    // `highHalf` and so refuses. Nothing consults adjacency or distance, which is why a pair eleven
+    // instructions apart folds (26% of the corpus's pairs are not adjacent) while a register reused
+    // between the halves refuses.
+    //
+    // BLOCK IDENTITY IT DOES CONSULT, through SSA and not directly, and the refusal has to say so.
+    // `readVar` during block FILLING answers from what is sealed: a chain of single-predecessor
+    // blocks walks back to the `lis` and folds, but a read at a JOIN gets the block parameter that
+    // stands for the merge, and in an unsealed loop header an incomplete one — neither is in
+    // `highHalf`. So an `@ha` hoisted above a loop with its `@l` in the body refuses, and so does a
+    // pair split across a diamond even when BOTH paths carry the same half. Measured: over 29,850
+    // swept functions this refusal has 0 inhabitants (the merge guard below has 113), so the
+    // residual is written down rather than built.
     const foldLoHalf = (ins: Instr, rHi: string, imm: string): Value => {
       relocTaken = true;
       const lo = ins.reloc!;
@@ -724,8 +750,12 @@ export function lift(
       if (!hi || hi.sym !== lo.sym || hi.addend !== lo.addend) {
         throw new PpcUnsupportedError(
           `${relocSite(ins)} carries the '@l' half of '${lo.sym}' but ${rHi} ` +
-            (hi ? `holds the high half of '${hi.sym}'` : 'holds no high half') +
-            ` — a reused register or a missing '@ha' is not a pair this frontend will guess at`,
+            (hi
+              ? `holds the high half of '${hi.sym}'`
+              : `holds no high half here — a reused register, a missing '@ha', or an '@ha' that ` +
+                `reaches this instruction only through a merge or a loop header, where what the ` +
+                `register holds is the block parameter standing for the join and not the half`) +
+            ` — this frontend will not guess at the pair`,
         );
       }
       hi.consumed = true;

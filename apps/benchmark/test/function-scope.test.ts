@@ -79,3 +79,32 @@ describe('functionScopedDump', () => {
     ).toBe(DUMP.replace('00000008 g     F .text\t00000018 f', '00000000 g     F .text\t00000028 f'));
   });
 });
+
+// The prologue split and the slice must read the same listing. A C++ template symbol carries `>` of
+// its own, so a `<[^>]+>` pattern cannot see its header — and this file held one while
+// `sliceSymbol` was fixed to a greedy `<(.+)>`. The two then disagreed.
+test('a listing whose FIRST function carries a TEMPLATE symbol is still scoped to one copy of it', () => {
+  const sym = 'invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane';
+  const listing = [
+    '',
+    'target.o:     file format elf32-powerpc',
+    '',
+    'Disassembly of section .text:',
+    '',
+    `00000000 <${sym}>:`,
+    '   0:\tblr',
+    '',
+    '00000004 <after>:',
+    '   4:\tbl      4 <after>',
+    '\t\t\t4: R_PPC_REL24\tsomewhere_else',
+    '   8:\tblr',
+    '',
+  ].join('\n');
+  // The prologue is everything BEFORE the first header, so a first header the pattern cannot see
+  // puts the template function itself into the prologue — and `sliceSymbol` then appends it a
+  // second time. The row's listing held its own function twice.
+  const scoped = functionDisassembly(listing, sym);
+  expect(scoped.split(`<${sym}>:`)).toHaveLength(2);
+  expect(scoped).not.toContain('somewhere_else');
+  expect(scoped).not.toContain('<after>:');
+});

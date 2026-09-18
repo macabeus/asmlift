@@ -283,3 +283,32 @@ test('…and an UNMODELLED one still refuses earlier, for its own better reason'
   const sda = '   0:\tlfs     f1,0(0)\n\t\t\t2: R_PPC_EMB_SDA21\tgF\n   4:\tblr\n';
   expect(() => dis('flt', sda)).toThrow(/unmodelled effect instruction 'lfs'/);
 });
+
+// The residual the fold's proof leaves behind, pinned so the refusal keeps naming it. `readVar`
+// answers from what SSA has sealed, so a read at a JOIN gets the block parameter standing for the
+// merge rather than the half itself — even when every incoming path carries the same half. A
+// hoisted loop-invariant address is the commonest shape of it. 0 inhabitants over a
+// 29,850-function sweep, which is why it is a documented refusal and not a build.
+test('an `@ha` that reaches its `@l` only through a JOIN refuses, and the refusal says why', () => {
+  const loop =
+    '   0:\tlis     r5,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_tbl\n' +
+    '   4:\tli      r3,0\n' +
+    '   8:\taddi    r3,r3,1\n' +
+    '   c:\taddi    r4,r5,0\n\t\t\te: R_PPC_ADDR16_LO\tg_tbl\n' +
+    '  10:\tstw     r3,0(r4)\n' +
+    '  14:\tcmpwi   r3,10\n' +
+    '  18:\tblt     8 <join+0x8>\n' +
+    '  1c:\tblr\n';
+  expect(() => dis('join', loop)).toThrow(/through a merge or a loop header/);
+  // The same is true of a diamond both of whose paths carry the half — so the refusal must not
+  // blame a reused register, which is what it used to do.
+  const diamond =
+    '   0:\tlis     r5,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_tbl\n' +
+    '   4:\tcmpwi   r3,0\n' +
+    '   8:\tbeq     10 <dia+0x10>\n' +
+    '   c:\tli      r6,1\n' +
+    '  10:\taddi    r4,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tg_tbl\n' +
+    '  14:\tlwz     r3,0(r4)\n' +
+    '  18:\tblr\n';
+  expect(() => dis('dia', diamond)).toThrow(/through a merge or a loop header/);
+});
