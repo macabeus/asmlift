@@ -341,10 +341,16 @@ test('ori carrying a data reloc is a placeholder — decline loud', () => {
   expect(() => dis('orilo', ori)).toThrow(/data relocation/);
 });
 
-test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip comes second', () => {
-  // r1 never holds an `@ha` half, so the `@l` fold refuses before the teardown skip can swallow it.
-  const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
-  expect(() => dis('fradj', asm)).toThrow(/r1 holds no high half/);
+test('a reloc on a frame adjust (`addi r1`) is loud whether or not an `@ha` is pending', () => {
+  // The stack-pointer guard runs BEFORE both the fold and the teardown skip. Without it, the lone
+  // `@l` was caught only incidentally (r1 held no pending half), and a COMPLETE pair walked
+  // straight through the fold into r1 and lifted as an ordinary teardown.
+  const lone = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
+  expect(() => dis('fradj', lone)).toThrow(/on a stack-pointer adjust/);
+  const pair =
+    '0:\tlis     r1,0\n\t\t\t2: R_PPC_ADDR16_HA gFrame\n' +
+    '4:\taddi    r1,r1,0\n\t\t\t6: R_PPC_ADDR16_LO gFrame\n8:\tblr\n';
+  expect(() => dis('fradjpair', pair)).toThrow(/on a stack-pointer adjust/);
 });
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads

@@ -851,22 +851,37 @@ export function lift(
         // `addi r1,r1,N` is frame teardown (skip); any other addi is a real add-immediate.
         case 'addi':
         case 'addic':
+          // The STACK POINTER first, before any fold looks at the operands. `addi r1,r1,N` is frame
+          // teardown and is skipped; a relocation on it is no known compiler's output, and folding
+          // one would write an address into r1 and let the function lift as if the teardown had
+          // happened — silent, and about the frame rather than the value.
+          if (d === 'r1') {
+            if (ins.reloc) {
+              throw new PpcUnsupportedError(
+                `${relocSite(ins)} carries a relocation ('${ins.reloc.sym}') on a stack-pointer ` +
+                  `adjust — an address built in r1 is not a shape this frontend models`,
+              );
+            }
+            break;
+          }
           // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
-          // addend). It is the ONLY `@l` consumer modelled here, because it is the only one with an
-          // inhabitant: `ori` and `addic` carry no relocation anywhere in this corpus, and the
-          // `@l`-in-a-displacement form is float loads. Those keep refusing (docs/level-tower.md,
-          // "earn the level"), and their high half is caught as a dangling `@ha` at the end of the lift.
+          // addend). It is the only `@l` consumer modelled here. The others — `ori`, `addic`, and
+          // the `@l`-in-a-displacement form (1,935 integer load/store sites across the three
+          // checkouts, plus the float loads) — are left unbuilt per docs/level-tower.md's "earn the
+          // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
+          // high half none of them consumed is caught by `readReg` when it is read, or by the
+          // dangling-`@ha` check at the end of the lift when it is not.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
             const g = foldLoHalf(ins, s, t);
-            ins.reloc.addend === 0 ? write(d, g) : emitBin('add', d, g, constVal(ins.reloc.addend));
+            if (ins.reloc.addend === 0) {
+              write(d, g);
+            } else {
+              emitBin('add', d, g, constVal(ins.reloc.addend));
+            }
             break;
           }
-          // reloc first: a data reloc on a stack adjust is no known compiler's output — loud
           if (ins.reloc) {
             relocPlaceholder(ins);
-          }
-          if (d === 'r1') {
-            break;
           }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;
