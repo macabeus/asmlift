@@ -17,6 +17,7 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import {
+  CAST_PATTERNS,
   CNTLZW_EQ0,
   HWMOD_PATTERNS,
   NOT_CMP_PATTERNS,
@@ -450,4 +451,88 @@ test('a malformed pattern throws on EVERY lift, not only the first', () => {
   };
   expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
   expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+});
+
+// ── a fold may re-spell an idiom, never RECOMPUTE one ────────────────────────────────────────
+//
+// A pattern collapses several ops into one on the strength of a compiled pair, measured where the
+// idiom's INTERIOR ops die with the fold. Give one a second reader and it survives — and whether
+// the recompiling compiler then emits the work twice or CSEs it back is a compiler fact, compiled
+// in engine.ts's `sharesInterior`: IDO emits the extra `sll` (5 words against the target's 4),
+// agbcc and both MIPS GCCs are byte-identical either way. So the refusal is opt-in per compiler,
+// and BOTH directions are pinned — a blanket one measured `synthetic:{membnarrow,sibwalk}:agbcc`
+// out of MATCH and `kleod:sub_0800A5B8:agbcc` from 173 to 179.
+const SEXT8: RewritePattern = {
+  id: 'test/sext8',
+  applies: { compilers: ['ido', 'agbcc'] },
+  recomputesSharedInterior: ['ido'],
+  match: {
+    op: 'shr_s',
+    attrEquals: { imm: 24 },
+    args: [{ op: 'shl', attrEquals: { imm: 24 }, args: [{ bind: 'X' }] }],
+  },
+  replaceWith: { op: 'sext', args: ['X'], attrs: { width: 8 } },
+};
+const SHIFT_PAIR_ALONE = `fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  ret %2
+}`;
+const SHIFT_PAIR_SHARED = `fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  %3: unk32 = add %2, %1
+  ret %3
+}`;
+
+test('the pair folds when the fold is all that reads its interior', () => {
+  const fn = parse(SHIFT_PAIR_ALONE);
+  expect(applyPattern(fn, SEXT8, 'ido')).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+test('a surviving reader of the interior `shl` refuses the fold where the compiler recomputes it', () => {
+  const fn = parse(SHIFT_PAIR_SHARED);
+  expect(applyPattern(fn, SEXT8, 'ido')).toBe(0);
+  expect(print(fn)).toContain('shr_s');
+  expect(print(fn)).toContain('shl');
+});
+
+test('…and folds it where the compiler CSEs it back — the refusal is a MEASUREMENT, not a rule', () => {
+  const fn = parse(SHIFT_PAIR_SHARED);
+  expect(applyPattern(fn, SEXT8, 'agbcc')).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+// The ROOT's readers are not interior readers: `replaceAllUsesWith` brings every one of them along,
+// which is what makes a fold a re-spelling at all. Without this exemption the refusal would swallow
+// every idiom whose result is used twice — `(s8)x + (s8)x` would stop folding.
+test('a second reader of the ROOT still folds — those uses come along with the rewrite', () => {
+  const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  %3: unk32 = add %2, %2
+  ret %3
+}`);
+  expect(applyPattern(fn, SEXT8, 'ido')).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+// Same discipline as `ordered` and `unsequencedRightFirst`: a declaration that could never have an
+// effect is a pattern author's mistake, and patterns are meant to become generated DATA.
+test('naming a compiler the pattern does not apply to throws, naming the pattern', () => {
+  const inert: RewritePattern = { ...SEXT8, id: 'test/inert-recompute', recomputesSharedInterior: ['mwcc'] };
+  expect(() => applyPattern(parse(SHIFT_PAIR_ALONE), inert, 'ido')).toThrow(/test\/inert-recompute.*mwcc/);
+});
+
+test('the shipped sign-extend folds declare IDO and nothing else', () => {
+  const sext = CAST_PATTERNS.filter((p) => p.id.startsWith('sext'));
+  expect(sext.map((p) => p.recomputesSharedInterior)).toEqual([['ido'], ['ido']]);
+  expect(CAST_PATTERNS.filter((p) => p.id.startsWith('zext')).map((p) => p.recomputesSharedInterior)).toEqual([
+    undefined,
+    undefined,
+  ]);
 });
