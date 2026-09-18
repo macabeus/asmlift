@@ -98,9 +98,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() =>
       dis(
         'callloop',
-        '0:\tli      r5,0\n4:\tmtctr   r4\n8:\tcmpwi   r4,0\nc:\tble     20 <callloop+0x20>\n' +
-          '10:\tbl      40 <foo>\n14:\tadd     r5,r5,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
-          '20:\tmr      r3,r5\n24:\tblr\n',
+        // The count is seeded from r3 and the accumulator lives in a callee-saved register, so no
+        // ARGUMENT register is left empty below one that holds a value — the arity guard below has
+        // nothing to say here and the CTR clobber is what this case is about.
+        '0:\tli      r31,0\n4:\tmtctr   r3\n8:\tcmpwi   r3,0\nc:\tble     20 <callloop+0x20>\n' +
+          '10:\tbl      40 <foo>\n14:\tadd     r31,r31,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
+          '20:\tmr      r3,r31\n24:\tblr\n',
       ),
     ).toThrow(/CTR loop body contains 'bl'.*clobbers CTR/);
   });
@@ -109,9 +112,37 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // argument — `func(1, 7)` for a call the caller set up with one — which is a wrong-code class, not
   // a formatting one. Same trim as the Thumb frontend (frontend/ssa.ts trimClobberedCallArgs).
   test('a guessed call arity drops the argument registers an earlier call clobbered', () => {
-    const src = dis('f', '0:\tli      r4,7\n4:\tbl      40 <foo>\n8:\tli      r3,1\nc:\tbl      50 <bar>\n10:\tblr\n');
+    // r3 is set before the first call too: a call whose r3 is empty while r4 holds a value is the
+    // undecidable ARITY shape the guard below refuses, which is a different question from this one.
+    const src = dis(
+      'f',
+      '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\nc:\tli      r3,1\n10:\tbl      50 <bar>\n14:\tblr\n',
+    );
     expect(src).toContain('func(1)');
     expect(src).not.toContain('func(1, 7)');
+  });
+
+  // The other half of the same question. A guessed arity counts CONTIGUOUSLY from r3, so an empty
+  // argument register ends the count — and an argument register is empty both when the call does not
+  // pass it and when it still holds this function's own untouched incoming argument, which nothing
+  // ever wrote and SSA therefore cannot see. Guessing the first reading drops that argument and
+  // every later one: `ac-decomp:evw_anime_colreg_manual` passes seven registers to `evw_color_set`
+  // and, with r4 left at its incoming value, lifted to `evw_color_set(a0);` — the divide, the
+  // multiply and five arguments gone. The function's own arity is precisely what is missing here,
+  // so the gap refuses.
+  test('a guessed arity with a GAP in the argument registers refuses, rather than dropping the tail', () => {
+    expect(() =>
+      dis('gap', '0:\tli      r5,3\n4:\tbl      40 <foo>\n8:\tblr\n'),
+    ).toThrow(/r5 holds a value and r3 holds none — an argument register left at its incoming value/);
+  });
+  test('control: no gap, so the contiguous count stands', () => {
+    expect(dis('nogap', '0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n')).toContain('func(1, 3)');
+  });
+  test('and a prototype answers the question the gap cannot', () => {
+    // `protoArity` is consulted before the guess, so a declared callee is unaffected by the gap.
+    const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
+    expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source)
+      .toContain('g(a0, a1, 3)');
   });
 
   test('an indirect branch (bctr) FAILS LOUD too', () => {

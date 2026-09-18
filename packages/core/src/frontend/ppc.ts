@@ -479,10 +479,32 @@ export function lift(
   // hoisted into the prologue leaves its half in r4 across an intervening call, and counted, it
   // makes `strlen(s)` into `strlen(s, <half>)` — which then refuses at the read. Measured on
   // `pikmin:searchKanjiCode__FUs`, whose `lis r4` at 0x4 pairs only at 0x28, past the `bl strlen`.
-  const fallbackArgc = (bi: number): number => {
+  //
+  // A GAP REFUSES. The count is contiguous, so a register with nothing reaching it ends it — and an
+  // argument register can be empty for two opposite reasons. Either the call really takes that few
+  // arguments, or the register still holds this function's own untouched incoming argument, which
+  // is a value the machine passes on and SSA has no definition for (nothing ever wrote it, so
+  // nothing is there to find). When a LATER argument register does hold a value, the second reading
+  // is the only one left — the caller set up r5 and left r3 alone — and taking the first silently
+  // drops that argument and every one after it: `marioparty4:fn_1_C4E4` sets up six arguments, the
+  // sixth of them the `&fn_1_C530` this frontend just recovered, and read as a contiguous count of
+  // 0 it emitted `omAddObjEx()`. Which of the two it is cannot be decided here — the function's own
+  // arity is exactly what is missing — so this refuses and names the gap rather than guessing at a
+  // count. A prototype answers it (`protoArity` is consulted first and this is never reached).
+  const fallbackArgc = (bi: number, at: number): number => {
+    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalf.has(v));
     let n = 0;
-    while (n < ARG_REGS.length && ssa.hasReachingDef(ARG_REGS[n], bi, (v) => !highHalf.has(v))) {
+    while (n < ARG_REGS.length && holdsValue(n)) {
       n++;
+    }
+    for (let k = n + 1; k < ARG_REGS.length; k++) {
+      if (holdsValue(k)) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${ARG_REGS[k]} holds a ` +
+            `value and ${ARG_REGS[n]} holds none — an argument register left at its incoming value and one ` +
+            `the call does not pass look the same here, so the argument count is not decidable`,
+        );
+      }
     }
     return n;
   };
@@ -756,7 +778,7 @@ export function lift(
         case 'bl': {
           const sym = ins.reloc?.sym ?? 'func';
           const declared = protoArity(prototypes[sym]);
-          const argc = declared ?? fallbackArgc(bi);
+          const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
           for (let k = 0; k < argc; k++) {
             args.push(read(ARG_REGS[k]));
