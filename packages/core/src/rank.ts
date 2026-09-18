@@ -1258,6 +1258,24 @@ export function enumerateCandidates(
       const v = regionVolatile();
       return v ? volStore(v) : null;
     });
+    /** The results of a multi-result variation, under the SAME guard `respell` puts around a
+     *  single-result one: a throw here costs this variation and nothing else. Running a candidate
+     *  source at statement level instead is the one way a variation can cost a match — the
+     *  paragraph above carries that argument — and a source is a `for`-loop subject rather than a
+     *  thunk, so it needs this helper rather than a thunk to stay inside a try. */
+    const candidatesOf = (
+      variations: readonly Variation[],
+      from: () => SFn | null | undefined,
+      resultsOf: (s: SFn) => { merged: string; sfn: SFn }[],
+    ): { merged: string; sfn: SFn }[] => {
+      try {
+        const base = from();
+        return base ? resultsOf(base) : [];
+      } catch (e) {
+        reportThrow([...preRespellVariations, ...variations], e);
+        return [];
+      }
+    };
     /** One candidate per result of a multi-result variation, `name` applied to the result's own
      *  subject after `prefix`. */
     const respellEach = (
@@ -1269,19 +1287,8 @@ export function enumerateCandidates(
       if (!offeredOn(target, [...prefix, name])) {
         return;
       }
-      let results: { variations: readonly Variation[]; sfn: SFn }[] = [];
-      try {
-        const base = from();
-        results = (base ? resultsOf(base) : []).map((c) => ({
-          variations: [...prefix, withSubject(name, c.merged)],
-          sfn: c.sfn,
-        }));
-      } catch (e) {
-        reportThrow([...preRespellVariations, ...prefix, name], e);
-        return;
-      }
-      for (const c of results) {
-        respell(c.variations, () => c.sfn);
+      for (const c of candidatesOf([...prefix, name], from, resultsOf)) {
+        respell([...prefix, withSubject(name, c.merged)], () => c.sfn);
       }
     };
     respellEach(['scopebase'], 'coalesce', () => hoistScopedBases(sfn));
@@ -1643,9 +1650,12 @@ export function enumerateCandidates(
     // what moves into it, and neither spelling alone reaches the bytes. The pairing is the existing
     // two primitives composed — each `/argcopy` tree is re-offered as a `/coalesce` subject — not a
     // new mechanism.
-    respellEach([], 'argcopy', () => sfn, argCopyCandidates);
-    for (const c of argCopyCandidates(sfn)) {
-      respellEach([withSubject('argcopy', c.merged)], 'coalesce', () => c.sfn);
+    if (offeredOn(target, ['argcopy'])) {
+      for (const c of candidatesOf(['argcopy'], () => sfn, argCopyCandidates)) {
+        const copied = withSubject('argcopy', c.merged);
+        respell([copied], () => c.sfn);
+        respellEach([copied], 'coalesce', () => c.sfn);
+      }
     }
     // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
