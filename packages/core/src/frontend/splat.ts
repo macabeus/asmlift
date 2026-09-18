@@ -15,11 +15,16 @@
 //   • constant immediate EXPRESSIONS (`(0x660104 >> 16)`, `(x & 0xFFFF)`) — the assembler's hi/lo
 //     split of a 32-bit literal, evaluated here to the plain number the decode switch parses.
 //
-// `%hi`/`%lo` operands (a global's address) are preserved verbatim so the MIPS frontend can fold
-// them into a `gaddr` (frontend/mips.ts). The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are
-// declined LOUD — small-data / position-independent access is not modelled. Preserving rather than
-// blindly evaluating is what keeps `parseImm('%hi(SYM)')` from silently becoming a NaN immediate.
-import type { DisasmInstr } from './disasm';
+// `%hi`/`%lo` operands (a global's address) are turned into exactly what a relocatable object
+// carries — an `R_MIPS_HI16`/`R_MIPS_LO16` record on the instruction, plus the immediate the
+// instruction really encodes — so both MIPS dialects reach ONE fold (frontend/mips.ts,
+// frontend/high-half.ts) and neither gets a pairing rule of its own. The encoding is the
+// assembler's: `%hi(x)` is `((x + 0x8000) >> 16) & 0xffff`, ADJUSTED so the sign-extended low half
+// cancels the carry, and `%lo(x)` is the sign-extended low 16 bits — which is what lets the fold
+// recover `x` as `(hi << 16) + (s16)lo` for a positive or a negative offset alike.
+// The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are declined LOUD — small-data /
+// position-independent access is not modelled.
+import type { DisasmInstr, DisasmReloc } from './disasm';
 import { FrontendUnsupportedError } from './errors';
 
 // One instruction line: `/* ROM VRAM BYTES */  MNEMONIC  OPS`. Group 1 is the VRAM address word.
@@ -29,9 +34,12 @@ const INSN_SIGNAL = /\/\*\s*[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s*\*\//;
 // A local-label DEFINITION on its own line (`.L800011C0_1DC0:`); the colon is required.
 const LABEL_DEF = /^(\.[\w.$]+):$/;
 // A GOT/PIC relocation operand this reader does not support (small-data / position-independent
-// access) — declined loud. `%hi`/`%lo` are NOT here: they name a global's address and are preserved
-// verbatim for the MIPS frontend to fold into a `gaddr` (see normalizeOperand / frontend/mips.ts).
+// access) — declined loud. `%hi`/`%lo` are NOT here: they name a global's address and become
+// relocation records for the MIPS frontend to fold (see normalizeOperand / frontend/mips.ts).
 const RELOC_OP = /%(gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
+// Any `%hi`/`%lo` spelling at all, so a half `normalizeOperand`'s pattern cannot resolve is caught
+// rather than falling through to the paths that read an operand as arithmetic.
+const HILO_OP = /%(hi|lo)\s*\(/i;
 // Data directives whose bytes could encode an effect: skipping one inside a function slice would
 // silently delete it, so they decline (mirrors the Thumb frontend's in-code-data guard).
 const DATA_DIRECTIVE =
@@ -120,7 +128,17 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
         `cannot lift '${name}': data directive '${mnemonic}' in the code stream — skipping it would silently delete its effect`,
       );
     }
-    const ops = m[3].trim() ? splitOperands(m[3].trim()).map((o) => normalizeOperand(name, o)) : [];
+    const normalized = m[3].trim() ? splitOperands(m[3].trim()).map((o) => normalizeOperand(name, o)) : [];
+    const ops = normalized.map((n) => n.op);
+    // At most one relocation per instruction — the same invariant disasm.ts enforces on objdump
+    // output, and for the same reason: two would leave one symbol standing for the other's operand.
+    const relocs = normalized.map((n) => n.reloc).filter((r): r is DisasmReloc => r !== undefined);
+    if (relocs.length > 1) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': two relocation operands on one instruction ('${mnemonic}' at ` +
+          `0x${addr.toString(16)}): '${relocs[0].sym}' and '${relocs[1].sym}'`,
+      );
+    }
     // addi/addiu SIGN-EXTEND their 16-bit immediate; Splat may spell the low half of a materialised
     // constant as an unsigned mask (`(0x8000ABCD & 0xFFFF)` = 0xABCD), so re-sign it here to match
     // the hardware — and the objdump path, which prints the already-signed value. Zero-extending ops
@@ -132,7 +150,7 @@ export function parseSplatMips(asm: string, name: string): DisasmInstr[] {
       labelAddr.set(l, addr);
     }
     pending = [];
-    instrs.push({ addr, mnemonic, ops });
+    instrs.push({ addr, mnemonic, ops, reloc: relocs[0] });
   }
 
   // Resolve every branch/jump's target label to an address. A target that is not a local label of
@@ -194,31 +212,51 @@ function splitOperands(s: string): string[] {
 
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
 // `$` register sigil, fold a memory operand's displacement expression, evaluate a bare constant
-// expression, preserve a `%hi`/`%lo` global reference, and decline an unsupported PIC relocation.
-function normalizeOperand(name: string, op: string): string {
-  // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Preserved verbatim (with a
-  // de-sigiled base) for the MIPS frontend to fold into a `gaddr`; NOT declined like the PIC relocs.
-  const hilo = op.match(/^(%(?:hi|lo)\([^)]*\))(?:\((\$?[A-Za-z]\w*)\))?$/);
+// expression, split a `%hi`/`%lo` reference into an immediate plus its record, decline a PIC one.
+function normalizeOperand(name: string, op: string): { op: string; reloc?: DisasmReloc } {
+  // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Becomes the relocation
+  // record an object file would carry plus the immediate the instruction really encodes, so the
+  // frontend folds this dialect through the same path as objdump; NOT declined like the PIC relocs.
+  const hilo = op.match(
+    /^%(hi|lo)\(\s*([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
+  );
   if (hilo) {
-    return hilo[2] ? `${hilo[1]}(${hilo[2].replace(/^\$/, '')})` : hilo[1];
+    const addend = hilo[4] ? evalConst(name, hilo[4]) * (hilo[3] === '-' ? -1 : 1) : 0;
+    const imm = hilo[1] === 'hi' ? ((addend + 0x8000) >> 16) & 0xffff : (addend << 16) >> 16;
+    const reloc: DisasmReloc = { type: hilo[1] === 'hi' ? 'R_MIPS_HI16' : 'R_MIPS_LO16', sym: hilo[2], addend: 0 };
+    return { op: hilo[5] ? `${imm}(${hilo[5].replace(/^\$/, '')})` : String(imm), reloc };
+  }
+  // A `%hi`/`%lo` the pattern above did NOT convert is still a relocation operand, and the paths
+  // below it read an operand as arithmetic: `%lo(0x800A1234)($v0)` matches the memory-operand shape
+  // and `evalConst` drops the tokens it does not know, so the displacement becomes the bare number
+  // and the access lifts as an index into the base register. A bare `%hi(…)` falls through to
+  // `plain` and the frontend refuses it one level down as a non-numeric immediate; refusing here
+  // says instead that what it saw was a relocation.
+  if (HILO_OP.test(op)) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': relocation operand '${op}' — this reader resolves a '%hi'/'%lo' half ` +
+        `only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve ` +
+        `as arithmetic`,
+    );
   }
   if (RELOC_OP.test(op)) {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': relocation operand '${op}' (small-data / PIC data access) — not modelled`,
     );
   }
+  const plain = (v: string) => ({ op: v });
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.
   const mem = op.match(/^(.*)\((\$?[A-Za-z]\w*)\)$/);
   if (mem) {
     const disp = mem[1].trim();
     const off = disp === '' ? '0' : String(evalConst(name, disp));
-    return `${off}(${mem[2].replace(/^\$/, '')})`;
+    return plain(`${off}(${mem[2].replace(/^\$/, '')})`);
   }
   // A bare constant expression (`(0x660104 >> 16)`) — the assembler's hi/lo literal split.
   if (op.startsWith('(')) {
-    return String(evalConst(name, op));
+    return plain(String(evalConst(name, op)));
   }
-  return op.replace(/^\$/, '');
+  return plain(op.replace(/^\$/, ''));
 }
 
 // Evaluate a constant integer expression (the assembler's hi/lo split: hex/dec literals with

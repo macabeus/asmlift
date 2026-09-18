@@ -36,7 +36,7 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
-import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
@@ -53,6 +53,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
+import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams } from './ssa';
@@ -439,25 +440,9 @@ export function lift(
   const ssa = makeSsaBuilder(name, blocks.length, preds);
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 
-  /** The HIGH half of a relocated address, per value standing for one.
-   *
-   *  frontend/mips.ts folds the same `%hi`/`%lo` pair, and this is NOT a copy of it. The first
-   *  divergence is only about dialects: MIPS reaches the fold through a pre-pass
-   *  (`applyMipsGlobalRelocs`) because it has a SECOND input dialect — Splat text already spells
-   *  `%hi`/`%lo`, so the records must be pushed into the operands before the lift. PowerPC has one
-   *  dialect, objdump `-r`, so that bridge would be scaffolding with no inhabitant.
-   *
-   *  The second divergence is the fold itself, and it is the one that matters. MIPS records a
-   *  pending high half BY REGISTER in a BLOCK-LOCAL map, and its `lui` writes no SSA value at all,
-   *  so its read-as-data guard reaches only the block that recorded the half. Two shapes walk past
-   *  it on `main` today: a `lui` whose register is read in a LATER block has no definition for SSA
-   *  to find, so the half comes back as a phantom entry parameter, and an `R_MIPS_HI16` with no
-   *  `LO16` is never rewritten into a `%hi` operand at all, so the `lui` lifts as the 0 objdump
-   *  printed. PowerPC refuses both. The route out is not a second copy of this code: `DisasmReloc`
-   *  is already a shared carrier, and once `applyMipsGlobalRelocs` and the Splat parser both write
-   *  `ins.reloc` instead of rewriting operands to `%hi(SYM)` text, ONE value-keyed fold serves both
-   *  ISAs and MIPS's holes close as a consequence of the sharing — a round of its own, with an N64
-   *  bench bill this one cannot pay.
+  /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
+   *  way a placeholder could leak past it, lives in frontend/high-half.ts — shared with
+   *  frontend/mips.ts, which folds the same two-instruction address under `%hi`/`%lo`.
    *
    *  `lis rD,SYM@ha` produces no VALUE: `@ha` is `((SYM + 0x8000) >> 16) & 0xffff`, a number that
    *  means nothing until the sign-extended `@l` half completes it, and in a relocatable object both
@@ -465,27 +450,21 @@ export function lift(
    *  The `gaddr` is emitted where the `@l` lands, the same choice frontend/mips.ts makes for
    *  `lui %hi`.
    *
-   *  KEYED BY VALUE, NOT BY REGISTER. The `lis` writes an ordinary SSA definition whose value is
-   *  this placeholder, so SSA — not a side map — answers "does a high half reach this read?".
-   *  A register-keyed map cannot: its entry is erased by a redefinition on ANY path, including a
-   *  sibling one the reader never takes, and the read then falls through to whatever def reached
-   *  before the `lis`. `assertNoHighHalfEscaped` below closes the second half of the same hole,
-   *  where the read lands on a block parameter MERGING a high half with an ordinary value. */
-  const highHalf = new Map<Value, { sym: string; addend: number; addr: number; mnemonic: string; consumed: boolean }>();
+   *  PowerPC is RELA, so the addend rides on the relocation record and is copied straight in; MIPS
+   *  is REL and must read it out of the two instruction immediates. That is the one place the two
+   *  folds diverge, and it is a relocation-format fact rather than a preference. */
+  const highHalves = makeHighHalves({
+    hi: '@ha',
+    hiArticle: 'an',
+    lo: '@l',
+    fail: (message) => {
+      throw new PpcUnsupportedError(message);
+    },
+  });
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
-  const readReg = (r: string, at: number): Value => {
-    const v = readVar(r, at);
-    const hi = highHalf.get(v);
-    if (hi) {
-      throw new PpcUnsupportedError(
-        `cannot lift '${name}': ${r} holds the high half of '${hi.sym}' (the 'lis' at ` +
-          `0x${hi.addr.toString(16)}) and is read as a value — only its matching '@l' half may consume it`,
-      );
-    }
-    return v;
-  };
+  const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
 
@@ -509,7 +488,7 @@ export function lift(
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
   // and names the gap rather than guessing. A prototype answers it (`protoArity` is asked first).
   const fallbackArgc = (bi: number, at: number): number => {
-    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalf.has(v));
+    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
     let n = 0;
     while (n < ARG_REGS.length && holdsValue(n)) {
       n++;
@@ -711,7 +690,7 @@ export function lift(
     // `lis` defined, and the two relocations must name the same symbol with the same addend.
     // Asking SSA for that value is what makes it a proof — a redefinition on any path that reaches
     // this read produces a different value (a block parameter, at a merge), which is not in
-    // `highHalf` and so refuses. Nothing consults adjacency or distance, which is why a pair eleven
+    // `highHalves` and so refuses. Nothing consults adjacency or distance, which is why a pair eleven
     // instructions apart folds — 26% of the corpus's pairs are not adjacent — while a register
     // reused between the halves refuses.
     //
@@ -719,9 +698,9 @@ export function lift(
     // `readVar` during block FILLING answers from what is sealed: a chain of single-predecessor
     // blocks walks back to the `lis` and folds, but a read at a JOIN gets the block parameter that
     // stands for the merge, and in an unsealed loop header an incomplete one — neither is in
-    // `highHalf`. So an `@ha` hoisted above a loop with its `@l` in the body refuses, and so does a
+    // `highHalves`. So an `@ha` hoisted above a loop with its `@l` in the body refuses, and so does a
     // pair split across a diamond even when BOTH paths carry the same half. Over a 29,850-function
-    // sweep this refusal has 0 inhabitants (`assertNoHighHalfEscaped` has 113), so the residual is
+    // sweep this refusal has 0 inhabitants (`assertNoneEscaped` has 113), so the residual is
     // written down rather than built.
     const foldLoHalf = (ins: Instr, rHi: string, imm: string): Value => {
       relocTaken = true;
@@ -732,19 +711,10 @@ export function lift(
             `not the expected 0 placeholder`,
         );
       }
-      const hi = highHalf.get(readVar(rHi, bi));
-      if (!hi || hi.sym !== lo.sym || hi.addend !== lo.addend) {
-        throw new PpcUnsupportedError(
-          `${relocSite(ins)} carries the '@l' half of '${lo.sym}' but ${rHi} ` +
-            (hi
-              ? `holds the high half of '${hi.sym}'`
-              : `holds no high half here — a reused register, a missing '@ha', or an '@ha' that ` +
-                `reaches this instruction only through a merge or a loop header, where what the ` +
-                `register holds is the block parameter standing for the join and not the half`) +
-            ` — this frontend will not guess at the pair`,
-        );
-      }
-      hi.consumed = true;
+      // The per-ISA rest of the match: PowerPC is RELA, so the two records must agree on the addend
+      // as well as the symbol — two `@ha`/`@l` pairs into the same array at different offsets are
+      // different addresses.
+      const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
       return emitGaddr(hi.sym);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
@@ -899,7 +869,7 @@ export function lift(
         case 'lis':
           // `lis rD,SYM@ha` is the high half of an absolute address, and the ONLY instruction that
           // carries `R_PPC_ADDR16_HA` in this corpus. rD is defined as a placeholder — see
-          // `highHalf`.
+          // `highHalves`.
           if (ins.reloc?.type === 'R_PPC_ADDR16_HA') {
             if (parseImm(s) !== 0) {
               throw new PpcUnsupportedError(
@@ -908,12 +878,11 @@ export function lift(
               );
             }
             const hi = mkValue(T.unk(32));
-            highHalf.set(hi, {
+            highHalves.record(hi, {
               sym: spellableSym(ins),
               addend: ins.reloc.addend,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
-              consumed: false,
             });
             write(d, hi);
             break;
@@ -1308,20 +1277,12 @@ export function lift(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
-  // A high half no `@l` ever completed. Its `lis` defines only a placeholder, so letting the lift
-  // finish would SILENTLY DROP the address it was building. Every `@l` consumer this frontend does
-  // not model (`ori`, a float load's displacement) lands here, which is what keeps "not modelled"
-  // from turning into "not emitted".
-  const dangling = [...highHalf.values()].filter((h) => !h.consumed).sort((a, b) => a.addr - b.addr)[0];
-  if (dangling) {
-    throw new PpcUnsupportedError(
-      `cannot lift '${name}': '${dangling.mnemonic}' at 0x${dangling.addr.toString(16)} carries the ` +
-        `'@ha' half of '${dangling.sym}' and no modelled instruction consumes its '@l' half — the ` +
-        `address is never completed`,
-    );
-  }
+  // A high half no `@l` ever completed — every `@l` consumer this frontend does not model (`ori`, a
+  // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
+  // emitted".
+  highHalves.assertAllConsumed(name);
   ssa.finish();
-  assertNoHighHalfEscaped(name, irBlocks, highHalf);
+  highHalves.assertNoneEscaped(name, irBlocks);
 
   // ABI-ordered entry parameters (r3, r4, …) — a callee-saved copy can read a later argument
   // register first, so sort the true entry's params by argument-register index.
@@ -1329,39 +1290,6 @@ export function lift(
   // non-ABI live-in ranks FIRST (indexOf's -1) — deliberate MIPS/PPC tie-break; Thumb's is 99/last
   abiSortEntryParams(entry, preds[0].length > 0, (v) => ARG_REGS.indexOf(paramReg.get(v) ?? ''));
   return ssa.fn;
-}
-
-/** The LAST line of defence for a high half. `readReg` refuses a read that lands ON the
- *  placeholder, but SSA builds a block parameter's incoming arguments with its own reads, which do
- *  not go through `readReg`: at a merge of a path that holds a high half and a path that does not,
- *  the read returns the PARAMETER — an ordinary value — while the placeholder is appended to the
- *  predecessor's successor arguments. The C that comes out of that is plausible and wrong, so the
- *  finished function is checked once: a placeholder that appears anywhere in the IR refuses. */
-function assertNoHighHalfEscaped(
-  name: string,
-  blocks: Block[],
-  highHalf: Map<Value, { sym: string; addr: number }>,
-): void {
-  const escaped = (v: Value): void => {
-    const hi = highHalf.get(v);
-    if (hi) {
-      throw new PpcUnsupportedError(
-        `cannot lift '${name}': the high half of '${hi.sym}' (the 'lis' at 0x${hi.addr.toString(16)}) ` +
-          `reaches a merge with values that are not it — what the register holds there is not a value ` +
-          `this frontend can write down`,
-      );
-    }
-  };
-  for (const b of blocks) {
-    b.params.forEach(escaped);
-    for (const op of b.ops) {
-      op.operands.forEach(escaped);
-      op.results.forEach(escaped);
-      for (const s of op.successors) {
-        s.args.forEach(escaped);
-      }
-    }
-  }
 }
 
 function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {

@@ -56,6 +56,35 @@ const SPLAT_GLOBAL = `glabel getGlobal
 endlabel getGlobal
 `;
 
+// A `%hi`/`%lo` this reader cannot resolve to a symbol. `%lo(NUM)(reg)` matches the memory-operand
+// shape, whose displacement is evaluated as arithmetic, so the address would silently become an
+// index into the base register; the half must refuse instead.
+const SPLAT_NUMERIC_HILO = `glabel f
+    /* 200 80000200 3C02800A */  lui        $v0, %hi(0x800A1234)
+    /* 204 80000204 03E00008 */  jr         $ra
+    /* 208 80000208 8C422884 */   lw        $v0, %lo(0x800A1234)($v0)
+endlabel f
+`;
+
+test('splat: a %hi/%lo half with no symbol refuses instead of lifting a null base', () => {
+  expect(() => decompile('f', SPLAT_NUMERIC_HILO, MIPS_IDO)).toThrow(
+    /relocation operand '%hi\(0x800A1234\)'.*only against a symbol/s,
+  );
+});
+
+test('splat: a non-numeric immediate refuses rather than becoming the literal 0', () => {
+  // An assembler-macro name in an immediate slot reaches the frontend as operand text, where bare
+  // `parseImm` answers NaN and `constVal` would render that as 0 — the relocation fold's own
+  // failure one level down.
+  const asm = `glabel f
+    /* 200 80000200 24820001 */  addiu      $v0, $a0, MY_CONST
+    /* 204 80000204 03E00008 */  jr         $ra
+    /* 208 80000208 00000000 */   nop
+endlabel f
+`;
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/non-numeric immediate 'MY_CONST' where a number belongs/);
+});
+
 test('splat: detection is positive on glabel / instruction-comment prefixes, negative on objdump', () => {
   expect(isSplatMips(SPLAT_CLAMP)).toBe(true);
   expect(isSplatMips('00000000 <add1>:\n   0:\tjr\tra\n   4:\taddiu\tv0,a0,1\n')).toBe(false);
@@ -143,7 +172,7 @@ test('splat: an FP global load (lwc1 %lo) declines loud, never a silently droppe
     /* 10C 8000010C 00000000 */   nop
 endlabel getF
 `;
-  expect(() => decompile('getF', fp, MIPS_IDO)).toThrow(/unmodelled instruction 'lwc1' with a %hi\/%lo/);
+  expect(() => decompile('getF', fp, MIPS_IDO)).toThrow(/'lwc1'.*R_MIPS_LO16.*'gFloat'.*not a modelled consumer/s);
 });
 
 test('splat: an unpaired %lo (no matching %hi in scope) declines loud, never a fabricated base', () => {
@@ -153,7 +182,7 @@ test('splat: an unpaired %lo (no matching %hi in scope) declines loud, never a f
     /* 108 80000108 00000000 */   nop
 endlabel f
 `;
-  expect(() => decompile('f', unpaired, MIPS_IDO)).toThrow(/no matching in-scope %hi/);
+  expect(() => decompile('f', unpaired, MIPS_IDO)).toThrow(/a0 holds no high half here/);
 });
 
 test('splat: a GOT/PIC relocation operand still declines loud (small-data access not modelled)', () => {
