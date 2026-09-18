@@ -217,3 +217,60 @@ test('a relocation INSIDE the function but on no instruction refuses, naming the
   const after = relocs([{ off: 10, type: 'R_MIPS_LO16', sym: 'gByte' }]);
   expect(() => decompile('getg', asm, MIPS_GCC, { asmData: after })).toThrow(/high half 0x0 with no relocation on it/);
 });
+// ── The choke point ─────────────────────────────────────────────────────────────────────────────
+// `if (ins.reloc && !relocTaken) relocPlaceholder(ins)` in `decode` catches a record that reached a
+// MODELLED arm which never consulted it — the arm lifts happily, the record evaporates, and the
+// immediate it described stays the placeholder. Both inputs below take such an arm, so neither is
+// caught by `guardRead` or by the `default:` opaque; delete the choke point and both lift a wrong
+// answer that compiles.
+
+test('a LO16 on a modelled arm that never reads it refuses at the choke point', () => {
+  // `ori rD,zero,%lo(SYM)` — the low half alone, an idiom `ori` models as a plain bitwise-or of a
+  // register and an immediate. Nothing in that arm asks about the relocation; without the choke
+  // point the function returns the constant 0 where the symbol's low half belongs.
+  const asm = '00000000 <lo>:\n   0:\tori\tv0,zero,0x0\n   4:\tjr\tra\n   8:\tnop\n';
+  const rs = relocs([{ off: 0, type: 'R_MIPS_LO16', sym: 'gB' }]);
+  expect(() => decompile('lo', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /'ori' at 0x0 carries 'R_MIPS_LO16' against 'gB' but is not a modelled consumer of it/,
+  );
+});
+
+test('a HI16 on a modelled arm that only checks LO16 refuses at the choke point', () => {
+  // `addiu` DOES consult `ins.reloc`, but only for the `%lo` that completes an address. A HI16 on
+  // it falls through the arm's ordinary add; without the choke point the lift returns `a0 + 0`.
+  const asm = '00000000 <hi>:\n   0:\taddiu\tv0,a0,0\n   4:\tjr\tra\n   8:\tnop\n';
+  const rs = relocs([{ off: 0, type: 'R_MIPS_HI16', sym: 'gB' }]);
+  expect(() => decompile('hi', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /'addiu' at 0x0 carries 'R_MIPS_HI16' against 'gB' but is not a modelled consumer of it/,
+  );
+});
+
+test('two globals pair ACROSS BLOCKS, one through a delay slot, into the arm each belongs to', () => {
+  // The cross-block, SSA-value-keyed pairing is the whole thesis of frontend/high-half.ts, and
+  // every other test in this file is one straight-line block, where an address-order reading and a
+  // value reading agree. This is IDO 7.1's own output for `x ? gA : gB` (`-mips2 -O2 -32
+  // -non_shared -G 0`), relocation offsets and all — and in it they do not:
+  //   the `beqz` DELAY SLOT holds gB's `lui v1`, whose `%lo` is at 0x14, in the TAKEN block;
+  //   the fall-through's `lui v1` at 0x8 is gA's, and its `%lo` at 0x10 is the `jr ra` delay slot.
+  // One register carries both halves, each is completed in a different block, and the object's
+  // relocation records arrive in neither address nor arm order (gA's pair is recorded first).
+  // Pairing by anything but the SSA value hands an arm the other global, which compiles.
+  const asm =
+    '00000000 <cb2>:\n' +
+    '   0:\tbeqz\ta0,14 <cb2+0x14>\n' +
+    '   4:\tlui\tv1,0x0\n' +
+    '   8:\tlui\tv1,0x0\n' +
+    '   c:\tjr\tra\n' +
+    '  10:\tlw\tv0,0(v1)\n' +
+    '  14:\tlw\tv1,0(v1)\n' +
+    '  18:\tjr\tra\n' +
+    '  1c:\tmove\tv0,v1\n';
+  const rs = relocs([
+    { off: 0x8, type: 'R_MIPS_HI16', sym: 'gA' },
+    { off: 0x10, type: 'R_MIPS_LO16', sym: 'gA' },
+    { off: 0x4, type: 'R_MIPS_HI16', sym: 'gB' },
+    { off: 0x14, type: 'R_MIPS_LO16', sym: 'gB' },
+  ]);
+  const src = decompile('cb2', asm, MIPS_GCC, { asmData: rs }).source;
+  expect(src).toMatch(/if \(a0 != 0\) \{\s*return gA;\s*\} else \{\s*return gB;\s*\}/);
+});
