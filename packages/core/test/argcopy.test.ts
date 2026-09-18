@@ -185,13 +185,16 @@ describe('a region copy of a pointer parameter', () => {
       cases: [
         {
           values: [0],
+          // a `defaultAt` label is only legal after an arm that does NOT fall through (ast.ts), so
+          // both arms here are closed — the fixture's whole point is the SPLICED default
+          fallsThrough: false,
           body: [
             forLoop(bump('p', rd('a0')), bump('p', rd('a0')), [
               { k: 'dowhile', cond: rd('a0'), body: [call('g', rd('a0'))] },
             ]),
           ],
         },
-        { values: [1], body: [call('h', rd('a0'))] },
+        { values: [1], fallsThrough: false, body: [call('h', rd('a0'))] },
       ],
     };
     const c = argCopyCandidates(fn([armIf([inner], [])])).find((x) => x.merged === 'a0@0.0')!;
