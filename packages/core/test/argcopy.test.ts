@@ -149,6 +149,17 @@ describe('a region copy of a pointer parameter', () => {
     expect(JSON.stringify(arm.slice(1))).not.toContain('"a0"');
   });
 
+  test('an arm NESTED inside a loop body is refused too — the copy still re-runs every iteration', () => {
+    // the region is two levels below the loop, so a rule reading only the IMMEDIATE parent would
+    // call it a branch arm and offer it
+    const inner: Stmt = { k: 'if', cond: rd('c'), then: [call('g', rd('a0')), call('g', rd('a0'))], else: [] };
+    const loop: Stmt = { k: 'dowhile', cond: rd('c'), body: [inner] };
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn([armIf([loop], [])]), ARGCOPY_REGION_GATES);
+    // only the arm OUTSIDE the loop survives; the loop body and the arm inside it are both refused
+    expect(candidates.map((c) => c.merged)).toEqual(['a0@0.0']);
+    expect(refusals.get('loop-region')).toBe(2);
+  });
+
   test('every legal region is offered, each as its own tree', () => {
     // two sibling arms both reading a0 twice → two candidates, and each names its own region
     const out = argCopyCandidates(

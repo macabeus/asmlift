@@ -79,8 +79,8 @@ export const ARGCOPY_GATES: readonly Gate<ArgCopyCtx>[] = [
 export interface ArgCopyRegionCtx {
   /** reads of the parameter inside this region */
   readonly reads: number;
-  /** the region is a loop's BODY rather than a branch arm */
-  readonly isLoopBody: boolean;
+  /** a loop encloses the region — its own body, or any list nested below one */
+  readonly underLoop: boolean;
 }
 
 /** Which regions are worth offering. NEITHER is sound — each refuses a spelling that is correct
@@ -95,9 +95,10 @@ export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
   },
   {
     id: 'loop-region',
-    why: 'a copy at the head of a loop body re-runs every iteration, and the region holding the loop already offers it',
+    why: 'a copy anywhere inside a loop re-runs every iteration, and the region holding the loop already offers it',
     sound: false,
-    rejects: (c) => c.isLoopBody,
+    guardedBy: 'argcopy.test.ts: an arm NESTED inside a loop body is refused too',
+    rejects: (c) => c.underLoop,
   },
 ];
 
@@ -123,19 +124,21 @@ function countReads(list: Stmt[], n: string): number {
  *  list a statement contains, which is what a `case` body, an `if` arm and a loop body all are.
  *  The function's own top-level list is NOT among them: a copy there frees nothing, and the entry
  *  prefix is `l3/parkfirst.ts`'s. */
-function regions(body: Stmt[]): { at: number[]; list: Stmt[]; isLoopBody: boolean }[] {
-  const out: { at: number[]; list: Stmt[]; isLoopBody: boolean }[] = [];
-  const walk = (list: Stmt[], path: number[]): void => {
+function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean }[] {
+  const out: { at: number[]; list: Stmt[]; underLoop: boolean }[] = [];
+  // carried DOWN rather than read off the immediate parent: an `if` arm two levels inside a loop
+  // body re-runs every iteration exactly as the body does, which is what `loop-region` refuses
+  const walk = (list: Stmt[], path: number[], underLoop: boolean): void => {
     list.forEach((st, i) => {
-      const isLoopBody = st.k === 'while' || st.k === 'dowhile' || st.k === 'for';
+      const inside = underLoop || st.k === 'while' || st.k === 'dowhile' || st.k === 'for';
       stmtLists(st).forEach((inner, j) => {
         const here = [...path, i, j];
-        out.push({ at: here, list: inner, isLoopBody });
-        walk(inner, here);
+        out.push({ at: here, list: inner, underLoop: inside });
+        walk(inner, here, inside);
       });
     });
   };
-  walk(body, []);
+  walk(body, [], false);
   return out;
 }
 
@@ -210,7 +213,7 @@ export function argCopyUnder(
       if (reads === 0) {
         continue;
       }
-      const regionRefused = firstRejection(regionGates, { reads, isLoopBody: r.isLoopBody });
+      const regionRefused = firstRejection(regionGates, { reads, underLoop: r.underLoop });
       if (regionRefused !== null) {
         refusals.set(regionRefused, (refusals.get(regionRefused) ?? 0) + 1);
         continue;
