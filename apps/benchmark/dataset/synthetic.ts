@@ -470,12 +470,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // NO FEATURE TAG FOR THE LEVEL. The 42 rows already built at -O0 are real ones and carry none
   // either — their level comes off their unit's flags, which the artifact publishes per row the
   // same way it publishes these. A tag here would be a filter that matched this row and missed
-  // those, which is worse than no filter.
+  // those, which is worse than no filter. `baseline` is what it does carry, and it is the truth
+  // about both -O0 rows rather than a placeholder: a trivial body carrying no other feature, which
+  // is also the one tag the vocabulary requires of every published row.
   {
     sym: 'retflat',
     src: '#define gOutA ((u32 *)0x03003440)\nvoid retflat(void){ *gOutA = 3; }',
     cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
-    features: [],
+    features: ['baseline'],
     toolchains: ['agbcc'],
     ctx: 'void retflat(void);',
     proto: { retflat: { returnsVoid: true } },
@@ -496,7 +498,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '#define gFlag ((u8 *)0x03003430)\n#define gOutA ((u32 *)0x03003440)\n#define gOutB ((u32 *)0x03003444)\n' +
       'void retjoin(void){ if (*gFlag) *gOutA = 3; else *gOutB = 4; }',
     cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
-    features: [],
+    features: ['baseline'],
     toolchains: ['agbcc'],
     ctx: 'void retjoin(void);',
     proto: { retjoin: { returnsVoid: true } },
