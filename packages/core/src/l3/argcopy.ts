@@ -24,6 +24,23 @@
 // so every legal region is offered as its own candidate and the differ referees — the `/regcopy`
 // idiom this file shares with `l3/coalesce.ts`. Uses OUTSIDE the chosen region keep naming the
 // parameter, which is the point: the copy is what makes the two live ranges separable.
+//
+// IT KEEPS ITS OWN REGION WALK, AND THAT IS A SECOND REGION MODEL. `l3/scopebase.ts` ships one
+// already — `RegionSelector`, `runsPerIteration`/`underNestedLoop`, its counting rules and
+// `applyScopedBasePlan` — and the paragraph above argues only the ELIGIBILITY half of why this is
+// not that file. The machinery half is not argued, because there is no argument: it is a
+// duplicate, narrower than the original, and merging the two is the right end state.
+//
+// What blocks the merge today is not the region question but the SAFETY OBLIGATION behind it.
+// scopebase hoists a pure ADDRESS and discharges its obligation by PLACEMENT — `assertHoistsDominate`
+// re-walks the emitted tree to check the hoist dominates every use it repointed. This pass hoists a
+// VALUE the caller passed, and its obligation is a whole-function invariance fact (`assigned`,
+// `addressed`) that no placement check can see; conversely it needs no dominance check at all,
+// because uses outside the region are not repointed. Putting both behind one table would need
+// scopebase's `collect()` to admit a plain `var` read as a site and `AccessCtx`/`keyOf` to key a
+// parameter — a widening of a file four shipped variations rest on. Until that is done, every walk
+// HERE goes through the shared `ast.ts` ones, so at least the two models cannot disagree about what
+// a statement contains.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, mapStmtLists, stmtChildren, stmtLists, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';

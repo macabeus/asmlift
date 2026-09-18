@@ -1121,16 +1121,23 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'which is what makes the two ranges separable.',
     compilerBehavior:
       'agbcc distinguishes the number of locals with disjoint lifetimes, not where they are declared, so the ' +
-      'copy is emitted as a plain local assigned in the region rather than a block-scoped declaration.',
+      'copy is emitted as a plain local assigned in the region rather than a block-scoped declaration. ' +
+      'That is an agbcc fact and the variation carries no target gate, so the copy is offered on every ' +
+      'compiler — as /scopebase, /regionbase and /coalesce, which rest on the same allocator fact, also are. ' +
+      'A target gate here would have to claim the copy is INERT on some compiler, the way /advance claims it ' +
+      'of a target that folds a pointer advance; nobody has compiled the pair that would say so, and a gate ' +
+      'withholding a candidate on an untested guess costs matches rather than fan.',
     offeredWhen: {
       judges: 'each pointer parameter, in each nested statement list that reads it',
       gates: ['ARGCOPY_GATES', 'ARGCOPY_REGION_GATES'],
     },
     subject: {
       meaning:
-        'The parameter, then the region that copies it as a path of statement and list indices: ' +
-        '`argcopy-a0@0.1` copies `a0` at the head of the second nested list of the first statement.',
-      examples: ['argcopy-a0@0.0', 'argcopy-a0@0.1'],
+        'The parameter, then the region that copies it, as a path of statement-index/list-index ' +
+        'PAIRS — one pair per nesting level. `argcopy-a0@0.1` copies `a0` at the head of the second ' +
+        'nested list of the first statement; `argcopy-a0@0.1.2.0` copies it in the first nested list ' +
+        'of the third statement of that one.',
+      examples: ['argcopy-a0@0.0', 'argcopy-a0@0.1', 'argcopy-a0@0.1.2.0'],
     },
     example: {
       compiler: 'agbcc',
