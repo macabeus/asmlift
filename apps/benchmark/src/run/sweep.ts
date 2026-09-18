@@ -243,8 +243,9 @@ export function renderDiff(d: SweepDiff): string[] {
  *
  *  The artifact of 2026-09-18 moves the giant and only the giant: PauseMenuScreenHandler is
  *  recorded at 30,240 there, the other two unchanged at 8,416 and 3,600, and it is still the only
- *  row in the corpus over the limit. 20,000 still sits between them. The giant is a third of the old one and the tier's cost profile
- *  moved with it: the NEXT artifact, not these numbers, is what prices the corpus.
+ *  row in the corpus over the limit. 20,000 still sits between them. The giant is a third of the
+ *  old one and the tier's cost profile moved with it: the NEXT artifact, not these numbers, is
+ *  what prices the corpus.
  *
  *  A row the artifact does not carry has no recorded count and IS enumerated: the guard protects
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
@@ -671,8 +672,9 @@ export function fanGuard(
   // --fan` refused (0 priced), while `--tier real --fan` found 114 priced rows in the other five
   // projects (af 10, marioparty3 24, pokeemerald 35, sa3 35, snowboardkids2 10) and 0 in kleod, so
   // `over` came back empty and PauseMenuScreenHandler — 27,360 spellings in the artifact of that
-  // day, 30,240 in the artifact of 2026-09-18 — would have enumerated unguarded. Every re-pin of a project's source reopens exactly this until the artifact
-  // is regenerated. Only the real tier can be checked this way — `current` is the dataset's REAL
+  // day, 30,240 in the artifact of 2026-09-18 — would have enumerated unguarded. Every re-pin of a
+  // project's source reopens exactly this until the artifact is regenerated. Only the real tier
+  // can be checked this way — `current` is the dataset's REAL
   // rows — so a synthetic-only hole is still covered by the selection-wide count alone.
   if (path !== undefined && current !== undefined) {
     const unpriced = [...new Set(current.filter((r) => selectsRow(o, r.id, r.aliases)).map((r) => r.project))].filter(
