@@ -487,13 +487,32 @@ export function lift(
     return n;
   };
 
-  // Frame slots (r1-relative offsets) that hold a TRANSPARENT save — a callee-saved register's
-  // entry value or the saved link register. A reload from one of these is dropped (the value is
-  // unchanged, so the in-register SSA value already carries it). Function-scoped so a save in the
-  // prologue block matches a restore in a different epilogue block. Any OTHER r1 access is a genuine
-  // local spill / address-taken stack object this frontend cannot model — those fail LOUD (below),
-  // never silently drop, because a dropped local spill is a silent miscompile.
-  const savedSlots = new Set<number>();
+  // Frame slots (r1-relative offsets) that hold a TRANSPARENT save, and WHICH REGISTER each one
+  // holds — a callee-saved register's entry value or the saved link register. A reload is dropped
+  // (the value is unchanged, so the in-register SSA value already carries it) only when it restores
+  // the very register the slot was saved from. Function-scoped so a save in the prologue block
+  // matches a restore in a different epilogue block. Any OTHER r1 access is a genuine local spill /
+  // address-taken stack object this frontend cannot model — those fail LOUD (below), never silently
+  // drop, because a dropped local spill is a silent miscompile.
+  //
+  // THE REGISTER IS PART OF THE SLOT, not bookkeeping about it. `stw r3,8(r1)` / `lwz r4,8(r1)` is
+  // mwcc spilling an incoming ARGUMENT and reading it back into another register — a real value
+  // moving through memory, not a save/restore pair. Dropping the reload leaves the destination with
+  // no definition at all, and then `fallbackArgc`'s contiguous scan finds nothing reaching that
+  // argument register and silently takes every LATER argument with it: measured on
+  // `marioparty4:fn_1_C4E4`, whose `omAddObjEx(…, &fn_1_C530)` lost the recovered address this
+  // frontend had just built. An offset-only record cannot tell the two apart.
+  const savedSlots = new Map<number, string>();
+  // `stmw rS,D(r1)` saves rS..r31 into consecutive words from D; `lmw rD,D(r1)` restores the same
+  // range. One rule, spelled once for both.
+  const frameRange = (firstReg: string, off: number): Array<{ off: number; reg: string }> => {
+    const first = Number(firstReg.slice(1));
+    const slots: Array<{ off: number; reg: string }> = [];
+    for (let r = first; r <= 31; r++) {
+      slots.push({ off: off + (r - first) * 4, reg: `r${r}` });
+    }
+    return slots;
+  };
 
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -548,23 +567,28 @@ export function lift(
         return false;
       }
       if (!ssa.hasReachingDef(srcReg, bi)) {
-        savedSlots.add(off);
+        savedSlots.set(off, srcReg);
         return true;
       }
       throw new PpcUnsupportedError(
         `cannot lift '${name}': spill of a live value to the stack ('${srcReg},${mem}') — local stack frames not supported`,
       );
     };
-    const frameLoad = (mem: string): boolean => {
+    const frameLoad = (dstReg: string, mem: string): boolean => {
       const { base, off } = parseMem(mem);
       if (base !== 'r1') {
         return false;
       }
-      if (savedSlots.has(off)) {
+      const saved = savedSlots.get(off);
+      if (saved === dstReg) {
         return true;
       }
       throw new PpcUnsupportedError(
-        `cannot lift '${name}': reload of a stack local ('${mem}') — local stack frames not supported`,
+        saved === undefined
+          ? `cannot lift '${name}': reload of a stack local ('${mem}') — local stack frames not supported`
+          : `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved} was saved into — ` +
+            `a load that does not restore the register the slot holds is a value read back through the ` +
+            `stack, which is a local stack frame this frontend does not model`,
       );
     };
     const write = (r: string, v: Value) => {
@@ -776,14 +800,22 @@ export function lift(
           break;
         case 'stmw':
           if (parseMem(s).base === 'r1') {
-            savedSlots.add(parseMem(s).off);
+            for (const slot of frameRange(d, parseMem(s).off)) {
+              savedSlots.set(slot.off, slot.reg);
+            }
             break;
           }
           assertOrdinaryMem(s);
           emitOpaqueDest(ins);
           break;
+        // The restore half. Every word it reads must be the slot the matching `stmw` wrote, for the
+        // same register — `frameLoad` asks that question one word at a time, and refuses loud when
+        // the answer is no, exactly as the single-register `lwz` does.
         case 'lmw':
           if (parseMem(s).base === 'r1') {
+            for (const slot of frameRange(d, parseMem(s).off)) {
+              frameLoad(slot.reg, `${slot.off}(r1)`);
+            }
             break;
           }
           assertOrdinaryMem(s);
@@ -1050,7 +1082,7 @@ export function lift(
         // Word load/store: a transparent frame save/restore is skipped; a live-value spill or a
         // stack local fails loud (frameStore/frameLoad); otherwise it is ordinary memory.
         case 'lwz':
-          if (frameLoad(s)) {
+          if (frameLoad(d, s)) {
             break;
           }
           emitLoad(ins, d, s, 4, true);

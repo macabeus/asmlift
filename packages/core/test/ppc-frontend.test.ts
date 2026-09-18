@@ -170,6 +170,41 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /spill of a live value/,
     );
   });
+  // A save slot is a register AND an offset. `stw r3,8(r1)` / `lwz r4,8(r1)` is mwcc reading an
+  // incoming argument back into a different register, not a callee-saved save/restore pair: an
+  // offset-only record calls it transparent, drops the load, leaves r4 with no definition, and the
+  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured
+  // on `marioparty4:fn_1_C4E4`, which lost the `&fn_1_C530` this frontend had just recovered.
+  test('a reload into a register the slot was NOT saved from FAILS LOUD, not a dropped value', () => {
+    expect(() => dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n')).toThrow(
+      /reload of '8\(r1\)' into r4, a slot r3 was saved into/,
+    );
+  });
+  test('and the call argument it used to carry away is the reason', () => {
+    // Without the register in the slot this lifts to `return callee(1);` — r4's reload dropped, so
+    // the recovered `&gObj` in r5 goes with it.
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tli      r3,1\n8:\tlwz     r4,8(r1)\n' +
+      'c:\tlis     r5,0\n\t\t\te: R_PPC_ADDR16_HA\tgObj\n' +
+      '10:\taddi    r5,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tgObj\n' +
+      '14:\tbl      18 <argdrop+0x18>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tblr\n';
+    expect(() => dis('argdrop', asm)).toThrow(/reload of '8\(r1\)' into r4/);
+  });
+  test('control: a save and restore of the SAME register stays transparent', () => {
+    expect(dis('saverestore', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r4\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
+      's32 saverestore(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
+  test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {
+    // `stmw r30,8(r1)` saves r30,r31 into 8(r1),12(r1); `lmw r29,8(r1)` would restore r29,r30,r31
+    // from 8(r1),12(r1),16(r1) — a different register range over the same slots.
+    expect(dis('mw', '0:\tstmw    r30,8(r1)\n4:\tadd     r3,r3,r4\n8:\tlmw     r30,8(r1)\nc:\tblr\n')).toBe(
+      's32 mw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+    expect(() => dis('mwskew', '0:\tstmw    r30,8(r1)\n4:\tlmw     r29,8(r1)\n8:\tblr\n')).toThrow(
+      /reload of '8\(r1\)' into r29, a slot r30 was saved into/,
+    );
+  });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {
     // `stw r0,0(0)` — the base field is a 0 placeholder an SDA relocation fills at link. Lifting it
     // as a store to a fabricated first pointer parameter loses the global write.
