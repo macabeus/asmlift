@@ -4462,6 +4462,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (term.opcode === 'ret') {
       // A void function's `bx lr` leaves whatever in r0; suppress that phantom return value.
       const value = returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]);
+      // The `value === undefined` half is a GUARD, not a fix: `l3/tailret.ts` re-checks it before
+      // deleting anything, so marking a value-carrying return would change no output today. The
+      // mark means "the asm shows no `return;` statement here", which is a claim about a VOID
+      // return, and it is not made about a return that carries a value.
       out.push({ k: 'return', value, ...(value === undefined && unspelledRets.has(b) ? { unspelled: true } : {}) });
       return out;
     }

@@ -349,6 +349,24 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
   }
 }
 
+/** The committed readability/quality rewrites, in the order they are committed in: merge a
+ *  statement common to every arm of an if, drop the void returns the assembly did not spell, drop
+ *  dead stores (whose empty-then peephole flips the arm the merge empties), then hoist each leaf
+ *  base the DEFAULT gate table admits into a typed local pointer.
+ *
+ *  THE ORDER IS OBSERVABLE. `l3/tailmerge.ts` moves only `assign`/`store`/`exprstmt`, so a `return`
+ *  at the end of an arm blocks its peel; dropping the returns first hands it arms it could not
+ *  otherwise peel and empties both of them. `test/tailret.test.ts` pins the difference and pins
+ *  which side of it this function is on.
+ *
+ *  `hoistBaseLocals`' two arguments are SPELLED, defaults or not: this is the one call to that pass
+ *  that is committed rather than offered, so it is the one whose gate table and whose placement can
+ *  cost a MATCH instead of a candidate (docs/level-tower.md). A committed policy that reads as
+ *  "whatever the default is" is the policy nobody reviews. */
+export function readabilityRewrites(raw: SFn): SFn {
+  return hoistBaseLocals(eliminateDeadStores(dropUnspelledReturns(mergeCommonTails(raw))), BASECSE_GATES, 'head');
+}
+
 /** Stage 4 — structure + its boundary contracts, always as a pair. */
 export function structureChecked(
   fn: Fn,
@@ -366,17 +384,9 @@ export function structureChecked(
   assertDerefsTyped(raw);
   assertLocalsWritten(raw);
   assertEffectsPreserved(fn, raw);
-  // Then the readability/quality rewrites: merge a statement common to every arm of an if, drop
-  // the void returns the assembly did not spell, drop dead stores (whose empty-then peephole flips
-  // the arm the merge empties), then hoist each leaf base the DEFAULT gate table admits into a
-  // typed local pointer. The hoist moves the deref
-  // cast from each `index` node onto the local's initializer, so re-validate deref typing on the
-  // rewritten tree.
-  // Both arguments SPELLED, defaults or not: this is the one call to this pass that is committed
-  // rather than offered, so it is the one whose gate table and whose placement can cost a MATCH
-  // instead of a candidate (docs/level-tower.md). A committed policy that reads as "whatever the
-  // default is" is the policy nobody reviews.
-  const sfn = hoistBaseLocals(eliminateDeadStores(dropUnspelledReturns(mergeCommonTails(raw))), BASECSE_GATES, 'head');
+  // The hoist moves the deref cast from each `index` node onto the local's initializer, so
+  // re-validate deref typing on the rewritten tree.
+  const sfn = readabilityRewrites(raw);
   assertDerefsTyped(sfn);
   // Re-checked after the readability rewrites for the same reason deref typing is: a pass that
   // merges arms or drops statements must not be able to lose or duplicate a call.

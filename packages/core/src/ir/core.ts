@@ -191,15 +191,19 @@ export function mkOp(opcode: Opcode, o: Partial<Op> = {}): Op {
  *  spells that case (`terminator(b)?.opcode === 'br'`); one that has already established the shape
  *  indexes `b.ops` directly, so a broken invariant surfaces as a TypeError rather than as a silent
  *  skip. */
-/** The layout fall-through stamp alone (`opcodes.ts` declares it on `br` and on `ret`). A pass that
- *  moves a `ret` ONTO an edge takes the edge's own stamp with it and nothing else: the rest of a
- *  terminator's attrs describe the branch, not the arrival. */
-export function fallThroughOf(term: Op): Op['attrs'] {
-  return term.attrs.fallthrough === true ? { fallthrough: true } : {};
-}
-
 export function terminator(b: Block): Op | undefined {
   return b.ops[b.ops.length - 1];
+}
+
+/** The layout fall-through stamp alone (`opcodes.ts` declares it on `br` and on `ret`). A pass that
+ *  moves a `ret` ONTO an edge takes the edge's own stamp with it and nothing else: the rest of a
+ *  terminator's attrs describe the branch, not the arrival.
+ *
+ *  A GUARD, not a fix: `fallthrough` is today the only attr anything sets on a `br`, so copying the
+ *  whole bag would behave identically. It is spelled this way so that the next attr a frontend
+ *  invents does not ride onto an edge it says nothing about. */
+export function fallThroughOf(term: Op): Op['attrs'] {
+  return term.attrs.fallthrough === true ? { fallthrough: true } : {};
 }
 
 /** The successor blocks of `b`, read off its terminator. */

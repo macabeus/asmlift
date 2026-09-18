@@ -15,8 +15,9 @@ import { describe, expect, test } from 'vitest';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { SFn, Stmt } from '../src/l3/ast';
+import { mergeCommonTails } from '../src/l3/tailmerge';
 import { dropUnspelledReturns } from '../src/l3/tailret';
-import { decompile } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { unspelledEpilogues } from '../src/structure/retspell';
 import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
 
@@ -116,6 +117,26 @@ describe('what the pass may drop', () => {
 
   test('a body that is nothing but a return stays — a function needs a statement to be one', () => {
     expect(kinds(dropUnspelledReturns(fn([unspelled()])).body)).toEqual(['return']);
+  });
+});
+
+describe('the order the pipeline runs these two passes in', () => {
+  // `pipeline.ts` commits `dropUnspelledReturns(mergeCommonTails(raw))`, and `l3/tailret.ts` says
+  // why: `tailmerge` moves only `assign`/`store`/`exprstmt`, so a `return` at the end of an arm
+  // BLOCKS its peel. Drop the returns first and the same arms become peelable — which is a change
+  // to rows that have nothing to do with return spelling, and it empties both arms to do it. The
+  // order is therefore observable, not a preference, and this is its ablation.
+  const bothArmsReturn = (): SFn => fn([iff([asg('v0'), unspelled()], [asg('v0'), unspelled()])]);
+  const shape = (f: SFn): string =>
+    JSON.stringify(f.body.map((s) => (s.k === 'if' ? [kinds(s.then), kinds(s.else)] : s.k)));
+
+  test('the two orders give different trees', () => {
+    expect(shape(dropUnspelledReturns(mergeCommonTails(bothArmsReturn())))).toBe('[[["assign"],["assign"]]]');
+    expect(shape(mergeCommonTails(dropUnspelledReturns(bothArmsReturn())))).toBe('[[[],[]],"assign"]');
+  });
+
+  test('the committed chain is the tailmerge-first one', () => {
+    expect(shape(readabilityRewrites(bothArmsReturn()))).toBe('[[["assign"],["assign"]]]');
   });
 });
 
