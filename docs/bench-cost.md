@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=206.6s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=93.7s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,15 +129,20 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-18: the ranked pass alone is **1,411 s over 172
-real rows** and **662 s over 681 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 416.6 s and 249.7 s. **A figure here is a price under a CACHE STATE and a
+Summed out of the committed artifact of 2026-09-18: the ranked pass alone is **775 s over 172
+real rows** and **470 s over 682 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 236.7 s and 121.9 s. **A figure here is a price under a CACHE STATE and a
 MACHINE, not a property of the corpus**, and this file's own history is the loudest evidence of it.
-The artifact before this one is the SAME corpus benched hours earlier and read 1,024 s and 661 s:
-`bench diff` across the pair reports **0 field changes and 0 rows moved**, the fan unmoved at 54,760
-over all 853 comparable rows, and the ranked pass at **1.23×** — every second of the difference is
-the machine. The one before THAT read 813 s and 419 s over two fewer synthetic rows, a fan unmoved
-but for two mwcc rows (54,739 → 54,755 over its 851) and the ranked pass at 1.35×. Its predecessor
+The artifact before this one read 1,411 s and 662 s over one fewer synthetic row: `bench diff` across
+the pair reports 204 field changes over 102 rows — a `return;` each, and the `lines` that follows it
+— the fan **unmoved at 54,760 over all 853 comparable rows**, and the ranked pass at **0.60×**. The
+corpus did not get 40% cheaper; the candidate store got warmer. The one before THAT is the SAME
+corpus benched hours earlier again and read 1,024 s and 661 s: **0 field changes and 0 rows moved**,
+the fan unmoved, and the ranked pass at **1.23×** — every second of that difference is the machine.
+The one before THAT read 813 s and 419 s over two fewer synthetic rows, a fan unmoved but for two
+mwcc rows (54,739 → 54,755 over its 851) and the ranked pass at 1.35×. That fan move is the one
+entry in this list that is NOT the machine: `synthetic:{memcpy1,memset1}:mwcc_242_81` each gained
+`initfirst`, which becomes applicable once the emitted source loses its trailing `return;`. Its predecessor
 read 772 s and 808 s over 679 synthetic rows and three fewer real ones, a fan **unmoved at 54,731
 over its 846 comparable rows** and the ranked pass at 0.78× — the synthetic side alone nearly
 halved, on a machine that was quieter and a candidate store several rounds had filled that day. The
@@ -151,7 +156,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 368 s of that real total — **26% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 197 s of that real total — **25% of the tier
 in one row**, over a fan of 27,360. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
