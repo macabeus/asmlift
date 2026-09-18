@@ -2,6 +2,20 @@
 // parses GNU-as text, not objdump, so it does not route through here.
 import { FrontendUnsupportedError } from './errors';
 
+/** The objdump function-header line, exported through the two readers below so that nothing can
+ *  disagree about where a function starts. GREEDY to the LAST `>`: a C++ template symbol contains
+ *  `>` of its own (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header a pattern cannot
+ *  see is worse than one it misreads — the PRECEDING function's slice runs on through it, and the
+ *  prologue split swallows it. */
+const HEADER_LINE = /^[0-9a-f]+\s+<(.+)>:\s*$/i;
+const HEADER_SEARCH = new RegExp(HEADER_LINE.source, 'im');
+
+/** Character offset of the FIRST function header in an objdump listing, or -1 — everything before
+ *  it is the listing's own prologue (`target.o: file format …`, section headings). */
+export function firstFunctionHeader(disasm: string): number {
+  return disasm.search(HEADER_SEARCH);
+}
+
 /** Slice a multi-symbol objdump listing down to ONE function's lines. objdump marks each
  *  function with an `ADDR <sym>:` header line; when headers are present the input is sliced to
  *  exactly the requested symbol — and an ABSENT symbol declines LOUD, because emitting some
@@ -11,7 +25,7 @@ export function sliceSymbol(disasm: string, symbol: string): string {
   const lines = disasm.split('\n');
   const headers: { line: number; sym: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^[0-9a-f]+\s+<([^>]+)>:\s*$/i);
+    const m = lines[i].match(HEADER_LINE);
     if (m) {
       headers.push({ line: i, sym: m[1] });
     }
@@ -29,21 +43,34 @@ export function sliceSymbol(disasm: string, symbol: string): string {
   return lines.slice(headers[at].line, end).join('\n');
 }
 
+/** A relocation objdump printed (with `-r`) under the instruction whose operand field it fills.
+ *  All three fields carry meaning the rest of the listing does not:
+ *  the TYPE says WHICH field — an `@ha` immediate half (`R_PPC_ADDR16_HA`), an `@l` half
+ *  (`R_PPC_ADDR16_LO`), a small-data memory base (`R_PPC_EMB_SDA21`), a call target
+ *  (`R_PPC_REL24`) — and the mnemonic cannot stand in for it; the ADDEND is part of the address,
+ *  so `SYM` and `SYM+0x4` are different words; the SYMBOL is the name. */
+export interface DisasmReloc {
+  type: string;
+  sym: string;
+  addend: number;
+}
+
 /** One disassembled instruction. `target` is a decoded branch-target address (objdump prints the
- *  target as `10 <sym+0x10>` in the last operand); `sym` is a relocation-attached callee symbol
- *  (PPC `-r` output), absent otherwise. */
+ *  target as `10 <sym+0x10>` in the last operand); `reloc` is the relocation objdump attached to
+ *  this instruction (PPC `-r` output), absent otherwise. */
 export interface DisasmInstr {
   addr: number;
   mnemonic: string;
   ops: string[];
   target?: number;
-  sym?: string;
+  reloc?: DisasmReloc;
 }
 
 export interface DisasmOptions {
   /** Attach relocation lines (`ADDR: R_* <sym>[+addend]`) to the PRECEDING instruction — the
-   *  callee symbol for a `bl` whose encoded offset is a 0 placeholder (PPC `-r` output). Tested
-   *  BEFORE the instruction regex, which would otherwise mis-read `R_PPC_…` as a mnemonic. */
+   *  callee symbol for a `bl` whose encoded offset is a 0 placeholder, the named global behind a
+   *  printed-as-0 immediate or memory base (PPC `-r` output). Tested BEFORE the instruction regex,
+   *  which would otherwise mis-read `R_PPC_…` as a mnemonic. */
   relocs?: boolean;
   /** Strip branch-prediction hint suffixes glued onto the mnemonic (`blt-`, `bge+`, `bgelr-`).
    *  The suffix is a prediction hint, not a different instruction — without stripping, the
@@ -51,16 +78,42 @@ export interface DisasmOptions {
   hintSuffixes?: boolean;
 }
 
+/** Attach a parsed relocation to the instruction it belongs to. The binding is POSITIONAL —
+ *  objdump prints a relocation directly beneath its instruction — and both ways that assumption
+ *  can break fail LOUD, because each one silently relocates the wrong operand: an offset outside
+ *  the preceding instruction's four bytes means the listing is not the assumed shape (the offset
+ *  points at the relocated FIELD, so a 16-bit immediate's offset is the instruction's address + 2),
+ *  and a second relocation on one instruction would overwrite the first, leaving one symbol
+ *  standing for two. */
+function attachReloc(out: DisasmInstr[], offset: number, reloc: DisasmReloc): void {
+  const ins = out[out.length - 1];
+  if (!ins || offset < ins.addr || offset >= ins.addr + 4) {
+    throw new FrontendUnsupportedError(
+      `relocation '${reloc.type} ${reloc.sym}' at 0x${offset.toString(16)} does not fall inside ` +
+        (ins ? `the preceding instruction ('${ins.mnemonic}' at 0x${ins.addr.toString(16)})` : 'any instruction'),
+    );
+  }
+  if (ins.reloc) {
+    throw new FrontendUnsupportedError(
+      `two relocations on one instruction ('${ins.mnemonic}' at 0x${ins.addr.toString(16)}): ` +
+        `'${ins.reloc.type} ${ins.reloc.sym}' and '${reloc.type} ${reloc.sym}'`,
+    );
+  }
+  ins.reloc = reloc;
+}
+
 /** Parse objdump `-d --no-show-raw-insn` output into a flat instruction list with addresses. */
 export function parseDisasm(disasm: string, opts: DisasmOptions = {}): DisasmInstr[] {
   const out: DisasmInstr[] = [];
   for (const raw of disasm.split('\n')) {
     if (opts.relocs) {
-      const rel = raw.match(/^\s+[0-9a-f]+:\s+R_\w+\s+(\S+)/i);
+      const rel = raw.match(/^\s+([0-9a-f]+):\s+(R_\w+)\s+([^\s+-]+)(?:\s*([+-])\s*(0x[0-9a-f]+|\d+))?\s*$/i);
       if (rel) {
-        if (out.length) {
-          out[out.length - 1].sym = rel[1].split('+')[0];
-        }
+        attachReloc(out, parseInt(rel[1], 16), {
+          type: rel[2],
+          sym: rel[3],
+          addend: rel[5] ? parseImm(rel[5]) * (rel[4] === '-' ? -1 : 1) : 0,
+        });
         continue;
       }
     }

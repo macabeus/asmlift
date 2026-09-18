@@ -3,7 +3,7 @@
 // the row's function alone: the listing both decompilers are handed, the codegen tags read off it, the
 // data dump the m2c normalizer and asmlift's jump-table reader take, and the `targetAsm` and `asmDump` the
 // row publishes. An object that holds one function is its own scope, and reads the same either way.
-import { sliceSymbol } from '@asmlift/core/frontend/disasm';
+import { firstFunctionHeader, sliceSymbol } from '@asmlift/core/frontend/disasm';
 
 /** `objdump -d -r` text of `sym` alone: the listing's header, then the function's own lines.
  *
@@ -12,7 +12,7 @@ import { sliceSymbol } from '@asmlift/core/frontend/disasm';
  *  objdump's own `--disassemble=<sym>` is no answer: binutils 2.40 prints every earlier function's
  *  relocations under the symbol's first instruction. */
 export function functionDisassembly(asm: string, sym: string): string {
-  const firstFunction = asm.search(/^[0-9a-f]+\s+<[^>]+>:\s*$/im);
+  const firstFunction = firstFunctionHeader(asm);
   return firstFunction === -1 ? asm : `${asm.slice(0, firstFunction)}${sliceSymbol(asm, sym).trimEnd()}\n`;
 }
 

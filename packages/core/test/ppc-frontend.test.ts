@@ -98,9 +98,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() =>
       dis(
         'callloop',
-        '0:\tli      r5,0\n4:\tmtctr   r4\n8:\tcmpwi   r4,0\nc:\tble     20 <callloop+0x20>\n' +
-          '10:\tbl      40 <foo>\n14:\tadd     r5,r5,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
-          '20:\tmr      r3,r5\n24:\tblr\n',
+        // The count is seeded from r3 and the accumulator lives in a callee-saved register, so no
+        // ARGUMENT register is left empty below one that holds a value — the arity guard below has
+        // nothing to say here and the CTR clobber is what this case is about.
+        '0:\tli      r31,0\n4:\tmtctr   r3\n8:\tcmpwi   r3,0\nc:\tble     20 <callloop+0x20>\n' +
+          '10:\tbl      40 <foo>\n14:\tadd     r31,r31,r3\n18:\taddi    r3,r3,4\n1c:\tbdnz    10 <callloop+0x10>\n' +
+          '20:\tmr      r3,r31\n24:\tblr\n',
       ),
     ).toThrow(/CTR loop body contains 'bl'.*clobbers CTR/);
   });
@@ -109,9 +112,38 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // argument — `func(1, 7)` for a call the caller set up with one — which is a wrong-code class, not
   // a formatting one. Same trim as the Thumb frontend (frontend/ssa.ts trimClobberedCallArgs).
   test('a guessed call arity drops the argument registers an earlier call clobbered', () => {
-    const src = dis('f', '0:\tli      r4,7\n4:\tbl      40 <foo>\n8:\tli      r3,1\nc:\tbl      50 <bar>\n10:\tblr\n');
+    // r3 is set before the first call too: a call whose r3 is empty while r4 holds a value is the
+    // undecidable ARITY shape the guard below refuses, which is a different question from this one.
+    const src = dis(
+      'f',
+      '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\nc:\tli      r3,1\n10:\tbl      50 <bar>\n14:\tblr\n',
+    );
     expect(src).toContain('func(1)');
     expect(src).not.toContain('func(1, 7)');
+  });
+
+  // The other half of the same question. A guessed arity counts CONTIGUOUSLY from r3, so an empty
+  // argument register ends the count — and an argument register is empty both when the call does not
+  // pass it and when it still holds this function's own untouched incoming argument, which nothing
+  // ever wrote and SSA therefore cannot see. Guessing the first reading drops that argument and
+  // every later one: `ac-decomp:evw_anime_colreg_manual` passes seven registers to `evw_color_set`
+  // and, with r4 left at its incoming value, lifted to `evw_color_set(a0);` — the divide, the
+  // multiply and five arguments gone. The function's own arity is precisely what is missing here,
+  // so the gap refuses.
+  test('a guessed arity with a GAP in the argument registers refuses, rather than dropping the tail', () => {
+    expect(() => dis('gap', '0:\tli      r5,3\n4:\tbl      40 <foo>\n8:\tblr\n')).toThrow(
+      /r5 holds a value and r3 holds none — an argument register left at its incoming value/,
+    );
+  });
+  test('control: no gap, so the contiguous count stands', () => {
+    expect(dis('nogap', '0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n')).toContain('func(1, 3)');
+  });
+  test('and a prototype answers the question the gap cannot', () => {
+    // `protoArity` is consulted before the guess, so a declared callee is unaffected by the gap.
+    const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
+    expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source).toContain(
+      'g(a0, a1, 3)',
+    );
   });
 
   test('an indirect branch (bctr) FAILS LOUD too', () => {
@@ -170,6 +202,42 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /spill of a live value/,
     );
   });
+  // A save slot is a register AND an offset. `stw r3,8(r1)` / `lwz r4,8(r1)` is mwcc reading an
+  // incoming argument back into a different register, not a callee-saved save/restore pair: an
+  // offset-only record calls it transparent, drops the load, leaves r4 with no definition, and the
+  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured
+  // on `pikmin:__ct__7ActFreeFP4Piki`, which reads `this` back into r4, and on 28 Mario Party 4
+  // checkout functions that each lose an address the relocation fold recovered.
+  test('a reload into a register the slot was NOT saved from FAILS LOUD, not a dropped value', () => {
+    expect(() =>
+      dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n'),
+    ).toThrow(/reload of '8\(r1\)' into r4, a slot r3 was saved into/);
+  });
+  test('and the call argument an offset-only record carries away is the reason', () => {
+    // Without the register in the slot this lifts to `return callee(1);` — r4's reload dropped, so
+    // the recovered `&gObj` in r5 goes with it.
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tli      r3,1\n8:\tlwz     r4,8(r1)\n' +
+      'c:\tlis     r5,0\n\t\t\te: R_PPC_ADDR16_HA\tgObj\n' +
+      '10:\taddi    r5,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tgObj\n' +
+      '14:\tbl      18 <argdrop+0x18>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tblr\n';
+    expect(() => dis('argdrop', asm)).toThrow(/reload of '8\(r1\)' into r4/);
+  });
+  test('control: a save and restore of the SAME register stays transparent', () => {
+    expect(dis('saverestore', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r4\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
+      's32 saverestore(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
+  test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {
+    // `stmw r30,8(r1)` saves r30,r31 into 8(r1),12(r1); `lmw r29,8(r1)` would restore r29,r30,r31
+    // from 8(r1),12(r1),16(r1) — a different register range over the same slots.
+    expect(dis('mw', '0:\tstmw    r30,8(r1)\n4:\tadd     r3,r3,r4\n8:\tlmw     r30,8(r1)\nc:\tblr\n')).toBe(
+      's32 mw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+    expect(() => dis('mwskew', '0:\tstmw    r30,8(r1)\n4:\tlmw     r29,8(r1)\n8:\tblr\n')).toThrow(
+      /reload of '8\(r1\)' into r29, a slot r30 was saved into/,
+    );
+  });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {
     // `stw r0,0(0)` — the base field is a 0 placeholder an SDA relocation fills at link. Lifting it
     // as a store to a fabricated first pointer parameter loses the global write.
@@ -219,13 +287,65 @@ test('addis over a register is a plain add of the shifted immediate', () => {
   expect(src).toContain('*(a0 + -536346624)');
 });
 
-test('a reloc-carrying addis/lis/addi is a link-time placeholder — declines loud, never `+ 0`', () => {
+test('a reloc-carrying addis is a link-time placeholder — declines loud, never `+ 0`', () => {
   // objdump -r interleaves the data reloc; the printed immediate is 0. Lifting it as the value
-  // silently reads the wrong address (the classic `arr@ha` indexed-global shape).
+  // silently reads the wrong address (the classic `arr@ha` indexed-global shape). `addis` over a
+  // REGISTER is not the `lis`/`addi` pair — it is a register-relative high half with no modelled
+  // low half, so it stays a placeholder.
   const addis = '0:\taddis   r4,r3,0\n\t\t\t0: R_PPC_ADDR16_HA arr\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
   expect(() => dis('anchor_reloc', addis)).toThrow(/data relocation/);
+  // A `lis`'s high half used as a memory base WITHOUT its `@l`: the register holds half an address,
+  // and reading it would load through whatever reached r4 before the `lis`.
   const lis = '0:\tlis     r4,0\n\t\t\t0: R_PPC_ADDR16_HA gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
-  expect(() => dis('lis_reloc', lis)).toThrow(/data relocation/);
+  expect(() => dis('lis_reloc', lis)).toThrow(/r4 holds the high half of 'gVal'/);
+});
+
+test('a jump-table base pair must carry the @ha/@l relocation TYPES, not just a shared symbol', () => {
+  // The dispatch recognizer pairs its own `lis`/`addi` — the same idea the `@ha`/`@l` fold
+  // implements, at a different time and for a different consumer (it wants the table's NAME, not
+  // its address). Keeping the two apart is only safe while both demand the same evidence, so the
+  // recognizer checks the relocation types the fold checks. Here the `lis` carries a SMALL-DATA
+  // relocation, which never forms a high half: the same symbol on both instructions is not a pair,
+  // and the dispatch declines at its `bctr` rather than reading a table the code never addressed.
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: [0x20, 0x28, 0x30, 0x38].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swt',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0 }],
+      ['swt', { section: '.text', value: 0 }],
+    ]),
+    bigEndian: true,
+  };
+  const asm = [
+    '00000000 <swt>:',
+    '   0:\tcmplwi  r3,3',
+    '   4:\tbgt     40 <swt+0x40>',
+    '   8:\tlis     r4,0',
+    '\t\t\t8: R_PPC_EMB_SDA21 jtbl', // not an `@ha` half — a small-data base
+    '   c:\tslwi    r0,r3,2',
+    '  10:\taddi    r4,r4,0',
+    '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+    '  14:\tlwzx    r0,r4,r0',
+    '  18:\tmtctr   r0',
+    '  1c:\tbctr',
+    '  20:\tli      r3,10',
+    '  24:\tblr',
+    '  28:\tli      r3,20',
+    '  2c:\tblr',
+    '  30:\tli      r3,30',
+    '  34:\tblr',
+    '  38:\tli      r3,40',
+    '  3c:\tblr',
+    '  40:\tli      r3,0',
+    '  44:\tblr',
+  ].join('\n');
+  expect(() => decompile('swt', asm, PPC_MWCC, { asmData })).toThrow(/unmodelled control transfer 'bctr'/);
 });
 
 test('a recovered jump table still lifts to a switch — its reloc lis/addi never reach the guards', () => {
@@ -282,18 +402,23 @@ test('a recovered jump table still lifts to a switch — its reloc lis/addi neve
   expect(decompile('swf', addiFirst, PPC_MWCC, { asmData }).source).toContain('switch (');
 });
 
-test('li and ori carrying a data reloc are placeholders too — decline loud', () => {
-  // SDA21 address formation encodes rA=0, printed as `li rD,0` + R_PPC_EMB_SDA21; `ori` is the
-  // other @l half-former.
-  const li = '0:\tli      r3,0\n\t\t\t0: R_PPC_EMB_SDA21 gSda\n4:\tblr\n';
-  expect(() => dis('sda', li)).toThrow(/data relocation/);
+test('ori carrying a data reloc is a placeholder — decline loud', () => {
+  // `ori rD,rA,SYM@l` is an `@l` half-former this frontend does not model. Lifting its printed 0
+  // would build the address from the low half alone.
   const ori = '0:\tori     r4,r4,0\n\t\t\t0: R_PPC_ADDR16_LO gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
   expect(() => dis('orilo', ori)).toThrow(/data relocation/);
 });
 
-test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip comes second', () => {
-  const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
-  expect(() => dis('fradj', asm)).toThrow(/data relocation/);
+test('a reloc on a frame adjust (`addi r1`) is loud whether or not an `@ha` is pending', () => {
+  // The stack-pointer guard runs BEFORE both the fold and the teardown skip. Without it, the lone
+  // `@l` was caught only incidentally (r1 held no pending half), and a COMPLETE pair walked
+  // straight through the fold into r1 and lifted as an ordinary teardown.
+  const lone = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
+  expect(() => dis('fradj', lone)).toThrow(/on a stack-pointer adjust/);
+  const pair =
+    '0:\tlis     r1,0\n\t\t\t2: R_PPC_ADDR16_HA gFrame\n' +
+    '4:\taddi    r1,r1,0\n\t\t\t6: R_PPC_ADDR16_LO gFrame\n8:\tblr\n';
+  expect(() => dis('fradjpair', pair)).toThrow(/on a stack-pointer adjust/);
 });
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads

@@ -48,6 +48,17 @@ test('objdump: sliceSymbol cuts one function (delay slots intact), declines on a
   expect(sliceSymbol(frag, 'anything')).toBe(frag);
 });
 
+test('objdump: a C++ TEMPLATE header is a header — its `>` does not end the symbol', () => {
+  // `<([^>]+)>` cannot see this header at all, and an invisible header is not a missing symbol: the
+  // PRECEDING function's slice runs on through it, so `plain__Fv` lifts with the template's body
+  // glued to its own. 7 pikmin functions have that shape.
+  const tpl =
+    '00002600 <plain__Fv>:\n    2600:\tblr\n\n' +
+    '0000260c <invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane>:\n    260c:\tli      r3,7\n    2610:\tblr\n';
+  expect(sliceSymbol(tpl, 'plain__Fv')).toBe('00002600 <plain__Fv>:\n    2600:\tblr\n');
+  expect(sliceSymbol(tpl, 'invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane')).toContain('li      r3,7');
+});
+
 test('a side-effect-only unmodelled instruction declines loud, never silently vanishes', () => {
   const swi = '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tswi\t5\n\tbx\tlr\n';
   expect(() => decompile('f', swi, ARMV4T_AGBCC)).toThrow(/unmodelled effect instruction 'swi'/);
