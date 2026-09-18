@@ -194,8 +194,8 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       continue;
     } // rB = &table (lo) + 0
     const rT = addi.ops[1];
-    const tableSym = lis.sym; // ADDR16_HA/LO @tbl (from inline -r reloc)
-    if (lis.ops[0] !== rT || !tableSym || addi.sym !== tableSym) {
+    const tableSym = lis.reloc?.sym; // ADDR16_HA/LO @tbl (from inline -r reloc)
+    if (lis.ops[0] !== rT || !tableSym || addi.reloc?.sym !== tableSym) {
       continue;
     }
     // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard. The `bgt` is itself a
@@ -368,7 +368,7 @@ export function lift(
   const relocPlaceholder = (ins: Instr): void => {
     throw new PpcUnsupportedError(
       `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries a data relocation ` +
-        `('${ins.sym}') — the printed immediate is a link-time placeholder, not the value`,
+        `('${ins.reloc?.sym}') — the printed immediate is a link-time placeholder, not the value`,
     );
   };
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
@@ -583,10 +583,10 @@ export function lift(
           break;
         // --- call + frame/link-register bookkeeping ---
         // `bl <sym>`: read the argument registers (r3..), produce the return value in r3. The
-        // callee symbol comes from the relocation (ins.sym); caller-saved clobbering is implicit
+        // callee symbol comes from the relocation (ins.reloc); caller-saved clobbering is implicit
         // (anything live across the call has already been moved to a callee-saved register).
         case 'bl': {
-          const sym = ins.sym ?? 'func';
+          const sym = ins.reloc?.sym ?? 'func';
           const declared = protoArity(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi);
           const args: Value[] = [];
@@ -650,13 +650,13 @@ export function lift(
           break; // move register (or rD,rS,rS)
         case 'li':
           // SDA21 address formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21
-          if (ins.sym) {
+          if (ins.reloc) {
             relocPlaceholder(ins);
           }
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
-          if (ins.sym) {
+          if (ins.reloc) {
             relocPlaceholder(ins);
           }
           write(d, constVal((parseImm(s) << 16) >> 0));
@@ -669,7 +669,7 @@ export function lift(
         case 'addi':
         case 'addic':
           // reloc first: a data reloc on a stack adjust is no known compiler's output — loud
-          if (ins.sym) {
+          if (ins.reloc) {
             relocPlaceholder(ins);
           }
           if (d === 'r1') {
@@ -682,7 +682,7 @@ export function lift(
         // pair recognizer is the only reloc-carrying consumer; an addis over a register is plain
         // arithmetic, and a reloc-carrying one is a placeholder (guard above).
         case 'addis':
-          if (ins.sym) {
+          if (ins.reloc) {
             relocPlaceholder(ins);
           }
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
@@ -739,7 +739,7 @@ export function lift(
           break;
         case 'ori':
           // `ori rD,rA,sym@l` is the other @l half-former — same placeholder hazard as addi
-          if (ins.sym) {
+          if (ins.reloc) {
             relocPlaceholder(ins);
           }
           emitBin('or', d, read(s), constVal(parseImm(t)));
