@@ -1110,6 +1110,37 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('scopebase'),
     seeAlso: ['scopebase', 'homesplit', 'vol-store'],
   },
+  argcopy: {
+    title: 'A pointer parameter copied for one region',
+    summary: 'a region copies an incoming pointer parameter into a local and uses the copy',
+    detail:
+      'A pointer parameter the whole function reads pins its incoming register for the whole body. A source ' +
+      'that copies it into a local at the head of the block that uses it gives the allocator a second name ' +
+      'for the same address, which it may home elsewhere — freeing the parameter register for something ' +
+      "else, such as that block's loop counter. Uses outside the chosen region keep naming the parameter, " +
+      'which is what makes the two ranges separable.',
+    compilerBehavior:
+      'agbcc distinguishes the number of locals with disjoint lifetimes, not where they are declared, so the ' +
+      'copy is emitted as a plain local assigned in the region rather than a block-scoped declaration.',
+    offeredWhen: {
+      judges: 'each pointer parameter, in each nested statement list that reads it',
+      gates: ['ARGCOPY_GATES', 'ARGCOPY_REGION_GATES'],
+    },
+    subject: {
+      meaning:
+        'The parameter, then the region that copies it as a path of statement and list indices: ' +
+        '`argcopy-a0@0.1` copies `a0` at the head of the second nested list of the first statement.',
+      examples: ['argcopy-a0@0.0', 'argcopy-a0@0.1'],
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(u8 *a0, u8 a1, s32 c) { u8 *p0; s32 i; @ }',
+      before: 'if (c) { i = 0; do { if (g(a0 + i) != 0) a0[i + 50] = a1; i = i + 1; } while (i <= 3); }',
+      after: 'if (c) { p0 = a0; i = 0; do { if (g(p0 + i) != 0) p0[i + 50] = a1; i = i + 1; } while (i <= 3); }',
+    },
+    implementedIn: l3('argcopy'),
+    seeAlso: ['scopebase', 'regionbase', 'parkfirst', 'coalesce'],
+  },
   coalesce: {
     title: 'Two locals share one variable',
     summary: 'two locals whose lifetimes never overlap are merged into one',

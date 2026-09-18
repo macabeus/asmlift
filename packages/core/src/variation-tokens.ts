@@ -123,6 +123,7 @@ const TOKENS = [
     target: { behavior: 'foldsPointerAdvance', declared: false, unlessWith: 'volatile' },
   },
   { name: 'parkfirst', variationKind: 'respell' },
+  { name: 'argcopy', variationKind: 'respell', subject: /[A-Za-z_]\w*@[\d.]+/ },
   { name: 'sinkinit', variationKind: 'respell' },
   { name: 'regcopy', variationKind: 'respell', subject: /ret|ret-fresh/ },
   { name: 'initfirst', variationKind: 'respell' },

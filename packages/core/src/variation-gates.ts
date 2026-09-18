@@ -9,6 +9,7 @@
 // Kept apart from `variation-definitions.ts`, which stays pure data: that module takes only the
 // TYPE of a key, so a consumer reading a title or a summary does not load the passes.
 import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from './l3/advance';
+import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from './l3/argcopy';
 import { BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, ORDERBASE_GATES, UNFOLDED_GATES } from './l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from './l3/coalesce';
 import type { Gate } from './l3/gates';
@@ -42,6 +43,8 @@ export interface ReaderRule {
 export const VARIATION_GATE_TABLES = {
   ADVANCE_HEAD_GATES,
   ADVANCE_MEMBER_GATES,
+  ARGCOPY_GATES,
+  ARGCOPY_REGION_GATES,
   ARM_DISJOINT_GATES,
   ARM_REREAD_GATES,
   BASEFOLD_GATES,

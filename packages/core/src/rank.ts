@@ -34,6 +34,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { advancedBases } from './l3/advance';
 import { materializeArgBases } from './l3/argbase';
+import { argCopyCandidates } from './l3/argcopy';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
@@ -1632,6 +1633,19 @@ export function enumerateCandidates(
     for (const { variations, hoist, volatiles } of paired) {
       respellEach(variations, 'coalesce', hoist, armDisjointCandidates);
       respellEach([...variations, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
+    }
+    // `/argcopy` — a pointer parameter copied into a local for ONE region (l3/argcopy.ts): the
+    // copy frees the parameter's incoming register for that region. Which region the source copied
+    // in is not derivable from the tree, so every legal one is a candidate.
+    //
+    // PAIRED WITH `/coalesce`, because the freed register is only worth anything if something takes
+    // it: on pokeemerald:SetMauvilleOldManLanguage the copy frees r5 and the SHARED loop counter is
+    // what moves into it, and neither spelling alone reaches the bytes. The pairing is the existing
+    // two primitives composed — each `/argcopy` tree is re-offered as a `/coalesce` subject — not a
+    // new mechanism.
+    respellEach([], 'argcopy', () => sfn, argCopyCandidates);
+    for (const c of argCopyCandidates(sfn)) {
+      respellEach([withSubject('argcopy', c.merged)], 'coalesce', () => c.sfn);
     }
     // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
