@@ -28,6 +28,7 @@ const irWith = (calls: string[], unreachable: string[] = []): Fn => {
     blocks: unreachable.length ? [entry, dead] : [entry],
     writeOrder: undefined,
     slotHomes: undefined,
+    deadParamHomes: undefined,
   };
 };
 
