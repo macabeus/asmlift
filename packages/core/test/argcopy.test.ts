@@ -77,9 +77,13 @@ describe('a region copy of a pointer parameter', () => {
   });
 
   test('a NON-POINTER parameter is never copied — this variation is about a base register', () => {
-    const s = fn([armIf([call('g', rd('n'))], [])]);
+    // TWO reads, so `single-read` does not refuse the region anyway: with one, the expectation is
+    // met whether or not this gate fires, and the gate is what the test is named for.
+    const s = fn([armIf([call('g', rd('n')), call('g', rd('n'))], [])]);
     s.params = [{ name: 'n', type: T.s(32) }];
-    expect(argCopyCandidates(s)).toEqual([]);
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, s);
+    expect(candidates).toEqual([]);
+    expect(refusals.get('non-pointer')).toBeGreaterThan(0);
   });
 
   test('the whole function body is not a region — parkfirst owns the entry prefix', () => {

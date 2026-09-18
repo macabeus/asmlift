@@ -282,12 +282,15 @@ describe('arm-disjoint admission', () => {
     expect(candidates.map((c) => c.merged)).toEqual([]);
   });
 
-  test('a closed arm between two falling ones still merges across the break', () => {
+  test('a closed arm BREAKS the chain — the pair after it still merges', () => {
+    // arm 0 runs on into arm 1, but arm 1 ends: no path reaches arm 2 from either. This is the
+    // one ADMITTING direction of the rule — every other fall-through test asserts a refusal, so
+    // without a falling arm here the transitive chain could stop at nothing and stay green.
     const out = coalesceCandidates(
       fn(
         [
           sw([
-            { values: [0], body: [use('a')] },
+            { values: [0], body: [use('a')], fallsThrough: true },
             { values: [1], body: arm('x') },
             { values: [2], body: arm('y') },
           ]),
