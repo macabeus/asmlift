@@ -518,6 +518,7 @@ export function lift(
   // parameter standing for a merge.
   const highHalves = makeHighHalves({
     hi: '%hi',
+    hiArticle: 'a',
     lo: '%lo',
     fail: (message) => {
       throw new FrontendUnsupportedError(message);
@@ -680,7 +681,6 @@ export function lift(
               addend: imm(ins, s ?? '0') << 16,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
-              consumed: false,
             });
             write(d, hi);
             break;
@@ -932,19 +932,7 @@ export function lift(
     const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } => {
       relocTaken = true;
       const lo = ins.reloc!;
-      const hi = highHalves.get(readVar(rHi, bi));
-      if (!hi || hi.sym !== lo.sym) {
-        throw new FrontendUnsupportedError(
-          `${site(ins)} carries the '%lo' half of ` +
-            `'${lo.sym}' but ${rHi} ` +
-            (hi
-              ? `holds the high half of '${hi.sym}'`
-              : `holds no high half here — a reused register, a missing '%hi', or a '%hi' that reaches ` +
-                `this instruction only through a merge or a loop header, where what the register holds ` +
-                `is the block parameter standing for the join and not the half`) +
-            ` — this frontend will not guess at the pair`,
-        );
-      }
+      const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), lo.sym);
       // The addend is split across the two instruction immediates because MIPS is REL.
       const off = hi.addend + loImm;
       if (off < 0) {
@@ -953,7 +941,6 @@ export function lift(
             `byte offset ${off} — an address BELOW the symbol (an index-biased array base) is not yet modelled`,
         );
       }
-      hi.consumed = true;
       return { base: emitGaddr(lo.sym), off };
     };
     // A displacement memory operand whose base is a `%hi` half: resolve it to the global's address

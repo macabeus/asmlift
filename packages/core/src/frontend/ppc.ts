@@ -455,6 +455,7 @@ export function lift(
    *  folds diverge, and it is a relocation-format fact rather than a preference. */
   const highHalves = makeHighHalves({
     hi: '@ha',
+    hiArticle: 'an',
     lo: '@l',
     fail: (message) => {
       throw new PpcUnsupportedError(message);
@@ -710,19 +711,10 @@ export function lift(
             `not the expected 0 placeholder`,
         );
       }
-      const hi = highHalves.get(readVar(rHi, bi));
-      if (!hi || hi.sym !== lo.sym || hi.addend !== lo.addend) {
-        throw new PpcUnsupportedError(
-          `${relocSite(ins)} carries the '@l' half of '${lo.sym}' but ${rHi} ` +
-            (hi
-              ? `holds the high half of '${hi.sym}'`
-              : `holds no high half here — a reused register, a missing '@ha', or an '@ha' that ` +
-                `reaches this instruction only through a merge or a loop header, where what the ` +
-                `register holds is the block parameter standing for the join and not the half`) +
-            ` — this frontend will not guess at the pair`,
-        );
-      }
-      hi.consumed = true;
+      // The per-ISA rest of the match: PowerPC is RELA, so the two records must agree on the addend
+      // as well as the symbol — two `@ha`/`@l` pairs into the same array at different offsets are
+      // different addresses.
+      const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
       return emitGaddr(hi.sym);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
@@ -891,7 +883,6 @@ export function lift(
               addend: ins.reloc.addend,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
-              consumed: false,
             });
             write(d, hi);
             break;

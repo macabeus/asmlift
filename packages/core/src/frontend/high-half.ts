@@ -32,20 +32,24 @@
 import type { Block, Value } from '../ir/core';
 
 /** A pending high half: what it names, what it contributed, and where it came from (so a refusal
- *  can point a reader at the instruction rather than make them re-derive it). */
+ *  can point a reader at the instruction rather than make them re-derive it). Whether it has been
+ *  consumed is deliberately NOT here: it is the module's own bookkeeping, set by `pair` and read by
+ *  `assertAllConsumed`, so no frontend can fold a pair and forget to mark it — forgetting would
+ *  refuse a function that is perfectly well formed, and nothing would catch it. */
 export interface HighHalfInfo {
   sym: string;
   /** This producer's contribution to the address — see the RELA/REL note above. */
   addend: number;
   addr: number;
   mnemonic: string;
-  consumed: boolean;
 }
 
 /** How one ISA spells the two halves in a refusal, and how it fails loud. */
 export interface HighHalfDialect {
   /** The high-half marker as the ISA's asm spells it: `@ha` (PowerPC), `%hi` (MIPS). */
   hi: string;
+  /** The indefinite article `hi` takes, so one shared sentence reads right in both ISAs' asm. */
+  hiArticle: string;
   /** The low-half marker: `@l` (PowerPC), `%lo` (MIPS). */
   lo: string;
   /** The frontend's designed loud-failure signal (`PpcUnsupportedError`, `FrontendUnsupportedError`). */
@@ -56,8 +60,12 @@ export interface HighHalves {
   /** Record the placeholder `v` as the high half `info`. The producer writes `v` as an ordinary SSA
    *  definition, which is what lets SSA answer the pairing question later. */
   record(v: Value, info: HighHalfInfo): void;
-  /** The half `v` stands for, or undefined. Only the low-half fold is entitled to call this. */
-  get(v: Value): HighHalfInfo | undefined;
+  /** THE PAIRING, and it is a proof rather than a guess. `v` is what the low half's base register
+   *  holds HERE; it must be the very placeholder a producer defined, and the two halves must name
+   *  the same symbol (`alsoMatches` adds the per-ISA rest of the match — PowerPC's RELA addend).
+   *  Anything else refuses, naming `reg` and what it really holds. The half is CONSUMED on the way
+   *  out, which is why this and not a public flag: the mark and the proof cannot come apart. */
+  pair(site: string, reg: string, v: Value, loSym: string, alsoMatches?: (hi: HighHalfInfo) => boolean): HighHalfInfo;
   /** True when `v` is a placeholder — for a caller that must EXCLUDE one (a call's argument count
    *  must not treat a half parked in an argument register as an argument). */
   has(v: Value): boolean;
@@ -78,13 +86,29 @@ export interface HighHalves {
 }
 
 export function makeHighHalves(d: HighHalfDialect): HighHalves {
-  const halves = new Map<Value, HighHalfInfo>();
+  const halves = new Map<Value, { info: HighHalfInfo; consumed: boolean }>();
   return {
-    record: (v, info) => void halves.set(v, info),
-    get: (v) => halves.get(v),
+    record: (v, info) => void halves.set(v, { info, consumed: false }),
     has: (v) => halves.has(v),
+    pair(site, reg, v, loSym, alsoMatches) {
+      const entry = halves.get(v);
+      const hi = entry && entry.info.sym === loSym && (alsoMatches?.(entry.info) ?? true) ? entry.info : undefined;
+      if (!hi) {
+        d.fail(
+          `${site} carries the '${d.lo}' half of '${loSym}' but ${reg} ` +
+            (entry
+              ? `holds the high half of '${entry.info.sym}'`
+              : `holds no high half here — a reused register, a missing '${d.hi}', or ${d.hiArticle} ` +
+                `'${d.hi}' that reaches this instruction only through a merge or a loop header, where ` +
+                `what the register holds is the block parameter standing for the join and not the half`) +
+            ` — this frontend will not guess at the pair`,
+        );
+      }
+      entry!.consumed = true;
+      return hi;
+    },
     guardRead(name, reg, v) {
-      const hi = halves.get(v);
+      const hi = halves.get(v)?.info;
       if (hi) {
         d.fail(
           `cannot lift '${name}': ${reg} holds the high half of '${hi.sym}' (the '${hi.mnemonic}' at ` +
@@ -96,7 +120,10 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
     assertAllConsumed(name) {
       // Lowest address first, so a function with several dangling halves names the one a reader
       // meets first in the listing rather than whichever the map happened to iterate to.
-      const dangling = [...halves.values()].filter((h) => !h.consumed).sort((a, b) => a.addr - b.addr)[0];
+      const dangling = [...halves.values()]
+        .filter((h) => !h.consumed)
+        .map((h) => h.info)
+        .sort((a, b) => a.addr - b.addr)[0];
       if (dangling) {
         d.fail(
           `cannot lift '${name}': '${dangling.mnemonic}' at 0x${dangling.addr.toString(16)} carries the ` +
@@ -107,7 +134,7 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
     },
     assertNoneEscaped(name, blocks) {
       const escaped = (v: Value): void => {
-        const hi = halves.get(v);
+        const hi = halves.get(v)?.info;
         if (hi) {
           d.fail(
             `cannot lift '${name}': the high half of '${hi.sym}' (the '${hi.mnemonic}' at ` +
