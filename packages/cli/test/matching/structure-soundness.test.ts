@@ -221,7 +221,7 @@ describe('C7 — switch_br edges carry their phi copies', () => {
       blocks: [entry, b1, b2, b3],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
   };
 

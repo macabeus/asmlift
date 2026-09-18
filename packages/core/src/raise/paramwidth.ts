@@ -24,21 +24,53 @@
 // BUT THE PROLOGUE TEST IS NOT UNIVERSAL EVIDENCE, AND ON MIPS IT IS NO EVIDENCE AT ALL. Everything
 // above reads the extension's POSITION, which works only where the compiler puts a declaration's
 // extension somewhere a body cast's never goes. IDO 7.1 at -O2 does not: it leads the function with
-// the `sll` for BOTH spellings, and emits the ABI argument-home store for the declaration alone.
+// the `sll` for BOTH spellings. Two OTHER facts separate them there, and it takes both — each one
+// alone is refuted by a compiled counterexample, at the row's own flags:
 //
-//     int f(s8  x){ return x;     }   sw a0,0(sp) / sll a0,a0,0x18 / jr ra / sra v0,a0,0x18
-//     int f(s32 x){ return (s8)x; }                 sll v0,a0,0x18 / jr ra / sra v0,v0,0x18
+//                                             home store   widened in place
+//   int f(s8 x){ return x; }                      sw a0     sll a0,a0,0x18     the declaration
+//   int f(s32 x){ return (s8)x; }                   —       sll v0,a0,0x18     a body cast
+//   int f(int x){ x = (signed char)x; return x; }   —       sll a0,a0,0x18     NOT homed
+//   int f(long long x){ return (signed char)x; }  sw a1     sll v0,a1,0x18     NOT in place
 //
-// Both lift to one parameter, `shl 24`, `shr_s 24`, `ret` — the SAME graph — so `not-prologue`
-// passes on both and, ungated, this pass narrows the body cast too and loses
-// `synthetic:tos8:ido7.1`, a MATCH. The two MIPS GCCs are a third case again: their two spellings
-// are one BYTE-IDENTICAL object, so nothing in the asm decides the width and the honest answer is
-// to leave the extension standing.
+// The third and fourth lines are why the conjunction is the claim. A DEAD ABI ARGUMENT HOME STORE
+// on its own is not "declared narrow": IDO emits one for an unused `int`, for an unused pointer and
+// for both halves of a `long long` (`target.ts` `narrowParamWitness` has those disassemblies), and
+// the fourth line above narrowed a 64-bit parameter's low half to `s8` until `widened-elsewhere`
+// refused it. WIDENING IN PLACE on its own is not "declared narrow" either: the third line is a
+// plain `int` the source re-assigns, and only the absent home store tells it from the first.
+//
+// The conjunction is NECESSARY-and-measured, not necessary-and-sufficient, and it errs toward
+// refusing: `int m2(signed char a){ int i,s=0; for(i=0;i<10;i++) s+=arr[i]+a; return s; }` is a
+// narrow declaration IDO widens into a SCRATCH register under register pressure (`sll a1,a0,0x18`),
+// so this pass leaves its parameter wide and re-spells the cast. That is a worse-reading answer,
+// not a wrong one.
+//
+// Ungated, this pass narrows the body cast too and loses `synthetic:tos8:ido7.1`, a MATCH. The two
+// MIPS GCCs are a third case again: their two spellings are one BYTE-IDENTICAL object, so nothing
+// in the asm decides the width and the honest answer is to leave the extension standing.
 //
 // So which fact settles the width is a per-COMPILER question, asked as
-// `compilerBehaviors.narrowParamWitness` and answered by `no-declaration-witness` and
-// `unhomed-param` below. The store it reads is destroyed at lift and survives as the frontend's
-// `Fn.deadParamHomes` stamp (ir/core.ts).
+// `compilerBehaviors.narrowParamWitness` and answered by `no-declaration-witness`, `unhomed-param`
+// and `widened-elsewhere` below. Both facts it reads are destroyed at lift and survive as the
+// frontend's `Fn.paramEvidence` (ir/core.ts).
+//
+// `not-prologue` STILL FIRES ON SUCH A TARGET, and it costs rather than protects there. IDO's
+// scheduler interleaves the widenings of several narrow parameters with the arithmetic that
+// consumes the earlier ones, and the scan below stops at the first value-reading op, so only the
+// LEADING parameters are seen as prologue:
+//
+//     int d4(s8 a, s8 b, s8 c){ return a+b+c; }   sll a1 / sll a0 / sll a2 / sra a0 / sra a1 /
+//                                                 addu t6,a0,a1 / sra a2 / addu v0,t6,a2
+//       recovered  s32 d4(s8 a0, s8 a1, s32 a2) { return a0 + a1 + (s8)a2; }
+//     int m3(s16 a, s16 b, s16 c, s16 d){ return a*b+c*d; }  all four widenings precede the first
+//       recovered  s32 m3(s16 a0, s16 a1, s16 a2, s16 a3)    multiply — all four narrow
+//
+// So the limit is the SCHEDULE's, not the declaration's, and the gate answers in the refusing
+// direction on the parameters it cuts off. Kept because it is the sound direction and because it is
+// the only gate that keeps a body cast behind real body code from being read as a prologue widening
+// on the position-witness targets; NO row on either tier is known to turn on the IDO half of it —
+// `d4` above is a probe, not a row, and lifting the scan is a change with its own measurement to make.
 //
 // WHAT THE PROLOGUE TEST CANNOT SEE, and why the declaration settles it. The scan steps over the
 // pure materializations agbcc interleaves among the extensions, so a constant the scheduler HOISTED
@@ -97,8 +129,10 @@ export interface NarrowParamCandidate {
   fusedBehindPool: boolean;
   /** what this compiler's object shows for a narrow declaration (target.ts `narrowParamWitness`) */
   witness: NarrowParamWitness;
-  /** the machine stored this parameter to a stack slot nothing reads back (`Fn.deadParamHomes`) */
+  /** the machine stored this parameter to a stack slot nothing reads back (`ParamObservation`) */
   homed: boolean;
+  /** the machine put the parameter's own widened value back in its argument register (`ParamObservation`) */
+  selfRedefined: boolean;
 }
 
 export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
@@ -139,7 +173,7 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   },
   {
     id: 'not-prologue',
-    why: 'an extension behind body code is where the SOURCE wrote the cast',
+    why: 'an extension behind body code is where the SOURCE wrote the cast — and on a schedule that interleaves them, the refusing answer',
     sound: true,
     guardedBy: 'param-width.test.ts: an extension behind a nullary call is body code',
     rejects: (c) => !c.inPrologue,
@@ -148,15 +182,24 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
     id: 'no-declaration-witness',
     why: 'this compiler spells a narrow declaration and a body cast the same way, so the asm decides nothing',
     sound: true,
-    guardedBy: 'param-width.test.ts: a compiler whose two spellings are one object refuses the narrowing, homed or not',
+    guardedBy:
+      'param-width.test.ts: a compiler whose two spellings are one object refuses the narrowing, measured or not',
     rejects: (c) => c.witness === 'none',
   },
   {
     id: 'unhomed-param',
-    why: 'where the compiler HOMES a narrow declared parameter, the absent home store proves the declaration was wide',
+    why: 'this compiler homes a narrow DECLARED parameter, so the absent home store proves the declaration was wide',
     sound: true,
     guardedBy: 'param-width.test.ts: a homing compiler refuses the parameter it did not home',
-    rejects: (c) => c.witness === 'home-store' && !c.homed,
+    rejects: (c) => c.witness === 'home-store-and-in-place' && !c.homed,
+  },
+  {
+    id: 'widened-elsewhere',
+    why: 'this compiler widens a narrow DECLARED parameter in the argument register itself, so a widening that lands in a scratch register is not a declaration',
+    sound: true,
+    guardedBy:
+      'param-width.test.ts: \u2026and refuses one it homed but widened SOMEWHERE ELSE \u2014 that is a 64-bit half',
+    rejects: (c) => c.witness === 'home-store-and-in-place' && !c.selfRedefined,
   },
   {
     id: 'fused-behind-pool',
@@ -194,10 +237,10 @@ export function narrowEntryParams(
   gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES,
   fusedBehindPool: ReadonlySet<Op> = new Set(),
 ): number {
-  // ABSENT ⇒ NOT HOMED, and the direction is the refusing one on a homing target: a function nobody
-  // measured (parsed IR, a hand-built fn) keeps every parameter wide rather than being narrowed on
-  // a stamp that was never taken.
-  const homed = fn.deadParamHomes ?? new Set<Value>();
+  // ABSENT ⇒ NEITHER OBSERVATION, and the direction is the refusing one on a target that reads
+  // them: a function nobody measured (parsed IR, a hand-built fn) keeps every parameter wide rather
+  // than being narrowed on evidence that was never taken.
+  const evidence = fn.paramEvidence;
   const entry = fn.blocks[0];
   const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
@@ -234,7 +277,8 @@ export function narrowEntryParams(
       declared: declared[entry.params.indexOf(p)],
       fusedBehindPool: fusedBehindPool.has(op),
       witness,
-      homed: homed.has(p),
+      homed: evidence?.get(p)?.deadHome ?? false,
+      selfRedefined: evidence?.get(p)?.selfRedefined ?? false,
     };
     if (firstRejection(gates, c) !== null) {
       continue;

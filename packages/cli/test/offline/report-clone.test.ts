@@ -12,7 +12,7 @@
 import { cBackend } from '@asmlift/core/backend/c';
 import { frontendFor } from '@asmlift/core/frontend/registry';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, structureOptionsFor } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_IDO, structureOptionsFor } from '@asmlift/core/target';
 import { expect, test } from 'vitest';
 
 import { structuredCloneFn } from '../../src/report';
@@ -80,4 +80,39 @@ test('…and the cloned record is keyed by the CLONE’s objects, not the origin
       expect(params.has(p)).toBe(true);
     }
   }
+});
+
+// `Fn.paramEvidence` is the second record keyed by VALUE, and the one whose mis-keying is silent in
+// a way `writeOrder`'s is not: raise/paramwidth.ts reads an unmeasured parameter as proof the
+// declaration was WIDE, so a clone carrying the original's keys reports every parameter unmeasured
+// and the probe scores a signature the ranked path never emits. Ablating the re-key in `report.ts`
+// leaves every other test in `packages/cli` and `packages/core` green and flips the probe's emitted
+// C from `s32 f(s8 a0){ return a0; }` to `s32 f(s32 a0){ return (s8)a0; }`.
+//
+// IDO 7.1's own object for `int f(signed char x){ return x; }`, at the
+// `synthetic:sextb:ido7.1` row's flags (`-mips2 -O2 -32 -non_shared -G 0`).
+const NARROW_PARAM = [
+  '00000000 <f>:',
+  '   0:\tsw\ta0,0(sp)',
+  '   4:\tsll\ta0,a0,0x18',
+  '   8:\tjr\tra',
+  '   c:\tsra\tv0,a0,0x18',
+  '',
+].join('\n');
+
+test('the parameter evidence is keyed by the CLONE’s parameters, not the original’s', () => {
+  const fn = frontendFor(MIPS_IDO).lift('f', NARROW_PARAM, MIPS_IDO, {});
+  expect(fn.paramEvidence?.size).toBe(1);
+  const clone = structuredCloneFn(fn);
+  const evidence = clone.paramEvidence!;
+  expect(evidence.size).toBe(fn.paramEvidence!.size);
+  const params = new Set(clone.blocks.flatMap((b) => b.params));
+  const originals = new Set(fn.blocks.flatMap((b) => b.params));
+  for (const p of evidence.keys()) {
+    expect(params.has(p)).toBe(true);
+    expect(originals.has(p)).toBe(false);
+  }
+  // The OBSERVATIONS survive the re-key: this parameter is homed dead and widened in place, which
+  // is the pair raise/paramwidth.ts needs before it may narrow one.
+  expect([...evidence.values()]).toEqual([{ deadHome: true, selfRedefined: true }]);
 });

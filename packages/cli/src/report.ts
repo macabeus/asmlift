@@ -10,7 +10,7 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, DeadParamHomes, Fn, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
+import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
@@ -222,12 +222,12 @@ export function structuredCloneFn(fn: Fn): Fn {
   const sh = fn.slotHomes;
   const slotHomes: SlotHomes | undefined =
     sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, offs]) => [map.get(v)!, new Set(offs)]));
-  // Re-keyed through `cv` for the same reason again: the stamp names the VALUES this clone just
-  // replaced, and a clone that carried the reference would report every parameter UNHOMED — which
-  // raise/paramwidth.ts reads as proof the declaration was wide, so the probe would measure a
-  // scoreDelta on a signature the ranked path does not emit.
-  const dh = fn.deadParamHomes;
-  const deadParamHomes: DeadParamHomes | undefined =
-    dh && new Set([...dh].filter((v) => map.has(v)).map((v) => map.get(v)!));
-  return { name: fn.name, blocks, writeOrder, slotHomes, deadParamHomes };
+  // Re-keyed through `cv` for the same reason again: the map names the VALUES this clone just
+  // replaced, and a clone that carried the reference would report every parameter unmeasured —
+  // which raise/paramwidth.ts reads as proof the declaration was wide, so the probe would measure a
+  // scoreDelta on a signature the ranked path does not emit. `report-clone.test.ts` pins it.
+  const pe = fn.paramEvidence;
+  const paramEvidence: ParamEvidence | undefined =
+    pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));
+  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence };
 }

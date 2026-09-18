@@ -293,12 +293,13 @@ describe("a narrow parameter is not a wide value's home", () => {
 //
 // Everything above reads the extension's POSITION, which is evidence only where a declaration's
 // extension goes somewhere a body cast's never does. IDO 7.1 at -O2 leads the function with the
-// `sll` for BOTH spellings and emits the ABI argument-home store for the declaration alone; the
-// two MIPS GCCs emit one byte-identical object for both and so witness nothing at all.
+// `sll` for BOTH spellings, and what separates them there is a PAIR of facts, because each one
+// alone has a compiled counterexample (raise/paramwidth.ts's header has the four-line table). The
+// two MIPS GCCs emit one byte-identical object for both spellings and so witness nothing at all.
 //
-// The SAME IR stands for all three cases below — one parameter, `sext`, `ret`, prologue-clean and
-// single-reader — which is the whole point: every gate above it passes, and only the witness and
-// the frontend's `Fn.deadParamHomes` stamp separate a narrowing from a miscompile.
+// The SAME IR stands for every case below — one parameter, `sext`, `ret`, prologue-clean and
+// single-reader — which is the whole point: every gate above passes, and only the witness and the
+// frontend's `Fn.paramEvidence` separate a narrowing from a miscompile.
 describe('the declaration witness', () => {
   const PROLOGUE_SEXT = `fn f {
 ^bb0(%0: unk32):
@@ -306,50 +307,72 @@ describe('the declaration witness', () => {
   ret %1
 }
 `;
-  /** the IR above with `p` stamped as homed, the way the MIPS frontend stamps `sw a0,0(sp)` */
-  const homedFn = () => {
+  /** the IR above with the parameter carrying whichever observations the case is about. */
+  const measured = (deadHome: boolean, selfRedefined: boolean) => {
     const fn = parse(PROLOGUE_SEXT);
     verify(fn);
-    fn.deadParamHomes = new Set([fn.blocks[0].params[0]]);
+    fn.paramEvidence = new Map([[fn.blocks[0].params[0], { deadHome, selfRedefined }]]);
     return fn;
   };
+  const declared = () => measured(true, true);
 
   test('agbcc narrows on POSITION — the prologue extension is its declaration', () => {
     expect(run(PROLOGUE_SEXT).n).toBe(1);
     expect(ARMV4T_AGBCC.compilerBehaviors.narrowParamWitness).toBe('prologue-extension');
   });
 
-  test('a homing compiler narrows the parameter it HOMED', () => {
-    expect(narrowEntryParams(homedFn(), 'home-store')).toBe(1);
+  test('a homing compiler narrows the parameter it HOMED and widened in place', () => {
+    expect(narrowEntryParams(declared(), 'home-store-and-in-place')).toBe(1);
+    expect(MIPS_IDO.compilerBehaviors.narrowParamWitness).toBe('home-store-and-in-place');
   });
 
   test('a homing compiler refuses the parameter it did not home — that is the body cast', () => {
     // `synthetic:tos8:ido7.1`, a MATCH: its target is `sll v0,a0,0x18 / jr ra / sra v0,v0,0x18`,
     // with no `sw`. Narrowed, it recompiles to the four-instruction homing form and the row is lost.
-    expect(run(PROLOGUE_SEXT, undefined, 'home-store').n).toBe(0);
-    expect(MIPS_IDO.compilerBehaviors.narrowParamWitness).toBe('home-store');
+    expect(narrowEntryParams(measured(false, false), 'home-store-and-in-place')).toBe(0);
   });
 
-  test('a compiler whose two spellings are one object refuses the narrowing, homed or not', () => {
+  test('…and refuses one it homed but widened SOMEWHERE ELSE — that is a 64-bit half', () => {
+    // `int f(long long x){ return (signed char)x; }` is `sll v0,a1,0x18 / sra v0,v0,0x18 /
+    // sw a0,0(sp) / jr ra / sw a1,4(sp)`: a1 is homed dead, and without this refusal the recovered
+    // signature said `s8 a1` for a parameter declared 64 bits wide.
+    expect(narrowEntryParams(measured(true, false), 'home-store-and-in-place')).toBe(0);
+  });
+
+  test('…and one it widened in place but never homed — that is a cast assigned back to the parameter', () => {
+    // `int f(int x){ x = (signed char)x; return x; }` is `sll a0,a0,0x18 / jr ra / sra v0,a0,0x18`
+    // — in place, no `sw`, and `int` all the way through.
+    expect(narrowEntryParams(measured(false, true), 'home-store-and-in-place')).toBe(0);
+  });
+
+  test('a compiler whose two spellings are one object refuses the narrowing, measured or not', () => {
     expect(run(PROLOGUE_SEXT, undefined, 'none').n).toBe(0);
-    expect(narrowEntryParams(homedFn(), 'none')).toBe(0);
+    expect(narrowEntryParams(declared(), 'none')).toBe(0);
     expect(MIPS_GCC.compilerBehaviors.narrowParamWitness).toBe('none');
   });
 
-  test('a fn nobody stamped is NOT homed — absent reads as the refusing answer', () => {
+  test('a fn nobody measured shows NEITHER — absent reads as the refusing answer', () => {
     const fn = parse(PROLOGUE_SEXT);
     verify(fn);
-    expect(fn.deadParamHomes).toBeUndefined();
-    expect(narrowEntryParams(fn, 'home-store')).toBe(0);
+    expect(fn.paramEvidence).toBeUndefined();
+    expect(narrowEntryParams(fn, 'home-store-and-in-place')).toBe(0);
   });
 
-  test('both new refusals are load-bearing — each ablation alone narrows', () => {
-    expect(runWithout(PROLOGUE_SEXT, 'unhomed-param', undefined, 'home-store')).toBe(1);
+  test('all three new refusals are load-bearing — each ablation alone narrows', () => {
     expect(runWithout(PROLOGUE_SEXT, 'no-declaration-witness', undefined, 'none')).toBe(1);
+    const ablate = (gate: string, fn: ReturnType<typeof measured>) =>
+      narrowEntryParams(
+        fn,
+        'home-store-and-in-place',
+        undefined,
+        PARAM_WIDTH_GATES.filter((g) => g.id !== gate),
+      );
+    expect(ablate('unhomed-param', measured(false, true))).toBe(1);
+    expect(ablate('widened-elsewhere', measured(true, false))).toBe(1);
   });
 
-  test('the home stamp alone licenses nothing — every gate above still applies', () => {
-    // a second reader of the raw parameter proves the declaration was wide, homed or not
+  test('the evidence alone licenses nothing — every gate above still applies', () => {
+    // a second reader of the raw parameter proves the declaration was wide, however it was measured
     const fn = parse(`fn f {
 ^bb0(%0: unk32):
   %1: unk32 = sext %0 {width=8}
@@ -358,7 +381,7 @@ describe('the declaration witness', () => {
 }
 `);
     verify(fn);
-    fn.deadParamHomes = new Set([fn.blocks[0].params[0]]);
-    expect(narrowEntryParams(fn, 'home-store')).toBe(0);
+    fn.paramEvidence = new Map([[fn.blocks[0].params[0], { deadHome: true, selfRedefined: true }]]);
+    expect(narrowEntryParams(fn, 'home-store-and-in-place')).toBe(0);
   });
 });

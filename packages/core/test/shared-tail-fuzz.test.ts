@@ -161,7 +161,7 @@ function generateSharedTailFn(seed: number): Fn {
     blocks: blocks.filter((b) => reach.has(b)),
     writeOrder: undefined,
     slotHomes: undefined,
-    deadParamHomes: undefined,
+    paramEvidence: undefined,
   };
 }
 

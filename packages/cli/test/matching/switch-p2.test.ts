@@ -64,7 +64,7 @@ describe('P2 verifier — switch_br invariants fail loud at their source', () =>
       blocks: [entry, ...bodies],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
   };
 

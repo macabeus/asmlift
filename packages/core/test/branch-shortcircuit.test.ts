@@ -125,7 +125,7 @@ function chain(opts: {
     // a second, unrelated entry into `g` — the fold would delete a block still reachable
     blocks.splice(1, 0, blk([{ ...mkOp('br'), successors: [{ block: g, args: [] }] }]));
   }
-  return { name: 'f', blocks, writeOrder: undefined, slotHomes: undefined, deadParamHomes: undefined };
+  return { name: 'f', blocks, writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined };
 }
 
 /** `chain` whose second condition tests a byte READ, and whose other arm writes back through the
@@ -719,7 +719,7 @@ describe('chains', () => {
       blocks: [h.b, g1.b, g2.b, shared, other],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(fn.blocks).toHaveLength(3); // both condition blocks consumed
@@ -766,7 +766,7 @@ describe('the refusals found by the adversarial round', () => {
       blocks: [entry, body, latch, exit],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
@@ -817,7 +817,7 @@ describe('the refusals found by the adversarial round', () => {
       blocks: [head, g, shared, other],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
   });
@@ -913,7 +913,7 @@ function comparisonTree(): Fn {
     blocks: [head, g, shared, other],
     writeOrder: undefined,
     slotHomes: undefined,
-    deadParamHomes: undefined,
+    paramEvidence: undefined,
   };
 }
 
@@ -1012,7 +1012,7 @@ describe('the VALUE form shares the entry-block refusal', () => {
       blocks: [entry, head, other, merge],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
     expect(recognizeShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
@@ -1097,7 +1097,7 @@ describe('the VALUE form carries the write-order record too', () => {
       blocks: [head, feeder, other, merge],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
     fn.writeOrder = {
       lastWrite: new Map([
@@ -1389,7 +1389,7 @@ describe('the VALUE form takes a fused connective head, and negates one by De Mo
       blocks: [blk(ops), b, m],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     };
   };
   const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
@@ -1504,7 +1504,7 @@ describe('the VALUE form refuses a NON-BOOLEAN head, because the chain reduction
         blocks: [entry, h, b, third, m],
         writeOrder: undefined,
         slotHomes: undefined,
-        deadParamHomes: undefined,
+        paramEvidence: undefined,
       },
       cond,
     };

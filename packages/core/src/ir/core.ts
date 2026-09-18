@@ -53,43 +53,54 @@ export interface Fn {
    *  so at its own definition), and a fact the structurer reads but the score probe's clone drops
    *  makes that probe's delta a fact about a program asmlift does not emit. */
   slotHomes: SlotHomes | undefined;
-  /** L1 SIDE DATA (see {@link DeadParamHomes}); set by the SSA builder, `undefined` on parsed IR.
+  /** L1 SIDE DATA (see {@link ParamEvidence}); set by the SSA builder, `undefined` on parsed IR.
    *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` and `slotHomes` are. */
-  deadParamHomes: DeadParamHomes | undefined;
+  paramEvidence: ParamEvidence | undefined;
 }
 
-/** Entry parameters the machine STORED to a stack slot that no load ever reads back — the ABI
- *  argument-home store, and the only trace it leaves.
+/** What the machine's own object shows about each ENTRY PARAMETER, beyond the value graph — two
+ *  observations the lift destroys, recorded so raise/paramwidth.ts can read them. Every entry
+ *  parameter of a lifted function has an entry; a `Fn` with no map is one nobody measured.
  *
- *  THE STORE ITSELF DOES NOT REACH THE IR. Both slot-modelling frontends spell a word sp-relative
- *  store as a write to the SSA key `sp@k` instead of a `store` op (`stackSlotKey`), so a slot
- *  nothing reloads has no reader, no op and no value — it simply is not there by L1. This set is
- *  the record that it was.
+ *  BOTH ARE OBSERVATIONS, NOT VERDICTS. What a compiler's object shows for a narrow DECLARED
+ *  parameter is a fact about a TARGET, and this builder holds none; `target.ts`
+ *  `compilerBehaviors.narrowParamWitness` decides what the pair means, and the disassemblies for
+ *  each value live there.
  *
- *  WHAT IT IS EVIDENCE OF, and why only some compilers produce it: a compiler that homes a
- *  DECLARED-NARROW parameter emits that store for the declaration and for nothing else, so its
- *  presence is the declaration and its absence is the declaration's absence. IDO 7.1 at `-O2` is
- *  such a compiler and `int f(s8 x){return x;}` / `int f(s32 x){return (s8)x;}` are its probe pair
- *  — same shift pair, `sw a0,0(sp)` only on the first. Which compilers those are is a fact about a
- *  TARGET, and this set is stamped by a builder that holds none, so it stamps the observation and
- *  `compilerBehaviors.narrowParamWitness` decides what it means (raise/paramwidth.ts).
+ *  `deadHome` — THE STORE DOES NOT REACH THE IR. Both slot-modelling frontends spell a word
+ *  sp-relative store as a write to the SSA key `sp@k` instead of a `store` op (`stackSlotKey`), so
+ *  a slot nothing reloads has no reader, no op and no value: it simply is not there by L1. A
+ *  parameter stored to two slots, one of them reloaded, still counts — the dead store happened —
+ *  and the reader's own gates decide what a parameter with that much traffic may become.
  *
- *  IT ASKS NO FRAME PARTITION, and that is the difference from {@link SlotHomes}. A slot home is a
+ *  It asks NO FRAME PARTITION, and that is the difference from {@link SlotHomes}. A slot home is a
  *  DECLARATION RANK, so `sp@40` had to be classified as this function's local before it could be
  *  stamped, and MIPS declares no partition and so stamps none. "Stored here and never read back"
  *  needs no such classification: it is a statement about the store, true at any offset.
  *
- *  ENTRY PARAMETERS ONLY. A dead spill of an ordinary value is a dead spill; it is the incoming
- *  ARGUMENT's home that carries the declaration. A parameter stored to two slots, one of them
- *  reloaded, is still in this set — the dead store happened — and the reader's own gates decide
- *  whether a parameter with that much traffic can be narrowed at all.
+ *  `selfRedefined` — THE REGISTER IDENTITY DOES NOT REACH THE IR EITHER. SSA renames, so nothing
+ *  downstream can tell a value the machine put back in the argument's OWN register from one it put
+ *  in a scratch. This records the first: the first write to the parameter's register, in the entry
+ *  block, is a value that parameter itself feeds. First and not any — a later write is a reuse of a
+ *  register the parameter is done with.
  *
- *  AND SO IT DOES NOT FOLLOW `replaceAllUsesWith`, where a {@link SlotHomes} entry does. A frame
- *  coordinate belongs to whichever value the structurer will name, so it travels with the uses; a
- *  home store is a fact about the ARGUMENT REGISTER the machine stored, and no other value can
- *  come to have been that argument. The score probe's clone re-keys it (`cli/src/report.ts`)
+ *  ENTRY PARAMETERS ONLY, for both. A dead spill of an ordinary value is a dead spill, and an
+ *  ordinary register's self-update is arithmetic; it is the incoming ARGUMENT that carries a
+ *  declaration.
+ *
+ *  AND SO NEITHER FOLLOWS `replaceAllUsesWith`, where a {@link SlotHomes} entry does. A frame
+ *  coordinate belongs to whichever value the structurer will name, so it travels with the uses;
+ *  these are facts about the ARGUMENT REGISTER the machine was handed, and no other value can come
+ *  to have been that argument. The score probe's clone re-keys the map (`cli/src/report.ts`)
  *  because a clone mints new `Value` objects for the same parameters; nothing else moves it. */
-export type DeadParamHomes = Set<Value>;
+export interface ParamObservation {
+  /** the machine stored this parameter to a stack slot no load reads back (the ABI argument home) */
+  deadHome: boolean;
+  /** the first entry-block write to this parameter's own register is a value the parameter feeds */
+  selfRedefined: boolean;
+}
+
+export type ParamEvidence = ReadonlyMap<Value, ParamObservation>;
 
 /** Which `[sp,#k]` the machine homed a value at — the frame coordinate, carried L1 → L3.
  *

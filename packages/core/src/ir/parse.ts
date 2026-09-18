@@ -126,7 +126,7 @@ export function parse(text: string): Fn {
     blocks: rawBlocks.map((r) => r.block),
     writeOrder: undefined,
     slotHomes: undefined,
-    deadParamHomes: undefined,
+    paramEvidence: undefined,
   };
 }
 

@@ -1163,7 +1163,7 @@ test('every withholding on the `default:` position, one call each', () => {
       blocks: [a0, a1, dflt, a2],
       writeOrder: undefined,
       slotHomes: undefined,
-      deadParamHomes: undefined,
+      paramEvidence: undefined,
     },
     defs: new Map(),
     dom: new Map(),

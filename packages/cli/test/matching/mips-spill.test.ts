@@ -10,9 +10,10 @@
 //
 // THE DROP IS NO LONGER SILENT, and that is what closes sextb here. The spill still has no uses and
 // still leaves no op — that part is B2 and is unchanged — but the SSA builder now records the
-// parameter it homed (`Fn.deadParamHomes`), and on a compiler whose object witnesses a narrow
-// declaration that way (`narrowParamWitness: 'home-store'`) raise/paramwidth.ts reads the record and
-// recovers `s8 a0`. `synthetic:sextb:ido7.1` byte-matches on it.
+// parameter it homed, together with the fact that the widening landed in that parameter's OWN
+// register (`Fn.paramEvidence`). On a compiler whose object witnesses a narrow declaration that way
+// (`narrowParamWitness: 'home-store-and-in-place'`) raise/paramwidth.ts reads the pair and recovers
+// `s8 a0`. `synthetic:sextb:ido7.1` byte-matches on it.
 //
 // zextb's half of the gap is still OPEN, and for a different reason: IDO spells `(u8)x` as `andi`,
 // not as a shift pair, so no `zext` op forms for the width pass to judge and the parameter stays
