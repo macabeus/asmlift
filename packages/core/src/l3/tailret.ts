@@ -1,7 +1,7 @@
 // L3 spelling pass: drop a void `return;` the assembly says the source never wrote.
 //
-// `structure.ts` marks a return `unspelled` when the machine reached that epilogue without the
-// `b <epilogue>` a source `return;` compiles to — the reading, and what makes it decidable, is
+// `structure/retspell.ts` marks a return `unspelled` when the machine reached that epilogue without
+// the `b <epilogue>` a source `return;` compiles to — the reading, and what makes it decidable, is
 // stated there. This pass is the other half: a mark alone is not a licence to delete, because a
 // `return` is still a control transfer in the STATEMENT tree. Deleting one that something follows
 // lets control run on into it, and that is a semantic change, not a spelling one.

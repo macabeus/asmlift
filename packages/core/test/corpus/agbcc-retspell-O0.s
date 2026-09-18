@@ -50,3 +50,34 @@ retearly:
 	.word	0x3003440
 .Lfe2:
 	.size	 retearly,.Lfe2-retearly
+	.align	2, 0
+	.globl	retjoin
+	.type	 retjoin,function
+	.thumb_func
+retjoin:
+	ldr	r0, .L25
+	ldrb	r1, [r0]
+	cmp	r1, #0
+	beq	.L23	@cond_branch
+	ldr	r0, .L25+0x4
+	mov	r1, #0x3
+	str	r1, [r0]
+	b	.L24
+.L26:
+	.align	2, 0
+.L25:
+	.word	0x3003430
+	.word	0x3003440
+.L23:
+	ldr	r0, .L27
+	mov	r1, #0x4
+	str	r1, [r0]
+.L24:
+.L22:
+	bx	lr
+.L28:
+	.align	2, 0
+.L27:
+	.word	0x3003444
+.Lfe3:
+	.size	 retjoin,.Lfe3-retjoin

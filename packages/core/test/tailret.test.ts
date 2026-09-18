@@ -2,20 +2,23 @@
 // where the assembly shows one.
 //
 // A source `return;` is a control transfer to the epilogue and a compiler spells it as
-// `b <epilogue>`. Where the epilogue is a block of its own, its in-edges ARE the function's return
-// transfers, so the asm decides: an unconditional branch into it is a `return;` the source wrote,
-// falling into it is not, and a conditional branch's own edge is not. The unoptimised object is
-// where that distinction costs bytes — every `return;` is its own branch there — and it is exactly
-// where reading the asm gets it right.
+// `b <epilogue>`. Where the epilogue is a block of its own, its in-edges ARE the ways the body
+// ends, so the asm decides: FALLING into the epilogue is the body running out and spells nothing,
+// which settles the statement at the end of the body; with no such edge, an unconditional branch
+// into it is a `return;` the source wrote. The unoptimised object is where that distinction costs
+// bytes — every `return;` is its own branch there — and it is exactly where reading the asm gets
+// it right. The reading itself is `structure/retspell.ts`.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { SFn, Stmt } from '../src/l3/ast';
 import { dropUnspelledReturns } from '../src/l3/tailret';
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { unspelledEpilogues } from '../src/structure/retspell';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
 
 const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 const O0 = read('agbcc-retspell-O0.s');
@@ -35,9 +38,19 @@ describe('the asm decides which returns exist', () => {
     expect(lift('retflat', O0)).toBe(['void retflat(void) {', '    *(s32 *)50345024 = 3;', '}', ''].join('\n'));
   });
 
-  test('an epilogue some path BRANCHES to keeps its return', () => {
-    // `b .L5` is a `return;` the source wrote; the fall-through from the store block is not. The
-    // two disagree, so the block-level reading keeps the return rather than guessing per path.
+  test('an epilogue a path FALLS into spells no return, though another path branches in', () => {
+    // `retjoin`'s `if`/`else` join sits ON the epilogue: the `then` arm branches there and the
+    // `else` arm falls in. The falling edge is the body running out, so the statement at the end of
+    // the body is not in the object — and its source wrote no `return;`. The branch is a `return;`
+    // too, but it ends an arm the compiler must branch over either way, so the `}` spells it.
+    expect(lift('retjoin', O0)).not.toContain('return');
+  });
+
+  test('a branch out of an EMPTY arm keeps the return — it is the only statement that arm has', () => {
+    // `retearly` is `if (gFlag & 1) return; *gOutA = 3;`. Its `b .L5` leaves a block with nothing
+    // else in it, so the `return;` it stands for has nowhere else to live: emptying that arm needs
+    // a branch-sense flip, and the object keeps the branch either way. The fall-through from the
+    // store block does not overrule it.
     expect(lift('retearly', O0)).toContain('return;');
   });
 
@@ -103,5 +116,67 @@ describe('what the pass may drop', () => {
 
   test('a body that is nothing but a return stays — a function needs a statement to be one', () => {
     expect(kinds(dropUnspelledReturns(fn([unspelled()])).body)).toEqual(['return']);
+  });
+});
+
+describe('the stamp the reading rests on, per ISA', () => {
+  // `structure/retspell.ts` can only tell a written `b` from layout because the FRONTEND says so:
+  // a `br` that stands for the machine running into the next block carries `attrs.fallthrough`, a
+  // real branch instruction does not. Each ISA sets it in its own frontend, so each owes a case —
+  // the same `if`/`else` join over a void tail as `retjoin`, hand-authored per ISA. Without the
+  // stamp the falling edge reads as a branch and a `return;` comes back.
+  test('MIPS: the falling edge of an if/else join is not a return', () => {
+    const asm =
+      '00000000 <mjoin>:\n' +
+      '   0:\tbeqz\ta0,14 <mjoin+0x14>\n   4:\tnop\n' +
+      '   8:\tli\tv0,3\n   c:\tb\t1c <mjoin+0x1c>\n  10:\tsw\tv0,0(a1)\n' +
+      '  14:\tli\tv0,4\n  18:\tsw\tv0,4(a1)\n' +
+      '  1c:\tjr\tra\n  20:\tnop\n';
+    const src = decompile('mjoin', asm, MIPS_GCC, { prototypes: { mjoin: { returnsVoid: true } } }).source;
+    expect(src).not.toContain('return');
+  });
+
+  test('PowerPC: the falling edge of an if/else join is not a return', () => {
+    const asm =
+      '0 <pjoin>:\n' +
+      '0:\tcmpwi   r3,0\n4:\tbeq     14 <pjoin+0x14>\n' +
+      '8:\tli      r0,3\nc:\tstw     r0,0(r4)\n10:\tb       1c <pjoin+0x1c>\n' +
+      '14:\tli      r0,4\n18:\tstw     r0,4(r4)\n' +
+      '1c:\tblr\n';
+    const src = decompile('pjoin', asm, PPC_MWCC, { prototypes: { pjoin: { returnsVoid: true } } }).source;
+    expect(src).not.toContain('return');
+  });
+});
+
+describe('what the reading refuses to answer', () => {
+  /** `ir` with `^bb0`'s `br` stamped as layout fall-through; how many epilogues come back marked. */
+  const marked = (ir: string): number => {
+    const fn = parse(ir);
+    fn.blocks[0].ops[fn.blocks[0].ops.length - 1].attrs.fallthrough = true;
+    const set = unspelledEpilogues(fn);
+    return fn.blocks.filter((b) => set.has(b)).length;
+  };
+
+  const FALL_INTO_RET = `fn f {
+^bb0(%0: s32*):
+  br ^bb1()
+^bb1():
+  ret
+}
+`;
+
+  test('an epilogue that also holds STATEMENTS is not asked at all', () => {
+    // Its in-edges answer how control reached those statements, not how it reached the epilogue,
+    // so a fall-through into it is no evidence about a `return;`. The bare block is the control:
+    // same edge, same stamp, and it IS asked.
+    expect(marked(FALL_INTO_RET)).toBe(1);
+    expect(
+      marked(
+        FALL_INTO_RET.replace(
+          '^bb1():\n  ret',
+          '^bb1():\n  %1: s32 = const {value=1}\n  store %0, %1 {off=0, width=4}\n  ret',
+        ),
+      ),
+    ).toBe(0);
   });
 });

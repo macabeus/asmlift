@@ -41,18 +41,7 @@
 // back to if-recovery, and arms that do not linearize into one chain — two arms falling into the
 // same sibling, or a fall into the `default:` — refuse in `chainArms`, which answers null.
 import { constAddressOf, globalCellOf } from '../ir/alias';
-import {
-  Block,
-  Fn,
-  Op,
-  Successor,
-  Value,
-  defOpMap,
-  dominators,
-  mergeClasses,
-  predecessors,
-  successorsOf,
-} from '../ir/core';
+import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
@@ -104,6 +93,7 @@ import {
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
+import { unspelledEpilogues } from './retspell';
 import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
@@ -4405,49 +4395,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Branch-sense sites, numbered as the walk below first reaches them (`branchSenseFlipSites`).
   const senseOrdinal = new Map<number, number>();
 
-  // ── which `return;` statements the SOURCE wrote ──────────────────────────────────────────────
-  //
-  // A void `return;` is a control transfer to the epilogue, and a compiler spells one as
-  // `b <epilogue>`. So where the epilogue is a block of its OWN — nothing in it but the `ret` —
-  // that block's in-edges are exactly the function's return transfers, and the assembly says which
-  // ones the source asked for:
-  //
-  //   - an unconditional branch into it   → a `return;` the source wrote. KEEP.
-  //   - falling into it                   → the end of the body, which spells nothing.
-  //   - a conditional branch's own edge   → nothing either. Unoptimised code tests into a BODY
-  //                                         label and never into the epilogue, so a `bxx` landing
-  //                                         there is jump-optimisation having rerouted a branch the
-  //                                         source did not write — and by then the two spellings
-  //                                         compile to one object, so the reading cannot cost bytes.
-  //
-  // The answer is per BLOCK, not per edge: one `b <epilogue>` anywhere means the source spelled a
-  // `return;` on SOME path, and which path is a question the structurer's arms cannot ask (a ret
-  // block is emitted once per arm that reaches it). Keeping every copy is the side that never
-  // deletes a return the object needs, which is the only direction that can be wrong.
-  //
-  // An epilogue block that ALSO holds statements is not asked at all. Its in-edges answer a
-  // different question — how control reached those statements — so a branch into it is no evidence
-  // about a `return;`, and it keeps today's spelling. `raise/retsink.ts`'s duplicated returns land
-  // in exactly such blocks, so they are covered by that same refusal rather than by a special case.
-  //
-  // This decides SPELLING only; `l3/tailret.ts` owns whether a marked return is safe to delete.
-  const blockPreds = predecessors(fn);
-  const epilogueUnbranched = (b: Block): boolean => {
-    // A return SUNK onto ONE edge (`raise/retsink.ts`, `raise/tailsink.ts`) carries that edge's own
-    // fall-through fact, and it beats anything this block's in-edges could say — they are about
-    // reaching the statements above the return, not about reaching the epilogue.
-    const t = b.ops[b.ops.length - 1];
-    if (t.attrs.fallthrough === true) {
-      return true;
-    }
-    return (
-      b.ops.length === 1 &&
-      !(blockPreds.get(b) ?? []).some((p) => {
-        const pt = p.ops[p.ops.length - 1];
-        return pt.opcode === 'br' && pt.attrs.fallthrough !== true;
-      })
-    );
-  };
+  // Which `return;` statements the SOURCE wrote — the reading, and why it is decidable, live in
+  // `structure/retspell.ts`. `l3/tailret.ts` owns whether a marked return is safe to delete.
+  const unspelledRets = unspelledEpilogues(fn);
 
   const structureRegion = (b: Block, stop: Block | null): Stmt[] => {
     if (b === stop) {
@@ -4512,7 +4462,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (term.opcode === 'ret') {
       // A void function's `bx lr` leaves whatever in r0; suppress that phantom return value.
       const value = returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]);
-      out.push({ k: 'return', value, ...(value === undefined && epilogueUnbranched(b) ? { unspelled: true } : {}) });
+      out.push({ k: 'return', value, ...(value === undefined && unspelledRets.has(b) ? { unspelled: true } : {}) });
       return out;
     }
     if (term.opcode === 'br') {

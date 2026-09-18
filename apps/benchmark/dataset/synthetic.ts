@@ -480,6 +480,27 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void retflat(void);',
     proto: { retflat: { returnsVoid: true } },
   },
+  // `retjoin` — the same pin one shape up, where the epilogue is reached BOTH ways. Its `if`/`else`
+  // join sits on the epilogue at -O0: the `then` arm branches there (`b .L4`) and the `else` arm
+  // falls in. A block-level reading that keeps a return whenever SOME path branches in keeps one
+  // here, and the object says the source wrote none — an `if`/`else` over a void tail is the
+  // commonest shape in the corpus that the flat body above cannot speak for.
+  //
+  //     void retjoin(void){ … }             b .L4; .L4: .L2: bx lr
+  //     void retjoin(void){ …; return; }    b .L4; .L4: b .L2; .L2: bx lr
+  //
+  // Same flags as `retflat`, and for the same reason.
+  {
+    sym: 'retjoin',
+    src:
+      '#define gFlag ((u8 *)0x03003430)\n#define gOutA ((u32 *)0x03003440)\n#define gOutB ((u32 *)0x03003444)\n' +
+      'void retjoin(void){ if (*gFlag) *gOutA = 3; else *gOutB = 4; }',
+    cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'void retjoin(void);',
+    proto: { retjoin: { returnsVoid: true } },
+  },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
