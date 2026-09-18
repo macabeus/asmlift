@@ -416,6 +416,38 @@ export function lift(
 
   const ssa = makeSsaBuilder(name, blocks.length, preds);
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
+
+  /** The HIGH half of a relocated address, per register holding one. `lis rD,SYM@ha` writes
+   *  NOTHING to rD: `@ha` is `((SYM + 0x8000) >> 16) & 0xffff`, a number that means nothing until
+   *  the sign-extended `@l` half completes it, and in a relocatable object both printed immediates
+   *  are 0 anyway — the address lives entirely in the two relocation records. The `gaddr` is
+   *  emitted where the `@l` lands, the same choice frontend/mips.ts makes for `lui %hi`.
+   *
+   *  Function-scoped rather than block-local (MIPS's equivalent is block-local and documents the
+   *  residual): a read of a high half in a LATER block refuses here instead of silently returning
+   *  whatever def reached before the `lis`. The residual that remains is a read reached only
+   *  through a back edge from a block filled earlier, which requires an `@ha` left live across a
+   *  loop with no `@l` in its own block — a shape the fold below already refuses to pair. */
+  const pendingHi = new Map<string, { sym: string; addend: number; addr: number; block: number }>();
+  /** Every `@ha` half whose `@l` has not yet arrived, keyed by the `lis` address. Kept separately
+   *  from `pendingHi` because a self-writing pair (`lis r4,…` / `addi r4,r4,…`) clears the register
+   *  entry as it folds. Anything left here at the end of the lift is a high half that was never
+   *  completed — an instruction whose effect would otherwise have been silently dropped. */
+  const danglingHi = new Map<number, { sym: string; mnemonic: string }>();
+  /** Every register read in this frontend goes through here. A register holding a high half is not
+   *  a value, so reading it as one refuses loud rather than handing back a plausible number that
+   *  stands for an address. Only the `@l` consumer may look at it, and it does so through
+   *  `foldLoHalf`, never through a read. */
+  const readReg = (r: string, at: number): Value => {
+    const hi = pendingHi.get(r);
+    if (hi) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': ${r} holds the high half of '${hi.sym}' (the 'lis' at ` +
+          `0x${hi.addr.toString(16)}) and is read as a value — only its matching '@l' half may consume it`,
+      );
+    }
+    return readVar(r, at);
+  };
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
 
@@ -444,7 +476,7 @@ export function lift(
 
     // A synthetic conditional-return block: just return the current return register.
     if (b.synthReturn) {
-      const retOps = ssa.hasReachingDef(RET, bi) ? [readVar(RET, bi)] : [];
+      const retOps = ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
       ops.push(mkOp('ret', { operands: retOps }));
       return;
     }
@@ -462,7 +494,7 @@ export function lift(
           `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
         );
       }
-      return readVar(r, bi);
+      return readReg(r, bi);
     };
     // Ordinary memory must be based on a real register that is not the frame pointer. A non-register
     // base is an SDA/global-relative access (`stw r0,0(0)` — the base field is a 0 placeholder the
@@ -511,6 +543,9 @@ export function lift(
       );
     };
     const write = (r: string, v: Value) => {
+      // A new definition ENDS the high half's life: a register reused between the two halves must
+      // not pair, and this is what makes the pairing below a proof rather than a guess.
+      pendingHi.delete(r);
       writeVar(r, bi, v);
       lastDef = v;
     };
@@ -588,6 +623,38 @@ export function lift(
       assertOrdinaryMem(mem);
       const { off, base } = parseMem(mem);
       return { base: read(base), off };
+    };
+    // `addi rD,rHi,SYM@l` — the LOW half that completes a `lis rHi,SYM@ha`. Returns `&SYM`.
+    //
+    // The pairing is PROVEN, not guessed. rHi must be the very register a `lis` left pending, and
+    // `write` clears that the moment anything else defines the register; the two relocations must
+    // name the same symbol with the same addend; and both must sit in one block. Nothing consults
+    // adjacency or distance, which is why a pair eleven instructions apart folds (26% of the
+    // corpus's pairs are not adjacent) while a register reused between the halves refuses.
+    const foldLoHalf = (ins: Instr, rHi: string, imm: string): Value => {
+      const lo = ins.reloc!;
+      if (parseImm(imm) !== 0) {
+        throw new PpcUnsupportedError(
+          `${relocSite(ins)} carries the '@l' half of '${lo.sym}' but its immediate is '${imm}', ` +
+            `not the expected 0 placeholder`,
+        );
+      }
+      const hi = pendingHi.get(rHi);
+      if (!hi || hi.sym !== lo.sym || hi.addend !== lo.addend) {
+        throw new PpcUnsupportedError(
+          `${relocSite(ins)} carries the '@l' half of '${lo.sym}' but ${rHi} ` +
+            (hi ? `holds the high half of '${hi.sym}'` : 'holds no high half') +
+            ` — a reused register or a missing '@ha' is not a pair this frontend will guess at`,
+        );
+      }
+      if (hi.block !== bi) {
+        throw new PpcUnsupportedError(
+          `${relocSite(ins)} carries the '@l' half of '${lo.sym}' whose '@ha' is in another block ` +
+            `(the 'lis' at 0x${hi.addr.toString(16)}) — split/cross-block hi/lo not modelled`,
+        );
+      }
+      danglingHi.delete(hi.addr);
+      return emitGaddr(hi.sym);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const { base, off } = memOperand(ins, mem);
@@ -728,6 +795,21 @@ export function lift(
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
+          // `lis rD,SYM@ha` is the high half of an absolute address, and the ONLY instruction that
+          // carries `R_PPC_ADDR16_HA` in this corpus. rD is deliberately left unwritten — see
+          // `pendingHi` — so that the address is materialised once, where its low half lands.
+          if (ins.reloc?.type === 'R_PPC_ADDR16_HA') {
+            if (parseImm(s) !== 0) {
+              throw new PpcUnsupportedError(
+                `${relocSite(ins)} carries the '@ha' half of '${ins.reloc.sym}' but its immediate ` +
+                  `is '${s}', not the expected 0 placeholder`,
+              );
+            }
+            const sym = spellableSym(ins);
+            pendingHi.set(d, { sym, addend: ins.reloc.addend, addr: ins.addr, block: bi });
+            danglingHi.set(ins.addr, { sym, mnemonic: ins.mnemonic });
+            break;
+          }
           if (ins.reloc) {
             relocPlaceholder(ins);
           }
@@ -740,6 +822,16 @@ export function lift(
         // `addi r1,r1,N` is frame teardown (skip); any other addi is a real add-immediate.
         case 'addi':
         case 'addic':
+          // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
+          // addend). It is the ONLY `@l` consumer modelled here, because it is the only one with an
+          // inhabitant: `ori` and `addic` carry no relocation anywhere in this corpus, and the
+          // `@l`-in-a-displacement form is float loads. Those keep refusing (docs/level-tower.md,
+          // "earn the level"), and their high half is caught as a dangling `@ha` at the end of the lift.
+          if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
+            const g = foldLoHalf(ins, s, t);
+            ins.reloc.addend === 0 ? write(d, g) : emitBin('add', d, g, constVal(ins.reloc.addend));
+            break;
+          }
           // reloc first: a data reloc on a stack adjust is no known compiler's output — loud
           if (ins.reloc) {
             relocPlaceholder(ins);
@@ -1012,7 +1104,7 @@ export function lift(
     if (jt) {
       pushSwitchBr(
         ops,
-        readVar(jt.scrutReg, bi),
+        readReg(jt.scrutReg, bi),
         succIdx[bi].map((j) => succ(j)),
       );
       return;
@@ -1058,7 +1150,7 @@ export function lift(
         }
       }
       const dec = mkValue(T.unk(32));
-      ops.push(mkOp('sub', { operands: [readVar('ctr', bi), constVal(1)], results: [dec] }));
+      ops.push(mkOp('sub', { operands: [readReg('ctr', bi), constVal(1)], results: [dec] }));
       writeVar('ctr', bi, dec);
       const cond = mkCmp(ops, 'icmp_ne', dec, constVal(0));
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
@@ -1086,7 +1178,7 @@ export function lift(
         ops.push(mkOp('br', { successors: [succ(succIdx[bi][0])] }));
         return;
       }
-      const retOps = ssa.hasReachingDef(RET, bi) ? [readVar(RET, bi)] : [];
+      const retOps = ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
       ops.push(mkOp('ret', { operands: retOps }));
       return;
     }
@@ -1098,6 +1190,18 @@ export function lift(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  // A high half no `@l` ever completed. Its `lis` wrote nothing, so letting the lift finish would
+  // SILENTLY DROP the instruction — and the address it was building would simply be absent from
+  // the output. Every `@l` consumer this frontend does not model (`ori`, a float load's
+  // displacement) lands here, which is what keeps "not modelled" from turning into "not emitted".
+  const dangling = [...danglingHi.entries()].sort((a, b) => a[0] - b[0])[0];
+  if (dangling) {
+    const [addr, { sym, mnemonic }] = dangling;
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': '${mnemonic}' at 0x${addr.toString(16)} carries the '@ha' half of ` +
+        `'${sym}' and no modelled instruction consumes its '@l' half — the address is never completed`,
+    );
+  }
   ssa.finish();
 
   // ABI-ordered entry parameters (r3, r4, …) — a callee-saved copy can read a later argument

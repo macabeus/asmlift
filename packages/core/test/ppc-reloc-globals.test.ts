@@ -34,11 +34,12 @@ test('a C++ vtable is refused although declaring it would compile', () => {
   expect(() => dis('vt', asm)).toThrow(/C\+\+ virtual table \('__vt__6System'\)/);
 });
 
-test('a spellable symbol still declines as a capability gap, not as an unspellable name', () => {
-  // The two refusals must stay distinguishable: `g_fdinfo` is an ordinary extern, so the reason
-  // this declines is that nothing folds the halves yet — a gap, not a dead end.
+test('a spellable symbol is never refused BY NAME — its decline is structural', () => {
+  // The two refusals must stay distinguishable. `g_fdinfo` is an ordinary extern, so nothing about
+  // the NAME stops it; this listing declines because the `@ha` half has no `@l` completing it.
   const asm = '   0:\tlis     r3,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_fdinfo\n   4:\tblr\n';
-  expect(() => dis('plain', asm)).toThrow(/carries a data relocation \('g_fdinfo'\)/);
+  expect(() => dis('plain', asm)).toThrow(/no modelled instruction consumes its '@l' half/);
+  expect(() => dis('plain', asm)).not.toThrow(/no C source|cannot enter|nothing to declare/);
 });
 
 // ── the small-data (SDA) memory operand ────────────────────────────────────────────────────────
@@ -99,4 +100,92 @@ test('an SDA relocation naming an unspellable symbol refuses by kind and recover
   // The naming policy runs BEFORE the recovery, so `@6` never reaches the declaration minter.
   const asm = '   0:\tlwz     r3,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\t@6\n   4:\tblr\n';
   expect(() => dis('pool', asm)).toThrow(/anonymous constant pool entry \('@6'\)/);
+});
+
+// ── the `@ha`/`@l` pair: the immediate half of the same capability ─────────────────────────────
+// `lis rD,SYM@ha` + `addi rD,rD,SYM@l` materialises an absolute address across TWO instructions,
+// and in a relocatable object both printed immediates are 0 — the address lives entirely in the
+// pair of relocation records. The high half is never written; the `gaddr` is emitted where the low
+// half lands, exactly as frontend/mips.ts folds `lui %hi` into its `%lo` consumer.
+
+test('an adjacent `@ha`/`@l` pair recovers the named global', () => {
+  // ac-decomp:bite_check's opening, verbatim: `(GYOEI_ACTOR *)aGYO_ctrlActor`.
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\taGYO_ctrlActor\n' +
+    '   4:\taddi    r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\taGYO_ctrlActor\n' +
+    '   8:\tlwz     r3,0(r4)\n   c:\tblr\n';
+  expect(dis('bite_check', asm)).toContain('aGYO_ctrlActor');
+});
+
+test('a pair eleven instructions apart folds — the pairing never looks at adjacency', () => {
+  // pikmin:searchKanjiCode__FUs's shape: the `lis` is hoisted to the top of the prologue and its
+  // `addi` lands after six unrelated instructions. 26% of the corpus's pairs are not adjacent.
+  const filler = [2, 3, 4, 5, 6, 7].map((k) => `  ${k}0:\tli      r${k + 20},${k}\n`).join('');
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
+    filler +
+    '  80:\taddi    r29,r4,0\n\t\t\t82: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    '  84:\tlbz     r3,0(r29)\n  88:\tblr\n';
+  expect(dis('searchKanji', asm)).toContain('kanji_convert_table');
+});
+
+test('a register REUSED between the two halves refuses rather than pairing across the overwrite', () => {
+  // `mr r4,r3` redefines the register between the halves, so the `addi` is completing something
+  // else entirely. Pairing by symbol and order alone would fold it and emit a wrong address.
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgSym\n' +
+    '   4:\tmr      r4,r3\n' +
+    '   8:\taddi    r5,r4,0\n\t\t\ta: R_PPC_ADDR16_LO\tgSym\n' +
+    '   c:\tblr\n';
+  expect(() => dis('reuse', asm)).toThrow(/r4 holds no high half|never completed/);
+});
+
+test('the high half read as a VALUE refuses, naming the symbol it belongs to', () => {
+  // The `lis` leaves r4 unwritten on purpose, so a read of r4 would hand back whatever def reached
+  // before it. That is the silent-wrong-address case this whole design exists to make impossible.
+  const asm = '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgSym\n' + '   4:\tadd     r3,r4,r5\n   8:\tblr\n';
+  expect(() => dis('halfval', asm)).toThrow(/r4 holds the high half of 'gSym'/);
+});
+
+test('an `@ha` whose `@l` never arrives refuses — the `lis` is not silently dropped', () => {
+  const asm = '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgSym\n   4:\tli      r3,0\n   8:\tblr\n';
+  expect(() => dis('dangling', asm)).toThrow(/no modelled instruction consumes its '@l' half/);
+});
+
+test('the `@l` consumers this frontend does not model still refuse — none of them completes quietly', () => {
+  // Only `addi` is modelled, because only `addi` has an inhabitant. The other two shapes that can
+  // carry `R_PPC_ADDR16_LO` each refuse at their OWN guard, reached before the dangling-`@ha` one:
+  // a float load has no register destination to degrade, and `ori` is a relocation placeholder.
+  // What matters is that neither one silently completes the address.
+  const flt =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgFloat\n' +
+    '   4:\tlfs     f1,0(r4)\n\t\t\t6: R_PPC_ADDR16_LO\tgFloat\n' +
+    '   8:\tblr\n';
+  expect(() => dis('flt', flt)).toThrow(/unmodelled effect instruction 'lfs'/);
+  const ori =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgVal\n' +
+    '   4:\tori     r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgVal\n' +
+    '   8:\tblr\n';
+  expect(() => dis('ori', ori)).toThrow(/'ori' at 0x4 carries a data relocation \('gVal'\)/);
+});
+
+test('an `@l` whose symbol differs from the pending `@ha` refuses', () => {
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgOne\n' +
+    '   4:\taddi    r5,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgTwo\n' +
+    '   8:\tblr\n';
+  expect(() => dis('mixed', asm)).toThrow(/r4 holds the high half of 'gOne'/);
+});
+
+test('an `@l` with no `@ha` at all refuses', () => {
+  const asm = '   0:\taddi    r5,r4,0\n\t\t\t2: R_PPC_ADDR16_LO\tgSym\n   4:\tblr\n';
+  expect(() => dis('loonly', asm)).toThrow(/r4 holds no high half/);
+});
+
+test('an unspellable `@ha` symbol is refused by kind before anything is paired', () => {
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\t@1135\n' +
+    '   4:\taddi    r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\t@1135\n' +
+    '   8:\tblr\n';
+  expect(() => dis('poolpair', asm)).toThrow(/anonymous constant pool entry \('@1135'\)/);
 });

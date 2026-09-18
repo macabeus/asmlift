@@ -219,13 +219,17 @@ test('addis over a register is a plain add of the shifted immediate', () => {
   expect(src).toContain('*(a0 + -536346624)');
 });
 
-test('a reloc-carrying addis/lis/addi is a link-time placeholder — declines loud, never `+ 0`', () => {
+test('a reloc-carrying addis is a link-time placeholder — declines loud, never `+ 0`', () => {
   // objdump -r interleaves the data reloc; the printed immediate is 0. Lifting it as the value
-  // silently reads the wrong address (the classic `arr@ha` indexed-global shape).
+  // silently reads the wrong address (the classic `arr@ha` indexed-global shape). `addis` over a
+  // REGISTER is not the `lis`/`addi` pair — it is a register-relative high half with no modelled
+  // low half, so it stays a placeholder.
   const addis = '0:\taddis   r4,r3,0\n\t\t\t0: R_PPC_ADDR16_HA arr\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
   expect(() => dis('anchor_reloc', addis)).toThrow(/data relocation/);
+  // A `lis`'s high half used as a memory base WITHOUT its `@l`: the register holds half an address,
+  // and reading it would load through whatever reached r4 before the `lis`.
   const lis = '0:\tlis     r4,0\n\t\t\t0: R_PPC_ADDR16_HA gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
-  expect(() => dis('lis_reloc', lis)).toThrow(/data relocation/);
+  expect(() => dis('lis_reloc', lis)).toThrow(/r4 holds the high half of 'gVal'/);
 });
 
 test('a recovered jump table still lifts to a switch — its reloc lis/addi never reach the guards', () => {
@@ -290,8 +294,9 @@ test('ori carrying a data reloc is a placeholder — decline loud', () => {
 });
 
 test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip comes second', () => {
+  // r1 never holds an `@ha` half, so the `@l` fold refuses before the teardown skip can swallow it.
   const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
-  expect(() => dis('fradj', asm)).toThrow(/data relocation/);
+  expect(() => dis('fradj', asm)).toThrow(/r1 holds no high half/);
 });
 
 // r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads
