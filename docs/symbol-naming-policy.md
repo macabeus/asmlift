@@ -71,6 +71,21 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   nesting prefix — never a double underscore alone, which would refuse ordinary C globals
   (`g_my__table`, `__initialised`). No false positive among the 230 symbols.
 
+  **Which way the rule cuts, said out loud.** The marker is the SCOPE, not the mangling. mwcc also
+  mangles a FREE function's parameter list — `makeObjectBoss__Fv`, `ARAMFinish__FUl`,
+  `__DspSync__FsP9OSContext` — and those are `plain`: **89** of the **24,236** distinct symbols
+  named by a data relocation across the three checkouts carry a `__F…` suffix with no class scope in
+  front of it. No source spells one of those either, so the "no source spells it" reading of this
+  policy would refuse them. That reading is not the rule, and the measurement above is why: what the
+  refusal is really about is the **declaration**, and a free function's has no class scope to be
+  suppressed by. The distinction has **0 inhabitants in emitted output** — over 4,663 lifted
+  functions in the same sweep, not one recovered `&NAME` carries a mangling marker — so it is
+  written down rather than acted on. Two things would have to be measured before widening it: what
+  the symbol map does with a name it already knows as a function, and whether a data relocation on a
+  free function (its address taken into a table) wants a function POINTER rather than the object
+  declaration `rank-declare` mints. Neither has been measured, and inventing an answer here is the
+  failure this file exists to prevent.
+
 - **Anything else that is not a C identifier** is refused too, so a spelling this corpus has not
   shown fails loud instead of reaching the minter.
 

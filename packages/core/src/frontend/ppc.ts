@@ -377,10 +377,10 @@ export function lift(
   // it is exempted from the loud-fail below; an UNrecovered `bctr` still fails loud.
   const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
-  // A data reloc on an immediate-forming instruction means objdump printed a LINK-TIME
+  // A data reloc on an instruction whose decode did not TAKE it means objdump printed a LINK-TIME
   // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
-  // The jump-table idiom's own @tbl pair never reaches these guards: a recovered dispatch block
+  // The jump-table idiom's own @tbl pair never reaches this guard: a recovered dispatch block
   // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
   //
   // TWO refusals, because they are different problems and the reader acts on them differently. A
@@ -389,10 +389,20 @@ export function lift(
   // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
   // waits on the fold. Saying which one a row hit is the whole value of the message.
   const relocSite = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+  /** Whether the decode of the instruction in hand has TAKEN its relocation — asked once, at the
+   *  end of `decode`, so a relocation no case consumed refuses instead of being dropped. Every
+   *  consumer answers it by doing the one thing a consumer does: asking for the relocation's
+   *  symbol. Five cases used to ask the question for themselves, each guarding its own immediate
+   *  field, which left every OTHER modelled instruction silently ignoring a relocation it carried
+   *  (`andi. r3,r3,0` under an `R_PPC_EMB_SDA21` lifted to `a0 & 0`). An unmodelled instruction
+   *  still refuses earlier and for its own better reason — `lfs`/`lfd` under either relocation name
+   *  the float gap, not this one. */
+  let relocTaken = false;
   /** The symbol a relocation names, once the naming policy has passed it. Every recovery below goes
    *  through here FIRST, so an unspellable name can never reach the declaration minter looking like
    *  an ordinary identifier — recovering the address is only half of being able to write it down. */
   const spellableSym = (ins: Instr): string => {
+    relocTaken = true;
     const sym = ins.reloc?.sym ?? '';
     const why = unspellableReason(sym);
     if (why) {
@@ -702,6 +712,7 @@ export function lift(
     // why a pair eleven instructions apart folds (26% of the corpus's pairs are not adjacent)
     // while a register reused between the halves refuses.
     const foldLoHalf = (ins: Instr, rHi: string, imm: string): Value => {
+      relocTaken = true;
       const lo = ins.reloc!;
       if (parseImm(imm) !== 0) {
         throw new PpcUnsupportedError(
@@ -768,6 +779,7 @@ export function lift(
       const rc = ins.mnemonic.length > 1 && ins.mnemonic.endsWith('.');
       const mnem = rc ? ins.mnemonic.slice(0, -1) : ins.mnemonic;
       lastDef = null;
+      relocTaken = false;
       switch (mnem) {
         case 'nop':
           break;
@@ -776,6 +788,7 @@ export function lift(
         // callee symbol comes from the relocation (ins.reloc); caller-saved clobbering is implicit
         // (anything live across the call has already been moved to a callee-saved register).
         case 'bl': {
+          relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
           const declared = protoArity(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi, ins.addr);
@@ -865,9 +878,6 @@ export function lift(
             }
             break;
           }
-          if (ins.reloc) {
-            relocPlaceholder(ins);
-          }
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
@@ -892,9 +902,6 @@ export function lift(
             });
             write(d, hi);
             break;
-          }
-          if (ins.reloc) {
-            relocPlaceholder(ins);
           }
           write(d, constVal((parseImm(s) << 16) >> 0));
           break; // load immediate shifted
@@ -934,19 +941,14 @@ export function lift(
             }
             break;
           }
-          if (ins.reloc) {
-            relocPlaceholder(ins);
-          }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
         // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
         // pair recognizer is the only reloc-carrying consumer; an addis over a register is plain
-        // arithmetic, and a reloc-carrying one is a placeholder (guard above).
+        // arithmetic, and a reloc-carrying one never gets here (the choke point at the end of
+        // `decode` takes it).
         case 'addis':
-          if (ins.reloc) {
-            relocPlaceholder(ins);
-          }
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':
@@ -1000,10 +1002,8 @@ export function lift(
           emitBin('or', d, read(s), read(t));
           break;
         case 'ori':
-          // `ori rD,rA,sym@l` is the other @l half-former — same placeholder hazard as addi
-          if (ins.reloc) {
-            relocPlaceholder(ins);
-          }
+          // `ori rD,rA,sym@l` is the other `@l` half-former, unbuilt per "earn the level"; one that
+          // carries a relocation refuses at the choke point rather than becoming an `or` of 0.
           emitBin('or', d, read(s), constVal(parseImm(t)));
           break;
         case 'xor':
@@ -1187,6 +1187,12 @@ export function lift(
       // next branch reading cr0 fuses (`andi. r0,r3,1; beq …` → `if ((a0 & 1) == 0)`).
       if (rc && lastDef) {
         cmpDef.set('cr0', { lhs: lastDef, rhs: constVal(0), signed: true });
+      }
+      // THE CHOKE POINT. Everything above either took the relocation or threw; a relocation still
+      // sitting here was dropped, and a dropped relocation is the printed placeholder standing in
+      // for an address — the forbidden class.
+      if (ins.reloc && !relocTaken) {
+        relocPlaceholder(ins);
       }
     };
 

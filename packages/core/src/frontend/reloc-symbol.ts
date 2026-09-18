@@ -55,6 +55,14 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   // for a nested scope, `<name>__Q<depth><…>` (`__ct__Q26Action5ChildFv`). The marker is the `__`
   // followed by that LENGTH or `Q<depth>`, never a double underscore on its own: a rule that fired
   // on `__` would refuse ordinary C globals like `g_my__table` and `__initialised`.
+  //
+  // THE MARKER IS THE SCOPE, NOT THE MANGLING, and the difference is deliberate. A free function's
+  // parameter mangle (`makeObjectBoss__Fv`, `ARAMFinish__FUl` — 89 of the 24,236 distinct symbols a
+  // data relocation names across the three checkouts) is `plain`: what this kind refuses is the
+  // missing DECLARATION, and a free function has no class scope for the symbol map to suppress one
+  // through. 0 of the 4,663 lifted functions in the same sweep emit such a name, so the line is
+  // documented rather than moved; docs/symbol-naming-policy.md names the two measurements that
+  // would have to come first.
   if (/__(?:\d|Q\d)/.test(sym)) {
     return 'cpp-mangled';
   }
