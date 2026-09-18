@@ -209,7 +209,7 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = f
       }),
     );
   }
-  return { name: `fz${seed}`, blocks, writeOrder: undefined, slotHomes: undefined };
+  return { name: `fz${seed}`, blocks, writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined };
 }
 
 /** A local that no path assigned. It POISONS: an expression over one is as indeterminate as it is,

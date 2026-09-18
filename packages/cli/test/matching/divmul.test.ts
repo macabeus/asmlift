@@ -31,7 +31,7 @@ const fold = (ir: string, pats: RewritePattern[]) => {
   const fn = parse(ir);
   let hits = 0;
   for (const p of pats) {
-    hits += applyPattern(fn, p);
+    hits += applyPattern(fn, p, MIPS_IDO);
   }
   dce(fn);
   verify(fn);
@@ -195,6 +195,7 @@ describe('sdiv variadic invariant (verifier)', () => {
       blocks: [{ params: [x], ops: [mkOp('sdiv', { operands, results: [r], attrs }), mkOp('ret', { operands: [r] })] }],
       writeOrder: undefined,
       slotHomes: undefined,
+      paramEvidence: undefined,
     };
   };
   test('1 operand WITH imm is valid', () => {

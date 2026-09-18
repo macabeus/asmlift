@@ -156,7 +156,13 @@ function generateSharedTailFn(seed: number): Fn {
       stack.push(...b.ops[b.ops.length - 1].successors.map((s) => s.block));
     }
   }
-  return { name: `st${seed}`, blocks: blocks.filter((b) => reach.has(b)), writeOrder: undefined, slotHomes: undefined };
+  return {
+    name: `st${seed}`,
+    blocks: blocks.filter((b) => reach.has(b)),
+    writeOrder: undefined,
+    slotHomes: undefined,
+    paramEvidence: undefined,
+  };
 }
 
 /** Parameter seeds for the two interpreters: each spreads the three parameters over -5..5, so the

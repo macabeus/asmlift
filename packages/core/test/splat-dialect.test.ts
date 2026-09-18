@@ -95,7 +95,11 @@ test('splat: a full function decompiles — branch, delay slot, .L target, join'
     's32 func_8000113C_1D3C(s32 a0) {\n' +
       '    s32 v0;\n' +
       '    if (a0 > 0) {\n' +
-      '        v0 = (a0 << 8 | 255) << 16 >> 16;\n' +
+      // `(s16)` and not the raw `<< 16 >> 16` because IDO lowers a signed narrowing cast to
+      // exactly that pair, so the cast idiom folds here (pattern/engine.ts). BYTE-NEUTRAL, compiled
+      // both ways at this row's flags: the two spellings of this whole function are one object,
+      // `blez / move / sll 8 / ori / sll 0x10 / jr / sra 0x10 / jr / move`.
+      '        v0 = (s16)(a0 << 8 | 255);\n' +
       '    } else {\n' +
       '        v0 = 0;\n' +
       '    }\n' +

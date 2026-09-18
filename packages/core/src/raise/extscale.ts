@@ -157,8 +157,11 @@ export function scaledExtensionOf(op: Op | undefined, defs: Map<Value, Op>): Sca
   return { src: inner.operands[0], width: 32 - l, signed: op.opcode === 'shr_s', shift: l - r, inner };
 }
 
-/** Does `target` lower a narrowing cast to a shift pair — the gate the fold shares with the cast
- *  idiom itself. */
+/** Does `target` lower BOTH narrowing casts to a shift pair? The conjunction is what the two
+ *  consumers need: a fused pair carries either signedness and this fold re-splits it without
+ *  knowing which. It is a stricter question than either cast pattern's own gate, because
+ *  `pattern/engine.ts` measures the halves separately — MIPS spells `(s8)x` as a shift pair and
+ *  `(u8)x` as `andi`, so every MIPS compiler answers `false` here while folding the signed half. */
 export const foldsShiftPairCasts = (target: TargetDescription): boolean =>
   CAST_PATTERNS.every((p) => patternApplies(p, target));
 

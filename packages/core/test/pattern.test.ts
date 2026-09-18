@@ -17,6 +17,7 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import {
+  CAST_PATTERNS,
   CNTLZW_EQ0,
   HWMOD_PATTERNS,
   NOT_CMP_PATTERNS,
@@ -26,6 +27,7 @@ import {
   dce,
   patternApplies,
 } from '../src/pattern/engine';
+import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 // agbcc's signed /2 idiom, lifted to L1: shr_s(add(X, shr_u(X,31)), 1).
 const BEFORE = `fn half {
@@ -47,7 +49,7 @@ const AFTER = `fn half {
 
 test('golden: sdiv-pow2/2 folds the idiom and DCE cleans the feeders', () => {
   const fn = parse(BEFORE);
-  const n = applyPattern(fn, SDIV_POW2_2);
+  const n = applyPattern(fn, SDIV_POW2_2, ARMV4T_AGBCC);
   dce(fn);
   expect(n).toBe(1);
   expect(print(fn)).toBe(AFTER);
@@ -56,7 +58,7 @@ test('golden: sdiv-pow2/2 folds the idiom and DCE cleans the feeders', () => {
 
 test('no spurious match on a non-idiom function', () => {
   const fn = parse(`fn keep {\n^bb0(%0: s32):\n  %1: s32 = shr_s %0 {imm=1}\n  ret %1\n}\n`);
-  expect(applyPattern(fn, SDIV_POW2_2)).toBe(0);
+  expect(applyPattern(fn, SDIV_POW2_2, ARMV4T_AGBCC)).toBe(0);
 });
 
 test('patternApplies gates on the COMPILER (the /2 idiom fires for agbcc + gcc, not ido)', () => {
@@ -93,7 +95,7 @@ const XOR1_AFTER = `fn ge {
 
 test('golden: `cmp ^ 1` folds to the negated comparison and DCE cleans the feeders', () => {
   const fn = parse(XOR1_BEFORE);
-  const hits = NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p), 0);
+  const hits = NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p, PPC_MWCC), 0);
   dce(fn);
   expect(hits).toBe(1);
   expect(print(fn)).toBe(XOR1_AFTER);
@@ -116,7 +118,7 @@ test('the fold covers every comparison, in BOTH operand orders, and is involutiv
         `fn f {\n^bb0(%0: s32, %1: s32):\n  %2: u32 = ${cmp} %0, %1\n` +
           `  %3: u32 = const {value=1}\n  %4: u32 = xor ${order}\n  ret %4\n}\n`,
       );
-      const hits = NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p), 0);
+      const hits = NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(fn, p, PPC_MWCC), 0);
       dce(fn);
       expect(hits).toBe(1);
       expect(print(fn)).toContain(NEGATED_ICMP[cmp]);
@@ -146,10 +148,10 @@ test('no spurious fold: a xor by any other constant, or of a non-comparison, is 
   const mask = parse(
     `fn f {\n^bb0(%0: s32, %1: s32):\n  %2: u32 = icmp_slt %0, %1\n  %3: u32 = const {value=2}\n  %4: u32 = xor %2, %3\n  ret %4\n}\n`,
   );
-  expect(NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(mask, p), 0)).toBe(0);
+  expect(NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(mask, p, PPC_MWCC), 0)).toBe(0);
   // ReadKeyInput's `eor rX, #0x3ff` shape: a bitwise mask-xor of a plain value, not a boolean flip
   const plain = parse(`fn f {\n^bb0(%0: s32):\n  %1: u32 = const {value=1}\n  %2: u32 = xor %0, %1\n  ret %2\n}\n`);
-  expect(NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(plain, p), 0)).toBe(0);
+  expect(NOT_CMP_PATTERNS.reduce((n, p) => n + applyPattern(plain, p, PPC_MWCC), 0)).toBe(0);
 });
 
 test('the table covers the WHOLE icmp family — a new comparison cannot be silently missed', () => {
@@ -174,9 +176,9 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
     `fn notb {\n^bb0(%0: s32):\n  %1: u32 = clz %0\n  %2: u32 = shr_u %1 {imm=5}\n` +
       `  %3: u32 = const {value=1}\n  %4: u32 = xor %2, %3\n  ret %4\n}\n`,
   );
-  let hits = applyPattern(fn, CNTLZW_EQ0);
+  let hits = applyPattern(fn, CNTLZW_EQ0, PPC_MWCC);
   for (const p of NOT_CMP_PATTERNS) {
-    hits += applyPattern(fn, p);
+    hits += applyPattern(fn, p, PPC_MWCC);
   }
   dce(fn);
   expect(hits).toBe(2);
@@ -250,14 +252,14 @@ const NEG_SECOND = `fn f {
 `;
 
 test('`ordered` matches the written operand order and refuses the swap', () => {
-  expect(applyPattern(parse(NEG_FIRST), MUL_ORDER_PROBE)).toBe(1);
-  expect(applyPattern(parse(NEG_SECOND), MUL_ORDER_PROBE)).toBe(0);
+  expect(applyPattern(parse(NEG_FIRST), MUL_ORDER_PROBE, PPC_MWCC)).toBe(1);
+  expect(applyPattern(parse(NEG_SECOND), MUL_ORDER_PROBE, PPC_MWCC)).toBe(0);
 });
 
 test('without `ordered` the same pattern matches a commutative op both ways', () => {
   const both: RewritePattern = { ...MUL_ORDER_PROBE, match: { ...MUL_ORDER_PROBE.match, ordered: undefined } };
-  expect(applyPattern(parse(NEG_FIRST), both)).toBe(1);
-  expect(applyPattern(parse(NEG_SECOND), both)).toBe(1);
+  expect(applyPattern(parse(NEG_FIRST), both, PPC_MWCC)).toBe(1);
+  expect(applyPattern(parse(NEG_SECOND), both, PPC_MWCC)).toBe(1);
 });
 
 // ── PPC's synthesized remainder ───────────────────────────────────────────────────────────────
@@ -284,7 +286,7 @@ const MOD_AFTER = `fn modv {
 
 test('golden: hwmod-smod folds divide-multiply-subtract to one remainder', () => {
   const fn = parse(MOD_BEFORE);
-  const n = applyPattern(fn, HWMOD_SMOD);
+  const n = applyPattern(fn, HWMOD_SMOD, PPC_MWCC);
   dce(fn);
   expect(n).toBe(1);
   expect(print(fn)).toBe(MOD_AFTER);
@@ -293,7 +295,7 @@ test('golden: hwmod-smod folds divide-multiply-subtract to one remainder', () =>
 
 test('golden: hwmod-umod is the same fold over the unsigned divide', () => {
   const fn = parse(MOD_BEFORE.replace('sdiv', 'udiv'));
-  expect(applyPattern(fn, HWMOD_UMOD)).toBe(1);
+  expect(applyPattern(fn, HWMOD_UMOD, PPC_MWCC)).toBe(1);
   dce(fn);
   expect(print(fn)).toBe(MOD_AFTER.replace('smod', 'umod'));
   verify(fn);
@@ -302,7 +304,7 @@ test('golden: hwmod-umod is the same fold over the unsigned divide', () => {
 test('hwmod refuses the multiply that reads the DIVISOR first', () => {
   // `mullw rP,b,rQ` is what a source-level `a - b * (a / b)` compiles to, and asmlift already
   // reproduces that byte-exact by spelling the decomposition back out. Folding it would respell it.
-  expect(applyPattern(parse(MOD_BEFORE.replace('mul %2, %1', 'mul %1, %2')), HWMOD_SMOD)).toBe(0);
+  expect(applyPattern(parse(MOD_BEFORE.replace('mul %2, %1', 'mul %1, %2')), HWMOD_SMOD, PPC_MWCC)).toBe(0);
 });
 
 test('hwmod refuses a different dividend or a different divisor', () => {
@@ -311,8 +313,8 @@ test('hwmod refuses a different dividend or a different divisor', () => {
   const otherDividend = withThird('  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %1\n  %4: s32 = sub %9, %3\n');
   // `a - a / b * c` — the multiplier is not the divisor.
   const otherDivisor = withThird('  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %9\n  %4: s32 = sub %0, %3\n');
-  expect(applyPattern(parse(otherDividend), HWMOD_SMOD)).toBe(0);
-  expect(applyPattern(parse(otherDivisor), HWMOD_SMOD)).toBe(0);
+  expect(applyPattern(parse(otherDividend), HWMOD_SMOD, PPC_MWCC)).toBe(0);
+  expect(applyPattern(parse(otherDivisor), HWMOD_SMOD, PPC_MWCC)).toBe(0);
 });
 
 test('hwmod applies to PPC/mwcc only — not to the hardware-divide ISA that HAS a remainder', () => {
@@ -345,19 +347,19 @@ const twoCalls = (first: string, second: string, dividend: string, divisor: stri
 
 test('unsequencedRightFirst refuses the fold that would swap two calls', () => {
   // `f()` then `g()` on the machine, folded to `f() % g()` — which mwcc runs as `g()` then `f()`.
-  expect(applyPattern(twoCalls('f', 'g', '%0', '%1'), HWMOD_SEQ)).toBe(0);
+  expect(applyPattern(twoCalls('f', 'g', '%0', '%1'), HWMOD_SEQ, PPC_MWCC)).toBe(0);
 });
 
 test('unsequencedRightFirst admits the fold when the RIGHT operand`s def already runs first', () => {
   // `f()` then `g()`, folded to `g() % f()` — mwcc runs `f()` then `g()`, the machine's own order.
-  expect(applyPattern(twoCalls('f', 'g', '%1', '%0'), HWMOD_SEQ)).toBe(1);
+  expect(applyPattern(twoCalls('f', 'g', '%1', '%0'), HWMOD_SEQ, PPC_MWCC)).toBe(1);
 });
 
 test('unsequencedRightFirst admits the fold when a sibling effect stands between the two', () => {
   // The store is a barrier the inline-at-use model refuses to cross, so `f()`'s result gets a named
   // temp at its own position and the order is pinned there rather than left to the expression.
   const between = '  %9: s32 = const {value=0}\n  store %9, %9 {off=0, width=4}\n';
-  expect(applyPattern(twoCalls('f', 'g', '%0', '%1', between), HWMOD_SEQ)).toBe(1);
+  expect(applyPattern(twoCalls('f', 'g', '%0', '%1', between), HWMOD_SEQ, PPC_MWCC)).toBe(1);
 });
 
 // The operand the fold names is not the only thing that moves with it: the structurer inlines
@@ -376,7 +378,7 @@ test('unsequencedRightFirst refuses when a PURE op stands between the effect and
   const body =
     '  %0: s32 = call {target="f"}\n  %6: s32 = const {value=1}\n' +
     '  %5: s32 = add %0, %6\n  %1: s32 = call {target="g"}\n';
-  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ)).toBe(0);
+  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ, PPC_MWCC)).toBe(0);
 });
 
 test('unsequencedRightFirst admits when the cone stops at a MULTI-USE value', () => {
@@ -385,19 +387,19 @@ test('unsequencedRightFirst admits when the cone stops at a MULTI-USE value', ()
   const body =
     '  %0: s32 = call {target="f"}\n  %6: s32 = const {value=1}\n  %5: s32 = add %0, %6\n' +
     '  %1: s32 = call {target="g"}\n  store %8, %0 {off=0, width=4}\n';
-  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ)).toBe(1);
+  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ, PPC_MWCC)).toBe(1);
 });
 
 test('unsequencedRightFirst refuses hoisting a memory READ over a call', () => {
   // The read answers whichever stores ran before it, and the call may be the one that writes.
   const body = '  %0: s32 = load %8 {off=0, signed=true, width=4}\n  %1: s32 = call {target="g"}\n';
-  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ)).toBe(0);
+  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ, PPC_MWCC)).toBe(0);
 });
 
 test('unsequencedRightFirst admits two READS, which commute', () => {
   const body =
     '  %0: s32 = load %8 {off=0, signed=true, width=4}\n' + '  %1: s32 = load %7 {off=0, signed=true, width=4}\n';
-  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ)).toBe(1);
+  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ, PPC_MWCC)).toBe(1);
 });
 
 test('unsequencedRightFirst admits the fold when at most ONE operand has an effect', () => {
@@ -405,7 +407,7 @@ test('unsequencedRightFirst admits the fold when at most ONE operand has an effe
     'fn f {\n^bb0(%1: s32):\n  %0: s32 = call {target="f"}\n' +
       '  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %1\n  %4: s32 = sub %0, %3\n  ret %4\n}\n',
   );
-  expect(applyPattern(oneCall, HWMOD_SEQ)).toBe(1);
+  expect(applyPattern(oneCall, HWMOD_SEQ, PPC_MWCC)).toBe(1);
 });
 
 // ── malformed pattern DATA fails loud, with the pattern's id ──────────────────────────────────
@@ -418,12 +420,12 @@ test('`ordered` on a node where it could not fire throws, naming the pattern', (
     match: { op: 'sub', ordered: true, args: [{ bind: 'X' }, { bind: 'Y' }] },
     replaceWith: { op: 'add', args: ['X', 'Y'] },
   };
-  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered.*'sub'/);
+  expect(() => applyPattern(parse(NEG_FIRST), inert, PPC_MWCC)).toThrow(/test\/inert-ordered.*'sub'/);
 });
 
 test('`unsequencedRightFirst` naming a non-replaceWith operand throws, naming the pattern', () => {
   const bogus: RewritePattern = { ...HWMOD_SEQ, id: 'test/bogus-seq', unsequencedRightFirst: ['A', 'Z'] };
-  expect(() => applyPattern(parse(MOD_BEFORE), bogus)).toThrow(/test\/bogus-seq.*'Z'/);
+  expect(() => applyPattern(parse(MOD_BEFORE), bogus, PPC_MWCC)).toThrow(/test\/bogus-seq.*'Z'/);
 });
 
 // The operand DIRECTION the field asserts was measured on one compiler, so a pattern that widens
@@ -434,7 +436,7 @@ test('`unsequencedRightFirst` on a compiler the direction was not measured for t
     id: 'test/widened-seq',
     applies: { ...HWMOD_SEQ.applies, compilers: ['mwcc', 'gcc'] },
   };
-  expect(() => applyPattern(parse(MOD_BEFORE), widened)).toThrow(/test\/widened-seq.*mwcc, gcc/);
+  expect(() => applyPattern(parse(MOD_BEFORE), widened, PPC_MWCC)).toThrow(/test\/widened-seq.*mwcc, gcc/);
 });
 
 // The validation memo is keyed on the pattern OBJECT, and the three tests above each build a fresh
@@ -448,6 +450,108 @@ test('a malformed pattern throws on EVERY lift, not only the first', () => {
     match: { op: 'sub', ordered: true, args: [{ bind: 'X' }, { bind: 'Y' }] },
     replaceWith: { op: 'add', args: ['X', 'Y'] },
   };
-  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
-  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+  expect(() => applyPattern(parse(NEG_FIRST), inert, PPC_MWCC)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+  expect(() => applyPattern(parse(NEG_FIRST), inert, PPC_MWCC)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+});
+
+// ── a fold may re-spell an idiom, never RECOMPUTE one ────────────────────────────────────────
+//
+// A pattern collapses several ops into one on the strength of a compiled pair, measured where the
+// idiom's INTERIOR ops die with the fold. Give one a second reader and it survives — and whether
+// the recompiling compiler then emits the work twice or CSEs it back is a compiler fact, compiled
+// in engine.ts's `sharesInterior`: IDO emits the extra `sll` (5 words against the target's 4),
+// agbcc and both MIPS GCCs are byte-identical either way. So the refusal is opt-in per compiler,
+// and BOTH directions are pinned — a blanket one measured `synthetic:{membnarrow,sibwalk}:agbcc`
+// out of MATCH and `kleod:sub_0800A5B8:agbcc` from 173 to 179.
+const SEXT8: RewritePattern = {
+  id: 'test/sext8',
+  applies: { compilers: ['ido', 'agbcc'] },
+  recomputesSharedInterior: ['ido'],
+  match: {
+    op: 'shr_s',
+    attrEquals: { imm: 24 },
+    args: [{ op: 'shl', attrEquals: { imm: 24 }, args: [{ bind: 'X' }] }],
+  },
+  replaceWith: { op: 'sext', args: ['X'], attrs: { width: 8 } },
+};
+const SHIFT_PAIR_ALONE = `fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  ret %2
+}`;
+const SHIFT_PAIR_SHARED = `fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  %3: unk32 = add %2, %1
+  ret %3
+}`;
+
+test('the pair folds when the fold is all that reads its interior', () => {
+  const fn = parse(SHIFT_PAIR_ALONE);
+  expect(applyPattern(fn, SEXT8, MIPS_IDO)).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+test('a surviving reader of the interior `shl` refuses the fold where the compiler recomputes it', () => {
+  const fn = parse(SHIFT_PAIR_SHARED);
+  expect(applyPattern(fn, SEXT8, MIPS_IDO)).toBe(0);
+  expect(print(fn)).toContain('shr_s');
+  expect(print(fn)).toContain('shl');
+});
+
+test('…and folds it where the compiler CSEs it back — the refusal is a MEASUREMENT, not a rule', () => {
+  const fn = parse(SHIFT_PAIR_SHARED);
+  expect(applyPattern(fn, SEXT8, ARMV4T_AGBCC)).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+// The ROOT's readers are not interior readers: `replaceAllUsesWith` brings every one of them along,
+// which is what makes a fold a re-spelling at all. Without this exemption the refusal would swallow
+// every idiom whose result is used twice — `(s8)x + (s8)x` would stop folding.
+test('a second reader of the ROOT still folds — those uses come along with the rewrite', () => {
+  const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  %3: unk32 = add %2, %2
+  ret %3
+}`);
+  expect(applyPattern(fn, SEXT8, MIPS_IDO)).toBe(1);
+  expect(print(fn)).toContain('sext %0 {width=8}');
+});
+
+// A BRANCH ARGUMENT is a reader too, and it is the only kind that reaches no operand list: `br`
+// carries its arguments in `successors[].args` and has zero operands. Scanning operands alone would
+// let a shift pair whose interior survives into a join fold anyway — an ordinary MIPS shape, and the
+// exact recompute the refusal exists to prevent.
+test('an interior read only by a BRANCH ARGUMENT still refuses the fold', () => {
+  const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  br ^bb1(%1, %2)
+^bb1(%3: unk32, %4: unk32):
+  %5: unk32 = add %3, %4
+  ret %5
+}`);
+  expect(applyPattern(fn, SEXT8, MIPS_IDO)).toBe(0);
+  expect(print(fn)).toContain('shl %0');
+});
+
+// Same discipline as `ordered` and `unsequencedRightFirst`: a declaration that could never have an
+// effect is a pattern author's mistake, and patterns are meant to become generated DATA.
+test('naming a compiler the pattern does not apply to throws, naming the pattern', () => {
+  const inert: RewritePattern = { ...SEXT8, id: 'test/inert-recompute', recomputesSharedInterior: ['mwcc'] };
+  expect(() => applyPattern(parse(SHIFT_PAIR_ALONE), inert, MIPS_IDO)).toThrow(/test\/inert-recompute.*mwcc/);
+});
+
+test('the shipped sign-extend folds declare IDO and nothing else', () => {
+  const sext = CAST_PATTERNS.filter((p) => p.id.startsWith('sext'));
+  expect(sext.map((p) => p.recomputesSharedInterior)).toEqual([['ido'], ['ido']]);
+  expect(CAST_PATTERNS.filter((p) => p.id.startsWith('zext')).map((p) => p.recomputesSharedInterior)).toEqual([
+    undefined,
+    undefined,
+  ]);
 });

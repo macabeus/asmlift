@@ -121,7 +121,13 @@ export function parse(text: string): Fn {
 
   // No write order: the text form is the value graph, and the record is a measurement of the
   // MACHINE. A parsed fn's edges are UNMEASURED, never written-nowhere (ir/core.ts `WriteOrder`).
-  return { name, blocks: rawBlocks.map((r) => r.block), writeOrder: undefined, slotHomes: undefined };
+  return {
+    name,
+    blocks: rawBlocks.map((r) => r.block),
+    writeOrder: undefined,
+    slotHomes: undefined,
+    paramEvidence: undefined,
+  };
 }
 
 /** Drop the two annotations `print(fn, { writeOrder: true })` appends, and NOTHING else.

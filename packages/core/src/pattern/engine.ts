@@ -91,16 +91,30 @@ export interface RewritePattern {
    *  is one inhabitant. The direction was measured on ONE compiler, so `validatePattern` pins the
    *  declaring pattern's compiler gate to that set; widening it fails loud. */
   unsequencedRightFirst?: [string, string];
+  /** The compilers measured to RECOMPUTE this idiom instead of CSEing it back, when an interior op
+   *  of the match survives the fold because something outside still reads it. On one of these the
+   *  fold refuses that shape (`sharesInterior`, which carries the disassemblies); everywhere else
+   *  it is byte-neutral and refusing it costs matches, so the list is opt-in and per-compiler. A
+   *  compiler absent from it was either measured neutral or not measured — `validatePattern`
+   *  refuses a name that is not in `applies.compilers`, where the fold cannot fire anyway. */
+  recomputesSharedInterior?: string[];
+}
+
+/** What the pattern layer reads off a target. STRUCTURAL on purpose: the pattern set is
+ *  serializable data and does not import `target.ts`, so a `TargetDescription` satisfies this by
+ *  shape. It is the layer's ONE channel — `patternApplies` and `applyPattern` both take it, so a
+ *  caller that raises through the patterns cannot hand one of them a target and the other nothing. */
+export interface PatternTarget {
+  id: string;
+  compiler: string;
+  capabilities: { hwDivide: boolean; hwFloat: boolean };
 }
 
 /** Does this pattern apply to `target`? Every DECLARED field must match: the ISA (so an idiom can be
  *  pinned to one frontend), the compiler set (so an idiom fires only for the compilers that emit
  *  it — the reason MIPS+IDO and MIPS+GCC are distinguishable despite one frontend), and every
  *  declared capability. An omitted field is unconstrained. */
-export function patternApplies(
-  p: RewritePattern,
-  target: { id: string; compiler: string; capabilities: { hwDivide: boolean; hwFloat: boolean } },
-): boolean {
+export function patternApplies(p: RewritePattern, target: PatternTarget): boolean {
   if (p.applies.isa && p.applies.isa !== target.id) {
     return false;
   }
@@ -271,9 +285,27 @@ export const MUL_CONST_PATTERNS: RewritePattern[] = [MUL_SHIFT_ADD, MUL_SHIFT_SU
 // lsr/asr #24`). The naive lift prints `x << 24 >> 24` — but C's `>>` over the s32-typed value is
 // ARITHMETIC, so the UNSIGNED case recompiles with `asr` where the target has `lsr`: a miscompile
 // (tou8/zextb/tou16 nonmatch). Folding to a cast op both fixes that and reads correctly; recompiling
-// `(u8)x` reproduces `lsl;lsr`. Gated to agbcc: on IDO/GCC the zero-extend is `andi`/`and` (not a
-// shift pair) and `(u8)x` lowers to `andi` there — so this shift-pair shape is agbcc's alone, and the
-// fold must not touch the other compilers (where it would change `srl`↔`andi`). `k = 32 - w`.
+// `(u8)x` reproduces `lsl;lsr`. `k = 32 - w`.
+//
+// THE TWO SIGNEDNESSES ARE GATED SEPARATELY, because MIPS spells them differently and the pair of
+// gates is the measurement. Compiled at each row's own flags — IDO 7.1 `-mips2 -O2 -32 -non_shared
+// -G 0`, KMC gcc `-mips3 -O2`, gcc 2.7.2 `-mips3 -O1`:
+//
+//     (s8)x   sll v0,a0,0x18 ; sra v0,v0,0x18      (s16)x  sll 0x10 ; sra 0x10     all three
+//     (u8)x   andi v0,a0,0xff                                                      all three
+//
+// So the SIGN-extend is a shift pair on MIPS exactly as on agbcc, and folding it is byte-neutral
+// there: the fold changes the printed spelling from `x << 24 >> 24` to `(s8)x` and recompiles to
+// the same two instructions. The ZERO-extend is not — `andi` is not a shift pair, and folding an
+// IDO `srl` to a `zext` would re-spell it as `andi`, a miscompile. So `zextPat` is pinned to agbcc
+// alone, and the row that pin protects is `synthetic:zextb:ido7.1` — whose target IS that `andi`.
+//
+// mwcc/PowerPC is in NEITHER list: it has `extsb`/`extsh`, which the frontend lifts straight to
+// `sext`, so the shift-pair shape is not one it emits and no measurement licenses the fold there.
+/** The compilers measured to lower a SIGNED narrowing cast to a shift pair — see the pair of
+ *  disassemblies above. A compiler outside this list keeps the raw shifts. */
+export const SEXT_SHIFT_PAIR_COMPILERS = ['agbcc', 'ido', 'gcc'];
+
 const zextPat = (w: number, k: number): RewritePattern => ({
   id: `zext${w}`,
   applies: { compilers: ['agbcc'] },
@@ -282,7 +314,10 @@ const zextPat = (w: number, k: number): RewritePattern => ({
 });
 const sextPat = (w: number, k: number): RewritePattern => ({
   id: `sext${w}`,
-  applies: { compilers: ['agbcc'] },
+  applies: { compilers: SEXT_SHIFT_PAIR_COMPILERS },
+  // IDO alone emits the `sll` twice when the pair's own `sll` has a second reader; agbcc and both
+  // MIPS GCCs CSE it back, byte-identically. `sharesInterior` carries the three-spelling table.
+  recomputesSharedInterior: ['ido'],
   match: { op: 'shr_s', attrEquals: { imm: k }, args: [{ op: 'shl', attrEquals: { imm: k }, args: [{ bind: 'X' }] }] },
   replaceWith: { op: 'sext', args: ['X'], attrs: { width: w } },
 });
@@ -296,7 +331,8 @@ const sextPat = (w: number, k: number): RewritePattern => ({
  *  and never reaches the bitfield member recognizer (structure.ts, which matches the raw
  *  `shr(shl(load))` shape only). Honest output, not a miscompile — the field just keeps the cast
  *  spelling at those widths. Teaching the recognizer a zext/sext arm is the coverage extension if
- *  a row ever needs it. */
+ *  a row ever needs it. The SIGNED half of that shadow reaches MIPS too, where the symbol maps are:
+ *  measured over the whole corpus, no row's emitted C moves for it (`pnpm bench sweep`). */
 export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16), sextPat(8, 24), sextPat(16, 16)];
 
 // ── boolean-negation idiom ───────────────────────────────────────────────────────────────────
@@ -408,6 +444,9 @@ const COMMUTATIVE = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_
 interface Binds {
   values: Map<string, Value>;
   imms: Map<string, number>;
+  /** Every value matched by an `op` node of the pattern, root included — the ops this rewrite is
+   *  about to REPLACE. `sharesInterior` below turns it into the fold's own legality condition. */
+  interior: Set<Value>;
 }
 
 function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): boolean {
@@ -430,6 +469,7 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
   if (!d || d.opcode !== node.op) {
     return false;
   }
+  b.interior.add(v);
   if (node.attrEquals) {
     for (const [k, val] of Object.entries(node.attrEquals)) {
       if (d.attrs[k] !== val) {
@@ -459,13 +499,16 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
       [0, 1],
       [1, 0],
     ] as const) {
-      const trial: Binds = { values: new Map(b.values), imms: new Map(b.imms) };
+      const trial: Binds = { values: new Map(b.values), imms: new Map(b.imms), interior: new Set(b.interior) };
       if (tryMatch(node.args[0], d.operands[i], defs, trial) && tryMatch(node.args[1], d.operands[j], defs, trial)) {
         for (const [k, val] of trial.values) {
           b.values.set(k, val);
         }
         for (const [k, val] of trial.imms) {
           b.imms.set(k, val);
+        }
+        for (const val of trial.interior) {
+          b.interior.add(val);
         }
         return true;
       }
@@ -520,6 +563,17 @@ function validatePattern(pat: RewritePattern): void {
       throw new Error(
         `pattern '${pat.id}' declares 'unsequencedRightFirst' but applies to compilers [${on.join(', ')}]; ` +
           `the operand direction is only measured for [${measured.join(', ')}] — measure the new one and widen the set`,
+      );
+    }
+  }
+  const recompiles = pat.recomputesSharedInterior;
+  if (recompiles?.length) {
+    const on = pat.applies.compilers;
+    const inert = on === undefined ? [] : recompiles.filter((c) => !on.includes(c));
+    if (inert.length) {
+      throw new Error(
+        `pattern '${pat.id}' names [${inert.join(', ')}] in 'recomputesSharedInterior' but does not apply to ` +
+          `${on === undefined ? 'them' : `[${on.join(', ')}]`} — the refusal could never fire, so the declaration is inert`,
       );
     }
   }
@@ -621,8 +675,66 @@ function reordersUnsequenced(
   return false;
 }
 
-/** Apply one pattern greedily to a fixed point. Returns the number of rewrites. */
-export function applyPattern(fn: Fn, pat: RewritePattern): number {
+/** Would this fold RECOMPUTE the idiom rather than re-spell it — leave an INTERIOR op standing
+ *  because something outside the match still reads it, while the replacement computes the same
+ *  thing again?
+ *
+ *  Every pattern here is licensed by a compiled pair showing that the replacement's C recompiles to
+ *  the SAME instructions. That pair is measured on the shape where the fold's interior ops DIE with
+ *  it — `dce` below removes exactly the ops nothing else reads. An interior op with a surviving
+ *  reader does not die, and whether the recompiling compiler then emits the work twice or CSEs it
+ *  back is a COMPILER fact, so it was compiled rather than reasoned. One function, three spellings,
+ *  each toolchain at its own canonical flags:
+ *
+ *      int r1(int x){ int y = x << 24; return (y >> 24) + y; }
+ *
+ *      ido7.1        raw `(a0 << 24 >> 24) + (a0 << 24)`   4 words   == the object of the C above
+ *                    folded `(s8)a0 + (a0 << 24)`          5 words   an extra `sll`
+ *      gcc2.7.2kmc   raw 4 words / folded 4 words, BYTE-IDENTICAL
+ *      gcc2.7.2      raw 4 words / folded 4 words, BYTE-IDENTICAL
+ *      agbcc         raw and folded identical (`lsl;asr;add`) — one `lsl` either way
+ *
+ *  So only IDO recomputes, and `recomputesSharedInterior` carries that list. On the other three the
+ *  fold stays byte-neutral in this shape and refusing it would COST: agbcc's `s16 i; i++` is one
+ *  `lsl #16` read by both the write-back's `lsr` and the comparison's `asr`, and a blanket refusal
+ *  measured `synthetic:{membnarrow,sibwalk}:agbcc` out of MATCH and `kleod:sub_0800A5B8:agbcc` from
+ *  173 to 179.
+ *
+ *  The ROOT is exempt and must be: `replaceAllUsesWith` brings its readers along, which is what
+ *  makes a fold a re-spelling at all. It is the interior — the operands the match walked THROUGH —
+ *  that this asks about. CONSTANTS REACH IT ASYMMETRICALLY, and both answers are the wanted ones:
+ *  a `constImm` node binds a literal and returns before the record, so a shared constant the
+ *  replacement re-spells as a literal never refuses a fold — nothing keeps a register alive for a
+ *  literal. An `{ op: 'const' }` node is walked like any other op and IS interior, so one the
+ *  replacement drops while another op still reads it counts as a survivor and refuses, which is the
+ *  conservative direction for a materialization the compiler may or may not rematerialize.
+ *
+ *  Refusing leaves the raw ops standing, which is the spelling that was byte-exact before any fold
+ *  existed — a worse-READING answer, never a worse-scoring one. */
+function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value, Op>): boolean {
+  const matched = new Set([...interior].map((v) => defs.get(v)));
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      if (matched.has(o)) {
+        continue; // a read from INSIDE the idiom is one this rewrite is replacing
+      }
+      for (const v of [...o.operands, ...o.successors.flatMap((x) => x.args)]) {
+        if (v !== root.results[0] && interior.has(v)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** Apply one pattern greedily to a fixed point. Returns the number of rewrites.
+ *
+ *  `target` is the same one `patternApplies` filtered with, REQUIRED because exactly one refusal
+ *  reads it (`recomputesSharedInterior`, whose answer is per-compiler). Both towers that fold —
+ *  `pipeline.ts` and `trace.ts` — must hand it over or the traced tower shows a fold `decompile()`
+ *  refuses; required, a caller that omits it is a type error rather than a wrong answer. */
+export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget): number {
   validatePattern(pat);
   let count = 0,
     changed = true;
@@ -635,8 +747,11 @@ export function applyPattern(fn: Fn, pat: RewritePattern): number {
         if (op.results.length !== 1) {
           continue;
         }
-        const binds: Binds = { values: new Map(), imms: new Map() };
+        const binds: Binds = { values: new Map(), imms: new Map(), interior: new Set() };
         if (!tryMatch(pat.match, op.results[0], defs, binds)) {
+          continue;
+        }
+        if (pat.recomputesSharedInterior?.includes(target.compiler) && sharesInterior(fn, op, binds.interior, defs)) {
           continue;
         }
         if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {

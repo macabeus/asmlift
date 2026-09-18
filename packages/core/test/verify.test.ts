@@ -9,7 +9,13 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
 
-const fnOf = (blocks: Block[]): Fn => ({ name: 'bad', blocks, writeOrder: undefined, slotHomes: undefined });
+const fnOf = (blocks: Block[]): Fn => ({
+  name: 'bad',
+  blocks,
+  writeOrder: undefined,
+  slotHomes: undefined,
+  paramEvidence: undefined,
+});
 
 test('rejects: block without a terminator', () => {
   expect(() => verify(parse(`fn f {\n^bb0():\n  %0: s32 = const {value=1}\n}\n`))).toThrow(VerifyError);

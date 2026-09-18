@@ -201,9 +201,19 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
       ),
     dce: false,
   },
+  // The `target` argument is read by TWO of this pass's gates, and unlike `narrowlocal`'s single
+  // conjunct it is not a tuning knob: `narrowParamWitness` says WHICH fact in the object settles a
+  // parameter's declared width on this compiler, and a target that names none refuses outright.
   {
     id: 'paramwidth',
-    run: (fn, self, _opts, _target, lifted) => narrowEntryParams(fn, self, PARAM_WIDTH_GATES, lifted.scales.behindPool),
+    run: (fn, self, _opts, target, lifted) =>
+      narrowEntryParams(
+        fn,
+        target.compilerBehaviors.narrowParamWitness ?? 'none',
+        self,
+        PARAM_WIDTH_GATES,
+        lifted.scales.behindPool,
+      ),
     dce: false,
   },
   // LAST, after every pass that can CLAIM what `extscale` exposed — the two width passes above take

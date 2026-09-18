@@ -321,18 +321,28 @@ describe('a broken cpp is fatal only when something here would have used it', ()
   const broken = () => ({ ok: false, how: 'exit 1: cc: error: no input files' });
   const clean = mkdtempSync(join(tmpdir(), 'asmlift-preflight-clean-'));
   execFileSync('git', ['-C', clean, 'init', '-q']);
+  // THE LOCK REGISTER IS INJECTED HERE TOO, and every case below is about `cpp`. Left to the
+  // default, `preflightRefusals` reads the machine-wide `BENCH_LOCK_DIR`, so a NEIGHBOUR's live
+  // `bench run` puts a concurrency refusal in `refusals` and turns the no-toolchain case red —
+  // which is exactly a mandated gate failing for a reason outside the tree it is gating, the
+  // masking HARD-RULE-7 warns about. Observed: this file failed with a neighbour's record present
+  // and passed two minutes later with the directory empty.
+  const noOtherRun = (): BenchLockState => ({ state: 'free', path: '/tmp/pretend-register' });
 
   test('with a MIPS toolchain installed it REFUSES', () => {
     const r = preflightRefusals(
       { tiers: ['real'] },
-      { repoRoot: clean, probe: broken, cppUsingToolchains: () => ['ido7.1'] },
+      { repoRoot: clean, probe: broken, lockState: noOtherRun, cppUsingToolchains: () => ['ido7.1'] },
     );
     expect(r.refusals.some((m) => m.includes('does not preprocess'))).toBe(true);
     expect(r.warnings).toEqual([]);
   });
 
   test('with none installed it WARNS and lets the run go — the rows would SKIP', () => {
-    const r = preflightRefusals({ tiers: ['real'] }, { repoRoot: clean, probe: broken, cppUsingToolchains: () => [] });
+    const r = preflightRefusals(
+      { tiers: ['real'] },
+      { repoRoot: clean, probe: broken, lockState: noOtherRun, cppUsingToolchains: () => [] },
+    );
     expect(r.refusals).toEqual([]);
     expect(r.warnings.join('\n')).toContain('WARNING');
   });
@@ -346,7 +356,12 @@ describe('a broken cpp is fatal only when something here would have used it', ()
       { tiers: ['real' as const], only: 'func_800600C0_60CC0' },
       { tiers: ['real' as const], project: 'marioparty3' },
     ]) {
-      const r = preflightRefusals(opts, { repoRoot: clean, probe: broken, cppUsingToolchains: () => ['ido7.1'] });
+      const r = preflightRefusals(opts, {
+        repoRoot: clean,
+        probe: broken,
+        lockState: noOtherRun,
+        cppUsingToolchains: () => ['ido7.1'],
+      });
       expect(
         r.refusals.some((m) => m.includes('does not preprocess')),
         JSON.stringify(opts),
@@ -361,6 +376,7 @@ describe('a broken cpp is fatal only when something here would have used it', ()
       const r = preflightRefusals(opts, {
         repoRoot: clean,
         probe: broken,
+        lockState: noOtherRun,
         cppUsingToolchains: () => {
           throw new Error('a synthetic run must not even ask which toolchains are installed');
         },

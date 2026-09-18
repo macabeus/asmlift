@@ -15,7 +15,18 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Op, type SlotHomes, Value, type WriteOrder, mkOp, mkValue } from '../ir/core';
+import {
+  Block,
+  Fn,
+  Op,
+  type ParamObservation,
+  type SlotHomes,
+  Value,
+  type WriteOrder,
+  defOpMap,
+  mkOp,
+  mkValue,
+} from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -202,7 +213,7 @@ export function makeSsaBuilder(
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
-  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined, slotHomes: undefined };
+  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const sealed: boolean[] = irBlocks.map(() => false);
@@ -307,6 +318,44 @@ export function makeSsaBuilder(
       prev.add(off);
     }
   };
+  // PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`), measured HERE for the same reason the clobber
+  // set, the write order and the slot homes are: a slot write is a `writeVar` and a slot read is a
+  // `readVar` in BOTH slot-modelling frontends, so one rule covers them and no frontend can forget
+  // to route a store past a wrapper. The two directions are NOT symmetric: raise/paramwidth.ts reads
+  // an absent observation as proof the declaration was wide, so a missed one costs a narrowing while
+  // a spurious one retypes a parameter the machine never declared narrow.
+  //
+  // RAW, in two ways that matter. Both halves record VALUES rather than verdicts, because the entry
+  // parameters are not final until `pruneDeadParams` has run in `finish()`, which is where the map
+  // is sealed. And the slot half asks no frame partition, unlike `noteSlotHome` directly above: see
+  // `ParamEvidence` for why "stored and never read back" needs none.
+  //
+  // A READ IS A `readVar`, AND `hasReachingDef` IS NOT ONE. The guard in `frontend/mips.ts`'s
+  // `emitLoad` asks whether a slot was ever stored before it reads it; asking is not reading, and
+  // the `readVar` on the line after it is.
+  const slotWrites = new Map<string, Set<Value>>();
+  const slotReads = new Set<string>();
+  const noteSlotTraffic = (key: string, v: Value | null) => {
+    if (slotKeyOffset(key) === null) {
+      return;
+    }
+    if (v === null) {
+      slotReads.add(key);
+      return;
+    }
+    const at = slotWrites.get(key);
+    if (at === undefined) {
+      slotWrites.set(key, new Set([v]));
+    } else {
+      at.add(v);
+    }
+  };
+  // THE FIRST entry-block write to each REGISTER, for `selfRedefined`. First and not any: a later
+  // write is the allocator reusing a register the argument is done with, which says nothing about
+  // the argument. Entry block only, because a widening the machine performs on the argument's own
+  // register is prologue work — a write in a later block has body code before it.
+  const firstEntryWrite = new Map<string, Value>();
+
   const forgetOrder = (p: Value) => {
     for (const m of writeOrder.lastWrite.values()) {
       m.delete(p);
@@ -315,11 +364,18 @@ export function makeSsaBuilder(
 
   const writeVar = (reg: string, b: number, v: Value) => {
     noteSlotHome(reg, v);
+    noteSlotTraffic(reg, v);
+    if (b === 0 && !firstEntryWrite.has(reg)) {
+      firstEntryWrite.set(reg, v);
+    }
     writtenSinceCall[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
   };
-  const readVar = (reg: string, b: number): Value => defs[b].get(reg) ?? readRecursive(reg, b);
+  const readVar = (reg: string, b: number): Value => {
+    noteSlotTraffic(reg, null);
+    return defs[b].get(reg) ?? readRecursive(reg, b);
+  };
 
   const newPhi = (reg: string, b: number): Value => {
     const phi = mkValue(T.unk(32));
@@ -544,6 +600,35 @@ export function makeSsaBuilder(
         phiKey.delete(p);
         forgetOrder(p);
       });
+      // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
+      // write, because `pruneDeadParams` above is the last thing that can retire an entry
+      // parameter, and an observation about a value no longer in the signature is one the reader
+      // would never find. Every surviving entry parameter gets an entry — EMPTY-but-present on a
+      // function that shows neither, because this builder measured it and found nothing.
+      const evidence = new Map<Value, ParamObservation>();
+      const deadHomed = new Set<Value>();
+      for (const [key, stored] of slotWrites) {
+        if (slotReads.has(key)) {
+          continue; // the slot is read back: the store is live and says nothing about a declaration
+        }
+        for (const v of stored) {
+          deadHomed.add(v);
+        }
+      }
+      const defs0 = defOpMap(fn);
+      for (const p of irBlocks[0].params) {
+        const reg = paramReg.get(p);
+        const first = reg === undefined ? undefined : firstEntryWrite.get(reg);
+        // The redefining op must READ the parameter — that is what makes the write the argument's
+        // own value moving, rather than an unrelated value landing in a register it had finished
+        // with. Direct, not transitive: a chain through body code is body code.
+        const redef = first === undefined ? undefined : defs0.get(first);
+        evidence.set(p, {
+          deadHome: deadHomed.has(p),
+          selfRedefined: redef !== undefined && redef.operands.includes(p),
+        });
+      }
+      fn.paramEvidence = evidence;
       // A STACK SLOT MAY NEVER LEAVE AS AN ENTRY PARAMETER. A slot is memory the function itself
       // allocated, so its value can only come from a store the function made; arriving as a live-in
       // instead means it was read on a path that never stored it, and the signature has grown an

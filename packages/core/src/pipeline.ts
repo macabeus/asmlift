@@ -213,7 +213,7 @@ export function applyIdiomPatterns(fn: Fn, target: TargetDescription, patterns?:
   const active = (patterns ?? DEFAULT_IDIOM_PATTERNS).filter((p) => patternApplies(p, target));
   let hits = 0;
   for (const p of active) {
-    hits += applyPattern(fn, p);
+    hits += applyPattern(fn, p, target);
   }
   if (active.length) {
     dce(fn);

@@ -168,7 +168,11 @@ const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
   const a = val();
   const b = val();
   const entry: Block = { params: [], ops: [mkOp('ret', { operands: [a] })] };
-  return { fn: { name: 'r', blocks: [entry], writeOrder: undefined, slotHomes: new Map() }, a, b };
+  return {
+    fn: { name: 'r', blocks: [entry], writeOrder: undefined, slotHomes: new Map(), paramEvidence: undefined },
+    a,
+    b,
+  };
 };
 
 test('replaceAllUsesWith carries the home onto the value that inherits the uses', () => {

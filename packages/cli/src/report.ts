@@ -10,7 +10,7 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, Fn, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
+import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
@@ -222,5 +222,12 @@ export function structuredCloneFn(fn: Fn): Fn {
   const sh = fn.slotHomes;
   const slotHomes: SlotHomes | undefined =
     sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, offs]) => [map.get(v)!, new Set(offs)]));
-  return { name: fn.name, blocks, writeOrder, slotHomes };
+  // Re-keyed like the two records above, and the only one whose mis-keying is SILENT: an
+  // unmeasured parameter is what raise/paramwidth.ts reads as proof the declaration was wide, so a
+  // clone carrying the original's keys scores a signature the ranked path never emits, with no
+  // missing record to trip over. `report-clone.test.ts` pins it.
+  const pe = fn.paramEvidence;
+  const paramEvidence: ParamEvidence | undefined =
+    pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));
+  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence };
 }

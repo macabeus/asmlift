@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vitest';
 import { decompileWithReport } from '../../src/report';
 
 const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+const IDO = targetFor('ido7.1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
 
 describe('soundness regressions — short-circuit hoisting, stack-passed args, report parity', () => {
   // FINDING 1 (shortcircuit.ts): a side effect in a `&&`/`||` RHS arm must NOT be hoisted out of the
@@ -210,6 +211,21 @@ describe('report path parity with decompile()', () => {
       const sym = c.match(/(\w+)\(int a\)/)![1];
       expect(decompileWithReport(sym, asm, AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
     }
+  });
+
+  // …and on a compiler whose PATTERN SET refuses a fold the others take. The refusal that reads
+  // the recompiling compiler (`recomputesSharedInterior`) is applied by BOTH tower entry points, so
+  // a shape where it fires is the case that tells them apart: IDO recomputes a shared `shl`, so the
+  // shift pair must stay written out on both paths rather than folding to `(s8)a0` on one of them.
+  test('pattern-dependent function on IDO: report source === decompile source', () => {
+    const { asm } = compileMipsTarget(
+      'int r1(int x){ int y = x << 24; return (y >> 24) + y; }',
+      'r1',
+      TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
+    );
+    const viaPipeline = decompile('r1', asm, MIPS_IDO).source;
+    expect(viaPipeline).toContain('<< 24'); // the fold really is refused on this shape
+    expect(decompileWithReport('r1', asm, IDO).source).toBe(viaPipeline);
   });
 
   test('annotate mode: a NON-localizable failure stubs identically on both paths', () => {
