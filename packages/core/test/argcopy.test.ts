@@ -115,6 +115,19 @@ describe('a region copy of a pointer parameter', () => {
     expect(refusals.get('loop-region')).toBeGreaterThan(0);
   });
 
+  test('a TOP-LEVEL loop is offered NOTHING — there is no region outside it to hold the copy', () => {
+    // the same two reads as the test above, with the loop at the function's own list instead of
+    // inside an arm. `regions()` does not offer that list, so the loop body is the only region
+    // over the reads and `loop-region` refuses it: the pass declines the whole shape rather than
+    // minting a per-iteration copy. The spelling this population wants — a copy BEFORE the loop,
+    // repointing only the loop's reads — is a copy site separate from its region, which this pass
+    // cannot express; a round that builds it should turn this test around.
+    const loop: Stmt = { k: 'dowhile', cond: rd('c'), body: [call('g', rd('a0')), call('g', rd('a0'))] };
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn([loop]), ARGCOPY_REGION_GATES);
+    expect(candidates).toEqual([]);
+    expect(refusals.get('loop-region')).toBe(1);
+  });
+
   // ── the walk is the WHOLE tree, `for` headers included ──────────────────────────────────────
   // `repoint` rewrites a `for`'s `init` and `inc` (mapStmtExprs recurses into both), so every
   // judgement this pass makes has to see them. `stmtLists` — the walk over the SCOPES a statement

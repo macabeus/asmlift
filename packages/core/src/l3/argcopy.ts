@@ -20,6 +20,16 @@
 // spellings were taken through the row's own agbcc), so this pass emits the one L3 already
 // spells and adds no block-scope representation to carry a distinction no object shows.
 //
+// WHAT IT GIVES UP, NAMED. A pointer parameter read only inside a loop that sits at FUNCTION TOP
+// LEVEL gets no candidate at all: `regions()` does not offer the function's own list, so the only
+// region over those reads is the loop body, and `loop-region` refuses it. That population — a base
+// live across a top-level loop — is `/livebase` and `/hipress`'s, and it is a DECLINE here rather
+// than an oversight, because the spelling it would want is a copy placed BEFORE the loop with only
+// the loop's reads repointed. This pass cannot express that: its copy goes at the head of the
+// region it repoints, so a copy outside the loop and a repoint inside it is a copy SITE separate
+// from its region, a representation nothing here has. Relaxing `loop-region` would not buy it — it
+// would buy the per-iteration copy, which is the spelling that rule exists to refuse.
+//
 // WHAT IS ENUMERATED, AND WHY. Which region the source copied in is not derivable from the tree,
 // so every legal region is offered as its own candidate and the differ referees — the `/regcopy`
 // idiom this file shares with `l3/coalesce.ts`. Uses OUTSIDE the chosen region keep naming the
@@ -112,8 +122,10 @@ export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
   },
   {
     id: 'loop-region',
-    why: 'a copy anywhere inside a loop re-runs every iteration, and the region holding the loop already offers it',
+    why: 'a copy anywhere inside a loop re-runs every iteration, so it belongs to a region that holds the loop instead — and no region does when the loop is at function top level, where this variation offers nothing at all',
     sound: false,
+    // the second clause has its own test, which `guardedBy` cannot also name (one title per gate):
+    // `argcopy.test.ts: a TOP-LEVEL loop is offered NOTHING`
     guardedBy: 'argcopy.test.ts: an arm NESTED inside a loop body is refused too',
     rejects: (c) => c.underLoop,
   },
@@ -139,8 +151,9 @@ function countReads(list: Stmt[], n: string): number {
 
 /** Every nested statement list in `body`, each with the path that reaches it — a REGION is any
  *  list a statement contains, which is what a `case` body, an `if` arm and a loop body all are.
- *  The function's own top-level list is NOT among them: a copy there frees nothing, and the entry
- *  prefix is `l3/parkfirst.ts`'s. */
+ *  The function's own top-level list is NOT among them: repointing it renames the parameter over
+ *  the whole function, which is a PARK — the shape `l3/parkfirst.ts` reorders — and not the two
+ *  separable live ranges this variation is about. */
 function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean }[] {
   const out: { at: number[]; list: Stmt[]; underLoop: boolean }[] = [];
   // carried DOWN rather than read off the immediate parent: an `if` arm two levels inside a loop
