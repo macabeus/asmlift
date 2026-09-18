@@ -8,16 +8,16 @@
 // offset: a never-reloaded home-slot spill has no uses and simply drops, and `sp` never
 // materializes as a value. These assertions lock the mislift out.
 //
-// THE DROP IS NO LONGER SILENT, and that is what closes sextb here. The spill still has no uses and
-// still leaves no op — that part is B2 and is unchanged — but the SSA builder now records the
-// parameter it homed, together with the fact that the widening landed in that parameter's OWN
-// register (`Fn.paramEvidence`). On a compiler whose object witnesses a narrow declaration that way
-// (`narrowParamWitness: 'home-store-and-in-place'`) raise/paramwidth.ts reads the pair and recovers
-// `s8 a0`. `synthetic:sextb:ido7.1` byte-matches on it.
+// THE DROP IS NOT SILENT, and that is what closes sextb here. The spill has no uses and leaves no
+// op, but the SSA builder records the parameter it homed, together with the fact that the widening
+// landed in that parameter's OWN register (`Fn.paramEvidence`). On a compiler whose object
+// witnesses a narrow declaration that way (`narrowParamWitness: 'home-store-and-in-place'`)
+// raise/paramwidth.ts reads the pair and recovers `s8 a0`. `synthetic:sextb:ido7.1` byte-matches on
+// it.
 //
-// zextb's half of the gap is still OPEN, and for a different reason: IDO spells `(u8)x` as `andi`,
-// not as a shift pair, so no `zext` op forms for the width pass to judge and the parameter stays
-// `u32`. The stamp is there; the fold that would give it something to read is not.
+// zextb's half of the gap stays OPEN, and for a different reason: IDO spells `(u8)x` as `andi`, not
+// as a shift pair, so no `zext` op forms for the width pass to judge and the parameter stays `u32`.
+// The evidence is recorded; the fold that would give it something to read is not built.
 import { decompile } from '@asmlift/core/pipeline';
 import { MIPS_IDO, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsTarget } from '@asmlift/toolchains';

@@ -297,9 +297,8 @@ export const MUL_CONST_PATTERNS: RewritePattern[] = [MUL_SHIFT_ADD, MUL_SHIFT_SU
 // So the SIGN-extend is a shift pair on MIPS exactly as on agbcc, and folding it is byte-neutral
 // there: the fold changes the printed spelling from `x << 24 >> 24` to `(s8)x` and recompiles to
 // the same two instructions. The ZERO-extend is not — `andi` is not a shift pair, and folding an
-// IDO `srl` to a `zext` would re-spell it as `andi`, a miscompile. That is why `zextPat` keeps the
-// agbcc pin the two patterns used to share, with its reason narrowed to the half it was measured
-// for, and the row it protects is `synthetic:zextb:ido7.1` — whose target IS that `andi`.
+// IDO `srl` to a `zext` would re-spell it as `andi`, a miscompile. So `zextPat` is pinned to agbcc
+// alone, and the row that pin protects is `synthetic:zextb:ido7.1` — whose target IS that `andi`.
 //
 // mwcc/PowerPC is in NEITHER list: it has `extsb`/`extsh`, which the frontend lifts straight to
 // `sext`, so the shift-pair shape is not one it emits and no measurement licenses the fold there.
@@ -332,8 +331,8 @@ const sextPat = (w: number, k: number): RewritePattern => ({
  *  and never reaches the bitfield member recognizer (structure.ts, which matches the raw
  *  `shr(shl(load))` shape only). Honest output, not a miscompile — the field just keeps the cast
  *  spelling at those widths. Teaching the recognizer a zext/sext arm is the coverage extension if
- *  a row ever needs it. The SIGNED half of that shadow now reaches MIPS as well, where the symbol
- *  maps are: measured over the whole corpus, no row's emitted C moves for it (`pnpm bench sweep`). */
+ *  a row ever needs it. The SIGNED half of that shadow reaches MIPS too, where the symbol maps are:
+ *  measured over the whole corpus, no row's emitted C moves for it (`pnpm bench sweep`). */
 export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16), sextPat(8, 24), sextPat(16, 16)];
 
 // ── boolean-negation idiom ───────────────────────────────────────────────────────────────────
@@ -703,8 +702,12 @@ function reordersUnsequenced(
  *
  *  The ROOT is exempt and must be: `replaceAllUsesWith` brings its readers along, which is what
  *  makes a fold a re-spelling at all. It is the interior — the operands the match walked THROUGH —
- *  that this asks about. A matched `const` is interior but never a hazard: `constImm` binds a
- *  literal the replacement re-spells as a literal, and nothing keeps a register alive for one.
+ *  that this asks about. CONSTANTS REACH IT ASYMMETRICALLY, and both answers are the wanted ones:
+ *  a `constImm` node binds a literal and returns before the record, so a shared constant the
+ *  replacement re-spells as a literal never refuses a fold — nothing keeps a register alive for a
+ *  literal. An `{ op: 'const' }` node is walked like any other op and IS interior, so one the
+ *  replacement drops while another op still reads it counts as a survivor and refuses, which is the
+ *  conservative direction for a materialization the compiler may or may not rematerialize.
  *
  *  Refusing leaves the raw ops standing, which is the spelling that was byte-exact before any fold
  *  existed — a worse-READING answer, never a worse-scoring one. */
@@ -728,9 +731,9 @@ function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value,
 /** Apply one pattern greedily to a fixed point. Returns the number of rewrites.
  *
  *  `target` is the same one `patternApplies` filtered with, REQUIRED because exactly one refusal
- *  reads it (`recomputesSharedInterior`, whose answer is per-compiler) and an optional argument is
- *  a refusal a second caller can silently switch off: `trace.ts` did, and the traced tower emitted
- *  a fold `decompile()` refuses. Required, that is a type error rather than a wrong answer. */
+ *  reads it (`recomputesSharedInterior`, whose answer is per-compiler). Both towers that fold —
+ *  `pipeline.ts` and `trace.ts` — must hand it over or the traced tower shows a fold `decompile()`
+ *  refuses; required, a caller that omits it is a type error rather than a wrong answer. */
 export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget): number {
   validatePattern(pat);
   let count = 0,

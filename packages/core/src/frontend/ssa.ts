@@ -321,8 +321,9 @@ export function makeSsaBuilder(
   // PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`), measured HERE for the same reason the clobber
   // set, the write order and the slot homes are: a slot write is a `writeVar` and a slot read is a
   // `readVar` in BOTH slot-modelling frontends, so one rule covers them and no frontend can forget
-  // to route a store past a wrapper. A missed observation here is not a lost ordering but a MISSING
-  // refusal, since raise/paramwidth.ts reads an absent one as proof the declaration was wide.
+  // to route a store past a wrapper. The two directions are NOT symmetric: raise/paramwidth.ts reads
+  // an absent observation as proof the declaration was wide, so a missed one costs a narrowing while
+  // a spurious one retypes a parameter the machine never declared narrow.
   //
   // RAW, in two ways that matter. Both halves record VALUES rather than verdicts, because the entry
   // parameters are not final until `pruneDeadParams` has run in `finish()`, which is where the map
@@ -336,7 +337,7 @@ export function makeSsaBuilder(
   const slotReads = new Set<string>();
   const noteSlotTraffic = (key: string, v: Value | null) => {
     if (slotKeyOffset(key) === null) {
-      return; // an ordinary register: no slot, no home
+      return;
     }
     if (v === null) {
       slotReads.add(key);

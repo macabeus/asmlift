@@ -184,48 +184,26 @@ export interface TargetDescription {
     hoistsSingleSetArm?: boolean;
     // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
     // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
-    // the compilers measured give three, and the pass refuses wherever the object is silent.
+    // the compilers measured give three, and the pass refuses wherever the object is silent. Each
+    // target below carries its own measurement, and raise/paramwidth.ts's header carries the
+    // compiled pairs all three readings rest on.
     //
-    //   • `'prologue-extension'` — the extension's POSITION decides it. agbcc has no byte move, so
-    //     a narrow-declared parameter widens at the very top of the function and a body cast widens
-    //     at its use; the `pa`/`pb` pair in raise/paramwidth.ts's header is the compiled evidence,
-    //     and mwcc's PowerPC prologue `extsb`/`extsh` is the same shape on another ISA.
-    //   • `'home-store-and-in-place'` — the position decides NOTHING, and TWO other facts decide it
-    //     together. Measured on IDO 7.1 at `-mips2 -O2 -32 -non_shared -G 0`:
+    //   • `'prologue-extension'` — the extension's POSITION decides it: a narrow-declared
+    //     parameter widens at the very top of the function, a body cast widens at its use.
+    //   • `'home-store-and-in-place'` — the position decides NOTHING, both spellings leading the
+    //     function, and TWO other facts decide it together: the parameter is stored to an argument
+    //     home nothing reads back AND widened in its own argument register. Each half alone has a
+    //     compiled counterexample, so only the PAIR separates a declaration from a body cast.
     //
-    //                                                      home store   widening
-    //       int f(s8 x){ return x; }                         sw a0,0(sp)  sll a0,a0,0x18   DECLARED
-    //       int f(s16 x){ return x; }                        sw a0,0(sp)  sll a0,a0,0x10   DECLARED
-    //       int f(s32 x){ return (s8)x; }                        —        sll v0,a0,0x18   body cast
-    //       int f(int x){ x = (signed char)x; return x; }        —        sll a0,a0,0x18   body cast
-    //       int f(long long x){ return (signed char)x; }     sw a1,4(sp)  sll v0,a1,0x18   64-bit half
-    //
-    //     Both extensions lead the function, so the prologue test cannot tell them apart. NEITHER
-    //     FACT DECIDES IT ALONE, and the last two lines are the counterexamples: a dead argument
-    //     home store is emitted for plenty of things that are not a narrow declaration —
-    //
-    //       int unused1(int x){ return 7; }        sw a0,0(sp) / jr ra / li v0,7
-    //       int ptr1(int *p,int y){ return y; }    sw a0,0(sp) / jr ra / move v0,a1
-    //       int ll2i(long long x){ return (int)x;} sw a0,0(sp) / sw a1,4(sp) / jr ra / move v0,a1
-    //       int used2(int x,int y){ return x+y; }  jr ra / addu v0,a0,a1        (no store at all)
-    //
-    //     — so the store means "the incoming register value was not consumed", not "declared
-    //     narrow"; and a widening in the argument's OWN register happens for a body cast the source
-    //     assigns back to the parameter. Only the PAIR separates a declaration from both, and
-    //     raise/paramwidth.ts's header states what the pair does and does not claim.
-    //
-    //     THE HOME STORE IS AN `-O2` OBSERVABLE, AND `-g` IS NOT WHAT REMOVES IT. Measured on the
-    //     pair above: present at `-O2` and at `-O2 -g3`, absent at `-O1`, at `-O0` and at `-g`
-    //     (which implies `-O0`). So the 42 real af rows that build at
+    //     THE HOME STORE IS AN `-O2` OBSERVABLE, AND `-g` IS NOT WHAT REMOVES IT. Measured on
+    //     `int f(s8 x){ return x; }`: present at `-O2` and at `-O2 -g3`, absent at `-O1`, at `-O0`
+    //     and at `-g` (which implies `-O0`). So the 42 real af rows that build at
     //     `-G 0 -non_shared -Wab,-r4300_mul -mips2 -EB -O2 -g3` DO carry it — checked at exactly
     //     those flags — and a target built at `-O1`/`-O0` would have to claim `'none'`. The
-    //     in-place widening survives every one of those levels, but on its own it decides nothing
-    //     (the counterexamples above), so the pass refuses there rather than reading half a pair.
+    //     in-place widening survives every one of those levels, but on its own it decides nothing,
+    //     so the pass refuses there rather than reading half a pair.
     //   • `'none'` — the object does not distinguish the two at all, so no reading of it licenses
-    //     the narrowing. Both MIPS GCCs answer this, and it is a MEASUREMENT rather than a
-    //     withholding: `int f(s8 x){return x;}` and `int f(s32 x){return (s8)x;}` compile to
-    //     BYTE-IDENTICAL objects under KMC gcc `-mips3 -O2` and gcc 2.7.2 `-mips3 -O1` alike
-    //     (`sll v0,a0,0x18 / jr ra / sra v0,v0,0x18`, the same four words).
+    //     the narrowing. It is a MEASUREMENT rather than a withholding wherever a target claims it.
     //
     // A compiler that sets nothing here also refuses, which is the right default for one nobody has
     // compiled the pair with (docs/level-tower.md: claim nothing about an unmeasured behavior).
@@ -515,10 +493,10 @@ export const MIPS_IDO: TargetDescription = {
     switchAllowsNeqCase: false,
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
-    // MEASURED: the `sll` leads the function for BOTH spellings, so the prologue position cannot
-    // decide; a narrow DECLARED parameter is the one that is both homed dead AND widened in its own
-    // argument register, and each half alone has a compiled counterexample. See
-    // `narrowParamWitness` for the disassemblies.
+    // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
+    // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
+    // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
+    // the disassemblies, including the counterexample for each half alone.
     narrowParamWitness: 'home-store-and-in-place',
     // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
     // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
@@ -648,7 +626,7 @@ export const PPC_MWCC: TargetDescription = {
     reloadsLocalReread: false,
     // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
-    // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through this pass.
+    // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.
     narrowParamWitness: 'prologue-extension',
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user

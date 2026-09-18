@@ -222,10 +222,10 @@ export function structuredCloneFn(fn: Fn): Fn {
   const sh = fn.slotHomes;
   const slotHomes: SlotHomes | undefined =
     sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, offs]) => [map.get(v)!, new Set(offs)]));
-  // Re-keyed through `cv` for the same reason again: the map names the VALUES this clone just
-  // replaced, and a clone that carried the reference would report every parameter unmeasured —
-  // which raise/paramwidth.ts reads as proof the declaration was wide, so the probe would measure a
-  // scoreDelta on a signature the ranked path does not emit. `report-clone.test.ts` pins it.
+  // Re-keyed like the two records above, and the only one whose mis-keying is SILENT: an
+  // unmeasured parameter is what raise/paramwidth.ts reads as proof the declaration was wide, so a
+  // clone carrying the original's keys scores a signature the ranked path never emits, with no
+  // missing record to trip over. `report-clone.test.ts` pins it.
   const pe = fn.paramEvidence;
   const paramEvidence: ParamEvidence | undefined =
     pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));

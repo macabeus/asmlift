@@ -33,12 +33,20 @@
 //   int f(int x){ x = (signed char)x; return x; }   —       sll a0,a0,0x18     NOT homed
 //   int f(long long x){ return (signed char)x; }  sw a1     sll v0,a1,0x18     NOT in place
 //
-// The third and fourth lines are why the conjunction is the claim. A DEAD ABI ARGUMENT HOME STORE
-// on its own is not "declared narrow": IDO emits one for an unused `int`, for an unused pointer and
-// for both halves of a `long long` (`target.ts` `narrowParamWitness` has those disassemblies), and
-// the fourth line above narrowed a 64-bit parameter's low half to `s8` until `widened-elsewhere`
-// refused it. WIDENING IN PLACE on its own is not "declared narrow" either: the third line is a
-// plain `int` the source re-assigns, and only the absent home store tells it from the first.
+// The last two lines are why the conjunction is the claim. A DEAD ABI ARGUMENT HOME STORE on its
+// own is not "declared narrow" — IDO emits one wherever the incoming register value goes unused,
+// whatever that value's type:
+//
+//   int unused1(int x){ return 7; }         sw a0,0(sp) / jr ra / li v0,7
+//   int ptr1(int *p, int y){ return y; }    sw a0,0(sp) / jr ra / move v0,a1
+//   int ll2i(long long x){ return (int)x; } sw a0,0(sp) / sw a1,4(sp) / jr ra / move v0,a1
+//   int used2(int x, int y){ return x+y; }  jr ra / addu v0,a0,a1        (no store at all)
+//
+// — so the store says the incoming register was not consumed, not that anything was declared
+// narrow, and on the `long long` line that is a 64-bit parameter whose low half the extension would
+// narrow to `s8`; `widened-elsewhere` is what refuses it. WIDENING IN PLACE on its own is not
+// "declared narrow" either: the third line is a plain `int` the source re-assigns, and only the
+// absent home store tells it from the first.
 //
 // The conjunction is NECESSARY-and-measured, not necessary-and-sufficient, and it errs toward
 // refusing: `int m2(signed char a){ int i,s=0; for(i=0;i<10;i++) s+=arr[i]+a; return s; }` is a
@@ -237,8 +245,7 @@ function useCount(fn: Fn, v: Value): number {
 
 /** Type an entry parameter at the width its prologue extension proves, and drop the extension.
  *  `witness` is what this compiler's object shows for a narrow declaration (target.ts
- *  `narrowParamWitness`) and leads the parameter list because it decides which of the gates below
- *  can speak at all; `self` is the prototype the caller supplied for THIS function, if any;
+ *  `narrowParamWitness`); `self` is the prototype the caller supplied for THIS function, if any;
  *  `fusedBehindPool` is raise/extscale.ts's record of the extensions it re-split behind a pool load
  *  (`ScaleRecord.behindPool`). Returns the number of parameters narrowed. */
 export function narrowEntryParams(
@@ -248,9 +255,8 @@ export function narrowEntryParams(
   gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES,
   fusedBehindPool: ReadonlySet<Op> = new Set(),
 ): number {
-  // ABSENT ⇒ NEITHER OBSERVATION, and the direction is the refusing one on a target that reads
-  // them: a function nobody measured (parsed IR, a hand-built fn) keeps every parameter wide rather
-  // than being narrowed on evidence that was never taken.
+  // ABSENT ⇒ NEITHER OBSERVATION, which is the refusing direction on a target that reads them: a
+  // function nobody measured (parsed IR, a hand-built fn) is never narrowed on evidence never taken.
   const evidence = fn.paramEvidence;
   const entry = fn.blocks[0];
   const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];

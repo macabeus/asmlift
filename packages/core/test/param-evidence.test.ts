@@ -1,14 +1,10 @@
-// PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`) — the two things IDO's object shows about an
-// entry parameter that the lift destroys, recorded by the shared SSA builder.
+// PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`) — the two things a MIPS object shows about an
+// entry parameter that the lift destroys: the ABI argument-home store, which goes with the dead
+// stack slot it writes, and which register a widening landed in, which goes with SSA renaming. The
+// type's own doc carries why neither survives.
 //
-// `deadHome`: a word sp-relative store is a write to the SSA key `sp@k` (`stackSlotKey`), so a slot
-// nothing reloads leaves no reader, no op and no value behind. That erasure is right — it is what
-// keeps `sp` from becoming a spurious pointer parameter — and it also erases the ABI argument-home
-// store. `selfRedefined`: SSA renames, so nothing downstream can tell a value the machine put back
-// in the argument's OWN register from one it put in a scratch.
-//
-// This file pins both, at the two places they are carried: the builder, and the score probe's clone
-// (`packages/cli/test/offline/report-clone.test.ts`).
+// This file pins both where they are carried: the shared SSA builder, and the score probe's clone
+// (`cli/test/offline/report-clone.test.ts`).
 //
 // What the record does NOT claim is as pinned as what it does. Neither half is a frame
 // classification, neither is a spill record, and neither is a verdict about any compiler —
