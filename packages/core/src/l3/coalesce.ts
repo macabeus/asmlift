@@ -497,6 +497,16 @@ function mentionIndex(): {
  *  TRANSITIVE chain and not merely the adjacent pair. `joined` reports it; the `fall-through` gate
  *  is what refuses it, so the reach stays a stated rule with a refusal rather than a silent skip.
  *
+ *  ITS REACH, MEASURED, because a soundness argument with no corpus witness should say so. Counted
+ *  2026-09-18 with a throwaway counter in this walk, over `pnpm bench sweep --fan --map-modes
+ *  harness,nomap` — 2,396 records over the 1,198-row corpus: 2,158 `switch` statements visited in
+ *  25 functions, and the switch half ADMITS on exactly one of them (192 pairs, all
+ *  `pokeemerald:SetMauvilleOldManLanguage:agbcc`). Every other pair is refused by `arm-init`
+ *  (4,024) or `type` (1,346), and `fall-through` and `loop` refuse **zero** — so what bounds this
+ *  extension corpus-wide today is a COST gate, while the rule carrying its soundness argument is
+ *  witnessed only by the fixtures in `coalesce.test.ts`. Re-take the count rather than quoting it:
+ *  a corpus that grows falsifies the number, not the argument.
+ *
  *  A `switch`'s `default` body is deliberately NOT an arm. `defaultAt` may place the label between
  *  case labels, where the body is reachable both by dispatch and by running on into the arm below
  *  it — a path `fallsThrough` does not describe, because the flag indexes the `cases` array the
