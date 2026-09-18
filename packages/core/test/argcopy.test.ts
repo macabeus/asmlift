@@ -173,6 +173,37 @@ describe('a region copy of a pointer parameter', () => {
     expect(refusals.get('loop-region')).toBe(2);
   });
 
+  test('the repoint reaches EVERY nested list — a mid-`switch` default and a loop body included', () => {
+    // one walk (`mapStmtExprs`) does the whole subtree; a region whose reads sit five levels down,
+    // in a `for` header, a `do`-`while` body and a `default` spliced BETWEEN two cases, must come
+    // back with no mention of the parameter left
+    const inner: Stmt = {
+      k: 'switch',
+      scrutinee: rd('c'),
+      defaultAt: 1,
+      default: [call('d', rd('a0'))],
+      cases: [
+        {
+          values: [0],
+          body: [
+            forLoop(bump('p', rd('a0')), bump('p', rd('a0')), [
+              { k: 'dowhile', cond: rd('a0'), body: [call('g', rd('a0'))] },
+            ]),
+          ],
+        },
+        { values: [1], body: [call('h', rd('a0'))] },
+      ],
+    };
+    const c = argCopyCandidates(fn([armIf([inner], [])])).find((x) => x.merged === 'a0@0.0')!;
+    const arm = (c.sfn.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(arm[0]).toEqual({ k: 'assign', name: 'p0', value: { k: 'var', name: 'a0' } });
+    expect(JSON.stringify(arm.slice(1))).not.toContain('"a0"');
+    // and the default is still spliced where it was, not re-ordered by the rewrite
+    const sw = arm[1] as Extract<Stmt, { k: 'switch' }>;
+    expect(sw.defaultAt).toBe(1);
+    expect(JSON.stringify(sw.default)).toContain('p0');
+  });
+
   test('every legal region is offered, each as its own tree', () => {
     // two sibling arms both reading a0 twice → two candidates, and each names its own region
     const out = argCopyCandidates(

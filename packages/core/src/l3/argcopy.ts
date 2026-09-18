@@ -174,15 +174,16 @@ function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean
 
 /** `list` with every `var n` leaf rewritten to `var to`, nested statements included. Both kind
  *  switches are ast.ts's, so a new statement or expression kind is that file's problem, not this
- *  one's. */
+ *  one's.
+ *
+ *  ONE walk: `mapStmtExprs` already recurses into every nested statement — a `for`'s `init`/`inc`
+ *  included, which is what makes this symmetric with `countReads` — so driving it through
+ *  `mapStmtLists` as well re-visited a statement at depth d once per level above it. Measured on a
+ *  five-level tree (switch > for > do-while > if > store): 40 expression visits, now 13, same tree
+ *  out. This runs once per region per parameter per candidate, and each candidate is a compile. */
 function repoint(list: Stmt[], n: string, to: string): Stmt[] {
   const inExpr = (e: Expr): Expr => (e.k === 'var' && e.name === n ? { ...e, name: to } : mapExprChildren(e, inExpr));
-  const inStmt = (s: Stmt): Stmt =>
-    mapStmtExprs(
-      mapStmtLists(s, (inner) => inner.map(inStmt)),
-      inExpr,
-    );
-  return list.map(inStmt);
+  return list.map((s) => mapStmtExprs(s, inExpr));
 }
 
 /** Replace the region at `at` with `next`. */
