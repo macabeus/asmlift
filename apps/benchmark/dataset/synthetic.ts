@@ -39,6 +39,17 @@ export interface SynthSpec {
   ctx?: string; // m2c --context (C declarations)
   proto?: Prototypes; // asmlift prototypes (void-ness / callee params)
   note?: string;
+  /** THE FLAGS THIS ROW COMPILES AND DECOMPILES AT, when its own toolchain's canonical set is not
+   *  the thing being measured. Absent — which is every row but one — means the canonical set, so
+   *  the tier is unchanged by this field existing. What it buys is an OPTIMISATION LEVEL of the
+   *  row's own: a spelling the compiler erases at -O2 is invisible at the canonical flags, and a
+   *  row that cannot fix its level cannot pin one. Both sides get the same flags (`codegenFor`
+   *  resolves the target from them, exactly as the real tier does off its unit), so it is not a
+   *  channel one decompiler is told about and the other is not.
+   *
+   *  D9: a LEVEL TWIN TAKES ITS OWN `sym`. Two rows differing only in flags would collide on the
+   *  row id, and a reader comparing them wants to see two functions, not one name twice. */
+  cflags?: readonly string[];
   /** A SYMBOL MAP for this row, the same value the real tier feeds asmlift off a project
    *  manifest (`src/cases/real.ts`). Synthetic rows carry none by default and that is not a
    *  neutral default: `/no-bitfield`, `/no-ptr-elem` and `/raw-globals` are enumerated only when
@@ -436,6 +447,38 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int retone(void){ return 1; }',
     features: ['baseline'],
     toolchains: ['agbcc', 'mwcc_242_81'],
+  },
+  // `retflat` — THE ROW THAT PINS `return;` SPELLING, and the only one in the tier that sets its
+  // own `cflags`. Every other synthetic row compiles at -O2, where a redundant trailing `return;`
+  // is free: written both ways, 124 of 125 agbcc sources give identical objects at -O2 and at -O1,
+  // so no row at the canonical flags can tell a decompiler that emits one from a decompiler that
+  // does not. At -O0 it is not free — every source `return;` becomes its own `b <epilogue>` — and
+  // this body is the smallest place that shows it. Compiled at the flags below, the two spellings
+  // of its own emitted C differ in the object:
+  //
+  //     void retflat(void){ *(s32 *)50345024 = 3; }            ldr/mov/str; bx lr
+  //     void retflat(void){ *(s32 *)50345024 = 3; return; }    ldr/mov/str; b .L2; bx lr
+  //
+  // so the row is a MATCH for the spelling the assembly shows and a nonmatch for the other. It
+  // failed before `l3/tailret.ts` and matches after; that is the whole of what it measures.
+  //
+  // `-fomit-frame-pointer` is not decoration. agbcc's -O0 frame (`push {r7,lr}; mov r7,sp`) homes
+  // every local on the stack and asmlift declines it outright ("stack pointer used as data"), so
+  // an -O0 row with a frame measures the frame and never reaches the backend. A parameterless body
+  // with no locals has no frame to omit, which leaves the return spelling as the only thing in it.
+  //
+  // NO FEATURE TAG FOR THE LEVEL. The 42 rows already built at -O0 are real ones and carry none
+  // either — their level comes off their unit's flags, which the artifact publishes per row the
+  // same way it publishes these. A tag here would be a filter that matched this row and missed
+  // those, which is worse than no filter.
+  {
+    sym: 'retflat',
+    src: '#define gOutA ((u32 *)0x03003440)\nvoid retflat(void){ *gOutA = 3; }',
+    cflags: ['-mthumb-interwork', '-O0', '-fomit-frame-pointer', '-fhex-asm', '-fprologue-bugfix'],
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'void retflat(void);',
+    proto: { retflat: { returnsVoid: true } },
   },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
