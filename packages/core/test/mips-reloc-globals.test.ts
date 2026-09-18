@@ -52,11 +52,11 @@ test('an addiu-materialised global base + plain-offset access recovers through t
 });
 
 test('a SECTION-symbol reloc is folded and named, never left to render as the literal 0', () => {
-  // `.rodata`/`.data` names an offset into a section — an anonymous datum C cannot spell. Excluding
-  // it from the carrier left the pair raw, and raw is the `lui`'s link-time placeholder: this same
-  // input used to render `*(s8 *)0`, a wrong answer that compiles. The fold now recovers the name;
-  // it is loud twice over downstream (rank-declare.ts refuses the declaration and REPORTS it, and
-  // the source does not compile), which is strictly more than a frontend refusal would say.
+  // `.rodata`/`.data` names an offset into a section — an anonymous datum C cannot spell. Leaving
+  // it off the carrier would leave the pair raw, and raw is the `lui`'s link-time placeholder: the
+  // wrong answer `*(s8 *)0`, which compiles. Folding it is loud twice over downstream instead
+  // (rank-declare.ts refuses the declaration and REPORTS the name, and the source does not
+  // compile), which is strictly more than a frontend refusal would say.
   const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
   const rs = relocs([
     { off: 0, type: 'R_MIPS_HI16', sym: '.rodata' },
@@ -129,8 +129,8 @@ test('a high half no low half completes REFUSES instead of lifting the placehold
 });
 
 test('a low half on an UNMODELLED consumer REFUSES and names the relocation it saw', () => {
-  // An FP load is not a modelled global consumer. Today the pair is left raw and the `lwc1` becomes
-  // an opaque — the global access silently deleted. The relocation nothing consumed must refuse.
+  // An FP load is not a modelled global consumer, so the `lwc1` would become an opaque and take
+  // the global access with it. The relocation nothing consumed must refuse instead.
   const asm = '00000000 <getf>:\n   0:\tlui\tv0,0x0\n   4:\tlwc1\t$f0,0(v0)\n   8:\tjr\tra\n   c:\tnop\n';
   const rs = relocs([
     { off: 0, type: 'R_MIPS_HI16', sym: 'gFloat' },
@@ -141,11 +141,10 @@ test('a low half on an UNMODELLED consumer REFUSES and names the relocation it s
 
 test('two high halves of ONE symbol pair by VALUE, not by address order', () => {
   // One symbol, two `lui`s, two `%lo` consumers whose BASE REGISTERS cross — the shape that shows
-  // why address order is the wrong pairing rule. Pairing "the first unconsumed same-symbol LO16
-  // after this HI16" hands each `lui` the other one's consumer; asking SSA which value the base
-  // register holds cannot. The N64 checkouts carry the degenerate form of this (two HI16 against
-  // one symbol sharing a LO16), where greedy pairing rewrites the `lui` that does NOT reach the
-  // consumer and the access then declines for a reason that is not the real one.
+  // why address order is the wrong pairing rule. "The first unconsumed same-symbol LO16 after this
+  // HI16" hands each `lui` the other one's consumer; asking SSA which value the base register holds
+  // here cannot. The N64 checkouts carry the degenerate form, two HI16 against one symbol sharing
+  // one LO16.
   const asm =
     '00000000 <cross>:\n' +
     '   0:\tlui\ta0,0x0\n' +
@@ -162,7 +161,7 @@ test('two high halves of ONE symbol pair by VALUE, not by address order', () => 
   ]);
   // Both `%lo`s fold to the SAME global, so the two accesses share one recovered pointer — element
   // 1 (byte 4, through a1's half) and element 2 (byte 8, through a0's half), each with the offset
-  // its own instruction carried rather than the one greedy pairing would have handed it.
+  // its own instruction carried.
   const src = decompile('cross', asm, MIPS_GCC, { asmData: rs }).source;
   expect(src).toContain('(s32 *)&gTbl');
   expect(src).toContain('p0[1] + p0[2]');
@@ -185,7 +184,7 @@ test('a high half READ AS DATA refuses, naming the lui that produced it', () => 
 test('a lui of 0x0 with NO relocation table refuses instead of rendering address 0', () => {
   // The scalar-load input of the first test, lifted with nothing on the side. `lui` of zero writes
   // zero — which `move rD,zero` says in one instruction — so no compiler emits this; an unrelocated
-  // high half does. It used to lift `*(s8 *)0`, which compiles, so nothing downstream complained.
+  // high half does, and reading it as the number gives `*(s8 *)0`, which compiles.
   const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
   expect(() => decompile('getg', asm, MIPS_GCC)).toThrow(/high half 0x0 with no relocation on it/);
   // and the same input with an EMPTY table is the same case: a table that describes no half here

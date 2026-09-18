@@ -83,38 +83,34 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
 // (frontend/splat.ts); objdump hides the symbol in the relocation table, which is what this reads.
 //
 // EVERY HI16/LO16 IS CARRIED, WHATEVER IT NAMES, and that includes a SECTION symbol (`.data`,
-// `.rodata` — a file-static array, a string literal, any anonymous datum). Excluding those left the
-// pair raw, and raw means the `lui`'s link-time placeholder — the literal 0 in a relocatable object
-// — standing in for the address: `*(u8 *)(0 + i)` compiles, so nothing downstream ever complains.
-// That is the forbidden class, and the only way to close it is to put every record in front of the
-// fold and its choke point.
+// `.rodata` — a file-static array, a string literal, any anonymous datum). A record left off the
+// carrier leaves its pair raw, and raw is the `lui`'s link-time placeholder — the literal 0 in a
+// relocatable object — standing in for the address, which `*(u8 *)(0 + i)` renders and the compiler
+// accepts. Only a carrier that holds every record can put the fold's refusals in front of them.
 //
-// WHETHER THE NAME CAN BE WRITTEN DOWN is a different question, and on MIPS a different seam
-// answers it. A section name is never a C identifier, so a recovered `.data` access is LOUD twice
-// over: rank-declare.ts refuses the declaration and REPORTS the name to the caller, and the
-// candidate's own source does not compile. That is strictly more than a frontend refusal would say,
-// and it is what the mapless-decls tests are designed around.
+// WHETHER THE NAME CAN BE WRITTEN DOWN is a different question, and this frontend does NOT adopt
+// frontend/ppc.ts's naming-policy refusal for it. A section name is never a C identifier, so a
+// recovered `.data` access is already LOUD twice over downstream: rank-declare.ts refuses the
+// declaration and REPORTS the name to the caller, and the candidate's own source does not compile
+// — strictly more than a frontend refusal would say, and what the mapless-decls tests are built
+// around. The rest of the policy has nothing to refuse here, measured rather than assumed: of the
+// 20,262 distinct symbols a `.text` HI16/LO16 names across the three N64 checkouts,
+// `classifyRelocSymbol` answers `plain` for 20,245, `section-local` for 4 and `cpp-mangled` for 13
+// — and all 13 are ORDINARY C NAMES (`game_GameFrame__1F`, `ovl__0078CB80_VRAM`) that the policy's
+// `__<digit>` class-scope marker misreads. Adopting it would refuse 13 names C spells perfectly
+// well and buy nothing: the kind it exists for, a mwcc vtable that would otherwise COMPILE, has no
+// inhabitant on this ISA.
 //
-// So this frontend does NOT clone frontend/ppc.ts's naming-policy refusal, and the reason is
-// measured rather than assumed. Of the 20,262 distinct symbols a `.text` HI16/LO16 names across the
-// three N64 checkouts, `classifyRelocSymbol` answers `plain` for 20,245, `section-local` for 4
-// (`.text`/`.data`/`.rodata`/`.bss`, handled above) and `cpp-mangled` for 13 — and all 13 of those
-// are ORDINARY C NAMES (`game_GameFrame__1F`, `ovl__0078CB80_VRAM`) that the policy's
-// `__<digit>` class-scope marker misreads. Adopting it here would refuse 13 names C spells
-// perfectly well and buy nothing: the kind it exists for, a mwcc vtable that would otherwise
-// COMPILE, has no inhabitant on this ISA.
-//
-// A recovered JUMP TABLE's dispatch is untouched by this: Regime B reads the table through
-// `asmdata.ts` and prunes the dispatch block, so its `lui %hi(.rodata)` never reaches `decode`.
+// A recovered JUMP TABLE's dispatch is untouched: Regime B reads the table through `asmdata.ts` and
+// prunes the dispatch block, so its `lui %hi(.rodata)` never reaches `decode`.
 //
 // `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` are PIC/small-data access, already refused by the
 // `gp`-as-data guard; widening this carrier to them would trade those messages for worse ones
-// without recovering an address, so they stay where they are.
+// without recovering an address.
 //
-// THE ADDEND IS NOT ON THE RECORD. MIPS objects are REL: the relocation has no addend field, and
-// the address's low bits live in the two instruction immediates (`(hi_imm << 16) + (s16)lo_imm`).
-// PowerPC is RELA and carries it on the record, which is the one place the two folds diverge. A
-// MIPS record that DOES carry an addend is therefore not the format assumed here, and refuses.
+// THE ADDEND IS NOT ON THE RECORD. MIPS objects are REL: the relocation has no addend field and the
+// address's low bits live in the two instruction immediates, so a record that DOES carry an addend
+// is not the format assumed here, and refuses.
 function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
   const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
   for (const r of ad.relocs) {
@@ -123,11 +119,10 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
     }
     const ins = byAddr.get(r.offset);
     if (!ins) {
-      // A `.text` record describes the whole section, so most of them belong to the OTHER functions
-      // in this object and are simply not this slice's business. One that lands INSIDE the slice and
-      // still matches no instruction is a different animal: the disassembly this fold reads and the
-      // relocation table it was handed disagree about addressing, and the half it describes would
-      // then stay raw — the placeholder 0 standing in for the symbol. Refuse, naming both.
+      // A `.text` record describes the whole section, so most belong to the object's OTHER
+      // functions and are not this slice's business. One that lands INSIDE the slice and still
+      // matches no instruction means the relocation table and this disassembly disagree about
+      // addressing, and the half it describes would stay raw — so refuse rather than skip it.
       if (r.offset >= instrs[0].addr && r.offset <= instrs[instrs.length - 1].addr) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': relocation '${r.type} ${r.sym}' at 0x${r.offset.toString(16)} falls inside the ` +
@@ -145,8 +140,8 @@ function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
       );
     }
     // At most one relocation per instruction — the same invariant disasm.ts and frontend/splat.ts
-    // enforce on their own inputs, and for the same reason: keeping the last would leave one
-    // symbol standing for the other's operand, silently.
+    // enforce on their own inputs: the carrier is one field, so keeping the last would leave one
+    // symbol standing for the other's operand.
     if (ins.reloc) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': two relocations on one instruction ('${ins.mnemonic}' at ` +
@@ -523,11 +518,10 @@ export function lift(
   const ARG_REGS = target.argRegs;
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
-  // defines — see frontend/high-half.ts for why a register-keyed map cannot answer the question,
-  // and frontend/ppc.ts for the other frontend folding the same invariant. FUNCTION-scoped, because
-  // a value is: SSA is what decides whether a half reaches a given `%lo`, so a pair split across
-  // blocks folds when the half provably reaches, and refuses when what arrives is the block
-  // parameter standing for a merge.
+  // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer
+  // the question; frontend/ppc.ts folds the same one). FUNCTION-scoped, because a value is: a pair
+  // split across blocks folds when SSA says the half reaches, and refuses when what arrives is the
+  // block parameter standing for a merge.
   const highHalves = makeHighHalves({
     hi: '%hi',
     hiArticle: 'a',
@@ -590,9 +584,7 @@ export function lift(
           `cannot lift '${name}': gp used as data (PIC / small-data global access) — not supported`,
         );
       }
-      // A register holding the high half of an address is NOT a value — `lui` defines only a
-      // link-time placeholder, and in a relocatable object the immediate it printed is 0. Refuse
-      // rather than hand back that 0 dressed as the program's answer. The legitimate consumers
+      // A register holding the high half of an address is NOT a value. The legitimate consumers
       // (`addiu %lo`, a `%lo` load/store base) reach the half through `foldLoHalf` instead.
       return highHalves.guardRead(name, r, readVar(r, bi));
     };
@@ -633,17 +625,17 @@ export function lift(
       cmpDef.set(v, { opcode: opc, lhs, rhs });
     };
 
-    // Where a refusal about ONE INSTRUCTION starts, spelled exactly as frontend/ppc.ts spells it —
-    // the artifact's decline text is read row by row across both ISAs.
+    // Where a refusal about ONE INSTRUCTION starts, spelled as frontend/ppc.ts spells it — the
+    // artifact's decline text is read row by row across both ISAs.
     const site = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
-    // Set by every case entitled to fold a relocation, cleared per instruction — see the choke
-    // point at the end of `decode`.
+    // Set by every case entitled to fold a relocation, cleared per instruction, and answered by
+    // `relocPlaceholder`.
     let relocTaken = false;
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
     // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
-    // `constVal(NaN << 16)` and `constVal(NaN)` both render as the literal 0. That is the same
-    // silent substitution the relocation fold exists to close, one level down, so it refuses.
+    // `constVal` renders as the literal 0. That is the relocation fold's own failure one level
+    // down, so it refuses instead.
     const imm = (ins: Instr, text: string | undefined): number => {
       const v = parseImm(text ?? '');
       if (!Number.isFinite(v)) {
@@ -679,12 +671,10 @@ export function lift(
         // and raise/const.ts folds the const/const pair into one 32-bit const — the form that
         // recompiles to this exact `lui;ori`.
         case 'lui':
-          // `lui rD, %hi(SYM)` is the HIGH HALF of a global's address. rD is defined as a
-          // PLACEHOLDER value, not a number: in a relocatable object the immediate objdump printed
-          // is 0, and the address lives in the relocation records. Every way that placeholder could
-          // escape is closed in frontend/high-half.ts; the `gaddr` itself is emitted at the `%lo`
-          // that completes the address. The MIPS half contributes `hi_imm << 16` to the addend —
-          // MIPS relocations are REL, so the addend is in the fields (see attachMipsRelocs).
+          // `lui rD, %hi(SYM)` is the HIGH HALF of a global's address, so rD is defined as a
+          // PLACEHOLDER value rather than a number (frontend/high-half.ts) and the `gaddr` itself
+          // is emitted at the `%lo` that completes the address. Being REL, this half contributes
+          // `hi_imm << 16` to the addend.
           if (ins.reloc?.type === 'R_MIPS_HI16') {
             relocTaken = true;
             const hi = mkValue(T.unk(32));
@@ -697,15 +687,13 @@ export function lift(
             write(d, hi);
             break;
           }
-          // `lui rD, 0x0` WITHOUT a relocation is not code any compiler wrote. `lui` of zero
-          // writes zero, which `move rD,zero` says in one instruction; what does print it is a
-          // relocatable object's UNRELOCATED high half, whose symbol lives in a relocation record
-          // this lift was never handed — the side table was not supplied, or it does not line up
-          // with this disassembly (see attachMipsRelocs). Reading it as the number 0 is the
-          // forbidden class from the other side: the fold above closes every path a CARRIED
-          // relocation could drop, and this closes the path where the record never arrived, so
-          // `*(T *)0` cannot be this frontend's answer either way. A non-zero `lui` is a genuine
-          // absolute address or literal high half (a linked dump, `lui;ori`) and is unaffected.
+          // `lui rD, 0x0` WITHOUT a relocation is not code any compiler wrote: `lui` of zero
+          // writes zero, which `move rD,zero` says in one instruction. What does print it is a
+          // relocatable object's UNRELOCATED high half, whose symbol lives in a record this lift
+          // was never handed — the side table is optional, and a caller may simply not pass one.
+          // Every refusal above covers a relocation that ARRIVED and was dropped; this covers the
+          // one that never arrived, so `*(T *)0` is not the answer either way. A non-zero `lui` is
+          // a genuine absolute address or literal high half (a linked dump, `lui;ori`).
           if (imm(ins, s) === 0) {
             throw new FrontendUnsupportedError(
               `${site(ins)} loads the high half 0x0 with no relocation on it — that is an ` +
@@ -898,10 +886,8 @@ export function lift(
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
       }
-      // THE CHOKE POINT (mirrors the PPC frontend). Everything above either folded the relocation or
-      // threw; one still sitting here was DROPPED, and a dropped relocation leaves the immediate
-      // objdump printed — the literal 0 — standing in for the address. That is the forbidden class:
-      // it compiles, so nothing downstream ever complains. An unmodelled `%lo` consumer (`lwc1`,
+      // THE CHOKE POINT (mirrors the PPC frontend). Every case above either folded the relocation
+      // or threw, so one still sitting here was DROPPED. An unmodelled `%lo` consumer (`lwc1`,
       // `swc1`, `ori`) lands here, which is what keeps "not modelled" from becoming "not emitted".
       if (ins.reloc && !relocTaken) {
         relocPlaceholder(ins);
@@ -921,10 +907,10 @@ export function lift(
     // drop its destination register — emit an honest `opaque`, which fails LOUD at assertResolved
     // whether or not anything reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
-      // THE RELOCATION FIRST. An unmodelled `%lo` consumer (`lwc1`, `swc1`) reaches here, and
-      // `opaqueDest` would refuse it for the lesser reason — "no register destination" — or, for a
-      // form that HAS one, degrade it to an opaque and lose the global access with it. Naming the
-      // relocation is what tells a reader which capability is missing.
+      // THE RELOCATION FIRST. `opaqueDest` would refuse an unmodelled `%lo` consumer for the
+      // lesser reason — "no register destination" — or, for a form that HAS one, degrade it to an
+      // opaque and lose the global access with it. Naming the relocation says which capability is
+      // missing.
       if (ins.reloc) {
         relocPlaceholder(ins);
       }
@@ -951,12 +937,11 @@ export function lift(
       write(od.dst, res);
     };
     const emitUn = kit.un;
-    // `%lo` completes the address a `lui %hi` began. THE PAIRING IS A PROOF, not a guess: the value
-    // `rHi` holds HERE must be the very placeholder a `lui` defined, and both relocations must name
-    // the same symbol. `readVar` — not `read`, which refuses a half — is what answers, so a pair
-    // separated by unrelated instructions folds while a register reused between the halves does not,
-    // and a half that reaches only through a merge or a loop header arrives as the block parameter
-    // standing for the join, which is not a half and refuses.
+    // `%lo` completes the address a `lui %hi` began. The pairing asks SSA — through `readVar`, not
+    // `read`, which refuses a half — what `rHi` holds HERE, so a pair separated by unrelated
+    // instructions folds while a register reused between the halves does not, and a half that
+    // arrives only through a merge or a loop header comes back as the block parameter standing for
+    // the join, which is not a half and refuses.
     const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } => {
       relocTaken = true;
       const lo = ins.reloc!;
@@ -971,9 +956,9 @@ export function lift(
       }
       return { base: emitGaddr(lo.sym), off };
     };
-    // A displacement memory operand whose base is a `%hi` half: resolve it to the global's address
-    // plus the access offset. A non-`%lo` instruction returns null (the caller falls through to the
-    // ordinary `off(base)` path).
+    // A displacement memory operand whose base is a `%hi` half: the global's address plus the
+    // access offset. A non-`%lo` instruction returns null (the caller falls through to the ordinary
+    // `off(base)` path).
     const globalBase = (ins: Instr, mem: string): { base: Value; off: number } | null => {
       if (ins.reloc?.type !== 'R_MIPS_LO16') {
         return null;
@@ -1085,12 +1070,13 @@ export function lift(
     } // unconditional / return: delay slot just executes first
 
     if (!br || isReturn(br)) {
-      // A HIGH HALF IN v0 IS NOT A RETURN VALUE. `v0` is both MIPS's return register and the
-      // register IDO most often parks a `lui %hi` base in, so a VOID function routinely ends with a
-      // half still sitting there (`lui v0,%hi(g); lw v1,%lo(g)(v0); … ; sw v1,%lo(g)(v0)`). Counting
-      // that def would make the function return the placeholder; rejecting it gives the honest void
-      // return. PowerPC needs no such predicate here — `r3` is not mwcc's habitual `lis` base — but
-      // it passes the same one to its call-arity count, for the same reason.
+      // A HIGH HALF IN v0 IS NOT A RETURN VALUE. `v0` is both MIPS's return register and an
+      // ordinary caller-saved scratch, so a void function can end with a half still live in it
+      // (`lui v0,%hi(g); lw v1,%lo(g)(v0); … ; sw v1,%lo(g)(v0)`). Counting that def hands the
+      // placeholder to the `ret` op, and the whole function then declines at `assertNoneEscaped` —
+      // loud, but for a merge that never happened. Rejecting it gives the honest void return.
+      // PowerPC reads its return register through the guard, so the refusal it would get is already
+      // the right one; it passes this same predicate to its call-arity count.
       const retOps = ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v)) ? [readVar(RET, bi)] : [];
       if (!br) {
         ops.push(mkOp('br', { successors: [succ(succAddrs.get(b)![0])] }));

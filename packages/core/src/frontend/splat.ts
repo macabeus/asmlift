@@ -18,10 +18,10 @@
 // `%hi`/`%lo` operands (a global's address) are turned into exactly what a relocatable object
 // carries — an `R_MIPS_HI16`/`R_MIPS_LO16` record on the instruction, plus the immediate the
 // instruction really encodes — so both MIPS dialects reach ONE fold (frontend/mips.ts,
-// frontend/high-half.ts) and neither gets a pairing rule of its own. The encoding is the assembler's:
-// `%hi(x)` is `((x + 0x8000) >> 16) & 0xffff` (ADJUSTED, so the sign-extended low half cancels the
-// carry) and `%lo(x)` is the sign-extended low 16 bits, which is why the fold can recover `x` as
-// `(hi << 16) + (s16)lo` for a positive OR a negative offset without the text spelling it.
+// frontend/high-half.ts) and neither gets a pairing rule of its own. The encoding is the
+// assembler's: `%hi(x)` is `((x + 0x8000) >> 16) & 0xffff`, ADJUSTED so the sign-extended low half
+// cancels the carry, and `%lo(x)` is the sign-extended low 16 bits — which is what lets the fold
+// recover `x` as `(hi << 16) + (s16)lo` for a positive or a negative offset alike.
 // The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are declined LOUD — small-data /
 // position-independent access is not modelled.
 import type { DisasmInstr, DisasmReloc } from './disasm';
@@ -37,8 +37,8 @@ const LABEL_DEF = /^(\.[\w.$]+):$/;
 // access) — declined loud. `%hi`/`%lo` are NOT here: they name a global's address and become
 // relocation records for the MIPS frontend to fold (see normalizeOperand / frontend/mips.ts).
 const RELOC_OP = /%(gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
-// Any `%hi`/`%lo` spelling at all — the half the pattern in `normalizeOperand` is entitled to
-// resolve, so anything else matching this is a half this reader does not understand.
+// Any `%hi`/`%lo` spelling at all, so a half `normalizeOperand`'s pattern cannot resolve is caught
+// rather than falling through to the paths that read an operand as arithmetic.
 const HILO_OP = /%(hi|lo)\s*\(/i;
 // Data directives whose bytes could encode an effect: skipping one inside a function slice would
 // silently delete it, so they decline (mirrors the Thumb frontend's in-code-data guard).
@@ -212,7 +212,7 @@ function splitOperands(s: string): string[] {
 
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
 // `$` register sigil, fold a memory operand's displacement expression, evaluate a bare constant
-// expression, preserve a `%hi`/`%lo` global reference, and decline an unsupported PIC relocation.
+// expression, split a `%hi`/`%lo` reference into an immediate plus its record, decline a PIC one.
 function normalizeOperand(name: string, op: string): { op: string; reloc?: DisasmReloc } {
   // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Becomes the relocation
   // record an object file would carry plus the immediate the instruction really encodes, so the
@@ -226,11 +226,12 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
     const reloc: DisasmReloc = { type: hilo[1] === 'hi' ? 'R_MIPS_HI16' : 'R_MIPS_LO16', sym: hilo[2], addend: 0 };
     return { op: hilo[5] ? `${imm}(${hilo[5].replace(/^\$/, '')})` : String(imm), reloc };
   }
-  // A `%hi`/`%lo` the pattern above did NOT convert is still a relocation operand, and every path
-  // below it treats the text as arithmetic: `%lo(0x800A1234)($v0)` matches the memory-operand shape
-  // and its displacement evaluates to a number, while a bare `%hi(…)` falls through to `plain` and
-  // reaches `parseImm`, which yields NaN and lands in the frontend as the literal 0. Either way the
-  // address is silently replaced by a plausible number, so an unrecognised half refuses here.
+  // A `%hi`/`%lo` the pattern above did NOT convert is still a relocation operand, and the paths
+  // below it read an operand as arithmetic: `%lo(0x800A1234)($v0)` matches the memory-operand shape
+  // and `evalConst` drops the tokens it does not know, so the displacement becomes the bare number
+  // and the access lifts as an index into the base register. A bare `%hi(…)` falls through to
+  // `plain` and the frontend refuses it one level down as a non-numeric immediate; refusing here
+  // says instead that what it saw was a relocation.
   if (HILO_OP.test(op)) {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': relocation operand '${op}' — this reader resolves a '%hi'/'%lo' half ` +

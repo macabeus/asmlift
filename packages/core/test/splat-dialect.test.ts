@@ -56,9 +56,9 @@ const SPLAT_GLOBAL = `glabel getGlobal
 endlabel getGlobal
 `;
 
-// A `%hi`/`%lo` this reader cannot resolve to a symbol. Every path below the pattern treats the
-// text as arithmetic — `%lo(NUM)(reg)` matches the memory-operand shape, a bare `%hi(NUM)` reaches
-// `parseImm` as NaN — so an unrecognised half must refuse rather than become the literal 0.
+// A `%hi`/`%lo` this reader cannot resolve to a symbol. `%lo(NUM)(reg)` matches the memory-operand
+// shape, whose displacement is evaluated as arithmetic, so the address would silently become an
+// index into the base register; the half must refuse instead.
 const SPLAT_NUMERIC_HILO = `glabel f
     /* 200 80000200 3C02800A */  lui        $v0, %hi(0x800A1234)
     /* 204 80000204 03E00008 */  jr         $ra
@@ -73,9 +73,9 @@ test('splat: a %hi/%lo half with no symbol refuses instead of lifting a null bas
 });
 
 test('splat: a non-numeric immediate refuses rather than becoming the literal 0', () => {
-  // An assembler-macro name in an immediate slot reaches the frontend as operand text. Bare
-  // `parseInt` answers NaN there, and every arm that builds a constant renders NaN as 0 — the same
-  // silent substitution one level down from the relocation fold.
+  // An assembler-macro name in an immediate slot reaches the frontend as operand text, where bare
+  // `parseImm` answers NaN and `constVal` would render that as 0 — the relocation fold's own
+  // failure one level down.
   const asm = `glabel f
     /* 200 80000200 24820001 */  addiu      $v0, $a0, MY_CONST
     /* 204 80000204 03E00008 */  jr         $ra
