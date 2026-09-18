@@ -11,7 +11,11 @@ export function sliceSymbol(disasm: string, symbol: string): string {
   const lines = disasm.split('\n');
   const headers: { line: number; sym: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^[0-9a-f]+\s+<([^>]+)>:\s*$/i);
+    // GREEDY to the LAST `>`: a C++ template symbol contains `>` of its own
+    // (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header this pattern cannot see is
+    // worse than one it misreads — the PRECEDING function's slice runs on through it, which is
+    // exactly the "other function's body under the requested name" this function refuses to do.
+    const m = lines[i].match(/^[0-9a-f]+\s+<(.+)>:\s*$/i);
     if (m) {
       headers.push({ line: i, sym: m[1] });
     }
