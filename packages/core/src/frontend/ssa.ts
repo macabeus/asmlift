@@ -45,8 +45,13 @@ export interface SsaBuilder {
    *  elsewhere a parameter is a phi whose position is aligned with its predecessors' terminator
    *  args, and appending an unpaired one would corrupt that. */
   ensureParam(key: string, b: number): void;
-  /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
-  hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
+  /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic).
+   *
+   *  `accept` says what counts as a definition. A frontend that defines a register with something
+   *  that is NOT a value — PowerPC's `@ha` high half — passes a predicate rejecting it, because
+   *  "a def reaches here" and "a value reaches here" are the same question only when every def is
+   *  a value. The distinction is the one `obligedParams` makes above, for the same consumer. */
+  hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
@@ -455,15 +460,21 @@ export function makeSsaBuilder(
     obligedParams[b].set(key, p);
   };
 
-  const hasReachingDef = (reg: string, b: number, seen = new Set<number>()): boolean => {
-    if (defs[b].has(reg)) {
-      return true;
-    }
-    if (seen.has(b)) {
-      return false;
-    }
-    seen.add(b);
-    return preds[b].length > 0 && preds[b].some((p) => hasReachingDef(reg, p, seen));
+  const hasReachingDef = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean => {
+    const walk = (at: number, seen: Set<number>): boolean => {
+      const own = defs[at].get(reg);
+      // A def `accept` rejects does not fall through to the predecessors: it is still a def, and
+      // nothing older than it reaches past it.
+      if (own !== undefined) {
+        return accept(own);
+      }
+      if (seen.has(at)) {
+        return false;
+      }
+      seen.add(at);
+      return preds[at].length > 0 && preds[at].some((p) => walk(p, seen));
+    };
+    return walk(b, new Set<number>());
   };
 
   return {

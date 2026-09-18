@@ -37,7 +37,9 @@ test('a C++ vtable is refused although declaring it would compile', () => {
 test('a spellable symbol is never refused BY NAME — its decline is structural', () => {
   // The two refusals must stay distinguishable. `g_fdinfo` is an ordinary extern, so nothing about
   // the NAME stops it; this listing declines because the `@ha` half has no `@l` completing it.
-  const asm = '   0:\tlis     r3,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_fdinfo\n   4:\tblr\n';
+  // r4, not r3: the `lis` defines its destination, so an `@ha` left in the RETURN register is read
+  // by the `ret` and stops at the read guard instead — also loud, but a different sentence.
+  const asm = '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tg_fdinfo\n   4:\tblr\n';
   expect(() => dis('plain', asm)).toThrow(/no modelled instruction consumes its '@l' half/);
   expect(() => dis('plain', asm)).not.toThrow(/no C source|cannot enter|nothing to declare/);
 });
@@ -141,10 +143,79 @@ test('a register REUSED between the two halves refuses rather than pairing acros
 });
 
 test('the high half read as a VALUE refuses, naming the symbol it belongs to', () => {
-  // The `lis` leaves r4 unwritten on purpose, so a read of r4 would hand back whatever def reached
-  // before it. That is the silent-wrong-address case this whole design exists to make impossible.
+  // The `lis` defines r4 as a placeholder on purpose: a read of r4 must not hand back a number
+  // standing for an address. That is the silent-wrong-address case this design exists to prevent.
   const asm = '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgSym\n' + '   4:\tadd     r3,r4,r5\n   8:\tblr\n';
   expect(() => dis('halfval', asm)).toThrow(/r4 holds the high half of 'gSym'/);
+});
+
+test('a redefinition on a SIBLING path does not unpoison the register on this one', () => {
+  // The high half is live into the `add` at 0x18, and the only definition of r4 in between is on
+  // the arm that block never reaches. A register-keyed record of the pending half is erased by
+  // that write and the read then falls through to whatever def reached before the `lis` — here the
+  // entry parameter, which compiles and reads as ordinary C. SSA is what makes the read honest.
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgVal\n' +
+    '   4:\taddi    r5,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgVal\n' +
+    '   8:\tcmpwi   r3,0\n' +
+    '   c:\tbeq     18 <sibling+0x18>\n' +
+    '  10:\tli      r4,5\n' +
+    '  14:\tb       1c <sibling+0x1c>\n' +
+    '  18:\tadd     r3,r4,r5\n' +
+    '  1c:\tblr\n';
+  expect(() => dis('sibling', asm)).toThrow(/r4 holds the high half of 'gVal'/);
+});
+
+test('a high half that reaches a MERGE refuses — the read there lands on the block parameter', () => {
+  // The read at 0x18 does not see the high half itself: it sees the parameter merging it with the
+  // `li r4,5` arm, so the read guard has nothing to refuse and the half leaves the frontend as a
+  // block argument. The finished function is checked for exactly that.
+  const asm =
+    '   0:\tcmpwi   r3,0\n' +
+    '   4:\tbeq     14 <merge+0x14>\n' +
+    '   8:\tlis     r4,0\n\t\t\ta: R_PPC_ADDR16_HA\tgVal\n' +
+    '   c:\taddi    r5,r4,0\n\t\t\te: R_PPC_ADDR16_LO\tgVal\n' +
+    '  10:\tb       18 <merge+0x18>\n' +
+    '  14:\tli      r4,5\n' +
+    '  18:\tadd     r3,r4,r4\n' +
+    '  1c:\tblr\n';
+  expect(() => dis('merge', asm)).toThrow(/high half of 'gVal'.*reaches a merge/s);
+});
+
+test('a pair SPLIT ACROSS BLOCKS folds when the `lis` reaches the `@l` on every path', () => {
+  // Nothing about a block boundary makes the pairing unsound: what must hold is that the value
+  // r4 holds AT THE `@l` is the one the `lis` defined, which is what SSA answers. The same shape
+  // with a second definition of r4 on another incoming path lands on a block parameter and refuses
+  // (the merge test above).
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgVal\n' +
+    '   4:\tcmpwi   r3,0\n' +
+    '   8:\tbeq     14 <split+0x14>\n' +
+    '   c:\taddi    r3,r4,0\n\t\t\te: R_PPC_ADDR16_LO\tgVal\n' +
+    '  10:\tb       18 <split+0x18>\n' +
+    '  14:\tli      r3,0\n' +
+    '  18:\tblr\n';
+  expect(dis('split', asm)).toContain('&gVal');
+});
+
+test('a pending high half does not count as a call ARGUMENT', () => {
+  // pikmin:searchKanjiCode__FUs's shape: the `lis` is hoisted into the prologue and its `@l` lands
+  // after the `bl`, so r4 carries the half across the call. A high half is a definition but not a
+  // value; counted by the prototype-less arity heuristic it turns `strlen(s)` into a two-argument
+  // call whose second argument is the half — which then refuses at the read, hiding the real
+  // decline behind a guard the row never actually hit.
+  const asm =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
+    '   4:\taddi    r3,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    '   8:\tbl      8 <argc+0x8>\n\t\t\t8: R_PPC_REL24\tstrlen\n' +
+    '   c:\tblr\n';
+  expect(dis('argc', asm)).toContain('strlen(&kanji_convert_table)');
+  const hoisted =
+    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
+    '   4:\tbl      4 <argc2+0x4>\n\t\t\t4: R_PPC_REL24\tstrlen\n' +
+    '   8:\taddi    r3,r4,0\n\t\t\ta: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    '   c:\tblr\n';
+  expect(dis('argc2', hoisted)).toContain('strlen()');
 });
 
 test('an `@ha` whose `@l` never arrives refuses — the `lis` is not silently dropped', () => {
