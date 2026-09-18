@@ -54,6 +54,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
+import { unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
@@ -365,10 +366,21 @@ export function lift(
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
   // The jump-table idiom's own @tbl pair never reaches these guards: a recovered dispatch block
   // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
-  const relocPlaceholder = (ins: Instr): void => {
+  //
+  // TWO refusals, because they are different problems and the reader acts on them differently. A
+  // symbol the naming policy calls unspellable (frontend/reloc-symbol.ts) is a DEAD END: recovering
+  // the address perfectly would still leave a name no C source can write, so no amount of lifting
+  // opens the row. A spellable symbol is a CAPABILITY GAP: the address is recoverable and the row
+  // waits on the fold. Saying which one a row hit is the whole value of the message.
+  const relocPlaceholder = (ins: Instr): never => {
+    const sym = ins.reloc?.sym ?? '';
+    const where = `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
+    const unspellable = unspellableReason(sym);
     throw new PpcUnsupportedError(
-      `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries a data relocation ` +
-        `('${ins.reloc?.sym}') — the printed immediate is a link-time placeholder, not the value`,
+      unspellable
+        ? `${where} ${unspellable}`
+        : `${where} carries a data relocation ('${sym}') — the printed immediate is a link-time ` +
+            `placeholder, not the value`,
     );
   };
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
