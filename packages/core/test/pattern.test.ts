@@ -522,6 +522,24 @@ test('a second reader of the ROOT still folds — those uses come along with the
   expect(print(fn)).toContain('sext %0 {width=8}');
 });
 
+// A BRANCH ARGUMENT is a reader too, and it is the only kind that reaches no operand list: `br`
+// carries its arguments in `successors[].args` and has zero operands. Scanning operands alone would
+// let a shift pair whose interior survives into a join fold anyway — an ordinary MIPS shape, and the
+// exact recompute the refusal exists to prevent.
+test('an interior read only by a BRANCH ARGUMENT still refuses the fold', () => {
+  const fn = parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = shl %0 {imm=24}
+  %2: unk32 = shr_s %1 {imm=24}
+  br ^bb1(%1, %2)
+^bb1(%3: unk32, %4: unk32):
+  %5: unk32 = add %3, %4
+  ret %5
+}`);
+  expect(applyPattern(fn, SEXT8, MIPS_IDO)).toBe(0);
+  expect(print(fn)).toContain('shl %0');
+});
+
 // Same discipline as `ordered` and `unsequencedRightFirst`: a declaration that could never have an
 // effect is a pattern author's mistake, and patterns are meant to become generated DATA.
 test('naming a compiler the pattern does not apply to throws, naming the pattern', () => {
