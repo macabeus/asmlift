@@ -19,12 +19,12 @@
 
 /** What sort of name a relocation carries. Everything but `plain` is unspellable in C. */
 export type RelocSymbolKind =
-  'plain' | 'anon-pool' | 'section-local' | 'local-static' | 'cpp-vtable' | 'not-an-identifier';
+  'plain' | 'anon-pool' | 'section-local' | 'local-static' | 'cpp-vtable' | 'cpp-mangled' | 'not-an-identifier';
 
-/** Classify a relocation's symbol by its spelling. Order matters: the three shapes that ARE valid
- *  C identifiers (`__vt__…`) or contain characters a C identifier may not (`@`, `.`, `$`) are each
- *  recognised before the general identifier test, so the catch-all below can be exactly "a name of
- *  no kind this policy knows, and not an identifier either". */
+/** Classify a relocation's symbol by its spelling. Order matters: the shapes that ARE valid C
+ *  identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C identifier may
+ *  not (`@`, `.`, `$`) are each recognised before the general identifier test, so the catch-all
+ *  below can be exactly "a name of no kind this policy knows, and not an identifier either". */
 export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   if (sym.startsWith('@')) {
     return 'anon-pool'; // `@193` — mwcc's anonymous string/constant pool entries
@@ -37,6 +37,13 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   }
   if (sym.startsWith('__vt__')) {
     return 'cpp-vtable'; // `__vt__6System` — a compiler-emitted virtual table
+  }
+  // mwcc mangles a class-scoped name as `<name>__<length><Class>` (`statbuff__9CmdStream`) or,
+  // for a nested scope, `<name>__Q<depth><…>` (`__ct__Q26Action5ChildFv`). The marker is the `__`
+  // followed by that LENGTH or `Q<depth>`, never a double underscore on its own: a rule that fired
+  // on `__` would refuse ordinary C globals like `g_my__table` and `__initialised`.
+  if (/__(?:\d|Q\d)/.test(sym)) {
+    return 'cpp-mangled';
   }
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sym) ? 'plain' : 'not-an-identifier';
 }
@@ -67,6 +74,12 @@ export function unspellableReason(sym: string): string | null {
       return (
         `names a C++ virtual table ('${sym}') — the compiler emits it from a class definition, so ` +
         `no source spells it (and declaring it anyway would compile, which is why this refuses)`
+      );
+    case 'cpp-mangled':
+      return (
+        `names a C++ mangled symbol ('${sym}') — the name is what the compiler made of a class ` +
+        `scope, not what any source writes, and the C emitted here cannot enter that scope to ` +
+        `spell it`
       );
     case 'not-an-identifier':
       return `names '${sym}', which is not a C identifier`;
