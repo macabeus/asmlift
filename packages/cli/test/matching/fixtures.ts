@@ -641,7 +641,6 @@ export const FIXTURES: DecompFixture[] = [
       '            v1 = v1 - 1;\n' +
       '        } while (v1 != 0);\n' +
       '    }\n' +
-      '    return;\n' +
       '}\n',
     // NOT yet byte-exact, and the pin says exactly how close: the guarded self-loop claim emits
     // the inits ahead of the guard (which reads the initialized counter), leaving only the

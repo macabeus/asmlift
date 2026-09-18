@@ -645,9 +645,14 @@ export function sinkReturns(
       continue;
     }
     for (const p of brPreds) {
-      const args = p.ops[p.ops.length - 1].successors[0].args;
-      const sunk = ret.operands.map((o) => args[m.params.indexOf(o)]);
-      p.ops[p.ops.length - 1] = mkOp('ret', { operands: sunk });
+      const t = p.ops[p.ops.length - 1];
+      const sunk = ret.operands.map((o) => t.successors[0].args[m.params.indexOf(o)]);
+      // The `br` being replaced carries whether the machine BRANCHED to this epilogue or fell into
+      // it — the fact `structure.ts` reads to decide whether the source spelled a `return;` here.
+      // Sinking puts the return ON that edge, so the edge's fact travels with it; without this the
+      // structurer would ask the new return block's in-edges instead, and they are about reaching
+      // the statements above the return, not about reaching the epilogue.
+      p.ops[p.ops.length - 1] = mkOp('ret', { operands: sunk, attrs: { ...t.attrs } });
       changed = true;
     }
     // If no predecessor still branches to m (all were unconditional), it is unreachable — drop it.

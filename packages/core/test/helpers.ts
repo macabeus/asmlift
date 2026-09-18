@@ -404,7 +404,14 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
     }
     return 'none';
   };
-  exec(sfn.body);
+  // FALLING OFF THE END OF A void FUNCTION IS A RETURN, and it is the SAME return the IR's `ret`
+  // op makes — `irTraceOf` records one on every path, so a tree that spells the trailing `return;`
+  // and a tree that does not have to trace alike or the differential reports a spelling as a
+  // clobber. `l3/tailret.ts` drops exactly that statement where the asm shows the machine fell into
+  // its epilogue, which is what made the two readings visibly disagree.
+  if (exec(sfn.body) !== 'return') {
+    trace.push({ fn: 'ret', args: [] });
+  }
   return trace;
 }
 

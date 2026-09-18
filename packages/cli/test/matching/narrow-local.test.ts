@@ -34,7 +34,7 @@ const CASES: { name: string; c: string; returnsVoid?: boolean; expect: string }[
     expect:
       'void basefold(s32 a0, s32 a1) {\n    s16 v0;\n    v0 = 0;\n    do {\n' +
       '        ((u16 *)((v0 << 1) + a0))[2] = ((u16 *)((v0 << 1) + a1))[2];\n' +
-      '        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n',
+      '        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n}\n',
   },
   // synthetic:mergenarrow — the carrier a LOOP does not carry. gcc sinks the write-back truncation
   // past the join, so the evidence for the width is `zext16` read by `sext16` at the carrier's own
