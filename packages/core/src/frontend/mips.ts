@@ -82,24 +82,43 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
 // Splat dialect spells `%hi`/`%lo` in the operand text and writes its own records
 // (frontend/splat.ts); objdump hides the symbol in the relocation table, which is what this reads.
 //
-// TWO KINDS ARE CARRIED, AND ONLY TWO. `R_MIPS_HI16`/`R_MIPS_LO16` against a NAMED symbol are a
-// global's address and are this fold's business. Everything else is deliberately left off the
-// instruction:
-//   - a SECTION symbol (`.rodata`, `.data`) is a jump-table base or section-relative data, read
-//     through a different seam entirely (`asmdata.ts`'s table reader, Regime B). Carrying it would
-//     put a half nothing folds in front of the choke point and refuse a dispatch that works.
-//   - `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` are PIC/small-data access, already refused by
-//     the `gp`-as-data guard. Widening this carrier to them would trade those messages for worse
-//     ones without recovering an address, so they stay where they are.
+// EVERY HI16/LO16 IS CARRIED, WHATEVER IT NAMES, and that includes a SECTION symbol (`.data`,
+// `.rodata` — a file-static array, a string literal, any anonymous datum). Excluding those left the
+// pair raw, and raw means the `lui`'s link-time placeholder — the literal 0 in a relocatable object
+// — standing in for the address: `*(u8 *)(0 + i)` compiles, so nothing downstream ever complains.
+// That is the forbidden class, and the only way to close it is to put every record in front of the
+// fold and its choke point.
+//
+// WHETHER THE NAME CAN BE WRITTEN DOWN is a different question, and on MIPS a different seam
+// answers it. A section name is never a C identifier, so a recovered `.data` access is LOUD twice
+// over: rank-declare.ts refuses the declaration and REPORTS the name to the caller, and the
+// candidate's own source does not compile. That is strictly more than a frontend refusal would say,
+// and it is what the mapless-decls tests are designed around.
+//
+// So this frontend does NOT clone frontend/ppc.ts's naming-policy refusal, and the reason is
+// measured rather than assumed. Of the 20,262 distinct symbols a `.text` HI16/LO16 names across the
+// three N64 checkouts, `classifyRelocSymbol` answers `plain` for 20,245, `section-local` for 4
+// (`.text`/`.data`/`.rodata`/`.bss`, handled above) and `cpp-mangled` for 13 — and all 13 of those
+// are ORDINARY C NAMES (`game_GameFrame__1F`, `ovl__0078CB80_VRAM`) that the policy's
+// `__<digit>` class-scope marker misreads. Adopting it here would refuse 13 names C spells
+// perfectly well and buy nothing: the kind it exists for, a mwcc vtable that would otherwise
+// COMPILE, has no inhabitant on this ISA.
+//
+// A recovered JUMP TABLE's dispatch is untouched by this: Regime B reads the table through
+// `asmdata.ts` and prunes the dispatch block, so its `lui %hi(.rodata)` never reaches `decode`.
+//
+// `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` are PIC/small-data access, already refused by the
+// `gp`-as-data guard; widening this carrier to them would trade those messages for worse ones
+// without recovering an address, so they stay where they are.
 //
 // THE ADDEND IS NOT ON THE RECORD. MIPS objects are REL: the relocation has no addend field, and
 // the address's low bits live in the two instruction immediates (`(hi_imm << 16) + (s16)lo_imm`).
 // PowerPC is RELA and carries it on the record, which is the one place the two folds diverge. A
 // MIPS record that DOES carry an addend is therefore not the format assumed here, and refuses.
-function attachMipsRelocs(instrs: Instr[], ad: AsmData): void {
+function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
   const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
   for (const r of ad.relocs) {
-    if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16') || r.sym.startsWith('.')) {
+    if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16')) {
       continue;
     }
     const ins = byAddr.get(r.offset);
@@ -108,8 +127,18 @@ function attachMipsRelocs(instrs: Instr[], ad: AsmData): void {
     }
     if (r.addend !== 0) {
       throw new FrontendUnsupportedError(
-        `relocation '${r.type} ${r.sym}' at 0x${r.offset.toString(16)} carries an addend (0x${r.addend.toString(16)}), ` +
-          `but MIPS relocations are REL and hold the addend in the instruction fields — this object is not the assumed format`,
+        `cannot lift '${name}': relocation '${r.type} ${r.sym}' at 0x${r.offset.toString(16)} carries an addend ` +
+          `(0x${r.addend.toString(16)}), but MIPS relocations are REL and hold the addend in the instruction ` +
+          `fields — this object is not the assumed format`,
+      );
+    }
+    // At most one relocation per instruction — the same invariant disasm.ts and frontend/splat.ts
+    // enforce on their own inputs, and for the same reason: keeping the last would leave one
+    // symbol standing for the other's operand, silently.
+    if (ins.reloc) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': two relocations on one instruction ('${ins.mnemonic}' at ` +
+          `0x${ins.addr.toString(16)}): '${ins.reloc.type} ${ins.reloc.sym}' and '${r.type} ${r.sym}'`,
       );
     }
     ins.reloc = { type: r.type, sym: r.sym, addend: 0 };
@@ -417,10 +446,10 @@ export function lift(
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
   // Carry the object's relocations on the instructions they fill (objdump dialect only — Splat
-  // text spells the halves and writes its own records). Runs AFTER jump-table recovery so that
-  // reads `.text` relocs pristine; only NAMED HI16/LO16 are carried, so a table base is untouched.
+  // text spells the halves and writes its own records). Runs AFTER jump-table recovery, so that
+  // reads `.text` relocs pristine and a recovered table base is decided before any of this.
   if (!splat && asmData) {
-    attachMipsRelocs(instrs, asmData);
+    attachMipsRelocs(name, instrs, asmData);
   }
   // TRUSTWORTHINESS: fail LOUD on a control transfer this frontend cannot model — the `opaque`
   // path cannot catch these (implicit or no register destination). `jal`/`jalr` clobber `v0`
@@ -591,9 +620,27 @@ export function lift(
       cmpDef.set(v, { opcode: opc, lhs, rhs });
     };
 
+    // Where a refusal about ONE INSTRUCTION starts, spelled exactly as frontend/ppc.ts spells it —
+    // the artifact's decline text is read row by row across both ISAs.
+    const site = (ins: Instr) => `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)}`;
     // Set by every case entitled to fold a relocation, cleared per instruction — see the choke
     // point at the end of `decode`.
     let relocTaken = false;
+    // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
+    // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
+    // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
+    // `constVal(NaN << 16)` and `constVal(NaN)` both render as the literal 0. That is the same
+    // silent substitution the relocation fold exists to close, one level down, so it refuses.
+    const imm = (ins: Instr, text: string | undefined): number => {
+      const v = parseImm(text ?? '');
+      if (!Number.isFinite(v)) {
+        throw new FrontendUnsupportedError(
+          `${site(ins)} has the non-numeric ` +
+            `immediate '${text ?? ''}' where a number belongs — this frontend will not read it as one`,
+        );
+      }
+      return v;
+    };
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       relocTaken = false;
@@ -612,7 +659,7 @@ export function lift(
           write(d, read(s));
           break; // pseudo: addu/or rD,rS,zero
         case 'li':
-          write(d, constVal(parseImm(s)));
+          write(d, constVal(imm(ins, s)));
           break; // pseudo: load immediate
         // `lui rD, hi` loads the 16-bit immediate into the UPPER half (mirrors PPC `lis`). Alone it
         // is the high half of a 32-bit literal; the following `ori`/`addiu` supplies the low half
@@ -630,7 +677,7 @@ export function lift(
             const hi = mkValue(T.unk(32));
             highHalves.record(hi, {
               sym: ins.reloc.sym,
-              addend: parseImm(s ?? '0') << 16,
+              addend: imm(ins, s ?? '0') << 16,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
               consumed: false,
@@ -638,7 +685,7 @@ export function lift(
             write(d, hi);
             break;
           }
-          write(d, constVal((parseImm(s) << 16) >> 0));
+          write(d, constVal((imm(ins, s) << 16) >> 0));
           break;
         case 'addiu':
         case 'addi':
@@ -651,7 +698,7 @@ export function lift(
           // `addiu rD, rHi, %lo(SYM)` completes a global's address begun by a `lui %hi(SYM)`:
           // rD = &SYM (+ a byte offset into it). Emits the shared `gaddr` op.
           if (ins.reloc?.type === 'R_MIPS_LO16') {
-            const { base: g, off } = foldLoHalf(ins, s, parseImm(t));
+            const { base: g, off } = foldLoHalf(ins, s, imm(ins, t));
             // `&SYM` (offset 0), or `&SYM + N` for a byte offset into the global. The `add` tree is
             // folded byte-correctly by memAccess when this address is a load/store base; if it
             // instead ESCAPES as a value, `assertDerefsTyped` declines it (the byte offset would
@@ -660,10 +707,10 @@ export function lift(
             break;
           }
           if (isZero(s)) {
-            write(d, constVal(parseImm(t)));
+            write(d, constVal(imm(ins, t)));
             break;
           } // li idiom
-          emitBin('add', d, read(s), constVal(parseImm(t)));
+          emitBin('add', d, read(s), constVal(imm(ins, t)));
           break;
         case 'addu':
         case 'add':
@@ -723,19 +770,19 @@ export function lift(
           emitBin('and', d, read(s), read(t));
           break;
         case 'andi':
-          emitBin('and', d, read(s), constVal(parseImm(t)));
+          emitBin('and', d, read(s), constVal(imm(ins, t)));
           break;
         case 'or':
           isZero(t) ? write(d, read(s)) : emitBin('or', d, read(s), read(t));
           break;
         case 'ori':
-          emitBin('or', d, read(s), constVal(parseImm(t)));
+          emitBin('or', d, read(s), constVal(imm(ins, t)));
           break;
         case 'xor':
           emitBin('xor', d, read(s), read(t));
           break;
         case 'xori':
-          emitBin('xor', d, read(s), constVal(parseImm(t)));
+          emitBin('xor', d, read(s), constVal(imm(ins, t)));
           break;
         // `nor rD, x, zero` / `nor rD, zero, x` = ~x (GCC emits the zero in EITHER operand — e.g.
         // its branchless `x<0?0:x` uses `nor v0,zero,a0`; IDO tends to put zero second).
@@ -755,13 +802,13 @@ export function lift(
           break;
         }
         case 'sll':
-          emitShImm('shl', d, read(s), t);
+          kit.shImm('shl', d, read(s), imm(ins, t));
           break;
         case 'srl':
-          emitShImm('shr_u', d, read(s), t);
+          kit.shImm('shr_u', d, read(s), imm(ins, t));
           break;
         case 'sra':
-          emitShImm('shr_s', d, read(s), t);
+          kit.shImm('shr_s', d, read(s), imm(ins, t));
           break;
         // Variable shift `<op>v rD, rT, rS` = rD = rT <shift> rS: VALUE is rT (=s), AMOUNT is rS
         // (=t) — value-then-amount, unlike `slt rD,rS,rT`.
@@ -785,13 +832,13 @@ export function lift(
           emitCmp('icmp_slt', d, read(s), read(t));
           break;
         case 'slti':
-          emitCmp('icmp_slt', d, read(s), constVal(parseImm(t)));
+          emitCmp('icmp_slt', d, read(s), constVal(imm(ins, t)));
           break;
         case 'sltu':
           emitCmp('icmp_ult', d, read(s), read(t));
           break;
         case 'sltiu':
-          emitCmp('icmp_ult', d, read(s), constVal(parseImm(t)));
+          emitCmp('icmp_ult', d, read(s), constVal(imm(ins, t)));
           break;
         // typed memory: `off(base)` addressing. Width/signedness come from the mnemonic; the
         // base is typed a pointer-to-element during recovery, mirroring the Thumb frontend.
@@ -837,7 +884,7 @@ export function lift(
     const relocPlaceholder = (ins: Instr): never => {
       const r = ins.reloc!;
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries '${r.type}' against ` +
+        `${site(ins)} carries '${r.type}' against ` +
           `'${r.sym}' but is not a modelled consumer of it — the printed immediate is a link-time ` +
           `placeholder, not the value`,
       );
@@ -876,7 +923,6 @@ export function lift(
       write(od.dst, res);
     };
     const emitUn = kit.un;
-    const emitShImm = (opc: Opcode, d: string, x: Value, sa: string) => kit.shImm(opc, d, x, parseImm(sa));
     // `%lo` completes the address a `lui %hi` began. THE PAIRING IS A PROOF, not a guess: the value
     // `rHi` holds HERE must be the very placeholder a `lui` defined, and both relocations must name
     // the same symbol. `readVar` — not `read`, which refuses a half — is what answers, so a pair
@@ -889,7 +935,7 @@ export function lift(
       const hi = highHalves.get(readVar(rHi, bi));
       if (!hi || hi.sym !== lo.sym) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries the '%lo' half of ` +
+          `${site(ins)} carries the '%lo' half of ` +
             `'${lo.sym}' but ${rHi} ` +
             (hi
               ? `holds the high half of '${hi.sym}'`
@@ -903,7 +949,7 @@ export function lift(
       const off = hi.addend + loImm;
       if (off < 0) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} completes '${lo.sym}' at ` +
+          `${site(ins)} completes '${lo.sym}' at ` +
             `byte offset ${off} — an address BELOW the symbol (an index-biased array base) is not yet modelled`,
         );
       }

@@ -56,6 +56,35 @@ const SPLAT_GLOBAL = `glabel getGlobal
 endlabel getGlobal
 `;
 
+// A `%hi`/`%lo` this reader cannot resolve to a symbol. Every path below the pattern treats the
+// text as arithmetic — `%lo(NUM)(reg)` matches the memory-operand shape, a bare `%hi(NUM)` reaches
+// `parseImm` as NaN — so an unrecognised half must refuse rather than become the literal 0.
+const SPLAT_NUMERIC_HILO = `glabel f
+    /* 200 80000200 3C02800A */  lui        $v0, %hi(0x800A1234)
+    /* 204 80000204 03E00008 */  jr         $ra
+    /* 208 80000208 8C422884 */   lw        $v0, %lo(0x800A1234)($v0)
+endlabel f
+`;
+
+test('splat: a %hi/%lo half with no symbol refuses instead of lifting a null base', () => {
+  expect(() => decompile('f', SPLAT_NUMERIC_HILO, MIPS_IDO)).toThrow(
+    /relocation operand '%hi\(0x800A1234\)'.*only against a symbol/s,
+  );
+});
+
+test('splat: a non-numeric immediate refuses rather than becoming the literal 0', () => {
+  // An assembler-macro name in an immediate slot reaches the frontend as operand text. Bare
+  // `parseInt` answers NaN there, and every arm that builds a constant renders NaN as 0 — the same
+  // silent substitution one level down from the relocation fold.
+  const asm = `glabel f
+    /* 200 80000200 24820001 */  addiu      $v0, $a0, MY_CONST
+    /* 204 80000204 03E00008 */  jr         $ra
+    /* 208 80000208 00000000 */   nop
+endlabel f
+`;
+  expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/non-numeric immediate 'MY_CONST' where a number belongs/);
+});
+
 test('splat: detection is positive on glabel / instruction-comment prefixes, negative on objdump', () => {
   expect(isSplatMips(SPLAT_CLAMP)).toBe(true);
   expect(isSplatMips('00000000 <add1>:\n   0:\tjr\tra\n   4:\taddiu\tv0,a0,1\n')).toBe(false);

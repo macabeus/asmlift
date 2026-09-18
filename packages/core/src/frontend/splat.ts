@@ -37,6 +37,9 @@ const LABEL_DEF = /^(\.[\w.$]+):$/;
 // access) — declined loud. `%hi`/`%lo` are NOT here: they name a global's address and become
 // relocation records for the MIPS frontend to fold (see normalizeOperand / frontend/mips.ts).
 const RELOC_OP = /%(gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
+// Any `%hi`/`%lo` spelling at all — the half the pattern in `normalizeOperand` is entitled to
+// resolve, so anything else matching this is a half this reader does not understand.
+const HILO_OP = /%(hi|lo)\s*\(/i;
 // Data directives whose bytes could encode an effect: skipping one inside a function slice would
 // silently delete it, so they decline (mirrors the Thumb frontend's in-code-data guard).
 const DATA_DIRECTIVE =
@@ -222,6 +225,18 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
     const imm = hilo[1] === 'hi' ? ((addend + 0x8000) >> 16) & 0xffff : (addend << 16) >> 16;
     const reloc: DisasmReloc = { type: hilo[1] === 'hi' ? 'R_MIPS_HI16' : 'R_MIPS_LO16', sym: hilo[2], addend: 0 };
     return { op: hilo[5] ? `${imm}(${hilo[5].replace(/^\$/, '')})` : String(imm), reloc };
+  }
+  // A `%hi`/`%lo` the pattern above did NOT convert is still a relocation operand, and every path
+  // below it treats the text as arithmetic: `%lo(0x800A1234)($v0)` matches the memory-operand shape
+  // and its displacement evaluates to a number, while a bare `%hi(…)` falls through to `plain` and
+  // reaches `parseImm`, which yields NaN and lands in the frontend as the literal 0. Either way the
+  // address is silently replaced by a plausible number, so an unrecognised half refuses here.
+  if (HILO_OP.test(op)) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': relocation operand '${op}' — this reader resolves a '%hi'/'%lo' half ` +
+        `only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve ` +
+        `as arithmetic`,
+    );
   }
   if (RELOC_OP.test(op)) {
     throw new FrontendUnsupportedError(

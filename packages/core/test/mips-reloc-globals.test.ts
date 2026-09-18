@@ -1,9 +1,13 @@
-// The objdump→gaddr reloc bridge (frontend/mips.ts applyMipsGlobalRelocs): in an object file a
-// global load shows `lui rX,0x0` with the symbol only in the R_MIPS_HI16/LO16 relocations. Given
-// the asmData side-table, the frontend rewrites those into `%hi(SYM)`/`%lo(SYM+N)` operands so the
-// gaddr recognition (shared with the Splat dialect) recovers the named global — instead of reading
-// address 0 as `*(T *)0`. This is what lets asmlift match global access in the benchmark's objdump
-// tier, symmetric with the symbols the harness feeds m2c.
+// The objdump relocation fold (frontend/mips.ts + the shared frontend/high-half.ts): in an object
+// file a global access shows `lui rX,0x0` with the symbol living only in the R_MIPS_HI16/LO16
+// records. Given the asmData side-table the frontend carries each record on its instruction and
+// folds the pair, BY SSA VALUE, into one `gaddr` — instead of reading the placeholder immediate as
+// address 0 and rendering `*(T *)0`. That is what lets asmlift match global access in the
+// benchmark's objdump tier, symmetric with the symbols the harness feeds m2c.
+//
+// The other half of the file is the refusals: every path that does NOT fold a record must say so,
+// because a dropped record leaves the literal 0 standing where the symbol belongs and `*(T *)0`
+// compiles — the silent wrong answer this project never ships.
 import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -49,16 +53,62 @@ test('an addiu-materialised global base + plain-offset access recovers through t
   expect(decompile('getm', asm, MIPS_GCC, { asmData: rs }).source).toContain('&gArr');
 });
 
-test('a section-symbol reloc (jump-table base / anonymous data) is NOT rewritten as a global', () => {
-  // A `.rodata`/`.data` section reloc is a jump-table base or section-relative data — the bridge
-  // leaves it raw so Regime-B recovery owns it; it must not become a bogus `%hi(.rodata)` global.
+test('a SECTION-symbol reloc is folded and named, never left to render as the literal 0', () => {
+  // `.rodata`/`.data` names an offset into a section — an anonymous datum C cannot spell. Excluding
+  // it from the carrier left the pair raw, and raw is the `lui`'s link-time placeholder: this same
+  // input used to render `*(s8 *)0`, a wrong answer that compiles. The fold now recovers the name;
+  // it is loud twice over downstream (rank-declare.ts refuses the declaration and REPORTS it, and
+  // the source does not compile), which is strictly more than a frontend refusal would say.
   const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
   const rs = relocs([
     { off: 0, type: 'R_MIPS_HI16', sym: '.rodata' },
     { off: 8, type: 'R_MIPS_LO16', sym: '.rodata' },
   ]);
-  // unchanged from the no-reloc behaviour: the raw address read, never a named global
-  expect(decompile('getg', asm, MIPS_GCC, { asmData: rs }).source).toContain('*(s8 *)0');
+  const src = decompile('getg', asm, MIPS_GCC, { asmData: rs }).source;
+  expect(src).toContain('.rodata');
+  expect(src).not.toContain('*(s8 *)0');
+});
+
+test('two relocations on one instruction refuse rather than silently keeping the last', () => {
+  // The carrier is one field. Keeping the last record would leave one symbol standing for the
+  // other's operand — the same invariant disasm.ts and frontend/splat.ts enforce on their inputs.
+  const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
+  const rs = relocs([
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gFirst' },
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gSecond' },
+    { off: 8, type: 'R_MIPS_LO16', sym: 'gFirst' },
+  ]);
+  expect(() => decompile('getg', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /two relocations on one instruction.*gFirst.*gSecond/s,
+  );
+});
+
+test('a relocation carrying an addend refuses — MIPS is REL and the addend rides the instruction', () => {
+  // The fold reads the addend out of the two instruction immediates. A record that ALSO carries one
+  // is a format this reader does not understand, and folding it anyway would count the offset twice.
+  const asm = '00000000 <getg>:\n   0:\tlui\tv0,0x0\n   4:\tjr\tra\n   8:\tlb\tv0,0(v0)\n';
+  const rs = relocs([
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gByte' },
+    { off: 8, type: 'R_MIPS_LO16', sym: 'gByte' },
+  ]);
+  rs.relocs[1] = { ...rs.relocs[1], addend: 0x10 };
+  expect(() => decompile('getg', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /carries an addend \(0x10\).*MIPS relocations are REL/s,
+  );
+});
+
+test('an address BELOW the symbol refuses instead of folding an index-biased base', () => {
+  // `lui %hi(gTab-8000)` / `lw %lo(gTab-8000)` recombines to byte offset -8000. The arithmetic is
+  // right, but an address below a symbol is an index-biased array base — a capability with its own
+  // `memAccess` question, unbuilt and unbenched — and this frontend will not guess at it.
+  const asm = '00000000 <getn>:\n   0:\tlui\tv0,0xffff\n   4:\tjr\tra\n   8:\tlw\tv0,-32768(v0)\n';
+  const rs = relocs([
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gTab' },
+    { off: 8, type: 'R_MIPS_LO16', sym: 'gTab' },
+  ]);
+  expect(() => decompile('getn', asm, MIPS_GCC, { asmData: rs })).toThrow(
+    /completes 'gTab' at byte offset -\d+ — an address BELOW the symbol/s,
+  );
 });
 
 // ── The high half is not a value ────────────────────────────────────────────────────────────────
