@@ -55,7 +55,7 @@ npm install -g @asmlift/cli
 npm install --save-dev @asmlift/cli
 ```
 
-**2.** Configure `decomp.yaml` by adding `platform` and, optionally, add `tools.asmlift.compiler` and `tools.asmlift.target`. Check for more examples [here](./apps/benchmark/dataset/toolchains).
+**2.** Configure `decomp.yaml` by adding `platform` and, optionally, `tools.asmlift.target`, `tools.asmlift.compiler` and `tools.asmlift.elf`. Check for more examples [here](./apps/benchmark/dataset/toolchains).
 
 ```yaml
 # example decomp.yaml snippet for a GBA project
@@ -75,12 +75,23 @@ tools:
     # one is covered in the CLI documentation linked below.
     elf: rom.elf
 
-    # Optional. Used only for the `--score-against`
+    # Optional. The command that compiles a candidate for `--score-against` — and the place
+    # asmlift reads this file's codegen flags from when nothing else states them. A project whose
+    # units build with several flag sets writes `{{cflags}}` here instead and lets asmlift find
+    # each function's unit; `--cflags` overrides both.
     compiler: |
       arm-none-eabi-cpp -nostdinc -I tools/agbcc/include {{inputPath}} -o {{outputPath}}.i
       ./tools/agbcc/bin/agbcc {{outputPath}}.i -o {{outputPath}}.s -mthumb-interwork -O2 -fhex-asm
       arm-none-eabi-as -mcpu=arm7tdmi -mthumb-interwork {{outputPath}}.s -o {{outputPath}}
 ```
+
+> 🎮 **A GameCube/Wii project** (`platform: gc`) wires up differently, because its units build with
+> many flag sets: `compiler` takes `{{cflags}}` — plus `{{cc}}` where a unit names its own
+> CodeWarrior build — and asmlift reads each function's flags from the `objdiff.json` beside
+> `decomp.yaml`. A function in a REL module needs `--module <name>`, which both narrows that lookup
+> and points asmlift at the module's own symbols. See
+> [Compiler flags](./packages/cli/README.md#compiler-flags) and
+> [REL modules](./packages/cli/README.md#rel-modules).
 
 **3.** Decompile and verify in one step:
 
@@ -93,6 +104,7 @@ s32 ReadUnalignedU16(u8 * a0) {
     return *a0 | a0[1] << 8;
 }
 asmlift: [config] target agbcc (platform 'gba' in ./decomp.yaml)
+asmlift: [flags] -mthumb-interwork -O2 -fhex-asm (compiler command)
 asmlift: [score] unsigned: 0/6 (match)
 ```
 
