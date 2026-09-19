@@ -98,6 +98,31 @@ test('every candidate failing to score throws the class, carrying both refusal l
   expect(e.withheld).toEqual([]);
 });
 
+// A compile failure's message is COMMAND on line one, the compiler's own complaint after it.
+// Summarising the cause to its first line published the half the reader already had and dropped
+// the half that says what broke — measured on a dockerized project whose real error,
+// `Can't create /work/cand.o: Invalid argument`, never reached the user.
+//
+// The PREFIX is unchanged on purpose: `apps/benchmark/src/run/fidelity.ts` recognises a
+// reproduced noncompile row by `stderr.includes("no scorable candidate for '<sym>'")`, which is a
+// substring of the head, so extending the TAIL cannot break it.
+test('the thrown cause keeps every line of the compile failure, not just the command', () => {
+  const candidates = enumerateCandidates('f', ASM, ARMV4T_AGBCC).slice(0, 2);
+  let thrown: unknown;
+  try {
+    rankBy(candidates, 'f', () => {
+      throw new Error("compile command failed (exit 1): docker run …\nFATAL: Can't create /work/cand.o");
+    });
+  } catch (e) {
+    thrown = e;
+  }
+  const e = thrown as NoScorableCandidateError;
+  expect(e.message.startsWith("no scorable candidate for 'f': ")).toBe(true);
+  expect(e.message).toContain("FATAL: Can't create /work/cand.o");
+  // and the per-candidate roster stays one line each — it is a list, not a diagnosis
+  expect(e.dropped.every((d) => !d.error.includes('\n'))).toBe(true);
+});
+
 // The all-WITHHELD branch: nothing threw, so there is no `cause` to quote and the count is the
 // only fact there is. `bench fan` prints these lines as the fan too.
 test('an entirely withheld fan throws the same class, with the withheld list on it', () => {

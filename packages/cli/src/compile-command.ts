@@ -12,16 +12,7 @@ import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -552,20 +543,25 @@ function cdBases(template: string, cwd: string): string[] {
 // fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
 // pass (the same class of silent truncation `compilersFromCommand`'s `sh -ec` note is about).
 //
-// Reuse is safe HERE because the template runs a fresh process per compile against the host
-// filesystem. It is NOT safe for a template that keeps a long-lived container with this
-// directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
-// compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
-// is why they still mkdtemp per candidate.
+// A PATH IS NEVER REUSED, because a `docker run` template bind-mounts this directory and the
+// host's sharing layer keeps resolving the mount to the inode it saw first. Deleting the
+// directory and recreating it under the same name then hands the container a stale inode, and the
+// compiler's output write fails with `Can't create /work/cand.o: Invalid argument` — measured over
+// a three-candidate reuse cycle as 2 failures in 3 under macOS's `$TMPDIR`, 0 in 3 under `/tmp`,
+// which is why picking a directory rather than a PATH POLICY only moves the bug.
+//
+// So each candidate gets a fresh `mkdtemp` and the previous one is removed: one directory is live
+// at a time, as before, and a surviving sibling still cannot let a failed compile pass. This is
+// what the benchmark's dockerized toolchains already do per candidate
+// (apps/benchmark/src/compile/util.ts).
 const slot = (): (() => string) => {
-  let dir: string | undefined;
+  let previous: string | undefined;
   return () => {
-    if (dir === undefined) {
-      dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
-      return dir;
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
+    if (previous !== undefined) {
+      rmSync(previous, { recursive: true, force: true });
     }
-    rmSync(dir, { recursive: true, force: true });
-    mkdirSync(dir);
+    previous = dir;
     return dir;
   };
 };

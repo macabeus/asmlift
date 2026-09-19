@@ -2234,8 +2234,12 @@ export function rankBy<S extends { score: number; rows?: number }>(
   if (results.length === 0) {
     // Naming the withheld count matters here: "no scorable candidate" with a null cause reads as a
     // scorer failure, and a list that was entirely proof-gated is a different thing entirely.
+    // NOT `firstLine`: a compile failure puts the COMMAND on line one and the compiler's own
+    // complaint after it, so summarising to one line published the thing the reader already knows
+    // and dropped the only sentence that says what went wrong. The per-candidate `dropped` list
+    // above stays one line each — it is a roster, not a diagnosis.
     const why =
-      lastScoreErr !== null ? firstLine(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
+      lastScoreErr !== null ? fullMessage(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
     throw new NoScorableCandidateError(`no scorable candidate for '${symbol}': ${why}`, dropped, withheld, {
       cause: lastScoreErr,
     });
@@ -2342,4 +2346,8 @@ function castCount(source: string): number {
  *  `instanceof` test; a caller wanting a word for "nothing was thrown" supplies it at the call. */
 function firstLine(e: unknown): string {
   return e instanceof Error ? e.message.split('\n')[0] : String(e);
+}
+
+function fullMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
