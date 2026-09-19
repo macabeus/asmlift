@@ -1,7 +1,7 @@
 # asmlift benchmark — m2c vs asmlift decompilation quality
 
 A reproducible, **extensible** benchmark comparing the decompilation quality of
-[`m2c`](https://github.com/matt-kempster/m2c) and asmlift over the five toolchains asmlift supports, scored with the same
+[`m2c`](https://github.com/matt-kempster/m2c) and asmlift over the seven toolchains asmlift supports, scored with the same
 `objdiff` engine asmlift uses. Built to become a **live QA pipeline**: re-run it as asmlift evolves
 and watch match/compile/error rates move.
 
@@ -52,9 +52,9 @@ are genuine modeling gaps — carry flags, unknown instructions, and callees the
 never declares — that context cannot fix; same class as asmlift's declines (the decline-reason
 Pareto in Gap Analysis is the roadmap).
 
-## Toolchains (the five `--target` IDs)
+## Toolchains (the seven `--target` IDs)
 
-All five are live via asmlift's own scoring seam (`packages/cli/src/score.ts`), reused here so the benchmark
+All seven are live via asmlift's own scoring seam (`packages/cli/src/score.ts`), reused here so the benchmark
 measures the exact compilers asmlift is tested against. Candidate compilation runs THROUGH the
 same `decomp.yaml` path a real project uses (`src/decomp-config.ts`): the configs are COMMITTED
 as live documentation — `dataset/toolchains/<id>/decomp.yaml`, one per toolchain, with machine
@@ -63,8 +63,9 @@ overrides) and the codegen flags as `{{cflags}}`, which each row's flags fill. T
 materializes them into the gitignored `.cache/decomp-configs/` and loads
 them with the real loader — the native pair (agbcc, IDO) keeps its `tools.asmlift.compiler`
 command mirroring the built-in invocation (parity enforced by `test/decomp-config.test.ts`),
-while for the dockerized three (KMC GCC, GCC 2.7.2, mwcc) the harness strips the compiler so the registry
-built-ins (with container pooling) serve it, the same either/or a user gets. The reproduction
+while for the POOLED pair (KMC GCC and `mwcc_242_81`) the harness strips the compiler so the registry
+built-ins (with container pooling) serve it, the same either/or a user gets. The three remaining
+dockerized configs (GCC 2.7.2, `mwcc_233_163n`, `mwcc_247_107`) keep their command. The reproduction
 scripts (`bench target`) get the command intact on every toolchain:
 
 | id              | ISA / compiler                           | asm both decompilers read                   |
@@ -96,8 +97,8 @@ real row, and that map is not name-and-address: sizes, declaration shapes, signe
 extents, volatility, const-ness, address-cast macro bodies, and, where the vendoring found them,
 callee signatures and struct tags with full field tables. So m2c is given the matching thing —
 that row's own vendored preprocessed context, verbatim, via `--context` — on every real row.
-How much of that map a project actually carries is a property of ITS vendoring, and on one of the
-seven it is name, kind and size alone: residual 6 measures it.
+How much of that map a project actually carries is a property of ITS vendoring, and on three of the
+nine it is name, kind and size alone: residual 6 measures it.
 
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
@@ -125,12 +126,13 @@ _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
    bulk (2179 of 41016 entries; af 26 of 61860, kleod 7 of 676, sa3 8, marioparty3 7, snowboardkids2 5).
+   The three dtk projects carry none, having no DWARF to vendor it from (residuals 6 and 10).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
    `.state/.frameCounter/.type/.datap` in the context.
 2. **Callee prototypes.** m2c reads them out of the headers; asmlift's channel is the map's
    `signature` field, which the vendoring extracts for kleod and pokeemerald only — af,
-   marioparty3, sa3, snowboardkids2 and ac-decomp vendor **zero**.
+   marioparty3, sa3, snowboardkids2 and the three dtk projects vendor **zero**.
 3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
    and m2c can READ it, so where it declares a struct type for a project static table
    (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
@@ -162,9 +164,10 @@ _Favouring m2c._
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
    gets that row's ~650 KB preprocessed context with every struct and every prototype. pikmin's map
    is the same shape (29,158 entries, names and sizes; its matching build carries no DWARF either),
-   so 84 of the 378 real rows are on that footing — and pikmin's rows are given no m2c context at
-   all, so there the asymmetry runs the other way. The other seven projects carry the shape family (`declared`:
-   pokeemerald 24,539, marioparty3 902, sa3 148, kleod 113, af 89, snowboardkids2 27).
+   and so is Mario Party 4's (residual 10), so 126 of the 378 real rows are on that footing — and
+   pikmin's rows are given no m2c context at all, so there the asymmetry runs the other way. The
+   other six projects carry the shape family (`declared`: pokeemerald 24,539, marioparty3 902,
+   sa3 148, kleod 113, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
 
@@ -214,11 +217,10 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
-  control), each run on its assigned toolchains: 215 functions → 671 cases.
+  control), each run on its assigned toolchains: 321 functions → 820 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
   with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
-  (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
-  from asmlift's mwcc_242, so byte-match is not defined there.)
+  (one toolchain each). Real game-code shapes, for anti-overfitting.
 
 Reference objects — the byte-exact goal each case is scored against — are built by compiling the reference C with asmlift's toolchain (not the shipped ROM object)
 — so "match" means "reproduces our deterministic re-compile of real code", the right question for a
@@ -321,8 +323,8 @@ the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, an
 disagreement FAILS. The flag table, the cold-vs-warm rule and what a project must declare before the
 cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
 
-**What that audit is worth here, measured on the run this repo's committed artifact came from**
-(948 rows, warm store, 16 shards, nothing planted): the shards served **10,221 objects and 50,583
+**What that audit is worth here, measured 2026-08-31 on a full run of the then-948-row corpus**
+(warm store, 16 shards, nothing planted): the shards served **10,221 objects and 50,583
 stored REJECTIONS** — 83% of served answers are the negative half — and re-compiled **1,283 of them
 (2.11%) to compare against the store: 210 objects, 1,073 rejections, 0 disagreements**, with
 `sampled` reconciling exactly against the audits it accounts for. The rejection direction is the
@@ -350,13 +352,13 @@ One consequence worth stating plainly: the real-tier agbcc path is reached under
 configs off the cache is `containerRuntimeNamedBy` — their command names `docker`, so the namespace
 stamp refuses and `candCache` reports `REFUSED reason=stamp-threw`, once per run.
 
-**`bench fidelity` runs every one of those ~1234 scripts with `ASMLIFT_CANDCACHE=0`**, pinned in
-`runScript`. That gate exists to prove a READER who copies a published script reproduces the
+**`bench fidelity` runs both of every row's scripts — m2c's and asmlift's — with
+`ASMLIFT_CANDCACHE=0`**, pinned in `runScript`. That gate exists to prove a READER who copies a published script reproduces the
 published row, and a reader starts with an empty store. Spawned with an inherited environment the
 scripts ran SERVED off the publishing machine's warm store — the base-versus-head asymmetry the
 sampled audit exists to bound, in the one gate whose entire job is to be the reader. Cache-off and
 cache-on-cold produce the same objects, so the pin is the conservative spelling of a reader's run;
-it also keeps 1234 script re-executions from filling and pruning a developer's shared store. The
+it also keeps two re-executions per row from filling and pruning a developer's shared store. The
 scripts THEMSELVES stay cache-silent, which is what a reader will actually get.
 
 The sampled audit is what stands between that and a silently wrong number, and the cost of not
@@ -411,6 +413,10 @@ Host prerequisites (macOS; verified empirically):
   (`softwareupdate --install-rosetta` — af's IDO recomp and marioparty3's KMC gcc are x86_64)
 - Docker (snowboardkids2 builds inside a linux/amd64 container; the `asmlift-elf` DWARF
   sidecar targets also fall back to Docker when no host `mips-linux-gnu-gcc` exists)
+- for the three dtk projects (ac-decomp, marioparty4, pikmin): `ninja`, plus `wine` on macOS —
+  the CodeWarrior compilers are Windows binaries and dtk-template downloads its `wibo` wrapper
+  only on linux/x86. Their disc image is never copied in (it is the maintainer's); `bench setup`
+  refuses with the directory to place it in
 - baseroms: setup copies them from the sibling user checkouts when found; otherwise place them
   manually (the status table names the missing file and destination)
 
