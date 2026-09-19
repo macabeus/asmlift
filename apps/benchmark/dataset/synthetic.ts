@@ -1791,9 +1791,11 @@ export const SYNTHETIC: SynthSpec[] = [
     // the only one the row needs.
     //
     // Measured when added: `selhead` MATCH on all four (agbcc `unsigned/flip-branch`), `selloop`
-    // MATCH on agbcc as `signed/flip-branch/indexed` — the composition this row exists to pin. Its
-    // ido7.1 column DECLINES on a branch-likely `beqzl`, which is the frontend's own gap and one of
-    // 52 such declines already in this tier, not anything the select admission decides.
+    // MATCH on agbcc as `signed/flip-branch/indexed` — the composition this row exists to pin.
+    // `selloop`'s ido7.1 column declines, on the frontend's own gap rather than on anything the
+    // select admission decides: it used to stop at a branch-likely `beqzl` and now stops one wall
+    // later, at a branch to 0x38 that is not a block boundary. (`selhead` matches on all four; the
+    // decline was never its.)
     sym: 'selhead',
     src: 'int selhead(int x,int *p){ *p = x; if (x & 0x40) return 1; return 0; }',
     features: ['bool', 'branch', 'mask', 'memory'],
@@ -4144,12 +4146,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // `sibwalk` is the guard: if a round ships counter reuse, this row must not move.
   //
   // DECLINES, each named by asmlift's own message and each a PRE-EXISTING link, never this family:
-  //     widecnt   × gcc2.7.2kmc : "cannot lift 'widecnt': unmodelled control transfer 'bnezl' at
-  //                               0x14 — branch-likely / coprocessor branch not supported"
-  //     narrowcnt × ido7.1      : the same `bnezl` link, at 0x1c
-  //     narrowcnt × gcc2.7.2kmc : the same `bnezl` link, at 0x28
-  // The MIPS toolchains emit the counted loop with a branch-likely delay slot, so those three cells
-  // measure that link. Every other cell scores.
+  //     widecnt   × gcc2.7.2kmc : "cannot structure 'widecnt': unrecovered back-edge into block #1
+  //                               (loop-recovery declined this shape: multi-latch, irreducible/
+  //                               overlapping loops, a conditional continue, or an unsafe break)"
+  //     narrowcnt × ido7.1      : the same back-edge link
+  //     narrowcnt × gcc2.7.2kmc : the same back-edge link
+  // The MIPS toolchains emit the counted loop with a branch-likely delay slot, which used to be the
+  // link these three measured; the slot is modelled now and all three land one wall further on, at
+  // loop recovery. Every other cell scores.
   //
   // WHY THE ctx SAYS `u8 *`. `ctx` reaches m2c ONLY — `evaluateM2c` is the only tool call that takes
   // it, `runAsmlift` has no such parameter — so the spelling moves m2c's column and can never move

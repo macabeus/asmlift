@@ -381,13 +381,13 @@ s32 clamp0(s32 a0) {
 **Scoring** (needs the real toolchain; `@asmlift/cli`): compile that C with agbcc, objdiff it
 against the original object → score 0, byte-exact match.
 
-**And when it can't?** Take a function whose comparison is a float one. MIPS puts the result of
-`c.lt.s` in a coprocessor condition code and branches on it with `bc1t`, and that condition code is
-not modelled:
+**And when it can't?** Take `fcmp`, a corpus test function whose comparison is a float one. MIPS
+puts the result of `c.lt.s` in a coprocessor condition code and branches on it with `bc1f`, and
+that condition code is not modelled:
 
 ```
-FrontendUnsupportedError: cannot lift 'fmin': floating-point condition-code
-branch 'bc1t' at 0x8 — the FP condition code is not modelled
+FrontendUnsupportedError: cannot lift 'fcmp': floating-point condition-code
+branch 'bc1f' at 0x8 — the FP condition code is not modelled
 ```
 
 Typed error, precise location, honest reason. In annotate mode the same gap becomes an
