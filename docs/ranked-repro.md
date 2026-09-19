@@ -49,8 +49,9 @@ The harness never reads the project's `.s` and never runs the project's `decomp.
   spelled as an instruction.
 - **The compile path differs.** Real rows are compiled inside `compile/real.ts`'s vendored-context
   escalation ladder — bare typedefs, then the manifest's `prependC`, then the vendored `ctx.i` —
-  with asmlift's canonical flags for the ISA. That file says so in its own header: _"the target is
-  our deterministic re-compile of real game code, not the shipped ROM object."_ The project's
+  at THE ROW'S OWN codegen flags, the ones its project's build compiles that unit with. That file
+  says so in its own header: _"The target and every candidate compile at the row's codegen flags
+  (`Case.codegen`)."_ The project's
   template — its `-iquote include`, its `-Werror`, its `arm-none-eabi-cpp` — is not on that path.
 - **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
   built, against whatever `build/…/tu.o` the project's make produced.
@@ -299,7 +300,7 @@ limit and nothing else, so it is **refused** beside a path that compiles nothing
 `--asm`) rather than accepted and dropped.
 
 **A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
-to return: on a `declined` row (234 of 1,062) enumeration THROWS on the same gap the published row
+to return: on a `declined` row (303 of 1,198) enumeration THROWS on the same gap the published row
 annotates — `enumerateCandidates` has no annotate mode — and on a `noncompile` row every candidate
 is refused, so there is no ranking to print. Both are answered with `asmlift: [fan] no fan …` and
 exit 2, and the noncompile case prints the whole `[dropped]`/`[withheld]` list first, because on
@@ -340,7 +341,7 @@ command is wrong by more than an order of magnitude at both ends of the tier.
 And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
 rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller
 falls back to the **richest** rung unconditionally (`cli.ts`, `publishedAsmliftSource` → `undefined`
-→ `ladder[ladder.length - 1]`) — **101 of the 252 real rows (40%)**, and the archetypal
+→ `ladder[ladder.length - 1]`) — **206 of the 378 real rows (54%)**, and the archetypal
 `/attribute-function` target. `real.ts`'s own comment says that fallback "is wrong whenever
 escalation stopped earlier, because a richer context can REJECT what a poorer one accepts". The
 stdout line names the rung either way and never says which case you are in.
@@ -799,13 +800,15 @@ find nothing to disagree with and go green having audited nothing.
 
 - **The CODEGEN FLAGS, first of all.** Every row compiles at its own build's flags, so a ranked run
   that assumes the toolchain's canonical set is measuring a different function from the one the
-  benchmark published. Inside a project the CLI finds them for you — the `objdiff.json` unit that
-  defines the function, or the words already in your `compiler` command — and `--cflags "<flags>"`
-  states them outright when neither applies. The run says which source it used, and a number quoted
-  without reading that line is a number about an unknown compile:
+  benchmark published. Four sources, in this order: `--cflags "<flags>"` first and above everything
+  else, then the `objdiff.json` unit that defines the function, then the words already in your
+  `compiler` command — and, when none of those answers, the toolchain's canonical set, which the
+  run takes WITHOUT refusing. That last one is the case this bullet exists for: it is a silent
+  substitution, announced only on the line most readers skip. The run says which source it used, and
+  a number quoted without reading that line is a number about an unknown compile:
 
   ```
-  asmlift: [flags] -mthumb-interwork -O1 -ansi (--cflags)
+  asmlift: [flags] -mthumb-interwork -O2 -fhex-asm (compiler command)
   ```
 
   A row's own flags are in the artifact (`cflags`), and `pnpm bench repro <row> --run` fills them in
