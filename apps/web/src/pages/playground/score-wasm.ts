@@ -331,11 +331,15 @@ export async function rankCandidatesInBrowser(
   // indeterminate bar with a different label here.
   emit({ phase: 'ranking' });
   if (results.length === 0) {
-    const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
+    // The WHOLE message, as core's `rankBy` does: a compile failure names the command on line one
+    // and the compiler's own complaint after it, and one line publishes the half the reader
+    // already has. `apps/web/test/candidate-compile.test.ts` is the acceptance test for exactly
+    // that — it pins a header (`in.i: In function 'f':`) being shown where the diagnosis belongs.
+    const why = lastErr instanceof Error ? lastErr.message : String(lastErr ?? 'no candidate produced');
     // CORE'S CLASS, for the same reason this driver borrows `compareScored` and `withheldReason`:
     // on a row where nothing scored the two lists are the whole fan, and a bare `Error` drops them
     // on the floor — leaving the playground's "ranking unavailable" toast with nothing behind it.
-    // The message is byte-identical either way.
+    // The message is built the same way core builds it, so the two drivers cannot drift.
     throw new NoScorableCandidateError(`no scorable candidate for '${name}': ${why}`, dropped, withheld, {
       cause: lastErr,
     });

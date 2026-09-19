@@ -12,16 +12,7 @@ import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -552,20 +543,34 @@ function cdBases(template: string, cwd: string): string[] {
 // fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
 // pass (the same class of silent truncation `compilersFromCommand`'s `sh -ec` note is about).
 //
-// Reuse is safe HERE because the template runs a fresh process per compile against the host
-// filesystem. It is NOT safe for a template that keeps a long-lived container with this
-// directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
-// compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
-// is why they still mkdtemp per candidate.
+// A PATH IS NEVER REUSED, because a container reaches this directory through a bind mount and a
+// recycled path does not survive one. `apps/benchmark/src/compile/util.ts` has the measurement —
+// 50 of 160 compiles failing on a reused path against 0 of 160 with a fresh mkdtemp, and
+// "emptying the CONTENTS and keeping the inode fails identically, so it is the shared mount's
+// view of the path, not the inode" — which is why its dockerized toolchains
+// (compile/{gcc272,kmc,mwcc}.ts) each mkdtemp per candidate rather than call its `scratchSlot`.
+//
+// This helper is the path a real project's `decomp.yaml` takes, and it was the one still
+// recycling. Observed here end to end against two dockerized benchmark configs: every candidate
+// failed with `FATAL: Can't create /work/cand.o: Invalid argument` under the recycled path, and
+// the same row scored `0/7 (match)` once the path stopped being reused. The SYMPTOM differs from
+// the one util.ts records (EINVAL rather than ENOENT) and an isolated probe of the reuse cycle
+// did not reproduce either, so treat the exact mechanism as unsettled — what is settled is that a
+// recycled path fails and a fresh one does not.
+//
+// One directory stays live per worker, as before, so a surviving sibling still cannot let a
+// compile that wrote nothing look like one that succeeded.
 const slot = (): (() => string) => {
-  let dir: string | undefined;
+  let previous: string | undefined;
   return () => {
-    if (dir === undefined) {
-      dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
-      return dir;
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
+    // Adopted BEFORE the removal: a throwing `rmSync` (EBUSY, EPERM) would otherwise leak this
+    // directory forever and retry the same undeletable one on every later candidate.
+    const stale = previous;
+    previous = dir;
+    if (stale !== undefined) {
+      rmSync(stale, { recursive: true, force: true });
     }
-    rmSync(dir, { recursive: true, force: true });
-    mkdirSync(dir);
     return dir;
   };
 };

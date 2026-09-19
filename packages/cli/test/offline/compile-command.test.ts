@@ -1,7 +1,7 @@
 // The candidate-compile command factory (src/compile-command.ts) — the seam a project fills
 // with its own toolchain. Offline: the "compilers" here are plain sh commands.
 import { C_TYPEDEFS } from '@asmlift/core/target';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -237,15 +237,36 @@ test('each worker gets its OWN scratch slot, so concurrent compiles cannot clobb
   expect(readFileSync(ob, 'utf8')).toContain('return 2;');
 });
 
-test('ONE scratch dir per worker across candidates — emptied, so a lying compiler still fails loud', async () => {
+test('a candidate never inherits a sibling, and never inherits a PATH either', async () => {
   const { worker } = compilersFromCommand('test ! -e {{outputPath}} && cp {{inputPath}} {{outputPath}}');
   const w = worker();
   const first = await w('s32 f(void) { return 1; }\n', 'f', 'c');
   const second = await w('s32 g(void) { return 2; }\n', 'g', 'c');
-  // same directory reused (the leak fix) — and the `test ! -e` above only passes because it was
-  // EMPTIED, which is what keeps "exited 0 but produced no object" reachable
-  expect(dirname(second)).toBe(dirname(first));
+  // The `test ! -e` only passes against an EMPTY scratch, which is what keeps "exited 0 but
+  // produced no object" reachable: a surviving sibling would let a compiler that wrote nothing
+  // look like one that succeeded.
   expect(readFileSync(second, 'utf8')).toContain('return 2;');
+  // Emptiness is the contract; the PATH must change to get it. Recycling one name is what a
+  // `docker run` template cannot survive — it bind-mounts the directory and the host's sharing
+  // layer keeps resolving the mount to the inode it first saw, so a recreated directory is a
+  // stale one and the output write fails with `Invalid argument` (2 of 3 under macOS's `$TMPDIR`,
+  // 0 of 3 under `/tmp`, so a different base directory only moves it).
+  expect(dirname(second)).not.toBe(dirname(first));
+  // Still bounded to one live directory per worker, as recycling was.
+  expect(existsSync(dirname(first))).toBe(false);
+  expect(existsSync(dirname(second))).toBe(true);
+});
+
+// The branch the emptying used to protect, pinned DIRECTLY rather than as a side effect of a
+// reused directory. With a fresh scratch per candidate the old spelling (`test ! -e` against a
+// recycled path) can no longer fail for any reason, so it stopped being a pin — and this is the
+// only assertion in the repo on "exited 0 but produced no object", the verdict that stands
+// between a compiler which wrote nothing and a silent pass.
+test('a command that exits 0 without writing its object fails LOUD, not silently', () => {
+  const { compile } = compilersFromCommand('true {{inputPath}} {{outputPath}}');
+  expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(
+    /compile command exited 0 but produced no object/,
+  );
 });
 
 test('an async worker reports a failed compile as a THROW, exactly like the sync one', async () => {
