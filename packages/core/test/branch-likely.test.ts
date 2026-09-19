@@ -136,13 +136,22 @@ test('every shape the taken-edge placement cannot model refuses loudly, naming w
   // A transfer in the slot is architecturally undefined; a slot past the end of the function is
   // malformed input; a slot some OTHER branch targets would run without the branch conditioning it,
   // and then take that branch's target; a likely branch inside another branch's delay slot has no
-  // block of its own to put a slot in. None of the four occurs in the corpus, so refusing costs
+  // block of its own to put a slot in. None of these occurs in the corpus, so refusing costs
   // nothing and guessing would cost correctness.
   expect(
     lift('0:\tbnezl\ta0,10 <f+0x10>', '4:\tb\t10 <f+0x10>', '8:\tli\tv0,1', 'c:\tnop', '10:\tjr\tra', '14:\tnop'),
   ).toThrow(/branch-likely 'bnezl' at 0x0 — the delay slot is itself a control transfer \('b'\)/);
   expect(lift('0:\tli\tv0,1', '4:\tbnezl\ta0,0 <f>')).toThrow(
-    /branch-likely 'bnezl' at 0x4 — the branch is the last instruction of the function/,
+    /branch-likely 'bnezl' at 0x4 — the disassembly has no instruction at 0x8 to be its delay slot/,
+  );
+  // the not-taken edge needs somewhere to land too: a slot but no word after it
+  expect(lift('0:\tbnezl\ta0,0 <f>', '4:\tli\tv0,1')).toThrow(
+    /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x8 for the not-taken edge to land on/,
+  );
+  // A BRANCH WHOSE TARGET IS NOT AN ADDRESS. Placement is defined by addresses, so there is nothing
+  // to place; without this the taken successor would be read off `undefined`.
+  expect(lift('0:\tbnezl\ta0,unresolved', '4:\tli\tv0,1', '8:\tjr\tra', 'c:\tnop')).toThrow(
+    /branch-likely 'bnezl' at 0x0 — the branch target is not a resolved address/,
   );
   expect(
     lift(
@@ -171,4 +180,51 @@ test('every shape the taken-edge placement cannot model refuses loudly, naming w
       '18:\tnop',
     ),
   ).toThrow(/branch-likely 'bnezl' at 0x4 — it sits in the delay slot of 'b'/);
+});
+
+test('a slot is the word at branch+4, not the next line objdump happened to print', () => {
+  // `parseDisasm` skips any line it cannot decode, so a branch's ARRAY neighbour is not always its
+  // delay slot — the corpus already carries 53 such holes across 15 rows, objdump eliding a `mflo`
+  // pad. Taken by position, the instruction after the hole becomes the annulled slot: the arm the
+  // function always runs is promoted onto the taken edge of a branch that never guarded it, the
+  // other arm disappears, and nothing says so. That is the one failure this capability must never
+  // have — C that compiles and is wrong, in place of a decline.
+  const holed = [
+    '0:\tbnezl\ta0,18 <f+0x18>',
+    '4:\t0x4500ffff', // objdump's spelling of an encoding it cannot name
+    '8:\tli\tv0,1',
+    'c:\tjr\tra',
+    '10:\tnop',
+    '18:\tli\tv0,2',
+    '1c:\tjr\tra',
+    '20:\tnop',
+  ];
+  expect(lift(...holed)).toThrow(
+    /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x4 to be its delay slot/,
+  );
+  // The SAME listing with an ordinary branch is lossy too, but its control flow survives — which is
+  // why only the likely path could invent a conditional, and why only it needs this guard.
+  expect(src(...['0:\tbnez\ta0,18 <f+0x18>', ...holed.slice(1)])).toBe(
+    's32 f(s32 a0) {\n    if (a0 == 0) {\n        return 1;\n    } else {\n        return 2;\n    }\n}\n',
+  );
+  // A hole BEFORE the branch refuses too, and this is the shape that really occurs: objdump elides
+  // GCC's `mflo` hazard pad as `...`, at 8 corpus sites. Whether the branch may be placed at all
+  // depends on what precedes it — a likely branch in some transfer's delay slot has nowhere to put
+  // its own slot — and a dropped line cannot be read. The cost is named and small: it is why
+  // `synthetic:powi:gcc2.7.2kmc` stays declined rather than lifting past a pad nothing verified.
+  expect(
+    lift(
+      '0:\tmult\ta2,a0',
+      '4:\tmflo\ta2',
+      '\t...',
+      '10:\tbnezl\tv0,18 <f+0x18>',
+      '14:\taddiu\tv1,v1,1',
+      '18:\tjr\tra',
+      '1c:\tnop',
+    ),
+  ).toThrow(/branch-likely 'bnezl' at 0x10 — the disassembly has no instruction at 0xc/);
+  // but the function's FIRST instruction has no predecessor by construction, and that is not a hole
+  expect(src('0:\tbltzl\ta0,8 <f+0x8>', '4:\tnegu\ta0,a0', '8:\tmove\tv0,a0', 'c:\tjr\tra', '10:\tnop')).toBe(
+    's32 f(s32 a0) {\n    if (a0 < 0) a0 = -a0;\n    return a0;\n}\n',
+  );
 });

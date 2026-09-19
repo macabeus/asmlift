@@ -178,11 +178,11 @@ interface MipsBlock {
   startAddr: number;
   body: Instr[]; // computation instructions (excludes the branch and its delay slot)
   branch: Instr | null; // terminating control transfer, or null for a pure fall-through
-  delay: Instr | null; // delay-slot instruction (executes before the transfer)
-  // BRANCH-LIKELY. The slot is NULLIFIED when the branch is not taken, so it does not run in this
-  // block at all: it is its own block at `likelySlot.addr`, reached only by the taken edge, which
-  // then jumps on to the branch's target. Mutually exclusive with `delay`.
-  likelySlot: Instr | null;
+  delay: Instr | null; // the word at `branch + 4`, or null where the branch has no slot
+  // BRANCH-LIKELY. An annulled slot is NULLIFIED when the branch is not taken, so it does not run
+  // in this block at all: it is its own block at `delay.addr`, reached only by the taken edge,
+  // which then jumps on to the branch's target.
+  delayAnnulled: boolean;
 }
 
 // Mnemonics whose destination is `ops[0]` (a plain register write) — the subset the jump-table
@@ -378,22 +378,37 @@ function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
   // Every address this function branches to, read BEFORE any rewriting so a likely branch's own
   // target is counted too.
   const targets = new Set(instrs.map((ins) => ins.target).filter((t): t is number => t !== undefined));
-  const indexAt = new Map(instrs.map((ins, i) => [ins.addr, i]));
+  // BY ADDRESS, never by array position. `parseDisasm` silently skips any line it cannot decode
+  // (frontend/disasm.ts), and the corpus already carries 53 such holes across 15 rows — objdump
+  // eliding a `mflo` pad. A branch's array neighbour is therefore not always the word at
+  // `branch + 4`, and reading a hole's neighbour as an annulled slot puts an arm the function
+  // always runs onto the taken edge of a branch that never guarded it: C that compiles and is wrong.
+  const at = new Map(instrs.map((ins) => [ins.addr, ins]));
+  const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
   for (const br of likely) {
-    const i = indexAt.get(br.addr)!;
-    const slot: Instr | undefined = instrs[i + 1];
+    const slot = at.get(br.addr + 4);
+    const fallThrough = at.get(br.addr + 8);
+    const prev = at.get(br.addr - 4);
     if (br.target === undefined) {
       throw refusal(br, 'the branch target is not a resolved address');
     }
     if (slot === undefined) {
-      throw refusal(br, 'the branch is the last instruction of the function, so it has no delay slot');
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr + 4)} to be its delay slot`);
     }
-    if (i > 0 && isControlTransfer(instrs[i - 1])) {
-      throw refusal(
-        br,
-        `it sits in the delay slot of '${instrs[i - 1].mnemonic}', so its own slot has no block to live in`,
-      );
+    if (fallThrough === undefined) {
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr + 8)} for the not-taken edge to land on`);
+    }
+    if (prev === undefined && br !== instrs[0]) {
+      // WHAT PRECEDES IT DECIDES WHETHER IT MAY BE PLACED AT ALL, so an unreadable predecessor is
+      // not a detail to shrug at: a likely branch sitting in some transfer's delay slot has no
+      // block of its own to put a slot in. The hole is almost certainly objdump's `...` for a
+      // `mflo` hazard pad — zero words, i.e. `nop`s — but `parseDisasm` does not model `...`, it
+      // just drops the line, so nothing here can tell that from a dropped branch.
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr - 4)}, so what precedes it is unknown`);
+    }
+    if (prev !== undefined && isControlTransfer(prev)) {
+      throw refusal(br, `it sits in the delay slot of '${prev.mnemonic}', so its own slot has no block to live in`);
     }
     if (isControlTransfer(slot)) {
       throw refusal(
@@ -460,16 +475,17 @@ function toBlocks(
     } // delay slot: handled with its branch
     const ins = instrs[i];
     if (cur === null || leaders.has(ins.addr)) {
-      cur = { startAddr: ins.addr, body: [], branch: null, delay: null, likelySlot: null };
+      cur = { startAddr: ins.addr, body: [], branch: null, delay: null, delayAnnulled: false };
       blocks.push(cur);
     }
     if (isXfer(ins)) {
       cur.branch = ins;
+      cur.delay = instrs[i + 1] ?? null;
       if (likelyAddrs.has(ins.addr)) {
-        cur.likelySlot = instrs[i + 1];
+        // `normaliseBranchLikely` has already refused every likely branch whose slot is not the
+        // word at `branch + 4`, so the array neighbour IS that word here.
+        cur.delayAnnulled = true;
         slotGoto.set(ins.addr + 4, ins.target!);
-      } else {
-        cur.delay = instrs[i + 1] ?? null;
       }
       cur = null;
     } else {
@@ -498,9 +514,9 @@ function toBlocks(
       succAddrs.set(b, []);
     } else if (isUncond(br)) {
       succAddrs.set(b, br.target !== undefined ? [br.target] : []);
-    } else if (b.likelySlot) {
+    } else if (b.delayAnnulled && b.delay) {
       // branch-likely: TAKEN runs the nullified slot's block, NOT-TAKEN skips straight past it
-      succAddrs.set(b, [b.likelySlot.addr, b.likelySlot.addr + 4]);
+      succAddrs.set(b, [b.delay.addr, b.delay.addr + 4]);
     } else {
       const fall = (b.delay ? b.delay.addr : br.addr) + 4; // instruction after the delay slot
       succAddrs.set(b, br.target !== undefined ? [br.target, fall] : [fall]);
@@ -1181,8 +1197,8 @@ export function lift(
       // A NULLIFIED slot is not decoded here: it is its own block on the taken edge, and the
       // not-taken edge skips past it (toBlocks). Every pass after this one sees ordinary
       // conditional execution.
-      if (b.likelySlot) {
-        const slot = b.likelySlot.addr;
+      if (b.delayAnnulled && b.delay) {
+        const slot = b.delay.addr;
         ops.push(mkOp('cond_br', { operands: [cond], successors: [succ(slot), succ(slot + 4)] }));
         return;
       }
