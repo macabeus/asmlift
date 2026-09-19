@@ -284,12 +284,27 @@ function rankedStderr(a: {
  *  a bug, and `tail` is the ranked path's `[candcache]` line — which belongs on a failure too,
  *  because a decline drops out before the success-path stderr is assembled and a reader would
  *  otherwise not learn that the store had disagreed. */
+/** How many lines of a failure reach the terminal before it is summarised. */
+const MAX_PRINTED_LINES = 40;
+
 const failureResult = (e: unknown, targetTrace: string, warn: string, code: number, tail = ''): CliResult => {
+  // A failing compile carries the compiler's whole output, which is what makes the error useful
+  // to a reader and what a compiler with no error cap (agbcc has none) can turn into megabytes.
+  // Bounded HERE, at the terminal, and nowhere earlier: the error text is also what the benchmark
+  // reads a row's diagnostics out of, and that reader scans the WHOLE thing for the `file:line:`
+  // lines — truncating at the source would drop a diagnosis that sits below a banner, which is
+  // the case this release fixed.
+  const forTerminal = (m: string): string => {
+    const lines = m.split('\n');
+    return lines.length <= MAX_PRINTED_LINES
+      ? m
+      : `${lines.slice(0, MAX_PRINTED_LINES).join('\n')}\n… and ${lines.length - MAX_PRINTED_LINES} more line(s)`;
+  };
   const kind = isDecline(e) ? 'declined' : 'internal error';
   return {
     code,
     stdout: '',
-    stderr: `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n${tail}`,
+    stderr: `${targetTrace}${warn}asmlift: [${kind}] ${forTerminal(e instanceof Error ? e.message : String(e))}\n${tail}`,
   };
 };
 

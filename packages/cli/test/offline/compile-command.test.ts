@@ -257,6 +257,18 @@ test('a candidate never inherits a sibling, and never inherits a PATH either', a
   expect(existsSync(dirname(second))).toBe(true);
 });
 
+// The branch the emptying used to protect, pinned DIRECTLY rather than as a side effect of a
+// reused directory. With a fresh scratch per candidate the old spelling (`test ! -e` against a
+// recycled path) can no longer fail for any reason, so it stopped being a pin — and this is the
+// only assertion in the repo on "exited 0 but produced no object", the verdict that stands
+// between a compiler which wrote nothing and a silent pass.
+test('a command that exits 0 without writing its object fails LOUD, not silently', () => {
+  const { compile } = compilersFromCommand('true {{inputPath}} {{outputPath}}');
+  expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(
+    /compile command exited 0 but produced no object/,
+  );
+});
+
 test('an async worker reports a failed compile as a THROW, exactly like the sync one', async () => {
   const { compile, worker } = compilersFromCommand(
     "echo 'version 2.4.2 required' >&2; false # {{inputPath}} {{outputPath}}",

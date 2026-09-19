@@ -119,7 +119,9 @@ test('the thrown cause keeps every line of the compile failure, not just the com
   const e = thrown as NoScorableCandidateError;
   expect(e.message.startsWith("no scorable candidate for 'f': ")).toBe(true);
   expect(e.message).toContain("FATAL: Can't create /work/cand.o");
-  // and the per-candidate roster stays one line each — it is a list, not a diagnosis
+  // and the per-candidate roster stays one line each — it is a list, not a diagnosis.
+  // Asserting the LENGTH first: `every` on an empty list is vacuously true.
+  expect(e.dropped).toHaveLength(candidates.length);
   expect(e.dropped.every((d) => !d.error.includes('\n'))).toBe(true);
 });
 
