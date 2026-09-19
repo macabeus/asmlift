@@ -34,12 +34,14 @@ describe('undeclaredCallees', () => {
   test('a compiler that never answers is killed, and says so', () => {
     const dir = mkdtempSync(join(tmpdir(), 'asmlift-hangcc-'));
     const cc = join(dir, 'cc');
-    writeFileSync(cc, '#!/bin/sh\nsleep 600\n');
+    // `exec`, not a bare `sleep`: `sh` would FORK the sleep, the signal would reach only the shell,
+    // and the test demonstrating this fix would leak the orphan the fix is about — once per run.
+    writeFileSync(cc, '#!/bin/sh\nexec sleep 600\n');
     chmodSync(cc, 0o755);
     try {
       const started = Date.now();
       expect(() => undeclaredCallees('int f(void) { return g(); }\n', { cc, timeoutMs: 1_000 })).toThrow(
-        /did not answer within 1s .*and was killed/,
+        /did not finish within 1s .*and was killed/,
       );
       expect(Date.now() - started, 'it waited for the sleep, not the deadline').toBeLessThan(30_000);
     } finally {

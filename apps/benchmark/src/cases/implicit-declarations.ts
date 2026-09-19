@@ -32,28 +32,50 @@ export function undeclaredCallees(tu: string, probe: Probe = {}): string[] {
       encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },
       maxBuffer: 64 * 1024 * 1024,
-      // BOUNDED, because an unbounded syntax probe does not fail — it HANGS, and a hung probe
-      // inside a test worker is indistinguishable from a slow suite. Measured: a `clang
-      // -fsyntax-only` left running with its `-cc1` child wedged a whole vitest run for two and a
-      // half hours, and reaping the child by hand finished the run in seconds. The suite reported
-      // nothing at all in the meantime, so the gate it was meant to be simply did not run.
+      // BOUNDED, because an unbounded syntax probe does not fail — it HANGS. `spawnSync` waits on
+      // the stdio PIPES, not merely on the child, so a compiler that exits promptly still blocks
+      // this call for as long as anything it forked holds stderr open. That is the clang
+      // driver/`-cc1` shape: measured, a probe whose child exited instantly while a forked process
+      // kept the pipe never returned at all, and the same probe with this deadline returns in
+      // 2.0 s. One wedged probe held a whole vitest run for two and a half hours while the suite
+      // reported nothing, so the gate it was meant to be did not run.
       //
-      // SIGKILL rather than the default SIGTERM: the process this is defending against is one
-      // that has already stopped behaving, and a driver that ignores SIGTERM leaves the same
-      // orphan behind.
+      // The default SIGTERM, NOT SIGKILL. Measured both ways against real clang: `-cc1` survives
+      // either signal (4 runs, 1 orphan each), so SIGKILL buys nothing there — while against a
+      // driver that traps SIGTERM to tear its child down, SIGTERM reaped the grandchild and
+      // SIGKILL left it running. SIGKILL is strictly worse on the only shape where the signal
+      // makes a difference.
       timeout,
-      killSignal: 'SIGKILL',
     },
   );
+  const read = (): string[] => {
+    const names = [...r.stderr.matchAll(/function '([^']+)'.*\[-Wimplicit-function-declaration\]/g)].map((m) => m[1]);
+    return [...new Set(names)].sort();
+  };
   if (r.error) {
-    const timedOut = (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT';
+    // A DEADLINE IS NOT ALWAYS A MISSING ANSWER. What `spawnSync` waits on is the pipes, so a
+    // compiler that answered and exited 0 still trips the timeout if anything it forked is holding
+    // stderr — and the diagnostics are already in hand. Read them rather than failing a run over a
+    // process that was never the point.
+    if ((r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT' && r.status === 0) {
+      return read();
+    }
     throw new Error(
-      timedOut
-        ? `${cc} did not answer within ${timeout / 1000}s on a ${tu.length}-byte unit and was killed — ` +
-            `the syntax probe is bounded so a wedged compiler fails the run instead of hanging it`
+      (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+        ? `${cc} did not finish within ${timeout / 1000}s on a ${tu.length}-byte unit and was killed — ` +
+            `either the compiler is wedged, or something it forked is still holding its output open`
         : `${cc} could not run (set ASMLIFT_CC to a gcc or clang): ${r.error.message}`,
     );
   }
-  const names = [...r.stderr.matchAll(/function '([^']+)'.*\[-Wimplicit-function-declaration\]/g)].map((m) => m[1]);
-  return [...new Set(names)].sort();
+  // A COMPILER THAT REFUSED THE UNIT MATCHES NOTHING, and "nothing" is this gate's PASSING answer.
+  // `-fsyntax-only` exits 0 on a unit whose only complaints are warnings, so a non-zero status
+  // means the front end rejected it outright — a wrong `ASMLIFT_CC`, a dialect it cannot read, a
+  // hard error. Refusing loudly is the difference between a gate and a gate-shaped no-op.
+  if (r.status !== 0) {
+    throw new Error(
+      `${cc} rejected the unit (exit ${r.status}) instead of syntax-checking it, so no implicit ` +
+        `declaration could be found — the answer would have been a vacuous pass:\n${r.stderr.trim().slice(0, 2000)}`,
+    );
+  }
+  return read();
 }
