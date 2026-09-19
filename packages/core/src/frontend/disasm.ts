@@ -76,6 +76,60 @@ export interface DisasmOptions {
    *  The suffix is a prediction hint, not a different instruction — without stripping, the
    *  mnemonic misses the cond tables and the branch is silently dropped. */
   hintSuffixes?: boolean;
+  /** What an all-zero word decodes to on this architecture (MIPS: `nop` — `sll zero,zero,0`).
+   *  objdump prints a run of zero words as a bare `...` instead of the words themselves, and the
+   *  words it stands for are real program text: a `mflo` hazard pad sits between a multiply and
+   *  the branch that reads it. Without a decoding they cannot be recovered, so the listing is
+   *  refused rather than parsed one word short (a zero word is not an instruction at all on
+   *  PowerPC, whose frontend therefore supplies none). */
+  zeroWord?: string;
+}
+
+/** Fixed instruction width, in bytes, of every ISA that reaches this reader (MIPS, PowerPC). The
+ *  Thumb frontend, the one variable-width target, parses GNU-as text and does not route here. */
+const WORD = 4;
+
+/** objdump's elision of a run of zero words: a bare `...` on its own line (`-d` prints it only
+ *  for zeroes; `-z` prints the words instead). */
+const ELISION_LINE = /^\s*\.\.\.\s*$/;
+
+/** An instruction line's address column, whatever the mnemonic column holds. A line that carries
+ *  an address carries a WORD of the function, so one this reader cannot decode must not be
+ *  skipped: the words after it would keep their addresses while the list lost one, and every
+ *  reader of that list — the delay slot at `branch + 4` above all — would be answering about a
+ *  word that is not there. */
+const ADDRESSED_LINE = /^\s*[0-9a-f]+:\s/i;
+
+/** Replace an elision with the zero words it stands for: from the word after the last instruction
+ *  parsed up to (not including) the address of the line that ends the run. Every way the run's
+ *  extent is unknowable refuses by name — a run of unknown length is exactly the silent hole this
+ *  exists to remove. A run with NO line after it is not a hole: it is the padding past the last
+ *  word objdump printed, it bounds nothing, and nothing is invented for it. */
+function expandElision(out: DisasmInstr[], next: number, zeroWord: string | undefined): void {
+  const prev = out[out.length - 1];
+  const hex = (a: number) => `0x${a.toString(16)}`;
+  if (!prev) {
+    throw new FrontendUnsupportedError(
+      `objdump elided a run of zero words ('...') before the first instruction of the listing, ` +
+        `ending at ${hex(next)}: where the run begins is unknown`,
+    );
+  }
+  const from = prev.addr + WORD;
+  if (zeroWord === undefined) {
+    throw new FrontendUnsupportedError(
+      `objdump elided a run of zero words ('...') at ${hex(from)}, but a zero word is not a ` +
+        `decodable instruction on this architecture`,
+    );
+  }
+  if (next <= from || (next - from) % WORD !== 0) {
+    throw new FrontendUnsupportedError(
+      `objdump elided a run of zero words ('...') between ${hex(from)} and ${hex(next)}, which is ` +
+        `not a whole number of instruction words`,
+    );
+  }
+  for (let addr = from; addr < next; addr += WORD) {
+    out.push({ addr, mnemonic: zeroWord, ops: [] });
+  }
 }
 
 /** Attach a parsed relocation to the instruction it belongs to. The binding is POSITIONAL —
@@ -105,7 +159,12 @@ function attachReloc(out: DisasmInstr[], offset: number, reloc: DisasmReloc): vo
 /** Parse objdump `-d --no-show-raw-insn` output into a flat instruction list with addresses. */
 export function parseDisasm(disasm: string, opts: DisasmOptions = {}): DisasmInstr[] {
   const out: DisasmInstr[] = [];
+  let elided = false;
   for (const raw of disasm.split('\n')) {
+    if (ELISION_LINE.test(raw)) {
+      elided = true;
+      continue;
+    }
     if (opts.relocs) {
       const rel = raw.match(/^\s+([0-9a-f]+):\s+(R_\w+)\s+([^\s+-]+)(?:\s*([+-])\s*(0x[0-9a-f]+|\d+))?\s*$/i);
       if (rel) {
@@ -121,9 +180,18 @@ export function parseDisasm(disasm: string, opts: DisasmOptions = {}): DisasmIns
       ? raw.match(/^\s*([0-9a-f]+):\s+([a-z][a-z0-9._]*)([-+]?)\s*(.*?)\s*$/i)
       : raw.match(/^\s*([0-9a-f]+):\s+([a-z][a-z0-9._]*)\s*(.*?)\s*$/i);
     if (!m) {
+      if (ADDRESSED_LINE.test(raw)) {
+        throw new FrontendUnsupportedError(
+          `objdump line '${raw.trim()}' carries an address but no instruction this reader can decode`,
+        );
+      }
       continue;
     }
     const addr = parseInt(m[1], 16);
+    if (elided) {
+      expandElision(out, addr, opts.zeroWord);
+      elided = false;
+    }
     const mnemonic = m[2]; // hint suffix (group 3), when parsed, is dropped
     const opsStr = opts.hintSuffixes ? m[4] : m[3];
     const ops = opsStr

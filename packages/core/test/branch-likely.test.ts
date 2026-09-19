@@ -183,15 +183,36 @@ test('every shape the taken-edge placement cannot model refuses loudly, naming w
   ).toThrow(/branch-likely 'bnezl' at 0x4 — it sits in the delay slot of 'b'/);
 });
 
-test('a slot is the word at branch+4, not the next line objdump happened to print', () => {
-  // `parseDisasm` skips any line it cannot decode, so a branch's ARRAY neighbour is not always its
-  // delay slot — the corpus already carries 53 such holes across 15 rows, objdump eliding a `mflo`
-  // pad. Taken by position, the instruction after the hole becomes the annulled slot: the arm the
+test('a slot is the word at branch+4, and the reader accounts for every word objdump printed', () => {
+  // Taken by ARRAY POSITION, the instruction after a hole becomes the annulled slot: the arm the
   // function always runs is promoted onto the taken edge of a branch that never guarded it, the
   // other arm disappears, and nothing says so. That is the one failure this capability must never
-  // have — C that compiles and is wrong, in place of a decline.
-  const holed = [
-    '0:\tbnezl\ta0,18 <f+0x18>',
+  // have — C that compiles and is wrong, in place of a decline. Placement is therefore asked by
+  // address; and the reader `parseDisasm` hands it no longer loses a word, so the two agree.
+
+  // objdump prints a run of ZERO words as a bare `...` — GCC's `mflo` hazard pad, 53 sites across
+  // 15 corpus rows — and on MIPS a zero word is `nop`. The pad comes back as the nops it stands
+  // for, so the branch-likely at 0x10 has both its predecessor and its slot.
+  expect(
+    src(
+      '0:\tmult\ta1,a0',
+      '4:\tmflo\ta2',
+      '\t...',
+      '10:\tbnezl\ta0,18 <f+0x18>',
+      '14:\taddiu\ta2,a2,1',
+      '18:\tmove\tv0,a2',
+      '1c:\tjr\tra',
+      '20:\tnop',
+    ),
+  ).toBe(
+    's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 == 0) {\n        v0 = a1 * a0;\n    } else {\n' +
+      '        v0 = a1 * a0 + 1;\n    }\n    return v0;\n}\n',
+  );
+
+  // A line carrying an ADDRESS but no instruction the reader can name is refused, not skipped —
+  // on BOTH branch paths, because the ordinary one reads its slot as the array neighbour too.
+  const holed = (branch: string) => [
+    `0:\t${branch}\ta0,18 <f+0x18>`,
     '4:\t0x4500ffff', // objdump's spelling of an encoding it cannot name
     '8:\tli\tv0,1',
     'c:\tjr\tra',
@@ -200,31 +221,22 @@ test('a slot is the word at branch+4, not the next line objdump happened to prin
     '1c:\tjr\tra',
     '20:\tnop',
   ];
-  expect(lift(...holed)).toThrow(
+  for (const branch of ['bnezl', 'bnez']) {
+    expect(lift(...holed(branch))).toThrow(
+      /objdump line '4:\t0x4500ffff' carries an address but no instruction this reader can decode/,
+    );
+  }
+
+  // What is missing from the listing ENTIRELY is a different thing from a hole, and each placement
+  // question says which word it wanted: the slot at branch+4, and the word the not-taken edge lands
+  // on at branch+8.
+  expect(lift('0:\tbnezl\ta0,18 <f+0x18>')).toThrow(
     /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x4 to be its delay slot/,
   );
-  // The SAME listing with an ordinary branch is lossy too, but its control flow survives — which is
-  // why only the likely path could invent a conditional, and why only it needs this guard.
-  expect(src(...['0:\tbnez\ta0,18 <f+0x18>', ...holed.slice(1)])).toBe(
-    's32 f(s32 a0) {\n    if (a0 == 0) {\n        return 1;\n    } else {\n        return 2;\n    }\n}\n',
+  expect(lift('0:\tbnezl\ta0,18 <f+0x18>', '4:\tli\tv0,1')).toThrow(
+    /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x8 for the not-taken edge/,
   );
-  // A hole BEFORE the branch refuses too, and this is the shape that really occurs: objdump elides
-  // GCC's `mflo` hazard pad as `...`, at 8 corpus sites. Whether the branch may be placed at all
-  // depends on what precedes it — a likely branch in some transfer's delay slot has nowhere to put
-  // its own slot — and a dropped line cannot be read. The cost is named and small: it is why
-  // `synthetic:powi:gcc2.7.2kmc` stays declined rather than lifting past a pad nothing verified.
-  expect(
-    lift(
-      '0:\tmult\ta2,a0',
-      '4:\tmflo\ta2',
-      '\t...',
-      '10:\tbnezl\tv0,18 <f+0x18>',
-      '14:\taddiu\tv1,v1,1',
-      '18:\tjr\tra',
-      '1c:\tnop',
-    ),
-  ).toThrow(/branch-likely 'bnezl' at 0x10 — the disassembly has no instruction at 0xc/);
-  // but the function's FIRST instruction has no predecessor by construction, and that is not a hole
+  // but the function's FIRST word has no predecessor by construction, and that is not a hole
   expect(src('0:\tbltzl\ta0,8 <f+0x8>', '4:\tnegu\ta0,a0', '8:\tmove\tv0,a0', 'c:\tjr\tra', '10:\tnop')).toBe(
     's32 f(s32 a0) {\n    if (a0 < 0) a0 = -a0;\n    return a0;\n}\n',
   );

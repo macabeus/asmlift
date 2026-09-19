@@ -96,7 +96,9 @@ const isControlTransfer = (ins: Instr) =>
 // Shared objdump scaffolding (frontend/disasm.ts): parseImm/parseMem/parseDisasm. MIPS needs no
 // reloc or hint-suffix handling; register-scaled indices are materialised by IDO as explicit
 // `sll`+`addu` before the access, so no `base+index` addressing form appears in parseMem input.
-const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
+// A zero word IS an instruction here — `sll zero,zero,0`, which objdump prints as `nop` — so the
+// runs of them objdump elides as `...` (GCC's `mflo` hazard pads) come back as the nops they are.
+const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { zeroWord: 'nop' });
 
 // Bridge an object file's `.text` relocation records onto the instructions they fill, so the
 // high/low fold reads ONE carrier (`ins.reloc`) whichever dialect the input arrived in — the same
@@ -379,11 +381,10 @@ function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
   // target is counted too. A recovered jump table's arms are NOT in here — they do not exist until
   // `recoverMipsJumpTables` has run, so `lift` checks them against the slot addresses returned below.
   const targets = new Set(instrs.map((ins) => ins.target).filter((t): t is number => t !== undefined));
-  // BY ADDRESS, never by array position. `parseDisasm` silently skips any line it cannot decode
-  // (frontend/disasm.ts), and the corpus already carries 53 such holes across 15 rows — objdump
-  // eliding a `mflo` pad. A branch's array neighbour is therefore not always the word at
-  // `branch + 4`, and reading a hole's neighbour as an annulled slot puts an arm the function
-  // always runs onto the taken edge of a branch that never guarded it: C that compiles and is wrong.
+  // BY ADDRESS, never by array position: reading a branch's array NEIGHBOUR as its delay slot puts
+  // an arm the function always runs onto the taken edge of a branch that never guarded it, which is
+  // C that compiles and is wrong. `parseDisasm` now accounts for every word objdump printed
+  // (frontend/disasm.ts), so the two readings agree — the address is the one that says so.
   const at = new Map(instrs.map((ins) => [ins.addr, ins]));
   const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
@@ -403,9 +404,7 @@ function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
     if (prev === undefined && br !== instrs[0]) {
       // WHAT PRECEDES IT DECIDES WHETHER IT MAY BE PLACED AT ALL, so an unreadable predecessor is
       // not a detail to shrug at: a likely branch sitting in some transfer's delay slot has no
-      // block of its own to put a slot in. The hole is almost certainly objdump's `...` for a
-      // `mflo` hazard pad — zero words, i.e. `nop`s — but `parseDisasm` does not model `...`, it
-      // just drops the line, so nothing here can tell that from a dropped branch.
+      // block of its own to put a slot in.
       throw refusal(br, `the disassembly has no instruction at ${hex(br.addr - 4)}, so what precedes it is unknown`);
     }
     if (prev !== undefined && isControlTransfer(prev)) {
