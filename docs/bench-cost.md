@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=96.4s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=96.6s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,11 +129,16 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-19: the ranked pass alone is **951 s over 180
-real rows** and **646 s over 715 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 263.9 s and 196.3 s. **A figure here is a price under a CACHE STATE and a
+Summed out of the committed artifact of 2026-09-19: the ranked pass alone is **957 s over 180
+real rows** and **666 s over 715 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 266.1 s and 200.5 s. **A figure here is a price under a CACHE STATE and a
 MACHINE, not a property of the corpus**, and this file's own history is the loudest evidence of it.
-The artifact before this one read 1,349 s and 675 s over the SAME 1,198 rows: `bench diff` across
+The artifact before this one read 951 s and 646 s over the SAME 1,198 rows: `bench diff` across the
+pair reports **0 field changes, 0 added, 0 removed**, the fan unmoved at 60,011 → 60,011 (1.00×)
+over 895 comparable rows, and the ranked pass at **1.02×** — a regeneration at the branch's final
+head, over a commit that reads a function's start address off the objdump header instead of off its
+first parsed line and moves no row. That pair is a second clean reading of how much of a figure here
+is the machine. The one before THAT read 1,349 s and 675 s over the SAME 1,198 rows: `bench diff` across
 the pair reports **14 field changes over 4 rows, 0 added, 0 removed**, one row moved (declined to
 nonmatch), and the fan **unmoved at 60,001 → 60,001 (1.00×) over 894 comparable rows** — a branch
 that makes the objdump reader account for every word the listing printed adds no candidate to any
@@ -181,7 +186,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 215 s of that real total — **23% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 218 s of that real total — **23% of the tier
 in one row**, over a fan of 30,240. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
