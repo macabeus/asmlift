@@ -386,8 +386,8 @@ IDO but declines on KMC GCC, because GCC lowers it with a _branch-likely_ instru
 its delay slot) the frontend doesn't model yet:
 
 ```
-FrontendUnsupportedError: cannot lift 'maxab': unmodelled control transfer 'beqzl'
-at 0x8 — branch-likely / coprocessor branch not supported
+FrontendUnsupportedError: cannot lift 'maxab': branch-likely 'beqzl'
+at 0x8 — the nullified delay slot is not modelled
 ```
 
 Typed error, precise location, honest reason. In annotate mode the same gap becomes an

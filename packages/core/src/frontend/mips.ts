@@ -48,6 +48,23 @@ const COND_Z: Record<string, Opcode> = {
   bgez: 'icmp_sge',
 };
 const COND_RR: Record<string, Opcode> = { beq: 'icmp_eq', bne: 'icmp_ne' };
+// BRANCH-LIKELY → the ordinary branch it tests the same way. The difference is the delay slot:
+// a likely branch NULLIFIES its slot when the branch is not taken, so the slot is conditional code
+// (see `toBlocks`, which gives it its own block on the taken edge). `beqzl`/`bnezl` are objdump's
+// printing of `beql`/`bnel` against `$0`; both spellings appear in the corpus.
+const LIKELY_BASE: Record<string, string> = {
+  beql: 'beq',
+  bnel: 'bne',
+  beqzl: 'beqz',
+  bnezl: 'bnez',
+  blezl: 'blez',
+  bgtzl: 'bgtz',
+  bltzl: 'bltz',
+  bgezl: 'bgez',
+};
+// A coprocessor-1 branch tests an FP condition code (`fcc`) that `c.cond.s/d` sets. Neither the
+// code nor the compare is modelled, so these refuse whether or not they are also likely.
+const isFpCondBranch = (m: string) => m.startsWith('bc1');
 
 const isZero = (r: string) => r === 'zero' || r === '$0';
 // The stack pointer (`$29`). A `sw/lw` through it is not a store/load through a data pointer — it
@@ -474,16 +491,28 @@ export function lift(
         `cannot lift '${name}': indirect jump 'jr ${ins.ops[0] ?? ''}' at 0x${ins.addr.toString(16)} — jump tables / tail calls not supported`,
       );
     }
+    // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what
+    // lets each be worked on alone: `bc1fl` is both, and the condition code blocks it either way.
+    if (isFpCondBranch(ins.mnemonic)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': floating-point condition-code branch '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+          `— the FP condition code is not modelled`,
+      );
+    }
+    if (ins.mnemonic in LIKELY_BASE) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': branch-likely '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+          `— the nullified delay slot is not modelled`,
+      );
+    }
     // CATCH-ALL (mirrors the PPC denylist): an unmodelled control-transfer mnemonic would otherwise
     // fall through to `emitOpaqueDest` and have its BRANCH silently dropped (no register dest for
-    // the opaque guard to catch). Bites the branch-LIKELY forms (`beql`/`bnel`/`b*zl`, which annul
-    // the delay slot when not taken) and coprocessor branches (`bc1t`/`bc1f`…). `break` is a trap,
-    // not a branch.
+    // the opaque guard to catch). `break` is a trap, not a branch.
     const isBranchish = (ins.mnemonic[0] === 'b' && ins.mnemonic !== 'break') || ins.mnemonic[0] === 'j';
     if (isBranchish && !isXfer(ins) && ins.mnemonic !== 'jal' && ins.mnemonic !== 'jalr') {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `— branch-likely / coprocessor branch not supported`,
+          `— not a modelled branch form`,
       );
     }
   }

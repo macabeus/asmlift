@@ -41,8 +41,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'branch-likely',
-    label: 'Branch-likely / coprocessor branches (MIPS)',
-    pattern: /branch-likely|coprocessor branch/,
+    label: 'Branch-likely delay slots (MIPS)',
+    pattern: /branch-likely/,
+  },
+  {
+    key: 'fp-cond-branch',
+    label: 'FP condition-code branches (MIPS bc1*)',
+    pattern: /floating-point condition-code branch/,
   },
   {
     key: 'mips-calls',
