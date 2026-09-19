@@ -797,6 +797,20 @@ find nothing to disagree with and go green having audited nothing.
 
 ## The flags are part of the number
 
+- **The CODEGEN FLAGS, first of all.** Every row compiles at its own build's flags, so a ranked run
+  that assumes the toolchain's canonical set is measuring a different function from the one the
+  benchmark published. Inside a project the CLI finds them for you — the `objdiff.json` unit that
+  defines the function, or the words already in your `compiler` command — and `--cflags "<flags>"`
+  states them outright when neither applies. The run says which source it used, and a number quoted
+  without reading that line is a number about an unknown compile:
+
+  ```
+  asmlift: [flags] -mthumb-interwork -O1 -ansi (--cflags)
+  ```
+
+  A row's own flags are in the artifact (`cflags`), and `pnpm bench repro <row> --run` fills them in
+  for you — which is the argument for reproducing through it rather than by hand.
+
 - **`--proto`, whenever a callee's arity matters.** A callee still written in assembly carries no
   DWARF signature, so asmlift has to guess its arity and guesses wrong. `LoadBGTilemapData`
   without `--proto '{"thunk_HeapFree":{"params":1}}'` scores **578** where the round's baseline is
