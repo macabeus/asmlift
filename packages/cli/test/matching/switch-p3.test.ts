@@ -111,21 +111,23 @@ describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switc
     expect(() => decompile('sw_jt', asm, MIPS_IDO)).toThrow(FrontendUnsupportedError);
   });
 
-  // SOUNDNESS: a MIPS branch-LIKELY (`bnezl`/`beql`/…) has no register dest, so a jal/jalr/jr-only
-  // loud-fail allowlist would let `emitOpaqueDest` silently DROP its branch — a switch fn with an
-  // outer branch-likely guard would silently miscompile. The PPC-style catch-all loud-fails
-  // instead. Constructed asm (IDO emits `bnezl` for the guard).
-  test('branch-likely is loud-failed, not silently dropped (even with the side-table)', () => {
+  // SOUNDNESS: a MIPS branch-LIKELY (`bnezl`/`beql`/…) has no register dest, so nothing in the
+  // opaque-dest path could catch a dropped branch — a switch fn with an outer branch-likely guard
+  // would silently miscompile. Its slot is annulled when not taken, so the branch must survive as a
+  // real conditional. Constructed asm (IDO emits `bnezl` for the guard).
+  test('a branch-likely guard survives as a conditional, never a dropped branch', () => {
     const asm = [
       '00000000 <f>:',
       '   0:\tbnezl\ta0,10 <f+0x10>',
-      '   4:\tnop',
+      '   4:\tli\tv0,2',
       '   8:\tli\tv0,1',
-      '   c:\tjr\tra',
-      '  10:\tli\tv0,2',
-      '  14:\tjr\tra',
+      '   c:\tnop',
+      '  10:\tjr\tra',
+      '  14:\tnop',
     ].join('\n');
-    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/branch-likely|unmodelled control transfer/);
+    const src = decompile('f', asm, MIPS_IDO).source;
+    expect(src).toContain('if (a0 == 0)');
+    expect(src).toContain('v0 = 2;'); // the annulled `li v0,2` is the taken arm, not a dropped op
   });
 });
 

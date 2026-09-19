@@ -564,9 +564,8 @@ export const MIPS_GCC: TargetDescription = {
     // break; case 7: *p = 2; break; } return 0; }` cross-jumps the two stores into one and compiles
     // instruction for instruction identically at -O1 and at -O2, to `beq` / `beql` with the shared
     // `sw` after both; the same body as an if/else-if ladder puts the first arm's `li v0,1` BETWEEN
-    // the two tests. Same split — not committed as a fixture only because `beql` is an unmodelled
-    // control transfer, so the row declines before PRE5 and the cross-jumped arms leave no store to
-    // read the split off. Re-measure it the day branch-likely lands. (A THREE-case body says the
+    // the two tests. Same split — not committed as a fixture because the cross-jumped arms leave no
+    // store to read the split off. (A THREE-case body says the
     // same more loudly, the balanced tree's `slti` bound test landing ahead of the bodies with the
     // rest, but at three cases neither spelling reaches Regime A on this compiler, so that pair
     // could not also serve as the recovery test.)

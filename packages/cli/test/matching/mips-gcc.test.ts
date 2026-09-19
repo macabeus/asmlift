@@ -6,8 +6,8 @@
 //
 // Docker-gated: skips cleanly where no daemon is reachable. The byte-exact cases cover the
 // GCC-vs-IDO divergences: compiler-tagged + commutativity-aware idiom fold (half), the widened
-// `nor` decode (clamp0), and unsigned compares (ucmp). The remaining frontier (GCC's `bnezl`
-// branch-likely) is pinned as a documented, flip-on-fix gap.
+// `nor` decode (clamp0), unsigned compares (ucmp), and the annulled delay slot of a branch-likely
+// (umax).
 import { RewritePattern, SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
@@ -58,6 +58,14 @@ const MATCH_CASES: { sym: string; c: string; proto?: Prototypes; patterns?: Rewr
     c: 'int ucmp(unsigned a, unsigned b){ return a < b; }',
     expect: 'u32 ucmp(u32 a0, u32 a1) {\n    return a0 < a1;\n}\n',
   },
+  // BRANCH-LIKELY: GCC -O2 spells `if (a < b) a = b;` as `sltu; bnezl; move`, where the `move` is
+  // annulled unless the branch is taken. The slot IS the if-assign; an always-executed reading of
+  // it loses the conditional and returns `b` unconditionally.
+  {
+    sym: 'umax',
+    c: 'unsigned umax(unsigned a, unsigned b){ if (a < b) a = b; return a; }',
+    expect: 's32 umax(u32 a0, u32 a1) {\n    if (a0 < a1) a0 = a1;\n    return a0;\n}\n',
+  },
 ];
 
 describe.runIf(HAVE_DOCKER)('MIPS (KMC GCC) — first-class: compile → disasm → decompile → recompile → objdiff', () => {
@@ -75,20 +83,4 @@ describe.runIf(HAVE_DOCKER)('MIPS (KMC GCC) — first-class: compile → disasm 
       expect(s.match).toBe(true);
     }, 60_000);
   }
-});
-
-// The next GCC frontier (flow runs end-to-end, not yet matching) — pinned to flip on fix.
-describe.runIf(HAVE_DOCKER)('MIPS (KMC GCC) — remaining frontier (documented gap)', () => {
-  test('umax: GCC -O2 emits `bnezl` (branch-likely) — loud-fails, never a silent branch drop', () => {
-    // `if (a < b) a = b;` compiles to `sltu; bnezl; move` — a branch-LIKELY that annuls its delay
-    // slot when not taken. The frontend models only ordinary branches; silently dropping the
-    // branch (the `if` lost) would be a soundness hole, so the MIPS catch-all loud-fails,
-    // mirroring PPC. Delay-slot annulment is the missing frontend feature (flip to a match then).
-    const { asm } = compileMipsGccTarget(
-      'unsigned umax(unsigned a, unsigned b){ if (a < b) a = b; return a; }',
-      'umax',
-      TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
-    );
-    expect(() => decompile('umax', asm, MIPS_GCC)).toThrow(/branch-likely|unmodelled control transfer/);
-  }, 60_000);
 });
