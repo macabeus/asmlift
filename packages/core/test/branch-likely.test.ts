@@ -229,12 +229,20 @@ test('a slot is the word at branch+4, and the reader accounts for every word obj
 
   // What is missing from the listing ENTIRELY is a different thing from a hole, and each placement
   // question says which word it wanted: the slot at branch+4, and the word the not-taken edge lands
-  // on at branch+8.
+  // on at branch+8. Both are asked of EVERY modelled transfer — an ordinary branch places the same
+  // two words, and taking its slot from whatever came next is the same wrong answer — and the
+  // branch-likely asks them in its own words, because for it they decide conditional execution.
   expect(lift('0:\tbnezl\ta0,18 <f+0x18>')).toThrow(
     /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x4 to be its delay slot/,
   );
   expect(lift('0:\tbnezl\ta0,18 <f+0x18>', '4:\tli\tv0,1')).toThrow(
     /branch-likely 'bnezl' at 0x0 — the disassembly has no instruction at 0x8 for the not-taken edge/,
+  );
+  expect(lift('0:\tbnez\ta0,18 <f+0x18>')).toThrow(
+    /cannot lift 'f': 'bnez' at 0x0 — the disassembly has no instruction at 0x4 to be its delay slot/,
+  );
+  expect(lift('0:\tbnez\ta0,18 <f+0x18>', '4:\tli\tv0,1')).toThrow(
+    /cannot lift 'f': 'bnez' at 0x0 — the disassembly has no instruction at 0x8 for the not-taken edge/,
   );
   // but the function's FIRST word has no predecessor by construction, and that is not a hole
   expect(src('0:\tbltzl\ta0,8 <f+0x8>', '4:\tnegu\ta0,a0', '8:\tmove\tv0,a0', 'c:\tjr\tra', '10:\tnop')).toBe(
