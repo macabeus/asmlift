@@ -118,6 +118,30 @@ Scoring rules, in the project's spirit of never guessing:
   and asmlift then drops both its typedefs and its synthesized declarations for every
   candidate; a template that accepts it keeps both. The verdict is cached per run.
 
+### When no target fits your compiler
+
+`--target` is a closed set of seven, and `platform` maps only `gba`, `n64` and `gc`/`gamecube`/`wii`.
+An unmapped platform (`ps1`, `nds`, …) refuses. A mapped one whose compiler is not the one it names
+does **not**: `platform: gba` on a modern `arm-none-eabi-gcc` build resolves to `agbcc`, and the
+`[config]` line is the only thing that says so — read it.
+
+A target key picks the ISA frontend and the `compilerBehaviors` that drive enumeration. It does not
+pick the scorer: `--score-against` compiles with YOUR command and diffs YOUR object, so a match is
+byte-exact whichever key produced it. A wrong key costs matches, never truth — which makes the
+nearest key on the right ISA usable:
+
+| Your ISA                   | Nearest key                                    |
+| -------------------------- | ---------------------------------------------- |
+| ARMv4T, Thumb only         | `agbcc`                                        |
+| MIPS (including PS1 / PS2) | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc`            |
+| PowerPC                    | `mwcc_233_163n`, `mwcc_242_81`, `mwcc_247_107` |
+
+Only those three frontends exist (`frontend/registry.ts`); an ARM-mode body is refused by name, not
+decoded as Thumb, and instructions the frontend does not model decline loudly.
+
+Making a compiler a real target is a change to `TOOLCHAIN_TARGETS`, deliberately not a setting: one
+asmlift has not been calibrated against is one it would otherwise guess at.
+
 ## Compiler flags
 
 The flags a function was compiled with compile every candidate, and asmlift reports the profile
