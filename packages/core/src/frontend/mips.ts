@@ -376,7 +376,8 @@ function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
       `cannot lift '${name}': branch-likely '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — ${why}`,
     );
   // Every address this function branches to, read BEFORE any rewriting so a likely branch's own
-  // target is counted too.
+  // target is counted too. A recovered jump table's arms are NOT in here — they do not exist until
+  // `recoverMipsJumpTables` has run, so `lift` checks them against the slot addresses returned below.
   const targets = new Set(instrs.map((ins) => ins.target).filter((t): t is number => t !== undefined));
   // BY ADDRESS, never by array position. `parseDisasm` silently skips any line it cannot decode
   // (frontend/disasm.ts), and the corpus already carries 53 such holes across 15 rows — objdump
@@ -573,13 +574,23 @@ export function lift(
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
-  // A recovered dispatch's bounds branch emits a `switch_br` and runs its delay slot unconditionally
-  // — which a nullified slot is not. The idiom has never been seen branch-likely; if it ever is,
-  // refuse rather than drop the slot.
+  // THE TWO WAYS A RECOVERED TABLE MEETS AN ANNULLED SLOT, neither of which `normaliseBranchLikely`
+  // can see: the table does not exist while it runs. (1) The dispatch's bounds branch emits a
+  // `switch_br`, which runs its delay slot unconditionally — a nullified slot is not that. (2) An
+  // arm of the table lands ON a nullified slot, which would run the slot with no branch
+  // conditioning it and then jump to that branch's target: `case 1:` would take the taken arm's
+  // value where the hardware runs the slot and falls on through. Neither idiom has ever been seen
+  // in the corpus; refuse rather than answer either one wrong.
+  const jtArms = new Set([...jts.values()].flatMap((jt) => [...jt.caseAddrs, jt.defaultAddr]));
   for (const addr of likelyAddrs) {
     if (jts.has(addr)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': branch-likely at 0x${addr.toString(16)} — a recovered switch's bounds branch cannot annul its delay slot`,
+      );
+    }
+    if (jtArms.has(addr + 4)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': branch-likely at 0x${addr.toString(16)} — a recovered switch arm lands on its delay slot, which would run it unconditioned`,
       );
     }
   }

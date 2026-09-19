@@ -8,6 +8,7 @@
 // shape the placement cannot model refuses loudly and by name instead.
 import { expect, test } from 'vitest';
 
+import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
@@ -226,5 +227,59 @@ test('a slot is the word at branch+4, not the next line objdump happened to prin
   // but the function's FIRST instruction has no predecessor by construction, and that is not a hole
   expect(src('0:\tbltzl\ta0,8 <f+0x8>', '4:\tnegu\ta0,a0', '8:\tmove\tv0,a0', 'c:\tjr\tra', '10:\tnop')).toBe(
     's32 f(s32 a0) {\n    if (a0 < 0) a0 = -a0;\n    return a0;\n}\n',
+  );
+});
+
+test('a recovered jump table and a nullified slot refuse where they meet, both ways', () => {
+  // `normaliseBranchLikely` runs BEFORE `recoverMipsJumpTables`, deliberately — one branch
+  // vocabulary then reaches the table walk — so the table's arms are not among the branch targets
+  // it checks. Both ways they can meet are therefore checked in `lift`, after recovery, and both
+  // are silent wrong answers if they are not: the bounds branch emits a `switch_br`, which runs its
+  // delay slot unconditionally, and an arm landing ON a nullified slot would run the slot with no
+  // branch conditioning it and then jump to that branch's target. Neither occurs in the corpus —
+  // no compiler emits a case arm into a delay slot — so refusing costs nothing.
+  const dispatch = (bounds: string) =>
+    obj(
+      ' 0:\tsltiu\tat,a0,0x2',
+      ` 4:\t${bounds}\tat,44 <f+0x44>`,
+      ' 8:\tsll\tv0,a0,0x2',
+      ' c:\tlui\tv1,0x0',
+      '10:\taddu\tat,v1,v0',
+      '14:\tlw\tat,0(at)',
+      '18:\tjr\tat',
+      '1c:\tnop',
+      '20:\tnop',
+      '24:\tbnezl\ta1,38 <f+0x38>',
+      '28:\tli\tv0,7', // the nullified slot — and the `case 1` word below points AT it
+      '2c:\tli\tv0,3',
+      '30:\tjr\tra',
+      '34:\tnop',
+      '38:\tli\tv0,8',
+      '3c:\tjr\tra',
+      '40:\tnop',
+      '44:\tli\tv0,9',
+      '48:\tjr\tra',
+      '4c:\tnop',
+    );
+  const asmData: AsmData = {
+    sections: new Map([['.rodata', new Uint8Array([0, 0, 0, 0x24, 0, 0, 0, 0x28])]]),
+    relocs: [
+      { section: '.text', offset: 0xc, type: 'R_MIPS_HI16', sym: 'jt', addend: 0 },
+      { section: '.rodata', offset: 0, type: 'R_MIPS_32', sym: '.text', addend: 0 },
+      { section: '.rodata', offset: 4, type: 'R_MIPS_32', sym: '.text', addend: 0 },
+    ],
+    symbols: new Map([
+      ['jt', { section: '.rodata', value: 0 }],
+      ['.text', { section: '.text', value: 0 }],
+    ]),
+    bigEndian: true,
+  };
+  // Hardware entering 0x28 runs `li v0,7; li v0,3; jr ra` and returns 3. Read as an ordinary
+  // successor, `case 1:` would return 8 — the taken arm's value.
+  expect(() => decompile('f', dispatch('beqz'), MIPS_GCC, { asmData })).toThrow(
+    /branch-likely at 0x24 — a recovered switch arm lands on its delay slot, which would run it unconditioned/,
+  );
+  expect(() => decompile('f', dispatch('beqzl'), MIPS_GCC, { asmData })).toThrow(
+    /branch-likely at 0x4 — a recovered switch's bounds branch cannot annul its delay slot/,
   );
 });
