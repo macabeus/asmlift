@@ -1,7 +1,7 @@
 # @asmlift/toolchains
 
-asmlift's **pinned toolchains** — agbcc (GBA), IDO 7.1 (N64), KMC GCC (N64), CodeWarrior
-2.4.2b81 (GameCube): the compile+score implementations, the Docker container pool, and the
+asmlift's **pinned toolchains** — agbcc (GBA), IDO 7.1 (N64), KMC GCC (N64), GCC 2.7.2 (N64), and
+the three CodeWarrior builds (GameCube): the compile+score implementations, the Docker container pool, and the
 AsmData extraction the **benchmark** ([`apps/benchmark`](../../apps/benchmark)) and the
 **matching test suite** (`packages/cli/test/matching`) run on.
 

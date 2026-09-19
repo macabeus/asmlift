@@ -4,7 +4,7 @@ The asmlift command line: give it one function's assembly, get C back — and, p
 original object file, **proof**: the output is recompiled with your project's own compiler and
 byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match.
 
-> 📚 Check the [root `README.md`](../README.md) for a quick-start on how to use `@asmlift/cli`
+> 📚 Check the [root `README.md`](../../README.md) for a quick-start on how to use `@asmlift/cli`
 
 ## Features
 
@@ -82,12 +82,14 @@ other status because a store that lied invalidates the whole fan ·
 
 All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
-| Field      | Meaning                                                                                                                                                                                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`; `gc`/`gamecube`/`wii` → `mwcc_242_81`, `mwcc_233_163n` or `mwcc_247_107`)                                                                        |
-| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
-| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
-| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
+| Field            | Meaning                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`; `gc`/`gamecube`/`wii` → `mwcc_242_81`, `mwcc_233_163n` or `mwcc_247_107`)                                                                                                                                                      |
+| `compiler`       | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                                                                                                        |
+| `objdump`        | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                                                                                                          |
+| `symbols`        | A symbol map already DERIVED, as JSON (hex address → `SymbolInfo[]`), for a project with no ELF to derive one from — an authored map, or the one a published reproduction script must feed back to reproduce its answer. Mutually exclusive with `elf`: two sources for one map is a silent precedence question, so declaring both is a loud input error |
+| `candidateCache` | `off` — this project REFUSES the cross-run candidate-object cache for its `compiler` command, whatever `ASMLIFT_CANDCACHE` says. A REFUSAL, never an assertion: declare it when the command runs the compiler somewhere nothing here can read it (a container image named by a tag, another host, a wrapper reading an unnamed config directory)         |
+| `elf`            | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf)                                                                               |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
 `{{outputPath}}` (where the object must land), `{{symbol}}` (the function name), `{{cflags}}`
