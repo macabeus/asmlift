@@ -110,25 +110,6 @@ describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switc
     const { asm } = compileMipsTarget(dense(8), 'sw_jt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     expect(() => decompile('sw_jt', asm, MIPS_IDO)).toThrow(FrontendUnsupportedError);
   });
-
-  // SOUNDNESS: a MIPS branch-LIKELY (`bnezl`/`beql`/…) has no register dest, so nothing in the
-  // opaque-dest path could catch a dropped branch — a switch fn with an outer branch-likely guard
-  // would silently miscompile. Its slot is annulled when not taken, so the branch must survive as a
-  // real conditional. Constructed asm (IDO emits `bnezl` for the guard).
-  test('a branch-likely guard survives as a conditional, never a dropped branch', () => {
-    const asm = [
-      '00000000 <f>:',
-      '   0:\tbnezl\ta0,10 <f+0x10>',
-      '   4:\tli\tv0,2',
-      '   8:\tli\tv0,1',
-      '   c:\tnop',
-      '  10:\tjr\tra',
-      '  14:\tnop',
-    ].join('\n');
-    const src = decompile('f', asm, MIPS_IDO).source;
-    expect(src).toContain('if (a0 == 0)');
-    expect(src).toContain('v0 = 2;'); // the annulled `li v0,2` is the taken arm, not a dropped op
-  });
 });
 
 const HAVE_DOCKER = dockerGate('switch-p3');

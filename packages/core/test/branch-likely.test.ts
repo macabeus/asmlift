@@ -50,6 +50,16 @@ test('the nullified slot IS the conditional — `absi` on KMC is one `if`, not a
   expect(absi).toBe('s32 absi(s32 a0) {\n    if (a0 < 0) a0 = -a0;\n    return a0;\n}\n');
 });
 
+test('a likely branch has no register destination, so nothing else could catch it being dropped', () => {
+  // The opaque-dest path catches an unmodelled instruction by the register it writes; a branch
+  // writes none, so a dropped one leaves no trace at all. The guard shape IDO emits around a
+  // switch is the one where that would show: the branch must survive as a real conditional, and
+  // its annulled slot must be the taken arm rather than an op silently deleted.
+  const guard = src('0:\tbnezl\ta0,10 <f+0x10>', '4:\tli\tv0,2', '8:\tli\tv0,1', 'c:\tnop', '10:\tjr\tra', '14:\tnop');
+  expect(guard).toContain('if (a0 == 0)');
+  expect(guard).toContain('v0 = 2;');
+});
+
 test('a STORE in a nullified slot is performed on the taken path ALONE', () => {
   // The line that makes "read it as an ordinary slot" a silent miscompile rather than a cosmetic
   // one: an unconditional `*a0 = a1` writes memory the function never writes when a1 is zero.

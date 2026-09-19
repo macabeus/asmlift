@@ -594,6 +594,18 @@ export function lift(
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
+  // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what lets
+  // each be worked on alone: `bc1fl` is both, and the condition code blocks it either way. Asked
+  // FIRST, before the likely rewrite, so that a function carrying both reports the FP gap rather
+  // than whatever the likely placement happens to say about the other branch.
+  for (const ins of instrs) {
+    if (isFpCondBranch(ins.mnemonic)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': floating-point condition-code branch '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+          `— the FP condition code is not modelled`,
+      );
+    }
+  }
   // BRANCH-LIKELY is rewritten to its ordinary branch FIRST, so everything downstream — jump-table
   // recovery's block-boundary walk included — sees one branch vocabulary. What stays special is the
   // slot, and `toBlocks` is where that is placed.
@@ -643,14 +655,6 @@ export function lift(
     if (ins.mnemonic === 'jr' && ins.ops[0] !== 'ra' && !recoveredJr.has(ins.addr)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': indirect jump 'jr ${ins.ops[0] ?? ''}' at 0x${ins.addr.toString(16)} — jump tables / tail calls not supported`,
-      );
-    }
-    // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what
-    // lets each be worked on alone: `bc1fl` is both, and the condition code blocks it either way.
-    if (isFpCondBranch(ins.mnemonic)) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': floating-point condition-code branch '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `— the FP condition code is not modelled`,
       );
     }
     // CATCH-ALL (mirrors the PPC denylist): an unmodelled control-transfer mnemonic would otherwise
