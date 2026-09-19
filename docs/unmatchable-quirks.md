@@ -186,8 +186,10 @@ memory.
 
 The construct also has almost no inhabitants — but the predicate has to be the CLASS and not a proxy
 for it, so say the class outright: **a repeated identical read statement, inside one straight-line
-run, with no intervening call.** Over the 252
-functions in `apps/benchmark/dataset/real` (6 projects × 42) it has **one** inhabitant, this row.
+run, with no intervening call.** Over the 378
+functions in `apps/benchmark/dataset/real` (9 projects × 42) it has **one** inhabitant, this row —
+a population that grew by half since the census, without the census being re-run over the new rows.
+Re-running it is the cheap half of falsifying this entry.
 Re-run it — split each `funcC` into straight-line runs at every brace and control keyword, split
 those into statements, and report a statement that (a) repeats verbatim, (b) has a memory access on
 its right-hand side, and (c) has no `ident(` between the two occurrences.
