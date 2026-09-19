@@ -3,7 +3,8 @@
 // runners have, and CodeWarrior's container for a GameCube unit.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { isMwccToolchainId, ppcDockerAvailable } from '@asmlift/toolchains';
-import { readFileSync, readdirSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
@@ -25,6 +26,25 @@ describe('undeclaredCallees', () => {
 
   test('a declaration after the call does not declare it', () => {
     expect(undeclaredCallees('int f(int a) { return g(a); }\nint g(int);\n')).toEqual(['g']);
+  });
+
+  // A compiler that never answers used to hang the whole run rather than fail it — a wedged
+  // `clang -fsyntax-only` and its `-cc1` child held a vitest run for two and a half hours, and the
+  // suite reported nothing at all while it did. The probe is bounded, so that is a loud failure now.
+  test('a compiler that never answers is killed, and says so', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-hangcc-'));
+    const cc = join(dir, 'cc');
+    writeFileSync(cc, '#!/bin/sh\nsleep 600\n');
+    chmodSync(cc, 0o755);
+    try {
+      const started = Date.now();
+      expect(() => undeclaredCallees('int f(void) { return g(); }\n', { cc, timeoutMs: 1_000 })).toThrow(
+        /did not answer within 1s .*and was killed/,
+      );
+      expect(Date.now() - started, 'it waited for the sleep, not the deadline').toBeLessThan(30_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
