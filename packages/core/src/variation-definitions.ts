@@ -1110,6 +1110,44 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('scopebase'),
     seeAlso: ['scopebase', 'homesplit', 'vol-store'],
   },
+  argcopy: {
+    title: 'A pointer parameter copied for one region',
+    summary: 'a region copies an incoming pointer parameter into a local and uses the copy',
+    detail:
+      'A pointer parameter the whole function reads pins its incoming register for the whole body. A source ' +
+      'that copies it into a local at the head of the block that uses it gives the allocator a second name ' +
+      'for the same address, which it may home elsewhere — freeing the parameter register for something ' +
+      "else, such as that block's loop counter. Uses outside the chosen region keep naming the parameter, " +
+      'which is what makes the two ranges separable.',
+    compilerBehavior:
+      'A braced declaration inside the region and a plain local assigned at its head were both taken through ' +
+      'agbcc on the row this variation was built for and produced the same bytes, so the copy is emitted as ' +
+      'a plain local and nothing here carries block scope. The variation has no target gate, so it is offered ' +
+      'on every compiler — as /scopebase, /regionbase and /coalesce, which rest on the same allocator fact, ' +
+      'also are. A target gate would have to claim the copy is INERT on some compiler, the way /advance claims ' +
+      'it of a target that folds a pointer advance; nobody has compiled the pair that would say so, and a gate ' +
+      'withholding a candidate on an untested guess costs matches rather than fan.',
+    offeredWhen: {
+      judges: 'each pointer parameter, in each nested statement list that reads it',
+      gates: ['ARGCOPY_GATES', 'ARGCOPY_REGION_GATES'],
+    },
+    subject: {
+      meaning:
+        'The parameter, then the region that copies it, as a path of statement-index/list-index ' +
+        'PAIRS — one pair per nesting level. `argcopy-a0@0.1` copies `a0` at the head of the second ' +
+        'nested list of the first statement; `argcopy-a0@0.1.2.0` copies it in the first nested list ' +
+        'of the third statement of that one.',
+      examples: ['argcopy-a0@0.0', 'argcopy-a0@0.1', 'argcopy-a0@0.1.2.0'],
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'void example(u8 *a0, u8 a1, s32 c) { u8 *p0; s32 i; @ }',
+      before: 'if (c) { i = 0; do { if (g(a0 + i) != 0) a0[i + 50] = a1; i = i + 1; } while (i <= 3); }',
+      after: 'if (c) { p0 = a0; i = 0; do { if (g(p0 + i) != 0) p0[i + 50] = a1; i = i + 1; } while (i <= 3); }',
+    },
+    implementedIn: l3('argcopy'),
+    seeAlso: ['scopebase', 'regionbase', 'parkfirst', 'coalesce'],
+  },
   coalesce: {
     title: 'Two locals share one variable',
     summary: 'two locals whose lifetimes never overlap are merged into one',

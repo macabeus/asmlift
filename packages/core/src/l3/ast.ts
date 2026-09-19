@@ -731,6 +731,44 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
+/** A statement that REPEATS what it contains — what {@link isLoop} narrows to.
+ *
+ *  Derived STRUCTURALLY, not from a second list of kinds: a repeating statement is exactly one that
+ *  carries both a `cond` and a `body`, and no other `Stmt` carries both (`if` has `cond` without
+ *  `body`, `switch` has neither). A new repeating kind therefore joins this type by construction,
+ *  where a hand-written kind list falls out of step SILENTLY — TypeScript does not check a
+ *  predicate's body against the type it asserts. */
+export type Loop = Extract<Stmt, { cond: Expr; body: Stmt[] }>;
+
+/** Does this statement REPEAT what it contains? Its body and its own condition run once per
+ *  iteration, which is the fact half of `l3/` asks about: a hoist out of one is loop-invariant
+ *  code motion, a copy inside one re-runs, and a live range that crosses one is under pressure.
+ *
+ *  It lives here, exhaustive and with no `default`, for the reason {@link stmtLists} does: a new
+ *  `Stmt` kind that repeats is then a compile error at ONE site rather than a silent `false` in
+ *  each caller's own hand-spelled kind test. It NARROWS to {@link Loop} rather than returning
+ *  `boolean`, because a caller that reaches `body` afterwards cannot use a `boolean` one and spells
+ *  the kind test out again instead. `backend/pascal.ts` is where that costs correctness: its
+ *  `hasReturn` walk decides a LOUD failure — Pascal's `case-of` cannot spell an early `return` — so
+ *  a repeating kind read as a non-loop turns the refusal into an emitted miscompile. */
+export function isLoop(s: Stmt): s is Loop {
+  switch (s.k) {
+    case 'while':
+    case 'dowhile':
+    case 'for':
+      return true;
+    case 'if':
+    case 'switch':
+    case 'assign':
+    case 'store':
+    case 'exprstmt':
+    case 'return':
+    case 'break':
+    case 'continue':
+      return false;
+  }
+}
+
 /** The nested statement LISTS of a statement — the SCOPES it opens.
  *
  *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those

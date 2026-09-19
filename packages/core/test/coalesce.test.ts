@@ -217,6 +217,110 @@ describe('arm-disjoint admission', () => {
     f.params = [{ name: 'y', type: T.s(32) }];
     expect(coalesceCandidates(f).map((c) => c.merged)).not.toContain('y-x');
   });
+
+  // ── a `switch` picks ONE arm, exactly as an `if` does ─────────────────────────────────────
+  // Two locals confined to two different `case` bodies never coexist for the same reason the
+  // then/else pair never does, so the same admission applies — UNLESS fall-through joins the two
+  // arms onto one path, which is what the `fall-through` gate refuses.
+  const sw = (cases: { values: number[]; body: Stmt[]; fallsThrough?: boolean }[]): Stmt => ({
+    k: 'switch',
+    scrutinee: { k: 'var', name: 'a' },
+    cases: cases.map((c) => ({ values: c.values, body: c.body, fallsThrough: c.fallsThrough === true })),
+  });
+
+  test('counters confined to two different case bodies merge', () => {
+    const out = coalesceCandidates(
+      fn(
+        [
+          sw([
+            { values: [2], body: arm('x') },
+            { values: [3], body: arm('y') },
+          ]),
+        ],
+        L('x', 'y'),
+      ),
+    );
+    expect(out.map((c) => c.merged)).toContain('y-x'); // survivor = the earlier declaration
+    const merged = out.find((c) => c.merged === 'y-x')!.sfn;
+    expect(names(merged)).toEqual(['x']);
+    expect(JSON.stringify(merged.body)).not.toContain('"y"');
+  });
+
+  test('two arms joined by fall-through never merge — one path holds both', () => {
+    const { candidates, refusals } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn(
+        [
+          sw([
+            { values: [2], body: arm('x'), fallsThrough: true },
+            { values: [3], body: arm('y') },
+          ]),
+        ],
+        L('x', 'y'),
+      ),
+    );
+    expect(candidates.map((c) => c.merged)).not.toContain('y-x');
+    expect(refusals.get('fall-through')).toBeGreaterThan(0); // the gate is reached, not decorative
+  });
+
+  test('fall-through reach is TRANSITIVE — a falling arm reaches past its neighbour', () => {
+    // arm 0 runs on into arm 1, which runs on into arm 2: x and z share a path even though the
+    // two arms are not adjacent. A rule that only looked at ADJACENT arms would admit (x, z).
+    const { candidates } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn(
+        [
+          sw([
+            { values: [0], body: arm('x'), fallsThrough: true },
+            { values: [1], body: arm('y'), fallsThrough: true },
+            { values: [2], body: arm('z') },
+          ]),
+        ],
+        L('x', 'y', 'z'),
+      ),
+    );
+    expect(candidates.map((c) => c.merged)).toEqual([]);
+  });
+
+  test('a closed arm BREAKS the chain — the pair after it still merges', () => {
+    // arm 0 runs on into arm 1, but arm 1 ends: no path reaches arm 2 from either. This is the
+    // one ADMITTING direction of the rule — every other fall-through test asserts a refusal, so
+    // without a falling arm here the transitive chain could stop at nothing and stay green.
+    const out = coalesceCandidates(
+      fn(
+        [
+          sw([
+            { values: [0], body: [use('a')], fallsThrough: true },
+            { values: [1], body: arm('x') },
+            { values: [2], body: arm('y') },
+          ]),
+        ],
+        L('x', 'y'),
+      ),
+    );
+    expect(out.map((c) => c.merged)).toContain('y-x');
+  });
+
+  test('an in-loop switch never admits its arm pair', () => {
+    const out = coalesceCandidates(
+      fn(
+        [
+          {
+            k: 'dowhile',
+            cond: cnd,
+            body: [
+              sw([
+                { values: [2], body: arm('x') },
+                { values: [3], body: arm('y') },
+              ]),
+            ],
+          },
+        ],
+        L('x', 'y'),
+      ),
+    );
+    expect(out.map((c) => c.merged)).not.toContain('y-x');
+  });
 });
 
 describe('volatile pairs (span path)', () => {

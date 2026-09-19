@@ -9,7 +9,7 @@
 // (`rshift` is arithmetic on a signed Integer → `sra`.) This is the concrete difference from
 // Turbo/Delphi/FreePascal.
 import { IrType, typeToString } from '../ir/types';
-import { BinOp, Expr, LanguageBackend, SFn, Stmt } from '../l3/ast';
+import { BinOp, Expr, LanguageBackend, SFn, Stmt, isLoop } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
 import { type VarTypes, declaredTypes, derefStrideOk, exprCType, writesNonPointerIntoPointer } from '../l3/typing';
 
@@ -240,7 +240,7 @@ function makePrinter(vt: VarTypes) {
             (st) =>
               st.k === 'return' ||
               (st.k === 'if' && (hasReturn(st.then) || hasReturn(st.else))) ||
-              ((st.k === 'while' || st.k === 'dowhile' || st.k === 'for') && hasReturn(st.body)) ||
+              (isLoop(st) && hasReturn(st.body)) ||
               (st.k === 'switch' && (st.cases.some((c) => hasReturn(c.body)) || hasReturn(st.default ?? []))),
           );
         if (s.cases.some((c) => hasReturn(c.body)) || hasReturn(s.default ?? [])) {

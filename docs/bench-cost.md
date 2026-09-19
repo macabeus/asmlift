@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=121.6s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=109.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,11 +129,17 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-18: the ranked pass alone is **972 s over 171
-real rows** and **560 s over 682 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 286.0 s and 149.5 s. **A figure here is a price under a CACHE STATE and a
+Summed out of the committed artifact of 2026-09-19: the ranked pass alone is **958 s over 171
+real rows** and **597 s over 682 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 297.7 s and 152.0 s. **A figure here is a price under a CACHE STATE and a
 MACHINE, not a property of the corpus**, and this file's own history is the loudest evidence of it.
-The artifact before this one read 911 s and 463 s over the SAME 1,198 rows: `bench diff` across the
+The artifact before this one read 972 s and 560 s over the SAME 1,198 rows: `bench diff` across the
+pair reports **8 field changes over 3 rows, 0 added, 0 removed**, one gained match, and the fan at
+**54,750 → 58,880 (1.08×) over 853 comparable rows** — a branch that shares a slot across switch
+arms and copies a pointer parameter for one region, so the fan move is a RESULT rather than the
+machine. Its ranked pass reads **1.01×**, and the same tree benched twice minutes apart read 0.96×
+first: two runs, one tree, one base, and the price moved 5%. The one before THAT read 911 s and
+463 s over the SAME 1,198 rows: `bench diff` across the
 pair reports **77 field changes over 24 rows, 0 added, 0 removed**, three gained matches, the fan at
 54,757 → 54,750 over 853 comparable rows, and the ranked pass at **1.12×** — a branch that narrows a
 MIPS parameter where the object says it was declared narrow, on a machine running nothing else.
@@ -162,8 +168,8 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 243 s of that real total — **25% of the tier
-in one row**, over a fan of 27,360. It is also the row that will strand a shard: in an earlier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 242 s of that real total — **25% of the tier
+in one row**, over a fan of 30,240. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
 ## 4. How many full runs a round gets
@@ -222,7 +228,7 @@ until grep -q 'EXIT=' "$LOG"; do
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 3200 s of no growth is ~30% over this corpus's long-pole ROW — the 2,454 s of §3, not the
+  # 3200 s of no growth is ~30% over this corpus's long-pole ROW — the 2,454 s below, not the
   # 2,169 s the whole real tier walls at. Below that, a static log is normal, not a hang.
   # Raise it, never lower it, as that row grows.
   [ "$still" -ge 3200 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
@@ -231,7 +237,10 @@ done
 ```
 
 **A log that stopped growing is almost certainly `kleod:PauseMenuScreenHandler:agbcc`** — one row,
-~2,454 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
+~2,454 s of ranked pass, alone on one shard while the other seven sit finished. That 2,454 s is a
+figure from a run slower than any §3 now lists, and it is the number the threshold above is set
+from; the spelling count it was taken over has since moved, so read the row's size from §3 (30,240
+in the artifact of 2026-09-19, 27,360 in the one before it), never from here.
 Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
 spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
 this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven

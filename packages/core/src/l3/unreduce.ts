@@ -196,6 +196,7 @@ import {
   exprEquals,
   exprHasEffect,
   exprReadsVolatile,
+  isLoop,
   mapExprChildren,
   stmtChildren,
   stmtExprs,
@@ -813,7 +814,7 @@ export function unreduceAccumulators(
 
   for (let li = 0; li < body.length; li++) {
     const loop = body[li];
-    if (loop.k !== 'while' && loop.k !== 'dowhile' && loop.k !== 'for') {
+    if (!isLoop(loop)) {
       continue;
     }
     // the counter: one name stepped by a constant, whose start stands above the loop

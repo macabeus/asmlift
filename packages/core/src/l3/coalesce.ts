@@ -6,17 +6,14 @@
 // TWO admission paths live here, each with its own gate table and its own reading of loops. The
 // SPAN path (COALESCE_GATES) proves disjoint liveness from preorder position, so it asks which
 // loops RE-RUN a mention of each local and refuses a pair only when one loop holds both. The
-// ARM-DISJOINT path (ARM_DISJOINT_GATES) proves the two never coexist because one `if` picks
-// between them, so it asks only whether ANY loop encloses that `if` — a second entry breaks the
-// argument however the arms' own loops relate. `coalesceCandidates` offers both.
+// ARM-DISJOINT path (ARM_DISJOINT_GATES) proves the two never coexist because one BRANCH picks
+// between them — an `if`'s two arms or a `switch`'s case bodies alike — so it asks only whether ANY
+// loop encloses that branch (a second entry breaks the argument however the arms' own loops relate)
+// and whether fall-through joins the two arms onto one path. `coalesceCandidates` offers both.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, isLoop, mapExprChildren, stmtChildren, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
-
-/** THE loop-kind test, shared by both admission paths in this file — the span model's enclosure
- *  walk and the arm path's `visit`. */
-const isLoop = (s: Stmt): boolean => s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
 
 function namesIn(e: Expr, out: Set<string>): void {
   // `addr` names a GLOBAL (`&gSym`) or a LOCAL — the structurer renders an `laddr` frame object
@@ -325,8 +322,11 @@ function localsAfterMerge(locals: SFn['locals'], gone: string, kept: string): SF
 export interface ArmPair {
   a: string;
   b: string;
-  /** the confining `if` has a loop ancestor, so it can run more than once */
+  /** the confining branch has a loop ancestor, so it can run more than once */
   ifInLoop: boolean;
+  /** control can run from one of the two arms INTO the other — `switch` fall-through, the one
+   *  way two arms of a branch land on a single path. Always false for an `if`. */
+  armsJoined: boolean;
   sameType: boolean;
   /** either local is object-volatile or carries a pointee-volatile qualifier (see MergePair) */
   eitherIsVolatile: boolean;
@@ -341,12 +341,13 @@ export interface ArmPair {
  *  different reason: `arm-init` is a FIRST-MENTION rule where `const-fed` is an every-assign one,
  *  so arms that open with a const write and then compute (`x = 0; x = x + 1;`) merge here and not
  *  there. Two locals confined to
- *  OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no read of either
- *  can observe the other's write — no liveness reasoning needed. That argument is exactly what the
- *  `loop` gate here protects: a loop ancestor re-enters the `if`, later entries can take the other
- *  arm, and a value written on one visit becomes readable on the next. Note this gate wants ANY
- *  enclosing loop, not the span model's shared-loop rule: never-coexisting is a claim about one
- *  entry, so a second entry breaks it however the two arms' loops relate. */
+ *  DIFFERENT arms of one branch never coexist at runtime: the branch picks one arm, so no read of
+ *  either can observe the other's write — no liveness reasoning needed. `branchArms` says what an
+ *  arm is, and the argument holds for a `switch`'s case bodies exactly as it does for an `if`'s two.
+ *
+ *  Two gates protect it, one per way it fails. `loop` covers a SECOND ENTRY, which is why it wants
+ *  ANY enclosing loop rather than the span model's shared-loop rule: never-coexisting is a claim
+ *  about one entry. `fall-through` covers the failure WITHIN one entry. */
 export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   {
     id: 'type',
@@ -363,10 +364,17 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   },
   {
     id: 'loop',
-    why: 'a loop ancestor re-enters the if, so opposite arms both run and a value could cross',
+    why: 'a loop ancestor re-enters the branch, so different arms both run and a value could cross',
     sound: true,
-    guardedBy: 'coalesce.test.ts: an in-loop if never admits its arm pair',
+    guardedBy: 'coalesce.test.ts: never admits its arm pair',
     rejects: (c) => c.ifInLoop,
+  },
+  {
+    id: 'fall-through',
+    why: 'a case that runs on into the other arm puts both locals on one path, so they coexist',
+    sound: true,
+    guardedBy: 'coalesce.test.ts: two arms joined by fall-through never merge',
+    rejects: (c) => c.armsJoined,
   },
   {
     id: 'arm-init',
@@ -477,6 +485,44 @@ function mentionIndex(): {
   return { mentionsOf, mentionsUnder, firstMention };
 }
 
+/** The MUTUALLY EXCLUSIVE arms of a branching statement, and which pairs of them control can
+ *  nevertheless run through together — the one shape both admission sites read, so `if` and
+ *  `switch` are one rule here rather than two walkers.
+ *
+ *  An `if` has exactly two arms and no way to reach one from the other. A `switch`'s arms are its
+ *  `case` bodies, and FALL-THROUGH is the one way two of them land on a single path: arm `i` runs
+ *  into arm `j` exactly when every arm from `i` up to `j` falls through, so the reach is the
+ *  TRANSITIVE chain and not merely the adjacent pair.
+ *
+ *  ITS REACH, MEASURED, because a soundness argument with no corpus witness should say so. Counted
+ *  2026-09-19 with a throwaway counter in this walk, over `pnpm bench sweep --fan --map-modes
+ *  harness,nomap` — 2,396 records over the 1,198-row corpus: the switch half ADMITS 192 pairs, all
+ *  on `pokeemerald:SetMauvilleOldManLanguage:agbcc` and none on any other function. Across all five
+ *  gates, `arm-init` refuses 4,024 and `type` 1,346, while `volatile`, `loop` and `fall-through`
+ *  refuse **zero** — so what bounds this extension corpus-wide is a COST gate, while both SOUND
+ *  rules are witnessed only by the fixtures in `coalesce.test.ts`. Re-take the count rather than
+ *  quoting it: a corpus that grows falsifies the number, not the argument.
+ *
+ *  A `switch`'s `default` body is deliberately NOT an arm. `defaultAt` may place the label between
+ *  case labels, where the body is reachable both by dispatch and by running on into the arm below
+ *  it — a path `fallsThrough` does not describe, because the flag indexes the `cases` array the
+ *  label does not sit in. Rather than reason about a position this file cannot see, no pair
+ *  involving the default is offered: a merge withheld is a candidate missed, a merge admitted on a
+ *  path that exists is a wrong answer. */
+const branchArms = (st: Stmt): { arms: Stmt[][]; joined: (i: number, j: number) => boolean } | null => {
+  if (st.k === 'if' && st.then.length && st.else.length) {
+    return { arms: [st.then, st.else], joined: () => false };
+  }
+  if (st.k === 'switch') {
+    const { cases } = st;
+    return {
+      arms: cases.map((c) => c.body),
+      joined: (i, j) => cases.slice(Math.min(i, j), Math.max(i, j)).every((c) => c.fallsThrough),
+    };
+  }
+  return null;
+};
+
 /** `armDisjointCandidates` with the gate table supplied plus which gate refused each pair — the
  *  same ablation-as-a-value seam `coalesceUnder` provides for the span table. */
 export function armDisjointUnder(
@@ -498,44 +544,55 @@ export function armDisjointUnder(
     const l = locals.get(n);
     return l !== undefined && isVolatileLocal(l);
   };
+  // locals only, and never a name that is ALSO a param — the span path holds the same belief as a
+  // gate, and a local shadowing a param would let rename() rewrite the param's own mentions
+  const confined = (m: Map<string, number>): string[] =>
+    [...m.entries()].filter(([n, k]) => locals.has(n) && !params.has(n) && total.get(n) === k).map(([n]) => n);
   const visit = (stmts: Stmt[], inLoop: boolean): void => {
     for (const st of stmts) {
-      if (st.k === 'if' && st.then.length && st.else.length) {
-        const thenM = mentionsOf(st.then);
-        const elseM = mentionsOf(st.else);
-        // locals only, and never a name that is ALSO a param — the span path holds the same
-        // belief as a gate, and a local shadowing a param would let rename() rewrite the param's
-        // own mentions
-        const confined = (m: Map<string, number>): string[] =>
-          [...m.entries()].filter(([n, k]) => locals.has(n) && !params.has(n) && total.get(n) === k).map(([n]) => n);
-        for (const a of confined(thenM)) {
-          for (const b of confined(elseM)) {
-            // the survivor is the earlier declaration, matching how a shared source local reads.
-            //
-            // THIS READS THE STRUCTURER'S ORDER, AND MUST. The declaration list is put into the
-            // target's frame order at EMIT time (l3/slotorder.ts), after this pass, so `declIdx`
-            // is the naming walk's order and the choice means "the earlier declaration in the
-            // source asmlift recovered". Ordering the list any earlier would silently change which
-            // local survives every arm-disjoint merge on a function whose frame order disagrees
-            // with its declaration order — exactly the population the ordering exists for.
-            const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
-            const refused = firstRejection(gates, {
-              a: gone,
-              b: kept,
-              ifInLoop: inLoop,
-              sameType: typeOf.get(a) === typeOf.get(b),
-              eitherIsVolatile: isVolatile(a) || isVolatile(b),
-              bothArmConstInit:
-                firstMention(st.then, a) === 'const-write' && firstMention(st.else, b) === 'const-write',
-            });
-            if (refused !== null) {
-              refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
-              continue;
+      const branch = branchArms(st);
+      if (branch !== null) {
+        const { arms, joined } = branch;
+        const confinedIn = arms.map((body) => confined(mentionsOf(body)));
+        for (let i = 0; i < arms.length; i++) {
+          for (let j = i + 1; j < arms.length; j++) {
+            for (const a of confinedIn[i]) {
+              for (const b of confinedIn[j]) {
+                // the survivor is the earlier declaration, matching how a shared source local
+                // reads.
+                //
+                // THIS READS THE STRUCTURER'S ORDER, AND MUST. The declaration list is put into
+                // the target's frame order at EMIT time (l3/slotorder.ts), after this pass, so
+                // `declIdx` is the naming walk's order and the choice means "the earlier
+                // declaration in the source asmlift recovered". Ordering the list any earlier
+                // would silently change which local survives every arm-disjoint merge on a
+                // function whose frame order disagrees with its declaration order — exactly the
+                // population the ordering exists for.
+                const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
+                const refused = firstRejection(gates, {
+                  a: gone,
+                  b: kept,
+                  ifInLoop: inLoop,
+                  armsJoined: joined(i, j),
+                  sameType: typeOf.get(a) === typeOf.get(b),
+                  eitherIsVolatile: isVolatile(a) || isVolatile(b),
+                  bothArmConstInit:
+                    firstMention(arms[i], a) === 'const-write' && firstMention(arms[j], b) === 'const-write',
+                });
+                if (refused !== null) {
+                  refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
+                  continue;
+                }
+                out.push({
+                  merged: `${gone}-${kept}`,
+                  sfn: {
+                    ...sfn,
+                    body: rename(sfn.body, gone, kept),
+                    locals: localsAfterMerge(sfn.locals, gone, kept),
+                  },
+                });
+              }
             }
-            out.push({
-              merged: `${gone}-${kept}`,
-              sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: localsAfterMerge(sfn.locals, gone, kept) },
-            });
           }
         }
       }

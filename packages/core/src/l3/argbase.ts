@@ -39,7 +39,7 @@
 // leaves the diff at 2; both together take it to 0.)
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtExprs } from './ast';
+import { isLoop, mapExprChildren, stmtExprs } from './ast';
 import { nameAllocator } from './hoist';
 import { declaredGlobals } from './storage';
 
@@ -133,7 +133,7 @@ export function materializeArgBases(sfn: SFn): SFn | null {
     // had. That is the register-pressure failure basecse.ts's `inLoop` gate exists to refuse, and
     // it would contradict this pass's own placement rule two comments down. So a loop's condition
     // is left alone; only its body (via the recursion) is eligible.
-    const ownExprs = s.k === 'while' || s.k === 'dowhile' || s.k === 'for' ? [] : stmtExprs(s);
+    const ownExprs = isLoop(s) ? [] : stmtExprs(s);
     for (const e of ownExprs) {
       const scan = (x: Expr): void => {
         if (x.k === 'call') {

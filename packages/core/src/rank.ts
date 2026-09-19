@@ -34,6 +34,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { advancedBases } from './l3/advance';
 import { materializeArgBases } from './l3/argbase';
+import { argCopyCandidates } from './l3/argcopy';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
@@ -1257,6 +1258,25 @@ export function enumerateCandidates(
       const v = regionVolatile();
       return v ? volStore(v) : null;
     });
+    /** The results of a multi-result variation, under the same guard `respell` gives a
+     *  single-result one: a throw costs this variation and nothing else. Run at statement level
+     *  instead, a throwing source takes the WHOLE row with it — `reportThrow` never runs, so the
+     *  DEFAULT candidate is lost too and the row goes `noncompile`. A multi-result source is a
+     *  `for`-loop subject rather than a thunk, which is why the guard is a helper and not a try
+     *  inside `respell`. */
+    const candidatesOf = (
+      variations: readonly Variation[],
+      from: () => SFn | null | undefined,
+      resultsOf: (s: SFn) => { merged: string; sfn: SFn }[],
+    ): { merged: string; sfn: SFn }[] => {
+      try {
+        const base = from();
+        return base ? resultsOf(base) : [];
+      } catch (e) {
+        reportThrow([...preRespellVariations, ...variations], e);
+        return [];
+      }
+    };
     /** One candidate per result of a multi-result variation, `name` applied to the result's own
      *  subject after `prefix`. */
     const respellEach = (
@@ -1268,19 +1288,8 @@ export function enumerateCandidates(
       if (!offeredOn(target, [...prefix, name])) {
         return;
       }
-      let results: { variations: readonly Variation[]; sfn: SFn }[] = [];
-      try {
-        const base = from();
-        results = (base ? resultsOf(base) : []).map((c) => ({
-          variations: [...prefix, withSubject(name, c.merged)],
-          sfn: c.sfn,
-        }));
-      } catch (e) {
-        reportThrow([...preRespellVariations, ...prefix, name], e);
-        return;
-      }
-      for (const c of results) {
-        respell(c.variations, () => c.sfn);
+      for (const c of candidatesOf([...prefix, name], from, resultsOf)) {
+        respell([...prefix, withSubject(name, c.merged)], () => c.sfn);
       }
     };
     respellEach(['scopebase'], 'coalesce', () => hoistScopedBases(sfn));
@@ -1632,6 +1641,20 @@ export function enumerateCandidates(
     for (const { variations, hoist, volatiles } of paired) {
       respellEach(variations, 'coalesce', hoist, armDisjointCandidates);
       respellEach([...variations, 'volatile'], 'coalesce', volatiles, armDisjointCandidates);
+    }
+    // `/argcopy` — a pointer parameter copied into a local for ONE region (l3/argcopy.ts): the
+    // copy frees the parameter's incoming register for that region, and every legal region is its
+    // own candidate.
+    //
+    // PAIRED WITH `/coalesce`, because a freed register is worth nothing until something takes it:
+    // on pokeemerald:SetMauvilleOldManLanguage the copy frees r5 and the counter shared between two
+    // switch arms is what moves into it, and neither spelling alone reaches the bytes.
+    if (offeredOn(target, ['argcopy'])) {
+      for (const c of candidatesOf(['argcopy'], () => sfn, argCopyCandidates)) {
+        const copied = withSubject('argcopy', c.merged);
+        respell([copied], () => c.sfn);
+        respellEach([copied], 'coalesce', () => c.sfn);
+      }
     }
     // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the

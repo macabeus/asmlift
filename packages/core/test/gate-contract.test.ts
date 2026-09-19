@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from '../src/l3/advance';
+import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from '../src/l3/argcopy';
 import {
   BASECSE_GATES,
   BASEFOLD_GATES,
@@ -69,6 +70,8 @@ import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '
 // (`gates`, `gates.shape`, `rules`, `admission`) and only four name one, so a scan of the call
 // sites would find four tables and miss every table that is passed in.
 const TABLES: Record<string, readonly Gate<never>[]> = {
+  ARGCOPY_GATES: ARGCOPY_GATES as readonly Gate<never>[],
+  ARGCOPY_REGION_GATES: ARGCOPY_REGION_GATES as readonly Gate<never>[],
   COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
   ARM_DISJOINT_GATES: ARM_DISJOINT_GATES as readonly Gate<never>[],
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
