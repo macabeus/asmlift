@@ -217,7 +217,8 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
-  control), each run on its assigned toolchains: 321 functions → 820 cases.
+  control), each run on its assigned toolchains: 321 distinct functions, authored as 328 specs — a few carry a
+  different source per toolchain — → 820 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
   with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting.
@@ -352,7 +353,8 @@ because the answer is not what the `decomp.yaml` files suggest:
 | --------- | ----------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys      | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
 | synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored          | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
-| synthetic | `gcc2.7.2kmc`, every `mwcc_*`       | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
+| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
+| synthetic | `mwcc_233_163n`, `mwcc_247_107`     | n/a                                                   | no synthetic rows                                                                                  |
 | synthetic | `gcc2.7.2`                          | n/a                                                   | no synthetic rows                                                                                  |
 | real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
 | real      | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc` | **no** — no `[candcache]` line at all                 | `REAL_COMPILERS`; only `compile/agbcc.ts` wires the cache                                          |

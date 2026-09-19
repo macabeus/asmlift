@@ -103,10 +103,13 @@ asmlift build/src/gfx.s --name ReadUnalignedU16 --score-against build/src/gfx.o
 s32 ReadUnalignedU16(u8 * a0) {
     return *a0 | a0[1] << 8;
 }
-asmlift: [config] target agbcc (platform 'gba' in ./decomp.yaml)
+asmlift: [config] target agbcc (tools.asmlift.target in ./decomp.yaml)
 asmlift: [flags] -mthumb-interwork -O2 -fhex-asm (compiler command)
 asmlift: [score] unsigned: 0/6 (match)
 ```
+
+The run also ends with a `[ranked]` summary naming the winner and a `[candcache]` line; drop
+`target:` from the config above and the `[config]` trace becomes `platform 'gba'` instead.
 
 > 📚 Check [`packages/cli`](./packages/cli/README.md#cli-reference) to learn about all the configuration options and flags of `asmlift`.
 
