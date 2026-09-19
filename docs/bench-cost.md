@@ -76,7 +76,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=109.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=302.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -129,15 +129,21 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-19: the ranked pass alone is **958 s over 171
-real rows** and **597 s over 682 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 297.7 s and 152.0 s. **A figure here is a price under a CACHE STATE and a
+Summed out of the committed artifact of 2026-09-19: the ranked pass alone is **1,349 s over 180
+real rows** and **675 s over 714 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 437.4 s and 269.8 s. **A figure here is a price under a CACHE STATE and a
 MACHINE, not a property of the corpus**, and this file's own history is the loudest evidence of it.
-The artifact before this one read 972 s and 560 s over the SAME 1,198 rows: `bench diff` across the
-pair reports **8 field changes over 3 rows, 0 added, 0 removed**, one gained match, and the fan at
-**54,750 → 58,880 (1.08×) over 853 comparable rows** — a branch that shares a slot across switch
-arms and copies a pointer parameter for one region, so the fan move is a RESULT rather than the
-machine. Its ranked pass reads **1.01×**, and the same tree benched twice minutes apart read 0.96×
+The artifact before this one read 958 s and 597 s over the SAME 1,198 rows: `bench diff` across the
+pair reports **417 field changes over 85 rows, 0 added, 0 removed**, twelve gained matches, and the
+fan **unmoved at 58,880 → 58,880 (1.00×) over 853 comparable rows** — 41 rows are priced here that
+were priced at neither end before, because they DECLINED there: a branch that models the MIPS
+branch-likely delay slot buys its rows by lifting what used to refuse, and adds no candidate to a
+row that already ranked. Its ranked pass reads **1.12×**, and the whole of that is the 281.3 s those
+41 newly-ranked rows cost. The one before THAT read 972 s and 560 s over the SAME 1,198 rows:
+`bench diff` across that pair reports **8 field changes over 3 rows, 0 added, 0 removed**, one
+gained match, and the fan at **54,750 → 58,880 (1.08×)** — a branch that shares a slot across switch
+arms and copies a pointer parameter for one region, so that fan move is a RESULT rather than the
+machine. Its ranked pass read **1.01×**, and the same tree benched twice minutes apart read 0.96×
 first: two runs, one tree, one base, and the price moved 5%. The one before THAT read 911 s and
 463 s over the SAME 1,198 rows: `bench diff` across the
 pair reports **77 field changes over 24 rows, 0 added, 0 removed**, three gained matches, the fan at
@@ -168,7 +174,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 242 s of that real total — **25% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 234 s of that real total — **17% of the tier
 in one row**, over a fan of 30,240. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
