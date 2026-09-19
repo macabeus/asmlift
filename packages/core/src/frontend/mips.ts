@@ -24,7 +24,14 @@ import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
-import { type DisasmInstr, parseImm, parseMem, parseDisasm as parseSharedDisasm, sliceSymbol } from './disasm';
+import {
+  type DisasmInstr,
+  parseImm,
+  parseMem,
+  parseDisasm as parseSharedDisasm,
+  sliceSymbol,
+  symbolStart,
+} from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
@@ -369,7 +376,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
 // always-executed one is not a cosmetic error: `absi` would return `-x` for every `x >= 0`, and a
 // store in such a slot would be performed on a path that never performs it. That is C which
 // compiles and is wrong — strictly worse than the decline it would replace.
-function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
+function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number): Set<number> {
   const likely = instrs.filter((ins) => ins.mnemonic in LIKELY_BASE);
   if (likely.length === 0) {
     return new Set();
@@ -402,10 +409,12 @@ function normaliseBranchLikely(name: string, instrs: Instr[]): Set<number> {
     if (fallThrough === undefined) {
       throw refusal(br, `the disassembly has no instruction at ${hex(br.addr + 8)} for the not-taken edge to land on`);
     }
-    if (prev === undefined && br.addr !== instrs[0].addr) {
+    if (prev === undefined && br.addr !== startAddr) {
       // WHAT PRECEDES IT DECIDES WHETHER IT MAY BE PLACED AT ALL, so an unreadable predecessor is
       // not a detail to shrug at: a likely branch sitting in some transfer's delay slot has no
-      // block of its own to put a slot in.
+      // block of its own to put a slot in. The function's own first word is the one address with
+      // nothing before it, and that is read off the objdump HEADER — not off the first line
+      // parsed, which is the same thing only when the listing spells that word.
       throw refusal(br, `the disassembly has no instruction at ${hex(br.addr - 4)}, so what precedes it is unknown`);
     }
     if (prev !== undefined && isControlTransfer(prev)) {
@@ -590,10 +599,14 @@ export function lift(
     assertInputFormat('mips', 'objdump', asm);
   }
   // ONE function only — an absent symbol declines loud (either dialect's slicer enforces this).
-  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliceSymbol(asm, name));
+  const sliced = splat ? asm : sliceSymbol(asm, name);
+  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliced);
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
+  // Headerless input (a raw fragment, and every Splat listing) says where the function starts only
+  // by its first line; a headed one says so outright.
+  const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
   // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what lets
   // each be worked on alone: `bc1fl` is both, and the condition code blocks it either way. Asked
   // FIRST, before the likely rewrite, so that a function carrying both reports the FP gap rather
@@ -609,7 +622,7 @@ export function lift(
   // BRANCH-LIKELY is rewritten to its ordinary branch FIRST, so everything downstream — jump-table
   // recovery's block-boundary walk included — sees one branch vocabulary. What stays special is the
   // slot, and `toBlocks` is where that is placed.
-  const likelyAddrs = normaliseBranchLikely(name, instrs);
+  const likelyAddrs = normaliseBranchLikely(name, instrs, startAddr);
   // Regime B: recover jump tables from the `jr`-dispatch idiom + the AsmData table. A recovered
   // dispatch's `jr` is subsumed into a `switch_br` (emitted from its bounds block), so it is
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.

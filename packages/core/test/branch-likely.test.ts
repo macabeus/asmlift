@@ -254,6 +254,26 @@ test('a slot is the word at branch+4, and the reader accounts for every word obj
   expect(lift('0:\tbnez\ta0,18 <f+0x18>', '4:\tli\tv0,1')).toThrow(
     /cannot lift 'f': 'bnez' at 0x0 — the disassembly has no instruction at 0x8 for the not-taken edge/,
   );
+  // A word whose LINE is simply absent is the remaining way to be short one — nothing marks it, so
+  // nothing can recover it — and what precedes a likely branch decides whether it may be placed at
+  // all. Asked by ADDRESS this refuses; asked by array position the `li` two words back would pass
+  // for the predecessor.
+  expect(
+    lift(
+      '0:\tmove\tv0,a0',
+      '4:\tli\tv1,1', // the word at 0x8 has no line at all
+      'c:\tbltzl\tv0,14 <f+0x14>',
+      '10:\tnegu\tv0,v0',
+      '14:\tjr\tra',
+      '18:\tnop',
+    ),
+  ).toThrow(/branch-likely 'bltzl' at 0xc — the disassembly has no instruction at 0x8/);
+  // and the same hole at the function's FIRST word is a hole too, which only the objdump HEADER can
+  // say: the first line parsed would otherwise pass for the first word, and the missing one could
+  // be the `jal` whose delay slot this branch sits in.
+  expect(lift('4:\tbltzl\tv0,c <f+0xc>', '8:\tnegu\tv0,v0', 'c:\tjr\tra', '10:\tnop')).toThrow(
+    /branch-likely 'bltzl' at 0x4 — the disassembly has no instruction at 0x0/,
+  );
   // but the function's FIRST word has no predecessor by construction, and that is not a hole
   expect(src('0:\tbltzl\ta0,8 <f+0x8>', '4:\tnegu\ta0,a0', '8:\tmove\tv0,a0', 'c:\tjr\tra', '10:\tnop')).toBe(
     's32 f(s32 a0) {\n    if (a0 < 0) a0 = -a0;\n    return a0;\n}\n',

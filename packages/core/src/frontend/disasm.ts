@@ -7,13 +7,22 @@ import { FrontendUnsupportedError } from './errors';
  *  `>` of its own (`invoke__Q23zen20NumberPicCallBack<i>FP7P2DPane`), and a header a pattern cannot
  *  see is worse than one it misreads — the PRECEDING function's slice runs on through it, and the
  *  prologue split swallows it. */
-const HEADER_LINE = /^[0-9a-f]+\s+<(.+)>:\s*$/i;
+const HEADER_LINE = /^([0-9a-f]+)\s+<(.+)>:\s*$/i;
 const HEADER_SEARCH = new RegExp(HEADER_LINE.source, 'im');
 
 /** Character offset of the FIRST function header in an objdump listing, or -1 — everything before
  *  it is the listing's own prologue (`target.o: file format …`, section headings). */
 export function firstFunctionHeader(disasm: string): number {
   return disasm.search(HEADER_SEARCH);
+}
+
+/** The ADDRESS the first function header gives, or undefined for headerless input (a raw
+ *  instruction fragment, which says where it starts only by its first line). It is the one thing
+ *  that tells a word with nothing before it apart from a word the listing does not spell, and
+ *  those two have opposite answers wherever what precedes a word decides how it may be read. */
+export function symbolStart(disasm: string): number | undefined {
+  const m = disasm.match(HEADER_SEARCH);
+  return m ? parseInt(m[1], 16) : undefined;
 }
 
 /** Slice a multi-symbol objdump listing down to ONE function's lines. objdump marks each
@@ -27,7 +36,7 @@ export function sliceSymbol(disasm: string, symbol: string): string {
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(HEADER_LINE);
     if (m) {
-      headers.push({ line: i, sym: m[1] });
+      headers.push({ line: i, sym: m[2] });
     }
   }
   if (headers.length === 0) {
