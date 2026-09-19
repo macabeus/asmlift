@@ -345,12 +345,10 @@ because the answer is not what the `decomp.yaml` files suggest:
 | real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
 | real      | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc` | **no** — no `[candcache]` line at all                 | `REAL_COMPILERS`; only `compile/agbcc.ts` wires the cache                                          |
 
-Two consequences worth stating plainly. The `tools.asmlift.candidateCache: off` that the three
-dockerized configs declare is **not** what keeps `bench run` off the cache — the pooled pair never
-builds their command, and `gcc2.7.2`'s real tier goes through `REAL_COMPILERS`; that declaration is
-load-bearing for the published REPRODUCTION SCRIPTS, which run the command as written. And the
-real-tier agbcc path is reached under `label=bench-agbcc`, which no `decomp.yaml` key can turn off:
-`ASMLIFT_CANDCACHE=0` is the only switch over it.
+One consequence worth stating plainly: the real-tier agbcc path is reached under
+`label=bench-agbcc`, and `ASMLIFT_CANDCACHE=0` is the only switch over it. What keeps the dockerized
+configs off the cache is `containerRuntimeNamedBy` — their command names `docker`, so the namespace
+stamp refuses and `candCache` reports `REFUSED reason=stamp-threw`, once per run.
 
 **`bench fidelity` runs every one of those ~1234 scripts with `ASMLIFT_CANDCACHE=0`**, pinned in
 `runScript`. That gate exists to prove a READER who copies a published script reproduces the

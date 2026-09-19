@@ -29,7 +29,6 @@ import { fileURLToPath } from 'node:url';
 import {
   COMPILE_ENV,
   NOT_CACHEABLE,
-  OFF as OFF_CACHE,
   STAMP_PROBE,
   candCache,
   candidateCacheRefusal,
@@ -114,14 +113,6 @@ export interface CompileCommandOptions {
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
    *  paths (`./tools/agbcc/bin/agbcc`) resolve regardless of where asmlift was invoked. */
   cwd?: string;
-  /** `tools.asmlift.candidateCache` — `'off'` is a project's own REFUSAL of the candidate-object
-   *  cache for this command, and the only value there is. It is the opposite shape from the
-   *  deleted `cacheInputs`: that key was a soundness CONTRACT whose incompleteness served a stale
-   *  object, this one only ever turns the cache off, so getting it wrong costs a cold start.
-   *  It is the general escape for the shapes no scan can reach — a wrapper that reads a config
-   *  directory, a compiler behind a runtime `OPAQUE_RUNTIMES` does not name, a `cd` into a
-   *  computed path — and it is per PROJECT, where `ASMLIFT_CANDCACHE` is per process. */
-  candidateCache?: 'off';
   /** The flags the command's `{{cflags}}` stands for, required exactly when the command has one. */
   cflags?: readonly string[];
   /** The compiler name the command's `{{cc}}` stands for (an objdiff.json unit's `scratch.compiler`),
@@ -280,9 +271,8 @@ const FLAG_FILE_FLAGS = new Set(['-specs']);
  *  `toolbox`, `limactl`, `chroot`, `ssh`, `wine`, `qemu-*`, `proot`, `bwrap`, `box64`), then over
  *  nine more that returned `undefined` and are current elsewhere, two of them installed on the
  *  box this was written on (`orb`, `kubectl`; also `container`, `colima`, `udocker`, `crun`,
- *  `runc`, `nix-shell`, `multipass`) — and the next one is always constructible. The GENERAL escape is not another name
- *  here: it is `tools.asmlift.candidateCache: off` in the project's own decomp.yaml — a refusal a
- *  project can spell for itself, whose worst case is a cold start.
+ *  `runc`, `nix-shell`, `multipass`) — and the next one is always constructible. A miss is bounded
+ *  by serving mode's sampled audit, and `ASMLIFT_CANDCACHE=0` turns the cache off outright.
  *
  *  THE FALSE-POSITIVE COST, kept on purpose: the check reads EVERY token, not only the word in
  *  command position, because `env X=1 docker run` and `xargs docker run` are ordinary and a
@@ -425,7 +415,7 @@ function scanTokens(template: string): string[] {
  *  So this is a published RESIDUAL, not a measurement: a glob with no `/` in it, and the quoted
  *  includes of an injected header that lives at the top level, are read by the compile and not
  *  seen here. `docs/ranked-repro.md` lists both, and the answers are the same as for every other
- *  residual — `ASMLIFT_CANDCACHE=verify`, or `tools.asmlift.candidateCache: off`. A subdirectory
+ *  residual — `ASMLIFT_CANDCACHE=verify`. A subdirectory
  *  operand (`-include inc/pre.h`, `cat inc/*.h`) is bounded and is still measured. */
 
 /** The paths a compile template names, in token order and de-duplicated by spelling: every path
@@ -529,8 +519,8 @@ function collectOperands(template: string, readDir: string | undefined, depth: n
  *  operand is resolved against. `cd sub; … -I inc` reads `sub/inc`, and resolving `inc` against
  *  the decomp.yaml's directory alone measured nothing at all. Over-hashing on purpose: both
  *  bases are tried, and a base that holds no such path costs one failed `statSync`. A `cd` whose
- *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base — the residual, and it
- *  is why `tools.asmlift.candidateCache: off` exists. */
+ *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base — a published residual
+ *  (`docs/ranked-repro.md`), answered by `ASMLIFT_CANDCACHE=verify` or `=0`. */
 function cdBases(template: string, cwd: string): string[] {
   const out: string[] = [];
   for (const m of stripShellComments(template).matchAll(/(?:^|[\s;&|(])cd\s+("[^"]*"|'[^']*'|[^\s;&|)]+)/g)) {
@@ -930,9 +920,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
         `the compile command runs the compiler through ${runtime}, which puts it somewhere this ` +
           `namespace cannot read it — inside an image named by a mutable TAG, on another host, or ` +
           `under a sandbox root the template never spells. An image rebuilt under the same tag is ` +
-          `a new compiler serving old objects. Refusing rather than hashing a stand-in. Declare ` +
-          `tools.asmlift.candidateCache: off in decomp.yaml to make this refusal the project's own ` +
-          `and silence this line`,
+          `a new compiler serving old objects. Refusing rather than hashing a stand-in`,
       );
     }
     h.update('command/v1');
@@ -1105,11 +1093,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // stale-object direction the moment the declaration is incomplete, and nothing verifies it; the
   // namespace measures those inputs instead (`stamp()`).
   //
-  // `tools.asmlift.candidateCache: off` is the only per-project key, and it is the other shape: a
-  // REFUSAL, never an assertion, so getting it wrong costs a cold start. It answers what the
-  // process-global `ASMLIFT_CANDCACHE` cannot: a user with two projects, one of them computing a
-  // compiler path in a wrapper, would otherwise have to disable the cache for BOTH.
-  const cache = opts.candidateCache === 'off' ? OFF_CACHE : candCache('command', stamp);
+  const cache = candCache('command', stamp);
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
   // cache on for every other candidate. Two shapes, both in `candidateCacheRefusal` (shared with
   // the bench pipeline, because a predicate copied into two files is a predicate fixed in one):

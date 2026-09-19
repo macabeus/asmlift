@@ -577,13 +577,9 @@ find nothing to disagree with and go green having audited nothing.
   listable: the compile can read it and the walk cannot, so nothing is cached), and when the
   command runs the compiler somewhere this namespace cannot follow — a container image named by a
   mutable tag, another host over `ssh`, a `chroot`/`qemu`/`wine` (`reason=stamp-threw`).
-- **A project can refuse for itself: `tools.asmlift.candidateCache: off`.** One key, one value.
-  Declare it when your command runs the compiler somewhere nothing here can read it, or reaches
-  something in the residual list below. It is deliberately the inverse of the deleted
-  `cacheInputs`: that key asserted what a command reads and an incomplete assertion served a stale
-  object; this one only ever turns the cache OFF, so an unnecessary one costs a cold start.
-  `ASMLIFT_CANDCACHE=0` is the same answer for a whole process; this one is per project, which is
-  what you want when only one of your projects has the problem.
+- **There is no per-project key.** A command whose compiler asmlift cannot measure refuses on its
+  own, naming itself once per run (`reason=stamp-threw`), and `ASMLIFT_CANDCACHE=0` turns the cache
+  off for a whole process.
 - **What is still NOT measured, said out loud.** A path the command itself COMPUTES
   (`H=in; cat ${H}c/k.h`), which no token scan can resolve, and its cousin, a `cd` into a computed
   directory (`cd "$(dirname …)"` contributes no resolution base — and note the ASYMMETRY, which is
@@ -616,8 +612,7 @@ find nothing to disagree with and go green having audited nothing.
   token, so a runtime word inside a quoted string (`echo "no ssh here"`) refuses the project's
   cache. That is loud and costs a cold start, and a command-position-only rule would silently miss
   `env X=1 docker run`.
-  If your command reads something in one of those shapes, declare
-  `tools.asmlift.candidateCache: off`, or run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
+  If your command reads something in one of those shapes, run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
   and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`. Serving mode's own sampled audit is the
   standing mitigation for this whole list, and it is a bound on how long one survives, not a
   removal: see the `on` MODE AUDITS ITSELF bullet below.

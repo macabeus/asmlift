@@ -1155,9 +1155,8 @@ export interface CandCache {
 }
 
 /** The inert cache: every call site tests `mode` first, so this is what a REFUSAL and an opt-out
- *  both collapse to. Exported because a second hand-written copy of it is a second place for the
- *  interface to drift. */
-export const OFF: CandCache = {
+ *  both collapse to. */
+const OFF: CandCache = {
   mode: 'off',
   warm() {},
   get: () => undefined,

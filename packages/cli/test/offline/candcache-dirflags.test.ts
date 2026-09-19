@@ -560,9 +560,7 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       },
     );
     expect(served.first).toContain('#define K 3');
-    expect(served.second, 'the project root is a residual: `verify` or candidateCache: off is the answer').toContain(
-      '#define K 3',
-    );
+    expect(served.second, 'the project root is a residual: `verify` is the answer').toContain('#define K 3');
     const { templatePathOperands } = await import('../../src/compile-command');
     expect(templatePathOperands(template), 'no `.` operand is synthesized').toEqual([]);
     expect(templatePathOperands(': -include global.h; cc'), 'nor from an injected header at the root').toEqual([
@@ -769,47 +767,4 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
       expect(err).toContain('reason=stamp-threw');
     },
   );
-});
-
-describe("a project's own REFUSAL — tools.asmlift.candidateCache: off", () => {
-  // The escape the deny-list above cannot be: a project whose compiler runs somewhere nothing
-  // here can read it says so in its own decomp.yaml, and the worst case of getting it wrong is a
-  // cold start. It is the inverse shape of the deleted `cacheInputs`, whose worst case was a
-  // stale object.
-  test('the store is never even created for a command that declares it', async () => {
-    const p = project();
-    const r = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-      const compile = compileFromCommand(templateWith('-iquote inc'), { cwd: p.cwd, candidateCache: 'off' });
-      const first = readFileSync(compile(CAND_K, 'f', 'c'), 'utf8');
-      p.setK(999);
-      const second = readFileSync(compile(CAND_K, 'f', 'c'), 'utf8');
-      return { first, second };
-    });
-    expect(r.first).toContain('#define K 3');
-    expect(r.second, 'with no cache there is nothing to serve stale').toContain('#define K 999');
-    expect(existsSync(join(p.store, 'ns')), 'a declared refusal writes no namespace at all').toBe(false);
-  });
-
-  test('and it is silent — a declared refusal is not an alarm', async () => {
-    const p = project();
-    let out = '';
-    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
-      out += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
-      return true;
-    });
-    try {
-      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-        // The runtime word is an argument to `:`, the shell's no-op — the template must NAME
-        // docker (which is all `containerRuntimeNamedBy` reads) without this suite ever running
-        // a container. Spelled as a real command it took 467 s and failed with exit 125.
-        compileFromCommand(templateWith('docker run img cc -iquote inc'), {
-          cwd: p.cwd,
-          candidateCache: 'off',
-        })(CAND_K, 'f', 'c');
-      });
-    } finally {
-      spy.mockRestore();
-    }
-    expect(out, 'the project already said no — there is nothing to warn about').not.toContain('[candcache]');
-  });
 });
