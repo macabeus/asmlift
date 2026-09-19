@@ -2,6 +2,7 @@
 // (imported at build time via Vite ?raw — the same fixtures corpus-offline.test.ts pins).
 import agbccClamp0 from '../../../../../packages/core/test/corpus/agbcc-clamp0.s?raw';
 import agbccDeref from '../../../../../packages/core/test/corpus/agbcc-deref.s?raw';
+import agbccSprites from '../../../../../packages/core/test/corpus/agbcc-sprites.s?raw';
 import gccAget from '../../../../../packages/core/test/corpus/gcc-aget.asm?raw';
 import gccClamp0 from '../../../../../packages/core/test/corpus/gcc-clamp0.asm?raw';
 import idoClamp0 from '../../../../../packages/core/test/corpus/ido-clamp0.asm?raw';
@@ -139,6 +140,19 @@ export const EXAMPLES: Example[] = [
   { label: 'GBA / agbcc — clamp to zero (if-assign)', target: 'agbcc', asm: agbccClamp0 },
   { label: 'GBA / agbcc — pointer deref', target: 'agbcc', asm: agbccDeref },
   { label: 'GBA / agbcc — x / 2 (idiom folding: watch the Pipeline tab)', target: 'agbcc', asm: AGBCC_HALF_ASM },
+  // The long one. Real agbcc -O2 output whose recovery is byte-exact under ranking, chosen so that
+  // several capabilities have to hold AT ONCE for the result to compile back to these bytes:
+  // a struct recovered from nothing but the asm's own offsets and access widths (padding
+  // included, since nothing reads bytes 8..11), a counted do-while with its guard, three
+  // induction variables coalesced back into a pointer walk and a countdown, a short-circuit `&&`
+  // that must NOT become a bitwise and, `step / 8` recovered from agbcc's sign-correct pow2
+  // shift sequence, and the `(u8)` the frame counter is compared through — drop any one and the
+  // candidate still reads plausibly while scoring nonzero.
+  {
+    label: 'GBA / agbcc — sprite list walk (struct + loop + short-circuit + pow2 divide)',
+    target: 'agbcc',
+    asm: agbccSprites,
+  },
   {
     label: 'GBA / agbcc — symbol map (named globals, struct fields, arrays)',
     target: 'agbcc',
