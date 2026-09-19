@@ -190,7 +190,7 @@ interface MipsBlock {
   // The word at `branch + 4`, which this block runs after its branch. NULL for a branch-LIKELY:
   // its slot is NULLIFIED when the branch is not taken, so it does not run in this block at all —
   // it is its own block at `branch + 4`, reached only by the taken edge, which then jumps on to
-  // the branch's target. The address is `branch.addr + 4` either way, so it is never stored twice.
+  // the branch's target.
   delay: Instr | null;
   delayAnnulled: boolean;
 }
@@ -385,14 +385,15 @@ function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number)
     new FrontendUnsupportedError(
       `cannot lift '${name}': branch-likely '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — ${why}`,
     );
-  // Every address this function branches to, read BEFORE any rewriting so a likely branch's own
-  // target is counted too. A recovered jump table's arms are NOT in here — they do not exist until
-  // `recoverMipsJumpTables` has run, so `lift` checks them against the slot addresses returned below.
+  // Every address this function branches to, the likely branches' own targets included: one that
+  // jumps to its OWN slot is the same hazard as some other branch landing there. A recovered jump
+  // table's arms are not in here — they do not exist until `recoverMipsJumpTables` has run, so
+  // `lift` checks them against the slot addresses this returns.
   const targets = new Set(instrs.map((ins) => ins.target).filter((t): t is number => t !== undefined));
   // BY ADDRESS, never by array position: reading a branch's array NEIGHBOUR as its delay slot puts
   // an arm the function always runs onto the taken edge of a branch that never guarded it, which is
-  // C that compiles and is wrong. `parseDisasm` now accounts for every word objdump printed
-  // (frontend/disasm.ts), so the two readings agree — the address is the one that says so.
+  // C that compiles and is wrong. The two readings agree only while the list has a word per
+  // address, which is what `parseDisasm` guarantees by refusing a listing it cannot account for.
   const at = new Map(instrs.map((ins) => [ins.addr, ins]));
   const hex = (a: number) => `0x${a.toString(16)}`;
   const rewritten = new Set<number>();
@@ -441,8 +442,8 @@ function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number)
 // runs after it — and every conditional branch's not-taken edge lands on the word at `branch + 8`.
 // `toBlocks` places both, so a listing that does not spell them refuses here rather than there:
 // with the word missing, the slot would be taken from whatever came next and the not-taken edge
-// would silently lose its successor. A branch-LIKELY asks the same two questions earlier, in its
-// own words (`normaliseBranchLikely`), because for it the answer decides conditional execution.
+// would silently lose its successor. A branch-LIKELY asks the same two questions in its own words,
+// before the rewrite, because for it they decide conditional execution rather than placement.
 function checkDelaySlots(name: string, instrs: Instr[]): void {
   const at = new Set(instrs.map((ins) => ins.addr));
   const hex = (a: number) => `0x${a.toString(16)}`;
@@ -506,8 +507,7 @@ function toBlocks(
   }
 
   const blocks: MipsBlock[] = [];
-  // Where a nullified slot's block goes once the slot has run: its branch's target. Keyed by the
-  // slot's address, which is that block's `startAddr`.
+  // Where a nullified slot's block goes once the slot has run: its branch's target.
   const slotGoto = new Map<number, number>();
   let cur: MipsBlock | null = null;
   for (const ins of instrs) {
@@ -604,8 +604,8 @@ export function lift(
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
-  // Headerless input (a raw fragment, and every Splat listing) says where the function starts only
-  // by its first line; a headed one says so outright.
+  // Headerless input — a raw fragment, and every Splat listing — says where the function starts
+  // only by its first line.
   const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
   // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what lets
   // each be worked on alone: `bc1fl` is both, and the condition code blocks it either way. Asked

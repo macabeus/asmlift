@@ -52,9 +52,8 @@ test('the nullified slot IS the conditional — `absi` on KMC is one `if`, not a
 
 test('a likely branch has no register destination, so nothing else could catch it being dropped', () => {
   // The opaque-dest path catches an unmodelled instruction by the register it writes; a branch
-  // writes none, so a dropped one leaves no trace at all. The guard shape IDO emits around a
-  // switch is the one where that would show: the branch must survive as a real conditional, and
-  // its annulled slot must be the taken arm rather than an op silently deleted.
+  // writes none, so a dropped one leaves no trace at all — the `if` would simply not be in the
+  // output. What this pins is that the conditional survives and the annulled slot is its taken arm.
   const guard = src('0:\tbnezl\ta0,10 <f+0x10>', '4:\tli\tv0,2', '8:\tli\tv0,1', 'c:\tnop', '10:\tjr\tra', '14:\tnop');
   expect(guard).toContain('if (a0 == 0)');
   expect(guard).toContain('v0 = 2;');
@@ -198,7 +197,7 @@ test('a slot is the word at branch+4, and the reader accounts for every word obj
   // function always runs is promoted onto the taken edge of a branch that never guarded it, the
   // other arm disappears, and nothing says so. That is the one failure this capability must never
   // have — C that compiles and is wrong, in place of a decline. Placement is therefore asked by
-  // address; and the reader `parseDisasm` hands it no longer loses a word, so the two agree.
+  // address, and `parseDisasm` keeps a word per address for it to ask about.
 
   // objdump prints a run of ZERO words as a bare `...` — GCC's `mflo` hazard pad, 53 sites across
   // 15 corpus rows — and on MIPS a zero word is `nop`. The pad comes back as the nops it stands

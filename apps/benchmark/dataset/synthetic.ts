@@ -1792,10 +1792,9 @@ export const SYNTHETIC: SynthSpec[] = [
     //
     // Measured when added: `selhead` MATCH on all four (agbcc `unsigned/flip-branch`), `selloop`
     // MATCH on agbcc as `signed/flip-branch/indexed` — the composition this row exists to pin.
-    // `selloop`'s ido7.1 column declines, on the frontend's own gap rather than on anything the
-    // select admission decides: it used to stop at a branch-likely `beqzl` and now stops one wall
-    // later, at a branch to 0x38 that is not a block boundary. (`selhead` matches on all four; the
-    // decline was never its.)
+    // `selloop`'s ido7.1 column declines on the frontend's own gap rather than on anything the
+    // select admission decides: a branch to 0x38 that is not a block boundary. `selhead` scores on
+    // all four, so the decline is never its.
     sym: 'selhead',
     src: 'int selhead(int x,int *p){ *p = x; if (x & 0x40) return 1; return 0; }',
     features: ['bool', 'branch', 'mask', 'memory'],
@@ -4151,9 +4150,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //                               overlapping loops, a conditional continue, or an unsafe break)"
   //     narrowcnt × ido7.1      : the same back-edge link
   //     narrowcnt × gcc2.7.2kmc : the same back-edge link
-  // The MIPS toolchains emit the counted loop with a branch-likely delay slot, which used to be the
-  // link these three measured; the slot is modelled now and all three land one wall further on, at
-  // loop recovery. Every other cell scores.
+  // The MIPS toolchains emit the counted loop with a branch-likely delay slot; that slot lifts, and
+  // what all three stop at is loop recovery. Every other cell scores.
   //
   // WHY THE ctx SAYS `u8 *`. `ctx` reaches m2c ONLY — `evaluateM2c` is the only tool call that takes
   // it, `runAsmlift` has no such parameter — so the spelling moves m2c's column and can never move

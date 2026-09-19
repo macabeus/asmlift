@@ -103,7 +103,7 @@ const CASES: OfflineCase[] = [
   // `maxab` is `if (a < b) return b; return a;`. IDO lowers it to a plain `slt; beqz` diamond.
   // KMC-GCC lowers it with `beqzl` — a BRANCH-LIKELY whose delay slot is annulled, so the `move`
   // in that slot IS the conditional assignment. Both are recovered; the shapes differ because the
-  // codegen does, which is what the dedicated test below pins.
+  // codegen does.
   {
     file: 'ido-maxab.asm',
     sym: 'maxab',

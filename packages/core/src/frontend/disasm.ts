@@ -94,8 +94,8 @@ export interface DisasmOptions {
   zeroWord?: string;
 }
 
-/** Fixed instruction width, in bytes, of every ISA that reaches this reader (MIPS, PowerPC). The
- *  Thumb frontend, the one variable-width target, parses GNU-as text and does not route here. */
+/** Fixed instruction width, in bytes, of every ISA that reaches this reader (MIPS, PowerPC), so an
+ *  address gap is a whole number of words. Thumb is variable-width and has a reader of its own. */
 const WORD = 4;
 
 /** objdump's elision of a run of zero words: a bare `...` on its own line (`-d` prints it only

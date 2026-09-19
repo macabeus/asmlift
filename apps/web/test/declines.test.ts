@@ -80,8 +80,8 @@ describe('all three "unmodelled …" message spellings are classified', () => {
 describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
-  // as work the branch-likely round left undone. The third row is the catch-all these were split
-  // out of: it must still land in `control-flow`, not in either named class.
+  // as work the branch-likely round left undone. The `bltzall` row holds the other half of the
+  // split: a transfer named by neither class stays in the `control-flow` catch-all.
   test.each([
     [
       "lift: cannot lift 'absi': branch-likely 'bltzl' at 0x4 — the delay slot is itself a control transfer",
