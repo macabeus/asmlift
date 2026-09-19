@@ -24,7 +24,14 @@ import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
-import { type DisasmInstr, parseImm, parseMem, parseDisasm as parseSharedDisasm, sliceSymbol } from './disasm';
+import {
+  type DisasmInstr,
+  parseImm,
+  parseMem,
+  parseDisasm as parseSharedDisasm,
+  sliceSymbol,
+  symbolStart,
+} from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
@@ -48,6 +55,23 @@ const COND_Z: Record<string, Opcode> = {
   bgez: 'icmp_sge',
 };
 const COND_RR: Record<string, Opcode> = { beq: 'icmp_eq', bne: 'icmp_ne' };
+// BRANCH-LIKELY → the ordinary branch it tests the same way. The difference is the delay slot:
+// a likely branch NULLIFIES its slot when the branch is not taken, so the slot is conditional code
+// (see `toBlocks`, which gives it its own block on the taken edge). `beqzl`/`bnezl` are objdump's
+// printing of `beql`/`bnel` against `$0`; both spellings appear in the corpus.
+const LIKELY_BASE: Record<string, string> = {
+  beql: 'beq',
+  bnel: 'bne',
+  beqzl: 'beqz',
+  bnezl: 'bnez',
+  blezl: 'blez',
+  bgtzl: 'bgtz',
+  bltzl: 'bltz',
+  bgezl: 'bgez',
+};
+// A coprocessor-1 branch tests an FP condition code (`fcc`) that `c.cond.s/d` sets. Neither the
+// code nor the compare is modelled, so these refuse whether or not they are also likely.
+const isFpCondBranch = (m: string) => m.startsWith('bc1');
 
 const isZero = (r: string) => r === 'zero' || r === '$0';
 // The stack pointer (`$29`). A `sw/lw` through it is not a store/load through a data pointer — it
@@ -70,11 +94,18 @@ const isReturn = (ins: Instr) => ins.mnemonic === 'jr';
 const isUncond = (ins: Instr) => ins.mnemonic === 'b' || ins.mnemonic === 'j';
 const isCond = (ins: Instr) => ins.mnemonic in COND_Z || ins.mnemonic in COND_RR;
 const isXfer = (ins: Instr) => isReturn(ins) || isUncond(ins) || isCond(ins);
+// ANY instruction that redirects control, modelled or not: on MIPS that is the whole `b*` space
+// (minus the `break` trap) plus `j*`. `isXfer` is the subset this frontend models; this is the
+// superset the refusals and the delay-slot guards have to reason about.
+const isControlTransfer = (ins: Instr) =>
+  (ins.mnemonic[0] === 'b' && ins.mnemonic !== 'break') || ins.mnemonic[0] === 'j';
 
 // Shared objdump scaffolding (frontend/disasm.ts): parseImm/parseMem/parseDisasm. MIPS needs no
 // reloc or hint-suffix handling; register-scaled indices are materialised by IDO as explicit
 // `sll`+`addu` before the access, so no `base+index` addressing form appears in parseMem input.
-const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
+// A zero word IS an instruction here — `sll zero,zero,0`, which objdump prints as `nop` — so the
+// runs of them objdump elides as `...` (GCC's `mflo` hazard pads) come back as the nops they are.
+const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { zeroWord: 'nop' });
 
 // Bridge an object file's `.text` relocation records onto the instructions they fill, so the
 // high/low fold reads ONE carrier (`ins.reloc`) whichever dialect the input arrived in — the same
@@ -156,7 +187,12 @@ interface MipsBlock {
   startAddr: number;
   body: Instr[]; // computation instructions (excludes the branch and its delay slot)
   branch: Instr | null; // terminating control transfer, or null for a pure fall-through
-  delay: Instr | null; // delay-slot instruction (executes before the transfer)
+  // The word at `branch + 4`, which this block runs after its branch. NULL for a branch-LIKELY:
+  // its slot is NULLIFIED when the branch is not taken, so it does not run in this block at all —
+  // it is its own block at `branch + 4`, reached only by the taken edge, which then jumps on to
+  // the branch's target.
+  delay: Instr | null;
+  delayAnnulled: boolean;
 }
 
 // Mnemonics whose destination is `ops[0]` (a plain register write) — the subset the jump-table
@@ -332,29 +368,135 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
   return out;
 }
 
+// BRANCH-LIKELY → the ordinary branch that tests the same way, in place, returning the addresses
+// rewritten. The mnemonic is all that differs in the COMPARISON; what differs in the FLOW is the
+// delay slot, which `toBlocks` then places on the taken edge alone.
+//
+// Refuses, by name, every shape that placement cannot model. A nullified slot read as an ordinary
+// always-executed one is not a cosmetic error: `absi` would return `-x` for every `x >= 0`, and a
+// store in such a slot would be performed on a path that never performs it. That is C which
+// compiles and is wrong — strictly worse than the decline it would replace.
+function normaliseBranchLikely(name: string, instrs: Instr[], startAddr: number): Set<number> {
+  const likely = instrs.filter((ins) => ins.mnemonic in LIKELY_BASE);
+  if (likely.length === 0) {
+    return new Set();
+  }
+  const refusal = (ins: Instr, why: string) =>
+    new FrontendUnsupportedError(
+      `cannot lift '${name}': branch-likely '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — ${why}`,
+    );
+  // Every address this function branches to, the likely branches' own targets included: one that
+  // jumps to its OWN slot is the same hazard as some other branch landing there. A recovered jump
+  // table's arms are not in here — they do not exist until `recoverMipsJumpTables` has run, so
+  // `lift` checks them against the slot addresses this returns.
+  const targets = new Set(instrs.map((ins) => ins.target).filter((t): t is number => t !== undefined));
+  // BY ADDRESS, never by array position: reading a branch's array NEIGHBOUR as its delay slot puts
+  // an arm the function always runs onto the taken edge of a branch that never guarded it, which is
+  // C that compiles and is wrong. The two readings agree only while the list has a word per
+  // address, which is what `parseDisasm` guarantees by refusing a listing it cannot account for.
+  const at = new Map(instrs.map((ins) => [ins.addr, ins]));
+  const hex = (a: number) => `0x${a.toString(16)}`;
+  const rewritten = new Set<number>();
+  for (const br of likely) {
+    const slot = at.get(br.addr + 4);
+    const fallThrough = at.get(br.addr + 8);
+    const prev = at.get(br.addr - 4);
+    if (br.target === undefined) {
+      throw refusal(br, 'the branch target is not a resolved address');
+    }
+    if (slot === undefined) {
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr + 4)} to be its delay slot`);
+    }
+    if (fallThrough === undefined) {
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr + 8)} for the not-taken edge to land on`);
+    }
+    if (prev === undefined && br.addr !== startAddr) {
+      // WHAT PRECEDES IT DECIDES WHETHER IT MAY BE PLACED AT ALL, so an unreadable predecessor is
+      // not a detail to shrug at: a likely branch sitting in some transfer's delay slot has no
+      // block of its own to put a slot in. The function's own first word is the one address with
+      // nothing before it, and that is read off the objdump HEADER — not off the first line
+      // parsed, which is the same thing only when the listing spells that word.
+      throw refusal(br, `the disassembly has no instruction at ${hex(br.addr - 4)}, so what precedes it is unknown`);
+    }
+    if (prev !== undefined && isControlTransfer(prev)) {
+      throw refusal(br, `it sits in the delay slot of '${prev.mnemonic}', so its own slot has no block to live in`);
+    }
+    if (isControlTransfer(slot)) {
+      throw refusal(
+        br,
+        `the delay slot is itself a control transfer ('${slot.mnemonic}'), which the ISA leaves undefined`,
+      );
+    }
+    // The slot's block is entered ONLY by this branch's taken edge. Anything else arriving there
+    // would run the slot with no branch conditioning it, and then take the branch's target.
+    if (targets.has(slot.addr)) {
+      throw refusal(br, 'another branch targets the delay slot, which would run it unconditioned');
+    }
+    br.mnemonic = LIKELY_BASE[br.mnemonic];
+    rewritten.add(br.addr);
+  }
+  return rewritten;
+}
+
+// EVERY control transfer this frontend models has a delay slot — the word at `branch + 4`, which
+// runs after it — and every conditional branch's not-taken edge lands on the word at `branch + 8`.
+// `toBlocks` places both, so a listing that does not spell them refuses here rather than there:
+// with the word missing, the slot would be taken from whatever came next and the not-taken edge
+// would silently lose its successor. A branch-LIKELY asks the same two questions in its own words,
+// before the rewrite, because for it they decide conditional execution rather than placement.
+function checkDelaySlots(name: string, instrs: Instr[]): void {
+  const at = new Set(instrs.map((ins) => ins.addr));
+  const hex = (a: number) => `0x${a.toString(16)}`;
+  for (const ins of instrs) {
+    if (!isXfer(ins)) {
+      continue;
+    }
+    if (!at.has(ins.addr + 4)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${ins.mnemonic}' at ${hex(ins.addr)} — the disassembly has no ` +
+          `instruction at ${hex(ins.addr + 4)} to be its delay slot`,
+      );
+    }
+    if (isCond(ins) && !at.has(ins.addr + 8)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${ins.mnemonic}' at ${hex(ins.addr)} — the disassembly has no ` +
+          `instruction at ${hex(ins.addr + 8)} for the not-taken edge to land on`,
+      );
+    }
+  }
+}
+
 // Split the instruction stream into basic blocks. Delay slots are consumed into their
 // branching block; leaders are the entry, every branch target, and each conditional branch's
-// fall-through. Unreachable trailing blocks (padding `nop`s) are dropped.
+// fall-through. A branch-LIKELY's slot is not consumed — it becomes its own block (see
+// `normaliseBranchLikely`). Unreachable trailing blocks (padding `nop`s) are dropped.
 function toBlocks(
   instrs: Instr[],
   jts: Map<number, MipsJT>,
+  likelyAddrs: Set<number>,
 ): { blocks: MipsBlock[]; succAddrs: Map<MipsBlock, number[]> } {
+  // BY ADDRESS, never by array position — the placement rule is the same one `normaliseBranchLikely`
+  // states, and `checkDelaySlots` has already refused every transfer whose words are not there.
+  const at = new Map(instrs.map((ins) => [ins.addr, ins]));
   const consumed = new Set<number>();
-  instrs.forEach((ins, i) => {
-    if (isXfer(ins)) {
-      consumed.add(i + 1);
+  for (const ins of instrs) {
+    if (isXfer(ins) && !likelyAddrs.has(ins.addr)) {
+      consumed.add(ins.addr + 4);
     }
-  });
+  }
 
   const leaders = new Set<number>(instrs.length ? [instrs[0].addr] : []);
-  instrs.forEach((ins, i) => {
+  for (const ins of instrs) {
     if ((isCond(ins) || isUncond(ins)) && ins.target !== undefined) {
       leaders.add(ins.target);
     }
-    if (isCond(ins) && instrs[i + 2]) {
-      leaders.add(instrs[i + 2].addr);
-    } // fall-through
-  });
+    if (isCond(ins)) {
+      leaders.add(ins.addr + 8);
+    } // fall-through: past the branch and its slot
+    if (likelyAddrs.has(ins.addr)) {
+      leaders.add(ins.addr + 4);
+    } // the nullified slot's own block
+  }
   // A recovered jump table makes its case + default targets leaders (the bounds block's `switch_br`
   // successors); the dispatch block then becomes unreachable and is pruned below.
   for (const jt of jts.values()) {
@@ -365,19 +507,25 @@ function toBlocks(
   }
 
   const blocks: MipsBlock[] = [];
+  // Where a nullified slot's block goes once the slot has run: its branch's target.
+  const slotGoto = new Map<number, number>();
   let cur: MipsBlock | null = null;
-  for (let i = 0; i < instrs.length; i++) {
-    if (consumed.has(i)) {
+  for (const ins of instrs) {
+    if (consumed.has(ins.addr)) {
       continue;
     } // delay slot: handled with its branch
-    const ins = instrs[i];
     if (cur === null || leaders.has(ins.addr)) {
-      cur = { startAddr: ins.addr, body: [], branch: null, delay: null };
+      cur = { startAddr: ins.addr, body: [], branch: null, delay: null, delayAnnulled: false };
       blocks.push(cur);
     }
     if (isXfer(ins)) {
       cur.branch = ins;
-      cur.delay = instrs[i + 1] ?? null;
+      if (likelyAddrs.has(ins.addr)) {
+        cur.delayAnnulled = true;
+        slotGoto.set(ins.addr + 4, ins.target!);
+      } else {
+        cur.delay = at.get(ins.addr + 4) ?? null;
+      }
       cur = null;
     } else {
       cur.body.push(ins);
@@ -387,6 +535,11 @@ function toBlocks(
   // Successor addresses per block (before reachability pruning).
   const succAddrs = new Map<MipsBlock, number[]>();
   for (const b of blocks) {
+    const goto = slotGoto.get(b.startAddr);
+    if (goto !== undefined) {
+      succAddrs.set(b, [goto]);
+      continue;
+    } // a nullified slot's block: run the slot, then take the branch
     const br = b.branch;
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
@@ -400,8 +553,11 @@ function toBlocks(
       succAddrs.set(b, []);
     } else if (isUncond(br)) {
       succAddrs.set(b, br.target !== undefined ? [br.target] : []);
+    } else if (b.delayAnnulled) {
+      // branch-likely: TAKEN runs the nullified slot's block, NOT-TAKEN skips straight past it
+      succAddrs.set(b, [br.addr + 4, br.addr + 8]);
     } else {
-      const fall = (b.delay ? b.delay.addr : br.addr) + 4; // instruction after the delay slot
+      const fall = br.addr + 8; // past the branch and its delay slot
       succAddrs.set(b, br.target !== undefined ? [br.target, fall] : [fall]);
     }
   }
@@ -443,15 +599,55 @@ export function lift(
     assertInputFormat('mips', 'objdump', asm);
   }
   // ONE function only — an absent symbol declines loud (either dialect's slicer enforces this).
-  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliceSymbol(asm, name));
+  const sliced = splat ? asm : sliceSymbol(asm, name);
+  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliced);
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }
+  // Headerless input — a raw fragment, and every Splat listing — says where the function starts
+  // only by its first line.
+  const startAddr = (splat ? undefined : symbolStart(sliced)) ?? instrs[0].addr;
+  // An FP condition-code branch is a DIFFERENT gap from a branch-likely, and saying so is what lets
+  // each be worked on alone: `bc1fl` is both, and the condition code blocks it either way. Asked
+  // FIRST, before the likely rewrite, so that a function carrying both reports the FP gap rather
+  // than whatever the likely placement happens to say about the other branch.
+  for (const ins of instrs) {
+    if (isFpCondBranch(ins.mnemonic)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': floating-point condition-code branch '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+          `— the FP condition code is not modelled`,
+      );
+    }
+  }
+  // BRANCH-LIKELY is rewritten to its ordinary branch FIRST, so everything downstream — jump-table
+  // recovery's block-boundary walk included — sees one branch vocabulary. What stays special is the
+  // slot, and `toBlocks` is where that is placed.
+  const likelyAddrs = normaliseBranchLikely(name, instrs, startAddr);
   // Regime B: recover jump tables from the `jr`-dispatch idiom + the AsmData table. A recovered
   // dispatch's `jr` is subsumed into a `switch_br` (emitted from its bounds block), so it is
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
+  // THE TWO WAYS A RECOVERED TABLE MEETS AN ANNULLED SLOT, neither of which `normaliseBranchLikely`
+  // can see: the table does not exist while it runs. (1) The dispatch's bounds branch emits a
+  // `switch_br`, which runs its delay slot unconditionally — a nullified slot is not that. (2) An
+  // arm of the table lands ON a nullified slot, which would run the slot with no branch
+  // conditioning it and then jump to that branch's target: `case 1:` would take the taken arm's
+  // value where the hardware runs the slot and falls on through. Neither idiom has ever been seen
+  // in the corpus; refuse rather than answer either one wrong.
+  const jtArms = new Set([...jts.values()].flatMap((jt) => [...jt.caseAddrs, jt.defaultAddr]));
+  for (const addr of likelyAddrs) {
+    if (jts.has(addr)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': branch-likely at 0x${addr.toString(16)} — a recovered switch's bounds branch cannot annul its delay slot`,
+      );
+    }
+    if (jtArms.has(addr + 4)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': branch-likely at 0x${addr.toString(16)} — a recovered switch arm lands on its delay slot, which would run it unconditioned`,
+      );
+    }
+  }
   // Carry the object's relocations on the instructions they fill (objdump dialect only — Splat
   // text spells the halves and writes its own records). Runs AFTER jump-table recovery, so that
   // reads `.text` relocs pristine and a recovered table base is decided before any of this.
@@ -476,18 +672,16 @@ export function lift(
     }
     // CATCH-ALL (mirrors the PPC denylist): an unmodelled control-transfer mnemonic would otherwise
     // fall through to `emitOpaqueDest` and have its BRANCH silently dropped (no register dest for
-    // the opaque guard to catch). Bites the branch-LIKELY forms (`beql`/`bnel`/`b*zl`, which annul
-    // the delay slot when not taken) and coprocessor branches (`bc1t`/`bc1f`…). `break` is a trap,
-    // not a branch.
-    const isBranchish = (ins.mnemonic[0] === 'b' && ins.mnemonic !== 'break') || ins.mnemonic[0] === 'j';
-    if (isBranchish && !isXfer(ins) && ins.mnemonic !== 'jal' && ins.mnemonic !== 'jalr') {
+    // the opaque guard to catch). `break` is a trap, not a branch.
+    if (isControlTransfer(ins) && !isXfer(ins) && ins.mnemonic !== 'jal' && ins.mnemonic !== 'jalr') {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          `— branch-likely / coprocessor branch not supported`,
+          `— not a modelled branch form`,
       );
     }
   }
-  const { blocks, succAddrs } = toBlocks(instrs, jts);
+  checkDelaySlots(name, instrs);
+  const { blocks, succAddrs } = toBlocks(instrs, jts, likelyAddrs);
   const idxOf = new Map(blocks.map((b, i) => [b.startAddr, i]));
 
   // CFG predecessors by block index.
@@ -1058,11 +1252,17 @@ export function lift(
 
     if (br && isCond(br)) {
       const cond = condValue(br, ops, read, constVal, cmpDef);
+      // A NULLIFIED slot is not decoded here: it is its own block on the taken edge, and the
+      // not-taken edge skips past it (toBlocks). Every pass after this one sees ordinary
+      // conditional execution.
+      if (b.delayAnnulled) {
+        ops.push(mkOp('cond_br', { operands: [cond], successors: [succ(br.addr + 4), succ(br.addr + 8)] }));
+        return;
+      }
       if (b.delay) {
         decode(b.delay);
       }
-      const fall = (b.delay ? b.delay.addr : br.addr) + 4;
-      ops.push(mkOp('cond_br', { operands: [cond], successors: [succ(br.target!), succ(fall)] }));
+      ops.push(mkOp('cond_br', { operands: [cond], successors: [succ(br.target!), succ(br.addr + 8)] }));
       return;
     }
     if (b.delay) {
@@ -1079,7 +1279,11 @@ export function lift(
       // the right one; it passes this same predicate to its call-arity count.
       const retOps = ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v)) ? [readVar(RET, bi)] : [];
       if (!br) {
-        ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succAddrs.get(b)![0])] }));
+        // A nullified slot's block leaves by its branch's TARGET, which need not be the next
+        // address, so `fallthrough` is claimed only where control really does fall through.
+        const to = succAddrs.get(b)![0];
+        const next = (b.body[b.body.length - 1]?.addr ?? b.startAddr) + 4;
+        ops.push(mkOp('br', { attrs: to === next ? { fallthrough: true } : {}, successors: [succ(to)] }));
       } // fall-through
       else {
         ops.push(mkOp('ret', { operands: retOps }));

@@ -77,6 +77,30 @@ describe('all three "unmodelled …" message spellings are classified', () => {
   });
 });
 
+describe('the two MIPS delay-slot gaps are told apart', () => {
+  // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
+  // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
+  // as work the branch-likely round left undone. The `bltzall` row holds the other half of the
+  // split: a transfer named by neither class stays in the `control-flow` catch-all.
+  test.each([
+    [
+      "lift: cannot lift 'absi': branch-likely 'bltzl' at 0x4 — the delay slot is itself a control transfer",
+      'branch-likely',
+    ],
+    ["lift: cannot lift 'f': branch-likely at 0x24 — a recovered switch arm lands on its delay slot", 'branch-likely'],
+    [
+      "lift: cannot lift 'fcmp': floating-point condition-code branch 'bc1f' at 0x8 — the FP condition code is not modelled",
+      'fp-cond-branch',
+    ],
+    [
+      "lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form",
+      'control-flow',
+    ],
+  ])('%s -> %s', (marker, want) => {
+    expect(classOf(marker)).toBe(want);
+  });
+});
+
 describe('the list is well-formed', () => {
   test('keys are unique', () => {
     const keys = DECLINE_CLASSES.map((c) => c.key);

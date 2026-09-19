@@ -110,23 +110,6 @@ describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switc
     const { asm } = compileMipsTarget(dense(8), 'sw_jt', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
     expect(() => decompile('sw_jt', asm, MIPS_IDO)).toThrow(FrontendUnsupportedError);
   });
-
-  // SOUNDNESS: a MIPS branch-LIKELY (`bnezl`/`beql`/…) has no register dest, so a jal/jalr/jr-only
-  // loud-fail allowlist would let `emitOpaqueDest` silently DROP its branch — a switch fn with an
-  // outer branch-likely guard would silently miscompile. The PPC-style catch-all loud-fails
-  // instead. Constructed asm (IDO emits `bnezl` for the guard).
-  test('branch-likely is loud-failed, not silently dropped (even with the side-table)', () => {
-    const asm = [
-      '00000000 <f>:',
-      '   0:\tbnezl\ta0,10 <f+0x10>',
-      '   4:\tnop',
-      '   8:\tli\tv0,1',
-      '   c:\tjr\tra',
-      '  10:\tli\tv0,2',
-      '  14:\tjr\tra',
-    ].join('\n');
-    expect(() => decompile('f', asm, MIPS_IDO)).toThrow(/branch-likely|unmodelled control transfer/);
-  });
 });
 
 const HAVE_DOCKER = dockerGate('switch-p3');

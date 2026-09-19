@@ -381,13 +381,13 @@ s32 clamp0(s32 a0) {
 **Scoring** (needs the real toolchain; `@asmlift/cli`): compile that C with agbcc, objdiff it
 against the original object → score 0, byte-exact match.
 
-**And when it can't?** Take `maxab`, a corpus test function (max of two values) that matches on
-IDO but declines on KMC GCC, because GCC lowers it with a _branch-likely_ instruction (`beqzl` — a MIPS branch that annuls
-its delay slot) the frontend doesn't model yet:
+**And when it can't?** Take `fcmp`, a corpus test function whose comparison is a float one. MIPS
+puts the result of `c.lt.s` in a coprocessor condition code and branches on it with `bc1f`, and
+that condition code is not modelled:
 
 ```
-FrontendUnsupportedError: cannot lift 'maxab': unmodelled control transfer 'beqzl'
-at 0x8 — branch-likely / coprocessor branch not supported
+FrontendUnsupportedError: cannot lift 'fcmp': floating-point condition-code
+branch 'bc1f' at 0x8 — the FP condition code is not modelled
 ```
 
 Typed error, precise location, honest reason. In annotate mode the same gap becomes an

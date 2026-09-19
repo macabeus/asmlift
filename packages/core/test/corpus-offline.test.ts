@@ -99,12 +99,11 @@ const CASES: OfflineCase[] = [
     expect: 's32 clamp0(s32 a0) {\n    return a0 & ~a0 >> 31;\n}\n',
   },
 
-  // ── Sibling pair on a DIVERGENT-IF: byte-exact on IDO, LOUD-FAIL on GCC ───────────────────
-  // `maxab` is `if (a < b) return b; return a;`. IDO lowers it to a plain `slt; beqz` diamond that
-  // asmlift matches byte-exact. KMC-GCC lowers it with `beqzl` — a BRANCH-LIKELY whose delay slot
-  // is annulled (only runs when taken). The frontend does not decode branch-likely; it LOUD-FAILS
-  // (never a silent branch drop) — pinned in the dedicated test below. The IDO sibling stays a
-  // positive fixture here.
+  // ── Sibling pair on a DIVERGENT-IF: two compilers, two lowerings of one source ────────────
+  // `maxab` is `if (a < b) return b; return a;`. IDO lowers it to a plain `slt; beqz` diamond.
+  // KMC-GCC lowers it with `beqzl` — a BRANCH-LIKELY whose delay slot is annulled, so the `move`
+  // in that slot IS the conditional assignment. Both are recovered; the shapes differ because the
+  // codegen does.
   {
     file: 'ido-maxab.asm',
     sym: 'maxab',
@@ -112,6 +111,13 @@ const CASES: OfflineCase[] = [
     note: 'divergent-if, two args — byte-exact on IDO',
     expect:
       's32 maxab(s32 a0, s32 a1) {\n    if (a0 < a1) {\n        return a1;\n    } else {\n        return a0;\n    }\n}\n',
+  },
+  {
+    file: 'gcc-maxab.asm',
+    sym: 'maxab',
+    target: MIPS_GCC,
+    note: "same source as ido-maxab, GCC's branch-likely lowering — the annulled `move` is the if-assign",
+    expect: 's32 maxab(s32 a0, s32 a1) {\n    if (a0 >= a1) a1 = a0;\n    return a1;\n}\n',
   },
 
   // ── The sibling NEGATIVE of maxab: a compare whose register is REDEFINED before the branch ─
@@ -232,15 +238,15 @@ describe('offline corpus: committed disassembly → decompile → golden C (no t
     expect(gcc).toContain('& ~a0 >> 31');
   });
 
-  test('maxab pins the GCC branch-likely gap offline (IDO matches; GCC loud-fails)', () => {
-    // IDO matches byte-exact; GCC lowers with `beqzl` (branch-likely). The frontend does not
-    // decode branch-likely — it must LOUD-FAIL, never silently drop the branch (which would emit a
-    // bogus `return a0;`). When branch-likely decode lands, the throw flips to a recovered
-    // diamond. Visible without Docker.
+  test('the maxab siblings both recover a real conditional, one of them through a branch-likely', () => {
+    // GCC's `beqzl v1,0x10 / move v0,a0` annuls the `move` when the compare is false. Reading that
+    // slot as an ordinary always-executed one drops the conditional entirely and emits a bogus
+    // unconditional `return a0;` — so what this pins is that the `if` survives, on both compilers,
+    // without Docker.
     const ido = decompile('maxab', read('ido-maxab.asm'), MIPS_IDO).source;
-    expect(ido).toContain('if (a0 < a1)'); // real diamond recovered
-    expect(() => decompile('maxab', read('gcc-maxab.asm'), MIPS_GCC)).toThrow(
-      /branch-likely|unmodelled control transfer/,
-    ); // loud-fail, not a silent branch drop
+    const gcc = decompile('maxab', read('gcc-maxab.asm'), MIPS_GCC).source;
+    expect(ido).toContain('if (a0 < a1)');
+    expect(gcc).toContain('if (a0 >= a1) a1 = a0;');
+    expect(ido).not.toBe(gcc); // same source C, two compilers, two recovered shapes
   });
 });
