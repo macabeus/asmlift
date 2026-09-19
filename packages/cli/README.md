@@ -63,10 +63,14 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--module`        | The dtk module the function belongs to. Its unit is looked for among this module's `objdiff.json` units only — REL code repeats names across modules, and a function several units define is refused until you choose — and a REL module's symbols come from that module's own ELF (see [REL modules](#rel-modules))                                                             |
 | `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                                                                                        |
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                                                                                           |
-| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                                                                                         |
+| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and then refuses the flag — unless the extraction failed, which warns and leaves the flag as the way to supply what it could not read                                              |
 | `--proto`         | Function prototypes, inline JSON or a path to it (`{"sym": {"params": N \| ["u8", ...], "returnsVoid": true}, ...}`): a callee's `params` gives its call-site arity, a TYPED list also gives its parameter widths (below), and the decompiled function's OWN entry gives its void-ness. Every entry is validated — a malformed one is refused (exit `64`), never quietly ignored |
 | `--jobs`          | With `--score-against`: compile `n` candidates at a time (default `1`). Candidate compiles are the bulk of a ranked run and are independent; the ranking is unchanged — the schedule cannot choose the winner                                                                                                                                                                    |
 | `--progress`      | With `--score-against`: an `asmlift: [progress] i/n candidates scored` liveness line on stderr every few seconds. The `[score]` table is unchanged, so two runs still compare on their `[score]` lines                                                                                                                                                                           |
+
+Flags take either spelling, `--name X` or `--name=X`. `--jobs` and `--progress` describe a ranked
+run and are a usage error (exit `64`) without `--score-against`, rather than silently ignored.
+`--progress` also prints a per-phase timing report when the run ends.
 
 Above `--jobs 1` it is YOUR `compiler` template that runs concurrently. Each worker gets its own
 `{{inputPath}}`/`{{outputPath}}` scratch directory, but every worker runs from the config's
@@ -241,6 +245,24 @@ asmlift fn.s --target agbcc --proto '{"fn": {"params": ["int", "void *"]}}'
 spelling asmlift cannot read leaves the asm's own inference standing. The list never PINS a width
 the asm did not carry — a declaration that agrees with an elided extension would take the
 signedness variation off the table before the differ ever ranked it.
+
+## Environment
+
+| Variable                        | Meaning                                                                                                                                                                                                                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ASMLIFT_CANDCACHE`             | The candidate-object cache, **on when unset**. `1`/`on`/`true`/`yes` also serve; `0`/`off`/`false`/`no` — and a set-but-empty value — bypass it; `verify` compiles everything anyway and audits the store against it. Anything else is refused out loud rather than read as "on" |
+| `ASMLIFT_BENCH_CACHE=0`         | Bypasses that cache too, so bisecting a suspect result does not leave half the caching on                                                                                                                                                                                        |
+| `ASMLIFT_CANDCACHE_DIR`         | Where the store lives                                                                                                                                                                                                                                                            |
+| `ASMLIFT_CANDCACHE_MAX_MB`      | Its size budget, above which it prunes                                                                                                                                                                                                                                           |
+| `ASMLIFT_CANDCACHE_SAMPLE`      | What percentage of served answers are re-compiled and compared. A disagreement FAILS the run — see exit `3`                                                                                                                                                                      |
+| `ASMLIFT_CANDCACHE_SAMPLE_SEED` | Replays an exact sampling selection; the `[candcache]` line prints the seed it used                                                                                                                                                                                              |
+| `ASMLIFT_CANDCACHE_PRUNE_MS`    | How often it may prune                                                                                                                                                                                                                                                           |
+| `ASMLIFT_CANDCACHE_TRACE`       | Prints every store decision, which is how you tell whether a run reaches the cache at all                                                                                                                                                                                        |
+| `ASMLIFT_MIPS_OBJDUMP`          | The objdump for MIPS object input, where `tools.asmlift.objdump` does not name one                                                                                                                                                                                               |
+| `ASMLIFT_PPC_OBJDUMP`           | The same for PowerPC                                                                                                                                                                                                                                                             |
+
+Every run that touched the store ends with a one-line `asmlift: [candcache] …` summary carrying
+the mode, the sample rate and seed, and the hit/miss counts.
 
 ## Using it as a library
 

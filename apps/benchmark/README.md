@@ -279,6 +279,16 @@ pnpm bench fan <sym> --asm <f.s> --toolchain <id>
                                       #       --toolchain ido7.1        # -> 4 candidates
                                       #   `--toolchain` means nothing WITHOUT `--asm` and is
                                       #   refused there: a row names its toolchain in its own id
+pnpm bench sweep [--base <ref>] [--fan]    # corpus-wide compile-free differential re-lift: what
+                                           #   would move, without compiling anything
+pnpm bench gates --pass <id>               # the refusal census of one tabled pass — corpus-wide,
+                                           #   enumeration only, ~10 s over the agbcc synthetic tier
+pnpm bench baseline <row>                  # phase 0 of a round: what the PUBLISHED benchmark says
+                                           #   about this row, and whether that is still the answer
+                                           #   (`--base origin/main`, not HEAD; docs/baseline-freshness.md)
+pnpm bench stale-check                     # is the committed artifact still measuring this code?
+                                           #   emits `stale=true|false` for Actions; a thrown safety
+                                           #   refusal (shrunk coverage, dirty provenance) exits 1
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
 pnpm bench flags [--project <p>] [--only <s>] [--write]
                                            # every real unit's flags, derived from the project's

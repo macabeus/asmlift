@@ -27,7 +27,7 @@ src/
   assets/  data/                    logo, committed summary.json
   pages/
     playground/                     Playground-only (editor, ranking worker, pipeline, examples)
-    benchmark/                      Benchmark-only (report views, charts, results.json)
+    benchmark/                      Benchmark-only (report views, charts, lib/, results.json)
   shared/
     components/                     used by BOTH pages (e.g. CodeBlock)
     utils/                          used by both (e.g. permalink.ts)
