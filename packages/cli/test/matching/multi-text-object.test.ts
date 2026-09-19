@@ -6,7 +6,7 @@ import { sliceSymbol } from '@asmlift/core/frontend/disasm';
 import { ppcDisasmText } from '@asmlift/toolchains';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { afterAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { codeSections, scopedObjectPath } from '../../src/elf-section';
 import { ppcDockerGate } from './docker-gate';
@@ -28,11 +28,19 @@ function gate(): boolean {
 }
 
 describe.runIf(gate())('m_choice.o, eight `.text` sections', () => {
+  // Every line of this setup runs in `beforeAll`, not in the suite body: a `describe` callback is
+  // executed at COLLECTION even when `runIf` is false, so a body-level `copyFileSync` throws on the
+  // machine the gate exists to excuse — the suite fails having just printed that it was skipping.
+  //
   // The pooled container reaches the host's /tmp, so the object and its scoped copy live there.
-  const dir = mkdtempSync('/tmp/asmlift-multitext-');
+  let dir: string;
+  let whole: string;
+  beforeAll(() => {
+    dir = mkdtempSync('/tmp/asmlift-multitext-');
+    copyFileSync(OBJECT, join(dir, 'm_choice.o'));
+    whole = ppcDisasmText('mwcc_242_81', dir, 'm_choice.o');
+  });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
-  copyFileSync(OBJECT, join(dir, 'm_choice.o'));
-  const whole = ppcDisasmText('mwcc_242_81', dir, 'm_choice.o');
   const scoped = (sym: string) =>
     ppcDisasmText('mwcc_242_81', dir, basename(scopedObjectPath(join(dir, 'm_choice.o'), sym, dir)));
 

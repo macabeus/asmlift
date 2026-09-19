@@ -4,7 +4,7 @@ The asmlift command line: give it one function's assembly, get C back — and, p
 original object file, **proof**: the output is recompiled with your project's own compiler and
 byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match.
 
-> 📚 Check the [root `README.md`](../README.md) for a quick-start on how to use `@asmlift/cli`
+> 📚 Check the [root `README.md`](../../README.md) for a quick-start on how to use `@asmlift/cli`
 
 ## Features
 
@@ -63,10 +63,14 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--module`        | The dtk module the function belongs to. Its unit is looked for among this module's `objdiff.json` units only — REL code repeats names across modules, and a function several units define is refused until you choose — and a REL module's symbols come from that module's own ELF (see [REL modules](#rel-modules))                                                             |
 | `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                                                                                        |
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                                                                                           |
-| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                                                                                         |
+| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and then refuses the flag — unless the extraction failed, which warns and leaves the flag as the way to supply what it could not read                                              |
 | `--proto`         | Function prototypes, inline JSON or a path to it (`{"sym": {"params": N \| ["u8", ...], "returnsVoid": true}, ...}`): a callee's `params` gives its call-site arity, a TYPED list also gives its parameter widths (below), and the decompiled function's OWN entry gives its void-ness. Every entry is validated — a malformed one is refused (exit `64`), never quietly ignored |
 | `--jobs`          | With `--score-against`: compile `n` candidates at a time (default `1`). Candidate compiles are the bulk of a ranked run and are independent; the ranking is unchanged — the schedule cannot choose the winner                                                                                                                                                                    |
 | `--progress`      | With `--score-against`: an `asmlift: [progress] i/n candidates scored` liveness line on stderr every few seconds. The `[score]` table is unchanged, so two runs still compare on their `[score]` lines                                                                                                                                                                           |
+
+Flags take either spelling, `--name X` or `--name=X`. `--jobs` and `--progress` describe a ranked
+run and are a usage error (exit `64`) without `--score-against`, rather than silently ignored.
+`--progress` also prints a per-phase timing report when the run ends.
 
 Above `--jobs 1` it is YOUR `compiler` template that runs concurrently. Each worker gets its own
 `{{inputPath}}`/`{{outputPath}}` scratch directory, but every worker runs from the config's
@@ -82,12 +86,13 @@ other status because a store that lied invalidates the whole fan ·
 
 All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
-| Field      | Meaning                                                                                                                                                                                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`; `gc`/`gamecube`/`wii` → `mwcc_242_81`, `mwcc_233_163n` or `mwcc_247_107`)                                                                        |
-| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
-| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
-| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
+| Field      | Meaning                                                                                                                                                                                                                                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`; `gc`/`gamecube`/`wii` → `mwcc_242_81`, `mwcc_233_163n` or `mwcc_247_107`)                                                                                                                                                      |
+| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                                                                                                        |
+| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                                                                                                          |
+| `symbols`  | A symbol map already DERIVED, as JSON (hex address → `SymbolInfo[]`), for a project with no ELF to derive one from — an authored map, or the one a published reproduction script must feed back to reproduce its answer. Mutually exclusive with `elf`: two sources for one map is a silent precedence question, so declaring both is a loud input error |
+| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf)                                                                               |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
 `{{outputPath}}` (where the object must land), `{{symbol}}` (the function name), `{{cflags}}`
@@ -111,6 +116,30 @@ Scoring rules, in the project's spirit of never guessing:
   template that injects the project's own headers rejects the probe (C89 duplicate typedef)
   and asmlift then drops both its typedefs and its synthesized declarations for every
   candidate; a template that accepts it keeps both. The verdict is cached per run.
+
+### When no target fits your compiler
+
+`--target` is a closed set of seven, and `platform` maps only `gba`, `n64` and `gc`/`gamecube`/`wii`.
+An unmapped platform (`ps1`, `nds`, …) refuses. A mapped one whose compiler is not the one it names
+does **not**: `platform: gba` on a modern `arm-none-eabi-gcc` build resolves to `agbcc`, and the
+`[config]` line is the only thing that says so — read it.
+
+A target key picks the ISA frontend and the `compilerBehaviors` that drive enumeration. It does not
+pick the scorer: `--score-against` compiles with YOUR command and diffs YOUR object, so a match is
+byte-exact whichever key produced it. A wrong key costs matches, never truth — which makes the
+nearest key on the right ISA usable:
+
+| Your ISA                   | Nearest key                                    |
+| -------------------------- | ---------------------------------------------- |
+| ARMv4T, Thumb only         | `agbcc`                                        |
+| MIPS (including PS1 / PS2) | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc`            |
+| PowerPC                    | `mwcc_233_163n`, `mwcc_242_81`, `mwcc_247_107` |
+
+Only those three frontends exist (`frontend/registry.ts`); an ARM-mode body is refused by name, not
+decoded as Thumb, and instructions the frontend does not model decline loudly.
+
+Making a compiler a real target is a change to `TOOLCHAIN_TARGETS`, deliberately not a setting: one
+asmlift has not been calibrated against is one it would otherwise guess at.
 
 ## Compiler flags
 
@@ -239,6 +268,24 @@ asmlift fn.s --target agbcc --proto '{"fn": {"params": ["int", "void *"]}}'
 spelling asmlift cannot read leaves the asm's own inference standing. The list never PINS a width
 the asm did not carry — a declaration that agrees with an elided extension would take the
 signedness variation off the table before the differ ever ranked it.
+
+## Environment
+
+| Variable                        | Meaning                                                                                                                                                                                                                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ASMLIFT_CANDCACHE`             | The candidate-object cache, **on when unset**. `1`/`on`/`true`/`yes` also serve; `0`/`off`/`false`/`no` — and a set-but-empty value — bypass it; `verify` compiles everything anyway and audits the store against it. Anything else is refused out loud rather than read as "on" |
+| `ASMLIFT_BENCH_CACHE=0`         | Bypasses that cache too, so bisecting a suspect result does not leave half the caching on                                                                                                                                                                                        |
+| `ASMLIFT_CANDCACHE_DIR`         | Where the store lives                                                                                                                                                                                                                                                            |
+| `ASMLIFT_CANDCACHE_MAX_MB`      | Its size budget, above which it prunes                                                                                                                                                                                                                                           |
+| `ASMLIFT_CANDCACHE_SAMPLE`      | What percentage of served answers are re-compiled and compared. A disagreement FAILS the run — see exit `3`                                                                                                                                                                      |
+| `ASMLIFT_CANDCACHE_SAMPLE_SEED` | Replays an exact sampling selection; the `[candcache]` line prints the seed it used                                                                                                                                                                                              |
+| `ASMLIFT_CANDCACHE_PRUNE_MS`    | How often it may prune                                                                                                                                                                                                                                                           |
+| `ASMLIFT_CANDCACHE_TRACE`       | Prints every store decision, which is how you tell whether a run reaches the cache at all                                                                                                                                                                                        |
+| `ASMLIFT_MIPS_OBJDUMP`          | The objdump for MIPS object input, where `tools.asmlift.objdump` does not name one                                                                                                                                                                                               |
+| `ASMLIFT_PPC_OBJDUMP`           | The same for PowerPC                                                                                                                                                                                                                                                             |
+
+Every run that touched the store ends with a one-line `asmlift: [candcache] …` summary carrying
+the mode, the sample rate and seed, and the hit/miss counts.
 
 ## Using it as a library
 

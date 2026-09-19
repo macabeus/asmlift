@@ -4,8 +4,9 @@ The **benchmark contract**: the result/manifest types the harness ([`apps/benchm
 produces and the web Benchmark view ([`apps/web`](../../apps/web)) consumes, plus the closed feature
 vocabulary they range over.
 
-**Types and data only** — no I/O, no dependencies, browser-safe by construction. That is what lets
-both sides import it; `apps/web` cannot import `apps/benchmark`, so anything both need lives here or
+**Types and data only** — no I/O, browser-safe by construction, and its one dependency
+(`@asmlift/core`, for `ToolchainId`) is imported `type`-only, so nothing of it survives the
+bundle. That is what lets both sides import it; `apps/web` cannot import `apps/benchmark`, so anything both need lives here or
 nowhere.
 
 **Private by design, never published.** It exists to stop the producer and the consumer drifting
