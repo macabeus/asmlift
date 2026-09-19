@@ -758,7 +758,6 @@ export async function runCli(
     try {
       compilers = compilersFromCommand(toolCfg.compiler, {
         cwd: configDir,
-        candidateCache: toolCfg.candidateCache,
         cflags: flagsResolution.fill,
         cc: flagsResolution.cc,
       });
