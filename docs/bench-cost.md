@@ -234,7 +234,7 @@ done
 ~2,454 s of ranked pass, alone on one shard while the other seven sit finished. That 2,454 s is a
 figure from a run slower than any §3 now lists, and it is the number the threshold above is set
 from; the spelling count it was taken over has since moved, so read the row's size from §3 (30,240
-in the artifact of 2026-09-18, 27,360 in the one before it), never from here.
+in the artifact of 2026-09-19, 27,360 in the one before it), never from here.
 Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
 spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
 this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven
