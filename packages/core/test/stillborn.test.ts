@@ -57,9 +57,11 @@ test('default and every probe rejected for ONE reason: the rest is not compiled,
   expect(e.withheld).toEqual([]);
   expect(e.notCompiled).toHaveLength(candidates.length - compiled.length);
   expect(e.dropped.length + e.notCompiled.length).toBe(candidates.length);
-  expect(e.message.startsWith("no scorable candidate for 'f': agbcc failed: ")).toBe(true);
-  expect(e.message).toContain('11 of 16 candidates were NOT COMPILED');
+  // the verdict first, then the default candidate's own diagnostic: a printer that bounds the
+  // text keeps the sentence that says the fan was not compiled to the end
+  expect(e.message.startsWith("no scorable candidate for 'f': 11 of 16 candidates were NOT COMPILED")).toBe(true);
   expect(e.message).toContain("too many arguments to function `HeapFree'");
+  expect(e.message.split('\n').at(-1)).toMatch(/^The default candidate's compile: agbcc failed: c\.c:11: /);
   expect((e.cause as Error).message).toContain('agbcc failed');
 });
 

@@ -8,6 +8,7 @@ import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { NoScorableCandidateError, enumerateCandidates } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { parseVariation } from '@asmlift/core/variation-tokens';
@@ -145,6 +146,49 @@ describe('the ranked row records its own price', () => {
     expect(typeof r.rankSeconds).toBe('number');
   });
 
+  // A STILLBORN fan (core stillborn.ts): the default and one probe per variation were compiled and
+  // the rest never was. The row says how many, on the row and per variation, and its markers are
+  // the default candidate's compiler lines — the error's own message opens on the verdict.
+  test('a STILLBORN row publishes what was not compiled, and its markers are the compiler’s lines', () => {
+    const ARITY = "agbcc failed: c.c:12: too many arguments to function `g'";
+    ranked.mockImplementation(() => {
+      throw new NoScorableCandidateError(
+        "no scorable candidate for 'f': 3 of 5 candidates were NOT COMPILED: the default candidate and one probe " +
+          `per variation (2 compiled) were all rejected for the same reason, which no variation changed:\n` +
+          `  too many arguments to function \`g'\nThe default candidate's compile: ${ARITY}`,
+        [
+          { variations: ['unsigned'], error: ARITY },
+          { variations: ['unsigned', 'raw-globals'], error: ARITY },
+        ],
+        [],
+        [{ variations: ['signed'] }, { variations: ['signed', 'raw-globals'] }, { variations: ['signed', 'unreduce'] }],
+        { cause: new CompilerRejection(ARITY) },
+      );
+    });
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    expect(r.outcome).toBe('noncompile');
+    expect(r.fanNotCompiled).toBe(3);
+    // the ENUMERATED count: the two that were compiled and the three that were not
+    expect(r.fanSize).toBe(2 + 0 + 3);
+    expect(r.fanVariations).toEqual({
+      unsigned: { candidates: 2, dropped: 2 },
+      signed: { candidates: 3, notCompiled: 3 },
+      'raw-globals': { candidates: 2, dropped: 1, notCompiled: 1 },
+      unreduce: { candidates: 1, notCompiled: 1 },
+    });
+    expect(r.errorMarkers).toEqual([ARITY]);
+    expect(r.compileErrors).toBe(1);
+  });
+
+  test('a row whose every candidate WAS compiled carries no fanNotCompiled at all', () => {
+    ranked.mockImplementation(() => {
+      throw new NoScorableCandidateError('no scorable candidate', [{ variations: ['unsigned'], error: 'x' }], [], []);
+    });
+    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    expect(r.fanSize).toBe(1);
+    expect(r).not.toHaveProperty('fanNotCompiled');
+  });
+
   // A scorer that blew up is not a row that enumerated nothing.
   test('a HARNESS throw records the seconds but claims no fan', () => {
     ranked.mockImplementation(() => {
@@ -259,6 +303,17 @@ describe('the per-row run line', () => {
     );
   });
 
+  test('a stillborn row prints how much of its fan was compiled', () => {
+    const r = {
+      id: 'x:y:agbcc',
+      asmlift: side({ outcome: 'noncompile', compileErrors: 1, fanSize: 8, fanNotCompiled: 3 }),
+      m2c: side({ decompiler: 'm2c', outcome: 'failed' }),
+    } as unknown as FunctionResult;
+    expect(rowLine(1, 1, '', r, '1.2')).toBe(
+      '[1/1] x:y:agbcc  asmlift=noncompile(1) m2c=failed  (1.2s, fan 8 (5 compiled))',
+    );
+  });
+
   test('a row that never ranked prints no fan, and the rest of the line is unchanged', () => {
     const r = {
       id: 'x:y:agbcc',
@@ -272,6 +327,13 @@ describe('the per-row run line', () => {
 describe('costNote', () => {
   test('prints the fan beside the seconds, so a run says what it is paying for', () => {
     expect(costNote({ fanSize: 5952 } as DecompilerResult, '518.3')).toBe('(518.3s, fan 5952)');
+  });
+
+  // On a stillborn fan the enumerated count is not what was paid for.
+  test('prints how much of a stillborn fan was compiled, beside the count that was enumerated', () => {
+    expect(costNote({ fanSize: 30240, fanNotCompiled: 30205 } as DecompilerResult, '97.0')).toBe(
+      '(97.0s, fan 30240 (35 compiled))',
+    );
   });
 
   // A row that never ranked has no fan. `fan 0` would read as a claim about its enumeration.

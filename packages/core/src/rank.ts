@@ -2255,7 +2255,8 @@ export function rankBy<S extends { score: number; rows?: number }>(
       return outcome.thrown;
     };
     throw new NoScorableCandidateError(
-      `no scorable candidate for '${symbol}': ${fullMessage(thrownAt(0))}\n${stillbornNote(stillborn, candidates.length)}`,
+      `no scorable candidate for '${symbol}': ${stillbornNote(stillborn, candidates.length)}\n` +
+        `The default candidate's compile: ${fullMessage(thrownAt(0))}`,
       stillborn.compiled.map((i) => ({ variations: candidates[i].variations, error: firstLine(thrownAt(i)) })),
       [],
       stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations })),
@@ -2303,10 +2304,10 @@ export function rankBy<S extends { score: number; rows?: number }>(
   return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
 }
 
-/** The sentence a stillborn fan's error ends on: how much of the fan was never compiled, on what
- *  evidence, and the reason every compiled candidate shared. It follows the DEFAULT candidate's
- *  own diagnostic — the spelling the rule is anchored on — rather than whichever was refused
- *  last. */
+/** The sentence a stillborn fan's error OPENS on: how much of the fan was never compiled, on what
+ *  evidence, and the reason every compiled candidate shared. The DEFAULT candidate's own
+ *  diagnostic — the spelling the rule is anchored on, rather than whichever was refused last —
+ *  follows it, so that a printer bounding a long diagnostic keeps the verdict. */
 function stillbornNote(stillborn: Stillborn, fan: number): string {
   const tally = new Map<string, number>();
   for (const m of stillborn.messages) {

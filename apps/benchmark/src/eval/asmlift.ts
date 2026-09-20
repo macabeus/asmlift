@@ -195,7 +195,12 @@ export function runAsmlift(
   } catch (e) {
     // Backstop: annotate mode is designed not to throw; anything that still does produced no
     // usable output — the honest "failed".
-    const msg = (e as Error).message ?? String(e);
+    // The compiler's text is the CAUSE's: `rankBy` composes its own sentences around it — on a
+    // stillborn fan, opening on the verdict — and a marker is a compiler line, not one of ours.
+    const msg =
+      e instanceof NoScorableCandidateError && e.cause instanceof Error
+        ? e.cause.message
+        : String((e as Error).message ?? e);
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
@@ -226,7 +231,12 @@ export function runAsmlift(
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref
     // family), but this also catches scorer infrastructure errors; the diagnostics say which.
-    const msg = (e as Error).message ?? String(e);
+    // The compiler's text is the CAUSE's: `rankBy` composes its own sentences around it — on a
+    // stillborn fan, opening on the verdict — and a marker is a compiler line, not one of ours.
+    const msg =
+      e instanceof NoScorableCandidateError && e.cause instanceof Error
+        ? e.cause.message
+        : String((e as Error).message ?? e);
     // The seconds were spent whichever throw this is, so they are recorded either way; the fan is
     // recorded only when the error actually carries it (`refusedFan`), which is the
     // every-spelling-refused case and not a scorer that died.
