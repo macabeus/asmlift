@@ -12,14 +12,14 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
 /** .i → pooled docker KMC gcc at `cflags` → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string, cflags: readonly string[]): void {
   try {
     kmcCompile(dir, iName, oName, cflags);
   } catch (e) {
-    throw new Error(`kmc gcc failed: ${compilerDiagnostics((e as Error).message)}`);
+    throw restated('kmc gcc', e);
   }
 }
 

@@ -53,11 +53,26 @@ export function spawnFailure(cmd: string, e: NodeJS.ErrnoException): string {
  *  `CompilerRejection` when the tool ran to completion and said no, a plain `Error` when a signal
  *  killed it — the half-printed diagnostics of a killed compiler have the shape of a rejection and
  *  are not one (core stillborn.ts reads rejections only). */
-function refused(what: string, r: { status: number | null; stderr: string; stdout: string }): Error {
+export function refused(what: string, r: { status: number | null; stderr: string; stdout: string }): Error {
   const output = r.stderr || r.stdout;
   return r.status === null
     ? new Error(`${what} did not run to completion — transient, not a rejection:\n${output}`)
     : new CompilerRejection(`${what} failed: ${output}`, output);
+}
+
+/** The lowest exit status that is the container's, not the compiler's: 125 the daemon refused
+ *  the run, 126 and 127 the command could not be invoked or found, 128+n the contained command was
+ *  killed by signal n (an OOM kill is `exit 137`). */
+const DOCKER_OWN_EXIT = 125;
+
+/** `refused` for a step run through `docker run` or `docker exec`, where a killed compiler cannot
+ *  arrive as `status === null`: docker reports it as an exit status of its own. */
+export function containerRefused(what: string, r: { status: number | null; stderr: string; stdout: string }): Error {
+  return r.status !== null && r.status >= DOCKER_OWN_EXIT
+    ? new Error(
+        `${what} did not run to completion (exit ${r.status}) — transient, not a rejection:\n${r.stderr || r.stdout}`,
+      )
+    : refused(what, r);
 }
 
 /** How much output one spawn may write. Node's default is a mebibyte, and an object carrying a big
@@ -277,7 +292,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
     ]);
     if (cc) {
       if (cc.status !== 0) {
-        throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+        throw containerRefused('gcc 2.7.2 (docker)', cc);
       }
       return;
     }
@@ -307,7 +322,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
     `/work/${srcC}`,
   ]);
   if (cc.status !== 0) {
-    throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+    throw containerRefused('gcc 2.7.2 (docker)', cc);
   }
 }
 
@@ -511,7 +526,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
     ]);
     if (cc) {
       if (cc.status !== 0) {
-        throw new Error(`kmc gcc (docker) failed: ${cc.stderr || cc.stdout}`);
+        throw containerRefused('kmc gcc (docker)', cc);
       }
       return;
     }
@@ -539,7 +554,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
     `/work/${srcC}`,
   ]);
   if (cc.status !== 0) {
-    throw new Error(`kmc gcc (docker) failed: ${cc.stderr || cc.stdout}`);
+    throw containerRefused('kmc gcc (docker)', cc);
   }
 }
 
@@ -626,17 +641,29 @@ export function ppcDockerAvailable(mwcc: MwccToolchainId): boolean {
  *  CodeWarrior dir is mounted read-only at /mwcc. `script` is parameterized by the container-side
  *  path of `dir`, which differs between the two routes; `via` names the route that answered, so an
  *  empty result can be blamed on the right one. */
-function ppcExec(mwcc: MwccToolchainId, dir: string, script: (W: string) => string): { out: string; via: string } {
+function ppcExec(
+  mwcc: MwccToolchainId,
+  dir: string,
+  script: (W: string) => string,
+  /** the step's name in the error thrown for a nonzero exit; a COMPILE step's is a `containerRefused`,
+   *  because its exit status is the compiler's verdict, and any other step's is a plain Error */
+  what: { compile: string } | { dump: string },
+): { out: string; via: string } {
   const t = MWCC_PPC_TOOLCHAIN;
   const w = hostTmp(dir);
+  const done = (r: { status: number | null; stdout: string; stderr: string }, via: string) => {
+    if (r.status !== 0) {
+      throw 'compile' in what
+        ? containerRefused(what.compile, r)
+        : new Error(`${what.dump} failed (exit ${r.status}): ${r.stderr || r.stdout}`);
+    }
+    return { out: r.stdout, via };
+  };
   if (w) {
     const { name, mounts } = ppcPoolCfg(mwcc);
     const r = poolExec(t.docker, t.image, name, mounts, [name, 'sh', '-c', script(w)]);
     if (r) {
-      if (r.status !== 0) {
-        throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
-      }
-      return { out: r.stdout, via: 'pooled' };
+      return done(r, 'pooled');
     }
   }
   const r = run(t.docker, [
@@ -655,10 +682,7 @@ function ppcExec(mwcc: MwccToolchainId, dir: string, script: (W: string) => stri
     '-c',
     script('/work'),
   ]);
-  if (r.status !== 0) {
-    throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
-  }
-  return { out: r.stdout, via: 'one-shot' };
+  return done(r, 'one-shot');
 }
 
 /** Compile `srcC` (a basename in `dir`) with mwcceppc-via-wibo at `flags` to `outObj`, and — when
@@ -677,11 +701,16 @@ export function ppcCompile(
   disasm = false,
 ): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const { out, via } = ppcExec(mwcc, dir, (W) => {
-    const argv = [...t.harnessFlags, ...flags];
-    const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
-    return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
-  });
+  const { out, via } = ppcExec(
+    mwcc,
+    dir,
+    (W) => {
+      const argv = [...t.harnessFlags, ...flags];
+      const compile = `${t.wibo} /mwcc/mwcceppc.exe ${argv.map(shq).join(' ')} -o ${W}/${outObj} ${W}/${srcC}`;
+      return disasm ? `${compile} && ${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${outObj}` : compile;
+    },
+    { compile: 'mwcceppc (docker)' },
+  );
   // a compile-only run legitimately prints nothing; only the piped objdump owes output
   return disasm ? nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${outObj}`) : out;
 }
@@ -691,13 +720,17 @@ export function ppcCompile(
  *  too. */
 export function ppcDisasmText(mwcc: MwccToolchainId, dir: string, objName: string): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`);
+  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} ${t.objdumpFlags.join(' ')} ${W}/${objName}`, {
+    dump: 'ppc objdump (docker)',
+  });
   return nonEmptyDump(out, `ppc objdump (${via}) on ${dir}/${objName}`);
 }
 /** `objdump -t` on an object already in `dir`: its symbol table, sizes included. */
 export function ppcSymbolTableText(mwcc: MwccToolchainId, dir: string, objName: string): string {
   const t = MWCC_PPC_TOOLCHAIN;
-  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} -t ${W}/${objName}`);
+  const { out, via } = ppcExec(mwcc, dir, (W) => `${t.objdump} -t ${W}/${objName}`, {
+    dump: 'ppc objdump -t (docker)',
+  });
   return nonEmptyDump(out, `ppc objdump -t (${via}) on ${dir}/${objName}`);
 }
 // CodeWarrior flags carry spaces (e.g. `msg_show_realref off`), so quote each token for the shell.

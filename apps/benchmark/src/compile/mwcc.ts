@@ -28,7 +28,7 @@ import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
 import { declarationsOnly } from './declarations';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir } from './util';
+import { compilerDiagnostics, contentDir, restated } from './util';
 
 /** The CodeWarrior binary, as a project's own build rule names it. */
 const MWCCEPPC = 'mwcceppc.exe';
@@ -82,7 +82,7 @@ function compile(
   try {
     return ppcCompile(mwcc, dir, srcName, objName, cflags, disasm);
   } catch (e) {
-    throw new Error(`mwcceppc failed: ${compilerDiagnostics((e as Error).message)}`);
+    throw restated('mwcceppc', e);
   }
 }
 

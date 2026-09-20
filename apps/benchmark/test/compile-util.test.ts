@@ -1,10 +1,11 @@
 // Pin tests for compilerDiagnostics — the compile modules embed its output in the Error
 // messages that become row error markers, so it must surface real diagnostics, not banners.
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { compilerDiagnostics, pickDiagnostics, scratchSlot } from '../src/compile/util';
+import { compilerDiagnostics, pickDiagnostics, restated, scratchSlot } from '../src/compile/util';
 
 describe('compilerDiagnostics (pinned)', () => {
   test('pre-3.0 gcc diagnostics (no "error" keyword) survive via their file:line prefix', () => {
@@ -113,5 +114,24 @@ describe('scratchSlot (the leak fix)', () => {
     expect(second).toBe(first); // one directory, not one per call
     expect(existsSync(join(second, 'left-behind'))).toBe(false); // emptied, so a missing output stays LOUD
     rmSync(first, { recursive: true, force: true });
+  });
+});
+
+describe('restated', () => {
+  // The docker seams' throws are re-worded with the bounded diagnostic the row publishes; what
+  // they must not lose is the KIND, which is the only thing the stillborn rule reads.
+  test('a rejection stays a rejection, its whole diagnostic intact behind the bounded message', () => {
+    const diagnostic = Array.from({ length: 9 }, (_, i) => `c.c:${i + 1}: parse error before \`;'`).join('\n');
+    const e = restated('kmc gcc', new CompilerRejection(`kmc gcc (docker) failed: ${diagnostic}`, diagnostic));
+    expect(e).toBeInstanceOf(CompilerRejection);
+    expect((e as CompilerRejection).diagnostic).toBe(diagnostic);
+    expect(e.message.startsWith('kmc gcc failed: ')).toBe(true);
+    expect(e.message.split('\n')).toHaveLength(5);
+  });
+
+  test('a transient stays a plain Error', () => {
+    const e = restated('kmc gcc', new Error('kmc gcc (docker) did not run to completion (exit 137)'));
+    expect(e).not.toBeInstanceOf(CompilerRejection);
+    expect(e.message).toContain('exit 137');
   });
 });

@@ -1,5 +1,5 @@
 // Shared helpers for the per-toolchain compile modules.
-import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
@@ -85,6 +85,14 @@ export function compilerDiagnostics(s: string): string {
     .slice(0, 5)
     .map((l) => l.replace(ABSOLUTE_PATH, '$1$2').slice(0, 240))
     .join('\n');
+}
+
+/** A toolchain seam's throw, restated with the bounded diagnostic the evaluator publishes and
+ *  still the KIND it was: a `CompilerRejection` stays one, its whole diagnostic with it, so the
+ *  ranking driver's stillborn rule can read the verdict; anything else stays the transient it was. */
+export function restated(tool: string, e: unknown): Error {
+  const message = `${tool} failed: ${compilerDiagnostics(e instanceof Error ? e.message : String(e))}`;
+  return e instanceof CompilerRejection ? new CompilerRejection(message, e.diagnostic) : new Error(message);
 }
 
 /** A content-keyed scratch dir for a reference build: same flags and TU ⇒ same path, every run. The
