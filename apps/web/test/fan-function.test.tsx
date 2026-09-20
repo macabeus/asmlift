@@ -156,6 +156,12 @@ test('a row with no winner lists every variation its fan carried as lost', () =>
   expect([...names].sort()).toEqual(Object.keys(row.asmlift.fanVariations!).sort());
 });
 
+test('a stillborn fan’s row says how many candidates were never compiled, apart from the dropped', () => {
+  const row = FAN_SAMPLE.find((r) => r.asmlift.fanNotCompiled !== undefined)!;
+  const html = renderToStaticMarkup(<WinningSpelling fn={row} hash="#view=benchmark" onOpenVariation={noop} />);
+  expect(html).toContain('3 not compiled');
+});
+
 test("each winning variation shows its definition's title inline, not only on hover", () => {
   const row = FAN_SAMPLE.find((r) => r.id === 'synthetic:dmafield:agbcc')!;
   const html = renderToStaticMarkup(<WinningSpelling fn={row} hash="#view=benchmark" onOpenVariation={noop} />);

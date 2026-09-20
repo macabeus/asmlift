@@ -6,15 +6,15 @@ the dominant one.
 
 ## The seven words a reader needs
 
-| Word             | Meaning                                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **candidate**    | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                                                                 |
-| **fan**          | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                                                             |
-| **winner**       | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.                                         |
-| **variation**    | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too.                                         |
-| **dropped**      | A candidate the scorer refused: its source did not build.                                                                                                                                  |
-| **withheld**     | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                                                          |
-| **not compiled** | A candidate never handed to the scorer: its fan was stillborn — the default candidate and one probe per variation were all rejected for the same reason, so the rest was not compiled.     |
+| Word             | Meaning                                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **candidate**    | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                                                             |
+| **fan**          | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                                                         |
+| **winner**       | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.                                     |
+| **variation**    | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too.                                     |
+| **dropped**      | A candidate the scorer refused: its source did not build.                                                                                                                              |
+| **withheld**     | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                                                      |
+| **not compiled** | A candidate never handed to the scorer: its fan was stillborn — the default candidate and one probe per variation were all rejected for the same reason, so the rest was not compiled. |
 
 A fan is **stillborn** when no variation can reach what refuses it: the default candidate fails
 to build, and so does the smallest candidate carrying each variation, every one with the same

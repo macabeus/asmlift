@@ -39,7 +39,12 @@ export type ProbeOutcome = 'compiled' | { thrown: unknown };
 
 /** The candidates to compile once the default was rejected: for every variation name in the fan,
  *  the index of the candidate with the FEWEST variations that carries it, enumeration order
- *  breaking a tie. Ascending, and without the default itself. */
+ *  breaking a tie. Ascending, and without the default itself.
+ *
+ *  A NAME is the whole part as the candidate carries it, subject included: `argcopy-a0@1.0` and
+ *  `argcopy-a0@2.0` are two probes, because each re-spells a different statement and the rule asks
+ *  whether ANY re-spelling reaches the failing one. Collapsing them to the registered name would
+ *  probe one region and answer for both. */
 export function probeIndices(candidates: readonly { variations: readonly string[] }[]): number[] {
   const smallest = new Map<string, number>();
   candidates.forEach((c, i) => {

@@ -64,10 +64,11 @@ function rankInto(nDropped: number, nWithheld: number): void {
 }
 
 describe('fanSize (pure)', () => {
-  // core's `rankBy` puts every enumerated candidate into EXACTLY ONE of the three lists, so the
+  // core's `rankBy` puts every enumerated candidate into EXACTLY ONE of the four lists, so the
   // fan is their sum. Counting only `candidates` would under-report a row by its whole refused
-  // half — `kleod:ProcessInputAndUpdateEntities:agbcc` publishes 51,840 dropped spellings.
-  test('is scored + dropped + withheld, the three lists rankBy partitions the fan into', () => {
+  // half — `kleod:ProcessInputAndUpdateEntities:agbcc` publishes 51,840 dropped spellings — and
+  // a stillborn fan by everything it never compiled.
+  test('is scored + dropped + withheld + not compiled, the four lists rankBy partitions the fan into', () => {
     expect(fanSize({ candidates: [1, 2, 3], dropped: [4], withheld: [5, 6] })).toBe(6);
     expect(fanSize({ candidates: [], dropped: [4], withheld: [], notCompiled: [7, 8] })).toBe(3);
   });

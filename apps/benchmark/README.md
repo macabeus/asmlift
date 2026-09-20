@@ -21,13 +21,13 @@ For every `(function × toolchain)` case it runs BOTH decompilers and records, p
 > of the best compiling candidate on a non-matching case. **Provenance** (`meta.asmlift`) records
 > which asmlift commit produced the numbers, and whether the tree was dirty.
 
-| outcome      | meaning                                                                                                                                                                                                                              |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `match`      | output compiles **and** objdiff score is 0 (byte-exact)                                                                                                                                                                              |
-| `nonmatch`   | output compiles but score > 0 (with the objdiff difference count)                                                                                                                                                                    |
-| `declined`   | output bears explicit incompleteness markers — asmlift's `ASMLIFT_ERROR`; m2c's `M2C_ERROR`/`M2C_UNK`/`M2C_CARRY`/`?` type placeholders. Deliberately uncompilable, never scored (a marker compiled out could byte-match wrong code) |
-| `noncompile` | marker-free output that claims completeness but fails to compile — the case's record keeps the source AND the compiler's diagnostics                                                                                                 |
-| `failed`     | no usable output at all (crash, `Function not found`, empty)                                                                                                                                                                         |
+| outcome      | meaning                                                                                                                                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `match`      | output compiles **and** objdiff score is 0 (byte-exact)                                                                                                                                                                                                                       |
+| `nonmatch`   | output compiles but score > 0 (with the objdiff difference count)                                                                                                                                                                                                             |
+| `declined`   | output bears explicit incompleteness markers — asmlift's `ASMLIFT_ERROR`; m2c's `M2C_ERROR`/`M2C_UNK`/`M2C_CARRY`/`?` type placeholders. Deliberately uncompilable, never scored (a marker compiled out could byte-match wrong code)                                          |
+| `noncompile` | marker-free output that claims completeness but fails to compile — the case's record keeps the source AND the compiler's diagnostics. On a ranked row whose fan was declared stillborn (core `stillborn.ts`), `fanNotCompiled` says how many of `fanSize` were never compiled |
+| `failed`     | no usable output at all (crash, `Function not found`, empty)                                                                                                                                                                                                                  |
 
 plus a transparent **readability heuristic** (`quality`), a measured **gap size** for
 non-matching rows.
@@ -261,7 +261,8 @@ pnpm bench repro <sym|id> --run       # reproduce ONE published row outside the 
                                       #   docs/ranked-repro.md is the argument
 pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for ONE row, not just
                                       #   the winner it published: the `[score]` table, the
-                                      #   [dropped]/[withheld] lists, the `[ranked]` line.
+                                      #   [dropped]/[withheld] lists, the `[ranked]` line — and on
+                                      #   a stillborn fan, how many were NOT COMPILED.
                                       #   `--enumerate` lists the fan without compiling anything,
                                       #   `--show <variations>` prints one candidate's C, `--force`
                                       #   scores a fan over 2,000, `--base <ref>` prints the fan

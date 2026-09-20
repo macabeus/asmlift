@@ -284,10 +284,12 @@ export async function rankCandidatesInBrowser(
   // candidate this loop did not compile.
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const outcomes = new Map<string, MatchScore | Error>();
-  // The total is only ever `candidates.length` — the number actually returned. No estimate, and no
-  // borrowing the CLI's count for the same function (66,816 with a symbol map, against the
-  // browser's map-less 117,760: a fabricated denominator would have been 76 % wrong).
-  const total = candidates.length;
+  // The total is the number of candidates this run will compile: `candidates.length` — the number
+  // actually returned, never an estimate and never the CLI's count for the same function (66,816
+  // with a symbol map, against the browser's map-less 117,760: a fabricated denominator would have
+  // been 76 % wrong) — until a stillborn verdict says the rest will not be, whereupon it is the
+  // number compiled, so the phase still ends on a full bar rather than a bar that stops short.
+  let total = candidates.length;
   const score = async (i: number): Promise<void> => {
     const c = candidates[i];
     // `outcomes.size` is how many candidates are FINISHED, and the tick is emitted at the top so
@@ -322,7 +324,9 @@ export async function rankCandidatesInBrowser(
         await score(i);
       }
       const tried = new Set(probes);
-      rest = stillbornVerdict(candidates, outcomeOf) === null ? rest.filter((i) => !tried.has(i)) : [];
+      const stillborn = stillbornVerdict(candidates, outcomeOf);
+      rest = stillborn === null ? rest.filter((i) => !tried.has(i)) : [];
+      total = stillborn === null ? total : stillborn.compiled.length;
     }
     for (const i of rest) {
       await score(i);
