@@ -275,8 +275,8 @@ export async function rankCandidatesInBrowser(
 
   // The COMPILES run here, on the wasm scorer's own async schedule; the RANKING is core's `rankBy`
   // over the memoized outcomes, exactly as the CLI's pooled driver does it. A driver that re-spelled
-  // the drop/withhold/ordering rules to fit an async loop is how the playground and the CLI came to
-  // disagree about the same function — so none of them is spelled here.
+  // the drop/withhold/ordering rules to fit an async loop would let the playground and the CLI
+  // disagree about the same function, so none of them is spelled here.
   //
   // The ORDER is the stillborn rule's (core stillborn.ts): the default candidate alone, then — only
   // if the compiler rejected it — one probe per variation, then the rest unless the verdict says the
