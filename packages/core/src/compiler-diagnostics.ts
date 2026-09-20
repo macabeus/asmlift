@@ -24,25 +24,44 @@ export class CompilerRejection extends Error {
 }
 
 /** A warning or a note — a line the compiler prints about text it may still accept. */
-const ADVISORY = /\b(?:warning|note)\b\s*:/i;
-/** An mwcc caret line (`#   Error:      ^`). It carries no message: the NEXT line does, and the
- *  two are one diagnostic. */
+/** The FIRST class word a line carries, with the colon that makes it a tag: `warning:`, `note:`,
+ *  `error:`, `fatal error:`, and IDO's numbered `Warning 712:`. The first, because a message can
+ *  quote a tag of its own — `expected ';' before 'note' token; note: …` is an error. */
+const TAG = /\b(?:(fatal\s+)?error|warning|note)\b(?:\s+\d+)?\s*:/i;
+const isAdvisory = (line: string): boolean => {
+  const tag = TAG.exec(line);
+  return tag !== null && !/^(?:fatal\s+)?error/i.test(tag[0]);
+};
+/** An mwcc caret line (`#   Error:      ^`). It carries no message: the line(s) after it do, and
+ *  together they are one diagnostic. */
 const MWCC_CARET = /#\s*(Error|Warning):[\s^~]*$/i;
+/** A line of an mwcc diagnostic's MESSAGE: `#`, then prose. Not the caret, not a source excerpt
+ *  (`#      12: x = y;`), not the banner (`### mwcceppc.exe Compiler:`, `#    File: …`, `# ----`).
+ *  mwcc wraps a message at the terminal's width, so a message is every such line up to the first
+ *  that is not one: a conversion error's source type ends one line and its target type `'int *'`
+ *  opens the next, and the first line alone equals the same conversion to `'int'`. */
+const MWCC_MESSAGE = /^\s*#(?!#)\s*(?!(?:Error|Warning)\s*:|\d+:|File:|-{3,})\S/i;
 
 /** `lines` with every ERROR ahead of every warning and note, each class in its original order.
  *
  *  A compiler prints diagnostics in source order, and a candidate that casts its way through a
  *  project's types can print dozens of warnings above the one error that refused it. Whatever
  *  bounds the list downstream then keeps warnings only, and the reader is shown a cause that is
- *  not why the compile failed. An mwcc message line travels with its caret line, whichever class
- *  that is. */
+ *  not why the compile failed. An mwcc message travels with its caret line, whichever class that
+ *  is. */
 export function errorsFirst(lines: readonly string[]): string[] {
   const errors: string[] = [];
   const advisories: string[] = [];
-  let caretAdvisory: boolean | undefined;
+  /** the class of the mwcc diagnostic whose message lines are still arriving */
+  let open: boolean | undefined;
   for (const l of lines) {
-    const advisory = caretAdvisory ?? ADVISORY.test(l);
-    caretAdvisory = MWCC_CARET.test(l) ? advisory : undefined;
+    let advisory: boolean;
+    if (open !== undefined && MWCC_MESSAGE.test(l)) {
+      advisory = open;
+    } else {
+      advisory = isAdvisory(l);
+      open = MWCC_CARET.test(l) ? advisory : undefined;
+    }
     (advisory ? advisories : errors).push(l);
   }
   return [...errors, ...advisories];
@@ -62,7 +81,11 @@ const TAGGED = /\b(?:fatal\s+)?error\s*:\s*(?:\S+, line \d+:\s*)?(.*)$/i;
  *  the statement, and a `previous declaration` line points into the context rather than at the
  *  candidate. */
 const CONTINUATION =
-  /^(?:previous (?:implicit )?(?:declaration|definition)\b|this is the location of\b|\(Each undeclared identifier\b|for each function it appears in\b)/i;
+  /^(?:previous (?:implicit )?(?:declaration|definition)\b|this is the location of\b|\(Each undeclared identifier\b|for each function it appears in\b|.*\bpreviously (?:declared|defined) here$)/i;
+/** A position spelled INSIDE a message rather than ahead of it: IDO's `redeclaration of 'a';
+ *  previous declaration at line 2 in file '/tmp/x/cand.c'`, whose file is a scratch directory that
+ *  differs per compile. */
+const POSITION_IN_MESSAGE = /\s*\bat line \d+ in file '[^']*'/g;
 
 /** The compiler's ERROR lines, each reduced to its message: no file, no line, no column, no
  *  `error:` tag. Warnings, notes, `In function` banners, `previous declaration` lines and source
@@ -77,20 +100,22 @@ export function errorMessages(diagnostic: string): string[] {
   for (let i = 0; i < lines.length; i++) {
     const caret = MWCC_CARET.exec(lines[i]);
     if (caret !== null) {
-      const message = lines[i + 1]?.replace(/^#\s*/, '') ?? '';
-      if (caret[1].toLowerCase() === 'error' && message !== '') {
-        out.push(message);
+      const parts: string[] = [];
+      while (i + 1 < lines.length && MWCC_MESSAGE.test(lines[i + 1])) {
+        parts.push(lines[++i].replace(/^#\s*/, ''));
       }
-      i++;
+      if (caret[1].toLowerCase() === 'error' && parts.length > 0) {
+        out.push(parts.join(' '));
+      }
       continue;
     }
-    if (ADVISORY.test(lines[i])) {
+    if (isAdvisory(lines[i])) {
       continue;
     }
     const located = LOCATED.exec(lines[i]);
     const message = located === null ? TAGGED.exec(lines[i])?.[1] : located[1].replace(ERROR_TAG, '');
     if (message !== undefined && message !== '' && !CONTINUATION.test(message)) {
-      out.push(message);
+      out.push(message.replace(POSITION_IN_MESSAGE, ''));
     }
   }
   return out;

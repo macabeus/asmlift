@@ -90,3 +90,74 @@ test('text with no recognisable error has NO key — never an empty one that equ
   expect(errorKey('c.c:3: warning: only a warning')).toBeNull();
   expect(errorKey('compile command exited 0 but produced no object at {{outputPath}}: cc -c in.c')).toBeNull();
 });
+
+// ── the shapes the five real compilers were measured to print ──────────────────────────────────
+
+test('an mwcc message wrapped over several lines is ONE message, and its whole text is the key', () => {
+  const twoTargets = [
+    '### mwcceppc.exe Compiler:',
+    '#    File: ..\\host-tmp\\asmlift-ppc-score-uAUBsk\\cand.c',
+    '# ----------------------------------------------------',
+    '#       3: void f(struct A a, s32 *q){ s32 y; y = a; q = a; }',
+    '#   Error:                                         ^',
+    "#   illegal implicit conversion from 'struct A' to",
+    "#   'int'",
+    '### mwcceppc.exe Compiler:',
+    '#       3: void f(struct A a, s32 *q){ s32 y; y = a; q = a; }',
+    '#   Error:                                                ^',
+    "#   illegal implicit conversion from 'struct A' to",
+    "#   'int *'",
+    '',
+    'Errors caused tool to abort.',
+  ].join('\n');
+  expect(errorMessages(twoTargets)).toEqual([
+    "illegal implicit conversion from 'struct A' to 'int'",
+    "illegal implicit conversion from 'struct A' to 'int *'",
+  ]);
+  const threeLines = [
+    '#   Error:        ^',
+    "#   illegal implicit conversion from 'struct ",
+    "#   VeryLongStructNameToWrapTheMessageOver *' to",
+    "#   'int *'",
+  ].join('\n');
+  expect(errorMessages(threeLines)).toEqual([
+    "illegal implicit conversion from 'struct VeryLongStructNameToWrapTheMessageOver *' to 'int *'",
+  ]);
+});
+
+test('an mwcc warning’s wrapped message travels with the warning, ahead of nothing', () => {
+  expect(
+    errorsFirst(['#   Warning:    ^', '#   variable is not', '#   used', '#   Error:   ^', '#   type mismatch']),
+  ).toEqual(['#   Error:   ^', '#   type mismatch', '#   Warning:    ^', '#   variable is not', '#   used']);
+});
+
+test('IDO’s numbered `Warning 712:` is a warning, so its errors still come first', () => {
+  const warn = 'cfe: Warning 712: /tmp/x/cand.c, line 2: illegal combination of pointer and integer';
+  const err = "cfe: Error: /tmp/x/cand.c, line 2: 'zz' undefined; reoccurrences will not be reported.";
+  expect(errorsFirst([warn, ' s32 f(s32 a){ s32 *p = a; }', warn, err])).toEqual([
+    ' s32 f(s32 a){ s32 *p = a; }',
+    err,
+    warn,
+    warn,
+  ]);
+  expect(errorMessages([warn, err].join('\n'))).toEqual(["'zz' undefined; reoccurrences will not be reported."]);
+});
+
+test('an error whose message quotes a `note:` is still an error', () => {
+  expect(errorMessages("c.c:3: error: expected ';' before 'note' token; note: foo")).toEqual([
+    "expected ';' before 'note' token; note: foo",
+  ]);
+});
+
+test('IDO spells the previous declaration’s position inside the message; the key drops it', () => {
+  const at = (dir: string) =>
+    `cfe: Error: ${dir}/cand.c, line 2: redeclaration of 'a'; previous declaration at line 2 in file '${dir}/cand.c'`;
+  expect(errorKey(at('/tmp/a1'))).toBe(errorKey(at('/tmp/b2')));
+  expect(errorMessages(at('/tmp/a1'))).toEqual(["redeclaration of 'a'; previous declaration"]);
+});
+
+test('pre-3.0 gcc’s `previously declared here` is where the OTHER declaration was, not an error', () => {
+  expect(errorMessages("c.c:5: redeclaration of `x'\nc.c:3: `x' previously declared here")).toEqual([
+    "redeclaration of `x'",
+  ]);
+});
