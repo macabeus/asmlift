@@ -300,7 +300,7 @@ limit and nothing else, so it is **refused** beside a path that compiles nothing
 `--asm`) rather than accepted and dropped.
 
 **A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
-to return: on a `declined` row (303 of 1,198) enumeration THROWS on the same gap the published row
+to return: on a `declined` row (303 of 1,200) enumeration THROWS on the same gap the published row
 annotates — `enumerateCandidates` has no annotate mode — and on a `noncompile` row every candidate
 is refused, so there is no ranking to print. Both are answered with `asmlift: [fan] no fan …` and
 exit 2, and the noncompile case prints the whole `[dropped]`/`[withheld]` list first, because on

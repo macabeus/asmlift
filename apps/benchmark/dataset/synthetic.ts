@@ -4827,6 +4827,28 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void maskchain(s32 d, s32 *out);',
     proto: { maskchain: { params: ['s32', 's32 *'], returnsVoid: true } },
   },
+  // A REGION COPY THAT SURVIVES BECAUSE THE REGION BRANCHES INSIDE ITSELF. `/argcopy`
+  // (l3/argcopy.ts) refuses a STRAIGHT-LINE region: one basic block, in which every compiler in
+  // the matrix forward-propagates `p = a` and the candidate is a compile that buys nothing. A
+  // region holding `&&` is not one basic block — each short-circuit is an edge — and agbcc keeps
+  // the copy across those edges, the same `adds rN, rM, #0` SetMauvilleOldManLanguage matches
+  // through. This row is that shape with NO nested statement list: the arm's every statement is
+  // a store or a call, and the reference's `p = a` is the only thing the copy models. The
+  // `straight-line` gate reads the connectives, not the nesting, and this is the row that holds
+  // it there; `argcopy.test.ts` pins the three sides.
+  {
+    sym: 'leafand',
+    src:
+      'void g(s32);\n' +
+      's32 leafand(s32 *a, s32 c, s32 v){ s32 *p; s32 r = 0;\n' +
+      ' if (c == 1) { p = a; p[3] = p[0] > v && p[4] < v; g(p[1]); p[5] = p[2] > 3 && p[6] < v; }\n' +
+      ' else if (c == 2) { r = a[5]; }\n' +
+      ' return r + a[7]; }',
+    features: ['value-home', 'pointer', 'bool', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(s32);\ns32 leafand(s32 *a, s32 c, s32 v);',
+    proto: { leafand: { params: ['s32 *', 's32', 's32'] }, g: { params: ['s32'], returnsVoid: true } },
+  },
   {
     sym: 'basecell',
     src: '#define gStage 0x03001100\n' + 'void basecell(s32 *out){ u8 *p = (u8 *)gStage; out[0] = (p[3] != 7); }',
@@ -5028,6 +5050,31 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void dmascope2(s32 n);',
     proto: { dmascope2: { params: ['s32'], returnsVoid: true } },
+  },
+  // `dmascope` WITH ITS WRITE BASE IN ORDINARY RAM. The reading is the same — three regions,
+  // one local each, bare `/regionbase` — and nothing in the function is a device: the base is
+  // `(u32 *)0x03002000` and the reference declares no `volatile`. What the row pins is the
+  // TIE-BREAK rather than the reach. The bare per-region spelling and its `/volatile` sibling
+  // both reach the bytes, and the published winner must be the one that adds no `volatile` to
+  // memory the reference never marked: a `volatile` on ordinary RAM is a spelling the reference
+  // does not have, and a winner carrying it would be a wrong answer at score 0. Every other
+  // row that reaches a bare `/regionbase` writes a device register, where the `/volatile` sibling
+  // is the right answer, so without this row the tie-break is refereed on one side only.
+  {
+    sym: 'memscope',
+    src:
+      '#define gTbl ((s32 *)0x03001000)\n' +
+      '#define MSet(src, dest, control) { u32 *regs = (u32 *)0x03002000;' +
+      ' regs[0] = (u32)(src); regs[1] = (u32)(dest); regs[2] = (u32)(control); }\n' +
+      'void memscope(s32 n){ s32 i;' +
+      ' for (i = 0; i < n; i++) {' +
+      ' if (gTbl[i] != 0) { MSet(gTbl[i], gTbl[i + 1], 0x80000020); }' +
+      ' else { MSet(gTbl[i + 2], gTbl[i + 3], 0x80000040); } }' +
+      ' MSet(gTbl[0], gTbl[1], 0x80000080); }',
+    features: ['value-home', 'pointer', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void memscope(s32 n);',
+    proto: { memscope: { params: ['s32'], returnsVoid: true } },
   },
   {
     sym: 'dmascope',

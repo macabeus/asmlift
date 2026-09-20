@@ -217,8 +217,8 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
 
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
-  control), each run on its assigned toolchains: 321 distinct functions, authored as 328 specs — a few carry a
-  different source per toolchain — → 820 cases.
+  control), each run on its assigned toolchains: 323 distinct functions, authored as 330 specs — a few carry a
+  different source per toolchain — → 822 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
   with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting.
