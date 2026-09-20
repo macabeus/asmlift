@@ -255,7 +255,18 @@ export function makeRealCompile(
   ctxI: string,
   language: 'c' | 'c++',
 ) {
-  const rc = compilerFor(toolchain, language);
+  return ladderCompile(compilerFor(toolchain, language), cflags, tu, prependC, ctxI, language);
+}
+
+/** `makeRealCompile` over an explicit compile module — the seam its tests hand a fake to. */
+export function ladderCompile(
+  rc: RealCompile,
+  cflags: readonly string[],
+  tu: TuModel,
+  prependC: string,
+  ctxI: string,
+  language: 'c' | 'c++',
+) {
   return (candC: string, sym: string, _backendId?: string, declarations?: string): string => {
     // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
     // world — rungs 1/2 are asmlift's own prelude, rung 3 the project's PREPROCESSED context —
@@ -268,6 +279,14 @@ export function makeRealCompile(
     // C++ candidate handed to the C parser fails on the word `class` — a diagnostic about the harness's
     // ladder, not about the decompiler's output.
     const failed = new Map<'c' | 'c++', Error>();
+    // EVERY rung's diagnostic, for the ranking driver's stillborn rule. That rule compares what two
+    // candidates were rejected FOR, and the richest rung alone cannot say: when it fails for a reason
+    // the candidate has no hand in — the corpus's shape is cpp's `global.h: No such file or
+    // directory` — every candidate carries its one sentence, the fan reads as rejected "for the same
+    // reason", and the product of two variations that each cure one of the poorer rung's errors is
+    // never compiled. The comparison is over the whole ladder, so a dead rung is a constant term
+    // and any rung a variation reaches still tells the candidates apart.
+    const rejections: string[] = [];
     let transient = false;
     const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
     const richest = richestRung(tu, ladder);
@@ -284,6 +303,9 @@ export function makeRealCompile(
           // other rungs said: the thrown error is then no `CompilerRejection`, and the ranking
           // driver's stillborn rule treats it as the transient it is.
           transient ||= !(e instanceof CompilerRejection);
+          if (e instanceof CompilerRejection) {
+            rejections.push(`--- ${rung.name} (${dialect}) ---\n${e.diagnostic}`);
+          }
           if (rung === richest) {
             failed.set(dialect, e instanceof Error ? e : new Error(String(e)));
           }
@@ -294,7 +316,13 @@ export function makeRealCompile(
     if (lastErr === undefined) {
       throw new Error('candidate did not compile in any context');
     }
-    throw transient && lastErr instanceof CompilerRejection ? new Error(lastErr.message) : lastErr;
+    if (!(lastErr instanceof CompilerRejection)) {
+      throw lastErr;
+    }
+    if (transient) {
+      throw new Error(lastErr.message);
+    }
+    throw new CompilerRejection(lastErr.message, rejections.join('\n'));
   };
 }
 
