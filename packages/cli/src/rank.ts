@@ -11,6 +11,7 @@ import type { Prototypes } from '@asmlift/core/proto';
 import {
   type Candidate,
   type RankedResult as CoreRankedResult,
+  NoScorableCandidateError,
   type Scored,
   enumerateCandidates,
   rankBy,
@@ -125,19 +126,28 @@ export function decompileRanked(
       : opts.compile;
   let done = 0;
   let best: MatchScore | undefined;
-  return rankBy(candidates, name, (source, symbol, cand) => {
-    try {
-      const s = timed(opts.clock, 'score', () =>
-        scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
-      );
-      best = best === undefined || s.score < best.score ? s : best;
-      return s;
-    } finally {
-      // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
-      // variation whose every candidate fails to build
-      opts.onProgress?.(++done, candidates.length, best);
+  try {
+    return rankBy(candidates, name, (source, symbol, cand) => {
+      try {
+        const s = timed(opts.clock, 'score', () =>
+          scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
+        );
+        best = best === undefined || s.score < best.score ? s : best;
+        return s;
+      } finally {
+        // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
+        // variation whose every candidate fails to build
+        opts.onProgress?.(++done, candidates.length, best);
+      }
+    });
+  } catch (e) {
+    // a stillborn fan (core stillborn.ts) ends the pass after the probes: the bar closes on what
+    // was compiled rather than stopping short of a total nothing will reach
+    if (e instanceof NoScorableCandidateError && e.notCompiled.length > 0) {
+      opts.onProgress?.(done, done, best);
     }
-  });
+    throw e;
+  }
 }
 
 /** The same ranking with the candidate COMPILES run `jobs` at a time.
@@ -224,7 +234,12 @@ export async function decompileRankedParallel(
       const probes = probeIndices(candidates);
       await pool(probes);
       const tried = new Set(probes);
-      rest = stillbornVerdict(candidates, outcomeOf) === null ? rest.filter((i) => !tried.has(i)) : [];
+      if (stillbornVerdict(candidates, outcomeOf) === null) {
+        rest = rest.filter((i) => !tried.has(i));
+      } else {
+        rest = [];
+        opts.onProgress?.(done, done, best);
+      }
     }
     await pool(rest);
   }

@@ -139,6 +139,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
     let pooledCompiles = 0;
     const asm = asmOf(IFOR);
     const obj = assembleTarget(asm);
+    const ticks = { pooled: [] as [number, number][], serial: [] as [number, number][] };
     const pooled = await stillbornOf(() =>
       decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, {
         jobs: 4,
@@ -146,15 +147,26 @@ describe('the pooled ranked run is the serial ranked run', () => {
           pooledCompiles++;
           return refuse();
         },
+        onProgress: (done, total) => ticks.pooled.push([done, total]),
       }),
     );
-    const serial = await stillbornOf(() => decompileRanked('ifor', asm, ARMV4T_AGBCC, obj, { compile: refuse }));
+    const serial = await stillbornOf(() =>
+      decompileRanked('ifor', asm, ARMV4T_AGBCC, obj, {
+        compile: refuse,
+        onProgress: (done, total) => ticks.serial.push([done, total]),
+      }),
+    );
     // what was compiled is the dropped list, and only that reached a worker
     expect(pooled.notCompiled.length).toBeGreaterThan(0);
     expect(pooledCompiles).toBe(pooled.dropped.length);
     expect(pooled.dropped).toEqual(serial.dropped);
     expect(pooled.notCompiled).toEqual(serial.notCompiled);
     expect(pooled.message).toContain('NOT COMPILED');
+    // …and the progress bar closes on what was compiled, on both drivers
+    const compiled = pooled.dropped.length;
+    expect(ticks.pooled.at(-1)).toEqual([compiled, compiled]);
+    expect(ticks.serial.at(-1)).toEqual([compiled, compiled]);
+    expect(ticks.serial.at(-2)).toEqual([compiled, compiled + pooled.notCompiled.length]);
   });
 
   test('a fan whose refusals DIFFER is compiled whole on the pool too', async () => {
