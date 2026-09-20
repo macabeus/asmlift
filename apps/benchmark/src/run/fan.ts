@@ -583,6 +583,15 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
         `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above ARE this ` +
         `row's fan. This is what the published row's "noncompile" outcome means.`,
     );
+    if (nsc.notCompiled.length > 0) {
+      // A stillborn fan's lines above are its PROBES, not the fan: the rest was never compiled,
+      // and a reader counting [dropped] lines against the row's fanSize must be told why.
+      notes.push(
+        `asmlift: [fan] …and ${nsc.notCompiled.length} more candidate(s) were NOT COMPILED: the fan was ` +
+          `declared stillborn after the default candidate and one probe per variation were all rejected ` +
+          `for the same reason (core stillborn.ts). The row's fanSize counts them; nothing refused them.`,
+      );
+    }
   } else if (e instanceof NoSpellableCandidateError) {
     notes.push(
       `asmlift: [fan] the backend refused every source this row enumerates, before anything was ` +

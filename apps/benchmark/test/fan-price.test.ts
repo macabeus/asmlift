@@ -69,6 +69,7 @@ describe('fanSize (pure)', () => {
   // half — `kleod:ProcessInputAndUpdateEntities:agbcc` publishes 51,840 dropped spellings.
   test('is scored + dropped + withheld, the three lists rankBy partitions the fan into', () => {
     expect(fanSize({ candidates: [1, 2, 3], dropped: [4], withheld: [5, 6] })).toBe(6);
+    expect(fanSize({ candidates: [], dropped: [4], withheld: [], notCompiled: [7, 8] })).toBe(3);
   });
 });
 
@@ -81,8 +82,9 @@ describe('fanSizeOfError (pure)', () => {
       'no scorable candidate',
       [{ variations: ['a'], error: 'x' }],
       [{ variations: ['b'], score: 1, why: 'proof' }],
+      [{ variations: ['c'] }],
     );
-    expect(fanSizeOfError(e)).toBe(2);
+    expect(fanSizeOfError(e)).toBe(3);
   });
 
   // …and says nothing about a throw that is not a fan at all. A scorer infrastructure error is
@@ -127,6 +129,7 @@ describe('the ranked row records its own price', () => {
           { variations: ['unsigned'], error: 'error: boom' },
           { variations: ['signed', 'raw-globals'], error: 'error: boom' },
         ],
+        [],
         [],
       );
     });
@@ -185,7 +188,7 @@ describe('the ranked row records its own price', () => {
 
   test('an unregistered variation in a fully REFUSED fan throws too', () => {
     ranked.mockImplementation(() => {
-      throw new NoScorableCandidateError('no scorable candidate', [{ variations: ['nosuch'], error: 'x' }], []);
+      throw new NoScorableCandidateError('no scorable candidate', [{ variations: ['nosuch'], error: 'x' }], [], []);
     });
     expect(() => runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile)).toThrow(/nosuch/);
   });

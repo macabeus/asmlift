@@ -13,6 +13,7 @@ import {
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
@@ -39,6 +40,9 @@ import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
  * `pkill`, a shard reaped under load — and `util.ts run()` only throws for `error` (ENOENT and the
  * 120 s timeout). A SIGKILLed agbcc produces literally `"agbcc failed: "` — a message with the
  * shape of a rejection and no verdict in it, which is why the SPAWN RESULT is what decides.
+ *
+ * A rejection is thrown as core's `CompilerRejection`, carrying the WHOLE stderr beside the
+ * bounded message: the ranking driver's stillborn rule compares diagnostics, never messages.
  */
 export function stepFailed(
   tool: 'cpp' | 'agbcc' | 'as',
@@ -55,7 +59,7 @@ export function stepFailed(
     // apps/benchmark/src/cache.ts, which refuses to cache an empty m2c answer for the same reason.
     throw new Error(`${tool} exited ${r.status} with no diagnostic — transient, not a rejection`);
   }
-  throw new Error(`${tool} failed: ${d}`);
+  throw new CompilerRejection(`${tool} failed: ${d}`, r.stderr);
 }
 
 /** Preprocessed C → agbcc at `cflags` → .s (asmlift ARM input) with the canonical .text/.align tail →
@@ -285,12 +289,11 @@ export const agbccReal: RealCompile = {
       // spawn result rather than off the message). `util.ts run()` throws `spawnFailure` for a
       // missing binary or the 120 s timeout. Caching any of those would silently drop a candidate
       // on every future run, the failure mode this repo calls a silent wrong answer.
-      const m = (e as Error).message;
-      if (cache.mode !== 'off' && DETERMINISTIC_REJECTION.test(m)) {
+      if (cache.mode !== 'off' && e instanceof CompilerRejection && DETERMINISTIC_REJECTION.test(e.message)) {
         // verifyFail FIRST: under `verify` a stored OBJECT for a TU that no longer compiles is a
         // mismatch, and it is the direction that was audited by nothing at all.
-        cache.verifyFail(tu, sym, m);
-        cache.putFail(tu, sym, m);
+        cache.verifyFail(tu, sym, e);
+        cache.putFail(tu, sym, e);
         throw e;
       }
       // A TRANSIENT — exactly the failures the guard above refuses to store. If the sampled audit

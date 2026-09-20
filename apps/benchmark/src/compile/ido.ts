@@ -2,6 +2,7 @@
 // build, real-tier candidate compile (shared cc step). Every compile passes the harness words from
 // @asmlift/toolchains, then the row's codegen flags.
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -13,11 +14,18 @@ import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
-/** .i → IDO cc at `cflags` → .o. Shared by target and candidate. */
+/** .i → IDO cc at `cflags` → .o. Shared by target and candidate. A compiler that ran and said no is
+ *  a `CompilerRejection`; one killed by a signal is not (agbcc.ts `stepFailed` states why). */
 function compile(iPath: string, oPath: string, cflags: readonly string[]): void {
   const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...cflags, '-o', oPath, iPath]);
+  if (cc.status === null) {
+    throw new Error(
+      `ido cc did not run to completion (killed by ${cc.signal ?? 'a signal'}) — transient, not a rejection`,
+    );
+  }
   if (cc.status !== 0) {
-    throw new Error(`ido cc failed: ${compilerDiagnostics(cc.stderr || cc.stdout)}`);
+    const output = cc.stderr || cc.stdout;
+    throw new CompilerRejection(`ido cc failed: ${compilerDiagnostics(output)}`, output);
   }
 }
 

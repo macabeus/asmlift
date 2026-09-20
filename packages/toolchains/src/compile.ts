@@ -9,6 +9,7 @@
 // rows would record "noncompile" instead of failing loud.)
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/score';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -46,6 +47,17 @@ export function spawnFailure(cmd: string, e: NodeJS.ErrnoException): string {
     `default path doesn't exist on this machine. Toolchain binaries resolve from ASMLIFT_* env ` +
     `vars with sibling-checkout defaults; see packages/cli/CONTRIBUTION.md#the-pinned-toolchains.`
   );
+}
+
+/** A candidate compile step that exited nonzero, as the ranking driver must see it: core's
+ *  `CompilerRejection` when the tool ran to completion and said no, a plain `Error` when a signal
+ *  killed it — the half-printed diagnostics of a killed compiler have the shape of a rejection and
+ *  are not one (core stillborn.ts reads rejections only). */
+function refused(what: string, r: { status: number | null; stderr: string; stdout: string }): Error {
+  const output = r.stderr || r.stdout;
+  return r.status === null
+    ? new Error(`${what} did not run to completion — transient, not a rejection:\n${output}`)
+    : new CompilerRejection(`${what} failed: ${output}`, output);
 }
 
 /** How much output one spawn may write. Node's default is a mebibyte, and an object carrying a big
@@ -155,11 +167,11 @@ export function compileCandAgbcc(cSource: string, flags: readonly string[]): str
   const ppPath = writePreprocessed(dir, 'cand', C_TYPEDEFS + cSource);
   const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.harnessFlags, ...flags]);
   if (cc.status !== 0) {
-    throw new Error(`agbcc failed: ${cc.stderr}`);
+    throw refused('agbcc', cc);
   }
   const as = run(TOOLCHAIN.as, [...TOOLCHAIN.asFlags, sPath, '-o', oPath]);
   if (as.status !== 0) {
-    throw new Error(`as failed: ${as.stderr}`);
+    throw refused('as', as);
   }
   return oPath;
 }
@@ -330,7 +342,7 @@ export function compileCandIdoPascal(pascalSource: string, flags: readonly strin
     USR_LIB: dirname(IDO_TOOLCHAIN.cc),
   });
   if (cc.status !== 0) {
-    throw new Error(`ido pascal (upas) failed: ${cc.stderr || cc.stdout}`);
+    throw refused('ido pascal (upas)', cc);
   }
   return oPath;
 }
@@ -343,7 +355,7 @@ export function compileCandIdoC(cSource: string, flags: readonly string[]): stri
   writeFileSync(cPath, C_TYPEDEFS + cSource);
   const cc = run(IDO_TOOLCHAIN.cc, [...IDO_TOOLCHAIN.harnessFlags, ...flags, '-o', oPath, cPath]);
   if (cc.status !== 0) {
-    throw new Error(`ido cc failed: ${cc.stderr || cc.stdout}`);
+    throw refused('ido cc', cc);
   }
   return oPath;
 }

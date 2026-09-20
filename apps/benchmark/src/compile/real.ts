@@ -6,6 +6,7 @@
 // the compiler's actual input, frozen — so the runner needs no project checkouts. The target and every
 // candidate compile at the row's codegen flags (`Case.codegen`).
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { macroDefinesOf } from '@asmlift/core/declare';
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
@@ -266,7 +267,8 @@ export function makeRealCompile(
     // and bare typedefs fail on every project type. The fallback dialect is a harness convenience, and a
     // C++ candidate handed to the C parser fails on the word `class` — a diagnostic about the harness's
     // ladder, not about the decompiler's output.
-    const failed = new Map<'c' | 'c++', string>();
+    const failed = new Map<'c' | 'c++', Error>();
+    let transient = false;
     const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
     const richest = richestRung(tu, ladder);
     // The whole context ladder in the row's own dialect BEFORE the fallback dialect is tried at
@@ -278,14 +280,21 @@ export function makeRealCompile(
         try {
           return rc.compileCandidate(`${rung.prelude}${macros}${body}`, sym, cflags, dialect);
         } catch (e) {
+          // A rung that did not run to completion leaves the candidate UNDECIDED, whatever the
+          // other rungs said: the thrown error is then no `CompilerRejection`, and the ranking
+          // driver's stillborn rule treats it as the transient it is.
+          transient ||= !(e instanceof CompilerRejection);
           if (rung === richest) {
-            failed.set(dialect, (e as Error).message);
+            failed.set(dialect, e instanceof Error ? e : new Error(String(e)));
           }
         }
       }
     }
-    const lastErr = failed.get(language) ?? '';
-    throw new Error(lastErr || 'candidate did not compile in any context');
+    const lastErr = failed.get(language);
+    if (lastErr === undefined) {
+      throw new Error('candidate did not compile in any context');
+    }
+    throw transient && lastErr instanceof CompilerRejection ? new Error(lastErr.message) : lastErr;
   };
 }
 

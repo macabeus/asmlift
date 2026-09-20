@@ -464,7 +464,7 @@ describe('noFanReport', () => {
   const withheld = [{ variations: ['unsigned', 'unreduce'], score: 2, why: 'needs a byte-exact proof' }];
 
   it('reads NOTHING SCORED off the error class, and prints the drop list that rides on it', () => {
-    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, [], []);
     const r = noFanReport('sa3:f:agbcc', e);
     expect(r.fan).toEqual(['asmlift: [dropped] unsigned: agbcc failed: c.c:12']);
     expect(r.notes.join('\n')).toContain('"noncompile"');
@@ -475,7 +475,7 @@ describe('noFanReport', () => {
   // reachable, and a dropped-only count reads "the 0 [dropped] line(s) above ARE this row's fan"
   // printed directly under N withheld lines.
   it('counts BOTH refusal lists, not just the dropped one', () => {
-    const e = new NoScorableCandidateError("no scorable candidate for 'f': 1 withheld", [], withheld);
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': 1 withheld", [], withheld, []);
     const r = noFanReport('sa3:f:agbcc', e);
     expect(r.fan).toHaveLength(1);
     expect(r.notes.join('\n')).toContain('0 [dropped] and 1 [withheld]');
@@ -516,7 +516,7 @@ describe('noFanReport', () => {
   // `--show` was silently dropped here — on a `noncompile` row, i.e. the one row class where
   // EVERY candidate is unshowable and the advice earns its keep.
   it('answers --show instead of ignoring it, and names --enumerate for a dropped candidate', () => {
-    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, [], []);
     expect(noFanReport('sa3:f:agbcc', e, 'unsigned').notes.join('\n')).toContain('--enumerate --show unsigned');
   });
 

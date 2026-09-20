@@ -80,8 +80,9 @@ function refusalSummary(err: Error): string {
   }
   const names = [...err.dropped, ...err.withheld].map((c) => joinVariations(c.variations));
   const shown = names.slice(0, 3).join(', ');
+  const notCompiled = err.notCompiled.length === 0 ? '' : `, ${err.notCompiled.length} not compiled`;
   return (
-    ` (${err.dropped.length} dropped, ${err.withheld.length} withheld` +
+    ` (${err.dropped.length} dropped, ${err.withheld.length} withheld${notCompiled}` +
     `${shown === '' ? '' : `: ${shown}${names.length > 3 ? `, +${names.length - 3} more` : ''}`})`
   );
 }

@@ -9,6 +9,7 @@
 // This module is deliberately free of score.ts/objdiff imports so the CLI can build a compiler
 // from config without loading the objdiff wasm, and so its tests stay offline.
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -682,10 +683,13 @@ const PROBE = 'int asmlift_prelude_probe;\n';
 const preludeFor = (world: boolean, declarations?: string): string =>
   world ? selfDeclaredContext(declarations) : macroDefinesOf(declarations);
 
-/** A verdict as the caller's contract wants it: the object path, or a throw. */
+/** A verdict as the caller's contract wants it: the object path, or a throw — a
+ *  `CompilerRejection` when the template ran to completion and said no, so that a ranking driver
+ *  can tell the compiler's answer from this machine's bad minute (core stillborn.ts). The message
+ *  already holds the template's whole output, so it is the diagnostic too. */
 const unwrap = (r: Verdict): string => {
   if (!r.ok) {
-    throw new Error(r.err);
+    throw r.transient ? new Error(r.err) : new CompilerRejection(r.err);
   }
   return r.objPath;
 };
@@ -1144,8 +1148,9 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
       // is the direction that nothing audited — 84% of a warm bench store's served answers are
       // rejections and verify mode never looked at one.
-      cache.verifyFail(key, symbol, r.err);
-      cache.putFail(key, symbol, r.err);
+      const rejection = new CompilerRejection(r.err);
+      cache.verifyFail(key, symbol, rejection);
+      cache.putFail(key, symbol, rejection);
       return r;
     }
     // NO FRESH ANSWER AT ALL — a spawn failure, the timeout, a signal. If the sampled audit

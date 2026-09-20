@@ -282,12 +282,15 @@ export function splitVariations(name: string): string[] {
 }
 
 /** How many of one fan's candidates carry one variation. `candidates` counts the whole fan —
- *  scored, dropped and withheld alike — and `dropped` and `withheld` are the refused part of that
- *  count, each absent when 0. */
+ *  scored, dropped, withheld and never compiled alike — and `dropped`, `withheld` and
+ *  `notCompiled` are the parts of that count the ranking did not score, each absent when 0.
+ *  `notCompiled` is not a refusal: nothing was compiled (core stillborn.ts), and a tally that
+ *  folded it into `dropped` would report compile failures that never ran. */
 export interface VariationTally {
   candidates: number;
   dropped?: number;
   withheld?: number;
+  notCompiled?: number;
 }
 
 interface NamedCandidate {
@@ -299,7 +302,7 @@ interface NamedCandidate {
  *  (`coalesce-v0-v1` and `coalesce-v2-v3` are both `coalesce`), and a candidate counts once under
  *  each name it carries however many subjects it applies it to.
  *
- *  `fan` is ranking's three-way partition, which puts every enumerated candidate in exactly one
+ *  `fan` is ranking's four-way partition, which puts every enumerated candidate in exactly one
  *  list, so each signedness entry's `candidates` sums with the other's to the fan size.
  *
  *  A tally, not a factorisation: enumeration gates prune the fan, so the counts do not multiply to
@@ -309,6 +312,7 @@ export function tallyFanVariations(fan: {
   candidates: readonly NamedCandidate[];
   dropped: readonly NamedCandidate[];
   withheld: readonly NamedCandidate[];
+  notCompiled: readonly NamedCandidate[];
 }): Record<string, VariationTally> {
   const registeredName = new Map<string, string>();
   const nameOf = (part: string): string => {
@@ -319,13 +323,13 @@ export function tallyFanVariations(fan: {
     }
     return name;
   };
-  const counts = new Map<string, { candidates: number; dropped: number; withheld: number }>();
-  const add = (list: readonly NamedCandidate[], refusal: 'dropped' | 'withheld' | undefined): void => {
+  const counts = new Map<string, { candidates: number; dropped: number; withheld: number; notCompiled: number }>();
+  const add = (list: readonly NamedCandidate[], refusal: 'dropped' | 'withheld' | 'notCompiled' | undefined): void => {
     for (const c of list) {
       for (const name of new Set(c.variations.map(nameOf))) {
         let n = counts.get(name);
         if (n === undefined) {
-          n = { candidates: 0, dropped: 0, withheld: 0 };
+          n = { candidates: 0, dropped: 0, withheld: 0, notCompiled: 0 };
           counts.set(name, n);
         }
         n.candidates++;
@@ -338,6 +342,7 @@ export function tallyFanVariations(fan: {
   add(fan.candidates, undefined);
   add(fan.dropped, 'dropped');
   add(fan.withheld, 'withheld');
+  add(fan.notCompiled, 'notCompiled');
   const kindIndex = (name: string): number => VARIATION_KINDS.indexOf(variationToken(name).variationKind);
   const names = [...counts.keys()].sort((a, b) => kindIndex(a) - kindIndex(b) || (a < b ? -1 : a > b ? 1 : 0));
   return Object.fromEntries(
@@ -349,6 +354,7 @@ export function tallyFanVariations(fan: {
           candidates: n.candidates,
           ...(n.dropped ? { dropped: n.dropped } : {}),
           ...(n.withheld ? { withheld: n.withheld } : {}),
+          ...(n.notCompiled ? { notCompiled: n.notCompiled } : {}),
         },
       ];
     }),

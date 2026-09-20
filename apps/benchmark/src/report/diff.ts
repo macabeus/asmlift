@@ -84,6 +84,9 @@ import { rowsAddedSince } from './regression';
  *  (`compareCost`) — out of the verdict for the reason above, and not out of the report, because
  *  a number recorded on 828 rows that nothing reads is bookkeeping.
  *
+ *  `fanNotCompiled` is out for the same reason as `fanSize`: it is what a stillborn fan did NOT
+ *  spend, a cost and never a verdict — the verdict is `outcome`, which is watched.
+ *
  *  `fanVariations` is out because it is what the fan is made of: a cost, like `fanSize`. The parts of
  *  a fan a verdict rests on — the winner's variations and the refused counts — are watched above. A
  *  roster that moves while `fanSize` holds is therefore visible to `stale-check`, whose row key

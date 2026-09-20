@@ -6,6 +6,7 @@
 // 144.9 MB logical and only 14,484 distinct = 32.1 MB. Content-addressed bytes under `objects/`,
 // hardlinked per key under `ns/<namespace>/` — so a key costs an inode, not a copy, and evicting
 // one namespace leaves every other namespace's answers intact.
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import {
   mkdirSync,
   mkdtempSync,
@@ -151,7 +152,11 @@ describe('the store is content-addressed and hardlinked', () => {
   test('a stored deterministic REJECTION reads back as an Error carrying its diagnostic', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
-      m.candCache('t', () => NS_A).putFail('k', 'f', "agbcc failed: c.c:2: conflicting types for `f'");
+      m.candCache('t', () => NS_A).putFail(
+        'k',
+        'f',
+        new CompilerRejection("agbcc failed: c.c:2: conflicting types for `f'"),
+      );
       const hit = m.candCache('t', () => NS_A).get('k', 'f');
       expect(hit).toBeInstanceOf(Error);
       expect((hit as Error).message).toContain('conflicting types');
@@ -335,7 +340,7 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
       const c = m.candCache('t', () => NS_A);
       for (let i = 0; i < 300; i++) {
-        c.putFail(`k${i}`, 'f', "agbcc failed: c.c:2: conflicting types for `f'");
+        c.putFail(`k${i}`, 'f', new CompilerRejection("agbcc failed: c.c:2: conflicting types for `f'"));
       }
     });
     expect(objectsIn(root).length, 'not one byte of this store is in objects/').toBe(0);
@@ -483,7 +488,7 @@ describe('verify mode compiles anyway, compares, and lets the FRESH bytes win', 
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       const c = m.candCache('t', () => NS_A);
       c.put('k', 'f', object('TRUTH'));
-      c.putFail('k', 'f', 'agbcc failed: stale');
+      c.putFail('k', 'f', new CompilerRejection('agbcc failed: stale'));
       expect(readFileSync(c.get('k', 'f') as string, 'utf8'), 'this is what a warm run is served').toBe('TRUTH');
     });
     await load({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_CANDCACHE_DIR: root }, (m) => {

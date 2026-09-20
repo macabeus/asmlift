@@ -35,6 +35,7 @@
 // ON BY DEFAULT: unset means `on`. `ASMLIFT_CANDCACHE=1|on|true|yes` serves too; `=verify`
 // compiles and compares; `0` / `off` / `false` / `no` — and a SET-BUT-EMPTY value — bypass the
 // module entirely; and ANYTHING ELSE is refused out loud rather than quietly treated as "on".
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -715,7 +716,7 @@ export function toolchainFileChain(cmd: string): string[] {
 //
 //   objects/<ab>/<sha256 of the object bytes>   content-addressed, immutable, deduped
 //   ns/<ns16>/<ab>/<key>.o                      a HARDLINK to the object above
-//   ns/<ns16>/<ab>/<key>.fail                   a negative entry (the diagnostic text)
+//   ns/<ns16>/<ab>/<key>.fail                   a negative entry (`rejectionBody`)
 //   ns/<ns16>/.live/<pid>-<rand>                a LEASE: this namespace has a live reader
 //
 // Two levels because the redundancy is 4.51x on LBG and 2.53x on the bench: the same object is
@@ -1115,6 +1116,18 @@ function pruneOnce(keepNs: string): void {
   }
 }
 
+/** A negative entry's bytes: the message the seam publishes and, after a NUL, the compiler's whole
+ *  diagnostic where that is more than the message. Both halves, because a served rejection must
+ *  be the rejection a fresh compile would have thrown: the stillborn rule (core stillborn.ts)
+ *  compares DIAGNOSTICS, and a store that kept only the bounded message would make a warm run
+ *  decide on less than a cold one read. */
+const rejectionBody = (r: CompilerRejection): string =>
+  r.diagnostic === r.message ? r.message : `${r.message}\0${r.diagnostic}`;
+const rejectionFrom = (body: string): CompilerRejection => {
+  const cut = body.indexOf('\0');
+  return cut < 0 ? new CompilerRejection(body) : new CompilerRejection(body.slice(0, cut), body.slice(cut + 1));
+};
+
 export interface CandCache {
   /** `off` once this cache has REFUSED — every call site tests it before doing anything. */
   readonly mode: CandCacheMode;
@@ -1123,16 +1136,16 @@ export interface CandCache {
    *  it run AFTER a candidate, which with a shared scratch slot overwrites that candidate's
    *  object. That exact ordering poisoned 8 keys and flipped 2 benchmark rows once already. */
   warm(): void;
-  /** The stored answer: an object PATH, an Error (a stored deterministic rejection), or
+  /** The stored answer: an object PATH, a stored deterministic rejection, or
    *  undefined for a miss. A store racing with another process is a MISS, never a throw. */
-  get(key: string, symbol: string): string | Error | undefined;
+  get(key: string, symbol: string): string | CompilerRejection | undefined;
   /** Store `objPath`'s bytes and return the path to serve — the STORE's path, so a warm run and
    *  a cold run hand the caller the same kind of stable read-only path. */
   put(key: string, symbol: string, objPath: string): string;
   /** Store a DETERMINISTIC rejection (the compiler ran and said no). Never a spawn failure, a
    *  timeout or a signal: a transient stored as a rejection drops that candidate on every future
    *  run. */
-  putFail(key: string, symbol: string, message: string): void;
+  putFail(key: string, symbol: string, rejection: CompilerRejection): void;
   /** The caller got NEITHER an object nor a storable rejection for this key — a spawn failure, a
    *  timeout, a signal — so there is no fresh answer to audit against. Give back whatever was
    *  WITHHELD for the audit (an object path, a stored rejection, or undefined for a key that was
@@ -1143,7 +1156,7 @@ export interface CandCache {
    *  fraction hands that fraction straight back to the hazard, deleting a spelling under a RANDOM
    *  per-run seed. Falling back to the stored answer is exactly what an unaudited run would have
    *  been served, and it is counted so the audit's own shortfall is visible. */
-  abandonAudit(key: string, symbol: string): string | Error | undefined;
+  abandonAudit(key: string, symbol: string): string | CompilerRejection | undefined;
   /** verify mode only, fresh compile SUCCEEDED: compare the stored answer against it. Differing
    *  bytes are a mismatch; so is a stored REJECTION, which would have dropped this candidate. */
   verify(key: string, symbol: string, objPath: string): void;
@@ -1151,7 +1164,7 @@ export interface CandCache {
    *  is a mismatch — it would have been scored as a candidate that no longer compiles. This is
    *  the half of the store that dominates what a warm run is SERVED: 30,332 of 36,025 answers,
    *  84%, on one full `pnpm bench run`. */
-  verifyFail(key: string, symbol: string, message: string): void;
+  verifyFail(key: string, symbol: string, rejection: CompilerRejection): void;
 }
 
 /** The inert cache: every call site tests `mode` first, so this is what a REFUSAL and an opt-out
@@ -1385,7 +1398,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
   };
 
   /** The same for a fresh DETERMINISTIC REJECTION — 84% of what a warm bench store serves. */
-  const auditRejection = (n: string, key: string, symbol: string, message: string): AuditVerdict => {
+  const auditRejection = (n: string, key: string, symbol: string, rejection: CompilerRejection): AuditVerdict => {
     const found = lookup(n, key, symbol);
     if (found === undefined) {
       return 'absent';
@@ -1394,7 +1407,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
       // The store holds an OBJECT for a TU that no longer compiles: served under `on` it would
       // be scored as a candidate the toolchain now rejects.
       report(
-        `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=object fresh=rejection: ${message.split('\n')[0].slice(0, 120)}`,
+        `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=object fresh=rejection: ${rejection.message.split('\n')[0].slice(0, 120)}`,
       );
       return settle(
         n,
@@ -1402,7 +1415,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
         symbol,
         repair(() => {
           rmSync(found.obj, { force: true });
-          writeAtomic(pathFor(n, key, symbol, 'fail'), message);
+          writeAtomic(pathFor(n, key, symbol, 'fail'), rejectionBody(rejection));
         }),
       );
     }
@@ -1416,13 +1429,13 @@ export function candCache(label: string, stamp: () => string): CandCache {
   /** Hand a found entry back the way this store answers: an object path, or the stored rejection
    *  as an Error. The counter is bumped HERE, so the two paths that serve an entry (`get`, and
    *  `abandonAudit` taking a withheld answer back) cannot come to count a serve differently. */
-  const serve = (found: { obj: string } | { fail: string }): string | Error => {
+  const serve = (found: { obj: string } | { fail: string }): string | CompilerRejection => {
     if ('obj' in found) {
       bump('hit');
       return found.obj;
     }
     bump('failHit');
-    return new Error(found.fail);
+    return rejectionFrom(found.fail);
   };
 
   /** Is this key one `get` withheld for an audit? Claims it, so the audit runs exactly once and a
@@ -1520,13 +1533,13 @@ export function candCache(label: string, stamp: () => string): CandCache {
       bump('stored');
       return dest;
     },
-    putFail(key, symbol, message) {
+    putFail(key, symbol, rejection) {
       const n = namespace();
       if (n === undefined) {
         return;
       }
       if (claimAudit(keyId(n, key, symbol))) {
-        if (auditRejection(n, key, symbol, message) !== 'absent') {
+        if (auditRejection(n, key, symbol, rejection) !== 'absent') {
           return;
         }
         bump('sampledStale');
@@ -1534,7 +1547,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
       const dest = pathFor(n, key, symbol, 'fail');
       try {
         mkdirSync(dirname(dest), { recursive: true });
-        writeAtomic(dest, message);
+        writeAtomic(dest, rejectionBody(rejection));
         bump('failStored');
       } catch {
         bump('failUnstorable'); // a store that cannot be written is a cold store, and says so
@@ -1561,13 +1574,13 @@ export function candCache(label: string, stamp: () => string): CandCache {
         auditObject(n, key, symbol, objPath);
       }
     },
-    verifyFail(key, symbol, message) {
+    verifyFail(key, symbol, rejection) {
       if (MODE !== 'verify') {
         return;
       }
       const n = namespace();
       if (n !== undefined) {
-        auditRejection(n, key, symbol, message);
+        auditRejection(n, key, symbol, rejection);
       }
     },
   };

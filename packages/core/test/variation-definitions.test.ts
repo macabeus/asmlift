@@ -149,8 +149,8 @@ describe('docs/vocabulary.md says the same', () => {
     );
   }
 
-  test('the six words table', () => {
-    expect(tableRows('The six words a reader needs')).toEqual(
+  test('the seven words table', () => {
+    expect(tableRows('The seven words a reader needs')).toEqual(
       READER_WORDS.map((w) => [`**${w.word}**`, w.command ? `${w.meaning} ${w.command}` : w.meaning]),
     );
   });

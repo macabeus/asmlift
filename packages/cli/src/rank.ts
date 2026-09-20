@@ -15,6 +15,7 @@ import {
   enumerateCandidates,
   rankBy,
 } from '@asmlift/core/rank';
+import { type ProbeOutcome, defaultIsKeyedRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
@@ -174,35 +175,59 @@ export async function decompileRankedParallel(
   const candidates = timed(clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const scored = new Map<string, MatchScore | Error>();
-  let next = 0;
   let done = 0;
   let best: MatchScore | undefined;
-  await Promise.all(
-    Array.from({ length: Math.max(1, opts.jobs) }, async () => {
-      const compile = opts.worker();
-      for (;;) {
-        const i = next++;
-        if (i >= candidates.length) {
-          return;
+  const workers = Array.from({ length: Math.max(1, opts.jobs) }, () => opts.worker());
+  const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
+    let result: MatchScore | Error;
+    try {
+      const obj = await timedAsync(clock, 'compile', () =>
+        compile(cand.source, name, backend.id, declarationsOf(cand)),
+      );
+      result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
+      best = best === undefined || result.score < best.score ? result : best;
+    } catch (e) {
+      // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
+      // survivable (a sibling scored) or fatal (every one failed)
+      result = e instanceof Error ? e : new Error(String(e));
+    }
+    scored.set(cand.source, result);
+    opts.onProgress?.(++done, candidates.length, best);
+  };
+  /** every worker takes the next unclaimed index until `indices` is spent */
+  const pool = async (indices: readonly number[]): Promise<void> => {
+    let next = 0;
+    await Promise.all(
+      workers.map(async (compile) => {
+        for (;;) {
+          const i = next++;
+          if (i >= indices.length) {
+            return;
+          }
+          await score(candidates[indices[i]], compile);
         }
-        const cand = candidates[i];
-        let result: MatchScore | Error;
-        try {
-          const obj = await timedAsync(clock, 'compile', () =>
-            compile(cand.source, name, backend.id, declarationsOf(cand)),
-          );
-          result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
-          best = best === undefined || result.score < best.score ? result : best;
-        } catch (e) {
-          // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
-          // survivable (a sibling scored) or fatal (every one failed)
-          result = e instanceof Error ? e : new Error(String(e));
-        }
-        scored.set(cand.source, result);
-        opts.onProgress?.(++done, candidates.length, best);
-      }
-    }),
-  );
+      }),
+    );
+  };
+  const outcomeOf = (i: number): ProbeOutcome | undefined => {
+    const r = scored.get(candidates[i].source);
+    return r === undefined ? undefined : r instanceof Error ? { thrown: r } : 'compiled';
+  };
+  // THE DEFAULT ALONE, THEN THE PROBES, THEN THE REST — the stillborn rule (core stillborn.ts)
+  // is asked over a finished probe phase, so the pool's scheduling cannot reach the verdict.
+  // `rankBy` asks the same rule over the same memoized outcomes and never reaches an unscored
+  // candidate: a fan the rule stops here, it stops there.
+  if (candidates.length > 0) {
+    await pool([0]);
+    let rest = candidates.map((_, i) => i).slice(1);
+    if (defaultIsKeyedRejection(outcomeOf(0)!)) {
+      const probes = probeIndices(candidates);
+      await pool(probes);
+      const tried = new Set(probes);
+      rest = stillbornVerdict(candidates, outcomeOf) === null ? rest.filter((i) => !tried.has(i)) : [];
+    }
+    await pool(rest);
+  }
   return timed(clock, 'rank', () =>
     rankBy(candidates, name, (source) => {
       const r = scored.get(source);

@@ -11,6 +11,7 @@
 // The audit would then report clean on exactly the defect it exists to find. A sampled key's
 // `put`/`putFail` must route into the same comparison `verify` mode uses, never into a plain
 // store.
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -116,8 +117,8 @@ const compileAndFail = (c: ReturnType<CandCacheModule['candCache']>, key: string
   if (typeof hit === 'string' || hit instanceof Error) {
     return hit;
   }
-  c.verifyFail(key, 'f', message);
-  c.putFail(key, 'f', message);
+  c.verifyFail(key, 'f', new CompilerRejection(message));
+  c.putFail(key, 'f', new CompilerRejection(message));
   return undefined;
 };
 
@@ -161,7 +162,7 @@ describe('a sampled key is AUDITED, not silently re-stored', () => {
     // candidate that compiles, and the spelling leaves the row's fan with nothing said.
     const root = scratch();
     await load(seedEnv(root), (m) =>
-      m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error'),
+      m.candCache('t', () => NS_A).putFail('k', 'f', new CompilerRejection('agbcc failed: c.c:3: syntax error')),
     );
     const { said, stats } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) =>
       compileAndStore(
@@ -202,7 +203,7 @@ describe('a sampled key is AUDITED, not silently re-stored', () => {
     await load(seedEnv(root), (m) => {
       const c = m.candCache('t', () => NS_A);
       c.put('obj', 'f', object('SAME'));
-      c.putFail('rej', 'f', 'agbcc failed: c.c:3: syntax error');
+      c.putFail('rej', 'f', new CompilerRejection('agbcc failed: c.c:3: syntax error'));
     });
     const { said, stats } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       const c = m.candCache('t', () => NS_A);
@@ -564,7 +565,9 @@ describe('a withholding ACCOUNTS FOR ITSELF: `sampled` is not a count of audits'
 
   test('a stored REJECTION comes back the same way', async () => {
     const root = scratch();
-    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed (exit 1)'));
+    await load(seedEnv(root), (m) =>
+      m.candCache('t', () => NS_A).putFail('k', 'f', new CompilerRejection('agbcc failed (exit 1)')),
+    );
     const { stats, value } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       const c = m.candCache('t', () => NS_A);
       expect(c.get('k', 'f')).toBeUndefined();
@@ -604,7 +607,7 @@ describe('a withholding ACCOUNTS FOR ITSELF: `sampled` is not a count of audits'
       const c = m.candCache('t', () => NS_A);
       c.put('agree', 'f', object('SAME'));
       c.put('differ', 'f', object('STALE'));
-      c.putFail('failagree', 'f', 'agbcc failed (exit 1)');
+      c.putFail('failagree', 'f', new CompilerRejection('agbcc failed (exit 1)'));
       c.put('abandoned', 'f', object('STORED'));
       c.put('pending', 'f', object('STORED'));
       c.put('vanishes', 'f', object('STORED'));
@@ -616,7 +619,7 @@ describe('a withholding ACCOUNTS FOR ITSELF: `sampled` is not a count of audits'
       }
       c.put('agree', 'f', object('SAME')); // verified
       c.put('differ', 'f', object('FRESH')); // mismatch
-      c.putFail('failagree', 'f', 'agbcc failed (exit 1)'); // verifiedFail
+      c.putFail('failagree', 'f', new CompilerRejection('agbcc failed (exit 1)')); // verifiedFail
       c.abandonAudit('abandoned', 'f'); // sampledAbandoned
       return undefined; // 'pending' and 'vanishes' are never answered at all
     });

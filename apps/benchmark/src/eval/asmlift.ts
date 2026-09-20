@@ -9,7 +9,7 @@ import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
-import { NoScorableCandidateError } from '@asmlift/core/rank';
+import { NoScorableCandidateError, type NotCompiledCandidate } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import type { ResolvedTarget } from '@asmlift/core/target';
 import { tallyFanVariations } from '@asmlift/core/variation-tokens';
@@ -106,14 +106,20 @@ export function asmliftFan(
 
 /** HOW BIG THIS ROW'S FAN WAS — every spelling enumeration emitted.
  *
- *  `rankBy` (core rank.ts) puts each enumerated candidate into EXACTLY ONE of its three lists:
- *  scored, dropped (the scorer threw) or withheld (it scored and was refused publication). So the
- *  fan is their sum, and `candidates.length` alone is not it — on
- *  `kleod:ProcessInputAndUpdateEntities:agbcc` the refused half is 51,840 spellings.
+ *  `rankBy` (core rank.ts) puts each enumerated candidate into EXACTLY ONE of four lists: scored,
+ *  dropped (the scorer threw), withheld (it scored and was refused publication) or — on a fan it
+ *  declared stillborn — not compiled. So the fan is their sum, and `candidates.length` alone is not
+ *  it — on `kleod:ProcessInputAndUpdateEntities:agbcc` the refused half is 51,840 spellings. A
+ *  ranked RESULT has no fourth list: a stillborn fan throws.
  *
- *  Free: three lengths off an object the ranked pass already returned. */
-export function fanSize(r: { candidates: unknown[]; dropped: unknown[]; withheld: unknown[] }): number {
-  return r.candidates.length + r.dropped.length + r.withheld.length;
+ *  Free: four lengths off an object the ranked pass already returned. */
+export function fanSize(r: {
+  candidates: unknown[];
+  dropped: unknown[];
+  withheld: unknown[];
+  notCompiled?: unknown[];
+}): number {
+  return r.candidates.length + r.dropped.length + r.withheld.length + (r.notCompiled?.length ?? 0);
 }
 
 /** …and the fan of a row whose ranking THREW, which is where the artifact's `noncompile` rows come
@@ -131,13 +137,15 @@ export function fanSizeOfError(e: unknown): number | undefined {
 
 /** The whole fan of a row whose every candidate was refused, as ranking's partition with nothing
  *  scored — `undefined` for any other throw, for the reason `fanSizeOfError` gives. */
-function refusedFan(e: unknown): RankedFan | undefined {
+function refusedFan(e: unknown): RefusedFan | undefined {
   return e instanceof NoScorableCandidateError
-    ? { candidates: [], dropped: e.dropped, withheld: e.withheld }
+    ? { candidates: [], dropped: e.dropped, withheld: e.withheld, notCompiled: e.notCompiled }
     : undefined;
 }
 
-type RankedFan = Pick<RankedResult, 'candidates' | 'dropped' | 'withheld'>;
+type RefusedFan = Pick<RankedResult, 'candidates' | 'dropped' | 'withheld'> & {
+  notCompiled: NotCompiledCandidate[];
+};
 
 /** Wall seconds since `t0`, at the resolution a cost is read at. Two decimals: the fastest rows
  *  rank in tens of milliseconds and a whole-second field would publish `0` for most of the
@@ -228,6 +236,9 @@ export function runAsmlift(
       ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
       ...(fan === undefined ? {} : { fanSize: fanSize(fan), fanVariations: tallyFanVariations(fan) }),
+      // …and how much of that fan was never compiled — a stillborn fan's cost is what it did NOT
+      // spend, and `fanSize` alone would read as if every one of those had been.
+      ...(fan === undefined || fan.notCompiled.length === 0 ? {} : { fanNotCompiled: fan.notCompiled.length }),
       rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,
@@ -253,7 +264,7 @@ export function runAsmlift(
     fanSize: fanSize(ranked),
     // …and which variations that count is made of, so the candidates that lost are published as
     // counts beside the winner that did not.
-    fanVariations: tallyFanVariations(ranked),
+    fanVariations: tallyFanVariations({ ...ranked, notCompiled: [] }),
     rankSeconds: secondsSince(rankT0),
     // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
     // candidate that compiles — but dropping them SILENTLY published a clean win over a

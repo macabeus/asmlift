@@ -235,8 +235,9 @@ export function VariationDetailBody({
               label="candidates carried"
               value={stats.candidates}
               hint={
-                stats.dropped || stats.withheld
-                  ? `${stats.dropped.toLocaleString()} dropped · ${stats.withheld.toLocaleString()} withheld`
+                stats.dropped || stats.withheld || stats.notCompiled
+                  ? `${stats.dropped.toLocaleString()} dropped · ${stats.withheld.toLocaleString()} withheld` +
+                    (stats.notCompiled ? ` · ${stats.notCompiled.toLocaleString()} not compiled` : '')
                   : undefined
               }
             />
@@ -467,8 +468,9 @@ function RowTable({ name, rows, hash }: { name: VariationName; rows: ReturnType<
               <div
                 className="text-right font-mono text-xs text-slate-300"
                 title={
-                  tally.dropped || tally.withheld
-                    ? `${tally.dropped ?? 0} dropped · ${tally.withheld ?? 0} withheld`
+                  tally.dropped || tally.withheld || tally.notCompiled
+                    ? `${tally.dropped ?? 0} dropped · ${tally.withheld ?? 0} withheld` +
+                      (tally.notCompiled ? ` · ${tally.notCompiled} not compiled` : '')
                     : undefined
                 }
               >

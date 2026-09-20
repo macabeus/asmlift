@@ -7,9 +7,12 @@
 // offline in test/offline/compile-command.test.ts; what THIS suite can pin, with the real
 // toolchain, is the property that matters downstream: identical winner, identical per-candidate
 // scores in identical order, identical drops.
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
+import { NoScorableCandidateError } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm } from '@asmlift/toolchains';
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -109,5 +112,68 @@ describe('the pooled ranked run is the serial ranked run', () => {
     expect(r.dropped.length).toBeGreaterThan(0);
     expect(r.dropped.every((d) => d.error.includes('synthetic compile failure'))).toBe(true);
     expect(r.candidates.length).toBeGreaterThan(0);
+  });
+
+  // THE STILLBORN STOP (core stillborn.ts) is the one place the pool's ORDER matters: the default
+  // alone, then the probes, then the rest — and the rest not at all when the verdict says so. A
+  // pool that scheduled the whole fan at once would compile candidates the serial path never
+  // reaches, and the two paths would disagree on how many were compiled.
+  const asmOf = (src: string) => compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  const IFOR = 'int ifor(int a, int b){ if (a || b) return 42; return 7; }';
+  const stillbornOf = async (run: () => Promise<unknown> | unknown): Promise<NoScorableCandidateError> => {
+    try {
+      await run();
+    } catch (e) {
+      if (e instanceof NoScorableCandidateError) {
+        return e;
+      }
+      throw e;
+    }
+    throw new Error('ranked a fan whose every compile was refused');
+  };
+
+  test('a fan refused for ONE reason stops after the probes, on the pool exactly as on the serial path', async () => {
+    const refuse = (): never => {
+      throw new CompilerRejection("agbcc failed: c.c:4: too many arguments to function `g'");
+    };
+    let pooledCompiles = 0;
+    const asm = asmOf(IFOR);
+    const obj = assembleTarget(asm);
+    const pooled = await stillbornOf(() =>
+      decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, {
+        jobs: 4,
+        worker: () => async () => {
+          pooledCompiles++;
+          return refuse();
+        },
+      }),
+    );
+    const serial = await stillbornOf(() => decompileRanked('ifor', asm, ARMV4T_AGBCC, obj, { compile: refuse }));
+    // what was compiled is the dropped list, and only that reached a worker
+    expect(pooled.notCompiled.length).toBeGreaterThan(0);
+    expect(pooledCompiles).toBe(pooled.dropped.length);
+    expect(pooled.dropped).toEqual(serial.dropped);
+    expect(pooled.notCompiled).toEqual(serial.notCompiled);
+    expect(pooled.message).toContain('NOT COMPILED');
+  });
+
+  test('a fan whose refusals DIFFER is compiled whole on the pool too', async () => {
+    // the diagnostic carries a digest of the candidate's own source, so no two keys agree
+    let pooledCompiles = 0;
+    const asm = asmOf(IFOR);
+    const obj = assembleTarget(asm);
+    const pooled = await stillbornOf(() =>
+      decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, {
+        jobs: 4,
+        worker: () => async (source: string) => {
+          pooledCompiles++;
+          const digest = createHash('sha256').update(source).digest('hex').slice(0, 8);
+          throw new CompilerRejection(`agbcc failed: c.c:4: invalid operands to binary ${digest}`);
+        },
+      }),
+    );
+    expect(pooled.notCompiled).toEqual([]);
+    expect(pooledCompiles).toBe(pooled.dropped.length);
+    expect(pooled.dropped.length).toBeGreaterThan(2);
   });
 });

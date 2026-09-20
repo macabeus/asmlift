@@ -86,6 +86,7 @@ import {
   createdLocals,
   sameBases,
 } from './rank-variations';
+import { type Stillborn, stillbornVerdict } from './stillborn';
 import { hasDivergentSharedRet } from './structure/structure';
 import {
   type SymbolInfo,
@@ -261,10 +262,17 @@ export interface WithheldCandidate {
   why: string;
 }
 
+/** A candidate that was NEVER COMPILED: the fan was declared stillborn (stillborn.ts) before its
+ *  turn came. Kept apart from `dropped`, which means "the scorer refused it" — nothing refused
+ *  this one, and a count that folded the two would report compiles that never ran. */
+export interface NotCompiledCandidate {
+  variations: readonly string[];
+}
+
 /** EVERY candidate refused — `rankBy` has no ranked result to return, so it throws this.
  *
- *  The two lists ride on the error, and that is the point of having a class at all: on a row where
- *  nothing scored, `dropped` IS the whole fan, and a bare `Error` discards it. A caller that
+ *  The lists ride on the error, and that is the point of having a class at all: on a row where
+ *  nothing scored, the three of them ARE the whole fan, and a bare `Error` discards it. A caller that
  *  prints one candidate's failure (the `cause`) is showing the LAST spelling the scorer refused,
  *  which is neither the first nor a representative one — the benchmark's own noncompile rows have
  *  up to a thousand siblings behind that single line. The MESSAGE is load-bearing and must stay
@@ -273,11 +281,20 @@ export interface WithheldCandidate {
 export class NoScorableCandidateError extends Error {
   readonly dropped: DroppedCandidate[];
   readonly withheld: WithheldCandidate[];
-  constructor(message: string, dropped: DroppedCandidate[], withheld: WithheldCandidate[], options?: ErrorOptions) {
+  /** empty unless the fan was declared stillborn; `dropped` is then only what WAS compiled */
+  readonly notCompiled: NotCompiledCandidate[];
+  constructor(
+    message: string,
+    dropped: DroppedCandidate[],
+    withheld: WithheldCandidate[],
+    notCompiled: NotCompiledCandidate[],
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = 'NoScorableCandidateError';
     this.dropped = dropped;
     this.withheld = withheld;
+    this.notCompiled = notCompiled;
   }
 }
 
@@ -2200,36 +2217,74 @@ export function enumerateCandidates(
 /** Score each candidate with the injected `scoreFn` and rank by score (lowest first). A candidate
  *  whose `scoreFn` throws — e.g. its C failed to compile — is SKIPPED so it cannot sink a sibling
  *  that compiles and matches; only if EVERY candidate fails is the failure surfaced. Synchronous:
- *  the scorer must be sync (the cli/Node objdiff path). The webapp scores asynchronously and does
- *  its own await-loop over `enumerateCandidates`, reusing this module's `Candidate`/`RankedResult`
- *  types but not this driver. */
+ *  the scorer must be sync (the cli/Node objdiff path). An async driver scores on its own schedule
+ *  and then ranks through here against its memoized outcomes (the pooled CLI driver, the webapp).
+ *
+ *  A STILLBORN fan (stillborn.ts) is not compiled to the end: `scoreFn` is called for the default
+ *  candidate and the probes, and the rest ride on the thrown error as `notCompiled`. A `scoreFn`
+ *  that wants the rule to read its refusals throws `CompilerRejection`; any other throw ranks the
+ *  whole fan. */
 export function rankBy<S extends { score: number; rows?: number }>(
   candidates: Candidate[],
   symbol: string,
   scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
 ): RankedResult<S> {
+  const outcomes = new Map<number, { score: S } | { thrown: unknown }>();
+  const outcomeAt = (i: number): { score: S } | { thrown: unknown } => {
+    let outcome = outcomes.get(i);
+    if (outcome === undefined) {
+      try {
+        outcome = { score: scoreFn(candidates[i].source, symbol, candidates[i]) };
+      } catch (e) {
+        outcome = { thrown: e };
+      }
+      outcomes.set(i, outcome);
+    }
+    return outcome;
+  };
+  const stillborn = stillbornVerdict(candidates, (i) => {
+    const outcome = outcomeAt(i);
+    return 'score' in outcome ? 'compiled' : outcome;
+  });
+  if (stillborn !== null) {
+    const thrownAt = (i: number): unknown => {
+      const outcome = outcomeAt(i);
+      if ('score' in outcome) {
+        throw new Error(`internal: a stillborn fan holds a candidate that scored (${i})`);
+      }
+      return outcome.thrown;
+    };
+    throw new NoScorableCandidateError(
+      `no scorable candidate for '${symbol}': ${fullMessage(thrownAt(0))}\n${stillbornNote(stillborn, candidates.length)}`,
+      stillborn.compiled.map((i) => ({ variations: candidates[i].variations, error: firstLine(thrownAt(i)) })),
+      [],
+      stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations })),
+      { cause: thrownAt(0) },
+    );
+  }
   const results: (Scored<S> & { order: number })[] = [];
   const dropped: DroppedCandidate[] = []; // candidates that failed to build; only fatal if ALL do
   const withheld: WithheldCandidate[] = []; // candidates that built but did not earn publication
   let lastScoreErr: unknown = null;
   candidates.forEach((c, order) => {
-    try {
-      const score = scoreFn(c.source, symbol, c);
-      const why = withheldReason(c, score);
-      if (why !== null) {
-        withheld.push({
-          variations: c.variations,
-          score: score.score,
-          ...(score.rows === undefined ? {} : { rows: score.rows }),
-          why,
-        });
-        return;
-      }
-      results.push({ ...c, order, score });
-    } catch (e) {
-      lastScoreErr = e;
-      dropped.push({ variations: c.variations, error: firstLine(e) });
+    const outcome = outcomeAt(order);
+    if ('thrown' in outcome) {
+      lastScoreErr = outcome.thrown;
+      dropped.push({ variations: c.variations, error: firstLine(outcome.thrown) });
+      return;
     }
+    const { score } = outcome;
+    const why = withheldReason(c, score);
+    if (why !== null) {
+      withheld.push({
+        variations: c.variations,
+        score: score.score,
+        ...(score.rows === undefined ? {} : { rows: score.rows }),
+        why,
+      });
+      return;
+    }
+    results.push({ ...c, order, score });
   });
   if (results.length === 0) {
     // Naming the withheld count matters here: "no scorable candidate" with a null cause reads as a
@@ -2240,12 +2295,28 @@ export function rankBy<S extends { score: number; rows?: number }>(
     // above stays one line each — it is a roster, not a diagnosis.
     const why =
       lastScoreErr !== null ? fullMessage(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
-    throw new NoScorableCandidateError(`no scorable candidate for '${symbol}': ${why}`, dropped, withheld, {
+    throw new NoScorableCandidateError(`no scorable candidate for '${symbol}': ${why}`, dropped, withheld, [], {
       cause: lastScoreErr,
     });
   }
   results.sort(compareScored);
   return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
+}
+
+/** The sentence a stillborn fan's error ends on: how much of the fan was never compiled, on what
+ *  evidence, and the reason every compiled candidate shared. It follows the DEFAULT candidate's
+ *  own diagnostic — the spelling the rule is anchored on — rather than whichever was refused
+ *  last. */
+function stillbornNote(stillborn: Stillborn, fan: number): string {
+  const tally = new Map<string, number>();
+  for (const m of stillborn.messages) {
+    tally.set(m, (tally.get(m) ?? 0) + 1);
+  }
+  const shared = [...tally].map(([m, n]) => `  ${m}${n > 1 ? ` (x${n})` : ''}`).join('\n');
+  return (
+    `${stillborn.notCompiled.length} of ${fan} candidates were NOT COMPILED: the default candidate and one probe per ` +
+    `variation (${stillborn.compiled.length} compiled) were all rejected for the same reason, which no variation changed:\n${shared}`
+  );
 }
 
 /** THE candidate ordering — score, then preference, then readability, then enumeration

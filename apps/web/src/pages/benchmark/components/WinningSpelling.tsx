@@ -28,8 +28,8 @@ function KindHeading({ kind }: { kind: VariationKind }) {
   );
 }
 
-/** `50 candidates · 25 dropped`: how many of the fan's candidates carried a variation, and the refused
- *  part of them. */
+/** `50 candidates · 25 dropped`: how many of the fan's candidates carried a variation, the refused
+ *  part of them, and the part a stillborn fan never compiled. */
 function tallyText(t: VariationTally): string {
   const parts = [`${t.candidates.toLocaleString()} candidate${t.candidates === 1 ? '' : 's'}`];
   if (t.dropped) {
@@ -37,6 +37,9 @@ function tallyText(t: VariationTally): string {
   }
   if (t.withheld) {
     parts.push(`${t.withheld.toLocaleString()} withheld`);
+  }
+  if (t.notCompiled) {
+    parts.push(`${t.notCompiled.toLocaleString()} not compiled`);
   }
   return parts.join(' · ');
 }

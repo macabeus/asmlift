@@ -181,18 +181,18 @@ describe('the `/` join names exactly one list of variations', () => {
 describe('tallyFanVariations counts the candidates carrying each registered variation', () => {
   type Named = { variations: readonly string[] };
   /** A real fan with subject-taking variations (`volatile-p0`, `homesplit-…`) and three kinds,
-   *  split three ways the way ranking partitions one. */
+   *  split four ways the way ranking partitions one. */
   const fan = enumerateCandidates(
     'dmapoll',
     readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmapoll.s'), 'utf8'),
     ARMV4T_AGBCC,
   );
-  const third = (r: number): Named[] => fan.filter((_, i) => i % 3 === r);
-  const partition = { candidates: third(0), dropped: third(1), withheld: third(2) };
+  const quarter = (r: number): Named[] => fan.filter((_, i) => i % 4 === r);
+  const partition = { candidates: quarter(0), dropped: quarter(1), withheld: quarter(2), notCompiled: quarter(3) };
   const carrying = (list: readonly Named[], name: string): number =>
     list.filter((c) => hasVariation(c.variations, name)).length;
 
-  test('the fixture exercises subjects, several kinds and all three lists', () => {
+  test('the fixture exercises subjects, several kinds and all four lists', () => {
     const parts = fan.flatMap((c) => c.variations);
     expect(parts.some((p) => parseVariation(p).subject !== undefined)).toBe(true);
     expect(new Set(parts.map((p) => variationToken(parseVariation(p).name).variationKind)).size).toBeGreaterThan(2);
@@ -206,9 +206,15 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
         .map((n) => {
           const dropped = carrying(partition.dropped, n);
           const withheld = carrying(partition.withheld, n);
+          const notCompiled = carrying(partition.notCompiled, n);
           return [
             n,
-            { candidates: carrying(fan, n), ...(dropped ? { dropped } : {}), ...(withheld ? { withheld } : {}) },
+            {
+              candidates: carrying(fan, n),
+              ...(dropped ? { dropped } : {}),
+              ...(withheld ? { withheld } : {}),
+              ...(notCompiled ? { notCompiled } : {}),
+            },
           ];
         }),
     );
@@ -225,11 +231,12 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
       candidates: [{ variations: ['unsigned', 'coalesce-v0-v1', 'coalesce-v2-v3', 'volatile-p0'] }],
       dropped: [{ variations: ['signed', 'volatile', 'raw-globals'] }],
       withheld: [],
+      notCompiled: [{ variations: ['signed', 'coalesce-v4-v5'] }],
     });
     expect(t).toEqual({
       unsigned: { candidates: 1 },
-      signed: { candidates: 1, dropped: 1 },
-      coalesce: { candidates: 1 },
+      signed: { candidates: 2, dropped: 1, notCompiled: 1 },
+      coalesce: { candidates: 2, notCompiled: 1 },
       volatile: { candidates: 2, dropped: 1 },
       'raw-globals': { candidates: 1, dropped: 1 },
     });
@@ -241,6 +248,7 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
       candidates: [...partition.withheld].reverse(),
       dropped: [...partition.dropped].reverse(),
       withheld: [...partition.candidates].reverse(),
+      notCompiled: [...partition.notCompiled].reverse(),
     });
     expect(Object.keys(reversed)).toEqual(Object.keys(forward));
     const kinds = Object.keys(forward).map((n) => VARIATION_KINDS.indexOf(variationToken(n).variationKind));
@@ -258,7 +266,12 @@ describe('tallyFanVariations counts the candidates carrying each registered vari
 
   test('an unregistered variation throws', () => {
     expect(() =>
-      tallyFanVariations({ candidates: [{ variations: ['unsigned', 'nosuch'] }], dropped: [], withheld: [] }),
+      tallyFanVariations({
+        candidates: [{ variations: ['unsigned', 'nosuch'] }],
+        dropped: [],
+        withheld: [],
+        notCompiled: [],
+      }),
     ).toThrow(/names no registered variation/);
   });
 });
