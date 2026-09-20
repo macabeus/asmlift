@@ -223,14 +223,15 @@ describe('sinkablePreUpdateSlots', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const rd = v();
     const e = v();
-    // `q = *p + p` on the exit edge, with a STORE between the load and the add the copy is rebuilt
-    // at. The rebuilt load runs after that store and answers with what it wrote, where the edge read
-    // what stood there before it.
+    // `q = *p + p` on the exit edge, with a STORE to the loaded cell between the load and the add
+    // the copy is rebuilt at. It writes a value the load did not produce, so the rebuilt load runs
+    // after it and answers with what it wrote, where the edge read what stood there before it — an
+    // ablation that admits this slot emits a WRONG value, not merely a differently-spelled one.
     const rdOp = bodyOp(
       header,
       mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
     );
-    bodyOp(header, mkOp('store', { operands: [p, rd], attrs: { off: 0, width: 4 } }));
+    bodyOp(header, mkOp('store', { operands: [p, p], attrs: { off: 0, width: 4 } }));
     const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
     const h = make({
       defs: new Map([
@@ -340,7 +341,8 @@ describe('sinkablePreUpdateSlots', () => {
 
   test('the two arg gates are a PARTITION — ablating one does not disable the other', () => {
     // `add(mid, *p)` with a store in between trips both: a body-computed name AND a memory read the
-    // copy's position is on the far side of. Each gate must still
+    // copy's position is on the far side of — the store writes the loop variable rather than the
+    // value just loaded, so the far side really does answer differently. Each gate must still
     // refuse it with the other one dropped — otherwise ablating either measures less than its
     // name says, and a walk that reported only the first blocker it found would do exactly that.
     const { p, q, header, exit, latch, body } = scaffold();
@@ -352,7 +354,7 @@ describe('sinkablePreUpdateSlots', () => {
       header,
       mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
     );
-    bodyOp(header, mkOp('store', { operands: [p, rd], attrs: { off: 0, width: 4 } }));
+    bodyOp(header, mkOp('store', { operands: [p, p], attrs: { off: 0, width: 4 } }));
     const op = bodyOp(header, mkOp('add', { operands: [mid, rd], results: [e] }));
     const h = make({
       defs: new Map([
