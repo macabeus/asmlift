@@ -23,14 +23,14 @@ export class CompilerRejection extends Error {
   }
 }
 
-/** A warning or a note — a line the compiler prints about text it may still accept. */
 /** The FIRST class word a line carries, with the colon that makes it a tag: `warning:`, `note:`,
- *  `error:`, `fatal error:`, and IDO's numbered `Warning 712:`. The first, because a message can
- *  quote a tag of its own — `expected ';' before 'note' token; note: …` is an error. */
-const TAG = /\b(?:(fatal\s+)?error|warning|note)\b(?:\s+\d+)?\s*:/i;
+ *  `error:`, `fatal error:`, IDO's `Fatal:` and its numbered `Warning 712:`. The first, because a
+ *  message can quote a tag of its own — `expected ';' before 'note' token; note: …` is an error.
+ *  A line is ADVISORY when its tag is a warning or a note: the compiler may still accept the text. */
+const TAG = /\b(?:fatal(?:\s+error)?|error|warning|note)\b(?:\s+\d+)?\s*:/i;
 const isAdvisory = (line: string): boolean => {
   const tag = TAG.exec(line);
-  return tag !== null && !/^(?:fatal\s+)?error/i.test(tag[0]);
+  return tag !== null && /^(?:warning|note)/i.test(tag[0]);
 };
 /** An mwcc caret line (`#   Error:      ^`). It carries no message: the line(s) after it do, and
  *  together they are one diagnostic. */
@@ -75,7 +75,7 @@ const LOCATED = /(?:^|\s)[^\s:]+:\d+:(?:\d+:)?\s*(.*)$/;
 const ERROR_TAG = /^(?:fatal\s+)?error\s*:\s*/i;
 /** An error spelled with the word and no `file:line:`: `cc1: error: …`, `ld: fatal error: …`, and
  *  IDO's `cfe: Error: c.c, line 12: …`, whose own position is dropped with the rest. */
-const TAGGED = /\b(?:fatal\s+)?error\s*:\s*(?:\S+, line \d+:\s*)?(.*)$/i;
+const TAGGED = /\b(?:fatal(?:\s+error)?|error)\s*:\s*(?:\S+, line \d+:\s*)?(.*)$/i;
 /** Lines that belong to a diagnostic without being one: where the OTHER declaration was, and
  *  pre-3.0 gcc's two-line footnote to its first `undeclared`. None of them says what is wrong with
  *  the statement, and a `previous declaration` line points into the context rather than at the
@@ -121,11 +121,21 @@ export function errorMessages(diagnostic: string): string[] {
   return out;
 }
 
+/** A compiler that STOPPED REPORTING before it was done: IDO after 30 errors, clang at its
+ *  `-ferror-limit`, gcc under `-fmax-errors`, mwcc under `-maxerrors`. What it printed is a
+ *  prefix of its verdict, and two prefixes equal each other whatever follows them. */
+const TRUNCATED =
+  /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -fmax-errors|^User break, cancelled/im;
+
 /** WHAT a failed compile failed ON, as a value two compiles can be compared by: the MULTISET of
  *  its error messages, positions normalised away. A multiset, not a set — two calls with too many
  *  arguments are two errors, and a variation that repairs one of them has changed the answer.
- *  Null when no error is recognised: an unreadable diagnostic equals nothing, itself included. */
+ *  Null when no error is recognised, and null when the compiler stopped reporting: an unreadable
+ *  or unfinished diagnostic equals nothing, itself included. */
 export function errorKey(diagnostic: string): string | null {
+  if (TRUNCATED.test(diagnostic)) {
+    return null;
+  }
   const messages = errorMessages(diagnostic);
   return messages.length === 0 ? null : JSON.stringify([...messages].sort());
 }

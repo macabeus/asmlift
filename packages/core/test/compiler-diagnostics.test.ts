@@ -161,3 +161,48 @@ test('pre-3.0 gcc’s `previously declared here` is where the OTHER declaration 
     "redeclaration of `x'",
   ]);
 });
+
+// ── a report the compiler cut short ──────────────────────────────────────────────────────────────
+
+test('a diagnostic the compiler stopped short has NO key: a prefix of a verdict is not the verdict', () => {
+  const arity = (n: number, tail: string[]) =>
+    [
+      ...Array.from(
+        { length: n },
+        (_, i) =>
+          `cfe: Error: /tmp/x/cand.c, line ${i + 3}: The number of arguments doesn't agree with the number in the declaration.`,
+      ),
+      ...tail,
+    ].join('\n');
+  const ido = arity(30, ['   g(29, 1);', ' ---^', 'cfe: Fatal: Too many errors... goodbye.']);
+  expect(errorKey(ido)).toBeNull();
+  expect(errorKey(arity(30, []))).not.toBeNull();
+  expect(
+    errorKey(
+      'cap.c:3:5: error: too many arguments to function call, expected 1, have 2\nfatal error: too many errors emitted, stopping now [-ferror-limit=]\n20 errors generated.',
+    ),
+  ).toBeNull();
+  expect(
+    errorKey("max.c:2:15: error: too many arguments to function 'g'\ncompilation terminated due to -fmax-errors=1."),
+  ).toBeNull();
+  expect(
+    errorKey(
+      [
+        '#      5: g(1, 1);',
+        '#   Error:       ^',
+        "#   function call 'g(int, int)' does not match",
+        "#   'g(int)'",
+        '',
+        'User break, cancelled...',
+      ].join('\n'),
+    ),
+  ).toBeNull();
+});
+
+test('IDO’s `Fatal:` is an error tag, so a fatal line is read as one and comes first', () => {
+  expect(errorMessages('cfe: Fatal: Cannot open file foo.h')).toEqual(['Cannot open file foo.h']);
+  expect(errorsFirst(['cfe: Warning 712: x', 'cfe: Fatal: Cannot open file foo.h'])).toEqual([
+    'cfe: Fatal: Cannot open file foo.h',
+    'cfe: Warning 712: x',
+  ]);
+});
