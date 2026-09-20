@@ -198,8 +198,8 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v9']))).toEqual(new Set());
   });
 
-  // The arg's def-tree, rebuilt at the top of the body. `bodyOp` registers an op the way analysis.ts
-  // does, so `definedInBody` sees it where the fixture says it is.
+  // The arg's def-tree, rebuilt inside the body. `bodyOp` registers an op the way analysis.ts does,
+  // so `definedInBody` sees it where the fixture says it is.
   const bodyOp = (header: Block, op: Op) => {
     header.ops.push(op);
     return op;
@@ -426,6 +426,34 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, empty, new Set(['v0']))).toEqual(new Set());
+  });
+});
+
+describe('preUpdateCopyHome', () => {
+  // WHERE the caller rebuilds a sunk copy. The answer is a position, so it is a fact about the
+  // LATCH's op list and nothing else: the op that computed the arg, or null for an arg the body
+  // never computed.
+  test('an arg computed by a latch op is rebuilt at that op', () => {
+    const e = v();
+    const op = mkOp('shl', { results: [e] });
+    const latch: Block = { params: [], ops: [mkOp('store'), op] };
+    const h = make({ defs: new Map([[e, op]]), opBlock: new Map([[op, latch]]) });
+    expect(h.preUpdateCopyHome(e, latch)).toBe(op);
+  });
+
+  test('an arg the latch did not compute has no position in it', () => {
+    // A block param (no defining op) and a def in another block: both open the body instead, which
+    // is the placement the gates are stated at.
+    const param = v();
+    const e = v();
+    const outside: Block = { params: [], ops: [mkOp('add', { results: [e] })] };
+    const latch: Block = { params: [param], ops: [] };
+    const h = make({
+      defs: new Map([[e, outside.ops[0]]]),
+      opBlock: new Map([[outside.ops[0], outside]]),
+    });
+    expect(h.preUpdateCopyHome(param, latch)).toBe(null);
+    expect(h.preUpdateCopyHome(e, latch)).toBe(null);
   });
 });
 

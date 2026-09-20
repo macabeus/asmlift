@@ -116,9 +116,9 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
   );
 });
 
-// The exit arg COMPUTES from the loop variable instead of being it. The copy is REBUILT at the top
-// of the body, where the loop variable's name still holds the value the edge read, so the
-// arithmetic is spelled again there rather than moved.
+// The exit arg COMPUTES from the loop variable instead of being it. The copy is REBUILT inside the
+// body, where the loop variable's name still holds the value the edge read, so the arithmetic is
+// spelled again there rather than moved.
 const TRAILING_PTR_EXPR = TRAILING_PTR.replace(
   '  cond_br %5, ^bb1(%4), ^bb2(%3, %4)',
   '  %9: s32* = add %3, %0\n  cond_br %5, ^bb1(%4), ^bb2(%9, %4)',
@@ -168,7 +168,7 @@ const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 }
 `;
 
-test('do-while: a PURE computed exit arg is rebuilt at the top of the body', () => {
+test('do-while: a PURE computed exit arg is rebuilt inside the body', () => {
   expect(TRAILING_DOWHILE_EXPR).not.toBe(TRAILING_DOWHILE); // the one-fact edit landed
   // `v3 = v0 + 1` where the bare-variable fixture writes `v3 = v0`: the same slot, the same place,
   // the arithmetic the edge carried spelled again over the name that still holds v0 there.
@@ -248,6 +248,45 @@ test('a seed that would overwrite a value the loop init reads declines', () => {
   // unrelated reason. Without the gate the loop starts at `&head` instead of the caller's pointer.
   expect(() => emit(TRAILING_PTR)).not.toThrow();
   expect(() => emit(SEED_CLOBBERS_INIT)).toThrow(/loop initialisation reads/);
+});
+
+// WHERE the rebuilt copy lands. The body STORES before it computes the exit arg, so the two
+// statements have an order the target's code fixes, and only one of them is the order the source
+// wrote: the copy belongs at the shift, which is where the loop already evaluated it. Emitted
+// opening the body instead it would re-evaluate the tree ahead of a store it originally followed —
+// which is also the motion `arg-safe-to-reevaluate` exists to refuse.
+const SUNK_AFTER_A_STORE = `fn sunkafterstore {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gbuf"}
+  br ^bb1(%0)
+^bb1(%2: s32):
+  store %1, %2 {off=0, width=4}
+  %3: s32 = const {value=3}
+  %4: s32 = shl %2, %3
+  %5: s32 = const {value=1}
+  %6: s32 = sub %2, %5
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_ne %6, %7
+  cond_br %8, ^bb1(%6), ^bb2(%4)
+^bb2(%9: s32):
+  ret %9
+}
+`;
+
+test('a sunk copy is rebuilt at the op that computed its value, not ahead of the body', () => {
+  expect(emit(SUNK_AFTER_A_STORE)).toBe(
+    's32 sunkafterstore(s32 a0) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = a0;\n' +
+      '    do {\n' +
+      '        gbuf = v0;\n' +
+      '        v1 = v0 << 3;\n' +
+      '        v0 = v0 - 1;\n' +
+      '    } while (v0 != 0);\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
 });
 
 // REFUSAL — an early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree

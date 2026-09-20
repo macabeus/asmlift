@@ -8,14 +8,17 @@
 //     the loop's entry state so a guard about to be fused away can be checked against the test
 //     that replaces it.
 //
-// WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy lands
-// at the top of the body and spells the arg's def-tree again there. Two things have to hold — the
-// tree gives the same answer there, and every name it reads still denotes the same value — and the
-// arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf that is neither.
+// WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy spells
+// the arg's def-tree again inside the body, at the point that tree was already computed at
+// (`preUpdateCopyHome`) — or, for an arg with no position in the body at all, opening it. Two things
+// have to hold — the tree gives the same answer there, and every name it reads still denotes the
+// same value — and the arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf
+// that is neither.
 //
-// The tree must give the same answer at the new point. Two ways it might not, and `REEVAL_UNSAFE_OPS`
-// is the registry view that names both. ORDER: the copy opens the body, so a load in the tree would
-// move ahead of every store the body makes, and an effect would move against the others.
+// The tree must give the same answer at the new point, and the gates are stated at the FURTHER of
+// the two placements — the top of the body. Two ways it might not, and `REEVAL_UNSAFE_OPS`
+// is the registry view that names both. ORDER: a copy that opens the body puts a load in the tree
+// ahead of every store the body makes, and an effect against the others.
 // SPECULATION: the def dominates the latch, and the loop is single-latch at both call sites, but an
 // early-`return` arm still lets an iteration leave BEFORE the latch — so a tree the top of the body
 // evaluates is one that iteration never evaluated, and a trapping divide would fault where the
@@ -27,9 +30,10 @@
 // leave before its latch" into the candidate is what would recover it; no benchmark row asks yet.
 //
 // And every name the rebuilt expression reads must still denote the same value there. A loop
-// variable does: the update sits at the bottom, so at the top of the body its name holds exactly
-// the value the edge read. A name the body itself defines does NOT — at the top of the body it
-// still holds the previous iteration.
+// variable does: the update sits at the bottom, so anywhere ahead of it the name holds exactly the
+// value the edge read. A name the body itself defines does NOT, wherever the copy lands ahead of
+// the assignment that writes it — and `arg-reads-current-names` refuses every such name rather than
+// asking where.
 //
 // KNOWN GAP: `body` is the natural-loop body, which EXCLUDES the blocks an early-return arm owns
 // even though their statements are emitted inside the loop. A name assigned only in such an arm is
@@ -94,6 +98,7 @@ export interface LoopHazards {
     updateWrites: Set<string>,
     gates?: readonly Gate<SinkCandidate>[],
   ): Set<number>;
+  preUpdateCopyHome(a: Value, latch: Block): Op | null;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
 }
@@ -103,7 +108,7 @@ export interface LoopHazards {
 export const updateWriteSet = (updates: Stmt[]): Set<string> =>
   new Set(updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign').map((st) => st.name));
 
-/** Why an exit arg cannot be REBUILT at the top of the loop body — see the note above
+/** Why an exit arg cannot be REBUILT inside the loop body — see the note above
  *  `PREUPDATE_SINK_GATES`. The walk collects EVERY one it finds, not the first: with one blocker
  *  per gate, stopping early would let ablating one gate disable another on any tree where the
  *  other's blocker happens to be found first, and the ablation would then be measuring less than
@@ -112,7 +117,7 @@ export type ArgBlocker = 'order-sensitive' | 'stale-name' | 'no-definition';
 
 /** One exit slot weighed for sinking. `destName` is the name the sunk copy would write. */
 export interface SinkCandidate {
-  /** everything that stops the arg's def-tree from being rebuilt at the top of the body */
+  /** everything that stops the arg's def-tree from being rebuilt inside the body */
   argBlockers: ReadonlySet<ArgBlocker>;
   destName: string | undefined;
   /** the names of the loop's own variables */
@@ -159,7 +164,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
   {
     id: 'dest-free-inside-loop',
-    why: 'the name already denotes a value the loop reads, which a write at the top of the body clobbers',
+    why: 'the name already denotes a value the loop reads, which a write inside the body clobbers',
     sound: true,
     guardedBy: 'hazards.test.ts: ablating dest-free-inside-loop admits a name the loop still reads',
     rejects: (c) => c.destBusyInLoop,
@@ -363,8 +368,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on
   // one iteration; emitting the copy inside the body, AHEAD of the update, restores it — the
   // trailing-pointer idiom (`for (fast = slow = head; ...; fast = fast->next) slow = fast;`).
-  // Returns the exit slots that may move; the caller emits them at the top of the body and drops
-  // them from the post-loop copies.
+  // Returns the exit slots that may move; the caller emits each one inside the body, at the point
+  // `preUpdateCopyHome` names, and drops it from the post-loop copies.
   //
   // The idiom reaches here at all because the compiler DID keep a second register for the trailing
   // value and SSA construction folded the copy away, leaving the exit edge as the only place the
@@ -421,7 +426,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       return false;
     };
-    // Everything that stops `a` from being REBUILT at the top of the body. Walks the def-tree
+    // Everything that stops `a` from being REBUILT inside the body. Walks the def-tree
     // where `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which
     // renders as its name, and at a value with no reaching def, which renders as a gap.
     //
@@ -443,7 +448,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         }
         seen.add(x);
         if (header.params.includes(x)) {
-          return; // a loop variable: at the top of the body its name holds exactly this
+          return; // a loop variable: ahead of the update its name holds exactly this
         }
         const n = varName.get(x);
         if (n !== undefined) {
@@ -489,11 +494,28 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     return exitArgs.some((a, j) => !dest.has(j) && readsClobbered(a, sub, names)) ? none : new Set(dest.keys());
   };
 
+  // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
+  // there, so the point it belongs at is the one its value was computed at: the arg's own defining
+  // op, when that op is one of `latch`'s — the block whose statements both loop emitters render
+  // inline, ahead of the update. Null when the arg has no position inside the body at all (a block
+  // param, or a def outside the loop), and the copy opens the body instead.
+  //
+  // The two answers are not interchangeable, and `arg-safe-to-reevaluate` reads the difference. At
+  // the def's own position every op under the arg has already run wherever the copy runs, so the
+  // rebuilt tree evaluates on exactly the paths the original did and MOVES only against whatever
+  // sits between each op and that point. Opening the body it does neither: it re-evaluates the tree
+  // ahead of every statement the body makes, and on iterations an early-`return` arm left first.
+  const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
+    const d = defs.get(a);
+    return d !== undefined && opBlock.get(d) === latch ? d : null;
+  };
+
   return {
     readsClobbered,
     loopEscapeHazard,
     loopUpdateHazard,
     sinkablePreUpdateSlots,
+    preUpdateCopyHome,
     sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
     loopWriteSet,
   };
@@ -504,8 +526,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
  *  `pred` after proving no value in `name`'s class has a definition able to run before that edge.
  *  It reads each such definition's home off `paramBlock`/`opBlock`, and a SUNK pre-update exit copy
  *  is written somewhere else than its home says: its destination is the loop EXIT's param, so the
- *  model homes it after the loop, while `preUpdateCopies` really writes it at the top of the body,
- *  on every iteration, ahead of any edge inside that body.
+ *  model homes it after the loop, while `preUpdateCopies` really writes it INSIDE the body, on
+ *  every iteration, ahead of the update and of any edge the header dominates.
  *
  *  Nothing today puts the two together — a merge inside the body that adopted the exit param's name
  *  is a block param `definedInBody` sees, so `dest-free-inside-loop` refuses the sink before it

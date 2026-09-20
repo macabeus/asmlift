@@ -3748,15 +3748,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // naming walk and the coalescing that follows it, and these checks only read it — so today the
   // two readings coincide; the reference is what keeps them coinciding if a write ever moves down
   // here.
-  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } = makeLoopHazards({
-    defs,
-    varName,
-    useSitesOf,
-    liveIn,
-    opBlock,
-    materialize,
-    respelledDefs: bitfieldSpelling,
-  });
+  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, preUpdateCopyHome, sameAtEntry, loopWriteSet } =
+    makeLoopHazards({
+      defs,
+      varName,
+      useSitesOf,
+      liveIn,
+      opBlock,
+      materialize,
+      respelledDefs: bitfieldSpelling,
+    });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a
   // latch back-edge arg) is held in its loop-variable NAME after the loop, so any post-loop use must
@@ -3802,9 +3803,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // stores whatever the arm left — the same substitution the parameter case makes, one step over.
   //
   // THE SECOND RELOCATION goes the other way, and this test cannot see it at all. A SUNK pre-update
-  // exit copy (preUpdateCopies) writes the loop EXIT's param at the top of the loop BODY, so the
-  // home this reads for it — `paramBlock`, the exit block — sits strictly LATER in the CFG than
-  // where the copy lands. What keeps the two apart is not this test but `dest-free-inside-loop`
+  // exit copy (preUpdateCopies) writes the loop EXIT's param INSIDE the loop BODY, so the home this
+  // reads for it — `paramBlock`, the exit block — sits strictly LATER in the CFG than where the copy
+  // lands. What keeps the two apart is not this test but `dest-free-inside-loop`
   // (hazards.ts): a merge inside the body under the exit param's name is a block param
   // `definedInBody` sees, so the slot is never sunk in the first place. That gate carries its own
   // KNOWN GAP, so the pair is a conjecture rather than a proof — `sunkCopyOverDroppedUndef` re-checks
@@ -3818,10 +3819,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   }
   /** Every copy `undefCarriesNothing` dropped, with the edge it was dropped from. */
   const droppedUndefCopies: { name: string; pred: Block }[] = [];
-  /** Every sunk pre-update exit copy, homed where it LANDS (the loop header whose body opens with
-   *  it) rather than where its destination param lives. These two lists are the postcondition's
-   *  whole input. */
+  /** Every sunk pre-update exit copy, homed where it LANDS (the loop header, which dominates every
+   *  point inside the body a copy is rebuilt at) rather than where its destination param lives.
+   *  These two lists are the postcondition's whole input. */
   const sunkCopyHomes: { name: string; home: Block }[] = [];
+  /** A loop's sunk pre-update exit copies: those rebuilt at the op that computed their value, and
+   *  those with no such op, which open the body. */
+  type SunkCopies = { leading: Stmt[]; atDef: Map<Op, Stmt[]> };
+  const NO_COPIES_AT_A_DEF: ReadonlyMap<Op, Stmt[]> = new Map();
+  /** The `atDef` copies `sideEffects` has spelled — `assertSunkCopiesPlaced`'s input. */
+  const sunkCopiesEmitted = new Set<Stmt>();
   const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
     if (defs.get(arg)?.opcode !== 'undef') {
       return false;
@@ -4281,7 +4288,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     !hasSpelledUse(op.results[0]) &&
     (opSig(op.opcode)?.reads !== true || volatileQualifiable(op));
 
-  const sideEffects = (b: Block): Stmt[] => {
+  const sideEffects = (b: Block, atDef: ReadonlyMap<Op, Stmt[]> = NO_COPIES_AT_A_DEF): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
       if (op.opcode === 'store') {
@@ -4363,6 +4370,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       for (const a of anchoredAt.get(op) ?? []) {
         out.push({ k: 'assign', name: a.name, value: expr(a.arg) });
         anchorsEmitted.add(a);
+      }
+      // a sunk pre-update exit copy, rebuilt at the op that computed its value (preUpdateCopies).
+      // Reached for the same reason the anchored copies are: every key is an op with a RESULT, so
+      // none of them is the `store`/`astore` this walk `continue`s out of above.
+      for (const st of atDef.get(op) ?? []) {
+        out.push(st);
+        sunkCopiesEmitted.add(st);
       }
     }
     return out;
@@ -4724,8 +4738,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // BEFORE the body ever ran — reading a temp uninitialized on the first test. The kept-guard
         // `do-while` tests after the body, so it carries no such restriction.
         const fused = guardProven && !li.header.ops.some((o) => materialize.has(o));
-        // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
-        // captures the value one iteration before the update, which is what the exit edge carries.
+        // A pre-update exit copy is repairable rather than fatal: emitted INSIDE the body, ahead of
+        // the update, it captures the value the exit edge carries rather than the updated one.
         // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
         // seed — the only edge holding the never-entered value. That is why the sink demands the
         // proof above: it makes the fused zero-trip path load-bearing.
@@ -4829,7 +4843,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         const loopStmt = emitWhile(
           li,
           updates,
-          preUpdateCopies(li.exit, hexitArgs, sunk, li.header),
+          preUpdateCopies(li.exit, hexitArgs, sunk, li.header, li.header),
           fused ? 'while' : 'dowhile',
         );
         // The guard-read substitution: an init arg reads as its loop variable's NAME. The inits
@@ -5105,10 +5119,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
   const loopSub = (li: LoopInfo): Map<Value, string> => subFor(li.header.params, li.backArgOfParam);
 
-  // The sunk exit copies, as body statements: `dest = <the arg, rebuilt here>`. The sink's gates
-  // are stated against `exprWith(null)` — every name it stops at holds, at the top of the body,
-  // what it held where the edge read it — so the arg is spelled with no substitution. Slot order
-  // keeps it deterministic.
+  // The sunk exit copies, as body statements: `dest = <the arg, rebuilt here>`, SPLIT by where in
+  // the body each one belongs. A copy is rebuilt at the point its own value was computed
+  // (`preUpdateCopyHome`), so `atDef` hands the ones with a position in `latch` to that block's
+  // `sideEffects` walk, keyed by the op; `leading` opens the body with the rest, whose value has no
+  // position inside it. The sink's gates are stated against `exprWith(null)` — every name the walk
+  // stops at holds, anywhere in the body ahead of the update, what it held where the edge read it —
+  // so the arg is spelled with no substitution. Slot order keeps it deterministic.
   //
   // NOT `expr`: an ambient `activeSub` is an ENCLOSING loop's post-loop naming, which the sink's
   // walk does not model, so a REBUILT tree here would be spelled under names that substitution has
@@ -5122,24 +5139,46 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // `home` is the loop HEADER — the block whose body these copies open, and so the block from which
   // the write is reachable. Recorded rather than inferred because `exit` says the opposite (see
   // `sunkCopyHomes`).
-  const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>, home: Block): Stmt[] =>
-    [...sunk]
-      .sort((x, y) => x - y)
-      .map((j) => {
-        if (activeSub !== null && !varName.has(exitArgs[j])) {
-          throw new StructureError(
-            `cannot structure '${fn.name}': a pre-update exit copy would rebuild a computed value ` +
-              `inside a loop nested in another loop's post-loop naming`,
-          );
-        }
-        const name = varName.get(exit.params[j])!;
-        sunkCopyHomes.push({ name, home });
-        return {
-          k: 'assign' as const,
-          name,
-          value: exprWith(null)(exitArgs[j]),
-        };
-      });
+  const preUpdateCopies = (
+    exit: Block,
+    exitArgs: readonly Value[],
+    sunk: Set<number>,
+    home: Block,
+    latch: Block,
+  ): SunkCopies => {
+    const out: SunkCopies = { leading: [], atDef: new Map() };
+    for (const j of [...sunk].sort((x, y) => x - y)) {
+      if (activeSub !== null && !varName.has(exitArgs[j])) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a pre-update exit copy would rebuild a computed value ` +
+            `inside a loop nested in another loop's post-loop naming`,
+        );
+      }
+      const name = varName.get(exit.params[j])!;
+      sunkCopyHomes.push({ name, home });
+      const st = { k: 'assign' as const, name, value: exprWith(null)(exitArgs[j]) };
+      const at = preUpdateCopyHome(exitArgs[j], latch);
+      if (at === null) {
+        out.leading.push(st);
+      } else {
+        (out.atDef.get(at) ?? out.atDef.set(at, []).get(at)!).push(st);
+      }
+    }
+    return out;
+  };
+
+  /** Every copy `preUpdateCopies` placed at a def, once the body that was meant to hold it is
+   *  assembled. A body built without the latch's `sideEffects` would drop one SILENTLY — a wrong
+   *  value, not a gap — so the placement is checked rather than assumed. */
+  const assertSunkCopiesPlaced = (copies: SunkCopies): void => {
+    for (const st of [...copies.atDef.values()].flat()) {
+      if (!sunkCopiesEmitted.has(st)) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a pre-update exit copy has no position in the loop body it belongs to`,
+        );
+      }
+    }
+  };
 
   // A guarded self-loop's body and latch test. The test reads the header's own params (back-edge
   // args substituted back), and the body is any sunk trailing copies, then the header's SIDE
@@ -5154,16 +5193,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // source spelling means.
   const emitWhile = (
     li: LoopInfo,
-    updates?: Stmt[],
-    sunkCopies: Stmt[] = [],
-    kind: 'while' | 'dowhile' = 'while',
+    updates: Stmt[] | undefined,
+    sunkCopies: SunkCopies,
+    kind: 'while' | 'dowhile',
   ): Stmt => {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
       cond = negateCond(cond);
     } // loop-continue must be `taken`
-    const body = [...sunkCopies, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
+    const body = [
+      ...sunkCopies.leading,
+      ...sideEffects(li.header, sunkCopies.atDef),
+      ...(updates ?? argAssigns(li.header, li.header)),
+    ];
+    assertSunkCopiesPlaced(sunkCopies);
     return kind === 'while' ? { k: 'while', cond, body } : { k: 'dowhile', cond, body };
   };
 
@@ -5380,8 +5424,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     const rebindHazard = [...bodyRebinds].some((n) => headerNames.has(n));
     const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
-    // A pre-update exit copy moves to the TOP of the body, where the loop variables still hold
-    // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
+    // A pre-update exit copy moves INSIDE the body, ahead of the update, where the loop variables
+    // still hold their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
     // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
     const sunk = rebindHazard
       ? new Set<number>()
@@ -5446,12 +5490,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already holds the next value, so the latch-computed test reads `v`, not `v - 1`). `updates`
     // reuses the hazard check's computation — a second argAssigns call would burn a spurious
     // swap-cycle temp number.
+    const sunkCopies = preUpdateCopies(dw.exit, exitArgs, sunk, dw.header, dw.latch);
+    const latchEffects = () => sideEffects(dw.latch, sunkCopies.atDef);
     const body = [
-      ...preUpdateCopies(dw.exit, exitArgs, sunk, dw.header),
+      ...sunkCopies.leading,
       ...inner,
-      ...(innerSub.size > 0 ? withSub(innerSub, () => sideEffects(dw.latch)) : sideEffects(dw.latch)),
+      ...(innerSub.size > 0 ? withSub(innerSub, latchEffects) : latchEffects()),
       ...updates,
     ];
+    assertSunkCopiesPlaced(sunkCopies);
     // The test reads this loop's own update under `sub`, and anything else an inner loop left under
     // `innerSub` — the outer loop's own reading wins where a value is both. The test runs AFTER the
     // update copies, so an inner name one of them really writes no longer holds the inner value, and
