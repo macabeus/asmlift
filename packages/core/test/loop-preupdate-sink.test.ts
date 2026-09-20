@@ -289,9 +289,10 @@ test('a sunk copy is rebuilt at the op that computed its value, not ahead of the
   );
 });
 
-// REFUSAL — an early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree
-// rebuilt at the top of the body is one that iteration never evaluated. Harmless for arithmetic,
-// not for a divide: at `a0 == 0` the IR returns without dividing and the C would divide first.
+// An early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree rebuilt at the
+// TOP of the body is one that iteration never evaluated — for a divide, a fault where the IR
+// returned. Rebuilt at the divide's OWN position the question does not arise: that position is in
+// the latch, which the arm has already declined to leave.
 const SPECULATED_DIVIDE = `fn specarm {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -317,11 +318,28 @@ const SPECULATED_DIVIDE = `fn specarm {
 }
 `;
 
-test('a trapping op in the tree is not rebuilt at the top of the body — an arm may leave first', () => {
-  // Positive control: the SAME shape with the divide replaced by a multiply does sink, so this is
-  // a refusal about the opcode and not about the arm.
-  expect(emit(SPECULATED_DIVIDE.replace('sdiv %3, %0', 'mul %3, %0'))).toContain('v1 = v0 * a0;');
-  expect(() => emit(SPECULATED_DIVIDE)).toThrow(/pre-update loop variable/);
+test('a trapping op is rebuilt at its own position, behind the arm that leaves first', () => {
+  // The arm's `return` is emitted AHEAD of the copy, so the divide runs on exactly the iterations
+  // the IR divided on. Replacing it with a multiply — the one fact the placement cannot depend on —
+  // emits the same loop with the same statement in the same place.
+  expect(emit(SPECULATED_DIVIDE)).toBe(
+    's32 specarm(s32 a0, s32 a1) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = 0;\n' +
+      '    do {\n' +
+      '        if (a1 >= 0) {\n' +
+      '            if (a0 == 0) return v0;\n' +
+      '        }\n' +
+      '        v1 = v0 / a0;\n' +
+      '        v0 = v0 + 1;\n' +
+      '    } while (v0 < a1);\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
+  expect(emit(SPECULATED_DIVIDE.replace('sdiv %3, %0', 'mul %3, %0'))).toBe(
+    emit(SPECULATED_DIVIDE).replace('v1 = v0 / a0;', 'v1 = v0 * a0;'),
+  );
 });
 
 // REFUSAL — a merge inside the body writes a loop variable's NAME (a body param adopts it), and

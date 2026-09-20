@@ -15,19 +15,19 @@
 // same value — and the arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf
 // that is neither.
 //
-// The tree must give the same answer at the new point, and the gates are stated at the FURTHER of
-// the two placements — the top of the body. Two ways it might not, and `REEVAL_UNSAFE_OPS`
-// is the registry view that names both. ORDER: a copy that opens the body puts a load in the tree
-// ahead of every store the body makes, and an effect against the others.
-// SPECULATION: the def dominates the latch, and the loop is single-latch at both call sites, but an
-// early-`return` arm still lets an iteration leave BEFORE the latch — so a tree the top of the body
-// evaluates is one that iteration never evaluated, and a trapping divide would fault where the
-// original returned.
+// The tree must give the same answer at the new point. Two ways it might not, and
+// `REEVAL_UNSAFE_OPS` is the registry view that names both. ORDER: a load re-evaluated after a
+// store the original preceded answers with what the store wrote, and an effect re-evaluated past
+// another is out of order. SPECULATION: a tree evaluated where the original never was — the def
+// dominates the latch, and the loop is single-latch at both call sites, but an early-`return` arm
+// lets an iteration leave BEFORE it, and a trapping divide would fault where the original returned.
 //
-// One gate covers both because `REEVAL_UNSAFE_OPS` answers both, and the candidate carries no arm
-// information to tell them apart. KNOWN COST: a loop with NO early-return arm speculates nothing,
-// so a divide in its exit-arg tree is refused for a hazard it cannot have. Threading "this loop can
-// leave before its latch" into the candidate is what would recover it; no benchmark row asks yet.
+// WHICH OF THE TWO APPLIES IS A FACT ABOUT THE POSITION, so `arg-safe-to-reevaluate` asks per slot
+// rather than refusing the opcode. At the def's own position nothing is speculated at all: every op
+// under the arg dominates that point, so the copy runs only on iterations that evaluated the whole
+// tree — the question reduces to ORDER, and to ORDER only against the ops lying strictly between
+// each one and the copy (`movesPast`). Opening the body instead, both hazards are live for the
+// whole body, and the blanket refusal is the answer.
 //
 // And every name the rebuilt expression reads must still denote the same value there. A loop
 // variable does: the update sits at the bottom, so anywhere ahead of it the name holds exactly the
@@ -47,7 +47,7 @@
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value } from '../ir/core';
-import { NEGATED_ICMP, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -94,6 +94,7 @@ export interface LoopHazards {
     exit: Block,
     exitArgs: readonly Value[],
     body: Set<Block>,
+    latch: Block,
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates?: readonly Gate<SinkCandidate>[],
@@ -137,7 +138,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     id: 'arg-safe-to-reevaluate',
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
-    guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg that reads memory',
+    guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },
   {
@@ -364,6 +365,22 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     exitArgs.some((a) => readsClobbered(a, sub, updateWrites)) ||
     loopEscapeHazard(body, sub, updateWrites, region);
 
+  // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
+  // there, so the point it belongs at is the one its value was computed at: the arg's own defining
+  // op, when that op is one of `latch`'s — the block whose statements both loop emitters render
+  // inline, ahead of the update. Null when the arg has no position inside the body at all (a block
+  // param, or a def outside the loop), and the copy opens the body instead.
+  //
+  // The two answers are not interchangeable, and `arg-safe-to-reevaluate` reads the difference. At
+  // the def's own position every op under the arg has already run wherever the copy runs, so the
+  // rebuilt tree evaluates on exactly the paths the original did and MOVES only against whatever
+  // sits between each op and that point. Opening the body it does neither: it re-evaluates the tree
+  // ahead of every statement the body makes, and on iterations an early-`return` arm left first.
+  const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
+    const d = defs.get(a);
+    return d !== undefined && opBlock.get(d) === latch ? d : null;
+  };
+
   // Which pre-update exit copies can be REPAIRED instead of declined. The exiting edge hands a
   // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on
   // one iteration; emitting the copy inside the body, AHEAD of the update, restores it — the
@@ -393,6 +410,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     exit: Block,
     exitArgs: readonly Value[],
     body: Set<Block>,
+    latch: Block,
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates: readonly Gate<SinkCandidate>[] = PREUPDATE_SINK_GATES,
@@ -439,7 +457,21 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // `undef` and `laddr` render a name from their own side maps rather than `varName`, and both
     // are position-independent — an `undef` is never assigned, a `laddr` is an address.
-    const blockersOf = (a: Value): ReadonlySet<ArgBlocker> => {
+    // Does re-evaluating `d` at the copy's position answer differently? `home` is that position
+    // (`preUpdateCopyHome`), so the only ops that can tell are the ones STRICTLY BETWEEN the two —
+    // and only when both are the latch's, because a def in any other block is separated from the
+    // copy by whole blocks this does not walk. `ORDER_SENSITIVE_OPS` is the between-set for all
+    // three ways `d` can care: a read wants no store crossed, an effect no other effect or read,
+    // and a trap none of those performed ahead of the fault.
+    const movesPast = (d: Op, home: Op): boolean => {
+      if (opBlock.get(d) !== latch) {
+        return true;
+      }
+      const i = latch.ops.indexOf(d);
+      const p = latch.ops.indexOf(home);
+      return i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+    };
+    const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
       const found = new Set<ArgBlocker>();
       const walk = (x: Value): void => {
@@ -462,7 +494,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
           found.add('no-definition');
           return;
         }
-        if (REEVAL_UNSAFE_OPS.has(d.opcode) || respelledDefs.has(d)) {
+        // A respelled def is opaque — what it renders is a memory read this walk never sees — so it
+        // is refused at every position rather than measured.
+        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home)))) {
           found.add('order-sensitive');
         }
         d.operands.forEach(walk);
@@ -477,7 +511,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       const destName = varName.get(exit.params[j]);
       const c: SinkCandidate = {
-        argBlockers: blockersOf(a),
+        argBlockers: blockersOf(a, preUpdateCopyHome(a, latch)),
         destName,
         headerNames,
         updateWrites,
@@ -492,22 +526,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       return none;
     }
     return exitArgs.some((a, j) => !dest.has(j) && readsClobbered(a, sub, names)) ? none : new Set(dest.keys());
-  };
-
-  // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
-  // there, so the point it belongs at is the one its value was computed at: the arg's own defining
-  // op, when that op is one of `latch`'s — the block whose statements both loop emitters render
-  // inline, ahead of the update. Null when the arg has no position inside the body at all (a block
-  // param, or a def outside the loop), and the copy opens the body instead.
-  //
-  // The two answers are not interchangeable, and `arg-safe-to-reevaluate` reads the difference. At
-  // the def's own position every op under the arg has already run wherever the copy runs, so the
-  // rebuilt tree evaluates on exactly the paths the original did and MOVES only against whatever
-  // sits between each op and that point. Opening the body it does neither: it re-evaluates the tree
-  // ahead of every statement the body makes, and on iterations an early-`return` arm left first.
-  const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
-    const d = defs.get(a);
-    return d !== undefined && opBlock.get(d) === latch ? d : null;
   };
 
   return {

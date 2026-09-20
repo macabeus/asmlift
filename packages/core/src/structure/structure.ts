@@ -4744,7 +4744,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // seed — the only edge holding the never-entered value. That is why the sink demands the
         // proof above: it makes the fused zero-trip path load-bearing.
         const sunk = guardProven
-          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
+          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), li.header, sub, updateWrites)
           : new Set<number>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
         // too — where the loop variables still hold their init values. It must therefore produce
@@ -5429,7 +5429,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
     const sunk = rebindHazard
       ? new Set<number>()
-      : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
+      : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, dw.latch, sub, updateWrites);
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
