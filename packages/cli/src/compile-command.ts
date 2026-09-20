@@ -583,7 +583,10 @@ const slot = (): (() => string) => {
 //
 // `transient` is the half a MESSAGE cannot carry: this machine had a bad minute, the compiler
 // never gave a verdict, and nothing about the outcome may be stored.
-type Verdict = { ok: true; objPath: string } | { ok: false; transient: boolean; cmd: string; err: string };
+type Verdict =
+  | { ok: true; objPath: string }
+  /** `output` is the compiler's own text, scrubbed; `err` is that behind the command that produced it */
+  | { ok: false; transient: boolean; cmd: string; err: string; output: string };
 
 // The scratch DIRECTORY is collapsed out of every failure message. It is an mkdtemp accident:
 // two runs of the identical failure print different text, so a rejection replayed from the cache
@@ -605,6 +608,7 @@ const verdict = (status: number | null, output: string, cmd: string, outPath: st
       ok: false,
       transient: true,
       cmd,
+      output: scrub(output.trim()),
       err: scrub(
         `compile command did not run to completion (${status === null ? 'killed by a signal' : `exit ${status} — killed by signal ${status - 128}`}): ` +
           `${cmd}\n${output.trim()}`,
@@ -616,6 +620,7 @@ const verdict = (status: number | null, output: string, cmd: string, outPath: st
       ok: false,
       transient: false,
       cmd,
+      output: scrub(output.trim()),
       err: scrub(`compile command failed (exit ${status}): ${cmd}\n${output.trim()}`),
     };
   }
@@ -624,6 +629,7 @@ const verdict = (status: number | null, output: string, cmd: string, outPath: st
       ok: false,
       transient: false,
       cmd,
+      output: scrub(output.trim()),
       err: scrub(`compile command exited 0 but produced no object at {{outputPath}}: ${cmd}`),
     };
   }
@@ -685,11 +691,12 @@ const preludeFor = (world: boolean, declarations?: string): string =>
 
 /** A verdict as the caller's contract wants it: the object path, or a throw — a
  *  `CompilerRejection` when the template ran to completion and said no, so that a ranking driver
- *  can tell the compiler's answer from this machine's bad minute (core stillborn.ts). The message
- *  already holds the template's whole output, so it is the diagnostic too. */
+ *  can tell the compiler's answer from this machine's bad minute (core stillborn.ts). Its
+ *  diagnostic is the compiler's output ALONE: the message opens on the command, and a command
+ *  whose text carries `error:` would otherwise key a compile that printed nothing. */
 const unwrap = (r: Verdict): string => {
   if (!r.ok) {
-    throw r.transient ? new Error(r.err) : new CompilerRejection(r.err);
+    throw r.transient ? new Error(r.err) : new CompilerRejection(r.err, r.output);
   }
   return r.objPath;
 };
@@ -767,7 +774,13 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
       // promise: the ranked driver reads a THROWN compile the same way whichever runner produced
       // it, and a second `res` after `close` is a no-op.
       p.on('error', (e) =>
-        res({ ok: false, transient: true, cmd, err: `compile command failed to start: ${cmd}\n${e.message}` }),
+        res({
+          ok: false,
+          transient: true,
+          cmd,
+          err: `compile command failed to start: ${cmd}\n${e.message}`,
+          output: '',
+        }),
       );
       p.on('close', (code) => res(verdict(code, err || out, cmd, outPath)));
     });
@@ -1133,7 +1146,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
       return { ok: true, objPath: hit };
     }
     if (hit instanceof Error) {
-      return { ok: false, transient: false, cmd: '', err: hit.message };
+      return { ok: false, transient: false, cmd: '', err: hit.message, output: hit.diagnostic };
     }
     return undefined;
   };
@@ -1148,7 +1161,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
       // is the direction that nothing audited — 84% of a warm bench store's served answers are
       // rejections and verify mode never looked at one.
-      const rejection = new CompilerRejection(r.err);
+      const rejection = new CompilerRejection(r.err, r.output);
       cache.verifyFail(key, symbol, rejection);
       cache.putFail(key, symbol, rejection);
       return r;
@@ -1163,7 +1176,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
         return { ok: true, objPath: held };
       }
       if (held instanceof Error) {
-        return { ok: false, transient: false, cmd: '', err: held.message };
+        return { ok: false, transient: false, cmd: '', err: held.message, output: held.diagnostic };
       }
     }
     return r;
