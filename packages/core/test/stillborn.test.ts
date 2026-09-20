@@ -153,7 +153,7 @@ test('a fan whose default compiles is never probed: enumeration order is the com
   expect(compiled).toEqual(candidates.map((c) => c.source));
 });
 
-// THE NAMED RESIDUAL (stillborn.ts header): one error INSTANCE that two variations cure only
+// THE NAMED RESIDUAL (stillborn.ts header): one error MESSAGE that two variations cure only
 // jointly. Each probe leaves the multiset as it found it, so the rule stops, and the product is
 // never compiled. Pinned so that the day a variation can re-type an operand, this is the test that
 // has to be argued with.
@@ -161,6 +161,19 @@ test('RESIDUAL: a single error that needs two variations jointly is declared sti
   const candidates = fan(['a', 'b']);
   const { run, compiled } = rank(candidates, (c) =>
     c.variations.includes('a') && c.variations.includes('b') ? { score: 0 } : reject(OPERANDS),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).not.toContain('unsigned/a/b');
+});
+
+// The same residual with no re-typing in it: a compiler that prints ONE message for a statement
+// holding TWO defects (mwcc and IDO on `y = g(1, 2) + h(3, 4)`), each defect cured by its own
+// variation. The multiset cannot tell one defect from two, so the rule stops here as well.
+test('RESIDUAL: two defects the compiler reports as one message are declared stillborn', () => {
+  const candidates = fan(['a', 'b']);
+  const MISMATCH = "#   Error:    ^\n#   function call 'g(int, int)' does not match\n#   'g(int)'";
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('a') && c.variations.includes('b') ? { score: 0 } : reject(MISMATCH),
   );
   expect(run).toThrow(NoScorableCandidateError);
   expect(compiled).not.toContain('unsigned/a/b');

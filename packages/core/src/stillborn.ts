@@ -19,13 +19,17 @@
 // understood, and an unread sentence equals nothing. A throw that is not a `CompilerRejection`: a
 // timeout or a killed compiler says nothing about the candidate.
 //
-// THE RESIDUAL COUNTER-CASE, which this rule does NOT close: ONE error instance that needs TWO
+// THE RESIDUAL COUNTER-CASE, which this rule does NOT close: ONE error MESSAGE that needs TWO
 // variations jointly. `a & b` is `invalid operands to binary &` while either operand is a struct;
 // if one variation re-types `a` and another re-types `b`, each probe leaves the multiset exactly
-// as it found it, and only their product compiles. No variation in the vocabulary re-types an
-// operand today; a variation that does must revisit this rule. (Two DIFFERENT errors each cured
-// by its own variation are not this case: each probe removes its error from the multiset, the
-// key differs, and the fan is ranked whole.)
+// as it found it, and only their product compiles. The same shape arises without any re-typing
+// wherever the compiler prints ONE message for a statement holding TWO defects: mwcc and IDO
+// report `y = g(1, 2) + h(3, 4)` as a single message, and agbcc, kmc and IDO report an undeclared
+// name once however many times it is used — a probe that cures one of the two defects leaves
+// the message where it was. Two DIFFERENT messages each cured by its own variation are not this
+// case: each probe removes its message from the multiset, the key differs, and the fan is ranked
+// whole. No variation in the vocabulary re-types an operand or cures half a statement today; a
+// variation that does must revisit this rule.
 //
 // ONE COPY. Probe selection and the verdict are pure functions over indices, so the sync driver
 // (rank.ts `rankBy`), the pooled CLI driver and the webapp's async loop all sequence their own
