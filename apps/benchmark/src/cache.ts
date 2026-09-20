@@ -265,6 +265,10 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      moves from noncompile to declined, and a v18 entry replays the old label. The same
   //      version covers the normalizer spelling a condition-register bit as a number
   //      (`cror 2,1,2`), which no row published before it disassembles to.
+  // v20: a row's diagnostics are picked ERRORS FIRST (core compiler-diagnostics.ts `errorsFirst`), in the compile
+  //      modules' messages and in `compilerErrorLines`. Both shape this value's `errorMarkers` and
+  //      neither is in a key field, so a v19 entry replays five warnings for a row whose cause is
+  //      the error printed below them.
   // `cppLadder` is the same register for a change no C row can see, and it bumps INSTEAD of `v`:
   // compile/real.ts's candidate ladder — C linkage on the candidate, then a plain-C fallback for
   // text the C++ front end refuses — reaches a c++ row only. A C row's candidate is the same text
@@ -304,7 +308,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 19,
+      v: 20,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),

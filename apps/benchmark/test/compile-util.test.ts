@@ -44,6 +44,19 @@ describe('compilerDiagnostics (pinned)', () => {
     expect(compilerDiagnostics('')).toBe('');
   });
 
+  test('an error below more warnings than the cap holds is what the cap keeps', () => {
+    const stderr = [
+      ...Array.from({ length: 6 }, (_, i) => `c.c:${i + 1}: warning: assignment from incompatible pointer type`),
+      "c.c:9: too many arguments to function `thunk_HeapFree'",
+    ].join('\n');
+    const lines = compilerDiagnostics(stderr).split('\n');
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toBe("c.c:9: too many arguments to function `thunk_HeapFree'");
+    expect(lines.slice(1)).toEqual(
+      [1, 2, 3, 4].map((n) => `c.c:${n}: warning: assignment from incompatible pointer type`),
+    );
+  });
+
   test('caps at 5 lines of 240 chars', () => {
     const many = Array.from({ length: 9 }, (_, i) => `c.i:${i}: ${'x'.repeat(300)}`).join('\n');
     const lines = compilerDiagnostics(many).split('\n');
