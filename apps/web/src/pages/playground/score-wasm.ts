@@ -300,11 +300,15 @@ export async function rankCandidatesInBrowser(
       const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs), flags: [...flags] });
       if (!cc.ok) {
         // agbcc-wasm ran to completion and said no: the compiler's verdict, with its whole
-        // stderr, which is what the stillborn rule compares
-        throw new CompilerRejection(
-          `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`,
-          cc.stderr,
-        );
+        // stderr, which is what the stillborn rule compares. A TRAP arrives the same way — the
+        // package maps any throw that is not an exit status to code 1, with the stderr printed so
+        // far or, when nothing was, the throw's own text. The second shape is refused as the
+        // transient it is; the first is not distinguishable from a verdict at this seam, and a
+        // trap is deterministic per input, so what it printed is compared like any rejection.
+        const failure = `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`;
+        throw /^(?:RuntimeError\b|Aborted\(|abort\()/.test(cc.stderr.trimStart())
+          ? new Error(failure)
+          : new CompilerRejection(failure, cc.stderr);
       }
       outcomes.set(c.source, await scoreObjectBytes(t.obj, cc.obj, name));
     } catch (e) {

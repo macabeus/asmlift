@@ -2321,9 +2321,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
 }
 
 /** THE candidate ordering — score, then preference, then readability, then enumeration
- *  order. Exported because there are TWO drivers over the same enumeration (this module's sync
- *  `rankBy` for the Node/objdiff scorer, and the webapp's async await-loop for the wasm one), and
- *  a per-driver copy would let the same input produce two different winners.
+ *  order. Exported because it is asked outside `rankBy` too — the benchmark's sweep driver and
+ *  fan runner order what they read back — and a second copy would let the same input produce two
+ *  different winners.
  *
  *  SCORE dominates absolutely: the differ is the fitness function, and a tie means the variation
  *  that separates these two candidates did not change the bytes — so everything below only chooses what

@@ -82,7 +82,7 @@ readers, none of which compiles anything:
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
   Use it before you launch a scoped run, not after. A `noncompile` row may carry
   `fanNotCompiled` — its fan was declared stillborn (core `stillborn.ts`) and only the default and
-  one probe per variation were compiled — and prints as `fan=30240 (41 compiled)`: `fanSize` is
+  one probe per variation were compiled — and prints as `fan=30240 (35 compiled)`: `fanSize` is
   the enumerated count, `fanSize − fanNotCompiled` the compiled one, and the enumeration is the
   only part of `rank=` that scales with the first number.
 
