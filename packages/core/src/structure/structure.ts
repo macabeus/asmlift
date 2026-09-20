@@ -4373,7 +4373,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       // a sunk pre-update exit copy, rebuilt at the op that computed its value (preUpdateCopies).
       // Reached for the same reason the anchored copies are: every key is an op with a RESULT, so
-      // none of them is the `store`/`astore` this walk `continue`s out of above.
+      // none of them is the `store`/`astore` this walk `continue`s out of above. A PARAMETER, where
+      // the anchored copies read a module-level map: a sunk copy belongs to ONE loop's body, and a
+      // map would let the generic `sideEffects(b)` calls emit it in an unrelated context — silently,
+      // because `assertSunkCopiesPlaced` would see it placed.
       for (const st of atDef.get(op) ?? []) {
         out.push(st);
         sunkCopiesEmitted.add(st);
@@ -5425,8 +5428,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const rebindHazard = [...bodyRebinds].some((n) => headerNames.has(n));
     const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
     // A pre-update exit copy moves INSIDE the body, ahead of the update, where the loop variables
-    // still hold their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
-    // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
+    // still hold their top-of-iteration values. No zero-trip seed here: a `do-while` always runs
+    // its body, so any other predecessor of the exit is an ordinary edge some enclosing `if`
+    // already emits.
     const sunk = rebindHazard
       ? new Set<number>()
       : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, dw.latch, sub, updateWrites);

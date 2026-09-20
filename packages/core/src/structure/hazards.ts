@@ -368,8 +368,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
   // there, so the point it belongs at is the one its value was computed at: the arg's own defining
   // op, when that op is one of `latch`'s — the block whose statements both loop emitters render
-  // inline, ahead of the update. Null when the arg has no position inside the body at all (a block
-  // param, or a def outside the loop), and the copy opens the body instead.
+  // inline, ahead of the update. Null for every other arg, and the copy opens the body instead.
+  // THREE args get that answer, not two: one with no position in the body at all (a block param, or
+  // a def outside the loop), and one the body DID compute, in a body block that is not the latch.
+  // The last is the narrow case and the one a wider sink would widen — the value has a position, it
+  // is just not in the block whose `sideEffects` walk is handed the copies.
   //
   // The two answers are not interchangeable, and `arg-safe-to-reevaluate` reads the difference. At
   // the def's own position every op under the arg has already run wherever the copy runs, so the
@@ -457,12 +460,25 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // `undef` and `laddr` render a name from their own side maps rather than `varName`, and both
     // are position-independent — an `undef` is never assigned, a `laddr` is an address.
+    //
     // Does re-evaluating `d` at the copy's position answer differently? `home` is that position
     // (`preUpdateCopyHome`), so the only ops that can tell are the ones STRICTLY BETWEEN the two —
     // and only when both are the latch's, because a def in any other block is separated from the
     // copy by whole blocks this does not walk. `ORDER_SENSITIVE_OPS` is the between-set for all
     // three ways `d` can care: a read wants no store crossed, an effect no other effect or read,
     // and a trap none of those performed ahead of the fault.
+    //
+    // NOT A RESTATEMENT OF WHAT `materialize` ALREADY BOUNDS, which is the reading to guard against.
+    // That pass NAMES an order-sensitive value whose consumer is not adjacent to it, and a named
+    // leaf is refused by `arg-reads-current-names` before this scan runs — so on a ONE-op tree the
+    // two bounds do coincide. They part as soon as the tree has two ops: `r = *q + cb(q)` compiles
+    // to `call, load, add`, where the load IS adjacent to its consumer and the CALL is what this
+    // turns away. That is the `preupdate_exit_order` row, and the only refusal this arm has.
+    //
+    // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
+    // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
+    // slot its own block on the taken edge rather than a later index in the latch, and the
+    // `opBlock` test above then refuses it as a def elsewhere. No non-agbcc row inhabits this scan.
     const movesPast = (d: Op, home: Op): boolean => {
       if (opBlock.get(d) !== latch) {
         return true;
