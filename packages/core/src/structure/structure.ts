@@ -5512,8 +5512,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         condFold !== null,
       )
     ) {
-      // Three reasons share this refusal — the test, an exit slot, an escaped body value — so the
-      // one that was ASKED in detail names its gate, rather than leaving a reader to ablate for it.
+      // Three reasons share this refusal — the test, an exit slot, an escaped body value — and the
+      // one that was asked in detail names the gate that answered.
       throw new StructureError(
         `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable` +
           (condAnswer !== null && 'refused' in condAnswer

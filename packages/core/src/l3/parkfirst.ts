@@ -33,7 +33,8 @@ import { exprChildren, exprHasEffect, mentionedName } from './ast';
 type Assign = Extract<Stmt, { k: 'assign' }>;
 
 // Every mention counts as touching its name: `foo(&v)` may read or write v through the pointer,
-// and `v++` writes it outright, so a park must treat either exactly like a direct read of v.
+// and `v++` writes it outright, so a park must treat either exactly like a direct read-and-write
+// of v.
 const readVars = (e: Expr, acc: Set<string> = new Set()): Set<string> => {
   const n = mentionedName(e);
   if (n !== undefined) {

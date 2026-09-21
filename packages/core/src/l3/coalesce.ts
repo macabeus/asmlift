@@ -20,8 +20,8 @@ function namesIn(e: Expr, out: Set<string>): void {
   // misses one is SHORT, and a short span is a clobber where a long one is only a missed merge.
   // `&sp0` is a LOCAL's mention — the structurer renders an `laddr` frame object as an addr node
   // over a name that IS in `sfn.locals` — and `n++` in a bottom test is a counter's only mention
-  // inside its own loop. Collecting a global name costs nothing — it is not in `sfn.locals`, so no pair is
-  // ever built for it.
+  // inside its own loop. A global name comes along for the ride and costs nothing — it is not in
+  // `sfn.locals`, so no pair is ever built for it.
   //
   // `rename` DISAGREES WITH THIS, and knowingly: it rewrites `var` and `postincr` leaves, so a
   // local absorbed while mentioned through `&` leaves that mention standing against a declaration

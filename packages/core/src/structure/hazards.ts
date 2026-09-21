@@ -233,10 +233,10 @@ export interface PreUpdateCondCandidate {
  *  loud backstop for a later pass bringing a second read in.
  *
  *  NOT THE WHOLE LIST OF REFUSALS on this decision. The gates judge the DEF TREE; `spellUpdateInCond`
- *  (structure.ts) asks the same two questions of what the lowering actually rendered and throws its
- *  own `StructureError`, with the same discipline.
+ *  (structure.ts) asks the mention count again of what the lowering actually rendered, and throws
+ *  its own `StructureError`.
  *
- *  `one-pre-update-variable` is sound for a reason that lives in the CALLER: a non-null answer sets
+ *  `one-pre-update-variable` is sound for a reason that lives in the CALLER: a fold sets
  *  `condRepaired`, which switches off the whole condition disjunct of `loopUpdateHazard` rather than
  *  the folded name's share of it. A second pre-update variable would then be emitted under its
  *  post-update name with every hazard reporting clean. */
@@ -302,10 +302,11 @@ interface Reach {
 const ALWAYS: Reach = { onTrue: true, onFalse: true };
 
 /** The reach each operand of a SHORT-CIRCUIT op inherits. These two are the whole set: they are the
- *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||`, which hazards.test.ts holds the two
- *  lists to rather than the prose — and `Expr` has no conditional form
- *  besides them, no ternary, so every other op evaluates all of its operands whenever it is itself
- *  evaluated, and they inherit its reach unchanged.
+ *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||` — a test holds the two lists together,
+ *  since a connective missing from here is read as an ordinary op and its arms inherit a reach they
+ *  do not have — and `Expr` has no conditional form besides them, no ternary, so every other op
+ *  evaluates all of its operands whenever it is itself evaluated and they inherit its reach
+ *  unchanged.
  *
  *  In `a && b`, `b` runs only where `a` was true: a TRUE whole implies it ran, a FALSE whole does
  *  not. `a || b` is the dual.
@@ -537,8 +538,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     loopEscapeHazard(body, sub, updateWrites, region);
 
   // WHICH SPELLING A PRE-UPDATE READ IN THE BOTTOM TEST HAS. Returns the update to fold and the
-  // step to fold it as, or null — `PREUPDATE_COND_GATES` above carries the refusals and the
-  // argument. Non-null implies the condition's hazard is REPAIRED, and nothing else: the exit slots
+  // step to fold it as, or the id of the gate that refused — `PREUPDATE_COND_GATES` above carries
+  // the refusals and the argument. A fold implies the condition's hazard is REPAIRED, and nothing
+  // else: the exit slots
   // and the escaped body values are `loopUpdateHazard`'s other two disjuncts and are unaffected by
   // the fold, which is why they are asked for separately and why `one-pre-update-variable` keeps
   // this to the single-variable case.
