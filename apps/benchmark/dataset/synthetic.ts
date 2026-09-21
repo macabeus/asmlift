@@ -1353,9 +1353,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // this row the gate would refuse nothing a command can show. It is also the shape no C spelling
   // could pin: `+` leaves its operands' evaluation order unspecified even where both values agree.
   //
+  // AND WHAT THE CONDITION'S REPAIR REFUSES IS AN EFFECT, which `preupdate_cond_effect` carries. The
+  // fold is the only thing that puts such a loop into a short-circuit spelling at all, so everything
+  // else in the test rides along: the CALL the body's value comes from lands in an arm the emitted
+  // `&&` skips on every iteration the counter's arm answers true, while agbcc ran the `bl` ahead of
+  // that arm's branch. Compiled and executed both ways the admitted spelling returns a different
+  // value, not merely a different call count, so the row is a DECLINE and `effects-on-every-iteration`
+  // (PREUPDATE_COND_GATES) is the gate that owes it.
+  //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be five more ordinary loops on those toolchains rather than coverage.
+  // rows would be six more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -1364,6 +1372,21 @@ export const SYNTHETIC: SynthSpec[] = [
     note:
       "a post-increment inside the loop condition's own operand (`i >> b++`), so the test reads the " +
       'value the variable held one step before the update the compiler has already emitted',
+  },
+  {
+    sym: 'preupdate_cond_effect',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_cond_effect(int *p, int n){ int i = 0; int r;' +
+      ' do { r = cb(p); } while (i++ <= n && r != 0); return i; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note:
+      "the same pre-update read in the bottom test, with a CALL's result as the other arm. agbcc " +
+      'calls before either branch, so folding the update into the test would hand the call a ' +
+      'position the emitted `&&` skips — the decline is the whole point of the row',
   },
   {
     sym: 'preupdate_exit',

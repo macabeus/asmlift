@@ -47,7 +47,7 @@
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value } from '../ir/core';
-import { NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { Expr, Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -202,6 +202,8 @@ export interface PreUpdateCondCandidate {
   unreadable: boolean;
   /** a short-circuit op is reached through an op that is not one, so its arms' reach is unknown */
   nestedConnective: boolean;
+  /** an op with an observable effect renders where a short circuit ahead of it may skip it */
+  skippedEffect: boolean;
   /** the folded leaf is evaluated on every iteration that takes the back edge */
   onContinue: boolean;
   /** …and on the iteration that leaves the loop */
@@ -227,6 +229,19 @@ export interface PreUpdateCondCandidate {
  *  the emitted C is still correct and the candidate merely does not match, which is the direction to
  *  be wrong in — and on the agbcc shape the fold exists for they agree, because the short-circuit
  *  fold (raise/shortcircuit.ts) is what merged the test's blocks into one in the first place.
+ *
+ *  A THIRD OBLIGATION IS NOT ABOUT THE COUNTER AT ALL. The fold is the only thing that puts these
+ *  loops into a short-circuit spelling, and everything else in the test rides along: an operand the
+ *  machine evaluated before its branch renders in an arm the emitted `&&`/`||` may skip. Where that
+ *  operand has an EFFECT the emitted loop runs it fewer times than the machine did — a call in the
+ *  right arm of an `||` is skipped on every iteration the left arm answers true, and the loop then
+ *  returns a different value, not merely a different call count. That is `effects-on-every-iteration`.
+ *
+ *  It reads the effect flag and no block position, because for an effectful op the two say the same
+ *  thing: `HOIST_UNSAFE_OPS` (ir/opcodes.ts) IS `EFFECTFUL_OPS`, so raise/shortcircuit.ts never
+ *  lifts one out of the arm it guards, and a genuinely short-circuited effect therefore never
+ *  reaches a connective here. A memory read is exempt there and stays exempt here — C's own short
+ *  circuit re-guards it at the new point, which is the whole argument that exemption rests on.
  *
  *  `variable-named-once` is C89's own rule rather than this pass's: an object modified between two
  *  sequence points may not be read again there, and `contracts.ts`'s `assertPostIncrUnshared` is the
@@ -274,6 +289,13 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
     sound: true,
     guardedBy: 'hazards.test.ts: ablating connectives-join-at-the-root folds an arm of a negated &&',
     rejects: (c) => c.nestedConnective,
+  },
+  {
+    id: 'effects-on-every-iteration',
+    why: 'an effect an arm may skip ran ahead of the machine\u2019s branch, so the loop would run it fewer times',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating effects-on-every-iteration folds a test whose arm holds a call',
+    rejects: (c) => c.skippedEffect,
   },
   {
     id: 'folded-on-every-continue',
@@ -545,10 +567,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // the fold, which is why they are asked for separately and why `one-pre-update-variable` keeps
   // this to the single-variable case.
   //
-  // The walk is `readsClobbered`'s, with two things added that the boolean does not need: it COUNTS
-  // occurrences instead of stopping at the first (C89's sequence-point rule is about the count), and
-  // it tracks, per name, whether the leaf's position is reached when the whole test is TRUE and when
-  // it is FALSE (`SHORT_CIRCUIT_ARMS`). A name reached twice takes the INTERSECTION of the two
+  // The walk is `readsClobbered`'s, with three things added that the boolean does not need: it COUNTS
+  // occurrences instead of stopping at the first (C89's sequence-point rule is about the count), it
+  // tracks, per name, whether the leaf's position is reached when the whole test is TRUE and when
+  // it is FALSE (`SHORT_CIRCUIT_ARMS`), and it notes any EFFECT sitting at a position one of those
+  // two answers misses. A name reached twice takes the INTERSECTION of the two
   // positions' reach, which `variable-named-once` then refuses anyway — kept so the field means the
   // same thing whichever gate is ablated.
   //
@@ -570,6 +593,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     let budget = WALK_BUDGET;
     let unreadable = false;
     let nestedConnective = false;
+    let skippedEffect = false;
     const mentions = new Map<string, number>();
     const pre = new Map<string, Reach>();
     const note = (name: string, r: Reach): void => {
@@ -605,6 +629,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         unreadable = true;
         return;
       }
+      if (EFFECTFUL_OPS.has(d.opcode) && !(r.onTrue && r.onFalse)) {
+        skippedEffect = true;
+      }
       const arm = SHORT_CIRCUIT_ARMS[d.opcode];
       if (arm !== undefined && !spine) {
         nestedConnective = true;
@@ -622,6 +649,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       mentions: mentions.get(name) ?? 0,
       unreadable,
       nestedConnective,
+      skippedEffect,
       onContinue: negated ? reach.onFalse : reach.onTrue,
       onExit: negated ? reach.onTrue : reach.onFalse,
       updateObserved:

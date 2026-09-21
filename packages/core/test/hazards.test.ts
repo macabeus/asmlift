@@ -660,10 +660,12 @@ describe('preUpdateCondFold', () => {
   // Each refusal is a one-fact edit of the accepted case, and each asserts WHICH gate answered, so
   // an ablation measures the rule it names rather than whatever happened to refuse first.
   const nine = (): Value => v();
-  const scaffold = (opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean } = {}) => {
+  const scaffold = (
+    opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean; callArm?: boolean } = {},
+  ) => {
     const p = v(); // the loop variable, named v1
     const u = v(); // its back-edge arg — post-update, so `sub` maps it to the same name
-    const other = v(); // the other arm's value, named v0
+    const other = v(); // the other arm's value, named v0 — or, with `callArm`, an inlined call
     const k = nine();
     const cmp = v();
     const zero = v();
@@ -679,6 +681,9 @@ describe('preUpdateCondFold', () => {
       [cmp, cmpOp],
       [ne, neOp],
     ]);
+    if (opts.callArm === true) {
+      defs.set(other, mkOp('call', { operands: [v()], results: [other] }));
+    }
     // `!(…)`: the connective is reached through an op that inverts it, so the arms it hands out
     // answer about the opposite edge of the loop from the one the walk is reading.
     const root = opts.underNot === true ? v() : cond;
@@ -692,10 +697,13 @@ describe('preUpdateCondFold', () => {
       header,
       body: new Set([header]),
       defs,
-      varName: new Map([
-        [p, 'v1'],
-        [other, 'v0'],
-      ]),
+      varName:
+        opts.callArm === true
+          ? new Map([[p, 'v1']])
+          : new Map([
+              [p, 'v1'],
+              [other, 'v0'],
+            ]),
       cmpOp,
     };
   };
@@ -879,6 +887,26 @@ describe('preUpdateCondFold', () => {
       .filter(([, spelling]) => spelling === '&&' || spelling === '||')
       .map(([op]) => op);
     expect(Object.keys(SHORT_CIRCUIT_ARMS).sort()).toEqual(renders.sort());
+  });
+
+  test('ablating effects-on-every-iteration folds a test whose arm holds a call', () => {
+    // `v1 <= 9 && work() != 0`, the call INLINED into the arm because nothing names it. agbcc put
+    // that `bl` ahead of the counter's branch, so the machine ran it on every iteration; the
+    // emitted `&&` runs it only where the counter's arm was true. The fold is what puts the loop
+    // into a short-circuit spelling at all, so admitting this is a decline traded for a loop that
+    // calls — and returns — differently.
+    const f = scaffold({ leftArm: true, callArm: true });
+    expect(ask(f)).toEqual({ refused: 'effects-on-every-iteration' });
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'effects-on-every-iteration') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('the same call is fine in the arm every evaluation of the test reaches', () => {
+    // The one-fact control: move the call to the LEFT of the `&&`, which is evaluated whichever way
+    // the test answers, and the fold is back.
+    expect(ask(scaffold({ callArm: true }))).toEqual({ name: 'v1', by: 1 });
   });
 
   test('ablating folded-on-every-continue folds a leaf under the right operand of an ||', () => {
