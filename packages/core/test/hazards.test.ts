@@ -190,13 +190,15 @@ describe('sinkablePreUpdateSlots', () => {
   test('an exit arg that IS a loop variable, into a name of its own, is sinkable', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Set([0]));
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, null]]),
+    );
   });
 
   test('an arg the update does NOT clobber has no hazard to repair', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']))).toEqual(new Map());
   });
 
   // The arg's def-tree, rebuilt inside the body. `bodyOp` registers an op the way analysis.ts does,
@@ -216,7 +218,9 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Set([0]));
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
   });
 
   test('ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store', () => {
@@ -246,10 +250,10 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     const args = [e];
-    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, op]]),
     );
   });
 
@@ -277,7 +281,9 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Set([0]));
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
   });
 
   test('a read the LATCH did not compute keeps the blanket refusal', () => {
@@ -303,10 +309,10 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate');
     expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, null]]),
     );
   });
 
@@ -332,10 +338,10 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     const args = [e];
-    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, op]]),
     );
   });
 
@@ -373,9 +379,9 @@ describe('sinkablePreUpdateSlots', () => {
     const args = [e];
     const run = (gates?: readonly Gate<SinkCandidate>[]) =>
       h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), gates);
-    expect(run()).toEqual(new Set());
-    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Set());
-    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Set());
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Map());
   });
 
   test('a leaf with neither a name nor a definition is refused on its own gate', () => {
@@ -393,10 +399,10 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     const args = [e];
-    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-has-a-definition');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, op]]),
     );
   });
 
@@ -421,17 +427,17 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [out, 'v0']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(new Map());
   });
 
   test('ablating dest-not-loop-variable admits a self-assignment', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     // `q` shares the loop variable's name, so the sunk copy would read `v0 = v0`.
     const h = make({ varName: names([p, 'v0'], [q, 'v0']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'dest-not-loop-variable');
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, null]]),
     );
   });
 
@@ -450,10 +456,10 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, null]]),
     );
   });
 
@@ -464,10 +470,10 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set([other])]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']), ablated)).toEqual(
-      new Set([0]),
+      new Map([[0, null]]),
     );
   });
 
@@ -482,7 +488,7 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
   });
 
   test('two slots wanting ONE name refuse the whole edge (one parallel copy)', () => {
@@ -498,7 +504,47 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     expect(h.sinkablePreUpdateSlots(header, exit, [p, p2], body, latch, empty, new Set(['v0', 'v9']))).toEqual(
-      new Set(),
+      new Map(),
+    );
+  });
+
+  // WHERE the caller rebuilds each admitted copy. The position comes back WITH the permission: it
+  // is what `arg-safe-to-reevaluate` judged the tree against, so an emitter that derived its own
+  // would be free to place a copy at a point no gate cleared.
+  test('an admitted slot carries the position it was cleared at', () => {
+    // The arg's def is NOT the latch's first op — a store precedes it — so opening the body and
+    // rebuilding at the def are two different program points.
+    const { p, q, header, exit, latch, body } = scaffold();
+    const e = v();
+    bodyOp(header, mkOp('store', { operands: [p, p], attrs: { off: 0, width: 4 } }));
+    const op = bodyOp(header, mkOp('shl', { operands: [p], results: [e] }));
+    const h = make({
+      defs: new Map([[e, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
+  });
+
+  test('an arg the latch did not compute carries no position, and its copy opens the body', () => {
+    // A pure def in another body block. The value HAS a position in the body, just not in the block
+    // whose walk is handed the copies — the third of the three args that come back homed at null.
+    const { p, q, header, exit, latch } = scaffold();
+    const e = v();
+    const op = mkOp('add', { operands: [p], results: [e] });
+    const mid: Block = { params: [], ops: [op] };
+    const body = new Set([header, mid]);
+    const h = make({
+      defs: new Map([[e, op]]),
+      opBlock: new Map([[op, mid]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, null]]),
     );
   });
 
@@ -514,35 +560,7 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [stay, 'v2']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, latch, empty, new Set(['v0']))).toEqual(new Set());
-  });
-});
-
-describe('preUpdateCopyHome', () => {
-  // WHERE the caller rebuilds a sunk copy. The answer is a position, so it is a fact about the
-  // LATCH's op list and nothing else: the op that computed the arg, or null for an arg the body
-  // never computed.
-  test('an arg computed by a latch op is rebuilt at that op', () => {
-    const e = v();
-    const op = mkOp('shl', { results: [e] });
-    const latch: Block = { params: [], ops: [mkOp('store'), op] };
-    const h = make({ defs: new Map([[e, op]]), opBlock: new Map([[op, latch]]) });
-    expect(h.preUpdateCopyHome(e, latch)).toBe(op);
-  });
-
-  test('an arg the latch did not compute has no position in it', () => {
-    // A block param (no defining op) and a def in another block: both open the body instead, which
-    // is the placement the gates are stated at.
-    const param = v();
-    const e = v();
-    const outside: Block = { params: [], ops: [mkOp('add', { results: [e] })] };
-    const latch: Block = { params: [param], ops: [] };
-    const h = make({
-      defs: new Map([[e, outside.ops[0]]]),
-      opBlock: new Map([[outside.ops[0], outside]]),
-    });
-    expect(h.preUpdateCopyHome(param, latch)).toBe(null);
-    expect(h.preUpdateCopyHome(e, latch)).toBe(null);
+    expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, latch, empty, new Set(['v0']))).toEqual(new Map());
   });
 });
 

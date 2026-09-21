@@ -644,7 +644,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   refusal discipline"). That comment is the whole obligation. A partial table with the residue named
   is finished work; a partial table that reads as a complete one is the defect. Note what that
   exclusion is NOT: both rules judge one prepared edge
-  (`grep -n "const names = new Set(dest.values())" packages/core/src/structure/hazards.ts`), so the
+  (`grep -n "names.size !== cleared.size" packages/core/src/structure/hazards.ts`), so the
   next bullet's bar does not touch them. They are outside `PREUPDATE_SINK_GATES` because a
   `Gate<Ctx>` is per-candidate and these would need a SECOND table over a different `Ctx` — which the
   paragraph below says to build when a round has had to instrument them, and not before.

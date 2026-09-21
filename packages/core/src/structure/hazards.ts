@@ -98,8 +98,7 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates?: readonly Gate<SinkCandidate>[],
-  ): Set<number>;
-  preUpdateCopyHome(a: Value, latch: Block): Op | null;
+  ): Map<number, Op | null>;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
 }
@@ -379,6 +378,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // rebuilt tree evaluates on exactly the paths the original did and MOVES only against whatever
   // sits between each op and that point. Opening the body it does neither: it re-evaluates the tree
   // ahead of every statement the body makes, and on iterations an early-`return` arm left first.
+  //
+  // PRIVATE TO THIS FILE, because a position the emitter derives for itself is a position no gate
+  // cleared: `sinkablePreUpdateSlots` hands each admitted slot the home it was judged at.
   const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
     const d = defs.get(a);
     return d !== undefined && opBlock.get(d) === latch ? d : null;
@@ -388,13 +390,19 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on
   // one iteration; emitting the copy inside the body, AHEAD of the update, restores it — the
   // trailing-pointer idiom (`for (fast = slow = head; ...; fast = fast->next) slow = fast;`).
-  // Returns the exit slots that may move; the caller emits each one inside the body, at the point
-  // `preUpdateCopyHome` names, and drops it from the post-loop copies.
+  // Returns the exit slots that may move, each mapped to the point the caller rebuilds it at — an
+  // op of the latch, or null for the copies that open the body — and the caller drops each one from
+  // the post-loop copies.
   //
   // The idiom reaches here at all because the compiler DID keep a second register for the trailing
   // value and SSA construction folded the copy away, leaving the exit edge as the only place the
   // value is still named. Where the compiler kept two loop-carried registers instead, the value is
   // a back-edge arg and the un-rotation substitution already reads it — no repair needed.
+  //
+  // Each admitted slot comes back WITH THE POSITION IT WAS JUDGED AT, because permission and
+  // placement are one answer: `arg-safe-to-reevaluate` clears the tree against that position and no
+  // other, so an emitter free to re-derive its own would be free to place a copy where nothing
+  // cleared it — silently, since the statement is still emitted and still reads names that resolve.
   //
   // `PREUPDATE_SINK_GATES` holds the per-candidate refusals, ablatable one at a time. Two rules are
   // properties of the EDGE rather than of a candidate and stay here: the exit edge is a PARALLEL
@@ -417,8 +425,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates: readonly Gate<SinkCandidate>[] = PREUPDATE_SINK_GATES,
-  ): Set<number> => {
-    const none = new Set<number>();
+  ): Map<number, Op | null> => {
+    const none = new Map<number, Op | null>();
     const headerNames = new Set(header.params.map((p) => varName.get(p)));
     // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
     // An op with no `opBlock` entry counts as INSIDE: the map is total over the function, and the
@@ -520,28 +528,31 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       walk(a);
       return found;
     };
-    const dest = new Map<number, string>();
+    const cleared = new Map<number, { name: string; home: Op | null }>();
     exitArgs.forEach((a, j) => {
       if (!readsClobbered(a, sub, updateWrites)) {
         return; // no hazard on this slot — nothing to repair
       }
       const destName = varName.get(exit.params[j]);
+      const home = preUpdateCopyHome(a, latch);
       const c: SinkCandidate = {
-        argBlockers: blockersOf(a, preUpdateCopyHome(a, latch)),
+        argBlockers: blockersOf(a, home),
         destName,
         headerNames,
         updateWrites,
         destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j]),
       };
       if (firstRejection(gates, c) === null) {
-        dest.set(j, destName!);
+        cleared.set(j, { name: destName!, home });
       }
     });
-    const names = new Set(dest.values());
-    if (dest.size === 0 || names.size !== dest.size) {
+    const names = new Set([...cleared.values()].map((c) => c.name));
+    if (cleared.size === 0 || names.size !== cleared.size) {
       return none;
     }
-    return exitArgs.some((a, j) => !dest.has(j) && readsClobbered(a, sub, names)) ? none : new Set(dest.keys());
+    return exitArgs.some((a, j) => !cleared.has(j) && readsClobbered(a, sub, names))
+      ? none
+      : new Map([...cleared].map(([j, c]) => [j, c.home]));
   };
 
   return {
@@ -549,7 +560,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     loopEscapeHazard,
     loopUpdateHazard,
     sinkablePreUpdateSlots,
-    preUpdateCopyHome,
     sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
     loopWriteSet,
   };
