@@ -39,11 +39,25 @@
 // spells is the address the machine computed, by the map's own arithmetic.
 //
 // WHAT REFUSES is `OFFSET_NAME_GATES` below, and every rejection leaves the arithmetic exactly as
-// the frontend emitted it — the spelling that is valid under any declaration. The refusing
-// populations are real corpus rows, not hypotheticals: an unsized base (`snowboardkids2`'s
-// `gDefaultFontPalette`), and an offset landing INSIDE the base's own declared extent, which the
-// interior/field machinery already owns (`pokeemerald:TrySetCantSelectMoveBattleScript`,
-// `marioparty3:GWBoardRecordGet`, `kleod:sub_08045F68`'s `gSineTable+128`).
+// the frontend emitted it — the spelling that is valid under any declaration.
+//
+// WHICH GATE BOUNDS THE CORPUS PATH, off `offsetNameRefusals` over every row of both tiers that
+// lifts with a map. Twenty sites, and only two rules decide any of them:
+//
+//   NAMED             7 sites, 3 rows   kleod `DeleteAllSaveData` (×3),
+//                                       `ButtonConfigurationScreenInit` (×3), `sub_0804E708`
+//   interior-offset  12 sites, 5 rows   `pokeemerald:TrySetCantSelectMoveBattleScript` (×4),
+//                                       `synthetic:sbscope` (×3), `marioparty3:GWBoardRecordGet`
+//                                       (×2), `pokeemerald:Cmd_tryconversiontypechange`,
+//                                       `kleod:sub_08045F68`'s `gSineTable+128`
+//   base-unsized      1 site,  1 row    `snowboardkids2:func_80014440_15040`'s
+//                                       `gDefaultFontPalette+2`
+//
+// The other four rules refuse NOTHING in this corpus and are pinned by `offset-names.test.ts`
+// alone. They are the sound ones — a code address at either end, a store onto a `const` name, a
+// base the map places twice — so the path is bounded by the two heuristics and guarded by four
+// rules with no measured reach. Say so rather than letting the table read as though all seven
+// were load-bearing here.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -70,8 +84,10 @@ export interface OffsetAddress {
 }
 
 /** The refusals. FIRST rejection is what `offsetNameRefusals` reports, so the order is the
- *  attribution order: the two rules about what the map can tell us at all come before the two
- *  about what it says. */
+ *  attribution order: the three rules about what the map can say about the BASE come before the
+ *  four about what sits at the offset. The two that are not `sound` are about OWNERSHIP and
+ *  ABSENCE rather than correctness — an interior address is the field and element machinery's to
+ *  spell, and where no symbol sits there the arithmetic is simply the only name available. */
 export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
   {
     id: 'base-address-ambiguous',

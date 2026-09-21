@@ -835,7 +835,8 @@ export interface AnalyzeOptions {
    *  The MIRROR of `/expr-home`, which wants a def OUTSIDE a loop with a consumer inside: here every
    *  consumer is outside the def's block, and neither scope reaches the other's shape. Straight-line
    *  values whose def block also consumes them stay with the siblings — a consumer beside the def is
-   *  what says the compiler could re-derive there, and that class is 64 sites where this one is 6.
+   *  what says the compiler could re-derive there. What is left reaches six corpus rows over two
+   *  toolchains, which `bench diff`'s FAN section names, plus the synthetic row that pins it.
    *
    *  A differ-refereed variation, never a default: `pokeemerald:AcroBikeHandleInputTurning` is a
    *  MATCH inside this scope, so forced on the spelling would be REPLACED across the fan rather than
