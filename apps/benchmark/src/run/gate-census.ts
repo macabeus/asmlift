@@ -20,10 +20,9 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHAT PUTS A PASS IN THE REGISTRY BELOW. Sixteen passes in `packages/core/src` take their gate
-// table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
-// CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Five have
-// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, and four passes in
+// WHAT PUTS A PASS IN THE REGISTRY BELOW. Taking a gate table as an optional parameter is necessary
+// and NOT sufficient: the census also needs a CALLER-SIDE SEAM a process outside core can reach, a
+// MUTABLE RECORD holding the call. Five passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, and four passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
 // core swaps and the driver then calls. Being in `raise/` is not the seam — `raise/retsink.ts` is

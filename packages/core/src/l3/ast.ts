@@ -11,8 +11,10 @@ export type Expr =
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
   // WRITES anything, so `exprHasEffect` answers for it alongside `call` and `marker` — that is what
-  // every pass asking "may I move or duplicate this" already consults — and `l3/mentions.ts`, which
-  // hand-rolls its traversal, counts it as a write of the name as well as a read.
+  // every pass asking "may I move or duplicate this" already consults. It also NAMES a local, so
+  // `mentionedName` answers for it beside `var` and `addr`, and the two walks that classify their
+  // own leaves — `l3/mentions.ts` and `contracts.ts`'s `assertLocalsWritten` — count it on both
+  // sides, because `v++` reads the name and writes it.
   //
   // The target is a NAME rather than an Expr because its one producer has one: structure.ts's
   // `emitDoWhile`, folding a loop update into a bottom test that reads the variable at its

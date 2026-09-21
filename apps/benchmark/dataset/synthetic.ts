@@ -1311,18 +1311,20 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // A LOOP VARIABLE READ AT ITS PRE-UPDATE VALUE. agbcc hoists an induction update above the exit
   // test, so something still wants the variable one iteration back. The structurer treats every
-  // such read as a hazard and declines the whole function — correct, because rendering it under
-  // the post-update name is an off-by-one-iteration miscompile, but it costs 29 functions across
-  // the klonoa/sa3/newlib corpus and no other benchmark row reproduces it.
+  // such read as a hazard — rendering it under the post-update name is an off-by-one-iteration
+  // miscompile — and declines wherever it has no spelling for the pre-update value. It cost 29
+  // functions across the klonoa/sa3/newlib corpus, and no other benchmark row reproduces it.
   //
   // ONE decline message, THREE causes, which is the point of authoring several rows: the message
   // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
-  // after the loop deriving from it. Only the EDGE reaches the repair that exists
-  // (`sinkablePreUpdateSlots`, the trailing-pointer sink), which rebuilds the copy at the op the
-  // arg's value was computed at. The sink repairs exit SLOTS, and the other two rows have none to
-  // repair: instrumented, `preupdate_cond` declines on the CONDITION with its one exit arg clean,
-  // and `preupdate_escape` on an escaped body value with no exit arg at all.
+  // after the loop deriving from it. TWO of the three have a repair, and they are different
+  // repairs: the EDGE is rebuilt as a copy inside the body, at the op its value was computed at
+  // (`sinkablePreUpdateSlots`, the trailing-pointer sink), and the CONDITION is respelled `n++` at
+  // the leaf that reads it with the update dropped from the foot of the body
+  // (`PREUPDATE_COND_GATES`, structure/hazards.ts). So what `preupdate_cond` measures is the
+  // distance to the bytes rather than a refusal. The ESCAPE has neither: instrumented,
+  // `preupdate_escape` declines on an escaped body value with no exit arg at all.
   //
   // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
