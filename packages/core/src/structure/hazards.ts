@@ -101,7 +101,7 @@ export interface LoopHazards {
     updates: Stmt[],
     updateWrites: Set<string>,
     gates?: readonly Gate<PreUpdateCondCandidate>[],
-  ): { name: string; by: 1 | -1 } | null;
+  ): PreUpdateCondFold;
   sinkablePreUpdateSlots(
     header: Block,
     exit: Block,
@@ -184,6 +184,11 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
 ];
 
+/** The `++` a bottom test's pre-update read folds into, or the id of the gate that refused it. The
+ *  id is what the decline names, so the three reasons this table holds do not reach a reader as one
+ *  message. */
+export type PreUpdateCondFold = { name: string; by: 1 | -1 } | { refused: string };
+
 /** Why a bottom test's pre-update read of a loop variable cannot be spelled `n++` — see the note
  *  above `PREUPDATE_COND_GATES`. */
 export interface PreUpdateCondCandidate {
@@ -227,16 +232,21 @@ export interface PreUpdateCondCandidate {
  *  sequence points may not be read again there, and `contracts.ts`'s `assertPostIncrUnshared` is the
  *  loud backstop for a later pass bringing a second read in.
  *
+ *  NOT THE WHOLE LIST OF REFUSALS on this decision. The gates judge the DEF TREE; `spellUpdateInCond`
+ *  (structure.ts) asks the same two questions of what the lowering actually rendered and throws its
+ *  own `StructureError`, with the same discipline.
+ *
  *  `one-pre-update-variable` is sound for a reason that lives in the CALLER: a non-null answer sets
  *  `condRepaired`, which switches off the whole condition disjunct of `loopUpdateHazard` rather than
  *  the folded name's share of it. A second pre-update variable would then be emitted under its
  *  post-update name with every hazard reporting clean. */
 export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
   {
-    id: 'update-is-a-unit-step',
-    why: 'C has no read-then-update operator but ++ and --, so no other update has a spelling inside the test',
-    sound: false,
-    rejects: (c) => c.step === null,
+    id: 'test-is-readable',
+    why: 'an op that renders something its operand tree does not show hides whether the test names the variable again',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating test-is-readable folds through a respelled def',
+    rejects: (c) => c.unreadable,
   },
   {
     id: 'one-pre-update-variable',
@@ -246,11 +256,10 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
     rejects: (c) => c.preUpdateNames !== 1,
   },
   {
-    id: 'test-is-readable',
-    why: 'an op that renders something its operand tree does not show hides whether the test names the variable again',
-    sound: true,
-    guardedBy: 'hazards.test.ts: ablating test-is-readable folds through a respelled def',
-    rejects: (c) => c.unreadable,
+    id: 'update-is-a-unit-step',
+    why: 'C has no read-then-update operator but ++ and --, so no other update has a spelling inside the test',
+    sound: false,
+    rejects: (c) => c.step === null,
   },
   {
     id: 'variable-named-once',
@@ -555,7 +564,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     updates: Stmt[],
     updateWrites: Set<string>,
     gates: readonly Gate<PreUpdateCondCandidate>[] = PREUPDATE_COND_GATES,
-  ): { name: string; by: 1 | -1 } | null => {
+  ): PreUpdateCondFold => {
     let budget = WALK_BUDGET;
     let unreadable = false;
     let nestedConnective = false;
@@ -616,10 +625,18 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       updateObserved:
         u === undefined || exitArgs.includes(u) || (useSitesOf.get(u) ?? []).some((s) => !body.has(s.blk)),
     };
-    // `step !== null` again at the return, not `c.step!`: ablating `update-is-a-unit-step` must
-    // yield a decline, and a `{ by: null }` node renders as `n--` over a body the emitter has
-    // already dropped the real update from.
-    return firstRejection(gates, c) === null && c.step !== null ? { name, by: c.step } : null;
+    const refusal = firstRejection(gates, c);
+    if (refusal !== null) {
+      return { refused: refusal };
+    }
+    // Asked again at the return, not `c.step!`: ablating `update-is-a-unit-step` is a question about
+    // the CENSUS, and the node's shape is not negotiable — a `{ by: null }` renders as `n--` over a
+    // body the emitter has already dropped the real update from. So the ablation gets that gate's
+    // refusal back rather than a malformed fold.
+    if (c.step === null) {
+      return { refused: 'update-is-a-unit-step' };
+    }
+    return { name, by: c.step };
   };
 
   // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN

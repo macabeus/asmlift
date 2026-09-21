@@ -657,9 +657,8 @@ describe('preUpdateCondFold', () => {
   // the body. Everything the predicate weighs is a knob on it: which connective joins the arms,
   // which arm the variable is in, what the update spells, and who reads its result after the loop.
   //
-  // `test-is-readable` is the one refusal that needs two of those turned at once — its opaque op
-  // has to sit where the walk meets it AFTER the variable, or an earlier gate answers first and
-  // the ablation measures nothing.
+  // Each refusal is a one-fact edit of the accepted case, and each asserts WHICH gate answered, so
+  // an ablation measures the rule it names rather than whatever happened to refuse first.
   const nine = (): Value => v();
   const scaffold = (opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean } = {}) => {
     const p = v(); // the loop variable, named v1
@@ -755,7 +754,7 @@ describe('preUpdateCondFold', () => {
   });
 
   test('an update that is not a unit step has no operator to fold into', () => {
-    expect(ask(scaffold(), { updates: step(2) })).toBe(null);
+    expect(ask(scaffold(), { updates: step(2) })).toEqual({ refused: 'update-is-a-unit-step' });
   });
 
   test('ablating one-pre-update-variable repairs one variable and clobbers the other', () => {
@@ -805,16 +804,16 @@ describe('preUpdateCondFold', () => {
         new Set(['v1', 'v2']),
         gates,
       );
-    expect(both()).toBe(null);
+    expect(both()).toEqual({ refused: 'one-pre-update-variable' });
     expect(both(without(PREUPDATE_COND_GATES, 'one-pre-update-variable'))).toEqual({ name: 'v1', by: 1 });
   });
 
   test('ablating update-is-a-unit-step declines rather than minting a step-less node', () => {
     // The gate is the census entry for the refusal; the `step !== null` at the return is what keeps
     // the node well formed, so the ablation measures the message and not the type.
-    expect(ask(scaffold(), { updates: step(2), gates: without(PREUPDATE_COND_GATES, 'update-is-a-unit-step') })).toBe(
-      null,
-    );
+    expect(
+      ask(scaffold(), { updates: step(2), gates: without(PREUPDATE_COND_GATES, 'update-is-a-unit-step') }),
+    ).toEqual({ refused: 'update-is-a-unit-step' });
   });
 
   test('a test with no pre-update read at all is not this predicate’s business', () => {
@@ -831,7 +830,7 @@ describe('preUpdateCondFold', () => {
       step(1),
       writes,
     );
-    expect(post).toBe(null);
+    expect(post).toEqual({ refused: 'one-pre-update-variable' });
   });
 
   test('ablating test-is-readable folds through a respelled def', () => {
@@ -841,7 +840,7 @@ describe('preUpdateCondFold', () => {
     const f = scaffold({ leftArm: true });
     const opaque = f.defs.get(f.cond)!.operands[1];
     const respelled = new Map<Op, unknown>([[[...f.defs].find(([val]) => val === opaque)![1], 'a global member read']]);
-    expect(ask(f, { respelledDefs: respelled })).toBe(null);
+    expect(ask(f, { respelledDefs: respelled })).toEqual({ refused: 'test-is-readable' });
     expect(ask(f, { respelledDefs: respelled, gates: without(PREUPDATE_COND_GATES, 'test-is-readable') })).toEqual({
       name: 'v1',
       by: 1,
@@ -854,7 +853,7 @@ describe('preUpdateCondFold', () => {
     const f = scaffold();
     const ne = f.defs.get(f.cond)!.operands[0];
     f.defs.set(ne, mkOp('icmp_ne', { operands: [f.p, v()], results: [ne] }));
-    expect(ask(f)).toBe(null);
+    expect(ask(f)).toEqual({ refused: 'variable-named-once' });
     expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'variable-named-once') })).toEqual({ name: 'v1', by: 1 });
   });
 
@@ -865,7 +864,7 @@ describe('preUpdateCondFold', () => {
     // edge still carries `v1 + 1`, and the loop asmlift emits does not terminate where the machine
     // terminates.
     const f = scaffold({ underNot: true });
-    expect(ask(f)).toBe(null);
+    expect(ask(f)).toEqual({ refused: 'connectives-join-at-the-root' });
     expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'connectives-join-at-the-root') })).toEqual({
       name: 'v1',
       by: 1,
@@ -886,7 +885,7 @@ describe('preUpdateCondFold', () => {
     // `v0 != 0 || v1 <= 9` continues whenever the FIRST arm is true, on an iteration that never
     // evaluated the `++` — while the back edge still carries `v1 + 1`.
     const f = scaffold({ connective: 'logic_or' });
-    expect(ask(f)).toBe(null);
+    expect(ask(f)).toEqual({ refused: 'folded-on-every-continue' });
     expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'folded-on-every-continue') })).toEqual({
       name: 'v1',
       by: 1,
@@ -900,7 +899,7 @@ describe('preUpdateCondFold', () => {
     const f = scaffold();
     const outside: Block = { params: [], ops: [] };
     const seen = new Map<Value, UseSite[]>([[f.u, [use(outside)]]]);
-    expect(ask(f, { useSitesOf: seen })).toBe(null);
+    expect(ask(f, { useSitesOf: seen })).toEqual({ refused: 'folded-on-the-exit-too' });
     expect(ask(f, { useSitesOf: seen, gates: without(PREUPDATE_COND_GATES, 'folded-on-the-exit-too') })).toEqual({
       name: 'v1',
       by: 1,

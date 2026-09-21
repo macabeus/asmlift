@@ -5480,7 +5480,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // leaf, with the update copy dropped from the foot of the body. Asked only where the test is
     // already a hazard, so a loop that structures today enumerates exactly the candidates it did.
     // The polarity is the one applied to `cond` below — the continue edge must be the taken one.
-    const condFold = readsClobbered(lterm.operands[0], sub, updateWrites)
+    const condAnswer = readsClobbered(lterm.operands[0], sub, updateWrites)
       ? preUpdateCondFold(
           lterm.operands[0],
           lterm.successors[1].block === dw.header,
@@ -5493,6 +5493,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           updateWrites,
         )
       : null;
+    const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
     if (
       loopUpdateHazard(
         lterm.operands[0],
@@ -5504,8 +5505,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         condFold !== null,
       )
     ) {
+      // Three reasons share this refusal — the test, an exit slot, an escaped body value — so the
+      // one that was ASKED in detail names its gate, rather than leaving a reader to ablate for it.
       throw new StructureError(
-        `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable`,
+        `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable` +
+          (condAnswer !== null && 'refused' in condAnswer
+            ? ` (no '++' for the test's own read: ${condAnswer.refused})`
+            : ''),
       );
     }
     // The exit copies render AFTER the `dowhile` statement, but the analysis judged where each

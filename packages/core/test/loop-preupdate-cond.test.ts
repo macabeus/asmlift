@@ -76,11 +76,11 @@ test('the pre-update read in the bottom test is spelled `++`, and the update lea
 
 test('a leaf an iteration can re-enter the loop without evaluating still declines', () => {
   expect(() => emit(RETRY_COUNT_OR)).toThrow(StructureError);
-  expect(() => emit(RETRY_COUNT_OR)).toThrow(/do-while condition or a post-loop value reads a pre-update/);
+  expect(() => emit(RETRY_COUNT_OR)).toThrow(/no '\+\+' for the test's own read: folded-on-every-continue/);
 });
 
 test('an update with no `++` spelling still declines', () => {
-  expect(() => emit(RETRY_COUNT_BY_TWO)).toThrow(/do-while condition or a post-loop value reads a pre-update/);
+  expect(() => emit(RETRY_COUNT_BY_TWO)).toThrow(/no '\+\+' for the test's own read: update-is-a-unit-step/);
 });
 
 // The rewrite itself, asked the three questions the emitter's guard turns on. Nothing reaches the
