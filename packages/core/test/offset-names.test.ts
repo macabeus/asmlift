@@ -239,7 +239,11 @@ describe('what refuses', () => {
   // four-byte store at its own address. The name the gate refuses, `REG_DMA1CNT_H = 1;`, is
   // `strh` over a two-byte declaration.
   test('access-behind-merge — the access hangs off the block parameter, not off this value', () => {
-    expect(judged(DMA, MERGED)).toContainEqual(['REG_DMA0CNT_H+12', 'access-behind-merge']);
+    // ONE address, TWO sites: each arm's `adds` is its own `add` op, and each is refused.
+    expect(judged(DMA, MERGED)).toEqual([
+      ['REG_DMA0CNT_H+12', 'access-behind-merge'],
+      ['REG_DMA0CNT_H+12', 'access-behind-merge'],
+    ]);
     const out = src('walk', MERGED, DMA);
     expect(out).not.toContain('REG_DMA1CNT_H');
     expect(out).toContain('&REG_DMA0CNT_H');

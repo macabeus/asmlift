@@ -418,19 +418,23 @@ export function nameOffsetAddresses(
   return admitted.length;
 }
 
-/** Which rule refused each offset site this function builds, keyed by `<base>+<offset>`, or null
- *  where the site was named — the attribution `firstRejection` exists for. NOT on the shipped
- *  path: a caller instrumenting a refusal asks here instead of re-deriving the predicates. */
+/** Which rule refused each offset site this function builds — one entry per SITE, in block order,
+ *  as `[<base>+<offset>, reason]` with `null` where the site was named. The attribution
+ *  `firstRejection` exists for. NOT on the shipped path: a caller instrumenting a refusal asks
+ *  here instead of re-deriving the predicates.
+ *
+ *  A LIST and not a map keyed by address: two `add` ops can resolve to one address — the arms of
+ *  a merge do exactly that — and a map reports the pair as one entry, which under-reports the
+ *  refusals the caller came to count. */
 export function offsetNameRefusals(
   fn: Fn,
   symbols: SymbolMap,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
-): Map<string, string | null> {
-  const out = new Map<string, string | null>();
-  for (const s of offsetSites(fn, symbols)) {
-    out.set(`${s.sym}${s.addr.offset < 0 ? '-' : '+'}${Math.abs(s.addr.offset)}`, firstRejection(gates, s.addr));
-  }
-  return out;
+): readonly (readonly [string, string | null])[] {
+  return offsetSites(fn, symbols).map(
+    (s) =>
+      [`${s.sym}${s.addr.offset < 0 ? '-' : '+'}${Math.abs(s.addr.offset)}`, firstRejection(gates, s.addr)] as const,
+  );
 }
 
 /** THE CALLER-SIDE SEAM. The three drivers — pipeline's `runTower`, rank's `enumerateCandidates`,
