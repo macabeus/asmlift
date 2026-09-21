@@ -62,7 +62,7 @@ import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
-import { nameOffsetAddresses } from './raise/offsetnames';
+import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkStoreTails } from './raise/tailsink';
@@ -1880,7 +1880,7 @@ export function enumerateCandidates(
           // named one (raise/offsetnames.ts). Per lift setting, off that setting's own map: the
           // `/raw-globals` sibling has no map and so no name to reach.
           if (symbolSetting.symbols) {
-            nameOffsetAddresses(fn, symbolSetting.symbols);
+            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols);
           }
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {

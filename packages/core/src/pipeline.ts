@@ -28,7 +28,7 @@ import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
-import { nameOffsetAddresses } from './raise/offsetnames';
+import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
@@ -164,7 +164,7 @@ function runTower(
   // about the lift as the frontend emitted it; before everything below, so the whole raising
   // tower sees a walked-to cell as the named global it is.
   if (opts.symbols) {
-    nameOffsetAddresses(fn, opts.symbols);
+    OFFSET_NAME_PASS.run(fn, opts.symbols);
   }
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),

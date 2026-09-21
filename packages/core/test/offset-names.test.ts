@@ -190,6 +190,81 @@ describe('what refuses', () => {
     ]);
   });
 
+  test('access-unlike-target — a halfword store walked onto a word-wide name', () => {
+    const wide: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gWord', size: 4 }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(wide)).toEqual([
+      ['REG_DMA0CNT_H+12', 'access-unlike-target'],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('access-unlike-target — an unsigned halfword load walked onto a signed name', () => {
+    const readWalk = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	adds	r1, #12
+	ldrh	r0, [r1]`,
+      '.word	0x40000ba',
+    );
+    const signed: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gSigned', signed: true }]],
+    ]);
+    expect(judged(signed, readWalk)).toEqual([['REG_DMA0CNT_H+12', 'access-unlike-target']]);
+  });
+
+  test('target-unsized — the map names the neighbour but states no width for it', () => {
+    const nameOnly: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ name: 'gNeighbour', kind: 'data' as const }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(nameOnly)).toEqual([
+      ['REG_DMA0CNT_H+12', 'target-unsized'],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('a name the map states no width for is still named where nothing accesses it', () => {
+    const handOut = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	adds	r1, #12
+	adds	r0, r1, #0`,
+      '.word	0x40000ba',
+    );
+    const nameOnly: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ name: 'gNeighbour', kind: 'data' as const }]],
+    ]);
+    expect(judged(nameOnly, handOut)).toEqual([['REG_DMA0CNT_H+12', null]]);
+  });
+
+  test('const-target-store fires through the index between the walk and the store', () => {
+    const indexed = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	movs	r2, #1
+	adds	r1, #12
+	lsls	r3, r0, #1
+	adds	r3, r3, r1
+	strh	r2, [r3]`,
+      '.word	0x40000ba',
+    );
+    const rom: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [
+        0x040000c6,
+        [{ name: 'gRomTable', kind: 'data' as const, shape: 'array' as const, elemSize: 2, size: 32, const: true }],
+      ],
+    ]);
+    expect(judged(rom, indexed)).toEqual([['REG_DMA0CNT_H+12', 'const-target-store']]);
+  });
+
   test('a const-declared cell the walk only READS is named — the refusal is about the store', () => {
     const readWalk = thumb(
       'walk',
@@ -224,6 +299,7 @@ describe('the gates are load-bearing', () => {
     expect(namedWithout('interior-offset', big)).toContain('REG_DMA1CNT_H');
   });
 
+  // `base-unsized` is a COST gate, so this one records the spelling it costs rather than a guard.
   test('without `base-unsized` an unsized base is walked off as though it ended', () => {
     const unsized: SymbolMap = new Map([
       [0x040000ba, [{ name: 'gPalette', kind: 'data' as const, shape: 'array' as const, elemSize: 2 }]],
@@ -244,12 +320,20 @@ describe('the gates are load-bearing', () => {
   });
 
   test('without `target-is-code` the walk names a function', () => {
+    // A walk that only carries the address out — a store through it would be refused by
+    // `target-unsized` first, since a function symbol declares no access width.
+    const handOut = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	adds	r1, #12
+	adds	r0, r1, #0`,
+      '.word	0x40000ba',
+    );
     const code: SymbolMap = new Map([
       [0x040000ba, [reg('REG_DMA0CNT_H')]],
       [0x040000c6, [{ name: 'DoTheThing', kind: 'code' as const }]],
-      [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
-    expect(namedWithout('target-is-code', code)).toContain('DoTheThing');
+    expect(namedWithout('target-is-code', code, handOut)).toContain('DoTheThing');
   });
 
   test('without `base-is-code` an offset into a function becomes a data name', () => {
@@ -259,6 +343,22 @@ describe('the gates are load-bearing', () => {
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
     expect(namedWithout('base-is-code', fromCode)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `access-unlike-target` a halfword store onto a word-wide name becomes `str`', () => {
+    const wide: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gWord', size: 4 }]],
+    ]);
+    expect(namedWithout('access-unlike-target', wide)).toContain('gWord');
+  });
+
+  test('without `target-unsized` a name-only neighbour is stored through at the guessed width', () => {
+    const nameOnly: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ name: 'gNeighbour', kind: 'data' as const }]],
+    ]);
+    expect(namedWithout('target-unsized', nameOnly)).toContain('gNeighbour');
   });
 
   test('without `const-target-store` the store walks onto a const-declared name', () => {

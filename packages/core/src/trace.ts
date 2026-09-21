@@ -16,7 +16,7 @@ import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternAppli
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
-import { nameOffsetAddresses } from './raise/offsetnames';
+import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type ResolvedTarget, type TargetDescription, type ToolchainId, structureOptionsFor } from './target';
 
@@ -216,7 +216,7 @@ function traceTower(
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
   // runTower.
-  const named = opts.symbols ? nameOffsetAddresses(fn, opts.symbols) : 0;
+  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : 0;
   trace.push({
     id: 'stage:offsetnames',
     title: 'Name a walked-to address the symbol map knows',

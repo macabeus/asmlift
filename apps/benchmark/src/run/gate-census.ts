@@ -22,13 +22,15 @@
 //
 // WHAT PUTS A PASS IN THE REGISTRY BELOW. Seventeen passes in `packages/core/src` take their gate
 // table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
-// CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Five have
-// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, and four passes in
+// CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Six have
+// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, four passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
-// core swaps and the driver then calls. Being in `raise/` is not the seam — `raise/retsink.ts` is
-// not in that list — and a pass reached through a static import binding has none, because the
-// binding is a read-only module-namespace property — measured, not argued:
+// core swaps and the driver then calls, and `nameOffsetAddresses`, whose record stands alone
+// (`OFFSET_NAME_PASS`) because its seat in the tower is fixed rather than a position in a list. A
+// LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
+// `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has
+// none, because the binding is a read-only module-namespace property — measured, not argued:
 //
 //     import * as retsink from '@asmlift/core/raise/retsink';
 //     retsink.sinkReturns = () => false;
@@ -50,6 +52,12 @@ import {
   UNMERGE_VALUE_GATES,
   unmergeJoins,
 } from '@asmlift/core/l3/unmerge';
+import {
+  OFFSET_NAME_GATES,
+  OFFSET_NAME_PASS,
+  type OffsetAddress,
+  nameOffsetAddresses,
+} from '@asmlift/core/raise/offsetnames';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
@@ -123,6 +131,21 @@ export const PASSES: Record<string, CensusablePass> = {
         restore(fn, self, { ...opts, shortCircuit: { ...opts.shortCircuit, armReread } }, target, lifted);
       return () => {
         pass.run = restore;
+      };
+    },
+  },
+  offsetnames: {
+    // raise/offsetnames.ts's `OFFSET_NAME_GATES` — which walked-to addresses the symbol map is
+    // allowed to name. ONE table, asked once per site the walk resolves, and a site is only built
+    // where the address already bottoms out at a `gaddr` plus a non-zero constant, so the rows with
+    // no symbol map and the rows whose arithmetic stands on a parameter contribute nothing.
+    tables: [['offset', OFFSET_NAME_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      const restore = OFFSET_NAME_PASS.run;
+      const gates = w[0] as readonly Gate<OffsetAddress>[];
+      OFFSET_NAME_PASS.run = (fn, symbols) => nameOffsetAddresses(fn, symbols, gates);
+      return () => {
+        OFFSET_NAME_PASS.run = restore;
       };
     },
   },
