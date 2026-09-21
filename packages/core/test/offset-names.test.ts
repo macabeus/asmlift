@@ -305,6 +305,27 @@ describe('what refuses', () => {
     expect(judged(rom, indexed)).toEqual([['REG_DMA0CNT_H+12', 'const-target-store']]);
   });
 
+  test('an earlier link of the walk is not written by a store through a later one', () => {
+    const twoLinks = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	movs	r2, #1
+	adds	r1, #12
+	adds	r1, #12
+	strh	r2, [r1]`,
+      '.word	0x40000ba',
+    );
+    const rom: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gRomMid', const: true }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(rom, twoLinks)).toEqual([
+      ['REG_DMA0CNT_H+12', null],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
   test('a const-declared cell the walk only READS is named — the refusal is about the store', () => {
     const readWalk = thumb(
       'walk',

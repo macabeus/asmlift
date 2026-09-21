@@ -312,15 +312,24 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
   // walked address and a scaled index, so the value the gates judge is one level up from the
   // store's own base operand. Without the walk the const rule fires or not depending on whether an
   // index happens to sit in between.
+  //
+  // A CONSTANT displacement ends the closure, because it is the link that names its own cell: on
+  // `&g + 12 + 12` the store goes through the second link, and descending past it would report
+  // the first as written too — a `const` two cells back would then refuse a site nothing stores
+  // through, and `offsetNameRefusals` would publish that as this site's reason.
   const markWritten = (v: Value): void => {
     if (written.has(v)) {
       return;
     }
     written.add(v);
     const d = defOf.get(v);
-    if (d?.opcode === 'add' || d?.opcode === 'sub') {
-      d.operands.forEach(markWritten);
+    if (d?.opcode !== 'add' && d?.opcode !== 'sub') {
+      return;
     }
+    if (d.operands.some((o) => defOf.get(o)?.opcode === 'const')) {
+      return;
+    }
+    d.operands.forEach(markWritten);
   };
   const access = new Map<Value, { widths: Set<number>; signs: Set<boolean> }>();
   const accessOf = (v: Value) => access.get(v) ?? access.set(v, { widths: new Set(), signs: new Set() }).get(v)!;
