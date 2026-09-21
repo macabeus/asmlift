@@ -266,6 +266,49 @@ test('CLI: a symbols map that PARSES but declares nothing is an input error, not
   }
 });
 
+// A BARE NAME THE MAP NEVER ANSWERED ABOUT. The pool word is `gCell`; the second cell is reached
+// by `add r0, #4` and named from `addr(gCell) + 4` (raise/offsetnames.ts), so the base's address
+// in the map — not just its name — decides which cell the reader sees spelled bare.
+test('CLI: a name reached by arithmetic is published as `[walked]`', async () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'symbols.json'),
+    JSON.stringify({
+      '0x03005220': [{ name: 'gCell', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: false }],
+      '0x03005224': [{ name: 'gNext', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: false }],
+    }),
+  );
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const file = join(root, 'f.s');
+  writeFileSync(
+    file,
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tldr\tr0, .L1\n\tadd\tr0, #4\n\tldr\tr0, [r0]\n\tbx\tlr\n\t.align 2\n.L1:\n\t.word\t0x03005220\n',
+  );
+  const r = await runCli([file]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('return gNext;');
+  expect(r.stderr).toContain('[walked] 1 name(s) reached by arithmetic off a named address');
+  expect(r.stderr).toContain('gNext');
+});
+
+// The absence is the assertion: a line that is always there says nothing.
+test('CLI: a pool-loaded name alone prints no `[walked]` line', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'symbols.json'), MAP_JSON);
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const file = join(root, 'f.s');
+  writeFileSync(file, POOL_ASM);
+  const r = await runCli([file]);
+  expect(r.code).toBe(0);
+  expect(r.stderr).not.toContain('[walked]');
+});
+
 // The positive control for the test above: the SAME rig with a real map exits 0. Without it, a
 // change that made every symbols-bearing run exit 66 would pass the loudness check.
 test('CLI: the loud-rejection rig accepts a well-formed map (the control)', async () => {

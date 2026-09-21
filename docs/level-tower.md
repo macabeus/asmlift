@@ -505,32 +505,43 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   use site behind a temporary env read and reverting, with a row that DOES move
   (`synthetic:livepark` under `/livebase`) run as the positive control.
 
-  A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
+  A second consolidation is BOOKED and deliberately unpaid: the FIVE home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,
-  `homeMergeFeeds`) are one `materialize.add(op)` behind shared refusals, differing only in an
+  `homeMergeFeeds`, `homeEscapingExtensions`) are one `materialize.add(op)` behind shared refusals,
+  differing only in an
   eligibility predicate, and `rank-variations.ts` already holds them as a data table (`STRUCTURE_VARIATIONS`) —
   only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, on one
   premise: `coneHoldsAddr` excludes basecse's symbol bases through a refusal `analysis.ts` calls
-  the soundness half of its own claim, and all four scopes carry it. The const exclusion is NOT a
+  the soundness half of its own claim, and the first four scopes carry it. The fifth does NOT, and
+  the omission is deliberate rather than an oversight: its clientele is an extension, whose result
+  is never an address, so there is nothing for the refusal to exclude — which narrows the blocker's
+  premise to the four scopes that can home an address at all. The const exclusion is NOT a
   second premise — `homeMergeFeeds` deliberately admits a `const`, because a const two arms of one
   merge carry is a register the compiler reserved across the branch rather than a
   re-materialization. So "one `homeSharedValues(eligibility, placement)`" is two changes, not one:
   the analysis.ts half is available, the basecse half would require deleting a sound refusal.
 
-  The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the four already
+  The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the five already
   a standalone function with an explicit parameter list, so it is the shape the fold would take —
   and the only one whose enumeration gate (`hasMergeFeedHome`) RUNS the scope instead of
-  re-implementing it. **`hasHomeableSharedAddress` now does too**, and the shape that paid it is
+  re-implementing it. **`hasHomeableSharedAddress` now does too, and so does
+  `hasEscapingExtension`**, and the shape that paid it is
   the one the remaining two should follow: the scope became a named export
-  (`sharedBaseClasses(fn, ignoreRet)`), the gate CALLS it, so the SCOPE has one definition. Where
+  (`sharedBaseClasses(fn, ignoreRet)` / `escapingExtensions(fn, ignoreRet)`), the gate CALLS it, so
+  the SCOPE has one definition. Where
   the gate stays looser than `analyze` it is loose in TWO places, not one, and only the first is a
   parameter: `ignoreRet`, because a `ret` operand may be a void phantom the gate cannot know
-  about; and the loop-header SEAT refusal (`multiBlockHeaders`), which the gate omits because it
+  about — and for the fifth scope a dropped `ret` operand moves the answer in BOTH directions, so
+  `hasEscapingExtension` asks under both readings rather than picking one; and the loop-header SEAT
+  refusal (`multiBlockHeaders`), which the gate omits because it
   needs the loop model. The second is the one to watch — it is a clause of the variation's third scope
   rather than an argument to the shared predicate, so calling `sharedBaseClasses` does not carry
   it, and what makes the omission safe is that the seat refusal is applied in the scope on every
   candidate the gate enumerates (an over-admitting gate costs one duplicate-collapsed candidate,
-  never a wrong one). So the debt is two, not three: `hasLoopSharedPureValue` and
+  never a wrong one). The FIFTH scope carries the same clause for the same reason, and there it is
+  weaker than a guard: four constructions of its shape decline before any variation is consulted,
+  so it has no structurable inhabitant to price (`escape-home.test.ts`). So the debt is still two:
+  `hasLoopSharedPureValue` and
   `hasDerivedReadHome` still restate their
   scope's predicate by hand, whose safety rests on every copy staying no stricter than the scope it
   mirrors, with nothing checking that and nothing in the harness reporting a candidate that was
@@ -543,6 +554,18 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   one field per pass, the L1 analogue of `AnalyzeOptions`. Absorbing it into `STRUCTURE_VARIATIONS`
   still needs one more gate KIND, since what is shipped is a side-effecting report rather than a
   `perLiftGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
+
+  A THIRD is booked and unpaid, and it is a per-function predicate deciding a per-site question —
+  the shape `joined-branch-sense-decidable` names. `structure.ts`'s `scalarGlobals` is one set per
+  FUNCTION: `bumpAgg` fires on any `add`/`sub` whose operand is the symbol's address, so ONE
+  interior access drops the name from the set, and the bare spelling and the `volatile` qualifier
+  both hang off it at EVERY site including the off-0 ones — `gVolA = 0;` becomes
+  `*(u16 *)&gVolA = 0;` beside one walk to an address nothing is named at. `raise/offsetnames.ts`
+  removes the cause for the subset where the map holds a symbol at the walked-to address, which is
+  a rewrite and not an answer: every site that pass REFUSES still poisons its base. The answer is a
+  per-site classification, which is a corpus-wide structure change rather than one round's work,
+  and the price of not paying it is that a refusal in that pass is safe about its own bytes and not
+  free elsewhere.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three output languages. Every language-specific decision
@@ -718,16 +741,22 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   dirty, and that a module duplicate censuses zero silently — all three measured in
   `apps/benchmark/src/run/gate-census.ts`'s header).
 
-  **What makes a pass censusable is a fact about its CALLER.** Seventeen passes in `packages/core/src`
-  take their table as a parameter; FIVE of them can be censused, because `rank-variations.ts` and
-  `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_RESPELL_VARIATIONS`,
-  and the branch short-circuit fold, `member-arrays`, `narrowlocal` and `paramwidth` in
-  `PRE_RECOVERY_PASSES` — and two are registered (`--pass unmerge`, `--pass arm-reread`). A pass
+  **What makes a pass censusable is a fact about its CALLER.** Many passes in `packages/core/src`
+  take their table as a parameter (`git grep -lE "gates\??: readonly Gate<" packages/core/src`);
+  SIX of them can be censused, because three files hold their callers in mutable records —
+  `/unmerge` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`; the branch short-circuit fold,
+  `member-arrays`, `narrowlocal` and `paramwidth` in `raise/pre-recovery.ts`'s
+  `PRE_RECOVERY_PASSES`; and `nameOffsetAddresses` in its own `OFFSET_NAME_PASS`, a record with no
+  list around it because its seat in the tower is fixed rather than a position — and three are
+  registered (`--pass unmerge`, `--pass arm-reread`, `--pass offsetnames`). A pass
   reached only through a static import has no seam — the binding is read-only
   (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_) — and `raise/retsink.ts` is
   one: the seam is the record, not the directory. So for any other pass the cost of an entry in that
   registry is a seam, not a wrapper — and a pass that wants to be censusable should be given one
-  when its caller is written, which is cheap then and a redesign later.
+  when its caller is written, which is cheap then and a redesign later. A record with no list also
+  gives up the invariant a list carries — `PRE_RECOVERY_PASSES` reaches every driver, three
+  hand-written calls do not — so it owes a test that asserts each driver reaches it
+  (`offset-names.test.ts`).
 
   **A census is FIRST REJECTIONS, which is not reach.** The other column is what an ablation MOVES,
   and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, exactly one moves a row.

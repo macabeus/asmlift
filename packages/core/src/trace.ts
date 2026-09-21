@@ -16,6 +16,7 @@ import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternAppli
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
+import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type ResolvedTarget, type TargetDescription, type ToolchainId, structureOptionsFor } from './target';
 
@@ -210,6 +211,21 @@ function traceTower(
         : [...inferredSymbols.values()]
             .map((i) => `${i.name}: elem ${i.elemSize} ${i.elemSigned ? 'signed' : 'unsigned'}${dimsNote(i)}`)
             .join('; '),
+  });
+
+  // The names the map holds for addresses this machine code built by arithmetic off a named one
+  // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
+  // runTower.
+  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
+  trace.push({
+    id: 'stage:offsetnames',
+    title: 'Name a walked-to address the symbol map knows',
+    irDump: irDump(fn),
+    verified: true,
+    note:
+      named.length === 0
+        ? 'no address built off a named one lands on a symbol the map names'
+        : `${named.length} address${named.length === 1 ? '' : 'es'} named: ${named.join(', ')}`,
   });
 
   // (2) idiom fold (capability-gated), with an optional probed score per pattern boundary —

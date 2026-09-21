@@ -7231,6 +7231,32 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 sinkacc(void);',
   },
   {
+    // THE ESCAPING NARROW (rank.ts `/escape-home`): a `u16` local assigned a call's result inside
+    // the inner loop, then read by the outer latch and by the return — two blocks, neither the one
+    // that narrowed. agbcc narrows at the assignment (`lsls`/`lsrs` into a register, inside the
+    // loop) and both later blocks read that register; the default spelling has no name there and
+    // writes `(u16)` out again at each reader, for 5/23.
+    //
+    // THE NARROW LOCAL IS WHAT PUTS THE SHAPE HERE, measured rather than assumed: spelled `s32 v`
+    // with the casts at the two readers, the same function compiles with the `lsls`/`lsrs` AFTER
+    // the loop, in the latch block that also tests it — consumed at home, and out of this scope.
+    // The corpus's other inhabitants are all real rows, so without this one a refactor that loses
+    // the scope fails nothing local.
+    sym: 'esccast',
+    src:
+      'extern s32 poll(u16 i);\n' +
+      's32 esccast(void){\n' +
+      '  u16 v; u32 n; u32 i;\n' +
+      '  n = 0;\n' +
+      '  do { i = 0; do { v = poll((u16)i); i = i + 1; } while (i <= 63); } while (v != 0 && n++ <= 9);\n' +
+      '  return v;\n' +
+      '}',
+    features: ['value-home'],
+    toolchains: ['agbcc'],
+    ctx: 's32 poll(u16 i); s32 esccast(void);',
+    proto: { poll: { params: 1 } },
+  },
+  {
     sym: 'calad',
     src:
       'extern u8 gGrid[5][7];\n' +

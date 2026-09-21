@@ -1590,6 +1590,10 @@ export interface StructureOptions {
   // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
   // variation — see analysis.ts AnalyzeOptions.
   homeMergeFeeds?: boolean;
+  // Materialize a `zext`/`sext` with 2+ consumers, none of them in its own block — the register the
+  // asm narrowed into once and every later block read. Off by default; rank.ts enumerates the ON
+  // spelling as the `/escape-home` variation — see analysis.ts AnalyzeOptions.
+  homeEscapingExtensions?: boolean;
   // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
   // block that block strictly dominates. A compiler behavior (TargetDescription
   // .compilerBehaviors), not a differ-refereed variation: where the compiler has neither a scheduler
@@ -1742,6 +1746,7 @@ function assertDefaultAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeLoopExprs: false,
       homeDerivedReads: false,
       homeMergeFeeds: false,
+      homeEscapingExtensions: false,
       anchorConstCopies: false,
       anchorLoopEntryConsts: false,
       followEarlyReturns: false,
@@ -1911,6 +1916,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeLoopExprs = false,
     homeDerivedReads = false,
     homeMergeFeeds = false,
+    homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -1967,6 +1973,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeLoopExprs ||
     homeDerivedReads ||
     homeMergeFeeds ||
+    homeEscapingExtensions ||
     anchorConstCopies ||
     followEarlyReturns
   ) {
@@ -1998,6 +2005,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       homeLoopExprs,
       homeDerivedReads,
       homeMergeFeeds,
+      homeEscapingExtensions,
       readsStayWhereWritten,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {

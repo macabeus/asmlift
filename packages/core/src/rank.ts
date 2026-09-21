@@ -62,6 +62,7 @@ import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
+import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkStoreTails } from './raise/tailsink';
@@ -1875,6 +1876,13 @@ export function enumerateCandidates(
           // declaration. A map that names the symbol an array takes the access to a bare `var`
           // base anyway, which carries no licence: the two never meet.
           orderLicensed = orderLicensedGlobals(fn, target);
+          // …and the NAMES the map holds for the addresses this lift built by arithmetic off a
+          // named one (raise/offsetnames.ts). Per lift setting, off that setting's own map: the
+          // `/raw-globals` sibling has no map and so no name to reach. AFTER the two readings, and
+          // the staleness that leaves them is priced in pipeline.ts's copy of this note.
+          if (symbolSetting.symbols) {
+            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols);
+          }
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {
               inferredSymbols.delete(n);

@@ -58,6 +58,12 @@
 //   u16 v; … *out = v;                  zext16                 4     0 MATCH
 //   s32 v; … *out = (u16)v;             zext16             0 MATCH       4
 //
+// A THIRD SPELLING of rows three and four is the `/escape-home` variation's
+// (structure/analysis.ts `escapingExtensions`): keep `s32 v` and give the truncation a NAME where
+// it happened, `t = (u16)v`. It is not an alternative to this pass — it judges an extension's
+// result where this one judges a block PARAMETER — and it is a ranked candidate where this is a
+// decision, so neither can take the other's input.
+//
 // Rows one and two are DECIDABLE by the carrier's own readers: a `zext_w` read by a `sext_w` is the
 // write-back truncation followed by the declaration's own sign extension, and no cast on a wide
 // local writes that pair. Rows three and four are the same IR in this pass's READER vocabulary —

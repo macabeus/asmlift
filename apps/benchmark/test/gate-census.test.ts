@@ -39,11 +39,11 @@ const emptyArmSite = (): SFn => ({
 const unmergeVariation = () => PRE_RESPELL_VARIATIONS.find((p) => p.name === 'unmerge')!;
 
 describe('the gate census seam', () => {
-  it('names the two registered passes', () => {
+  it('names the registered passes', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
-    // caller-side seam and what an entry costs, so a third entry has to re-open that paragraph
+    // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
-    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread']);
+    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'offsetnames']);
   });
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {

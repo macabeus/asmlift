@@ -494,6 +494,16 @@ export function isScalarCellSize(size: number | undefined): size is 1 | 2 | 4 {
   return size === 1 || size === 2 || size === 4;
 }
 
+/** THE SIGNEDNESS AN ACCESS OF THIS WIDTH STATES. A sub-word load says in the instruction whether
+ *  it sign- or zero-fills; a whole-word one performs no extension at all, so whatever `signed`
+ *  its attrs carry says nothing about the cell. Every comparison between an access and a
+ *  declaration normalizes both sides through here — `rank-declare.ts`'s `bareGlobalAccessFacts`
+ *  for a bare name over a whole function, `raise/offsetnames.ts` for the accesses made through one
+ *  address — or a 4-byte load's incidental attr decides a declaration. */
+export function accessSignedness(width: number, signed: boolean | undefined): boolean {
+  return signed === true && width < 4;
+}
+
 /** THE DECLARED type of a 1/2/4-byte scalar cell — what `extern T gSym;` synthesis writes, and
  *  therefore what `&gSym` actually points to.
  *

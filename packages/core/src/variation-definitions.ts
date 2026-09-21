@@ -734,6 +734,32 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: ANALYSIS,
     seeAlso: ['expr-home', 'fresh-merge'],
   },
+  'escape-home': {
+    title: 'Narrowed value named where it was narrowed',
+    summary: 'a widening or narrowing whose readers are all elsewhere is computed once, at its own place',
+    detail:
+      'A value narrowed or widened from another, read two or more times and never in the place it was ' +
+      'computed, gets a local there — the register the machine narrowed into once and every later block ' +
+      'read. By default the cast is written out again at each reader.',
+    offeredWhen: {
+      when: "A symbol-map setting's own lift narrows or widens a value whose two or more readers are all elsewhere.",
+      decidedBy: { symbol: 'hasEscapingExtension', file: ANALYSIS },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 's32 example(void) { @ }',
+      before:
+        's32 v; u32 n; u32 i; n = 0; ' +
+        'do { i = 0; do { v = f(); i = i + 1; } while (i <= 63); } while ((u16)v != 0 && n++ <= 9); ' +
+        'return (u16)v;',
+      after:
+        's32 v; s32 t; u32 n; u32 i; n = 0; ' +
+        'do { i = 0; do { v = f(); t = (u16)v; i = i + 1; } while (i <= 63); } while (t != 0 && n++ <= 9); ' +
+        'return t;',
+    },
+    implementedIn: ANALYSIS,
+    seeAlso: ['expr-home', 'derived-home'],
+  },
   'uns-cmp': {
     title: 'Unsigned compare spelled unsigned',
     summary: 'an unsigned compare carries a `(u32)` cast where its operands do not already say so',
