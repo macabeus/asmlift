@@ -316,6 +316,53 @@ describe('sinkablePreUpdateSlots', () => {
     );
   });
 
+  test('a read from ANOTHER body block is refused even though the arg itself is a latch op', () => {
+    // The tree straddles two blocks: the load is in `mid`, the add that computes the arg is in the
+    // latch, so the copy HAS a position and the blanket refusal does not apply. Rebuilt there the
+    // load moves across whole blocks — everything `mid` and the latch do between it and the add —
+    // which the between-scan does not walk and cannot bound. The one-fact control puts the same
+    // load in the latch next to its consumer, where it moves past nothing and is admitted.
+    const { p, q, header, exit, latch } = scaffold();
+    const rd = v();
+    const e = v();
+    const rdOp = mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } });
+    const mid: Block = { params: [], ops: [rdOp] };
+    const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
+    const body = new Set([header, mid]);
+    const deps = {
+      defs: new Map([
+        [rd, rdOp],
+        [e, op],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    };
+    const split = make({
+      ...deps,
+      opBlock: new Map([
+        [rdOp, mid],
+        [op, header],
+      ]),
+    });
+    const args = [e];
+    expect(split.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Map());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate');
+    expect(split.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
+      new Map([[0, op]]),
+    );
+    header.ops.unshift(rdOp);
+    const together = make({
+      ...deps,
+      opBlock: new Map([
+        [rdOp, header],
+        [op, header],
+      ]),
+    });
+    expect(together.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
+  });
+
   test('ablating arg-reads-current-names admits an arg over a body-computed name', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const mid = v();

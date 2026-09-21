@@ -485,12 +485,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
-    // slot its own block on the taken edge rather than a later index in the latch, and the
-    // `opBlock` test above then refuses it as a def elsewhere. No non-agbcc row inhabits this scan.
+    // slot its own block on the taken edge rather than a later index in the latch, and `i < 0`
+    // then refuses it as a def this block does not hold. No non-agbcc row inhabits this scan.
+    //
+    // A def in ANOTHER block is refused by that same `i < 0` and needs no test of its own: the
+    // copy's position is in the latch, so the two are separated by whole blocks nothing here walks.
     const movesPast = (d: Op, home: Op): boolean => {
-      if (opBlock.get(d) !== latch) {
-        return true;
-      }
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
       return i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
