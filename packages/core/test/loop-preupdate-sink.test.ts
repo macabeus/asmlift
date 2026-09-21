@@ -8,6 +8,17 @@
 // guard-fused `while` (which must also SEED the copy for the zero-trip path it fuses away) and
 // the `do-while` (which needs no seed: its body always runs).
 //
+// WHICH CORPUS ROWS REACH THE SINK, logged over the whole agbcc population (`pnpm bench run --tier
+// synthetic --toolchain agbcc`, 315 rows, exit 0): five symbols sink a copy. `preupdate_exit` and
+// `preupdate_exit_pure` are homed at the latch's SECOND op; the `reread` family's three MATCH
+// controls — `ereadctl`, `ername`, `rereadctl` — at its first, whose def renders no statement of its
+// own, so for them the two placements spell the same body. Emitting every admitted copy at the top
+// of the body instead takes `preupdate_exit_pure` from MATCH to diff:2/14 and leaves those three
+// MATCHing, so the position is load-bearing for a row and the three controls are indifferent to it
+// rather than protected by it. A RECORD of a measurement, not a live check: the position is pinned
+// by `a sunk copy is rebuilt at the op that computed its value` below, and at the seam by
+// hazards.test.ts's `an admitted slot carries the position it was cleared at`.
+//
 // A refusal test that declines for the WRONG reason reads as a pass, so each one pins the message
 // and carries a positive control: either the accepted fixture emitted first, or — where the
 // refusal turns on one fact — the same IR with that fact changed. The two body-rebind fixtures are
@@ -116,9 +127,9 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
   );
 });
 
-// The exit arg COMPUTES from the loop variable instead of being it. The copy is REBUILT at the top
-// of the body, where the loop variable's name still holds the value the edge read, so the
-// arithmetic is spelled again there rather than moved.
+// The exit arg COMPUTES from the loop variable instead of being it. The copy is REBUILT inside the
+// body, where the loop variable's name still holds the value the edge read, so the arithmetic is
+// spelled again there rather than moved.
 const TRAILING_PTR_EXPR = TRAILING_PTR.replace(
   '  cond_br %5, ^bb1(%4), ^bb2(%3, %4)',
   '  %9: s32* = add %3, %0\n  cond_br %5, ^bb1(%4), ^bb2(%9, %4)',
@@ -168,7 +179,7 @@ const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 }
 `;
 
-test('do-while: a PURE computed exit arg is rebuilt at the top of the body', () => {
+test('do-while: a PURE computed exit arg is rebuilt inside the body', () => {
   expect(TRAILING_DOWHILE_EXPR).not.toBe(TRAILING_DOWHILE); // the one-fact edit landed
   // `v3 = v0 + 1` where the bare-variable fixture writes `v3 = v0`: the same slot, the same place,
   // the arithmetic the edge carried spelled again over the name that still holds v0 there.
@@ -250,9 +261,49 @@ test('a seed that would overwrite a value the loop init reads declines', () => {
   expect(() => emit(SEED_CLOBBERS_INIT)).toThrow(/loop initialisation reads/);
 });
 
-// REFUSAL — an early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree
-// rebuilt at the top of the body is one that iteration never evaluated. Harmless for arithmetic,
-// not for a divide: at `a0 == 0` the IR returns without dividing and the C would divide first.
+// WHERE the rebuilt copy lands. The body STORES before it computes the exit arg, so the two
+// statements have an order the target's code fixes, and only one of them is the order the source
+// wrote: the copy belongs at the shift, which is where the loop already evaluated it. Emitted
+// opening the body instead it would re-evaluate the tree ahead of a store it originally followed —
+// which is also the motion `arg-safe-to-reevaluate` exists to refuse.
+const SUNK_AFTER_A_STORE = `fn sunkafterstore {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gbuf"}
+  br ^bb1(%0)
+^bb1(%2: s32):
+  store %1, %2 {off=0, width=4}
+  %3: s32 = const {value=3}
+  %4: s32 = shl %2, %3
+  %5: s32 = const {value=1}
+  %6: s32 = sub %2, %5
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_ne %6, %7
+  cond_br %8, ^bb1(%6), ^bb2(%4)
+^bb2(%9: s32):
+  ret %9
+}
+`;
+
+test('a sunk copy is rebuilt at the op that computed its value, not ahead of the body', () => {
+  expect(emit(SUNK_AFTER_A_STORE)).toBe(
+    's32 sunkafterstore(s32 a0) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = a0;\n' +
+      '    do {\n' +
+      '        gbuf = v0;\n' +
+      '        v1 = v0 << 3;\n' +
+      '        v0 = v0 - 1;\n' +
+      '    } while (v0 != 0);\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
+});
+
+// An early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree rebuilt at the
+// TOP of the body is one that iteration never evaluated — for a divide, a fault where the IR
+// returned. Rebuilt at the divide's OWN position the question does not arise: that position is in
+// the latch, which the arm has already declined to leave.
 const SPECULATED_DIVIDE = `fn specarm {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -278,11 +329,28 @@ const SPECULATED_DIVIDE = `fn specarm {
 }
 `;
 
-test('a trapping op in the tree is not rebuilt at the top of the body — an arm may leave first', () => {
-  // Positive control: the SAME shape with the divide replaced by a multiply does sink, so this is
-  // a refusal about the opcode and not about the arm.
-  expect(emit(SPECULATED_DIVIDE.replace('sdiv %3, %0', 'mul %3, %0'))).toContain('v1 = v0 * a0;');
-  expect(() => emit(SPECULATED_DIVIDE)).toThrow(/pre-update loop variable/);
+test('a trapping op is rebuilt at its own position, behind the arm that leaves first', () => {
+  // The arm's `return` is emitted AHEAD of the copy, so the divide runs on exactly the iterations
+  // the IR divided on. Replacing it with a multiply — the one fact the placement cannot depend on —
+  // emits the same loop with the same statement in the same place.
+  expect(emit(SPECULATED_DIVIDE)).toBe(
+    's32 specarm(s32 a0, s32 a1) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = 0;\n' +
+      '    do {\n' +
+      '        if (a1 >= 0) {\n' +
+      '            if (a0 == 0) return v0;\n' +
+      '        }\n' +
+      '        v1 = v0 / a0;\n' +
+      '        v0 = v0 + 1;\n' +
+      '    } while (v0 < a1);\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
+  expect(emit(SPECULATED_DIVIDE.replace('sdiv %3, %0', 'mul %3, %0'))).toBe(
+    emit(SPECULATED_DIVIDE).replace('v1 = v0 / a0;', 'v1 = v0 * a0;'),
+  );
 });
 
 // REFUSAL — a merge inside the body writes a loop variable's NAME (a body param adopts it), and

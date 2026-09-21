@@ -1318,30 +1318,38 @@ export const SYNTHETIC: SynthSpec[] = [
   // ONE decline message, THREE causes, which is the point of authoring several rows: the message
   // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
-  // after the loop deriving from it. Only the middle one reaches the repair that already exists
-  // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
-  // `arg-safe-to-reevaluate` gate (PREUPDATE_SINK_GATES, structure/hazards.ts): the row's exit
-  // arg `*q + n` reads memory, so its def-tree cannot be rebuilt at the top of the body. That gate
-  // is the memory-read tier alone — the PURE tier the real functions inhabit passes it, and
-  // `preupdate_exit_pure` recovers at 2 with the copy sunk into the body.
+  // after the loop deriving from it. Only the EDGE reaches the repair that exists
+  // (`sinkablePreUpdateSlots`, the trailing-pointer sink), which rebuilds the copy at the op the
+  // arg's value was computed at. The sink repairs exit SLOTS, and the other two rows have none to
+  // repair: instrumented, `preupdate_cond` declines on the CONDITION with its one exit arg clean,
+  // and `preupdate_escape` on an escaped body value with no exit arg at all.
   //
   // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
-  // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one
-  // can be placed at the top of the body at all. Measured over the corpus, the tree is PURE
+  // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one can
+  // be rebuilt at that op at all. Measured over the corpus, the tree is PURE
   // arithmetic over a loop variable in 11 of 12 (`preupdate_exit_pure`), a memory READ in none
   // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`).
   //
-  // So the three EXIT rows are the three tiers, not three copies: a fix for the pure tier closes
-  // the real bucket, and the other two are what say it did not overreach. The CALL tier clears the
-  // guard on "a post-loop value inlines a 'call' from inside the loop": `structure/analysis.ts`
+  // So the EXIT rows are the tiers of that tree, not copies of one row: a fix for the pure tier
+  // closes the real bucket, and the others are what say it did not overreach. The CALL tier clears
+  // the guard on "a post-loop value inlines a 'call' from inside the loop": `structure/analysis.ts`
   // materializes any call whose value rides a branch edge — the placement that guard refuses — so
   // `preupdate_exit_call` RECOVERS, at 2, with `cb` inside the loop where the asm calls it. What
   // still reaches that guard is an `opaque`, the other member of `REPEATED_EFFECT`, for which no
   // such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
   // harder of the two shapes the corpus has — ten of the twelve have no effect in the latch block
   // at all, and `LoadBGTilemapData`, the function this link is being walked for, is the one that
-  // does. A pure tree may be recomputed across it; a tree that read memory could not.
+  // does. Neither tier is recomputed ACROSS that store: the copy is rebuilt at its own def, BEHIND
+  // it, which is also what lets the memory-read tier through — `preupdate_exit` and
+  // `preupdate_exit_pure` both MATCH.
+  //
+  // WHAT THE SINK STILL REFUSES IS ORDER, and `preupdate_exit_order` is the row that carries it:
+  // `*q + cb(q)`, where agbcc calls first and loads second, so an op the copy must not cross sits
+  // BETWEEN the read and the point it would be rebuilt at. That is the one shape
+  // `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES, structure/hazards.ts) turns away, so without
+  // this row the gate would refuse nothing a command can show. It is also the shape no C spelling
+  // could pin: `+` leaves its operands' evaluation order unspecified even where both values agree.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
@@ -1395,6 +1403,21 @@ export const SYNTHETIC: SynthSpec[] = [
       'as a second refusal behind the pre-update one; that second refusal has since been removed at ' +
       'its cause (a call feeding a branch edge is materialized where the asm ran it), so the row ' +
       'scores instead of declining and it is now the pre-update link alone that it measures',
+  },
+  {
+    sym: 'preupdate_exit_order',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit_order(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { r = *q + cb(q); q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note:
+      'an exiting edge whose value is a memory READ and a CALL added together (`*q + cb(q)`). agbcc ' +
+      'emits the call, then the load, then the add, so rebuilding the read at the add would move it ' +
+      'across the call — the sink refuses, and the decline is the whole point of the row',
   },
   {
     sym: 'preupdate_escape',

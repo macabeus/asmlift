@@ -86,7 +86,7 @@
 //   • `sitesOf` widens where a loop emitter may MOVE a copy, but the read side does not follow. For
 //     a block parameter `clobbers` falls to `liveIn` of the widened site, and a parameter's SSA def
 //     point is its own block's entry, not the position the emitter actually writes it at — so a
-//     header definition is not seen to clobber a value the sink copies to the top of the body. The
+//     header definition is not seen to clobber a value the sink copies into the body. The
 //     slot that is actually sunk is unreachable (its exit arg is a header parameter, which
 //     `loop-escape` rejects); reaching it needs a second, non-loop predecessor of the exit block
 //     passing the header's definition into the same slot, and no input has been built that does.
