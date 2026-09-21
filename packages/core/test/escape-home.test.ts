@@ -138,3 +138,44 @@ test('REFUSES a pure value that is not an extension', () => {
   expect(hasEscapingExtension(parse(ESCAPING_XOR))).toBe(false);
   expect(emit(ESCAPING_XOR, true)).toBe(emit(ESCAPING_XOR, false));
 });
+
+// THE SEAT REFUSAL, the one clause of the rule that is not in the scope: a multi-block loop header
+// seats no temp — only its test-at-top condition renders there. NO STRUCTURABLE INHABITANT was
+// found for it: in four constructions a header defining a multi-consumer value that escapes its own
+// block declines before any variation is consulted, and it declines the same way with a plain `xor`
+// in the extension's place, so the shape rather than the scope is what the structurer refuses. What
+// this pins is therefore the property that holds whatever the structurer later learns — the
+// variation neither reaches nor changes it.
+const LOOP_HEADER_SEAT = `fn seat {
+^bb0(%0: s32*):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = load %0 {off=0, width=4, signed=1}
+  %13: s32 = zext %4 {width=16}
+  %5: u32 = icmp_ne %4, %3
+  cond_br %5, ^bb2(%3), ^bb3()
+^bb2(%6: s32):
+  %7: s32 = const {value=1}
+  %8: s32 = add %6, %7
+  br ^bb1(%8)
+^bb3():
+  %15: u32 = icmp_ne %13, %2
+  %14: s32 = add %15, %13
+  ret %14
+}
+`;
+
+/** The emitted source, or the refusal — so a shape the structurer declines is still comparable. */
+const emitted = (ir: string, on: boolean): string => {
+  try {
+    return emit(ir, on);
+  } catch (e) {
+    return `declined: ${(e as Error).message}`;
+  }
+};
+
+test('a multi-block loop header is a seat the variation neither reaches nor changes', () => {
+  expect(hasEscapingExtension(parse(LOOP_HEADER_SEAT))).toBe(true);
+  expect(emitted(LOOP_HEADER_SEAT, true)).toBe(emitted(LOOP_HEADER_SEAT, false));
+});

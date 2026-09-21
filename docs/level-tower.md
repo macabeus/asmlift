@@ -505,32 +505,43 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   use site behind a temporary env read and reverting, with a row that DOES move
   (`synthetic:livepark` under `/livebase`) run as the positive control.
 
-  A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
+  A second consolidation is BOOKED and deliberately unpaid: the FIVE home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,
-  `homeMergeFeeds`) are one `materialize.add(op)` behind shared refusals, differing only in an
+  `homeMergeFeeds`, `homeEscapingExtensions`) are one `materialize.add(op)` behind shared refusals,
+  differing only in an
   eligibility predicate, and `rank-variations.ts` already holds them as a data table (`STRUCTURE_VARIATIONS`) —
   only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, on one
   premise: `coneHoldsAddr` excludes basecse's symbol bases through a refusal `analysis.ts` calls
-  the soundness half of its own claim, and all four scopes carry it. The const exclusion is NOT a
+  the soundness half of its own claim, and the first four scopes carry it. The fifth does NOT, and
+  the omission is deliberate rather than an oversight: its clientele is an extension, whose result
+  is never an address, so there is nothing for the refusal to exclude — which narrows the blocker's
+  premise to the four scopes that can home an address at all. The const exclusion is NOT a
   second premise — `homeMergeFeeds` deliberately admits a `const`, because a const two arms of one
   merge carry is a register the compiler reserved across the branch rather than a
   re-materialization. So "one `homeSharedValues(eligibility, placement)`" is two changes, not one:
   the analysis.ts half is available, the basecse half would require deleting a sound refusal.
 
-  The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the four already
+  The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the five already
   a standalone function with an explicit parameter list, so it is the shape the fold would take —
   and the only one whose enumeration gate (`hasMergeFeedHome`) RUNS the scope instead of
-  re-implementing it. **`hasHomeableSharedAddress` now does too**, and the shape that paid it is
+  re-implementing it. **`hasHomeableSharedAddress` now does too, and so does
+  `hasEscapingExtension`**, and the shape that paid it is
   the one the remaining two should follow: the scope became a named export
-  (`sharedBaseClasses(fn, ignoreRet)`), the gate CALLS it, so the SCOPE has one definition. Where
+  (`sharedBaseClasses(fn, ignoreRet)` / `escapingExtensions(fn, ignoreRet)`), the gate CALLS it, so
+  the SCOPE has one definition. Where
   the gate stays looser than `analyze` it is loose in TWO places, not one, and only the first is a
   parameter: `ignoreRet`, because a `ret` operand may be a void phantom the gate cannot know
-  about; and the loop-header SEAT refusal (`multiBlockHeaders`), which the gate omits because it
+  about — and for the fifth scope a dropped `ret` operand moves the answer in BOTH directions, so
+  `hasEscapingExtension` asks under both readings rather than picking one; and the loop-header SEAT
+  refusal (`multiBlockHeaders`), which the gate omits because it
   needs the loop model. The second is the one to watch — it is a clause of the variation's third scope
   rather than an argument to the shared predicate, so calling `sharedBaseClasses` does not carry
   it, and what makes the omission safe is that the seat refusal is applied in the scope on every
   candidate the gate enumerates (an over-admitting gate costs one duplicate-collapsed candidate,
-  never a wrong one). So the debt is two, not three: `hasLoopSharedPureValue` and
+  never a wrong one). The FIFTH scope carries the same clause for the same reason, and there it is
+  weaker than a guard: four constructions of its shape decline before any variation is consulted,
+  so it has no structurable inhabitant to price (`escape-home.test.ts`). So the debt is still two:
+  `hasLoopSharedPureValue` and
   `hasDerivedReadHome` still restate their
   scope's predicate by hand, whose safety rests on every copy staying no stricter than the scope it
   mirrors, with nothing checking that and nothing in the harness reporting a candidate that was

@@ -402,20 +402,29 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   return false;
 }
 
-/** rank.ts's enumeration gate for the `/escape-home` variation: does the function HAVE a value the
- *  variation would home — a `zext`/`sext` with 2+ distinct consumers, none of them in its own block?
+/** The `/escape-home` variation's SCOPE, as one definition the variation's rule and its enumeration
+ *  gate both read: a `zext`/`sext` with 2+ distinct consumers, none of them in its own block. A
+ *  successor ARG counts as a use in the block whose terminator carries it, which is where the edge
+ *  copy is emitted, so an edge-fed value is never mistaken for one that escaped.
  *
- *  Mirrors the variation's scope exactly but for the loop-header seat refusal, which needs the loop
- *  model; a false positive there costs one duplicate-collapsed candidate, never a wrong one. It
- *  diverges once more, in the same direction `hasDerivedReadHome` does: `analyze` drops a void
- *  function's `ret` operand as a phantom and this counts it, so a value whose second consumer is a
- *  suppressed return is enumerated here and refused there — again a collapsed duplicate. */
-export function hasEscapingExtension(fn: Fn): boolean {
+ *  `ignoreRet` is the one fact the gate cannot know, on the same terms as `sharedBaseClasses`':
+ *  `analyze` drops a void function's `ret` operand as a phantom, and a dropped operand moves this
+ *  answer in BOTH directions — it can take a value below two consumers, and it can remove the
+ *  at-home use that disqualified one. Which is why the gate asks under both readings rather than
+ *  picking the one that happens to admit more.
+ *
+ *  The seat refusal (`multiBlockHeaders`) is NOT here: it needs the loop model, it is a clause of
+ *  the rule rather than of the scope, and over-admitting at the gate costs one duplicate-collapsed
+ *  candidate. */
+export function escapingExtensions(fn: Fn, ignoreRet: boolean): Set<Op> {
   const consumers = new Map<Value, Set<Op>>();
   const blockOf = new Map<Op, Block>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       blockOf.set(op, b);
+      if (ignoreRet && op.opcode === 'ret') {
+        continue;
+      }
       const use = (v: Value) => (consumers.get(v) ?? consumers.set(v, new Set()).get(v)!).add(op);
       for (const o of op.operands) {
         use(o);
@@ -427,6 +436,7 @@ export function hasEscapingExtension(fn: Fn): boolean {
       }
     }
   }
+  const out = new Set<Op>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode !== 'zext' && op.opcode !== 'sext') {
@@ -434,11 +444,18 @@ export function hasEscapingExtension(fn: Fn): boolean {
       }
       const cs = consumers.get(op.results[0]);
       if (cs !== undefined && cs.size >= 2 && [...cs].every((c) => blockOf.get(c) !== b)) {
-        return true;
+        out.add(op);
       }
     }
   }
-  return false;
+  return out;
+}
+
+/** rank.ts's enumeration gate for `/escape-home`: does the function HAVE a value the variation
+ *  would home? It RUNS the scope rather than restating it — see `escapingExtensions` for the one
+ *  divergence left, and `sharedBaseClasses` for the shape this follows. */
+export function hasEscapingExtension(fn: Fn): boolean {
+  return escapingExtensions(fn, false).size > 0 || escapingExtensions(fn, true).size > 0;
 }
 
 /** Natural loops: a back edge is `latch → header` with the header dominating the latch, and the
@@ -837,6 +854,12 @@ export interface AnalyzeOptions {
    *  values whose def block also consumes them stay with the siblings — a consumer beside the def is
    *  what says the compiler could re-derive there. What is left reaches six corpus rows over two
    *  toolchains, which `bench diff`'s FAN section names, plus the synthetic row that pins it.
+   *
+   *  A THIRD SPELLING of the shape `raise/narrowlocal.ts` tabulates. That pass reads one extension
+   *  over raw in-edges and picks between `u16 v` and `s32 v` + `(u16)v` off branch-shape evidence;
+   *  this one leaves the width alone and gives the truncation a name where it happened. They do not
+   *  overlap — narrowlocal judges a block PARAMETER, this an extension's result — and they are
+   *  neighbours rather than alternatives.
    *
    *  A differ-refereed variation, never a default: `pokeemerald:AcroBikeHandleInputTurning` is a
    *  MATCH inside this scope, so forced on the spelling would be REPLACED across the fan rather than
@@ -1371,6 +1394,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // Over the MERGE CLASS, so a base the arms derive and the join dereferences counts as the one
   // register it is — see `sharedBaseClasses`. Computed once, and only under the variation.
   const sharedBaseClass = homeSharedAddresses ? sharedBaseClasses(fn, returnsVoid) : new Set<Value>();
+  // The seventh scope's members, read the same way and for the same reason — one definition, run
+  // under this function's own `returnsVoid` where the gate must ask under both.
+  const escapeHomeOps = homeEscapingExtensions ? escapingExtensions(fn, returnsVoid) : new Set<Op>();
   // The same question asked of the VALUE ALONE, which is what the two variations below need: their
   // "shared bases stay the address-home scope's" exclusion is a hand-off between scopes, and
   // widening it to the class would make them refuse values the address-home scope only claims
@@ -1476,11 +1502,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
   const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
-  /** The escaping-extension-home variation's scope: no use of `v` renders in the def's own block. A
-   *  successor ARG counts as a use in the block whose terminator carries it, which is the block the
-   *  edge copy is emitted in — so an edge-fed value is never mistaken for one that escapes. */
-  const escapesDefBlock = (v: Value, defBlk: Block): boolean =>
-    (useSitesOf.get(v) ?? []).every((s) => s.blk !== defBlk);
   /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
    *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
    *
@@ -1578,7 +1599,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
           // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
-          // along with the price the fourth one added to it (the gate duplication).
+          // along with the gate duplication that is its price.
           // Third scope, under the address-home variation only (see AnalyzeOptions.homeSharedAddresses):
           // a non-const pure value whose MERGE CLASS is used only as the base of 2+ memory
           // accesses.
@@ -1634,18 +1655,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             materialize.add(op);
           }
           // Seventh scope, under the escaping-extension-home variation
-          // (AnalyzeOptions.homeEscapingExtensions): a `zext`/`sext` with 2+ consumers, none of
-          // them in the def's own block. The siblings all admit a value the def block also
-          // consumes; this one admits only the value that left, which is the register the asm
-          // carried across the boundary.
-          if (
-            homeEscapingExtensions &&
-            (op.opcode === 'zext' || op.opcode === 'sext') &&
-            pr &&
-            multiConsumer(pr) &&
-            escapesDefBlock(pr, b) &&
-            !multiBlockHeaders.has(b)
-          ) {
+          // (AnalyzeOptions.homeEscapingExtensions) — `escapingExtensions` above, which the
+          // enumeration gate also runs. The siblings all admit a value the def block also consumes;
+          // this one admits only the value that left, which is the register the asm carried across
+          // the boundary. The seat refusal is the rule's, not the scope's — and unlike the third
+          // scope's, which `sharedBaseClasses` prices with a named row, it has NO structurable
+          // inhabitant here: four constructions of a header defining a multi-consumer escaping
+          // value decline before any variation is consulted, `xor` included
+          // (`escape-home.test.ts`). It stands because the seat is a property of the block.
+          if (homeEscapingExtensions && escapeHomeOps.has(op) && !multiBlockHeaders.has(b)) {
             materialize.add(op);
           }
           continue;
