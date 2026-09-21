@@ -8,6 +8,17 @@
 // guard-fused `while` (which must also SEED the copy for the zero-trip path it fuses away) and
 // the `do-while` (which needs no seed: its body always runs).
 //
+// WHICH CORPUS ROWS REACH THE SINK, logged over the whole agbcc population (`pnpm bench run --tier
+// synthetic --toolchain agbcc`, 315 rows, exit 0): five symbols sink a copy. `preupdate_exit` and
+// `preupdate_exit_pure` are homed at the latch's SECOND op; the `reread` family's three MATCH
+// controls — `ereadctl`, `ername`, `rereadctl` — at its first, whose def renders no statement of its
+// own, so for them the two placements spell the same body. Emitting every admitted copy at the top
+// of the body instead takes `preupdate_exit_pure` from MATCH to diff:2/14 and leaves those three
+// MATCHing, so the position is load-bearing for a row and the three controls are indifferent to it
+// rather than protected by it. A RECORD of a measurement, not a live check: the position is pinned
+// by `a sunk copy is rebuilt at the op that computed its value` below, and at the seam by
+// hazards.test.ts's `an admitted slot carries the position it was cleared at`.
+//
 // A refusal test that declines for the WRONG reason reads as a pass, so each one pins the message
 // and carries a positive control: either the accepted fixture emitted first, or — where the
 // refusal turns on one fact — the same IR with that fact changed. The two body-rebind fixtures are
