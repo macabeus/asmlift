@@ -10,7 +10,7 @@
 //
 // WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy spells
 // the arg's def-tree again inside the body, at the point that tree was already computed at
-// (`preUpdateCopyHome`) — or, for an arg with no position in the body at all, opening it. Two things
+// (`preUpdateCopyHome`) — or, for an arg the LATCH did not compute, opening it. Two things
 // have to hold — the tree gives the same answer there, and every name it reads still denotes the
 // same value — and the arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf
 // that is neither.
@@ -142,7 +142,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
   {
     id: 'arg-reads-current-names',
-    why: 'a value computed in the body still holds the PREVIOUS iteration at the top of it, where the copy lands',
+    why: 'a value computed in the body may still hold the PREVIOUS iteration where the copy lands, wherever that is',
     sound: true,
     guardedBy: 'hazards.test.ts: ablating arg-reads-current-names admits an arg over a body-computed name',
     rejects: (c) => c.argBlockers.has('stale-name'),

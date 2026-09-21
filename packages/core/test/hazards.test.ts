@@ -367,9 +367,12 @@ describe('sinkablePreUpdateSlots', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const mid = v();
     const e = v();
-    // `mid` is NAMED and defined in the body, so the rebuilt copy would read `v2` at the top of the
-    // body — where it still holds the previous iteration's value. The loop variable is in the tree
-    // as well, which is what makes the slot a repair candidate in the first place.
+    // `mid` is NAMED and defined in the body, which is all the gate asks: it refuses on the NAME and
+    // never on the place. Here the place would have been safe — the copy lands at `op`, one
+    // statement after `v2` is written — so what the ablation admits is a conservative refusal, not a
+    // wrong value. The fixture below is the one where the admitted copy really does read the
+    // previous iteration. The loop variable is in the tree as well, which is what makes the slot a
+    // repair candidate in the first place.
     const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
     const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
     const h = make({
@@ -389,6 +392,38 @@ describe('sinkablePreUpdateSlots', () => {
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
       new Map([[0, op]]),
+    );
+  });
+
+  test('ablating arg-reads-current-names admits a copy that reads the PREVIOUS iteration', () => {
+    // The same stale name with the copy homed at `leading`: the arg is computed in a body block the
+    // latch is not, so the copy opens the body — AHEAD of the statement that writes `v2` on this
+    // iteration. Ablated, the sink emits `v1 = v2 + v0` there, carrying the value `v2` held one
+    // iteration back, which is a wrong value rather than a differently-spelled one.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const e = v();
+    const midOp = mkOp('add', { operands: [p], results: [mid] });
+    const op = mkOp('add', { operands: [mid, p], results: [e] });
+    const arm: Block = { params: [], ops: [midOp, op] };
+    const body = new Set([header, arm]);
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, arm],
+        [op, arm],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']))).toEqual(new Map());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
+      new Map([[0, null]]),
     );
   });
 
