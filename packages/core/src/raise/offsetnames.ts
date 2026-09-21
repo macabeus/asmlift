@@ -30,7 +30,9 @@
 // on untouched. The passes on the OTHER side of the question are `l3/nearbase.ts` and
 // `l3/basecse.ts`: they BUILD the one-base-many-cells form this one un-spells — `nearbase`'s own
 // example is `add #72` / `add #74` off one pool word — which is why the walk stays reachable from
-// `/raw-globals`, where no map name exists to replace it. THE CORPUS DOES NOT REFEREE THE SEAT: run instead from `raiseRecovered`'s
+// `/raw-globals`, where no map name exists to replace it.
+//
+// THE CORPUS DOES NOT REFEREE THE SEAT: run instead from `raiseRecovered`'s
 // `beforeRecover` hook, after every recognizer, and `pnpm bench gates --pass offsetnames` reports
 // the identical counts on all six rows that refuse or name anything, with
 // `kleod:DeleteAllSaveData:agbcc` the same winner at the same 0/81. The argument is about which
@@ -125,10 +127,8 @@ export interface OffsetAddress {
   readonly targetAmbiguous: boolean;
   /** some use of this value is the base operand of a store */
   readonly written: boolean;
-  /** some use of this value is a successor's block argument, so the accesses made through it are
-   *  made through a block PARAMETER — a value with no def, which the walk below stops at. The two
-   *  access sets are therefore incomplete rather than empty, and the three rules that read them
-   *  would pass on nothing. */
+  /** some use of this value is a successor's block argument, which is where the two access sets
+   *  below stop being a complete answer — see `access-behind-merge` */
   readonly crossesMerge: boolean;
   /** the width of every OFF-0 access through this address, and the load signedness of the narrow
    *  ones — the same facts `rank-declare.ts`'s `bareGlobalAccessFacts` reads for a bare name, taken

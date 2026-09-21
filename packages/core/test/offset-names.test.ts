@@ -2,9 +2,11 @@
 //
 // The frontend asks the symbol map what lives at a POOL-LOADED word. A compiler with several
 // neighbouring cells to touch loads one pool word and walks — `adds r1, #12` — so every cell after
-// the first is reached by arithmetic and the map is never asked about it. This file pins both
-// halves: the walk resolves to the name the map holds at that exact address, and every refusal
-// leaves the arithmetic the frontend emitted.
+// the first is reached by arithmetic and the map is never asked about it. This file pins the
+// walk resolving to the name the map holds at that exact address, every refusal leaving the
+// arithmetic the frontend emitted, the names the result publishes for what it reached that way,
+// and the hand-wired seat — the pass has a record and no list, so nothing but a test says all
+// three drivers still call it.
 //
 // The refusals carry the weight, because this changes the DEFAULT spelling rather than adding a
 // candidate: naming a cell the map does not hold there is a silently wrong address with no second
