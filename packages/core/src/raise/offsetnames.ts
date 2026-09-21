@@ -92,15 +92,14 @@
 //   everything else       0
 //
 // Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. Of the
-// seven SOUND rules exactly one refuses anything here, once: `access-behind-merge`, on the single
-// site in `ButtonConfigurationScreenInit` whose address is merged from two arms. That row scores
+// SOUND rules exactly one refuses anything here, once: `access-behind-merge`, on the single site
+// in `ButtonConfigurationScreenInit` whose address is merged from two arms. That row scores
 // 107/212 whether the site is named or refused, and its fan moves 440 -> 446 against `origin/main`
 // rather than the other way, because what a refusal leaves is arithmetic and the respell
-// variations have something to apply to again. The other six — a code address at either end, a
-// width the map does not state, a width that disagrees with the access, a store onto a `const`
-// name, an address the map spells two ways — refuse NOTHING here and are pinned by
-// `offset-names.test.ts` alone. Say so rather than letting the table read as though all eleven were
-// load-bearing.
+// variations have something to apply to again. The rest — a code address at either end, an address
+// the map spells two ways at either end, a width the map does not state, a width that disagrees
+// with the access, a store onto a `const` name — refuse NOTHING here and are pinned by
+// `offset-names.test.ts` alone.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -172,20 +171,19 @@ function sameAuthority(a: SymbolInfo, b: SymbolInfo): boolean {
 }
 
 /** The refusals. FIRST rejection is what `offsetNameRefusals` reports, so the order is the
- *  attribution order: the three rules about what the map can say about the BASE, then what sits at
- *  the offset, then the two about the ACCESS made through it. The two that are not `sound` are
- *  about OWNERSHIP and ABSENCE rather than correctness — an interior address is the field and
- *  element machinery's to spell, and where no symbol sits there the arithmetic is simply the only
- *  name available.
+ *  attribution order: what the map can say about the BASE, then what sits at the offset, then the
+ *  ACCESS made through it, and last the store. The rules that are not `sound` are about OWNERSHIP
+ *  and ABSENCE rather than correctness — an interior address is the field and element machinery's
+ *  to spell, and where no symbol sits there the arithmetic is simply the only name available.
  *
- *  THE ADDRESS IS NOT THE WHOLE QUESTION, and the last two rules are what says so. Naming an
- *  address the map holds is address-exact by construction; what a bare name ALSO decides is the
- *  instruction, because `gSym = v` writes whatever `gSym` was declared as. A halfword store walked
- *  onto a word-wide neighbour compiles to `str` where the target says `strh` — the same four bytes
- *  of address, four bytes written instead of two — and a name the map has no width for reaches
- *  declaration synthesis with no width authority at all (rank-declare.ts's `bareGlobalAccessFacts`
- *  keys off the pool-loaded `gaddr` defs of a lift this pass has not run on), so it falls back to
- *  `extern u32`. Both refuse here, where the map's own width is in hand. */
+ *  THE ADDRESS IS NOT THE WHOLE QUESTION, and `target-unsized` and `access-unlike-target` are what
+ *  say so. Naming an address the map holds is address-exact by construction; what a bare name ALSO
+ *  decides is the instruction, because `gSym = v` writes whatever `gSym` was declared as. A
+ *  halfword store walked onto a word-wide neighbour compiles to `str` where the target says `strh`
+ *  — the same four bytes of address, four bytes written instead of two — and a name the map has no
+ *  width for reaches declaration synthesis with no width authority at all (rank-declare.ts's
+ *  `bareGlobalAccessFacts` keys off the pool-loaded `gaddr` defs of a lift this pass has not run
+ *  on), so it falls back to `extern u32`. Both refuse here, where the map's own width is in hand. */
 export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
   {
     id: 'base-address-ambiguous',
@@ -248,11 +246,11 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
     guardedBy: 'offset-names.test.ts: without `target-is-code` the walk names a function',
     rejects: (c) => c.target?.kind === 'code',
   },
-  // FIRST of the access rules, because it is the reason the other three can have nothing to
+  // FIRST of the access rules, because it is the reason the ones below it can have nothing to
   // judge. An address merged from two predecessors reaches its store through the successor's
   // block parameter, and `offsetSites` counts accesses against the site's OWN value — so without
-  // this the three rules below are asked about an empty set and pass, and the merge the
-  // structurer then collapses hands the bare name straight to the access they exist to check.
+  // this the rules below are asked about an empty set and pass, and the merge the structurer then
+  // collapses hands the bare name straight to the access they exist to check.
   {
     id: 'access-behind-merge',
     why: 'a use of this address is a block argument, so the accesses made through it are not this census to count',
@@ -494,14 +492,12 @@ export function offsetNameRefusals(
  *  which is what lets `pnpm bench gates --pass offsetnames` put a wrapped table in front of a real
  *  enumeration: a module-namespace binding is read-only and cannot be swapped, so a tabled pass
  *  whose only reachable name is its import is not censusable at all
- *  (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). It is not a pass
- *  LIST because the ordering question a list answers is already answered here: this pass has one
- *  seat, stated above.
+ *  (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY).
  *
- *  What a LIST would also buy is the invariant `PRE_RECOVERY_PASSES` states in its own header —
- *  add a pass there and every driver picks it up. Three hand-written calls have no such
- *  invariant, so `offset-names.test.ts` supplies it: it wraps this record and asserts all three
- *  drivers reach it. Delete any one call and that test is the only thing that fails. */
+ *  A record and not a pass LIST: the ordering question a list answers is already answered above,
+ *  this pass having one seat. What a list also carries is the invariant that every driver picks a
+ *  pass up, which three hand-written calls do not — so `offset-names.test.ts` supplies it by
+ *  wrapping this record and asserting all three reach it. */
 export const OFFSET_NAME_PASS: { run: (fn: Fn, symbols: SymbolMap) => string[] } = {
   run: (fn, symbols) => nameOffsetAddresses(fn, symbols),
 };

@@ -466,8 +466,8 @@ describe('the gates are load-bearing', () => {
   });
 
   test('without `target-is-code` the walk names a function', () => {
-    // A walk that only carries the address out — a store through it would be refused by
-    // `target-unsized` first, since a function symbol declares no access width.
+    // A walk that only carries the address out — with this rule removed a store through it would
+    // be refused by `target-unsized` instead, since a function symbol declares no access width.
     const handOut = thumb(
       'walk',
       `	ldr	r1, .L3
