@@ -7,6 +7,7 @@
 // Hand-built AST, the way locals-written.test.ts pins its rule: the coverage is the property, not
 // which pass produces the shape today. Its one producer is structure.ts's `emitDoWhile`
 // (loop-preupdate-cond.test.ts).
+import { readFileSync, readdirSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -136,4 +137,48 @@ test('a cast over a post-increment renders from the local declaration, not from 
     ),
   );
   expect(src).toContain('return (s32)v1++ >> 3;');
+});
+
+// The STRUCTURAL half, and the reason it is a source scan rather than another hand-built tree: TS
+// exhaustiveness protects `exprChildren`/`mapExprChildren`, where a new `Expr` kind is a compile
+// error, and protects nothing about a predicate that spells the leaf kinds out by hand. Every such
+// predicate answers "which name does this node mention", `mentionedName` (l3/ast.ts) is the one
+// place that answers it for the whole vocabulary, and the two walks below are the only ones with a
+// reason to tell the kinds apart. A collector that misses `postincr` reports the name UNTOUCHED —
+// `initfirst`'s deadness rule read one of these and hoisted an init onto the path its guard skips.
+const SEPARATE_THE_KINDS: ReadonlyMap<string, string> = new Map([
+  ['contracts.ts', '`&v` is a write channel and a bare `v` is a read, and the walk records them on different sides'],
+  ['l3/argbase.ts', 'asks what a memory BASE is — an address, a const, or a global — not which names a tree mentions'],
+]);
+
+test('every leaf-kind collector goes through mentionedName, or says why it does not', () => {
+  const root = new URL('../src/', import.meta.url);
+  const files: string[] = [];
+  const walk = (dir: URL, prefix: string): void => {
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (ent.isDirectory()) {
+        walk(new URL(`${ent.name}/`, dir), `${prefix}${ent.name}/`);
+      } else if (ent.name.endsWith('.ts')) {
+        files.push(`${prefix}${ent.name}`);
+      }
+    }
+  };
+  walk(root, '');
+  const offenders: string[] = [];
+  for (const f of files) {
+    readFileSync(new URL(f, root), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const pairs = line.includes(`k === 'var'`) && line.includes(`k === 'addr'`);
+        if (pairs && !line.includes('postincr') && !SEPARATE_THE_KINDS.has(f)) {
+          offenders.push(`${f}:${i + 1}`);
+        }
+      });
+  }
+  expect(offenders).toEqual([]);
+  // The exemptions are named, so one whose file stops spelling the pair is a line to delete rather
+  // than a licence that quietly outlives its reason.
+  for (const f of SEPARATE_THE_KINDS.keys()) {
+    expect(readFileSync(new URL(f, root), 'utf8')).toContain(`k === 'addr'`);
+  }
 });

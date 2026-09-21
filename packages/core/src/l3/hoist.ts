@@ -116,7 +116,7 @@ function mentionsHere(s: Stmt, name: string): boolean {
   }
   let found = false;
   const visit = (e: Expr): void => {
-    if ((e.k === 'var' || e.k === 'addr') && e.name === name) {
+    if (mentionedName(e) === name) {
       found = true;
     }
     for (const c of exprChildren(e)) {

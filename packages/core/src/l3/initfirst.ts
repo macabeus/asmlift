@@ -38,11 +38,20 @@
 // re-enters everything, a case can fall through), so there the variable must appear nowhere
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, exprEquals, exprHasEffect, stmtChildren, stmtExprs, walkExprs } from './ast';
+import {
+  NEGATE_REL,
+  exprChildren,
+  exprEquals,
+  exprHasEffect,
+  mentionedName,
+  stmtChildren,
+  stmtExprs,
+  walkExprs,
+} from './ast';
 import { arithConversionSignedness, declaredTypes, provablyNonNegative } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
-  ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
+  mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
 
 // READS only — a pure write in a tail is benign (it overwrites the minted value on every path,
 // and any read after it is that write's business); touchesOutside below is TOTAL because strong

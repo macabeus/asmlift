@@ -71,6 +71,24 @@ test('refused: the variable appears after the if (the skip path would now hold K
   expect(r).toBeNull();
 });
 
+test('refused: the only later mention is a `v0++` in a bottom test', () => {
+  // The same deadness question as the test above, with the later read spelled by the node that
+  // both reads and writes. A collector blind to it reports the name untouched after the `if` and
+  // the init moves onto the path the guard skips, where the loop it feeds then counts from K.
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('<', c(0), v('a0')),
+        then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+        else: [],
+      },
+      dowhile(bin('<', { k: 'postincr', name: 'v0', by: 1 }, v('a0')), []),
+    ]),
+  );
+  expect(r).toBeNull();
+});
+
 test('a plain-read init moves too, replacing its own expression in the cond', () => {
   // if (0 < a0) { v0 = a0; … } → v0 = a0; if (0 < v0): guard and init read the same value back
   // to back; the local-spelling source reads it once.

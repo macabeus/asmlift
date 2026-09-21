@@ -17,7 +17,7 @@
 // stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
 // consumption point makes staleness impossible by construction.
 import type { SymbolInfo } from '../symbols';
-import { Expr, Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
+import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 
 /** One recorded VALUE reference — a name the tree references plus the facts to declare it. */
 export interface SymbolRef {
@@ -60,10 +60,11 @@ export function collectSymbolRefs(
   const called = new Set<string>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
+    const named = mentionedName(e);
     if (e.k === 'call') {
       called.add(e.fn);
-    } else if ((e.k === 'var' || e.k === 'addr') && symbols.has(e.name)) {
-      valueRefs.add(e.name);
+    } else if (named !== undefined && symbols.has(named)) {
+      valueRefs.add(named);
     }
     exprChildren(e).forEach(visitExpr);
   };
