@@ -24,6 +24,8 @@
 // label scores, so that flip is a reclassification, not a regression.
 // Explicit incompleteness markers a decompiler emits where it KNOWS it has a gap
 // (classification runs BEFORE any compile — see the header).
+import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
+
 import { pickDiagnostics } from '../compile/util';
 
 const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
@@ -64,8 +66,8 @@ export function isHardFailure(source: string): boolean {
   return /Decompilation failure/.test(source) || /Function \S+ not found/.test(source);
 }
 
-/** The compiler diagnostics inside a captured error string (pickDiagnostics selection, capped;
- *  falls back to the first non-empty line so the marker is never empty). Scratch-dir paths
+/** The compiler diagnostics inside a captured error string (pickDiagnostics selection, errors
+ *  first, capped; falls back to the first non-empty line so the marker is never empty). Scratch-dir paths
  *  collapse to `<tmp>/`: an unchanged row must re-run to the IDENTICAL marker, or committed
  *  artifacts churn on temp-dir names. */
 export function compilerErrorLines(msg: string): string[] {
@@ -73,7 +75,7 @@ export function compilerErrorLines(msg: string): string[] {
     .split('\n')
     .map((l) => l.trim().replace(/\S*\/(?:asmlift|bench)-[A-Za-z0-9-]+\//g, '<tmp>/'))
     .filter(Boolean);
-  const diags = pickDiagnostics(lines);
+  const diags = errorsFirst(pickDiagnostics(lines));
   const picked = (diags.length > 0 ? diags : lines.slice(0, 1)).slice(0, 5).map((l) => l.slice(0, 240));
   return picked.length > 0 ? picked : ['unknown error'];
 }

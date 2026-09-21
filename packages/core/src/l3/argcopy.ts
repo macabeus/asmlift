@@ -101,9 +101,12 @@ export interface ArgCopyRegionCtx {
   readonly reads: number;
   /** a loop encloses the region — its own body, or any list nested below one */
   readonly underLoop: boolean;
+  /** the region is ONE basic block: no statement opens a nested list, and no expression holds a
+   *  short-circuit connective */
+  readonly straightLine: boolean;
 }
 
-/** Which regions are worth offering. NEITHER is sound — each refuses a spelling that is correct
+/** Which regions are worth offering. NONE is sound — each refuses a spelling that is correct
  *  but models nothing, and what they buy is the candidate count: every one of these is a COMPILE,
  *  and this variation multiplies with `/coalesce`. */
 export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
@@ -122,7 +125,30 @@ export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
     guardedBy: 'argcopy.test.ts: an arm NESTED inside a loop body is refused too',
     rejects: (c) => c.underLoop,
   },
+  {
+    id: 'straight-line',
+    why: 'a copy whose every read sits in one basic block is forward-propagated away by every compiler in the matrix, so the copy is erased — a `&&` or `||` in the region is an edge the copy can live across, and such a region is offered',
+    sound: false,
+    guardedBy: 'argcopy.test.ts: a STRAIGHT-LINE region is refused',
+    rejects: (c) => c.straightLine,
+  },
 ];
+
+/** Whether `list` is one basic block. A nested list is a branch or a loop; a short-circuit
+ *  connective is a branch too — `p[3] = p[0] > v && p[4] < v` is two blocks, and agbcc keeps a
+ *  copy live across that edge (the synthetic `leafand` row matches only through it). `walkExprs` for the
+ *  reason `countReads` gives: it is the walk `repoint` rewrites by. */
+function isStraightLine(list: Stmt[]): boolean {
+  if (list.some((st) => stmtLists(st).length > 0)) {
+    return false;
+  }
+  for (const e of walkExprs(list)) {
+    if (e.k === 'bin' && (e.op === '&&' || e.op === '||')) {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** How many `var n` leaves the region holds, nested statements included — the region rules'
  *  yardstick for whether a copy has a range to shorten.
@@ -238,7 +264,11 @@ export function argCopyUnder(
       if (reads === 0) {
         continue;
       }
-      const regionRefused = firstRejection(regionGates, { reads, underLoop: r.underLoop });
+      const regionRefused = firstRejection(regionGates, {
+        reads,
+        underLoop: r.underLoop,
+        straightLine: isStraightLine(r.list),
+      });
       if (regionRefused !== null) {
         refusals.set(regionRefused, (refusals.get(regionRefused) ?? 0) + 1);
         continue;

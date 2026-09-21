@@ -53,7 +53,11 @@ const score = (s: number | null | undefined, m: number | null | undefined): stri
 const cost = (r: FunctionResult): string => {
   const bits: string[] = [];
   if (r.asmlift.fanSize !== undefined) {
-    bits.push(`fan=${r.asmlift.fanSize}`);
+    // a stillborn fan (core stillborn.ts) was enumerated whole and compiled in part: the price a
+    // reader takes off this line is the compiled part
+    const compiled =
+      r.asmlift.fanNotCompiled === undefined ? '' : ` (${r.asmlift.fanSize - r.asmlift.fanNotCompiled} compiled)`;
+    bits.push(`fan=${r.asmlift.fanSize}${compiled}`);
   }
   if (r.asmlift.rankSeconds !== undefined) {
     bits.push(`rank=${r.asmlift.rankSeconds.toFixed(1)}s`);

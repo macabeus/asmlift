@@ -14,6 +14,7 @@
 // this file returns and a status the README documents cannot drift apart.
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
+import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
@@ -294,11 +295,15 @@ const failureResult = (e: unknown, targetTrace: string, warn: string, code: numb
   // reads a row's diagnostics out of, and that reader scans the WHOLE thing for the `file:line:`
   // lines — truncating at the source would drop a diagnosis that sits below a banner, which is
   // the case this release fixed.
+  //
+  // WHAT IS CUT IS THE WARNINGS. A compiler prints in source order, so the error that refused the
+  // candidate can sit below more warnings than the bound holds; a failure too long to print whole
+  // is printed errors first, and one that fits is printed as the compiler wrote it.
   const forTerminal = (m: string): string => {
     const lines = m.split('\n');
     return lines.length <= MAX_PRINTED_LINES
       ? m
-      : `${lines.slice(0, MAX_PRINTED_LINES).join('\n')}\n… and ${lines.length - MAX_PRINTED_LINES} more line(s)`;
+      : `${errorsFirst(lines).slice(0, MAX_PRINTED_LINES).join('\n')}\n… and ${lines.length - MAX_PRINTED_LINES} more line(s)`;
   };
   const kind = isDecline(e) ? 'declined' : 'internal error';
   return {

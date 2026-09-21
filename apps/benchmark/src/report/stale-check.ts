@@ -19,7 +19,7 @@ import { readCommitted, scrub } from './committed';
  *  `rankSeconds` is dropped for the same reason the scratch paths are scrubbed, and it is the
  *  sharper case: it is wall clock, so it differs on EVERY row of EVERY run — machine load, docker,
  *  and ~5× between a cold and a warm candidate cache. Left in, this file would answer `stale`
- *  unconditionally and stop being a question at all. `fanSize` and `fanVariations` STAY:
+ *  unconditionally and stop being a question at all. `fanSize`, `fanNotCompiled` and `fanVariations` STAY:
  *  enumeration is a deterministic cross over variations, so a fan that moved is a real change and
  *  exactly the one this artifact started recording in order to stop losing.
  *

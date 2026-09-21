@@ -1,5 +1,6 @@
 // The candidate-compile command factory (src/compile-command.ts) — the seam a project fills
 // with its own toolchain. Offline: the "compilers" here are plain sh commands.
+import { CompilerRejection, errorKey } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -275,4 +276,31 @@ test('an async worker reports a failed compile as a THROW, exactly like the sync
   );
   expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
   await expect(worker()('int x;', 'f', 'c')).rejects.toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
+});
+
+// The stillborn rule (core stillborn.ts) keys a rejection by its DIAGNOSTIC, and a `decomp.yaml`
+// template is text this process wrote, not the compiler: what it says is not the verdict.
+test("a rejection's diagnostic is the compiler's output alone, never the command that ran it", () => {
+  const compile = compileFromCommand('echo "{{inputPath}}:1: error: boom" >&2; false; cp {{inputPath}} {{outputPath}}');
+  let thrown: unknown;
+  try {
+    compile('int x;', 'f', 'c');
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(CompilerRejection);
+  const e = thrown as CompilerRejection;
+  expect(e.message).toMatch(/exit 1[\s\S]*error: boom/);
+  expect(e.diagnostic).toBe('<scratch>/cand.c:1: error: boom');
+  // a compiler that said nothing keys nothing, whatever the template's own text spells
+  const silent = compileFromCommand('false # x.c:1: error: not the compiler ; {{inputPath}} {{outputPath}}');
+  try {
+    silent('int x;', 'f', 'c');
+    throw new Error('compiled?');
+  } catch (e2) {
+    expect(e2).toBeInstanceOf(CompilerRejection);
+    expect((e2 as CompilerRejection).diagnostic).toBe('');
+    expect(errorKey((e2 as CompilerRejection).diagnostic)).toBeNull();
+    expect(errorKey((e2 as CompilerRejection).message)).not.toBeNull();
+  }
 });

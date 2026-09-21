@@ -578,11 +578,25 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
     // Count BOTH lists. `rankBy` has a reachable all-withheld branch ("N candidate(s) withheld,
     // none scored"), where a dropped-only count reads "the 0 [dropped] line(s) above ARE this
     // row's fan" printed under N withheld lines.
-    notes.push(
-      `asmlift: [fan] every candidate was refused, so there is no ranking — the ` +
-        `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above ARE this ` +
-        `row's fan. This is what the published row's "noncompile" outcome means.`,
-    );
+    if (nsc.notCompiled.length === 0) {
+      notes.push(
+        `asmlift: [fan] every candidate was refused, so there is no ranking — the ` +
+          `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above ARE this ` +
+          `row's fan. This is what the published row's "noncompile" outcome means.`,
+      );
+    } else {
+      // A stillborn fan's lines above are what was COMPILED — the default and one probe per
+      // variation — and the fan is those plus the rest, which nothing refused: a reader counting
+      // [dropped] lines against the row's fanSize must be told why they differ.
+      notes.push(
+        `asmlift: [fan] every compiled candidate was refused, so there is no ranking — the ` +
+          `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above are the default ` +
+          `candidate and one probe per variation, all rejected for the same reason, so the fan was ` +
+          `declared stillborn (core stillborn.ts) and its other ${nsc.notCompiled.length} candidate(s) ` +
+          `were NOT COMPILED. This row's fan is the ${dropped.length + withheld.length} above plus those ` +
+          `${nsc.notCompiled.length}; its published "noncompile" outcome and fanSize count them all.`,
+      );
+    }
   } else if (e instanceof NoSpellableCandidateError) {
     notes.push(
       `asmlift: [fan] the backend refused every source this row enumerates, before anything was ` +

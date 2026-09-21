@@ -41,11 +41,13 @@ export interface VariationStats {
   rows: number;
   /** those rows whose winner carries it */
   winners: number;
-  /** candidates carrying it, summed over those rows — dropped and withheld included */
+  /** candidates carrying it, summed over those rows — dropped, withheld and never compiled included */
   candidates: number;
   /** the refused part of `candidates` */
   dropped: number;
   withheld: number;
+  /** the part a stillborn fan never compiled (core stillborn.ts) — not a refusal */
+  notCompiled: number;
   /** distinct toolchains among those rows */
   toolchains: number;
 }
@@ -70,6 +72,7 @@ export function variationStats(rows: readonly FunctionResult[]): Map<VariationNa
         candidates: 0,
         dropped: 0,
         withheld: 0,
+        notCompiled: 0,
         toolchainSet: new Set<string>(),
       },
     ]),
@@ -86,6 +89,7 @@ export function variationStats(rows: readonly FunctionResult[]): Map<VariationNa
       e.candidates += tally.candidates;
       e.dropped += tally.dropped ?? 0;
       e.withheld += tally.withheld ?? 0;
+      e.notCompiled += tally.notCompiled ?? 0;
       e.toolchainSet.add(row.toolchain);
     }
   }

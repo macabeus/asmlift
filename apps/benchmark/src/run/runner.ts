@@ -77,12 +77,18 @@ export function fmt(d: DecompilerResult): string {
  *
  *  The seconds alone say a row took 400 s and not that it compiled 5,952 spellings to get there.
  *  The pair is the only thing on this line that is not an outcome, and it is what a round watching
- *  a run scroll past steers by when it asks whether a variation it just shipped is affordable.
+ *  a run scroll past steers by when it asks whether a variation it just shipped is affordable. On
+ *  a stillborn fan (core stillborn.ts) the enumerated count was NOT what the row compiled, and the
+ *  note says how many were: `fan 30240 (35 compiled)`.
  *
  *  Absent on a row that never ranked (declined, failed): a bare `(1.2s)` rather than `fan 0`, which
  *  would read as a claim about the row's enumeration instead of about the run. */
 export function costNote(d: DecompilerResult, secs: string): string {
-  return d.fanSize === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.fanSize})`;
+  if (d.fanSize === undefined) {
+    return `(${secs}s)`;
+  }
+  const compiled = d.fanNotCompiled === undefined ? '' : ` (${d.fanSize - d.fanNotCompiled} compiled)`;
+  return `(${secs}s, fan ${d.fanSize}${compiled})`;
 }
 
 /** THE PER-ROW LINE, assembled — a round's whole live view of a run. Pinning `costNote` alone

@@ -3,12 +3,12 @@
 // `FunctionResult`, so a renamed or reshaped field fails `tsc` here instead of leaving a stale copy.
 //
 // It holds the states the tests need together: three toolchains, a noncompile row whose whole fan
-// was dropped, withheld candidates, a winner carrying a subject (`coalesce-v1-v0`), and fans of 5
-// to 800.
+// was dropped, a noncompile row whose fan was declared stillborn and left part uncompiled, withheld
+// candidates, a winner carrying a subject (`coalesce-v1-v0`), and fans of 5 to 800.
 import type { DecompilerResult, FunctionResult, Outcome, ToolchainId } from '@asmlift/bench-schema';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
-type Tally = { candidates: number; dropped?: number; withheld?: number };
+type Tally = { candidates: number; dropped?: number; withheld?: number; notCompiled?: number };
 
 /** A real row's flags are its unit's, copied from the committed manifests; a synthetic row's are its
  *  toolchain's canonical flags. */
@@ -74,6 +74,8 @@ function ranked(
   outcome: Outcome,
   winnerVariations: readonly string[] | undefined,
   fanVariations: Record<string, Tally>,
+  /** a stillborn fan's never-compiled part (core stillborn.ts), on the row as the producer writes it */
+  fanNotCompiled?: number,
 ): FunctionResult {
   const [project, sym, toolchain] = id.split(':') as [string, string, ToolchainId];
   return {
@@ -96,6 +98,7 @@ function ranked(
       // every candidate carries exactly one signedness
       fanSize: (fanVariations.unsigned?.candidates ?? 0) + (fanVariations.signed?.candidates ?? 0),
       fanVariations,
+      ...(fanNotCompiled === undefined ? {} : { fanNotCompiled }),
     },
     m2c: unscored('m2c', 'declined'),
   };
@@ -194,6 +197,21 @@ export const FAN_SAMPLE: readonly FunctionResult[] = [
     sinkinit: { candidates: 1, dropped: 1 },
     unfolded: { candidates: 1, dropped: 1 },
   }),
+  // the shape of `kleod:DrawLevelHud_Hearts:agbcc`: eight enumerated, the default and four probes
+  // rejected for one reason, the other three never compiled
+  ranked(
+    'sa3:sub_8061A40:agbcc',
+    'noncompile',
+    undefined,
+    {
+      unsigned: { candidates: 8, dropped: 5, notCompiled: 3 },
+      scopebase: { candidates: 4, dropped: 1, notCompiled: 3 },
+      'ptr-field': { candidates: 4, dropped: 1, notCompiled: 3 },
+      regcopy: { candidates: 4, dropped: 1, notCompiled: 3 },
+      unfolded: { candidates: 4, dropped: 1, notCompiled: 3 },
+    },
+    3,
+  ),
   ranked('marioparty3:GWBoardRecordGet:gcc2.7.2', 'nonmatch', ['signed'], {
     signed: { candidates: 8 },
     unsigned: { candidates: 8 },

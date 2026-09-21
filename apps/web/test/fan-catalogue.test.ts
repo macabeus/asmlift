@@ -51,6 +51,13 @@ describe.each([
       expect(s.rows, name).toBe(carried.length);
       expect(s.winners, name).toBe(carried.filter((r) => hasVariation(r.asmlift.winnerVariations ?? [], name)).length);
       expect(s.candidates, name).toBe(carried.reduce((a, r) => a + r.asmlift.fanVariations![name].candidates, 0));
+      // the refused part and the never-compiled part are summed apart: a stillborn fan's rest
+      // was refused by nothing
+      for (const part of ['dropped', 'withheld', 'notCompiled'] as const) {
+        expect(s[part], `${name} ${part}`).toBe(
+          carried.reduce((a, r) => a + (r.asmlift.fanVariations![name][part] ?? 0), 0),
+        );
+      }
     }
   });
 
@@ -97,6 +104,12 @@ describe('over the sample', () => {
     expect(new Set(FAN_SAMPLE.map((r) => r.toolchain)).size).toBe(3);
     expect(FAN_SAMPLE.some((r) => r.asmlift.outcome === 'noncompile')).toBe(true);
     expect(FAN_SAMPLE.some((r) => Object.values(r.asmlift.fanVariations!).some((t) => t.withheld))).toBe(true);
+    expect(FAN_SAMPLE.some((r) => r.asmlift.fanNotCompiled)).toBe(true);
+  });
+
+  test('a stillborn fan’s never-compiled part is counted apart from the dropped', () => {
+    const s = stats.get('scopebase')!;
+    expect(s).toMatchObject({ candidates: 4, dropped: 1, withheld: 0, notCompiled: 3 });
   });
 
   test('the two signedness entries sum to the candidates in every fan', () => {

@@ -15,18 +15,10 @@
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
-import {
-  type DroppedCandidate,
-  NoScorableCandidateError,
-  type RankedResult,
-  type RefusedDeclarationReason,
-  type Scored,
-  type WithheldCandidate,
-  compareScored,
-  enumerateCandidates,
-  withheldReason,
-} from '@asmlift/core/rank';
+import { type RankedResult, type RefusedDeclarationReason, enumerateCandidates, rankBy } from '@asmlift/core/rank';
+import { type ProbeOutcome, defaultIsKeyedRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
@@ -281,69 +273,84 @@ export async function rankCandidatesInBrowser(
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });
 
-  // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
-  // that fails to build is DROPPED rather than allowed to sink a sibling that compiles, and each
-  // drop is RECORDED so a failed spelling is never invisible.
+  // The COMPILES run here, on the wasm scorer's own async schedule; the RANKING is core's `rankBy`
+  // over the memoized outcomes, exactly as the CLI's pooled driver does it. A driver that re-spelled
+  // the drop/withhold/ordering rules to fit an async loop would let the playground and the CLI
+  // disagree about the same function, so none of them is spelled here.
   //
-  // The ORDERING is not re-spelled here, it is IMPORTED — `compareScored` is core's one copy. Two
-  // drivers over the same enumeration with two hand-written comparators is how the playground and
-  // the CLI come to disagree about which spelling of the same function is best.
-  const results: (Scored<MatchScore> & { order: number })[] = [];
-  const dropped: DroppedCandidate[] = [];
-  const withheld: WithheldCandidate[] = [];
-  let lastErr: unknown = null;
-  // The total is only ever `candidates.length` — the number actually returned. No estimate, and no
-  // borrowing the CLI's count for the same function (66,816 with a symbol map, against the
-  // browser's map-less 117,760: a fabricated denominator would have been 76 % wrong).
-  const total = candidates.length;
-  for (const [order, c] of candidates.entries()) {
-    // `order` is how many candidates are FINISHED, and the tick is emitted at the top so the
-    // `continue` on a withheld spelling cannot skip it. Iteration 0 is therefore the phase change
-    // itself (`0 / total`, never suppressed by the throttle); an empty enumeration emits nothing
-    // here and is announced by the `done === total` tick below.
-    emit({ phase: 'scoring', done: order, total });
+  // The ORDER is the stillborn rule's (core stillborn.ts): the default candidate alone, then — only
+  // if the compiler rejected it — one probe per variation, then the rest unless the verdict says the
+  // fan is stillborn. `rankBy` asks the same rule over the same outcomes and never reaches a
+  // candidate this loop did not compile.
+  // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
+  const outcomes = new Map<string, MatchScore | Error>();
+  // The total is the number of candidates this run will compile: `candidates.length` — the number
+  // actually returned, never an estimate and never the CLI's count for the same function (66,816
+  // with a symbol map, against the browser's map-less 117,760: a fabricated denominator would have
+  // been 76 % wrong) — until a stillborn verdict says the rest will not be, whereupon it is the
+  // number compiled, so the phase still ends on a full bar rather than a bar that stops short.
+  let total = candidates.length;
+  const score = async (i: number): Promise<void> => {
+    const c = candidates[i];
+    // `outcomes.size` is how many candidates are FINISHED, and the tick is emitted at the top so
+    // that iteration 0 is the phase change itself (`0 / total`, never suppressed by the throttle);
+    // an empty enumeration emits nothing here and is announced by the `done === total` tick below.
+    emit({ phase: 'scoring', done: outcomes.size, total });
     try {
       const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs), flags: [...flags] });
       if (!cc.ok) {
-        throw new Error(
-          `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`,
-        );
+        // agbcc-wasm ran to completion and said no: the compiler's verdict, with its whole
+        // stderr, which is what the stillborn rule compares. A TRAP arrives the same way — the
+        // package maps any throw that is not an exit status to code 1, with the stderr printed so
+        // far or, when nothing was, the throw's own text. The second shape is refused as the
+        // transient it is; the first is not distinguishable from a verdict at this seam, and a
+        // trap is deterministic per input, so what it printed is compared like any rejection.
+        const failure = `agbcc could not compile candidate '${joinVariations(c.variations)}': ${toolFailureLine(cc.stderr)}`;
+        throw /^(?:RuntimeError\b|Aborted\(|abort\()/.test(cc.stderr.trimStart())
+          ? new Error(failure)
+          : new CompilerRejection(failure, cc.stderr);
       }
-      const score = await scoreObjectBytes(t.obj, cc.obj, name);
-      // The PUBLICATION rule is imported for the same reason the ordering is: `withheldReason` is
-      // core's one copy, and a `matchOnly` spelling this driver published while the CLI withheld
-      // it would be the playground showing a source the CLI refuses to stand behind.
-      const why = withheldReason(c, score);
-      if (why !== null) {
-        withheld.push({ variations: c.variations, score: score.score, rows: score.rows, why });
-        continue;
-      }
-      results.push({ ...c, order, score });
+      outcomes.set(c.source, await scoreObjectBytes(t.obj, cc.obj, name));
     } catch (e) {
-      lastErr = e;
-      dropped.push({ variations: c.variations, error: e instanceof Error ? toolFailureLine(e.message) : String(e) });
+      outcomes.set(c.source, e instanceof Error ? e : new Error(String(e)));
+    }
+  };
+  const outcomeOf = (i: number): ProbeOutcome | undefined => {
+    const r = outcomes.get(candidates[i].source);
+    return r === undefined ? undefined : r instanceof Error ? { thrown: r } : 'compiled';
+  };
+  if (total > 0) {
+    await score(0);
+    let rest = candidates.map((_, i) => i).slice(1);
+    if (defaultIsKeyedRejection(outcomeOf(0)!)) {
+      const probes = probeIndices(candidates);
+      for (const i of probes) {
+        await score(i);
+      }
+      const tried = new Set(probes);
+      const stillborn = stillbornVerdict(candidates, outcomeOf);
+      rest = stillborn === null ? rest.filter((i) => !tried.has(i)) : [];
+      total = stillborn === null ? total : stillborn.compiled.length;
+    }
+    for (const i of rest) {
+      await score(i);
     }
   }
-  emit({ phase: 'scoring', done: total, total });
+  emit({ phase: 'scoring', done: outcomes.size, total });
   // The scoring phase ends by CHANGING PHASE, never by sitting at done === total: the sort and the
   // structured clone of a six-figure array back to the main thread are real work, and a bar full
   // while the tab is still busy is the lie constraint 3 forbids. The UI falls back to an
   // indeterminate bar with a different label here.
   emit({ phase: 'ranking' });
-  if (results.length === 0) {
-    // The WHOLE message, as core's `rankBy` does: a compile failure names the command on line one
-    // and the compiler's own complaint after it, and one line publishes the half the reader
-    // already has. `apps/web/test/candidate-compile.test.ts` is the acceptance test for exactly
-    // that — it pins a header (`in.i: In function 'f':`) being shown where the diagnosis belongs.
-    const why = lastErr instanceof Error ? lastErr.message : String(lastErr ?? 'no candidate produced');
-    // CORE'S CLASS, for the same reason this driver borrows `compareScored` and `withheldReason`:
-    // on a row where nothing scored the two lists are the whole fan, and a bare `Error` drops them
-    // on the floor — leaving the playground's "ranking unavailable" toast with nothing behind it.
-    // The message is built the same way core builds it, so the two drivers cannot drift.
-    throw new NoScorableCandidateError(`no scorable candidate for '${name}': ${why}`, dropped, withheld, {
-      cause: lastErr,
-    });
-  }
-  results.sort(compareScored);
-  return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
+  const ranked = rankBy(candidates, name, (source, _symbol, c) => {
+    const r = outcomes.get(source);
+    if (r === undefined) {
+      throw new Error(`internal: a candidate reached ranking unscored (${c.source.length} bytes)`);
+    }
+    if (r instanceof Error) {
+      throw r;
+    }
+    return r;
+  });
+  return { ...ranked, refused };
 }

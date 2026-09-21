@@ -194,6 +194,13 @@ describe('the variation drawer', () => {
     },
   );
 
+  test('the candidates figure says how many a stillborn fan never compiled, apart from the dropped', () => {
+    const html = renderToStaticMarkup(
+      <VariationDetailBody name="scopebase" rows={FAN_SAMPLE} hash={HASH} onClose={noop} onOpenVariation={noop} />,
+    );
+    expect(html).toContain('1 dropped · 0 withheld · 3 not compiled');
+  });
+
   test('when it is offered is read from the code: every rule of its tables, its condition, its target', () => {
     for (const { name } of VARIATION_TOKENS) {
       const offer = VARIATION_DEFINITIONS[name].offeredWhen;

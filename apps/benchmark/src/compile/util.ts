@@ -1,4 +1,5 @@
 // Shared helpers for the per-toolchain compile modules.
+import { CompilerRejection, errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
@@ -71,19 +72,27 @@ export function pickDiagnostics(lines: string[]): string[] {
  *  untouched. */
 const ABSOLUTE_PATH = /(^|[\s("'`<])\/(?:[^\s:]+\/)+([^\s:/]+)/g;
 
-/** The diagnostic lines of a compiler's output as one string (capped at 5×240 chars,
- *  newline-joined), falling back to the first non-empty lines. Embedded in the compile modules'
+/** The diagnostic lines of a compiler's output as one string (errors first, capped at 5×240
+ *  chars, newline-joined), falling back to the first non-empty lines. Embedded in the compile modules'
  *  thrown Error messages, which the evaluator turns into row error markers. */
 export function compilerDiagnostics(s: string): string {
   const lines = (s ?? '')
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-  const diags = pickDiagnostics(lines);
+  const diags = errorsFirst(pickDiagnostics(lines));
   return (diags.length > 0 ? diags : lines)
     .slice(0, 5)
     .map((l) => l.replace(ABSOLUTE_PATH, '$1$2').slice(0, 240))
     .join('\n');
+}
+
+/** A toolchain seam's throw, restated with the bounded diagnostic the evaluator publishes and
+ *  still the KIND it was: a `CompilerRejection` stays one, its whole diagnostic with it, so the
+ *  ranking driver's stillborn rule can read the verdict; anything else stays the transient it was. */
+export function restated(tool: string, e: unknown): Error {
+  const message = `${tool} failed: ${compilerDiagnostics(e instanceof Error ? e.message : String(e))}`;
+  return e instanceof CompilerRejection ? new CompilerRejection(message, e.diagnostic) : new Error(message);
 }
 
 /** A content-keyed scratch dir for a reference build: same flags and TU ⇒ same path, every run. The

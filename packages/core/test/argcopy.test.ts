@@ -23,10 +23,13 @@ const plus1 = (n: string): Expr => ({ k: 'bin', op: '+', l: rd(n), r: { k: 'cons
 const forLoop = (init: Stmt, inc: Stmt, body: Stmt[]): Stmt => ({ k: 'for', init, cond: rd('c'), inc, body });
 /** a two-armed `if`, the smallest thing with regions */
 const armIf = (thenS: Stmt[], elseS: Stmt[]): Stmt => ({ k: 'if', cond: rd('c'), then: thenS, else: elseS });
+/** `g(n && c)`: a read under a short-circuit — the edge that keeps a leaf arm from being one basic
+ *  block, which the `straight-line` gate would otherwise refuse */
+const andCall = (n: string): Stmt => call('g', { k: 'bin', op: '&&', l: rd(n), r: rd('c') });
 
 describe('a region copy of a pointer parameter', () => {
   test('a parameter used inside one arm is copied into a local that arm assigns first', () => {
-    const out = argCopyCandidates(fn([armIf([call('g', rd('a0')), call('g', rd('a0'))], [call('h')])]));
+    const out = argCopyCandidates(fn([armIf([andCall('a0'), call('g', rd('a0'))], [call('h')])]));
     expect(out.length).toBeGreaterThanOrEqual(1);
     const c = out[0];
     // the copy is a NEW local, declared and assigned from the parameter
@@ -43,7 +46,7 @@ describe('a region copy of a pointer parameter', () => {
   test('a use OUTSIDE the region keeps naming the parameter', () => {
     // both arms read a0; the candidate that copies in the THEN arm must leave the ELSE arm alone
     const out = argCopyCandidates(
-      fn([armIf([call('g', rd('a0')), call('g', rd('a0'))], [call('h', rd('a0')), call('h', rd('a0'))])]),
+      fn([armIf([andCall('a0'), call('g', rd('a0'))], [call('h', rd('a0')), call('h', rd('a0'))])]),
     );
     const c = out.find((x) => x.merged === 'a0@0.0')!;
     const both = c.sfn.body[0] as Extract<Stmt, { k: 'if' }>;
@@ -90,7 +93,7 @@ describe('a region copy of a pointer parameter', () => {
   });
 
   test('a region with a SINGLE read is refused — one use gives the allocator no range to shorten', () => {
-    const body = [armIf([call('g', rd('a0')), call('g', rd('a0'))], [call('h', rd('a0'))])];
+    const body = [armIf([andCall('a0'), call('g', rd('a0'))], [call('h', rd('a0'))])];
     const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn(body), ARGCOPY_REGION_GATES);
     // the two-read THEN arm is offered; the one-read ELSE arm is not
     expect(candidates.map((c) => c.merged)).toEqual(['a0@0.0']);
@@ -120,6 +123,35 @@ describe('a region copy of a pointer parameter', () => {
     const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn([loop]), ARGCOPY_REGION_GATES);
     expect(candidates).toEqual([]);
     expect(refusals.get('loop-region')).toBe(1);
+  });
+
+  // ── straight-line regions ────────────────────────────────────────────────────────────────────
+  // The `straight-line` gate is a COST gate with three sides: a region that is one basic block is
+  // refused (the compiler propagates the copy away), while a leaf region whose expressions branch
+  // through `&&`/`||` and a region holding a nested statement are both offered.
+
+  test('a STRAIGHT-LINE region is refused — one basic block forward-propagates the copy away', () => {
+    const plain = [armIf([call('g', rd('a0')), call('g', rd('a0'))], [])];
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn(plain), ARGCOPY_REGION_GATES);
+    expect(candidates).toEqual([]);
+    expect(refusals.get('straight-line')).toBe(1);
+  });
+
+  test('a leaf region holding `&&` is offered — a short-circuit is an edge the copy lives across', () => {
+    // the synthetic `leafand` row's shape: no nested list, every statement a store or a call
+    const leaf = [armIf([andCall('a0'), call('g', rd('a0'))], [])];
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn(leaf), ARGCOPY_REGION_GATES);
+    expect(candidates.map((c) => c.merged)).toEqual(['a0@0.0']);
+    expect(refusals.get('straight-line')).toBeUndefined();
+  });
+
+  test('a region holding a nested `if` is offered — its reads sit in more than one block', () => {
+    const inner: Stmt = { k: 'if', cond: rd('c'), then: [call('g', rd('a0'))], else: [] };
+    const nested = [armIf([inner, call('g', rd('a0'))], [])];
+    const { candidates, refusals } = argCopyUnder(ARGCOPY_GATES, fn(nested), ARGCOPY_REGION_GATES);
+    // the outer arm is offered; the inner arm's single read is refused by `single-read`, not here
+    expect(candidates.map((c) => c.merged)).toEqual(['a0@0.0']);
+    expect(refusals.get('straight-line')).toBeUndefined();
   });
 
   // ── the walk is the WHOLE tree, `for` headers included ──────────────────────────────────────
@@ -204,7 +236,7 @@ describe('a region copy of a pointer parameter', () => {
   test('every legal region is offered, each as its own tree', () => {
     // two sibling arms both reading a0 twice → two candidates, and each names its own region
     const out = argCopyCandidates(
-      fn([armIf([call('g', rd('a0')), call('g', rd('a0'))], [call('h', rd('a0')), call('h', rd('a0'))])]),
+      fn([armIf([andCall('a0'), call('g', rd('a0'))], [call('h', rd('a0')), andCall('a0')])]),
     );
     expect(out.length).toBeGreaterThanOrEqual(2);
     expect(new Set(out.map((c) => c.merged)).size).toBe(out.length);

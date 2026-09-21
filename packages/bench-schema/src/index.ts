@@ -87,7 +87,7 @@ export interface DecompilerResult {
    *  variations produced `source`. Printed `/`-joined (`unsigned/raw-globals`). */
   winnerVariations?: readonly string[];
   /** asmlift only, RANKED rows: HOW BIG THIS ROW'S FAN WAS — every candidate spelling
-   *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
+   *  enumeration emitted, i.e. `scored + dropped + withheld + not compiled`. The row's own share of what a
    *  `bench run` costs, and the number that says whether a variation a round shipped multiplied it.
    *
    *  Nothing else in the artifact carries it: `droppedCandidates.length +
@@ -105,6 +105,13 @@ export interface DecompilerResult {
    *  Absent ⇒ the row never reached the ranked pass (`declined` on a phase-1 gap, or `failed`).
    *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
   fanSize?: number;
+  /** asmlift only, `noncompile` rows: how many of `fanSize` were NEVER COMPILED, because the
+   *  ranking declared the fan stillborn (core stillborn.ts: the default candidate and one probe
+   *  per variation were all rejected for the same reason). `fanSize` keeps counting them — they
+   *  were enumerated — and `droppedCandidates` does not: nothing refused them. A cost, like
+   *  `fanSize`, so it is out of `bench diff`'s watched fields. Absent when every candidate was
+   *  compiled, which is every row that is not stillborn. */
+  fanNotCompiled?: number;
   /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
    *  objdiff-score every candidate. The price `fanSize` predicts, as this machine actually
    *  paid it.
@@ -127,7 +134,8 @@ export interface DecompilerResult {
   /** asmlift only, RANKED rows: every variation this row's fan carried, keyed by its registered
    *  name (`@asmlift/core/variation-tokens` `VARIATION_TOKENS`), with how many of the fan's
    *  candidates carry it — `candidates` over the whole fan, `dropped` and `withheld` the refused
-   *  part of that count, each absent when 0. A variation applied to a subject counts under its
+   *  part of that count and `notCompiled` the part a stillborn fan never compiled, each absent
+   *  when 0. A variation applied to a subject counts under its
    *  registered name, and a candidate counts once under each name it carries.
    *
    *  The artifact names only the winner and the refused candidates; this is the rest of the fan,
@@ -139,7 +147,7 @@ export interface DecompilerResult {
    *  to `fanSize`. Every candidate carries exactly one signedness, so `unsigned` and `signed` sum
    *  to it. Keys run in variation-kind order, then by name. Present exactly when `fanSize` is,
    *  and deterministic under the same conditions. */
-  fanVariations?: Record<string, { candidates: number; dropped?: number; withheld?: number }>;
+  fanVariations?: Record<string, { candidates: number; dropped?: number; withheld?: number; notCompiled?: number }>;
   /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
    *  the ranking, each named by its variations with the compiler's first diagnostic line. A dropped sibling is a defect
    *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean

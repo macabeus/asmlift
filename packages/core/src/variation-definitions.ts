@@ -64,6 +64,11 @@ export const READER_WORDS: readonly ReaderWord[] = [
     word: 'withheld',
     meaning: 'A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.',
   },
+  {
+    word: 'not compiled',
+    meaning:
+      'A candidate never handed to the scorer: its fan was stillborn — the default candidate and one probe per variation were all rejected for the same reason, so the rest was not compiled.',
+  },
 ];
 
 export interface VariationKindDefinition {

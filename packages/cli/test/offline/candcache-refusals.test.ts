@@ -3,6 +3,7 @@
 //
 // Every case below is a shape an audit reproduced on the shipped code, each of which served a
 // stale or wrong answer with no perturbation of anything the design considered an input.
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -323,7 +324,7 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
     // served answers are rejections — 84% of the 36,025 one full `pnpm bench run` was served.
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
-      m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
+      m.candCache('t', () => NS_A).putFail('k', 'f', new CompilerRejection('agbcc failed: c.c:3: syntax error'));
     });
     const { said, stats } = await capture({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).verify('k', 'f', object('THE-TRUTH'));
@@ -339,13 +340,34 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
     expect(readFileSync(served as string, 'utf8')).toBe('THE-TRUTH');
   });
 
+  test('a served rejection carries the WHOLE diagnostic it was stored with, not only its message', async () => {
+    // The stillborn rule compares diagnostics. A store that kept the bounded message alone would
+    // have a warm run decide on five lines what a cold run decided on all of them.
+    const root = scratch();
+    const diagnostic = "c.c:3: warning: w\nc.c:9: too many arguments to function `g'";
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      m.candCache('t', () => NS_A).putFail(
+        'k',
+        'f',
+        new CompilerRejection('agbcc failed: c.c:9: too many', diagnostic),
+      );
+      m.candCache('t', () => NS_A).putFail('k2', 'f', new CompilerRejection('cc failed: whole output'));
+    });
+    const [served, plain] = await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => [
+      m.candCache('t', () => NS_A).get('k', 'f'),
+      m.candCache('t', () => NS_A).get('k2', 'f'),
+    ]);
+    expect(served).toMatchObject({ name: 'CompilerRejection', message: 'agbcc failed: c.c:9: too many', diagnostic });
+    expect(plain).toMatchObject({ message: 'cc failed: whole output', diagnostic: 'cc failed: whole output' });
+  });
+
   test('a stored OBJECT against a fresh REJECTION is a mismatch — a candidate scored on dead bytes', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).put('k', 'f', object('STALE'));
     });
     const { said, stats } = await capture({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
-      m.candCache('t', () => NS_A).verifyFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
+      m.candCache('t', () => NS_A).verifyFail('k', 'f', new CompilerRejection('agbcc failed: c.c:3: syntax error'));
     });
     expect(stats).toMatchObject({ mismatch: 1 });
     expect(said).toContain('OUTCOME MISMATCH');
@@ -359,12 +381,16 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
   test('an agreeing REJECTION is COUNTED — an audit that skips the negative half is not an audit', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
-      m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
+      m.candCache('t', () => NS_A).putFail('k', 'f', new CompilerRejection('agbcc failed: c.c:3: syntax error'));
     });
     const { said, stats } = await capture({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       // The OUTCOME is compared, not the diagnostic text: a message can carry a scratch path or a
       // line the harness reformats, and neither is the answer the cache serves.
-      m.candCache('t', () => NS_A).verifyFail('k', 'f', 'agbcc failed: c.c:3: syntax error before ")"');
+      m.candCache('t', () => NS_A).verifyFail(
+        'k',
+        'f',
+        new CompilerRejection('agbcc failed: c.c:3: syntax error before ")"'),
+      );
     });
     expect(stats).toMatchObject({ verifiedFail: 1 });
     expect(stats.mismatch).toBeUndefined();
@@ -526,7 +552,7 @@ describe('a store this process cannot prepare is a COLD store, never a dropped c
       expect(c.get('k', 'f')).toBeUndefined();
       // put hands back the CALLER'S OWN path, which is the answer it just compiled.
       expect(c.put('k', 'f', scratchObj)).toBe(scratchObj);
-      expect(() => c.putFail('k2', 'f', 'agbcc failed (exit 1)')).not.toThrow();
+      expect(() => c.putFail('k2', 'f', new CompilerRejection('agbcc failed (exit 1)'))).not.toThrow();
       expect(c.mode, 'and the instance is off for the rest of the process').toBe('off');
     });
     expect(said).toContain('REFUSED label=t reason=store-unusable');

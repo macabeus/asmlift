@@ -4,16 +4,22 @@ The words asmlift uses for candidate enumeration. Each word below has one meanin
 also has an ordinary meaning elsewhere in this repository, the last section says which sense is
 the dominant one.
 
-## The six words a reader needs
+## The seven words a reader needs
 
-| Word          | Meaning                                                                                                                                            |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **candidate** | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                         |
-| **fan**       | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                     |
-| **winner**    | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it. |
-| **variation** | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too. |
-| **dropped**   | A candidate the scorer refused: its source did not build.                                                                                          |
-| **withheld**  | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                  |
+| Word             | Meaning                                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **candidate**    | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                                                             |
+| **fan**          | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                                                         |
+| **winner**       | The best-scoring candidate among those that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.                                     |
+| **variation**    | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too.                                     |
+| **dropped**      | A candidate the scorer refused: its source did not build.                                                                                                                              |
+| **withheld**     | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                                                      |
+| **not compiled** | A candidate never handed to the scorer: its fan was stillborn — the default candidate and one probe per variation were all rejected for the same reason, so the rest was not compiled. |
+
+A fan is **stillborn** when no variation can reach what refuses it: the default candidate fails
+to build, and so does the smallest candidate carrying each variation, every one with the same
+compiler errors. The rule, and the case it does not close, are in
+`packages/core/src/stillborn.ts`.
 
 A candidate's name is its **variations**: the ordered list of variations it applied, e.g.
 `["unsigned", "defsite", "raw-globals"]`. Every command prints that list joined with `/`, as
@@ -53,7 +59,7 @@ bare "the variations" could be read both ways.
 - Every registered variation has one reader definition in `VARIATION_DEFINITIONS`
   ([`packages/core/src/variation-definitions.ts`](../packages/core/src/variation-definitions.ts)),
   keyed by the registry's names: what it changes in the C, a before/after pair, and what its subject
-  means. The six words and the kinds below are data there too, and a test holds these tables to it.
+  means. The seven words and the kinds below are data there too, and a test holds these tables to it.
 - When several combinations of variations produce the same source, only the first combination's
   variations are kept. **A candidate's variations name what was applied, not every route to its
   source, and not a route a deletion must remove.** Price a variation by ablating it, never by
@@ -78,12 +84,13 @@ already produced every source it made. A variation that threw prints an `asmlift
 
 ## Fields of the benchmark artifact
 
-| Field                                                                               | Meaning                                                                                                                                                             |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner.                                                            |
-| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.                                                                 |
-| `asmlift.fanVariations`                                                             | Every variation the fan carried, by registered name, with how many candidates carry it and how many of those were dropped or withheld. Present on every ranked row. |
-| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                                                                                        |
+| Field                                                                               | Meaning                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner.                                                                          |
+| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped, withheld and not compiled. Present on every ranked row.                                                                 |
+| `asmlift.fanNotCompiled`                                                            | How many of `fanSize` were never compiled, on a row whose fan was stillborn. Absent on every other row.                                                                           |
+| `asmlift.fanVariations`                                                             | Every variation the fan carried, by registered name, with how many candidates carry it and how many of those were dropped, withheld or not compiled. Present on every ranked row. |
+| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                                                                                                      |
 
 ## Words the enumeration code uses
 
@@ -107,6 +114,8 @@ already produced every source it made. A variation that threw prints an `asmlift
 | **preference**                  | Which symbol-map setting a candidate carries. The lower one wins a score tie.                                                                                                                                                                            |
 | **route**                       | A derivation path that reaches a source. The first route to a source keeps its variations.                                                                                                                                                               |
 | **admission**                   | The row or measurement that justifies enumerating a variation, a hoist or a pairing. An admitted variation is one the enumeration runs.                                                                                                                  |
+| **probe**                       | Once the default candidate is rejected, the candidate with the fewest variations that carries a given variation name, one per name in the fan; the stillborn rule compiles these next (`packages/core/src/stillborn.ts`).                                |
+| **error key**                   | What a rejected compile failed on: the multiset of the compiler's error messages, positions normalised away, or nothing when the diagnostic is unreadable or cut short (`packages/core/src/compiler-diagnostics.ts`).                                    |
 | **enumeration order**           | The order candidates are enumerated in. `compareScored` breaks a score tie by it last, so moving where a variation is enumerated can change a published winner.                                                                                          |
 | **fan hashes**                  | `bench sweep --fan`'s three digests of a fan, each in enumeration order: `fanHash` over each candidate's variations and source, `fanSourceHash` over the sources alone, `fanNamesHash` over the names alone.                                             |
 | **map mode**                    | One of the two ways `bench sweep` lifts a row: `harness`, as the row is configured, or `nomap`, the same without its symbol map. `--map-modes` selects them.                                                                                             |
@@ -130,6 +139,7 @@ A flag is never **withheld**: that word names a refused candidate.
 | ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **spelling** | How a piece of C writes something, and so why two sources compile differently.                     | —                                                                                                                                                                              |
 | **decline**  | A pass or a row refusing to act rather than emitting something wrong. `declined` is a row outcome. | —                                                                                                                                                                              |
+| **default**  | No variation of a kind is applied (above).                                                         | The default candidate: the first in enumeration order, which the stillborn rule compiles before any other.                                                                     |
 | **gate**     | A predicate deciding whether a rewrite or a variation fires.                                       | A check a round must pass before it merges.                                                                                                                                    |
 | **base**     | A base pointer (`livebase`, `BaseKey`).                                                            | A git ref (`--base`).                                                                                                                                                          |
 | **arm**      | A branch or `switch` arm of recovered C (`switch-arms`).                                           | The ARM instruction set.                                                                                                                                                       |

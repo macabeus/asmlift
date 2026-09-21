@@ -63,6 +63,17 @@ describe('compilerErrorLines (pinned)', () => {
     expect(compilerErrorLines(msg)).toEqual(["<tmp>/cand.pp.c:3: invalid type argument of `unary *'"]);
   });
 
+  test('a row whose error sits below six warnings publishes the error', () => {
+    const msg = [
+      "no scorable candidate for 'f': compile command failed (exit 1): cc -c in.c",
+      ...Array.from({ length: 6 }, (_, i) => `in.c:${i + 1}: warning: assignment from incompatible pointer type`),
+      "in.c:9: too many arguments to function `g'",
+    ].join('\n');
+    const markers = compilerErrorLines(msg);
+    expect(markers).toHaveLength(5);
+    expect(markers[0]).toBe("in.c:9: too many arguments to function `g'");
+  });
+
   test('falls back to the first line so the marker is never empty', () => {
     expect(compilerErrorLines('something opaque went wrong\nmore text')).toEqual(['something opaque went wrong']);
   });
