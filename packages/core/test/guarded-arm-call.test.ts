@@ -1,12 +1,16 @@
-// A CALL IN A `&&`/`||`'s GUARDED OPERAND runs on some iterations in the C and on every one in the
-// asm.
+// A CALL IN A `&&`/`||`'s GUARDED OPERAND runs on every evaluation of the test in the asm and on
+// only some of them in the C.
 //
-// `call` is in `HOIST_UNSAFE_OPS`, so `raise/shortcircuit.ts` never lifts one out of the arm it
-// guards: a call that reached a connective's operand[1] cone was already above the branch, run
-// unconditionally. Inlined at its use it lands behind C's own short circuit, which skips it —
-// fewer calls, and whatever the callee writes goes with them. The rule that stops it is a
-// placement one, the sibling of `edge-arg-call.test.ts`'s: materialize the call at the position
-// the asm ran it. Toolchain-free.
+// Two facts hold it up and they are independent. That the inlined C is WRONG needs only dominance:
+// `verify()` requires a def to dominate its uses, so a value the connective reads was produced on
+// every path that evaluates the connective, while C's own short circuit skips the guarded operand —
+// fewer calls, and whatever the callee wrote goes with them. That materializing the call at its DEF
+// is the fix needs the second: `call` is in `HOIST_UNSAFE_OPS`, so `raise/shortcircuit.ts` never
+// lifted one out of the arm it guards, and the def block is the block the asm called in.
+//
+// No contract catches it. `assertEffectsPreserved` (contracts.ts) refuses a call the emitted C
+// DROPS and one it runs more times than the asm does on some path, never one it runs FEWER times —
+// the hole `edge-arg-call.test.ts` names for the sibling placement rule. Toolchain-free.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -60,6 +64,28 @@ test('the FIRST operand is unconditional, and the rule leaves it inlined', () =>
   const src = emit(GUARDED_AND.replace('logic_and %3, %4', 'logic_and %4, %3'));
   expect(src).toContain('f2(a0) != 0 && a0 > 0');
   expect(src.match(/f2\(/g)).toHaveLength(1);
+});
+
+// The same connective as a VALUE: `return a0 > 0 && f2(a0) != 0;`. raise/shortcircuit.ts mints this
+// one at its own site, out of a value-merge diamond rather than a branch pair, and the bench feature
+// vocabulary counts it as a different recovery (bench-schema/src/features.ts) — so the rule is
+// asked of it separately.
+const GUARDED_AND_VALUE = `fn f {
+^bb0(%0: s32):
+  %1: s32 = call %0 {target="f2"}
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_sgt %0, %2
+  %4: u32 = icmp_ne %1, %2
+  %5: u32 = logic_and %3, %4
+  ret %5
+}
+`;
+
+test('the connective in VALUE position guards its second operand too', () => {
+  const src = emit(GUARDED_AND_VALUE);
+  expect(src).toMatch(/v0 = f2\(a0\);\s*\n\s*return /);
+  expect(src.match(/f2\(/g)).toHaveLength(1);
+  expect(src).toContain('return a0 > 0 && v0 != 0');
 });
 
 test('a call reached THROUGH the guarded operand’s cone counts too', () => {
