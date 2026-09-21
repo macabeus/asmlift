@@ -55,6 +55,7 @@ import {
   gapReasonFor,
   mapExprChildren,
   mapStmtExprs,
+  mentionedName,
   negateCond,
   stmtChildren,
   walkExprs,
@@ -932,7 +933,7 @@ const CMP_TO_BIN: Record<string, BinOp> = {
   icmp_eq: '==',
   icmp_ne: '!=',
 };
-const ARITH_TO_BIN: Record<string, BinOp> = {
+export const ARITH_TO_BIN: Record<string, BinOp> = {
   add: '+',
   sub: '-',
   mul: '*',
@@ -955,6 +956,38 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
 // The operators whose operand order the machine does not fix — candidates for the def-order
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
+
+// Spell a loop update at the place the bottom test reads the variable: the one `name` leaf becomes
+// `name++`. Returns null unless the rendered test MENTIONS `name` exactly once, and that mention is
+// a readable leaf. `&v1` is a mention the `++` cannot be placed on and cannot be counted out of —
+// a callee reads the object through it — so a test holding one alongside a bare `v1` is refused
+// here rather than left to `assertPostIncrUnshared`, which would abort the lift instead.
+//
+// `preUpdateCondFold` decided that on the DEF TREE, and this asks the same question of what the
+// lowering actually produced. The two can disagree — an idiom fold spells a value its operands do
+// not show, a substitution stops the render short of a leaf the walk reached — and the two
+// disagreements are not equally bad: a test that named the variable twice would be C89-undefined,
+// and one that names it not at all would drop the update altogether. Both answer null, and the
+// caller declines.
+//
+// No input reaches either answer today, so it is pinned directly, on hand-built expressions
+// (test/loop-preupdate-cond.test.ts) — the discipline `sunkCopyOverDroppedUndef` is held to.
+export function spellUpdateInCond(cond: Expr, name: string, by: 1 | -1): Expr | null {
+  let found = 0;
+  let mentions = 0;
+  const rec = (e: Expr): Expr => {
+    if (mentionedName(e) === name) {
+      mentions++;
+    }
+    if (e.k === 'var' && e.name === name) {
+      found++;
+      return { k: 'postincr', name, by };
+    }
+    return mapExprChildren(e, rec);
+  };
+  const out = rec(cond);
+  return found === 1 && mentions === 1 ? out : null;
+}
 
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
 // arg it feeds (the value on the header→header edge). The back-edge arg is the "next"
@@ -3748,7 +3781,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // naming walk and the coalescing that follows it, and these checks only read it — so today the
   // two readings coincide; the reference is what keeps them coinciding if a write ever moves down
   // here.
-  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } = makeLoopHazards({
+  const {
+    readsClobbered,
+    loopUpdateHazard,
+    testSkipsAnEffect,
+    preUpdateCondFold,
+    sinkablePreUpdateSlots,
+    sameAtEntry,
+    loopWriteSet,
+  } = makeLoopHazards({
     defs,
     varName,
     useSitesOf,
@@ -4773,6 +4814,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             null,
           )
         ) {
+          // NO `n++` REPAIR HERE, and the SHAPE is why rather than an oversight. The fold
+          // (`preUpdateCondFold`) trades the update copy at the foot of the body for a `++` at the
+          // leaf, which is the same program only for a BOTTOM test: it runs once per iteration, in
+          // the position the copy stood. This test renders at the TOP, ahead of the body, and runs
+          // one more time than the body does — `while (n++ < k)` over a body with no update is a
+          // different loop. Reaching this site is a rotation, not a wider gate.
           throw new StructureError(
             `cannot structure '${fn.name}': loop condition or a post-loop value reads a pre-update loop variable`,
           );
@@ -5449,6 +5496,38 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // post-loop where the other path really does read them after the update.
     const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
+    // AN EFFECT THE RENDERED TEST MAY SKIP. `movedEffect` below says this about the exit copies; the
+    // bottom test is the other place an effect can change how often it runs, and here it is the
+    // `&&`/`||` that moves it rather than a copy: the right operand is evaluated only where the left
+    // one let it be, while the asm's branch did not guard the op at all. Nothing can re-place it —
+    // the connective is what the test IS — so decline LOUD, the same answer for the same reason.
+    //
+    // Asked of every `do-while`, not only of a folded one: the arm holds the same call whichever way
+    // the counter is spelled.
+    if (testSkipsAnEffect(lterm.operands[0], sub)) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the bottom test may evaluate an effect behind a '&&'/'||' ` +
+          `that the asm ran on every iteration`,
+      );
+    }
+    // The test's OWN pre-update read has a spelling the other two disjuncts do not: `n++` at the
+    // leaf, with the update copy dropped from the foot of the body. Asked only where the test is
+    // already a hazard, so a loop that structures today enumerates exactly the candidates it did.
+    // The polarity is the one applied to `cond` below — the continue edge must be the taken one.
+    const condAnswer = readsClobbered(lterm.operands[0], sub, updateWrites)
+      ? preUpdateCondFold(
+          lterm.operands[0],
+          lterm.successors[1].block === dw.header,
+          dw.header,
+          successorTo(dw.latch, dw.header)?.args ?? [],
+          exitArgs,
+          dw.body,
+          sub,
+          updates,
+          updateWrites,
+        )
+      : null;
+    const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
     if (
       loopUpdateHazard(
         lterm.operands[0],
@@ -5457,10 +5536,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         sub,
         updateWrites,
         postLoop,
+        condFold !== null,
       )
     ) {
+      // Three reasons share this refusal — the test, an exit slot, an escaped body value — and the
+      // one that was asked in detail names the gate that answered.
       throw new StructureError(
-        `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable`,
+        `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable` +
+          (condAnswer !== null && 'refused' in condAnswer
+            ? ` (no '++' for the test's own read: ${condAnswer.refused})`
+            : ''),
       );
     }
     // The exit copies render AFTER the `dowhile` statement, but the analysis judged where each
@@ -5504,11 +5589,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // swap-cycle temp number.
     const sunkCopies = preUpdateCopies(dw.exit, exitArgs, sunk, dw.header);
     const latchEffects = () => sideEffects(dw.latch, sunkCopies.atDef);
+    // The folded update is spelled by the test's own `n++`, so it leaves the foot of the body.
+    // `updates` itself is untouched: every hazard above, and `writtenByUpdate` below, ask what one
+    // iteration WRITES, and the fold moves that write without removing it.
+    const bodyUpdates =
+      condFold === null ? updates : updates.filter((st) => !(st.k === 'assign' && st.name === condFold.name));
     const body = [
       ...sunkCopies.leading,
       ...inner,
       ...(innerSub.size > 0 ? withSub(innerSub, latchEffects) : latchEffects()),
-      ...updates,
+      ...bodyUpdates,
     ];
     assertSunkCopiesPlaced(sunkCopies);
     // The test reads this loop's own update under `sub`, and anything else an inner loop left under
@@ -5569,6 +5659,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
     } // continue edge must be `taken`
+    if (condFold !== null) {
+      // AFTER the negation, so the leaf is placed in the tree that is emitted. `negateCond` rewrites
+      // the connectives by De Morgan, which moves the leaf between arms without duplicating it — and
+      // a rewrite that did duplicate it is exactly what `spellUpdateInCond` refuses.
+      const folded = spellUpdateInCond(cond, condFold.name, condFold.by);
+      if (folded === null) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': the do-while test does not spell '${condFold.name}' exactly once, ` +
+            `so its update has no place inside the test`,
+        );
+      }
+      cond = folded;
+    }
     const out: Stmt[] = [{ k: 'dowhile', cond, body }];
     // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars).
     out.push(
@@ -5603,8 +5706,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   if (owed.length > 0) {
     const mentioned = new Set<string>(globalNames);
     for (const e of walkExprs(body)) {
-      if (e.k === 'var' || e.k === 'addr') {
-        mentioned.add(e.name);
+      const n = mentionedName(e);
+      if (n !== undefined) {
+        mentioned.add(n);
       }
     }
     const assignTargets = (ss: Stmt[]): void => {

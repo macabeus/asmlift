@@ -10,7 +10,7 @@
 // see `HoistPlacement` and `BaseInitPlacement`. Everything lives in one file because each half was
 // a per-caller copy once and every copy drifted from its original.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapStmtLists, stmtChildren, stmtExprs, stmtLists } from './ast';
+import { exprChildren, mapStmtLists, mentionedName, stmtChildren, stmtExprs, stmtLists } from './ast';
 import { localMentions } from './mentions';
 
 /** Every identifier a MINTED name must not collide with, anywhere in `sfn` — the hoists below,
@@ -18,15 +18,16 @@ import { localMentions } from './mentions';
  *
  *  Wider than "the declared locals" on purpose, and each addition is a real collision:
  *   - params and locals, obviously;
- *   - every `var`/`addr` mentioned — a GLOBAL is referenced by bare name, so a local shadowing one
- *     silently redirects every later mention of it;
+ *   - every name an expression mentions — a GLOBAL is referenced by bare name, so a local shadowing
+ *     one silently redirects every later mention of it;
  *   - every CALL TARGET — a local named like a callee shadows the function;
  *   - every assignment target, which includes names no declaration list carries. */
 export function takenNames(sfn: SFn): Set<string> {
   const taken = new Set<string>([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
   const visit = (e: Expr): void => {
-    if (e.k === 'var' || e.k === 'addr') {
-      taken.add(e.name);
+    const n = mentionedName(e);
+    if (n !== undefined) {
+      taken.add(n);
     }
     if (e.k === 'call') {
       taken.add(e.fn);
@@ -115,7 +116,7 @@ function mentionsHere(s: Stmt, name: string): boolean {
   }
   let found = false;
   const visit = (e: Expr): void => {
-    if ((e.k === 'var' || e.k === 'addr') && e.name === name) {
+    if (mentionedName(e) === name) {
       found = true;
     }
     for (const c of exprChildren(e)) {

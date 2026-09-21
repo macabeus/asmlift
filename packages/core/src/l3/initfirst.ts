@@ -38,15 +38,26 @@
 // re-enters everything, a case can fall through), so there the variable must appear nowhere
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, exprEquals, exprHasEffect, stmtChildren, stmtExprs, walkExprs } from './ast';
+import {
+  NEGATE_REL,
+  exprChildren,
+  exprEquals,
+  exprHasEffect,
+  mentionedName,
+  stmtChildren,
+  stmtExprs,
+  walkExprs,
+} from './ast';
 import { arithConversionSignedness, declaredTypes, provablyNonNegative } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
-  ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
+  mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
 
-// READS only — a pure write in a tail is benign (it overwrites the minted value on every path,
-// and any read after it is that write's business); touchesOutside below is TOTAL because strong
-// mode must know the name is absent, presence of any kind included.
+// MENTIONS in an expression — a read, an `&v` a callee may read through, a `v++` that reads before
+// it writes. A whole-statement write is what is benign (an `assign` overwrites the minted value on
+// every path, and any read after it is that write's business), which is why the target of one is
+// not consulted here; touchesOutside below is TOTAL because strong mode must know the name is
+// absent, presence of any kind included.
 const stmtTouches = (s: Stmt, name: string): boolean =>
   stmtExprs(s).some((e) => readsVar(e, name)) || stmtChildren(s).some((x) => stmtTouches(x, name));
 
@@ -67,10 +78,11 @@ const stripWideIntCast = (e: Expr): Expr =>
  *  would silently discard it. */
 const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
 
-/** A guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
- *  function (a global or `&gSym` could be project-declared volatile), and every deref `varRooted`. */
+/** A guard re-spell's X: call/marker/post-increment-free, every named leaf a non-volatile param/local
+ *  of THIS function (a global or `&gSym` could be project-declared volatile), and every deref
+ *  `varRooted`. */
 const hoistableRead = (e: Expr, ownNames: ReadonlySet<string>, volatileLocals: ReadonlySet<string>): boolean => {
-  if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+  if (e.k === 'call' || e.k === 'marker' || e.k === 'postincr' || e.k === 'addr') {
     return false;
   }
   if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {

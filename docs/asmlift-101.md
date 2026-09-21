@@ -214,7 +214,9 @@ through" — malformed IR fails loudly at the next gate, which is by design.
 
 Language **backends** then print L3 as concrete source: C, Pascal, and a deliberately scoped
 C++ (`packages/core/src/backend/`). One neutral AST, three output languages — every language-specific
-decision (Pascal's `:=`, C's `?:`) lives in a backend, never in the tower.
+decision (Pascal's `:=`, C's `?:`) lives in a backend, never in the tower. The one node that breaks
+the rule says so where it is declared: `postincr` is C's `n++`, and it is in the tower because the
+asm decides it rather than the output language (`docs/level-tower.md`).
 
 ### 2.5 Idioms — when the compiler writes riddles
 

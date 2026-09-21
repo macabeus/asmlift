@@ -7,15 +7,20 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
+import type { Stmt } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
 import {
+  PREUPDATE_COND_GATES,
   PREUPDATE_SINK_GATES,
+  type PreUpdateCondCandidate,
+  SHORT_CIRCUIT_ARMS,
   type SinkCandidate,
   makeLoopHazards,
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from '../src/structure/hazards';
+import { ARITH_TO_BIN } from '../src/structure/structure';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -643,6 +648,393 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, latch, empty, new Set(['v0']))).toEqual(new Map());
+  });
+});
+
+describe('preUpdateCondFold', () => {
+  // The agbcc shape the fold exists for: a self-loop carrying `v1`, whose bottom test is
+  // `v0 != 0 && v1 <= 9` — the second arm reading `v1` one update AHEAD of the copy at the foot of
+  // the body. Everything the predicate weighs is a knob on it: which connective joins the arms,
+  // which arm the variable is in, what the update spells, and who reads its result after the loop.
+  //
+  // Each refusal names the gate that answered, so an ablation measures the rule it names rather
+  // than whatever happened to refuse first. All but one are a single knob turned on that shape;
+  // `one-pre-update-variable` needs a second loop variable, which the scaffold has no room for, so
+  // it builds its own.
+  const nine = (): Value => v();
+  const scaffold = (
+    opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean; callArm?: boolean } = {},
+  ) => {
+    const p = v(); // the loop variable, named v1
+    const u = v(); // its back-edge arg — post-update, so `sub` maps it to the same name
+    const other = v(); // the other arm's value, named v0 — or, with `callArm`, an inlined call
+    const k = nine();
+    const cmp = v();
+    const zero = v();
+    const ne = v();
+    const cond = v();
+    const cmpOp = mkOp('icmp_ule', { operands: [p, k], results: [cmp] });
+    const neOp = mkOp('icmp_ne', { operands: [other, zero], results: [ne] });
+    const arms = opts.leftArm === true ? [cmp, ne] : [ne, cmp];
+    const condOp = mkOp(opts.connective ?? 'logic_and', { operands: arms, results: [cond] });
+    const header: Block = { params: [p], ops: [] };
+    const defs = new Map<Value, Op>([
+      [cond, condOp],
+      [cmp, cmpOp],
+      [ne, neOp],
+    ]);
+    if (opts.callArm === true) {
+      defs.set(other, mkOp('call', { operands: [v()], results: [other] }));
+    }
+    // `!(…)`: the connective is reached through an op that inverts it, so the arms it hands out
+    // answer about the opposite edge of the loop from the one the walk is reading.
+    const root = opts.underNot === true ? v() : cond;
+    if (root !== cond) {
+      defs.set(root, mkOp('icmp_eq', { operands: [cond, v()], results: [root] }));
+    }
+    return {
+      p,
+      u,
+      cond: root,
+      header,
+      body: new Set([header]),
+      defs,
+      varName:
+        opts.callArm === true
+          ? new Map([[p, 'v1']])
+          : new Map([
+              [p, 'v1'],
+              [other, 'v0'],
+            ]),
+      cmpOp,
+    };
+  };
+  const step = (value: number): Stmt[] => [
+    { k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: { k: 'var', name: 'v1' }, r: { k: 'const', value } } },
+  ];
+  const writes = new Set(['v1']);
+  const ask = (
+    f: ReturnType<typeof scaffold>,
+    over: {
+      updates?: Stmt[];
+      useSitesOf?: Map<Value, UseSite[]>;
+      respelledDefs?: Map<Op, unknown>;
+      exitArgs?: Value[];
+      gates?: readonly Gate<PreUpdateCondCandidate>[];
+    } = {},
+  ) =>
+    make({
+      defs: f.defs,
+      varName: f.varName,
+      useSitesOf: over.useSitesOf ?? new Map(),
+      respelledDefs: over.respelledDefs ?? new Map(),
+    }).preUpdateCondFold(
+      f.cond,
+      false,
+      f.header,
+      [f.u],
+      over.exitArgs ?? [],
+      f.body,
+      new Map([[f.u, 'v1']]),
+      over.updates ?? step(1),
+      writes,
+      over.gates,
+    );
+
+  test('the pre-update read in the second arm of an && folds into it', () => {
+    expect(ask(scaffold())).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('a decrement folds as `--`', () => {
+    const f = scaffold();
+    expect(
+      ask(f, {
+        updates: [
+          {
+            k: 'assign',
+            name: 'v1',
+            value: { k: 'bin', op: '-', l: { k: 'var', name: 'v1' }, r: { k: 'const', value: 1 } },
+          },
+        ],
+      }),
+    ).toEqual({
+      name: 'v1',
+      by: -1,
+    });
+  });
+
+  test('an update that is not a unit step has no operator to fold into', () => {
+    expect(ask(scaffold(), { updates: step(2) })).toEqual({ refused: 'update-is-a-unit-step' });
+  });
+
+  test('ablating one-pre-update-variable repairs one variable and clobbers the other', () => {
+    // `do { … } while (v1 <= 9 && v2 <= 9)`, the back edge carrying `v1 + 1` and `v2 + 1`. Only one
+    // name can take the `++`, and a non-null answer switches off the caller's WHOLE condition
+    // disjunct — so the other variable's pre-update read is emitted under its post-update name and
+    // every hazard reports clean.
+    const p1 = v();
+    const p2 = v();
+    const u1 = v();
+    const u2 = v();
+    const a = v();
+    const b = v();
+    const cond = v();
+    const defs = new Map<Value, Op>([
+      [a, mkOp('icmp_ule', { operands: [p1, v()], results: [a] })],
+      [b, mkOp('icmp_ule', { operands: [p2, v()], results: [b] })],
+      [cond, mkOp('logic_and', { operands: [a, b], results: [cond] })],
+    ]);
+    const header: Block = { params: [p1, p2], ops: [] };
+    const both = (gates?: readonly Gate<PreUpdateCondCandidate>[]) =>
+      make({
+        defs,
+        varName: new Map([
+          [p1, 'v1'],
+          [p2, 'v2'],
+        ]),
+      }).preUpdateCondFold(
+        cond,
+        false,
+        header,
+        [u1, u2],
+        [],
+        new Set([header]),
+        new Map([
+          [u1, 'v1'],
+          [u2, 'v2'],
+        ]),
+        [
+          ...step(1),
+          {
+            k: 'assign',
+            name: 'v2',
+            value: { k: 'bin', op: '+', l: { k: 'var', name: 'v2' }, r: { k: 'const', value: 1 } },
+          },
+        ],
+        new Set(['v1', 'v2']),
+        gates,
+      );
+    expect(both()).toEqual({ refused: 'one-pre-update-variable' });
+    expect(both(without(PREUPDATE_COND_GATES, 'one-pre-update-variable'))).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('ablating update-is-a-unit-step declines rather than minting a step-less node', () => {
+    // The gate is the census entry for the refusal; the `step !== null` at the return is what keeps
+    // the node well formed, so the ablation measures the message and not the type.
+    expect(
+      ask(scaffold(), { updates: step(2), gates: without(PREUPDATE_COND_GATES, 'update-is-a-unit-step') }),
+    ).toEqual({ refused: 'update-is-a-unit-step' });
+  });
+
+  test('a test with no pre-update read at all is not this predicate’s business', () => {
+    const f = scaffold();
+    // every leaf post-update: the condition reads the back-edge arg, which `sub` maps
+    const post = make({ defs: f.defs, varName: f.varName }).preUpdateCondFold(
+      f.u,
+      false,
+      f.header,
+      [f.u],
+      [],
+      f.body,
+      new Map([[f.u, 'v1']]),
+      step(1),
+      writes,
+    );
+    expect(post).toEqual({ refused: 'one-pre-update-variable' });
+  });
+
+  test('ablating test-is-readable folds through a respelled def', () => {
+    // The `v1 <= 9` arm moves FIRST, so the variable is noted before the walk meets the opaque op —
+    // and the opaque op is the other arm, whose rendering this walk never sees. It may name `v1`
+    // again, which would make the emitted expression C89-undefined.
+    const f = scaffold({ leftArm: true });
+    const opaque = f.defs.get(f.cond)!.operands[1];
+    const respelled = new Map<Op, unknown>([[[...f.defs].find(([val]) => val === opaque)![1], 'a global member read']]);
+    expect(ask(f, { respelledDefs: respelled })).toEqual({ refused: 'test-is-readable' });
+    expect(ask(f, { respelledDefs: respelled, gates: without(PREUPDATE_COND_GATES, 'test-is-readable') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('ablating variable-named-once folds a test that reads the variable twice', () => {
+    // `v1 != 0 && v1 <= 9`: both arms read the loop variable, and only one of them can carry the
+    // `++`. The other read would then see whichever value the compiler chose — C89 leaves it open.
+    const f = scaffold();
+    const ne = f.defs.get(f.cond)!.operands[0];
+    f.defs.set(ne, mkOp('icmp_ne', { operands: [f.p, v()], results: [ne] }));
+    expect(ask(f)).toEqual({ refused: 'variable-named-once' });
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'variable-named-once') })).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('ablating connectives-join-at-the-root folds an arm of a negated &&', () => {
+    // `!(v0 != 0 && v1 <= 9)`. Each arm function is about its OWN op's truth, so the `&&` says the
+    // second arm runs whenever the `&&` is true — which the negation makes the iterations that
+    // LEAVE. Folded there, the `++` is skipped on every iteration that re-enters while the back
+    // edge still carries `v1 + 1`, and the loop asmlift emits does not terminate where the machine
+    // terminates.
+    const f = scaffold({ underNot: true });
+    expect(ask(f)).toEqual({ refused: 'connectives-join-at-the-root' });
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'connectives-join-at-the-root') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('the short-circuit arms are total over the ops that render as && and ||', () => {
+    // The composition is valid only over ops the walk KNOWS short-circuit; one it does not passes
+    // its own reach down unchanged, which for a connective is the permissive answer. Nothing else
+    // couples the two tables, and `ARITH_TO_BIN` is where a new connective would be spelled.
+    const renders = Object.entries(ARITH_TO_BIN)
+      .filter(([, spelling]) => spelling === '&&' || spelling === '||')
+      .map(([op]) => op);
+    expect(Object.keys(SHORT_CIRCUIT_ARMS).sort()).toEqual(renders.sort());
+  });
+
+  test('ablating folded-on-every-continue folds a leaf under the right operand of an ||', () => {
+    // `v0 != 0 || v1 <= 9` continues whenever the FIRST arm is true, on an iteration that never
+    // evaluated the `++` — while the back edge still carries `v1 + 1`.
+    const f = scaffold({ connective: 'logic_or' });
+    expect(ask(f)).toEqual({ refused: 'folded-on-every-continue' });
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'folded-on-every-continue') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('ablating folded-on-the-exit-too folds a leaf an exiting iteration skips', () => {
+    // The same `&&` as the accepted case, with the updated value now READ after the loop. The
+    // iteration that leaves on a false first arm never evaluates the `++`, so the name it leaves
+    // behind is one short of what the back edge would have computed.
+    const f = scaffold();
+    const outside: Block = { params: [], ops: [] };
+    const seen = new Map<Value, UseSite[]>([[f.u, [use(outside)]]]);
+    expect(ask(f, { useSitesOf: seen })).toEqual({ refused: 'folded-on-the-exit-too' });
+    expect(ask(f, { useSitesOf: seen, gates: without(PREUPDATE_COND_GATES, 'folded-on-the-exit-too') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('the two walks agree about which tests hold a pre-update read', () => {
+    // `preUpdateCondFold` re-implements `readsClobbered`'s walk with a counter and a reach lattice,
+    // and is asked only where `readsClobbered` has already answered true — so the two have to agree
+    // about `sub`, `varName` and the def map. Nothing in the types couples them. A disagreement is
+    // safe in one direction only: the fold finds no pre-update name, `one-pre-update-variable`
+    // refuses and the loop declines. That is what this pins, over every knob the scaffold has.
+    const knobs = [
+      {},
+      { leftArm: true },
+      { connective: 'logic_or' as const },
+      { underNot: true },
+      { callArm: true },
+      { leftArm: true, callArm: true },
+    ];
+    for (const opts of knobs) {
+      const f = scaffold(opts);
+      const sub = new Map([[f.u, 'v1']]);
+      const clobbered = make({ defs: f.defs, varName: f.varName }).readsClobbered(f.cond, sub, writes);
+      const answer = ask(f);
+      const blamed = 'refused' in answer && answer.refused === 'one-pre-update-variable';
+      expect({ opts, clobbered, blamed }).toEqual({ opts, clobbered, blamed: !clobbered });
+      expect(clobbered).toBe(true);
+    }
+    // The other direction, so the assertion above is not one-sided: a test whose every leaf is
+    // post-update. `readsClobbered` says clean, and the fold finds no name to carry the `++`.
+    const f = scaffold();
+    const sub = new Map([[f.u, 'v1']]);
+    const hz = make({ defs: f.defs, varName: f.varName });
+    expect(hz.readsClobbered(f.u, sub, writes)).toBe(false);
+    expect(hz.preUpdateCondFold(f.u, false, f.header, [f.u], [], f.body, sub, step(1), writes)).toEqual({
+      refused: 'one-pre-update-variable',
+    });
+  });
+
+  test('the same post-loop read is fine when the leaf sits where every iteration evaluates it', () => {
+    // The one-fact control for the gate above: move the arm to the LEFT of the `&&`, which every
+    // iteration evaluates whichever way the test answers.
+    const f = scaffold({ leftArm: true });
+    const outside: Block = { params: [], ops: [] };
+    expect(ask(f, { useSitesOf: new Map([[f.u, [use(outside)]]]) })).toEqual({ name: 'v1', by: 1 });
+  });
+});
+
+describe('testSkipsAnEffect', () => {
+  // `v1 <= 9 && work() != 0` and its mirror: the call is INLINED into the test because nothing names
+  // it, and agbcc put that `bl` ahead of the branch either way. Where the `&&` renders it in the
+  // right operand the emitted loop calls only on the iterations the left one let through.
+  const scaffold = (callLeft: boolean, connective: 'logic_and' | 'logic_or' = 'logic_and') => {
+    const p = v();
+    const call = v();
+    const cmp = v();
+    const ne = v();
+    const cond = v();
+    const arms = callLeft ? [ne, cmp] : [cmp, ne];
+    return {
+      cond,
+      defs: new Map<Value, Op>([
+        [call, mkOp('call', { operands: [v()], results: [call] })],
+        [cmp, mkOp('icmp_ule', { operands: [p, v()], results: [cmp] })],
+        [ne, mkOp('icmp_ne', { operands: [call, v()], results: [ne] })],
+        [cond, mkOp(connective, { operands: arms, results: [cond] })],
+      ]),
+    };
+  };
+  const ask = (f: ReturnType<typeof scaffold>, sub: Map<Value, string> = new Map()) =>
+    make({ defs: f.defs }).testSkipsAnEffect(f.cond, sub);
+
+  test('a call in the operand a short circuit may skip is the refusal', () => {
+    expect(ask(scaffold(false))).toBe(true);
+    expect(ask(scaffold(false, 'logic_or'))).toBe(true);
+  });
+
+  test('the same call in the operand every evaluation reaches is clean', () => {
+    expect(ask(scaffold(true))).toBe(false);
+    expect(ask(scaffold(true, 'logic_or'))).toBe(false);
+  });
+
+  test('a pure read is not an effect — C re-guards it where the arm hoist put it', () => {
+    // The trailing-pointer `while (r != 0 && *p++ != 0)`: raise/shortcircuit.ts is allowed to lift a
+    // LOAD out of the arm it guards precisely because the `&&` guards it again, and this predicate
+    // has to agree or that fold's byte-matches all decline.
+    const f = scaffold(false);
+    const ne = f.defs.get(f.cond)!.operands[1];
+    const call = f.defs.get(ne)!.operands[0];
+    f.defs.set(call, mkOp('load', { operands: [v()], results: [call] }));
+    expect(ask(f)).toBe(false);
+  });
+
+  test('a name is a statement, not an inlined effect', () => {
+    // The same call, materialized: `v0 = work(a0);` stands in the body and the arm reads `v0`. The
+    // walk stops at the name, which is the difference between a skipped call and a skipped read.
+    const f = scaffold(false);
+    const ne = f.defs.get(f.cond)!.operands[1];
+    const call = f.defs.get(ne)!.operands[0];
+    expect(make({ defs: f.defs, varName: new Map([[call, 'v0']]) }).testSkipsAnEffect(f.cond, new Map())).toBe(false);
+  });
+
+  test('a respelled def is descended, not waved past', () => {
+    // The fold refuses a def whose rendering it cannot read; here the opposite answer is the safe
+    // one, because the def still names the values its operands stand for — the call among them.
+    const f = scaffold(false);
+    const ne = f.defs.get(f.cond)!.operands[1];
+    const spelled = new Map<Op, unknown>([[f.defs.get(ne)!, 'a bitfield read']]);
+    expect(make({ defs: f.defs, respelledDefs: spelled }).testSkipsAnEffect(f.cond, new Map())).toBe(true);
+  });
+
+  test('a test too large to walk answers the refusing way', () => {
+    // The budget is the only answer given without looking, so it is given as a refusal: the part of
+    // the test the walk did not reach is the part a clean answer would be about.
+    // Twenty ops, a million visits: the walk does not memoise, so a value both operands read costs
+    // it twice at every level.
+    const defs = new Map<Value, Op>();
+    let cur = v();
+    for (let i = 0; i < 20; i++) {
+      const up = v();
+      defs.set(up, mkOp('icmp_ne', { operands: [cur, cur], results: [up] }));
+      cur = up;
+    }
+    expect(make({ defs }).testSkipsAnEffect(cur, new Map())).toBe(true);
   });
 });
 

@@ -8,6 +8,23 @@ export type Expr =
   | { k: 'const'; value: number }
   | { k: 'bin'; op: BinOp; l: Expr; r: Expr }
   | { k: 'un'; op: '-' | '~' | '!'; e: Expr }
+  // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
+  // held BEFORE the update, with the update as a side effect. The only expression form here that
+  // WRITES anything, so `exprHasEffect` answers for it alongside `call` and `marker` — that is what
+  // every pass asking "may I move or duplicate this" already consults. It also NAMES a local, so
+  // `mentionedName` answers for it beside `var` and `addr`, and the two walks that classify their
+  // own leaves — `l3/mentions.ts` and `contracts.ts`'s `assertLocalsWritten` — count it on both
+  // sides, because `v++` reads the name and writes it.
+  //
+  // The target is a NAME rather than an Expr because its one producer has one: structure.ts's
+  // `emitDoWhile`, folding a loop update into a bottom test that reads the variable at its
+  // pre-update value (`while (v0 != 0 && v1++ <= 9)`). A general lvalue has no inhabitant.
+  //
+  // WHERE IT MAY STAND IS THE PRODUCER'S OBLIGATION, not a property of the node: C89 leaves the
+  // program undefined when the same object is also read elsewhere between two sequence points, and
+  // short-circuit operators decide whether the update happens at all. `PREUPDATE_COND_GATES`
+  // (structure/hazards.ts) holds both rules for the one producer.
+  | { k: 'postincr'; name: string; by: 1 | -1 }
   // A C-style value cast `(T)e`. Tree-level producers: a width-narrowing cast `(u8)e` (the
   // recovered form of a byte/half extend idiom — zext/sext IR ops), the STRUCT-pointer cast
   // (structure.ts memAccess/arrayAccess struct paths — see the note on `field` below), and the
@@ -435,6 +452,10 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       const bb = b as typeof a;
       return a.op === bb.op && exprEquals(a.e, bb.e);
     }
+    case 'postincr': {
+      const bb = b as typeof a;
+      return a.name === bb.name && a.by === bb.by;
+    }
     case 'cast': {
       const bb = b as typeof a;
       // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are: a
@@ -514,6 +535,7 @@ export function exprChildren(e: Expr): Expr[] {
     case 'var':
     case 'const':
     case 'addr':
+    case 'postincr':
       return [];
     case 'bin':
       return [e.l, e.r];
@@ -537,6 +559,7 @@ export function mapExprChildren(e: Expr, f: (c: Expr) => Expr): Expr {
     case 'var':
     case 'const':
     case 'addr':
+    case 'postincr':
       return e;
     case 'bin':
       return { ...e, l: f(e.l), r: f(e.r) };
@@ -654,7 +677,7 @@ export function rematerializableAddress(e: Expr): boolean {
       case 'un':
         break;
       default:
-        ok = false; // var, addr, index, field, call, marker
+        ok = false; // var, addr, postincr, index, field, call, marker
         return;
     }
     for (const c of exprChildren(x)) {
@@ -665,10 +688,22 @@ export function rematerializableAddress(e: Expr): boolean {
   return ok && nonZero;
 }
 
-/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
- *  standing in for an unmodelled instruction (annotate mode). */
+/** The local or global a node NAMES, or undefined for one that names none — the whole Expr
+ *  vocabulary a "which names does this tree mention" walk has to know about, in one place, because
+ *  a collector that misses a kind reports a SHORT live range and a short range is a clobber where a
+ *  long one is only a missed merge.
+ *
+ *  `call`'s `fn` is not one of them: it names a function, and the walks that care about that ask
+ *  for it beside this (l3/hoist.ts). A walk that must tell the kinds APART — `&v` is a write where
+ *  a bare `v` is a read — keeps its own arms; this answers the name, not what is done to it. */
+export function mentionedName(e: Expr): string | undefined {
+  return e.k === 'var' || e.k === 'addr' || e.k === 'postincr' ? e.name : undefined;
+}
+
+/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, a marker
+ *  standing in for an unmodelled instruction (annotate mode), or a post-increment's write. */
 export function exprHasEffect(e: Expr): boolean {
-  return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
+  return e.k === 'call' || e.k === 'marker' || e.k === 'postincr' || exprChildren(e).some(exprHasEffect);
 }
 
 /** Whether the tree performs an access to a `volatile` object — the OTHER thing no re-ordering may

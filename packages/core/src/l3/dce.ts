@@ -29,9 +29,11 @@ import { exprChildren, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
  *  `addr` name counts too: taking a local's address makes every store to it observable through the
- *  escaped pointer, so an address-taken local is never dead here. */
+ *  escaped pointer, so an address-taken local is never dead here. A `postincr` reads its name
+ *  before it writes it, so it pins the store that reaches it — `n++` in a loop test is the only
+ *  reader of the `n = 0` above the loop. */
 function readsInto(e: Expr, out: Set<string>): void {
-  if (e.k === 'var' || e.k === 'addr') {
+  if (e.k === 'var' || e.k === 'addr' || e.k === 'postincr') {
     out.add(e.name);
   }
   for (const c of exprChildren(e)) {
@@ -48,6 +50,7 @@ function reads(e: Expr): Set<string> {
 /** True if `e` carries any reason NOT to speculatively delete its assignment/condition:
  *   - `call` — may write memory/globals (a side effect);
  *   - `marker` — the annotate-mode ASMLIFT_ERROR gap signal, which must survive so the gap stays loud;
+ *   - `postincr` — its write is the loop update; deleting the assignment would delete the update;
  *   - the strict-mode `?` unresolved sentinel (`{k:'var', name:'?'}`) — dropping it would let a
  *     value asmlift could NOT lift slip past `assertResolved`, silently downgrading a loud gap;
  *   - a memory load (`index`/`field`) — a deref's volatility is unknowable here, so a possibly-effectful read
@@ -56,7 +59,7 @@ function reads(e: Expr): Set<string> {
  *     observable access the machine performed; deleting the dead assignment would delete the read.
  *  A dead assignment whose value contains any of these is kept. */
 function mustKeep(e: Expr, volatiles: ReadonlySet<string>): boolean {
-  if (e.k === 'call' || e.k === 'marker' || e.k === 'index' || e.k === 'field') {
+  if (e.k === 'call' || e.k === 'marker' || e.k === 'postincr' || e.k === 'index' || e.k === 'field') {
     return true;
   }
   if (e.k === 'var' && (e.name === '?' || volatiles.has(e.name))) {

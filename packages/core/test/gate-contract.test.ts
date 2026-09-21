@@ -50,7 +50,7 @@ import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
 import { PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
 import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
-import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
+import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
 
@@ -81,6 +81,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   UNFOLDED_GATES: UNFOLDED_GATES as readonly Gate<never>[],
   ORDERBASE_GATES: ORDERBASE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
+  PREUPDATE_COND_GATES: PREUPDATE_COND_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],

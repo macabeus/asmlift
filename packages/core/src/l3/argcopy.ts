@@ -202,7 +202,8 @@ function regions(body: Stmt[]): { at: number[]; list: Stmt[]; underLoop: boolean
  *  for > do-while > if > store). This runs once per region per parameter per candidate, and each
  *  candidate is a compile. */
 function repoint(list: Stmt[], n: string, to: string): Stmt[] {
-  const inExpr = (e: Expr): Expr => (e.k === 'var' && e.name === n ? { ...e, name: to } : mapExprChildren(e, inExpr));
+  const inExpr = (e: Expr): Expr =>
+    (e.k === 'var' || e.k === 'postincr') && e.name === n ? { ...e, name: to } : mapExprChildren(e, inExpr);
   return list.map((s) => mapStmtExprs(s, inExpr));
 }
 

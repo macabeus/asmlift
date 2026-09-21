@@ -95,6 +95,7 @@ import {
   Stmt,
   mapExprChildren,
   mapStmtExprs,
+  mentionedName,
   rematerializableAddress,
   stmtChildren,
   stmtExprs,
@@ -109,14 +110,15 @@ interface WalkLoop {
   base: string; // the var `p` was initialised from
 }
 
-/** Total mentions of `name` across a statement list (reads, writes, everywhere). `addr` counts:
- *  `&x` is how a frame local's address renders (structure.ts laddrName), and an escaped address
- *  is a read of the object by whatever holds it — the accounting these recognizers rest on is
- *  "nothing else in the function touches this name", which a var-only count cannot say. */
+/** Total mentions of `name` across a statement list (reads, writes, everywhere) — `mentionedName`'s
+ *  whole vocabulary, because the accounting these recognizers rest on is "nothing else in the
+ *  function touches this name", which a var-only count cannot say. `&x` is how a frame local's
+ *  address renders (structure.ts laddrName), and an escaped address is a read of the object by
+ *  whatever holds it. */
 function countMentions(stmts: Stmt[], name: string): number {
   let n = 0;
   const inExpr = (e: Expr): void => {
-    if ((e.k === 'var' || e.k === 'addr') && e.name === name) {
+    if (mentionedName(e) === name) {
       n++;
     }
     mapExprChildren(e, (c) => {
@@ -170,8 +172,9 @@ function derefWidths(stmts: Stmt[], p: string): number[] {
 
 /** Does `e` mention `name` anywhere — as a value or as an escaped address (see countMentions)? */
 function mentionsVar(e: Expr, name: string): boolean {
-  if (e.k === 'var' || e.k === 'addr') {
-    return e.name === name;
+  const own = mentionedName(e);
+  if (own !== undefined) {
+    return own === name;
   }
   let found = false;
   mapExprChildren(e, (c) => {

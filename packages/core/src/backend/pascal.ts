@@ -113,6 +113,10 @@ function makePrinter(vt: VarTypes) {
         throw new Error(`pascal backend: struct field access '${e.name}' has no IDO Pascal spelling yet`);
       case 'un':
         return e.op === '~' ? `bitnot(${pe(e.e)})` : `(${e.op === '!' ? 'not ' : e.op}${pe(e.e)})`;
+      // IDO Pascal has no increment operator and no expression with a side effect to put one in,
+      // so the update has no place to go — decline LOUD rather than drop it, like the casts below.
+      case 'postincr':
+        throw new Error(`pascal backend: post-increment of '${e.name}' has no IDO Pascal spelling yet`);
       // Casts have no faithful IDO-Pascal spelling yet — fail LOUD rather than emit silently-wrong
       // source. Tree-level producers reaching here: the width-narrowing idiom casts (agbcc-gated,
       // so never on this path today), structure.ts's STRUCT-pointer casts (unreachable too — the

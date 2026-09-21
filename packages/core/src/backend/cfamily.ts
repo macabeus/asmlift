@@ -236,6 +236,10 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     }
     case 'call':
       return `${e.fn}(${e.args.map((a) => rec(a, 99)).join(', ')})`;
+    // `v++` / `v--`. Postfix over a bare identifier, so it binds tighter than every parent and
+    // never self-parenthesizes.
+    case 'postincr':
+      return `${e.name}${e.by === 1 ? '++' : '--'}`;
     case 'index': {
       // `*base` for the zero offset (a PREFIX operator, so a prefix-shaped base like a cast needs
       // no parens: `*(u8 *)p` — but the whole form must self-parenthesize under a POSTFIX parent:

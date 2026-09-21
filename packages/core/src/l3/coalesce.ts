@@ -12,23 +12,24 @@
 // and whether fall-through joins the two arms onto one path. `coalesceCandidates` offers both.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, isLoop, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, isLoop, mapExprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 
 function namesIn(e: Expr, out: Set<string>): void {
-  // `addr` names a GLOBAL (`&gSym`) or a LOCAL — the structurer renders an `laddr` frame object
-  // as `&sp0`, an addr node over a name that IS in `sfn.locals`. Both are collected, because a
-  // name mentioned only through `&` still has a live range: a span that ignored its `addr`
-  // mentions would be SHORT, and a short span is a clobber where a long one is only a missed
-  // merge. Collecting a global name costs nothing — it is not in `sfn.locals`, so no pair is
-  // ever built for it.
+  // EVERY mention, through `mentionedName`'s vocabulary rather than this file's own: a span that
+  // misses one is SHORT, and a short span is a clobber where a long one is only a missed merge.
+  // `&sp0` is a LOCAL's mention — the structurer renders an `laddr` frame object as an addr node
+  // over a name that IS in `sfn.locals` — and `n++` in a bottom test is a counter's only mention
+  // inside its own loop. A global name comes along for the ride and costs nothing — it is not in
+  // `sfn.locals`, so no pair is ever built for it.
   //
-  // `rename` DISAGREES WITH THIS, and knowingly: it rewrites only `var` leaves, so a local
-  // absorbed while mentioned through `&` leaves that mention standing against a declaration the
-  // merge deleted. Reconciling the two changes which candidates compile — a measured change, not a
+  // `rename` DISAGREES WITH THIS, and knowingly: it rewrites `var` and `postincr` leaves, so a
+  // local absorbed while mentioned through `&` leaves that mention standing against a declaration
+  // the merge deleted. Reconciling the two changes which candidates compile — a measured change, not a
   // cleanup — so today's behaviour is pinned exactly in coalesce.test.ts ('rename') rather than
   // repaired here.
-  if (e.k === 'var' || e.k === 'addr') out.add(e.name);
+  const n = mentionedName(e);
+  if (n !== undefined) out.add(n);
   for (const c of exprChildren(e)) namesIn(c, out);
 }
 
@@ -62,7 +63,14 @@ export interface Span {
  *  arithmetic over the variable is its own history. The read must be a `var`: `mentions` counts an
  *  `addr` too, and `&a` is not a read of `a`. */
 const readsVarArithmetically = (e: Expr, n: string): boolean => {
-  if (e.k === 'index' || e.k === 'field' || e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+  if (
+    e.k === 'index' ||
+    e.k === 'field' ||
+    e.k === 'call' ||
+    e.k === 'marker' ||
+    e.k === 'postincr' ||
+    e.k === 'addr'
+  ) {
     return false;
   }
   return (e.k === 'var' && e.name === n) || exprChildren(e).some((c) => readsVarArithmetically(c, n));
@@ -155,7 +163,7 @@ function spans(body: Stmt[]): Map<string, Span> {
 }
 function rename(body: Stmt[], from: string, to: string): Stmt[] {
   const inExpr = (e: Expr): Expr =>
-    e.k === 'var' && e.name === from ? { ...e, name: to } : mapExprChildren(e, inExpr);
+    (e.k === 'var' || e.k === 'postincr') && e.name === from ? { ...e, name: to } : mapExprChildren(e, inExpr);
   const inStmt = (s: Stmt): Stmt => {
     const r = { ...s } as Record<string, unknown>;
     if (s.k === 'assign' && s.name === from) r.name = to;

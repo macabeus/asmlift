@@ -70,6 +70,22 @@ describe('gates', () => {
     expect(coalesceCandidates(fn(body))).toEqual([]);
   });
 
+  test('a folded loop update is a mention like any other', () => {
+    // `a++` inside a bottom test is the counter's only mention in the loop. A collector that does
+    // not know the node reports a span ending above the loop, `shared-loop` sees nothing, and the
+    // merge it then offers resets the counter to `b`'s value on every iteration — ten iterations
+    // become an infinite loop, in C that compiles and scores.
+    const body: Stmt[] = [
+      asg('a', 0),
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '<=', l: { k: 'postincr', name: 'a', by: 1 }, r: { k: 'const', value: 9 } },
+        body: [asg('b', 7), use('b')],
+      },
+    ];
+    expect(coalesceCandidates(fn(body))).toEqual([]);
+  });
+
   test('a NON-CONSTANT feed blocks it — a load-fed local is one the compiler kept deliberately', () => {
     const load: Expr = {
       k: 'index',

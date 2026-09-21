@@ -1311,18 +1311,20 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // A LOOP VARIABLE READ AT ITS PRE-UPDATE VALUE. agbcc hoists an induction update above the exit
   // test, so something still wants the variable one iteration back. The structurer treats every
-  // such read as a hazard and declines the whole function — correct, because rendering it under
-  // the post-update name is an off-by-one-iteration miscompile, but it costs 29 functions across
-  // the klonoa/sa3/newlib corpus and no other benchmark row reproduces it.
+  // such read as a hazard — rendering it under the post-update name is an off-by-one-iteration
+  // miscompile — and declines wherever it has no spelling for the pre-update value. It cost 29
+  // functions across the klonoa/sa3/newlib corpus, and no other benchmark row reproduces it.
   //
   // ONE decline message, THREE causes, which is the point of authoring several rows: the message
   // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
-  // after the loop deriving from it. Only the EDGE reaches the repair that exists
-  // (`sinkablePreUpdateSlots`, the trailing-pointer sink), which rebuilds the copy at the op the
-  // arg's value was computed at. The sink repairs exit SLOTS, and the other two rows have none to
-  // repair: instrumented, `preupdate_cond` declines on the CONDITION with its one exit arg clean,
-  // and `preupdate_escape` on an escaped body value with no exit arg at all.
+  // after the loop deriving from it. TWO of the three have a repair, and they are different
+  // repairs: the EDGE is rebuilt as a copy inside the body, at the op its value was computed at
+  // (`sinkablePreUpdateSlots`, the trailing-pointer sink), and the CONDITION is respelled `n++` at
+  // the leaf that reads it with the update dropped from the foot of the body
+  // (`PREUPDATE_COND_GATES`, structure/hazards.ts). So what `preupdate_cond` measures is the
+  // distance to the bytes rather than a refusal. The ESCAPE has neither: instrumented,
+  // `preupdate_escape` declines on an escaped body value with no exit arg at all.
   //
   // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
@@ -1351,9 +1353,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // this row the gate would refuse nothing a command can show. It is also the shape no C spelling
   // could pin: `+` leaves its operands' evaluation order unspecified even where both values agree.
   //
+  // AND BESIDE THE THREE, ONE REFUSAL THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
+  // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
+  // so everything else in the test rides along: the CALL the body's value comes from lands in an arm
+  // the emitted `&&` skips on every iteration the counter's arm answers true, while agbcc ran the
+  // `bl` ahead of that arm's branch. Compiled and executed both ways the admitted spelling returns a
+  // different value, not merely a different call count. `testSkipsAnEffect` (structure/hazards.ts)
+  // declines it, and asks the same question of every `do-while` rather than only of a folded one.
+  //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be five more ordinary loops on those toolchains rather than coverage.
+  // rows would be six more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -1362,6 +1372,21 @@ export const SYNTHETIC: SynthSpec[] = [
     note:
       "a post-increment inside the loop condition's own operand (`i >> b++`), so the test reads the " +
       'value the variable held one step before the update the compiler has already emitted',
+  },
+  {
+    sym: 'preupdate_cond_effect',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_cond_effect(int *p, int n){ int i = 0; int r;' +
+      ' do { r = cb(p); } while (i++ <= n && r != 0); return i; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note:
+      "the same pre-update read in the bottom test, with a CALL's result as the other arm. agbcc " +
+      'calls before either branch, so the emitted `&&` would hand the call a position it skips — ' +
+      'the decline is the whole point of the row',
   },
   {
     sym: 'preupdate_exit',

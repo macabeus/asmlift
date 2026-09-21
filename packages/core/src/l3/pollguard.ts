@@ -58,8 +58,9 @@ const countVar = (e: Expr, n: string): number =>
 const countAddr = (e: Expr, n: string): number =>
   (e.k === 'addr' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countAddr(c, n), 0);
 
-/** call- and marker-free: no effect the fold could move or duplicate. */
-const pure = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(pure);
+/** call-, marker- and post-increment-free: no effect the fold could move or duplicate. */
+const pure = (e: Expr): boolean =>
+  e.k !== 'call' && e.k !== 'marker' && e.k !== 'postincr' && exprChildren(e).every(pure);
 
 /** The var a deref's base stands on, through casts only — null for anything else (a raw address, an
  *  arithmetic base), which is exactly the set `condDerefsPlain` refuses. */
