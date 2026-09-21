@@ -1015,7 +1015,7 @@ describe('testSkipsAnEffect', () => {
 
   test('a respelled def is descended, not waved past', () => {
     // The fold refuses a def whose rendering it cannot read; here the opposite answer is the safe
-    // one, because a respelling still names the values its operands stand for — the call among them.
+    // one, because the def still names the values its operands stand for — the call among them.
     const f = scaffold(false);
     const ne = f.defs.get(f.cond)!.operands[1];
     const spelled = new Map<Op, unknown>([[f.defs.get(ne)!, 'a bitfield read']]);

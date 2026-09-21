@@ -143,9 +143,9 @@ test('a cast over a post-increment renders from the local declaration, not from 
 // exhaustiveness protects `exprChildren`/`mapExprChildren`, where a new `Expr` kind is a compile
 // error, and protects nothing about a predicate that spells the leaf kinds out by hand. Every such
 // predicate answers "which name does this node mention", `mentionedName` (l3/ast.ts) is the one
-// place that answers it for the whole vocabulary, and the two walks below are the only ones with a
-// reason to tell the kinds apart. A collector that misses `postincr` reports the name UNTOUCHED —
-// `initfirst`'s deadness rule read one of these and hoisted an init onto the path its guard skips.
+// place that answers it for the whole vocabulary, and the two lines below spell the pair for some
+// other reason, each named. A collector that misses `postincr` reports the name UNTOUCHED, which is
+// how `initfirst`'s deadness rule hoists an init onto the path its own guard skips.
 const SEPARATE_THE_KINDS: ReadonlyMap<string, string> = new Map([
   ['contracts.ts', '`&v` is a write channel and a bare `v` is a read, and the walk records them on different sides'],
   ['l3/argbase.ts', 'asks what a memory BASE is — an address, a const, or a global — not which names a tree mentions'],

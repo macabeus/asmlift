@@ -5503,8 +5503,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // the connective is what the test IS — so decline LOUD, the same answer for the same reason.
     //
     // Asked of every `do-while`, not only of a folded one: the arm holds the same call whichever way
-    // the counter is spelled. Over the whole corpus this moves nothing — `bench sweep --base`,
-    // lift-only and `--fan`, reports 2,320 identical records and 0 rows moved either way.
+    // the counter is spelled.
     if (testSkipsAnEffect(lterm.operands[0], sub)) {
       throw new StructureError(
         `cannot structure '${fn.name}': the bottom test may evaluate an effect behind a '&&'/'||' ` +

@@ -562,8 +562,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // one side of the reach and nothing down the chain restores it — so the polarity never enters.
   //
   // A def the walk cannot read through is DESCENDED rather than refused, which is the other
-  // direction from the fold's `unreadable`: a respelling names its operands' values, so an effect
-  // below one is still an effect in that position, and the budget answers the refusing way.
+  // direction from the fold's `unreadable`: a def spelled another way still names the values its
+  // operands stand for, so an effect below one is an effect in that position. The budget is the
+  // answer given without looking, so it goes the refusing way.
   const testSkipsAnEffect = (condV: Value, sub: Map<Value, string>): boolean => {
     let budget = WALK_BUDGET;
     let found = false;

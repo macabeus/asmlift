@@ -53,9 +53,11 @@ import { arithConversionSignedness, declaredTypes, provablyNonNegative } from '.
 const readsVar = (e: Expr, name: string): boolean =>
   mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
 
-// READS only — a pure write in a tail is benign (it overwrites the minted value on every path,
-// and any read after it is that write's business); touchesOutside below is TOTAL because strong
-// mode must know the name is absent, presence of any kind included.
+// MENTIONS in an expression — a read, an `&v` a callee may read through, a `v++` that reads before
+// it writes. A whole-statement write is what is benign (an `assign` overwrites the minted value on
+// every path, and any read after it is that write's business), which is why the target of one is
+// not consulted here; touchesOutside below is TOTAL because strong mode must know the name is
+// absent, presence of any kind included.
 const stmtTouches = (s: Stmt, name: string): boolean =>
   stmtExprs(s).some((e) => readsVar(e, name)) || stmtChildren(s).some((x) => stmtTouches(x, name));
 

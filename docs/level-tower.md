@@ -85,8 +85,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   ([`l3/ast.ts`](../packages/core/src/l3/ast.ts)): `if`/`while`/`switch`/expressions, no
   registers, no `goto`. Expressions are pure but for `call`, `marker` and `postincr` — the last is
   an expression that WRITES, and the `l3/` passes that count a name's mentions have to know it
-  (`mentionedName`, and the source scan in `test/postincr.test.ts` that holds them to it). Structuring ([`structure/`](../packages/core/src/structure)) recovers it
-  from the L2 CFG and destroys SSA (assigning merge values back to named variables).
+  (`mentionedName`, and the source scan in `test/postincr.test.ts` that holds them to it).
+  Structuring ([`structure/`](../packages/core/src/structure)) recovers it from the L2 CFG and
+  destroys SSA (assigning merge values back to named variables).
 - **The L3 rewrites** ([`l3/`](../packages/core/src/l3)) then improve that tree _within_ the
   level — no lowering, so this is a stage rather than a fourth level. They are either committed or
   ranked, and the difference is architectural, not incidental:

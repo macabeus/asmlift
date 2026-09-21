@@ -111,7 +111,7 @@ describe('C4 — inline-at-use has multi-use and memory-ordering barriers', () =
 
 describe('C5 — loop conditions/exits never read a pre-update value under its post-update name', () => {
   // the `i++ < n` do-while: the latch test reads the PRE-increment i, so rendering it under the
-  // post-update name is one iteration off. The test says so at the leaf instead.
+  // post-update name is one iteration off. The `++` is spelled at the leaf that reads it.
   const hazard = `fn c5 {
 ^bb0(%0: s32*, %1: s32):
   %2: s32 = const {value=0}
