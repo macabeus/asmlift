@@ -81,9 +81,10 @@
 //
 // Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. The
 // SOUND rules — a code address at either end, a width the map does not state, a width that
-// disagrees with the access, an access this census cannot see, a store onto a `const` name, a base
-// the map places twice — refuse NOTHING here and are pinned by `offset-names.test.ts` alone. Say so
-// rather than letting the table read as though all ten were load-bearing.
+// disagrees with the access, an access this census cannot see, a store onto a `const` name, an
+// address the map spells two ways at either end — refuse NOTHING here and are pinned by
+// `offset-names.test.ts` alone. Say so rather than letting the table read as though all eleven were
+// load-bearing.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -105,6 +106,9 @@ export interface OffsetAddress {
   readonly offset: number;
   /** what the map holds EXACTLY at `addr(base) + offset` */
   readonly target: SymbolInfo | null;
+  /** the map holds several entries at that address and they do not all spell the same thing, so
+   *  `target` is an arbitrary pick — the mirror of `ambiguous`, on the other end of the walk */
+  readonly targetAmbiguous: boolean;
   /** some use of this value is the base operand of a store */
   readonly written: boolean;
   /** some use of this value is a successor's block argument, so the accesses made through it are
@@ -135,6 +139,22 @@ function accessUnit(info: SymbolInfo): { width: number; signed: boolean } | null
           ? [4, false]
           : [undefined, false];
   return width === undefined ? null : { width, signed: signed && width < 4 };
+}
+
+/** Everything the gates below read off a `SymbolInfo` beyond its identity: the name they spell,
+ *  the kind `target-is-code` refuses, the `const` qualifier `const-target-store` refuses, and the
+ *  access the declaration produces. Two entries at one address agreeing on all four make the pick
+ *  between them immaterial. */
+function sameAuthority(a: SymbolInfo, b: SymbolInfo): boolean {
+  const ua = accessUnit(a);
+  const ub = accessUnit(b);
+  return (
+    a.name === b.name &&
+    a.kind === b.kind &&
+    (a.const === true) === (b.const === true) &&
+    ua?.width === ub?.width &&
+    ua?.signed === ub?.signed
+  );
 }
 
 /** The refusals. FIRST rejection is what `offsetNameRefusals` reports, so the order is the
@@ -193,6 +213,19 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
     why: 'no symbol sits exactly at the computed address, so the arithmetic is the only honest spelling',
     sound: false,
     rejects: (c) => c.target === null,
+  },
+  // The mirror of `base-address-ambiguous`, and it is not the same question asked twice: that one
+  // is one NAME the map places at two addresses, this one is one ADDRESS the map gives several
+  // names — aliases, or typed views of one RAM region, which `SymbolMap`'s `SymbolInfo[]` exists
+  // to carry. `lookupSymbol` answers with the first of them, so the width the two access rules
+  // check and the `const` the store rule checks would otherwise be read off an arbitrary pick.
+  {
+    id: 'target-address-ambiguous',
+    why: 'the map gives the walked-to address several names that do not agree, so which one this spells is arbitrary',
+    sound: true,
+    guardedBy:
+      'offset-names.test.ts: without `target-address-ambiguous` the walk spells one of two names at the address',
+    rejects: (c) => c.targetAmbiguous,
   },
   {
     id: 'target-is-code',
@@ -377,6 +410,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
       if (at === undefined) {
         continue; // the base name reached the IR from somewhere other than this map
       }
+      const entries = symbols.get(at.addr + base.offset) ?? [];
       out.push({
         op,
         sym: base.sym,
@@ -386,6 +420,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
           baseIsCode: base.code,
           offset: base.offset,
           target: lookupSymbol(symbols, at.addr + base.offset),
+          targetAmbiguous: entries.length > 1 && entries.some((i) => !sameAuthority(i, entries[0])),
           written: written.has(r),
           crossesMerge: blockArgs.has(r),
           accessWidths: access.get(r)?.widths ?? new Set(),

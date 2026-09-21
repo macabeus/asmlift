@@ -171,6 +171,30 @@ describe('what refuses', () => {
     ]);
   });
 
+  test('target-address-ambiguous — the map gives the walked-to address two names', () => {
+    const aliased: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gDmaAlias' }, reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(aliased)).toEqual([
+      ['REG_DMA0CNT_H+12', 'target-address-ambiguous'],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('two entries at the walked-to address that agree on everything spelled are one answer', () => {
+    const twin: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [reg('REG_DMA1CNT_H'), { ...reg('REG_DMA1CNT_H'), volatile: false }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(twin)).toEqual([
+      ['REG_DMA0CNT_H+12', null],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
   test('target-is-code — a walked-to function address is a relocation this cannot reproduce', () => {
     const code: SymbolMap = new Map([
       [0x040000ba, [reg('REG_DMA0CNT_H')]],
@@ -382,6 +406,15 @@ describe('the gates are load-bearing', () => {
       [0x040000d2, [reg('REG_DMA2CNT_H')]],
     ]);
     expect(namedWithout('base-address-ambiguous', twice)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `target-address-ambiguous` the walk spells one of two names at the address', () => {
+    const aliased: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gDmaAlias' }, reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('target-address-ambiguous', aliased)).toContain('gDmaAlias');
   });
 
   test('without `target-is-code` the walk names a function', () => {
