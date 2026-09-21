@@ -35,6 +35,7 @@ import { unmergeJoins } from './l3/unmerge';
 import type { structureChecked } from './pipeline';
 import {
   hasDerivedReadHome,
+  hasEscapingExtension,
   hasHomeableSharedAddress,
   hasLoopSharedPureValue,
   hasMergeFeedHome,
@@ -67,6 +68,7 @@ export interface StructureVariation {
     | 'exprHome'
     | 'derivedHome'
     | 'mergeHome'
+    | 'escapeHome'
     | 'unsCmp'
     | 'freshMerge'
     | 'copyDefPos'
@@ -201,6 +203,24 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     name: 'merge-home',
     options: (on) => ({ homeMergeFeeds: on }),
     perLiftGate: hasMergeFeedHome,
+    strip: true,
+  },
+  // `/escape-home` — the escaping-extension-home variation (structure/analysis.ts AnalyzeOptions
+  // homeEscapingExtensions): a `zext`/`sext` with 2+ consumers, none of them in its own block,
+  // materializes into a local — the register the asm narrowed into once and every later block read
+  // — where the default re-evaluates the truncation at each consumer (`(u16)v` per use). The
+  // MIRROR of `/expr-home`, which wants a def outside a loop and a consumer inside; neither scope
+  // reaches the other's shape. Gated per symbol-map setting like its four siblings.
+  //
+  // A VARIATION, not a default, and `pokeemerald:AcroBikeHandleInputTurning:agbcc` is the row that
+  // decides it: it is a MATCH inside the scope, so forced on the spelling would be REPLACED across
+  // the fan rather than added to it. As a variation `compareScored` rides the un-homed sibling
+  // beside it and the match cannot be lost — the same argument `/merge-home` records above.
+  {
+    flag: 'escapeHome',
+    name: 'escape-home',
+    options: (on) => ({ homeEscapingExtensions: on }),
+    perLiftGate: hasEscapingExtension,
     strip: true,
   },
   // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
