@@ -55,6 +55,7 @@ import {
   gapReasonFor,
   mapExprChildren,
   mapStmtExprs,
+  mentionedName,
   negateCond,
   stmtChildren,
   walkExprs,
@@ -5665,8 +5666,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   if (owed.length > 0) {
     const mentioned = new Set<string>(globalNames);
     for (const e of walkExprs(body)) {
-      if (e.k === 'var' || e.k === 'addr') {
-        mentioned.add(e.name);
+      const n = mentionedName(e);
+      if (n !== undefined) {
+        mentioned.add(n);
       }
     }
     const assignTargets = (ss: Stmt[]): void => {

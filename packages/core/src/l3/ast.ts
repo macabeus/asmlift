@@ -686,6 +686,18 @@ export function rematerializableAddress(e: Expr): boolean {
   return ok && nonZero;
 }
 
+/** The local or global a node NAMES, or undefined for one that names none — the whole Expr
+ *  vocabulary a "which names does this tree mention" walk has to know about, in one place, because
+ *  a collector that misses a kind reports a SHORT live range and a short range is a clobber where a
+ *  long one is only a missed merge.
+ *
+ *  `call`'s `fn` is not one of them: it names a function, and the walks that care about that ask
+ *  for it beside this (l3/hoist.ts). A walk that must tell the kinds APART — `&v` is a write where
+ *  a bare `v` is a read — keeps its own arms; this answers the name, not what is done to it. */
+export function mentionedName(e: Expr): string | undefined {
+  return e.k === 'var' || e.k === 'addr' || e.k === 'postincr' ? e.name : undefined;
+}
+
 /** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, a marker
  *  standing in for an unmodelled instruction (annotate mode), or a post-increment's write. */
 export function exprHasEffect(e: Expr): boolean {

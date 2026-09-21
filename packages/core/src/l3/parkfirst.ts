@@ -28,15 +28,16 @@
 // gcc2.7.2 schedules it last — so a second inhabitant consolidates both into one entry-prefix
 // ordering variation rather than growing a sibling.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, exprHasEffect } from './ast';
+import { exprChildren, exprHasEffect, mentionedName } from './ast';
 
 type Assign = Extract<Stmt, { k: 'assign' }>;
 
-// `addr` counts as touching its name: `foo(&v)` may read or write v through the pointer, so a
-// park must treat it exactly like a direct read-and-write of v.
+// Every mention counts as touching its name: `foo(&v)` may read or write v through the pointer,
+// and `v++` writes it outright, so a park must treat either exactly like a direct read of v.
 const readVars = (e: Expr, acc: Set<string> = new Set()): Set<string> => {
-  if (e.k === 'var' || e.k === 'addr') {
-    acc.add(e.name);
+  const n = mentionedName(e);
+  if (n !== undefined) {
+    acc.add(n);
   }
   for (const c of exprChildren(e)) {
     readVars(c, acc);

@@ -11,6 +11,7 @@ import {
   fieldSpellsDot,
   gapReasonFor,
   mapExprChildren,
+  mentionedName,
   stmtChildren,
   stmtExprs,
   stmtLists,
@@ -404,9 +405,10 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
   const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
     // `&p` COUNTS, the same mention the placing passes query on (l3/hoist.ts): the address is what
     // a callee reads the cell through, so an init has to precede it as surely as it must precede a
-    // read.
-    if ((e.k === 'var' || e.k === 'addr') && minted.has(e.name) && !live.has(e.name)) {
-      return e.name;
+    // read. `mentionedName` is the vocabulary rather than a pair of arms here for that reason.
+    const n = mentionedName(e);
+    if (n !== undefined && minted.has(n) && !live.has(n)) {
+      return n;
     }
     let bad: string | null = null;
     mapExprChildren(e, (c) => {
