@@ -5168,8 +5168,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   /** Every copy `preUpdateCopies` placed at a def, once the body that was meant to hold it is
-   *  assembled. A body built without the latch's `sideEffects` would drop one SILENTLY — a wrong
-   *  value, not a gap — so the placement is checked rather than assumed. */
+   *  assembled. FORWARD DEFENCE WITH NO REACH TODAY: both emitters hand `atDef` to `sideEffects` on
+   *  the very block the gate homed those copies in, and that walk visits every op the block holds,
+   *  so no key can go unvisited. It is stated rather than assumed because what it names is silent —
+   *  a body assembled without that block's side effects, or handing the copies to another block's
+   *  walk, drops a copy, and a dropped copy is a wrong value rather than a gap.
+   *
+   *  STRICT, where the anchored-copy obligation below tests OBSERVABILITY instead, and the
+   *  difference is which position is guaranteed. An anchor's position is a const's def block, which
+   *  may legitimately render no statement at all — a loop preheader the guarded-loop emitter never
+   *  structures is one — so a copy that vanishes there can still leave a consistent program. A sunk
+   *  copy's position is in a block both emitters render whatever else they do, because that block's
+   *  side effects carry the loop's stores; a copy missing from it is a mistake in assembling the
+   *  body and has no second reading. */
   const assertSunkCopiesPlaced = (copies: SunkCopies): void => {
     for (const st of [...copies.atDef.values()].flat()) {
       if (!sunkCopiesEmitted.has(st)) {
