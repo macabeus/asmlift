@@ -90,6 +90,7 @@ export interface LoopHazards {
     region: Set<Block> | null,
     condRepaired?: boolean,
   ): boolean;
+  testSkipsAnEffect(condV: Value, sub: Map<Value, string>): boolean;
   preUpdateCondFold(
     condV: Value,
     negated: boolean,
@@ -202,8 +203,6 @@ export interface PreUpdateCondCandidate {
   unreadable: boolean;
   /** a short-circuit op is reached through an op that is not one, so its arms' reach is unknown */
   nestedConnective: boolean;
-  /** an op with an observable effect renders where a short circuit ahead of it may skip it */
-  skippedEffect: boolean;
   /** the folded leaf is evaluated on every iteration that takes the back edge */
   onContinue: boolean;
   /** …and on the iteration that leaves the loop */
@@ -230,18 +229,10 @@ export interface PreUpdateCondCandidate {
  *  be wrong in — and on the agbcc shape the fold exists for they agree, because the short-circuit
  *  fold (raise/shortcircuit.ts) is what merged the test's blocks into one in the first place.
  *
- *  A THIRD OBLIGATION IS NOT ABOUT THE COUNTER AT ALL. The fold is the only thing that puts these
- *  loops into a short-circuit spelling, and everything else in the test rides along: an operand the
- *  machine evaluated before its branch renders in an arm the emitted `&&`/`||` may skip. Where that
- *  operand has an EFFECT the emitted loop runs it fewer times than the machine did — a call in the
- *  right arm of an `||` is skipped on every iteration the left arm answers true, and the loop then
- *  returns a different value, not merely a different call count. That is `effects-on-every-iteration`.
- *
- *  It reads the effect flag and no block position, because for an effectful op the two say the same
- *  thing: `HOIST_UNSAFE_OPS` (ir/opcodes.ts) IS `EFFECTFUL_OPS`, so raise/shortcircuit.ts never
- *  lifts one out of the arm it guards, and a genuinely short-circuited effect therefore never
- *  reaches a connective here. A memory read is exempt there and stays exempt here — C's own short
- *  circuit re-guards it at the new point, which is the whole argument that exemption rests on.
+ *  WHAT THIS TABLE DOES NOT JUDGE is the rest of the test. The fold puts the loop into a
+ *  short-circuit spelling and everything else in the bottom test rides along, an EFFECT included —
+ *  that question is `testSkipsAnEffect` below, asked of every `do-while` rather than only of a
+ *  folded one, because the same arm holds the same call whether or not a counter moved into it.
  *
  *  `variable-named-once` is C89's own rule rather than this pass's: an object modified between two
  *  sequence points may not be read again there, and `contracts.ts`'s `assertPostIncrUnshared` is the
@@ -290,13 +281,6 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
     sound: true,
     guardedBy: 'hazards.test.ts: ablating connectives-join-at-the-root folds an arm of a negated &&',
     rejects: (c) => c.nestedConnective,
-  },
-  {
-    id: 'effects-on-every-iteration',
-    why: 'an effect an arm may skip ran ahead of the machine\u2019s branch, so the loop would run it fewer times',
-    sound: true,
-    guardedBy: 'hazards.test.ts: ablating effects-on-every-iteration folds a test whose arm holds a call',
-    rejects: (c) => c.skippedEffect,
   },
   {
     id: 'folded-on-every-continue',
@@ -560,6 +544,44 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     exitArgs.some((a) => readsClobbered(a, sub, updateWrites)) ||
     loopEscapeHazard(body, sub, updateWrites, region);
 
+  // DOES THE RENDERED BOTTOM TEST PUT AN EFFECT WHERE A SHORT CIRCUIT MAY SKIP IT? The `&&`/`||` the
+  // test renders as evaluate their right operand conditionally; the machine's branch did not, for
+  // anything the fold above may have brought into the test. Where the skipped position holds an
+  // EFFECT the emitted loop runs it fewer times than the asm does.
+  //
+  // The effect flag is the whole test and no block position is consulted, because for an effectful
+  // op the two say the same thing: `HOIST_UNSAFE_OPS` (ir/opcodes.ts) IS `EFFECTFUL_OPS`, so
+  // raise/shortcircuit.ts never lifts one out of the arm it guards and a genuinely short-circuited
+  // effect never reaches a connective here. A memory read is exempt there — C's own short circuit
+  // re-guards it at the new point — and stays exempt here for the same reason.
+  //
+  // NO SPINE CONDITION, unlike the gates that read the same `Reach`: those ask which LOOP EDGE a
+  // position is evaluated on, which an op between the connectives inverts. This asks only whether
+  // the position is evaluated EVERY time the test is, and `!(a && b)` skips `b` exactly where
+  // `a && b` does. `SHORT_CIRCUIT_ARMS` composes to that answer on its own — an arm function clears
+  // one side of the reach and nothing down the chain restores it — so the polarity never enters.
+  const testSkipsAnEffect = (condV: Value, sub: Map<Value, string>): boolean => {
+    let budget = WALK_BUDGET;
+    let found = false;
+    const walk = (x: Value, r: Reach): void => {
+      if (budget-- <= 0 || found || sub.has(x) || varName.has(x)) {
+        return;
+      }
+      const d = defs.get(x);
+      if (d === undefined || respelledDefs.has(d)) {
+        return;
+      }
+      if (EFFECTFUL_OPS.has(d.opcode) && !(r.onTrue && r.onFalse)) {
+        found = true;
+        return;
+      }
+      const arm = SHORT_CIRCUIT_ARMS[d.opcode];
+      d.operands.forEach((o, i) => walk(o, arm === undefined ? r : arm(i, r)));
+    };
+    walk(condV, ALWAYS);
+    return found;
+  };
+
   // WHICH SPELLING A PRE-UPDATE READ IN THE BOTTOM TEST HAS. Returns the update to fold and the
   // step to fold it as, or the id of the gate that refused — `PREUPDATE_COND_GATES` above carries
   // the refusals and the argument. A fold implies the condition's hazard is REPAIRED, and nothing
@@ -567,11 +589,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // and are unaffected by the fold, which is why they are asked for separately and why
   // `one-pre-update-variable` keeps this to the single-variable case.
   //
-  // The walk is `readsClobbered`'s, with three things added that the boolean does not need: it COUNTS
+  // The walk is `readsClobbered`'s, with two things added that the boolean does not need: it COUNTS
   // occurrences instead of stopping at the first (C89's sequence-point rule is about the count), it
   // tracks, per name, whether the leaf's position is reached when the whole test is TRUE and when
-  // it is FALSE (`SHORT_CIRCUIT_ARMS`), and it notes any EFFECT sitting at a position one of those
-  // two answers misses. A name reached twice takes the INTERSECTION of the two
+  // it is FALSE (`SHORT_CIRCUIT_ARMS`). A name reached twice takes the INTERSECTION of the two
   // positions' reach, which `variable-named-once` then refuses anyway — kept so the field means the
   // same thing whichever gate is ablated.
   //
@@ -593,7 +614,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     let budget = WALK_BUDGET;
     let unreadable = false;
     let nestedConnective = false;
-    let skippedEffect = false;
     const mentions = new Map<string, number>();
     const pre = new Map<string, Reach>();
     const note = (name: string, r: Reach): void => {
@@ -629,9 +649,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         unreadable = true;
         return;
       }
-      if (EFFECTFUL_OPS.has(d.opcode) && !(r.onTrue && r.onFalse)) {
-        skippedEffect = true;
-      }
       const arm = SHORT_CIRCUIT_ARMS[d.opcode];
       if (arm !== undefined && !spine) {
         nestedConnective = true;
@@ -649,7 +666,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       mentions: mentions.get(name) ?? 0,
       unreadable,
       nestedConnective,
-      skippedEffect,
       onContinue: negated ? reach.onFalse : reach.onTrue,
       onExit: negated ? reach.onTrue : reach.onFalse,
       updateObserved:
@@ -885,6 +901,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     readsClobbered,
     loopEscapeHazard,
     loopUpdateHazard,
+    testSkipsAnEffect,
     preUpdateCondFold,
     sinkablePreUpdateSlots,
     sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),

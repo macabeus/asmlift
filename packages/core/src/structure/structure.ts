@@ -3781,16 +3781,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // naming walk and the coalescing that follows it, and these checks only read it — so today the
   // two readings coincide; the reference is what keeps them coinciding if a write ever moves down
   // here.
-  const { readsClobbered, loopUpdateHazard, preUpdateCondFold, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } =
-    makeLoopHazards({
-      defs,
-      varName,
-      useSitesOf,
-      liveIn,
-      opBlock,
-      materialize,
-      respelledDefs: bitfieldSpelling,
-    });
+  const {
+    readsClobbered,
+    loopUpdateHazard,
+    testSkipsAnEffect,
+    preUpdateCondFold,
+    sinkablePreUpdateSlots,
+    sameAtEntry,
+    loopWriteSet,
+  } = makeLoopHazards({
+    defs,
+    varName,
+    useSitesOf,
+    liveIn,
+    opBlock,
+    materialize,
+    respelledDefs: bitfieldSpelling,
+  });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a
   // latch back-edge arg) is held in its loop-variable NAME after the loop, so any post-loop use must
@@ -5489,6 +5496,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // post-loop where the other path really does read them after the update.
     const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
+    // AN EFFECT THE RENDERED TEST MAY SKIP. `movedEffect` below says this about the exit copies; the
+    // bottom test is the other place an effect can change how often it runs, and here it is the
+    // `&&`/`||` that moves it rather than a copy: the right operand is evaluated only where the left
+    // one let it be, while the asm's branch did not guard the op at all. Nothing can re-place it —
+    // the connective is what the test IS — so decline LOUD, the same answer for the same reason.
+    //
+    // Asked of every `do-while`, not only of a folded one: the arm holds the same call whichever way
+    // the counter is spelled. Over the whole corpus this moves nothing — `bench sweep --base`,
+    // lift-only and `--fan`, reports 2,320 identical records and 0 rows moved either way.
+    if (testSkipsAnEffect(lterm.operands[0], sub)) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the bottom test evaluates an effect behind a '&&'/'||' that ` +
+          `the asm ran on every iteration`,
+      );
+    }
     // The test's OWN pre-update read has a spelling the other two disjuncts do not: `n++` at the
     // leaf, with the update copy dropped from the foot of the body. Asked only where the test is
     // already a hazard, so a loop that structures today enumerates exactly the candidates it did.

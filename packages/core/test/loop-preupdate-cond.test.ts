@@ -6,7 +6,9 @@
 // Its refusals live in `PREUPDATE_COND_GATES` (structure/hazards.ts) and are ablated one at a time
 // in hazards.test.ts, on hand-built values. What these pin is the other half: that the emitter
 // reaches the fold at all, that the update really leaves the body, and that a shape the gates turn
-// away still declines with the same message it declined with before the fold existed.
+// away still declines with the same message it declined with before the fold existed. One refusal
+// beside them is not the table's: a `&&`/`||` the fold puts in the test may also skip an EFFECT the
+// asm ran unconditionally, which `testSkipsAnEffect` asks of every `do-while`.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -87,6 +89,34 @@ test('an update with no `++` spelling still declines', () => {
 // two null answers through `structure()` today — the gate that admits the fold has already
 // established the count on the def tree — so the rule is pinned here rather than through a
 // function no fixture can produce.
+// The same loop with the arms the other way round, an `||` joining them, and the COUNTER as the
+// return value: `do { r = work(a0); } while (i++ <= 9 || r != 0); return i;`. Nothing but the test
+// reads the call now, so it renders inlined — in the operand the `||` skips on every iteration the
+// counter's arm answers true, while agbcc's `bl` sits ahead of both branches.
+const RETRY_COUNT_CALL_IN_ARM = `fn retrycall {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = call %0 {target="work"}
+  %4: s32 = const {value=1}
+  %5: s32 = add %2, %4
+  %6: s32 = const {value=0}
+  %7: u32 = icmp_ne %3, %6
+  %8: s32 = const {value=9}
+  %9: u32 = icmp_sle %2, %8
+  %10: u32 = logic_or %9, %7
+  cond_br %10, ^bb1(%5), ^bb2(%5)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+test('a call the rendered test may skip declines, whatever the counter does', () => {
+  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(StructureError);
+  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(/evaluates an effect behind a '&&'\/'\|\|'/);
+});
+
 test('the rewrite refuses unless the rendered test names the variable exactly once', () => {
   const le = (l: Expr): Expr => ({ k: 'bin', op: '<=', l, r: { k: 'const', value: 9 } });
   const v = (name: string): Expr => ({ k: 'var', name });
