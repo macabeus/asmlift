@@ -47,7 +47,9 @@ function rendersAsAddress(op: Op): boolean {
  *  branch on the contract that the structurer inlines it back under C's own short circuit, so the
  *  def block of anything in it is a FOLD ARTIFACT — a rule that names one of these values there
  *  emits it above the guard the source wrote (`p != 0 && *p != 0` becoming `v0 = *p;` above its own
- *  null check). Asked by the def-block placement rule and by the merge-feed-home scope. */
+ *  null check). Asked by the def-block placement rule and by the merge-feed-home scope; the
+ *  guarded-call rule asks the same set for the opposite answer, since `call` is hoist-unsafe and so
+ *  was never folded into the cone in the first place. */
 function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
   const guarded = new Set<Value>();
   const work: Value[] = [];
@@ -1502,20 +1504,27 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
   const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
-  /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
-   *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
+  /** Values C evaluates only under a `&&`/`||` — the SECOND operand of every
+   *  `logic_and`/`logic_or`, and everything it reads. Two rules below read it and they read it the
+   *  opposite way round, because the fold that built the connective treats a READ and an EFFECT
+   *  differently.
    *
    *  raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body,
    *  memory reads included, into the block ABOVE the branch (its value form and its control-flow
    *  form both splice that body into the head). ir/opcodes.ts states the safety argument as the
    *  reason a read is deliberately absent from HOIST_UNSAFE_OPS: the structurer inlines it back
-   *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a value
-   *  in that cone the def block is a FOLD ARTIFACT rather than the block the asm read in, and the
-   *  whole premise this rule reads placement under does not hold there. Naming it also breaks the
-   *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check.
+   *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
+   *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
+   *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
+   *  emit `v0 = *p;` above its own null check.
    *
-   *  An operand[0] cone is unconditional and keeps the rule; only the guarded side is collected. */
-  const shortCircuitGuarded = readsStayWhereWritten ? shortCircuitGuardedValues(fn, defOf) : new Set<Value>();
+   *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
+   *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
+   *  materializes it there rather than letting C's short circuit skip it.
+   *
+   *  An operand[0] cone is unconditional and neither rule touches it; only the guarded side is
+   *  collected. */
+  const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -1702,6 +1711,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // practice — a second use already materialized above — and it is 0 of 2288 sa3 functions,
         // 2 of 412 klonoa ones.
         if (isCall && branchArgFed.has(r)) {
+          materialize.add(op);
+          continue;
+        }
+        // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
+        // give it away. `shortCircuitGuarded` above is why the direction is decidable: a call in
+        // that cone was never lifted into it, so the asm ran it above the connective's branch.
+        // Compiled, `do { r = cb(p); } while (i++ <= n && r != 0);` puts `bl cb` ahead of both
+        // compares; inlined at the `&&` the recovered C calls `cb` only while the counter's arm
+        // holds, so the callee runs fewer times and whatever it wrote goes with it.
+        if (isCall && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;
         }

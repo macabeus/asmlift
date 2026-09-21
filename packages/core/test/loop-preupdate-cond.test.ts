@@ -6,9 +6,9 @@
 // Its refusals live in `PREUPDATE_COND_GATES` (structure/hazards.ts) and are ablated one at a time
 // in hazards.test.ts, on hand-built values. What these pin is the other half: that the emitter
 // reaches the fold at all, that the update really leaves the body, and that a shape the gates turn
-// away declines loud and names the gate. One refusal beside them is not the table's: a `&&`/`||`
-// the fold puts in the test may also skip an EFFECT the asm ran unconditionally, which
-// `testSkipsAnEffect` asks of every `do-while`.
+// away declines loud and names the gate. One rule beside them is not the table's: a call the fold
+// would leave behind a `&&`/`||` is materialized ahead of the test (structure/analysis.ts), so the
+// position the connective skips holds a name and `testSkipsAnEffect` finds no effect there.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -87,8 +87,8 @@ test('an update with no `++` spelling still declines', () => {
 
 // The same loop with the arms the other way round, an `||` joining them, and the COUNTER as the
 // return value: `do { r = work(a0); } while (i++ <= 9 || r != 0); return i;`. Nothing but the test
-// reads the call now, so it renders inlined — in the operand the `||` skips on every iteration the
-// counter's arm answers true, while agbcc's `bl` sits ahead of both branches.
+// reads the call, and the operand it reads it in is the one the `||` skips on every iteration the
+// counter's arm answers true — while agbcc's `bl` sits ahead of both branches.
 const RETRY_COUNT_CALL_IN_ARM = `fn retrycall {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -108,9 +108,18 @@ const RETRY_COUNT_CALL_IN_ARM = `fn retrycall {
 }
 `;
 
-test('a call the rendered test may skip declines, whatever the counter does', () => {
-  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(StructureError);
-  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(/an effect behind a '&&'\/'\|\|'/);
+test('the call the test would skip is a statement of its own, and the fold still happens', () => {
+  expect(emit(RETRY_COUNT_CALL_IN_ARM)).toBe(
+    's32 retrycall(s32 a0) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v1 = 0;\n' +
+      '    do {\n' +
+      '        v0 = work(a0);\n' +
+      '    } while (v1++ <= 9 || v0 != 0);\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
 });
 
 // The rewrite itself. Nothing reaches its null answers through `structure()` today — the gate that
