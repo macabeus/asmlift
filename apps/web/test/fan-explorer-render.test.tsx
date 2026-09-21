@@ -18,7 +18,7 @@ import { VARIATION_KINDS, VARIATION_TOKENS, variationToken } from '@asmlift/core
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { FanExplorer } from '../src/pages/benchmark/components/FanExplorer';
 import { VariationDetailBody } from '../src/pages/benchmark/components/VariationDetail';
@@ -41,6 +41,14 @@ import {
 import { levelMarker } from '../src/pages/benchmark/theme';
 import { hashToSearchParams } from '../src/shared/utils/hash-params';
 import { FAN_SAMPLE } from './fan-sample';
+
+// THE DRAWER TEST IS REGISTRY-SIZED TIMES CORPUS-SIZED, and both grow monotonically: it renders
+// one drawer per entry of `VARIATION_TOKENS` over every row of the committed artifact. At 56
+// entries and 1,203 rows it is 1.1 s on a developer machine and just over 5 s on a hosted runner,
+// so the 5 s default was going to be crossed by whichever branch added the next variation — and it
+// fails as `Test timed out in 5000ms`, which reads like a rendering hang and is not. A real hang is
+// still loud, 30 s later.
+vi.setConfig({ testTimeout: 30_000 });
 
 const artifact = (
   JSON.parse(readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8')) as {
