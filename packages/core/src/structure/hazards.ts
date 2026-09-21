@@ -185,9 +185,8 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
 ];
 
-/** The `++` a bottom test's pre-update read folds into, or the id of the gate that refused it. The
- *  id is what the decline names, so the three reasons this table holds do not reach a reader as one
- *  message. */
+/** The `++` a bottom test's pre-update read folds into, or the id of the gate that refused it —
+ *  which is what the decline names, so `PREUPDATE_COND_GATES`'s reasons reach a reader apart. */
 export type PreUpdateCondFold = { name: string; by: 1 | -1 } | { refused: string };
 
 /** Why a bottom test's pre-update read of a loop variable cannot be spelled `n++` — see the note
@@ -328,10 +327,11 @@ export const SHORT_CIRCUIT_ARMS: Readonly<Record<string, (i: number, r: Reach) =
   logic_or: (i, r) => (i === 0 ? r : { onTrue: false, onFalse: r.onFalse }),
 };
 
-/** How many values the reach walk may visit. It does not memoise — a value two consumers read
- *  renders twice, and the count is the fact being measured — so a shared def tree costs it once per
- *  path. Exhausting the budget answers `unreadable`, the same refusal an op the walk cannot see
- *  through gets. */
+/** How many values a reach walk may visit. Neither memoises — a value two consumers read renders
+ *  twice, and for `preUpdateCondFold` that count IS the fact being measured — so a shared def tree
+ *  costs a walk once per path. Both answer exhaustion the refusing way, `unreadable` and "an effect
+ *  may be skipped": a walk that stopped early has seen part of the test, and the part it did not
+ *  see is the part a permissive answer would be about. */
 const WALK_BUDGET = 4096;
 
 /** The `± 1` an update spells, or null for every other update — `n = n + 1`, `n = 1 + n` and
@@ -560,15 +560,23 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // the position is evaluated EVERY time the test is, and `!(a && b)` skips `b` exactly where
   // `a && b` does. `SHORT_CIRCUIT_ARMS` composes to that answer on its own — an arm function clears
   // one side of the reach and nothing down the chain restores it — so the polarity never enters.
+  //
+  // A def the walk cannot read through is DESCENDED rather than refused, which is the other
+  // direction from the fold's `unreadable`: a respelling names its operands' values, so an effect
+  // below one is still an effect in that position, and the budget answers the refusing way.
   const testSkipsAnEffect = (condV: Value, sub: Map<Value, string>): boolean => {
     let budget = WALK_BUDGET;
     let found = false;
     const walk = (x: Value, r: Reach): void => {
-      if (budget-- <= 0 || found || sub.has(x) || varName.has(x)) {
+      if (found || sub.has(x) || varName.has(x)) {
+        return;
+      }
+      if (budget-- <= 0) {
+        found = true;
         return;
       }
       const d = defs.get(x);
-      if (d === undefined || respelledDefs.has(d)) {
+      if (d === undefined) {
         return;
       }
       if (EFFECTFUL_OPS.has(d.opcode) && !(r.onTrue && r.onFalse)) {

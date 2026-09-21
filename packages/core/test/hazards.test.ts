@@ -657,8 +657,10 @@ describe('preUpdateCondFold', () => {
   // the body. Everything the predicate weighs is a knob on it: which connective joins the arms,
   // which arm the variable is in, what the update spells, and who reads its result after the loop.
   //
-  // Each refusal is a one-fact edit of the accepted case, and each asserts WHICH gate answered, so
-  // an ablation measures the rule it names rather than whatever happened to refuse first.
+  // Each refusal names the gate that answered, so an ablation measures the rule it names rather
+  // than whatever happened to refuse first. All but one are a single knob turned on that shape;
+  // `one-pre-update-variable` needs a second loop variable, which the scaffold has no room for, so
+  // it builds its own.
   const nine = (): Value => v();
   const scaffold = (
     opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean; callArm?: boolean } = {},
@@ -1009,6 +1011,30 @@ describe('testSkipsAnEffect', () => {
     const ne = f.defs.get(f.cond)!.operands[1];
     const call = f.defs.get(ne)!.operands[0];
     expect(make({ defs: f.defs, varName: new Map([[call, 'v0']]) }).testSkipsAnEffect(f.cond, new Map())).toBe(false);
+  });
+
+  test('a respelled def is descended, not waved past', () => {
+    // The fold refuses a def whose rendering it cannot read; here the opposite answer is the safe
+    // one, because a respelling still names the values its operands stand for — the call among them.
+    const f = scaffold(false);
+    const ne = f.defs.get(f.cond)!.operands[1];
+    const spelled = new Map<Op, unknown>([[f.defs.get(ne)!, 'a bitfield read']]);
+    expect(make({ defs: f.defs, respelledDefs: spelled }).testSkipsAnEffect(f.cond, new Map())).toBe(true);
+  });
+
+  test('a test too large to walk answers the refusing way', () => {
+    // The budget is the only answer given without looking, so it is given as a refusal: the part of
+    // the test the walk did not reach is the part a clean answer would be about.
+    // Twenty ops, a million visits: the walk does not memoise, so a value both operands read costs
+    // it twice at every level.
+    const defs = new Map<Value, Op>();
+    let cur = v();
+    for (let i = 0; i < 20; i++) {
+      const up = v();
+      defs.set(up, mkOp('icmp_ne', { operands: [cur, cur], results: [up] }));
+      cur = up;
+    }
+    expect(make({ defs }).testSkipsAnEffect(cur, new Map())).toBe(true);
   });
 });
 

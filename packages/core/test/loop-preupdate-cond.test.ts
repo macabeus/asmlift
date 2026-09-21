@@ -6,9 +6,9 @@
 // Its refusals live in `PREUPDATE_COND_GATES` (structure/hazards.ts) and are ablated one at a time
 // in hazards.test.ts, on hand-built values. What these pin is the other half: that the emitter
 // reaches the fold at all, that the update really leaves the body, and that a shape the gates turn
-// away still declines with the same message it declined with before the fold existed. One refusal
-// beside them is not the table's: a `&&`/`||` the fold puts in the test may also skip an EFFECT the
-// asm ran unconditionally, which `testSkipsAnEffect` asks of every `do-while`.
+// away declines loud and names the gate. One refusal beside them is not the table's: a `&&`/`||`
+// the fold puts in the test may also skip an EFFECT the asm ran unconditionally, which
+// `testSkipsAnEffect` asks of every `do-while`.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -54,7 +54,7 @@ const RETRY_COUNT = `fn retrycount {
 const RETRY_COUNT_OR = RETRY_COUNT.replace('logic_and', 'logic_or').replace('retrycount', 'retryor');
 
 // The counter stepped by two: `n += 2` has no read-then-update operator in C, so
-// `update-is-a-unit-step` refuses and the loop declines as it did before the fold existed.
+// `update-is-a-unit-step` refuses and the loop declines.
 const RETRY_COUNT_BY_TWO = RETRY_COUNT.replace('%4: s32 = const {value=1}', '%4: s32 = const {value=2}').replace(
   'retrycount',
   'retrytwo',
@@ -85,10 +85,6 @@ test('an update with no `++` spelling still declines', () => {
   expect(() => emit(RETRY_COUNT_BY_TWO)).toThrow(/no '\+\+' for the test's own read: update-is-a-unit-step/);
 });
 
-// The rewrite itself, asked the three questions the emitter's guard turns on. Nothing reaches the
-// two null answers through `structure()` today — the gate that admits the fold has already
-// established the count on the def tree — so the rule is pinned here rather than through a
-// function no fixture can produce.
 // The same loop with the arms the other way round, an `||` joining them, and the COUNTER as the
 // return value: `do { r = work(a0); } while (i++ <= 9 || r != 0); return i;`. Nothing but the test
 // reads the call now, so it renders inlined — in the operand the `||` skips on every iteration the
@@ -114,9 +110,12 @@ const RETRY_COUNT_CALL_IN_ARM = `fn retrycall {
 
 test('a call the rendered test may skip declines, whatever the counter does', () => {
   expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(StructureError);
-  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(/evaluates an effect behind a '&&'\/'\|\|'/);
+  expect(() => emit(RETRY_COUNT_CALL_IN_ARM)).toThrow(/an effect behind a '&&'\/'\|\|'/);
 });
 
+// The rewrite itself. Nothing reaches its null answers through `structure()` today — the gate that
+// admits the fold has already established the count on the def tree — so the rule is pinned here
+// rather than through a function no fixture can produce.
 test('the rewrite refuses unless the rendered test names the variable exactly once', () => {
   const le = (l: Expr): Expr => ({ k: 'bin', op: '<=', l, r: { k: 'const', value: 9 } });
   const v = (name: string): Expr => ({ k: 'var', name });

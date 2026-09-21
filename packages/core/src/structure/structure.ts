@@ -5507,8 +5507,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // lift-only and `--fan`, reports 2,320 identical records and 0 rows moved either way.
     if (testSkipsAnEffect(lterm.operands[0], sub)) {
       throw new StructureError(
-        `cannot structure '${fn.name}': the bottom test evaluates an effect behind a '&&'/'||' that ` +
-          `the asm ran on every iteration`,
+        `cannot structure '${fn.name}': the bottom test may evaluate an effect behind a '&&'/'||' ` +
+          `that the asm ran on every iteration`,
       );
     }
     // The test's OWN pre-update read has a spelling the other two disjuncts do not: `n++` at the
