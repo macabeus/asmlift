@@ -1878,7 +1878,8 @@ export function enumerateCandidates(
           orderLicensed = orderLicensedGlobals(fn, target);
           // …and the NAMES the map holds for the addresses this lift built by arithmetic off a
           // named one (raise/offsetnames.ts). Per lift setting, off that setting's own map: the
-          // `/raw-globals` sibling has no map and so no name to reach.
+          // `/raw-globals` sibling has no map and so no name to reach. AFTER the two readings, and
+          // the staleness that leaves them is priced in pipeline.ts's copy of this note.
           if (symbolSetting.symbols) {
             OFFSET_NAME_PASS.run(fn, symbolSetting.symbols);
           }

@@ -163,6 +163,13 @@ function runTower(
   // arithmetic off a named one (raise/offsetnames.ts). After the two readings above, which are
   // about the lift as the frontend emitted it; before everything below, so the whole raising
   // tower sees a walked-to cell as the named global it is.
+  //
+  // The two readings therefore attribute a walked access to the base rather than to the name this
+  // pass gives it, and that costs nothing either way: a SHAPE is a declaration, so a name the map
+  // describes — which every base here is, or the pass could not have fired — is dropped from
+  // `inferredSymbols`, and the ORDER licence only enables a cast spelling that is byte-correct
+  // under any declaration. Measured: with this call moved ABOVE both readings, the three corpus
+  // rows the pass fires on keep their fan size, their winner and their score exactly.
   if (opts.symbols) {
     OFFSET_NAME_PASS.run(fn, opts.symbols);
   }
