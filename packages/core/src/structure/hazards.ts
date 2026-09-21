@@ -195,6 +195,8 @@ export interface PreUpdateCondCandidate {
   mentions: number;
   /** an op in the test renders something its operand tree does not show (a respelled def) */
   unreadable: boolean;
+  /** a short-circuit op is reached through an op that is not one, so its arms' reach is unknown */
+  nestedConnective: boolean;
   /** the folded leaf is evaluated on every iteration that takes the back edge */
   onContinue: boolean;
   /** …and on the iteration that leaves the loop */
@@ -252,6 +254,13 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
     rejects: (c) => c.mentions !== 1,
   },
   {
+    id: 'connectives-join-at-the-root',
+    why: 'a short-circuit reached through some other op decides its arms against that op, not against the test',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating connectives-join-at-the-root folds an arm of a negated &&',
+    rejects: (c) => c.nestedConnective,
+  },
+  {
     id: 'folded-on-every-continue',
     why: 'a short-circuit ahead of the leaf would skip the update on an iteration that re-enters the loop',
     sound: true,
@@ -278,13 +287,20 @@ interface Reach {
 const ALWAYS: Reach = { onTrue: true, onFalse: true };
 
 /** The reach each operand of a SHORT-CIRCUIT op inherits. These two are the whole set: they are the
- *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||`, and `Expr` has no conditional form
- *  besides them — no ternary — so every other op evaluates all of its operands whenever it is
- *  itself evaluated, and they inherit its reach unchanged.
+ *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||`, which hazards.test.ts holds the two
+ *  lists to rather than the prose — and `Expr` has no conditional form
+ *  besides them, no ternary, so every other op evaluates all of its operands whenever it is itself
+ *  evaluated, and they inherit its reach unchanged.
  *
  *  In `a && b`, `b` runs only where `a` was true: a TRUE whole implies it ran, a FALSE whole does
- *  not. `a || b` is the dual. */
-const SHORT_CIRCUIT_ARMS: Readonly<Record<string, (i: number, r: Reach) => Reach>> = {
+ *  not. `a || b` is the dual.
+ *
+ *  BOTH ARMS ARE STATED ABOUT THE OP'S OWN TRUTH, while `Reach` is stated about the WHOLE test's,
+ *  so composing them down a chain is only valid where the two are the same value — a spine of
+ *  connectives from the root. One `icmp_eq %and, 0` between them inverts the polarity and the arm
+ *  answers backwards, which is `connectives-join-at-the-root`'s refusal: a connective reached
+ *  through any other op is not read at all. */
+export const SHORT_CIRCUIT_ARMS: Readonly<Record<string, (i: number, r: Reach) => Reach>> = {
   logic_and: (i, r) => (i === 0 ? r : { onTrue: r.onTrue, onFalse: false }),
   logic_or: (i, r) => (i === 0 ? r : { onTrue: false, onFalse: r.onFalse }),
 };
@@ -536,6 +552,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   ): { name: string; by: 1 | -1 } | null => {
     let budget = WALK_BUDGET;
     let unreadable = false;
+    let nestedConnective = false;
     const mentions = new Map<string, number>();
     const pre = new Map<string, Reach>();
     const note = (name: string, r: Reach): void => {
@@ -546,7 +563,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       const was = pre.get(name);
       pre.set(name, was === undefined ? r : { onTrue: was.onTrue && r.onTrue, onFalse: was.onFalse && r.onFalse });
     };
-    const walk = (x: Value, r: Reach): void => {
+    // `spine` says the path from the root here ran through connectives only, which is the condition
+    // under which `r` is about this op's own truth as well as the whole test's.
+    const walk = (x: Value, r: Reach, spine: boolean): void => {
       if (budget-- <= 0) {
         unreadable = true;
         return;
@@ -570,9 +589,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         return;
       }
       const arm = SHORT_CIRCUIT_ARMS[d.opcode];
-      d.operands.forEach((o, i) => walk(o, arm === undefined ? r : arm(i, r)));
+      if (arm !== undefined && !spine) {
+        nestedConnective = true;
+      }
+      d.operands.forEach((o, i) => walk(o, arm === undefined ? r : arm(i, r), arm !== undefined));
     };
-    walk(condV, ALWAYS);
+    walk(condV, ALWAYS, true);
     const [name] = [...pre.keys()];
     const reach = name === undefined ? ALWAYS : pre.get(name)!;
     const assigns = updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign' && st.name === name);
@@ -582,6 +604,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       preUpdateNames: pre.size,
       mentions: mentions.get(name) ?? 0,
       unreadable,
+      nestedConnective,
       onContinue: negated ? reach.onFalse : reach.onTrue,
       onExit: negated ? reach.onTrue : reach.onFalse,
       updateObserved:

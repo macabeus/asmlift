@@ -14,11 +14,13 @@ import {
   PREUPDATE_COND_GATES,
   PREUPDATE_SINK_GATES,
   type PreUpdateCondCandidate,
+  SHORT_CIRCUIT_ARMS,
   type SinkCandidate,
   makeLoopHazards,
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from '../src/structure/hazards';
+import { ARITH_TO_BIN } from '../src/structure/structure';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -659,7 +661,7 @@ describe('preUpdateCondFold', () => {
   // has to sit where the walk meets it AFTER the variable, or an earlier gate answers first and
   // the ablation measures nothing.
   const nine = (): Value => v();
-  const scaffold = (opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or' } = {}) => {
+  const scaffold = (opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or'; underNot?: boolean } = {}) => {
     const p = v(); // the loop variable, named v1
     const u = v(); // its back-edge arg — post-update, so `sub` maps it to the same name
     const other = v(); // the other arm's value, named v0
@@ -673,17 +675,24 @@ describe('preUpdateCondFold', () => {
     const arms = opts.leftArm === true ? [cmp, ne] : [ne, cmp];
     const condOp = mkOp(opts.connective ?? 'logic_and', { operands: arms, results: [cond] });
     const header: Block = { params: [p], ops: [] };
+    const defs = new Map<Value, Op>([
+      [cond, condOp],
+      [cmp, cmpOp],
+      [ne, neOp],
+    ]);
+    // `!(…)`: the connective is reached through an op that inverts it, so the arms it hands out
+    // answer about the opposite edge of the loop from the one the walk is reading.
+    const root = opts.underNot === true ? v() : cond;
+    if (root !== cond) {
+      defs.set(root, mkOp('icmp_eq', { operands: [cond, v()], results: [root] }));
+    }
     return {
       p,
       u,
-      cond,
+      cond: root,
       header,
       body: new Set([header]),
-      defs: new Map<Value, Op>([
-        [cond, condOp],
-        [cmp, cmpOp],
-        [ne, neOp],
-      ]),
+      defs,
       varName: new Map([
         [p, 'v1'],
         [other, 'v0'],
@@ -788,6 +797,30 @@ describe('preUpdateCondFold', () => {
     f.defs.set(ne, mkOp('icmp_ne', { operands: [f.p, v()], results: [ne] }));
     expect(ask(f)).toBe(null);
     expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'variable-named-once') })).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('ablating connectives-join-at-the-root folds an arm of a negated &&', () => {
+    // `!(v0 != 0 && v1 <= 9)`. Each arm function is about its OWN op's truth, so the `&&` says the
+    // second arm runs whenever the `&&` is true — which the negation makes the iterations that
+    // LEAVE. Folded there, the `++` is skipped on every iteration that re-enters while the back
+    // edge still carries `v1 + 1`, and the loop asmlift emits does not terminate where the machine
+    // terminates.
+    const f = scaffold({ underNot: true });
+    expect(ask(f)).toBe(null);
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'connectives-join-at-the-root') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('the short-circuit arms are total over the ops that render as && and ||', () => {
+    // The composition is valid only over ops the walk KNOWS short-circuit; one it does not passes
+    // its own reach down unchanged, which for a connective is the permissive answer. Nothing else
+    // couples the two tables, and `ARITH_TO_BIN` is where a new connective would be spelled.
+    const renders = Object.entries(ARITH_TO_BIN)
+      .filter(([, spelling]) => spelling === '&&' || spelling === '||')
+      .map(([op]) => op);
+    expect(Object.keys(SHORT_CIRCUIT_ARMS).sort()).toEqual(renders.sort());
   });
 
   test('ablating folded-on-every-continue folds a leaf under the right operand of an ||', () => {

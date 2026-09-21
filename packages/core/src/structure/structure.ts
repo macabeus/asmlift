@@ -932,7 +932,7 @@ const CMP_TO_BIN: Record<string, BinOp> = {
   icmp_eq: '==',
   icmp_ne: '!=',
 };
-const ARITH_TO_BIN: Record<string, BinOp> = {
+export const ARITH_TO_BIN: Record<string, BinOp> = {
   add: '+',
   sub: '-',
   mul: '*',
