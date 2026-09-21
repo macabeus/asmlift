@@ -4807,6 +4807,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             null,
           )
         ) {
+          // NO `n++` REPAIR HERE, and the SHAPE is why rather than an oversight. The fold
+          // (`preUpdateCondFold`) trades the update copy at the foot of the body for a `++` at the
+          // leaf, which is the same program only for a BOTTOM test: it runs once per iteration, in
+          // the position the copy stood. This test renders at the TOP, ahead of the body, and runs
+          // one more time than the body does — `while (n++ < k)` over a body with no update is a
+          // different loop. Reaching this site is a rotation, not a wider gate.
           throw new StructureError(
             `cannot structure '${fn.name}': loop condition or a post-loop value reads a pre-update loop variable`,
           );

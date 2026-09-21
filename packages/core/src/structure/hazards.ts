@@ -273,7 +273,8 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
   {
     id: 'update-is-a-unit-step',
     why: 'C has no read-then-update operator but ++ and --, so no other update has a spelling inside the test',
-    sound: false,
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating update-is-a-unit-step declines rather than minting a step-less node',
     rejects: (c) => c.step === null,
   },
   {
@@ -562,10 +563,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // WHICH SPELLING A PRE-UPDATE READ IN THE BOTTOM TEST HAS. Returns the update to fold and the
   // step to fold it as, or the id of the gate that refused — `PREUPDATE_COND_GATES` above carries
   // the refusals and the argument. A fold implies the condition's hazard is REPAIRED, and nothing
-  // else: the exit slots
-  // and the escaped body values are `loopUpdateHazard`'s other two disjuncts and are unaffected by
-  // the fold, which is why they are asked for separately and why `one-pre-update-variable` keeps
-  // this to the single-variable case.
+  // else: the exit slots and the escaped body values are `loopUpdateHazard`'s other two disjuncts
+  // and are unaffected by the fold, which is why they are asked for separately and why
+  // `one-pre-update-variable` keeps this to the single-variable case.
   //
   // The walk is `readsClobbered`'s, with three things added that the boolean does not need: it COUNTS
   // occurrences instead of stopping at the first (C89's sequence-point rule is about the count), it

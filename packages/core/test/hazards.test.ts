@@ -934,6 +934,40 @@ describe('preUpdateCondFold', () => {
     });
   });
 
+  test('the two walks agree about which tests hold a pre-update read', () => {
+    // `preUpdateCondFold` re-implements `readsClobbered`'s walk with a counter and a reach lattice,
+    // and is asked only where `readsClobbered` has already answered true — so the two have to agree
+    // about `sub`, `varName` and the def map. Nothing in the types couples them. A disagreement is
+    // safe in one direction only: the fold finds no pre-update name, `one-pre-update-variable`
+    // refuses and the loop declines. That is what this pins, over every knob the scaffold has.
+    const knobs = [
+      {},
+      { leftArm: true },
+      { connective: 'logic_or' as const },
+      { underNot: true },
+      { callArm: true },
+      { leftArm: true, callArm: true },
+    ];
+    for (const opts of knobs) {
+      const f = scaffold(opts);
+      const sub = new Map([[f.u, 'v1']]);
+      const clobbered = make({ defs: f.defs, varName: f.varName }).readsClobbered(f.cond, sub, writes);
+      const answer = ask(f);
+      const blamed = 'refused' in answer && answer.refused === 'one-pre-update-variable';
+      expect({ opts, clobbered, blamed }).toEqual({ opts, clobbered, blamed: !clobbered });
+      expect(clobbered).toBe(true);
+    }
+    // The other direction, so the assertion above is not one-sided: a test whose every leaf is
+    // post-update. `readsClobbered` says clean, and the fold finds no name to carry the `++`.
+    const f = scaffold();
+    const sub = new Map([[f.u, 'v1']]);
+    const hz = make({ defs: f.defs, varName: f.varName });
+    expect(hz.readsClobbered(f.u, sub, writes)).toBe(false);
+    expect(hz.preUpdateCondFold(f.u, false, f.header, [f.u], [], f.body, sub, step(1), writes)).toEqual({
+      refused: 'one-pre-update-variable',
+    });
+  });
+
   test('the same post-loop read is fine when the leaf sits where every iteration evaluates it', () => {
     // The one-fact control for the gate above: move the arm to the LEFT of the `&&`, which every
     // iteration evaluates whichever way the test answers.

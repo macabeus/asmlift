@@ -677,7 +677,7 @@ export function rematerializableAddress(e: Expr): boolean {
       case 'un':
         break;
       default:
-        ok = false; // var, addr, index, field, call, marker
+        ok = false; // var, addr, postincr, index, field, call, marker
         return;
     }
     for (const c of exprChildren(x)) {

@@ -83,7 +83,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   section).
 - **L3 — the neutral AST.** A genuinely different structure
   ([`l3/ast.ts`](../packages/core/src/l3/ast.ts)): `if`/`while`/`switch`/expressions, no
-  registers, no `goto`. Structuring ([`structure/`](../packages/core/src/structure)) recovers it
+  registers, no `goto`. Expressions are pure but for `call`, `marker` and `postincr` — the last is
+  an expression that WRITES, and the `l3/` passes that count a name's mentions have to know it
+  (`mentionedName`, and the source scan in `test/postincr.test.ts` that holds them to it). Structuring ([`structure/`](../packages/core/src/structure)) recovers it
   from the L2 CFG and destroys SSA (assigning merge values back to named variables).
 - **The L3 rewrites** ([`l3/`](../packages/core/src/l3)) then improve that tree _within_ the
   level — no lowering, so this is a stage rather than a fourth level. They are either committed or
@@ -543,7 +545,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three output languages. Every language-specific decision
-(Pascal's `:=`, C's `?:`) lives in a backend, never in the tower.
+(Pascal's `:=`, C's `?:`) lives in a backend, never in the tower — with the one exception the node
+list above names: `postincr` is C's `n++`, kept in the tower because the ASM decides it (the test
+reads the variable before the update, so no other spelling is faithful) and a backend cannot invent
+a node the structurer did not build. Pascal has no such operator and throws on one, the way it
+already does on `cast`.
 
 ## The contracts are the point
 
@@ -566,15 +572,22 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   C operator that rejects pointers, and every scalar access width is a real C scalar (1/2/4). A
   regressing pass that produced, say, a width-8 access would otherwise print the nonexistent
   `(s64 *)` typedef and fail at candidate-compile three stages downstream.
+- **`assertLocalsWritten`** (also after structuring): every declared local is written somewhere
+  before it is read, unless its declaration says why not — an `uninit` local stands on an `undef`,
+  a `frame` local is the machine's own slot. It catches a materialized def whose assignment no
+  position emitted.
+- **`assertPostIncrUnshared`** (also after structuring): no expression names a `postincr`'s
+  variable twice. C89 leaves undefined which value the second read sees, so a pass that brings one
+  in has to fail here rather than compile into whichever answer the compiler picked.
 - **`assertEffectsPreserved`** (also after structuring): every call the asm makes is emitted, and
   none is emitted more times than the asm makes it on any one path — same for the `opaque` ops
   standing in for unmodelled instructions. It is the odd one out and worth the attention: the
-  other three check L3 against _itself_, so they catch a tree that is ill-formed. This one checks
+  other four check L3 against _itself_, so they catch a tree that is ill-formed. This one checks
   L3 against the L2 graph it came from, which is the only way to catch a pass that **loses**
   something well-formedly — a dropped call, or an unmodelled instruction quietly vanishing
   because its destination register was dead.
 
-**Where they run matters as much as what they say.** The three post-structuring contracts fire
+**Where they run matters as much as what they say.** The five post-structuring contracts fire
 _before_ the committed L3 rewrites, so a readability pass cannot hide a structuring defect by
 deleting the statement that carries it; deref-typing and effect-preservation then fire _again_
 after, so those passes cannot introduce one either. And each respell variation's tree gets its own
@@ -704,7 +717,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   dirty, and that a module duplicate censuses zero silently — all three measured in
   `apps/benchmark/src/run/gate-census.ts`'s header).
 
-  **What makes a pass censusable is a fact about its CALLER.** Sixteen passes in `packages/core/src`
+  **What makes a pass censusable is a fact about its CALLER.** Seventeen passes in `packages/core/src`
   take their table as a parameter; FIVE of them can be censused, because `rank-variations.ts` and
   `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_RESPELL_VARIATIONS`,
   and the branch short-circuit fold, `member-arrays`, `narrowlocal` and `paramwidth` in
