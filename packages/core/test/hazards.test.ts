@@ -758,6 +758,65 @@ describe('preUpdateCondFold', () => {
     expect(ask(scaffold(), { updates: step(2) })).toBe(null);
   });
 
+  test('ablating one-pre-update-variable repairs one variable and clobbers the other', () => {
+    // `do { … } while (v1 <= 9 && v2 <= 9)`, the back edge carrying `v1 + 1` and `v2 + 1`. Only one
+    // name can take the `++`, and a non-null answer switches off the caller's WHOLE condition
+    // disjunct — so the other variable's pre-update read is emitted under its post-update name and
+    // every hazard reports clean.
+    const p1 = v();
+    const p2 = v();
+    const u1 = v();
+    const u2 = v();
+    const a = v();
+    const b = v();
+    const cond = v();
+    const defs = new Map<Value, Op>([
+      [a, mkOp('icmp_ule', { operands: [p1, v()], results: [a] })],
+      [b, mkOp('icmp_ule', { operands: [p2, v()], results: [b] })],
+      [cond, mkOp('logic_and', { operands: [a, b], results: [cond] })],
+    ]);
+    const header: Block = { params: [p1, p2], ops: [] };
+    const both = (gates?: readonly Gate<PreUpdateCondCandidate>[]) =>
+      make({
+        defs,
+        varName: new Map([
+          [p1, 'v1'],
+          [p2, 'v2'],
+        ]),
+      }).preUpdateCondFold(
+        cond,
+        false,
+        header,
+        [u1, u2],
+        [],
+        new Set([header]),
+        new Map([
+          [u1, 'v1'],
+          [u2, 'v2'],
+        ]),
+        [
+          ...step(1),
+          {
+            k: 'assign',
+            name: 'v2',
+            value: { k: 'bin', op: '+', l: { k: 'var', name: 'v2' }, r: { k: 'const', value: 1 } },
+          },
+        ],
+        new Set(['v1', 'v2']),
+        gates,
+      );
+    expect(both()).toBe(null);
+    expect(both(without(PREUPDATE_COND_GATES, 'one-pre-update-variable'))).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('ablating update-is-a-unit-step declines rather than minting a step-less node', () => {
+    // The gate is the census entry for the refusal; the `step !== null` at the return is what keeps
+    // the node well formed, so the ablation measures the message and not the type.
+    expect(ask(scaffold(), { updates: step(2), gates: without(PREUPDATE_COND_GATES, 'update-is-a-unit-step') })).toBe(
+      null,
+    );
+  });
+
   test('a test with no pre-update read at all is not this predicate’s business', () => {
     const f = scaffold();
     // every leaf post-update: the condition reads the back-edge arg, which `sub` maps

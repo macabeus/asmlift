@@ -225,7 +225,12 @@ export interface PreUpdateCondCandidate {
  *
  *  `variable-named-once` is C89's own rule rather than this pass's: an object modified between two
  *  sequence points may not be read again there, and `contracts.ts`'s `assertPostIncrUnshared` is the
- *  loud backstop for a later pass bringing a second read in. */
+ *  loud backstop for a later pass bringing a second read in.
+ *
+ *  `one-pre-update-variable` is sound for a reason that lives in the CALLER: a non-null answer sets
+ *  `condRepaired`, which switches off the whole condition disjunct of `loopUpdateHazard` rather than
+ *  the folded name's share of it. A second pre-update variable would then be emitted under its
+ *  post-update name with every hazard reporting clean. */
 export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
   {
     id: 'update-is-a-unit-step',
@@ -236,7 +241,8 @@ export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
   {
     id: 'one-pre-update-variable',
     why: 'two variables read ahead of their updates would need both updates folded into one expression',
-    sound: false,
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating one-pre-update-variable repairs one variable and clobbers the other',
     rejects: (c) => c.preUpdateNames !== 1,
   },
   {
@@ -610,7 +616,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       updateObserved:
         u === undefined || exitArgs.includes(u) || (useSitesOf.get(u) ?? []).some((s) => !body.has(s.blk)),
     };
-    return firstRejection(gates, c) === null ? { name, by: c.step! } : null;
+    // `step !== null` again at the return, not `c.step!`: ablating `update-is-a-unit-step` must
+    // yield a decline, and a `{ by: null }` node renders as `n--` over a body the emitter has
+    // already dropped the real update from.
+    return firstRejection(gates, c) === null && c.step !== null ? { name, by: c.step } : null;
   };
 
   // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
