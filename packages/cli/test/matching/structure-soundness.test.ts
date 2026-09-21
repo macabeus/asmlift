@@ -110,8 +110,8 @@ describe('C4 — inline-at-use has multi-use and memory-ordering barriers', () =
 });
 
 describe('C5 — loop conditions/exits never read a pre-update value under its post-update name', () => {
-  // the `i++ < n` do-while: the latch test reads the PRE-increment i. Rendering it under the
-  // post-update name is one iteration off. Must DECLINE loud.
+  // the `i++ < n` do-while: the latch test reads the PRE-increment i, so rendering it under the
+  // post-update name is one iteration off. The test says so at the leaf instead.
   const hazard = `fn c5 {
 ^bb0(%0: s32*, %1: s32):
   %2: s32 = const {value=0}
@@ -128,9 +128,20 @@ describe('C5 — loop conditions/exits never read a pre-update value under its p
   ret %6
 }
 `;
-  test('pre-update read in a do-while condition declines loud', () => {
-    expect(() => structure(parse(hazard))).toThrow(StructureError);
-    expect(() => structure(parse(hazard))).toThrow(/pre-update/);
+  test('a pre-update read in a do-while condition is spelled at the leaf that makes it', () => {
+    const src = emit(hazard);
+    expect(src).toContain('} while (v0++ < a1);');
+    // the one-iteration-off spelling, which is what this whole group exists to refuse
+    expect(src).not.toContain('} while (v0 < a1);');
+    expect(src).not.toContain('v0 = v0 + 1;');
+  });
+
+  test('a pre-update read the update cannot be folded into still declines loud', () => {
+    // `i += 2` — no read-then-update operator spells it, so the loop has no correct C form here
+    // and the decline is the answer (PREUPDATE_COND_GATES, structure/hazards.ts).
+    const byTwo = hazard.replace('add %3 {imm=1}', 'add %3 {imm=2}').replace('fn c5', 'fn c5two');
+    expect(() => structure(parse(byTwo))).toThrow(StructureError);
+    expect(() => structure(parse(byTwo))).toThrow(/pre-update/);
   });
 
   test('post-update read (the sound spelling) still structures as do-while', () => {
