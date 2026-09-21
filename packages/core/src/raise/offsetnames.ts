@@ -221,7 +221,11 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
 
 /** Every name the map carries, with the FIRST address it sits at and whether it sits at more than
  *  one. The reverse of the address-keyed map, which is the direction `addr(S) + K` needs and the
- *  only direction `SymbolMap` does not already have. */
+ *  only direction `SymbolMap` does not already have.
+ *
+ *  `twice` is about two ADDRESSES, not two entries: `SymbolMap` holds a `SymbolInfo[]` per address
+ *  precisely because one address legitimately carries several (aliases, typed views of one RAM
+ *  region), and a name repeated inside one of those lists still says where it is. */
 function addressesByName(symbols: SymbolMap): Map<string, { addr: number; info: SymbolInfo; twice: boolean }> {
   const out = new Map<string, { addr: number; info: SymbolInfo; twice: boolean }>();
   for (const [addr, infos] of symbols) {
@@ -229,7 +233,7 @@ function addressesByName(symbols: SymbolMap): Map<string, { addr: number; info: 
       const prev = out.get(info.name);
       if (prev === undefined) {
         out.set(info.name, { addr, info, twice: false });
-      } else {
+      } else if (prev.addr !== addr) {
         out.set(info.name, { ...prev, twice: true });
       }
     }

@@ -244,6 +244,18 @@ describe('what refuses', () => {
     expect(judged(nameOnly, handOut)).toEqual([['REG_DMA0CNT_H+12', null]]);
   });
 
+  test('one name listed twice at ONE address is not two addresses', () => {
+    const aliased: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H'), reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(aliased)).toEqual([
+      ['REG_DMA0CNT_H+12', null],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
   test('const-target-store fires through the index between the walk and the store', () => {
     const indexed = thumb(
       'walk',
