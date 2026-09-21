@@ -56,6 +56,18 @@
 // `ButtonConfigurationScreenInit`'s to 0.95x and `sub_0804E708`'s to 0.88x — and it buys 0 lost
 // rows. A per-site variation would be the third answer, and nothing in the corpus asks for it yet.
 //
+// WHY THERE IS NO SYNTHETIC ROW, measured rather than conceded. A walk only happens where the
+// compiler saw LITERAL addresses — spelled as `extern`s the pool words are relocations, agbcc
+// cannot see two cells are adjacent, and it loads one word per cell — and a literal address is
+// exactly what `/raw-globals` spells with no map at all. So a row built on the walk alone always
+// carries a map-less candidate with the same bytes. Two reductions were built and both scored the
+// broken candidate exactly as they scored the right one: three MMIO stores twelve bytes apart is
+// 0/13 with this pass and 0/13 with it ablated, and so is the version that re-reads the walked-to
+// cell, whose `/raw-globals` sibling wins at 0/13 either way. The capability is row-visible only
+// where the function ALSO needs something the map provides, which is what
+// `kleod:DeleteAllSaveData:agbcc` is — ablate the pass there and it goes MATCH -> 20/82 while its
+// best `/raw-globals` candidate is 72/97. The unit tests below carry the rest.
+//
 // WHAT REFUSES is `OFFSET_NAME_GATES` below, and every rejection leaves the arithmetic exactly as
 // the frontend emitted it — the spelling that is valid under any declaration.
 //
