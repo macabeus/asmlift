@@ -28,6 +28,7 @@ import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
+import { nameOffsetAddresses } from './raise/offsetnames';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
@@ -158,6 +159,13 @@ function runTower(
   // …and the ORDER half of the same reading, which reaches names the shape derivation refuses (a
   // struct element among them). Read off the same lifted fn, for the same reason.
   const orderLicensed = orderLicensedGlobals(fn, target);
+  // (1.6) …and the NAMES the map holds for the addresses this function's machine code built by
+  // arithmetic off a named one (raise/offsetnames.ts). After the two readings above, which are
+  // about the lift as the frontend emitted it; before everything below, so the whole raising
+  // tower sees a walked-to cell as the named global it is.
+  if (opts.symbols) {
+    nameOffsetAddresses(fn, opts.symbols);
+  }
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).

@@ -33,6 +33,7 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
   expect(ids).toEqual([
     'stage:lift',
     'stage:globalshape',
+    'stage:offsetnames',
     'stage:idiom',
     'stage:recover',
     'stage:structure',
@@ -63,5 +64,5 @@ test('M5: report is JSON-serializable (consumable by agent + webapp)', () => {
   const { report } = decompileWithReport('half', asm, AGBCC, { patterns: [SDIV_POW2_2] });
   const round = JSON.parse(JSON.stringify(report));
   expect(round.symbol).toBe('half');
-  expect(round.trace.length).toBe(6);
+  expect(round.trace.length).toBe(7);
 });

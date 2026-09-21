@@ -1,0 +1,272 @@
+// A NAME FOR AN ADDRESS THE MACHINE BUILT BY ARITHMETIC (raise/offsetnames.ts).
+//
+// The frontend asks the symbol map what lives at a POOL-LOADED word. A compiler with several
+// neighbouring cells to touch loads one pool word and walks — `adds r1, #12` — so every cell after
+// the first is reached by arithmetic and the map is never asked about it. This file pins both
+// halves: the walk resolves to the name the map holds at that exact address, and every refusal
+// leaves the arithmetic the frontend emitted.
+//
+// The refusals carry the weight, because this changes the DEFAULT spelling rather than adding a
+// candidate: naming a cell the map does not hold there is a silently wrong address with no second
+// opinion.
+import { describe, expect, test } from 'vitest';
+
+import { frontendFor } from '../src/frontend/registry';
+import { without } from '../src/l3/gates';
+import { decompile } from '../src/pipeline';
+import { OFFSET_NAME_GATES, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
+import type { SymbolInfo, SymbolMap } from '../src/symbols';
+import { ARMV4T_AGBCC } from '../src/target';
+
+/** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
+const thumb = (name: string, body: string, pool: string): string =>
+  `	.code	16
+.text
+	.align	2, 0
+	.globl	${name}
+	.type	 ${name},function
+	.thumb_func
+${name}:
+${body}
+	bx	lr
+.L4:
+	.align	2, 0
+.L3:
+	${pool}
+.Lfe1:
+	.size	 ${name},.Lfe1-${name}
+`;
+
+/** The GBA DMA control halfwords, twelve bytes apart — the shape agbcc walks. Address-cast macros,
+ *  as the project's own headers declare them. */
+const reg = (name: string): SymbolInfo => ({
+  name,
+  kind: 'data',
+  shape: 'scalar',
+  size: 2,
+  signed: false,
+  volatile: true,
+});
+const DMA: SymbolMap = new Map([
+  [0x040000ba, [reg('REG_DMA0CNT_H')]],
+  [0x040000c6, [reg('REG_DMA1CNT_H')]],
+  [0x040000d2, [reg('REG_DMA2CNT_H')]],
+]);
+
+/** Store 1 into the pool-loaded cell, then into the two cells the walk reaches. */
+const WALK = thumb(
+  'walk',
+  `	ldr	r1, .L3
+	movs	r2, #1
+	strh	r2, [r1]
+	adds	r1, #12
+	strh	r2, [r1]
+	adds	r1, #12
+	strh	r2, [r1]`,
+  '.word	0x40000ba',
+);
+
+const lift = (name: string, asm: string, symbols?: SymbolMap) =>
+  frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, symbols);
+
+const src = (name: string, asm: string, symbols: SymbolMap) => decompile(name, asm, ARMV4T_AGBCC, { symbols }).source;
+
+/** WHICH RULE decided, per `<base>+<offset>` site — the attribution `firstRejection` exists for. */
+const refusals = (name: string, asm: string, symbols: SymbolMap) => [
+  ...offsetNameRefusals(lift(name, asm, symbols), symbols),
+];
+
+describe('a walked-to address the map names', () => {
+  test('every cell of the walk is the name the map holds at its address', () => {
+    const out = src('walk', WALK, DMA);
+    expect(out).toContain('REG_DMA0CNT_H = 1;');
+    expect(out).toContain('REG_DMA1CNT_H = 1;');
+    expect(out).toContain('REG_DMA2CNT_H = 1;');
+    // the walk is gone: no cast off the base, and no address arithmetic left to spell
+    expect(out).not.toContain('&REG_DMA0CNT_H');
+    expect(refusals('walk', WALK, DMA)).toEqual([
+      ['REG_DMA0CNT_H+12', null],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('a negative offset walks backwards to the name the map holds there', () => {
+    const back = thumb(
+      'back',
+      `	ldr	r1, .L3
+	movs	r2, #1
+	subs	r1, #12
+	strh	r2, [r1]`,
+      '.word	0x40000c6',
+    );
+    expect(src('back', back, DMA)).toContain('REG_DMA0CNT_H = 1;');
+    expect(refusals('back', back, DMA)).toEqual([['REG_DMA1CNT_H-12', null]]);
+  });
+});
+
+describe('what refuses', () => {
+  /** The same walk, judged against a map that differs in one fact. */
+  const judged = (symbols: SymbolMap, asm = WALK) => refusals('walk', asm, symbols);
+
+  test('no-symbol-at-offset — nothing sits there, so the arithmetic stands', () => {
+    const lone: SymbolMap = new Map([[0x040000ba, [reg('REG_DMA0CNT_H')]]]);
+    expect(judged(lone)).toEqual([
+      ['REG_DMA0CNT_H+12', 'no-symbol-at-offset'],
+      ['REG_DMA0CNT_H+24', 'no-symbol-at-offset'],
+    ]);
+    expect(src('walk', WALK, lone)).toContain('&REG_DMA0CNT_H');
+  });
+
+  test('base-unsized — an unsized base cannot tell its own interior from a neighbour', () => {
+    const unsized: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'gPalette', kind: 'data' as const, shape: 'array' as const, elemSize: 2 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(unsized)).toEqual([
+      ['gPalette+12', 'base-unsized'],
+      ['gPalette+24', 'base-unsized'],
+    ]);
+  });
+
+  test('interior-offset — the address lands inside the base object', () => {
+    const big: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'gTable', kind: 'data' as const, shape: 'array' as const, size: 64, elemSize: 2 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(big)).toEqual([
+      ['gTable+12', 'interior-offset'],
+      ['gTable+24', 'interior-offset'],
+    ]);
+  });
+
+  test('base-address-ambiguous — the map carries the base name at two addresses', () => {
+    const twice: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x030000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(twice)).toEqual([
+      ['REG_DMA0CNT_H+12', 'base-address-ambiguous'],
+      ['REG_DMA0CNT_H+24', 'base-address-ambiguous'],
+    ]);
+  });
+
+  test('target-is-code — a walked-to function address is a relocation this cannot reproduce', () => {
+    const code: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ name: 'DoTheThing', kind: 'code' as const }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(code)).toEqual([
+      ['REG_DMA0CNT_H+12', 'target-is-code'],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('base-is-code — an offset into a function is not an object C can name', () => {
+    const fromCode: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'DoTheThing', kind: 'code' as const, size: 4 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(fromCode)).toEqual([
+      ['DoTheThing+12', 'base-is-code'],
+      ['DoTheThing+24', 'base-is-code'],
+    ]);
+  });
+
+  test('const-target-store — a store through a const-declared name does not compile', () => {
+    const rom: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gRomWord', const: true }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(judged(rom)).toEqual([
+      ['REG_DMA0CNT_H+12', 'const-target-store'],
+      ['REG_DMA0CNT_H+24', null],
+    ]);
+  });
+
+  test('a const-declared cell the walk only READS is named — the refusal is about the store', () => {
+    const readWalk = thumb(
+      'walk',
+      `	ldr	r1, .L3
+	adds	r1, #12
+	ldrh	r0, [r1]`,
+      '.word	0x40000ba',
+    );
+    const rom: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gRomWord', const: true }]],
+    ]);
+    expect(judged(rom, readWalk)).toEqual([['REG_DMA0CNT_H+12', null]]);
+  });
+});
+
+describe('the gates are load-bearing', () => {
+  /** The pass with ONE named rule removed — the real predicate, on real input, no test-only
+   *  branch in the shipped path. */
+  const namedWithout = (id: string, symbols: SymbolMap, asm = WALK): string[] => {
+    const fn = lift('walk', asm, symbols);
+    nameOffsetAddresses(fn, symbols, without(OFFSET_NAME_GATES, id));
+    return fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'gaddr').map((op) => op.attrs.sym as string));
+  };
+
+  test('without `interior-offset` the walk names a cell inside the base object', () => {
+    const big: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'gTable', kind: 'data' as const, shape: 'array' as const, size: 64, elemSize: 2 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('interior-offset', big)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `base-unsized` an unsized base is walked off as though it ended', () => {
+    const unsized: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'gPalette', kind: 'data' as const, shape: 'array' as const, elemSize: 2 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('base-unsized', unsized)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `base-address-ambiguous` a doubly-mapped name picks one of its addresses', () => {
+    const twice: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x030000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('base-address-ambiguous', twice)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `target-is-code` the walk names a function', () => {
+    const code: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ name: 'DoTheThing', kind: 'code' as const }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('target-is-code', code)).toContain('DoTheThing');
+  });
+
+  test('without `base-is-code` an offset into a function becomes a data name', () => {
+    const fromCode: SymbolMap = new Map([
+      [0x040000ba, [{ name: 'DoTheThing', kind: 'code' as const, size: 4 }]],
+      [0x040000c6, [reg('REG_DMA1CNT_H')]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('base-is-code', fromCode)).toContain('REG_DMA1CNT_H');
+  });
+
+  test('without `const-target-store` the store walks onto a const-declared name', () => {
+    const rom: SymbolMap = new Map([
+      [0x040000ba, [reg('REG_DMA0CNT_H')]],
+      [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gRomWord', const: true }]],
+      [0x040000d2, [reg('REG_DMA2CNT_H')]],
+    ]);
+    expect(namedWithout('const-target-store', rom)).toContain('gRomWord');
+  });
+});

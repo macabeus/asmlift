@@ -25,6 +25,7 @@ test('trace: stage sequence, pattern event, and source parity with decompile()',
     // shapes reported as `assumedSymbols` — but it is a stage, and a spelling change with no line
     // in the trail is a change attributable to nothing.
     'stage:globalshape',
+    'stage:offsetnames',
     'stage:idiom',
     'stage:recover',
     'stage:structure',
