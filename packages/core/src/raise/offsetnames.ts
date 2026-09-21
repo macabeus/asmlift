@@ -79,11 +79,11 @@
 //   base-unsized       1   snowboardkids2 `func_80014440_15040`'s `gDefaultFontPalette+2`
 //   everything else    0
 //
-// Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. The six
+// Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. The
 // SOUND rules — a code address at either end, a width the map does not state, a width that
-// disagrees with the access, a store onto a `const` name, a base the map places twice — refuse
-// NOTHING here and are pinned by `offset-names.test.ts` alone. Say so rather than letting the table
-// read as though all nine were load-bearing.
+// disagrees with the access, an access this census cannot see, a store onto a `const` name, a base
+// the map places twice — refuse NOTHING here and are pinned by `offset-names.test.ts` alone. Say so
+// rather than letting the table read as though all ten were load-bearing.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -107,6 +107,11 @@ export interface OffsetAddress {
   readonly target: SymbolInfo | null;
   /** some use of this value is the base operand of a store */
   readonly written: boolean;
+  /** some use of this value is a successor's block argument, so the accesses made through it are
+   *  made through a block PARAMETER — a value with no def, which the walk below stops at. The two
+   *  access sets are therefore incomplete rather than empty, and the three rules that read them
+   *  would pass on nothing. */
+  readonly crossesMerge: boolean;
   /** the width of every OFF-0 access through this address, and the load signedness of the narrow
    *  ones — the same facts `rank-declare.ts`'s `bareGlobalAccessFacts` reads for a bare name, taken
    *  at this one address. An access at a non-zero offset is spelled through a cast that carries its
@@ -195,6 +200,19 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
     sound: true,
     guardedBy: 'offset-names.test.ts: without `target-is-code` the walk names a function',
     rejects: (c) => c.target?.kind === 'code',
+  },
+  // FIRST of the access rules, because it is the reason the other three can have nothing to
+  // judge. An address merged from two predecessors reaches its store through the successor's
+  // block parameter, and `offsetSites` counts accesses against the site's OWN value — so without
+  // this the three rules below are asked about an empty set and pass, and the merge the
+  // structurer then collapses hands the bare name straight to the access they exist to check.
+  {
+    id: 'access-behind-merge',
+    why: 'a use of this address is a block argument, so the accesses made through it are not this census to count',
+    sound: true,
+    guardedBy:
+      'offset-names.test.ts: without `access-behind-merge` a word store behind a merge names a halfword cell',
+    rejects: (c) => c.crossesMerge,
   },
   {
     id: 'target-unsized',
@@ -306,8 +324,12 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
   };
   const access = new Map<Value, { widths: Set<number>; signs: Set<boolean> }>();
   const accessOf = (v: Value) => access.get(v) ?? access.set(v, { widths: new Set(), signs: new Set() }).get(v)!;
+  const blockArgs = new Set<Value>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
+      for (const s of op.successors) {
+        s.args.forEach((a) => blockArgs.add(a));
+      }
       if (op.opcode === 'store' || op.opcode === 'astore') {
         markWritten(op.operands[0]);
       }
@@ -356,6 +378,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
           offset: base.offset,
           target: lookupSymbol(symbols, at.addr + base.offset),
           written: written.has(r),
+          crossesMerge: blockArgs.has(r),
           accessWidths: access.get(r)?.widths ?? new Set(),
           accessSigns: access.get(r)?.signs ?? new Set(),
         },

@@ -66,6 +66,23 @@ const WALK = thumb(
   '.word	0x40000ba',
 );
 
+/** The same cell reached from two arms, so the store's base operand is the block PARAMETER the
+ *  merge binds — and the `str` writes four bytes where the map declares two. */
+const MERGED = thumb(
+  'walk',
+  `	ldr	r1, .L3
+	movs	r2, #1
+	cmp	r0, #0
+	beq	.L2
+	adds	r1, #12
+	b	.L5
+.L2:
+	adds	r1, #12
+.L5:
+	str	r2, [r1]`,
+  '.word	0x40000ba',
+);
+
 const lift = (name: string, asm: string, symbols?: SymbolMap) =>
   frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, symbols);
 
@@ -215,6 +232,17 @@ describe('what refuses', () => {
       [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gSigned', signed: true }]],
     ]);
     expect(judged(signed, readWalk)).toEqual([['REG_DMA0CNT_H+12', 'access-unlike-target']]);
+  });
+
+  // Compiled, agbcc at its canonical flags: the arithmetic this refusal leaves is
+  // `ldr r2,.L3 / mov r1,#0x1 / str r1,[r2]` over `.word REG_DMA0CNT_H+0xc` — the target's own
+  // four-byte store at its own address. The name the gate refuses, `REG_DMA1CNT_H = 1;`, is
+  // `strh` over a two-byte declaration.
+  test('access-behind-merge — the access hangs off the block parameter, not off this value', () => {
+    expect(judged(DMA, MERGED)).toContainEqual(['REG_DMA0CNT_H+12', 'access-behind-merge']);
+    const out = src('walk', MERGED, DMA);
+    expect(out).not.toContain('REG_DMA1CNT_H');
+    expect(out).toContain('&REG_DMA0CNT_H');
   });
 
   test('target-unsized — the map names the neighbour but states no width for it', () => {
@@ -371,6 +399,10 @@ describe('the gates are load-bearing', () => {
       [0x040000c6, [{ name: 'gNeighbour', kind: 'data' as const }]],
     ]);
     expect(namedWithout('target-unsized', nameOnly)).toContain('gNeighbour');
+  });
+
+  test('without `access-behind-merge` a word store behind a merge names a halfword cell', () => {
+    expect(namedWithout('access-behind-merge', DMA, MERGED)).toContain('REG_DMA1CNT_H');
   });
 
   test('without `const-target-store` the store walks onto a const-declared name', () => {
