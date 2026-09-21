@@ -381,6 +381,21 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   //
   // PRIVATE TO THIS FILE, because a position the emitter derives for itself is a position no gate
   // cleared: `sinkablePreUpdateSlots` hands each admitted slot the home it was judged at.
+  //
+  // READING AN OP'S INDEX AS THE SOURCE'S STATEMENT ORDER IS A COMPILER CLAIM, and the project
+  // names the direction next door: target.ts's `readsStayWhereWritten` declares from compiled pairs
+  // that a compiler EMITS a read in the block the source spelled it in, and states outright that
+  // the converse — the asm's block is where the source read — is false and may not be defaulted.
+  // This is that inference one level down, inside a block, and it consults no target: on a
+  // scheduling compiler an op's index is the scheduler's order, not the source's.
+  //
+  // It owes no declaration because it buys a SPELLING, not an answer. `sideEffects` renders the
+  // whole block in that same index order, so a copy placed among those statements agrees with every
+  // one of them whatever the compiler did; and the motion that would change an ANSWER is the one
+  // `movesPast` measures, in the order it renders. Where the asm's order is not the source's, the
+  // failure is a candidate that does not match. Nothing off agbcc reaches it today — 0 sunk copies
+  // over the whole `--tier synthetic --toolchain ido7.1` run (163 rows), and the four non-agbcc
+  // `loop-preupdate` rows are all mwcc.
   const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
     const d = defs.get(a);
     return d !== undefined && opBlock.get(d) === latch ? d : null;
@@ -490,6 +505,20 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // A def in ANOTHER block is refused by that same `i < 0` and needs no test of its own: the
     // copy's position is in the latch, so the two are separated by whole blocks nothing here walks.
+    //
+    // THE BETWEEN-SET DOES NOT EXEMPT THE TREE BEING REBUILT, where `pattern/engine.ts`'s
+    // index-order scan does exempt its own cone — a cone member is inlined into the very expression
+    // that moves, so it is no barrier to it. Two order-sensitive ops under one arg move together
+    // and keep their internal order, so the reading here is the narrower one. Left narrow on
+    // purpose: the exemption is a claim about a tree moving as a unit and no row offers a witness,
+    // while the whole between-scan refuses exactly one corpus row as it stands.
+    //
+    // PER SLOT, and two slots sharing one order-sensitive def spell it TWICE — one `ldr` feeding
+    // two exit args becomes two reads in the emitted C. Legal by this same scan: either nothing
+    // order-sensitive lies between the two homes, or the second slot is refused and the edge stands
+    // down whole. It costs a spelling; only a `volatile` qualifier would make the extra access
+    // observable, and that qualifier is minted by a variation the differ referees (l3/volatileptr.ts),
+    // never by the default candidate.
     const movesPast = (d: Op, home: Op): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
