@@ -68,7 +68,8 @@ export function assertResolved(sfn: SFn): void {
   // Every Expr kind that CARRIES a name, not just `var` — each is read through the same
   // `map.get(d)!` / `attrs.x as string` and prints straight into the source. `carriesName` is asked
   // separately because an ABSENT name is the case being caught: keying off `nameOf` alone refuses nothing.
-  const carriesName = (e: Expr): boolean => e.k === 'var' || e.k === 'addr' || e.k === 'field' || e.k === 'call';
+  const carriesName = (e: Expr): boolean =>
+    e.k === 'var' || e.k === 'addr' || e.k === 'field' || e.k === 'call' || e.k === 'postincr';
   const nameOf = (e: Expr): string | undefined =>
     e.k === 'call' ? e.fn : e.k === 'marker' ? undefined : (e as { name?: string }).name;
   const badExpr = (e: Expr): boolean => (carriesName(e) && badName(nameOf(e))) || exprChildren(e).some(badExpr);
@@ -259,6 +260,11 @@ export function assertLocalsWritten(sfn: SFn): void {
     if ((e.k === 'var' || e.k === 'addr') && suspect.has(e.name)) {
       (e.k === 'addr' ? written : read).add(e.name);
     }
+    // `v++` is a read and a write, so it answers both sides.
+    if (e.k === 'postincr' && suspect.has(e.name)) {
+      read.add(e.name);
+      written.add(e.name);
+    }
     exprChildren(e).forEach(walkExpr);
   };
   const walkStmt = (st: Stmt): void => {
@@ -274,6 +280,46 @@ export function assertLocalsWritten(sfn: SFn): void {
     throw new ContractError(
       `structuring emitted local(s) ${orphans.map((n) => `'${n}'`).join(', ')} in '${sfn.name}' read but ` +
         `never assigned — a def whose assignment no render position emitted`,
+    );
+  }
+}
+
+/** Post structuring, and after every respell variation: a `postincr` is the ONLY mention of its
+ *  local inside the full expression holding it.
+ *
+ *  C89 leaves a program undefined when an object is modified and also read elsewhere between two
+ *  sequence points, so `v1++ <= 9 && v1 != 0` is not a spelling asmlift may emit — the compiler
+ *  picks either value, and the candidate still compiles and scores. The producer establishes the
+ *  property on the tree it builds (structure.ts's `emitDoWhile`, judged by `PREUPDATE_COND_GATES`);
+ *  what this catches is a later pass bringing a SECOND mention into that expression — `l3/coalesce.ts`
+ *  renames one local onto another over a whole body, and asks nothing about this.
+ *
+ *  PER FULL EXPRESSION, not per function: a statement boundary is a sequence point, so the loop
+ *  body reading the same name is well-defined, and a pass that duplicates a whole expression owes
+ *  the evaluation-trace argument to `exprHasEffect` rather than to this contract. */
+export function assertPostIncrUnshared(sfn: SFn): void {
+  const overUpdated = (e: Expr): string | undefined => {
+    const mentions = new Map<string, number>();
+    const updated = new Set<string>();
+    const walk = (x: Expr): void => {
+      if (x.k === 'var' || x.k === 'addr' || x.k === 'postincr') {
+        mentions.set(x.name, (mentions.get(x.name) ?? 0) + 1);
+      }
+      if (x.k === 'postincr') {
+        updated.add(x.name);
+      }
+      exprChildren(x).forEach(walk);
+    };
+    walk(e);
+    return [...updated].find((n) => mentions.get(n)! > 1);
+  };
+  const bad = (s: Stmt): string | undefined =>
+    stmtExprs(s).map(overUpdated).find(Boolean) ?? stmtChildren(s).map(bad).find(Boolean);
+  const name = sfn.body.map(bad).find(Boolean);
+  if (name !== undefined) {
+    throw new ContractError(
+      `'${name}' is updated by a post-increment and read again in the same expression in '${sfn.name}' — ` +
+        `C89 leaves which value the other read sees undefined`,
     );
   }
 }

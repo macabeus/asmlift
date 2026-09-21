@@ -24,6 +24,7 @@ import {
   assertLocalsWritten,
   assertNoOrphanedLocals,
   assertPlacementSurvives,
+  assertPostIncrUnshared,
   assertResolved,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
@@ -1008,6 +1009,7 @@ export function enumerateCandidates(
         assertResolved(alt);
         assertDerefsTyped(alt);
         assertLocalsWritten(alt);
+        assertPostIncrUnshared(alt);
         assertNoOrphanedLocals(sfn, alt);
         sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
@@ -1046,6 +1048,7 @@ export function enumerateCandidates(
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
                 assertLocalsWritten(shaped.out);
+                assertPostIncrUnshared(shaped.out);
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
@@ -2109,6 +2112,7 @@ export function enumerateCandidates(
                 assertResolved(made);
                 assertDerefsTyped(made);
                 assertLocalsWritten(made);
+                assertPostIncrUnshared(made);
                 assertNoOrphanedLocals(sfn, made);
                 // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped

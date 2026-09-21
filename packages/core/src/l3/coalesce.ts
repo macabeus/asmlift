@@ -62,7 +62,14 @@ export interface Span {
  *  arithmetic over the variable is its own history. The read must be a `var`: `mentions` counts an
  *  `addr` too, and `&a` is not a read of `a`. */
 const readsVarArithmetically = (e: Expr, n: string): boolean => {
-  if (e.k === 'index' || e.k === 'field' || e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+  if (
+    e.k === 'index' ||
+    e.k === 'field' ||
+    e.k === 'call' ||
+    e.k === 'marker' ||
+    e.k === 'postincr' ||
+    e.k === 'addr'
+  ) {
     return false;
   }
   return (e.k === 'var' && e.name === n) || exprChildren(e).some((c) => readsVarArithmetically(c, n));
@@ -155,7 +162,7 @@ function spans(body: Stmt[]): Map<string, Span> {
 }
 function rename(body: Stmt[], from: string, to: string): Stmt[] {
   const inExpr = (e: Expr): Expr =>
-    e.k === 'var' && e.name === from ? { ...e, name: to } : mapExprChildren(e, inExpr);
+    (e.k === 'var' || e.k === 'postincr') && e.name === from ? { ...e, name: to } : mapExprChildren(e, inExpr);
   const inStmt = (s: Stmt): Stmt => {
     const r = { ...s } as Record<string, unknown>;
     if (s.k === 'assign' && s.name === from) r.name = to;

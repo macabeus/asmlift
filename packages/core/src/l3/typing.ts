@@ -162,6 +162,8 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 ? t.signed : undefined;
   switch (e.k) {
     case 'var':
+    // `v++` renders the value the local held, so it promotes exactly as the bare name does.
+    case 'postincr':
     case 'cast':
     case 'index':
     case 'field':
@@ -257,6 +259,7 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
   const rec = (x: Expr): IrType | undefined => exprCType(x, varType);
   switch (e.k) {
     case 'var':
+    case 'postincr':
       return varType(e.name);
     // An integer literal spells as a plain C `int` — NEVER a pointer, whatever the value's
     // recovered type was. This is the exact gap the emission guard exists to bridge.

@@ -67,10 +67,11 @@ const stripWideIntCast = (e: Expr): Expr =>
  *  would silently discard it. */
 const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
 
-/** A guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
- *  function (a global or `&gSym` could be project-declared volatile), and every deref `varRooted`. */
+/** A guard re-spell's X: call/marker/post-increment-free, every named leaf a non-volatile param/local
+ *  of THIS function (a global or `&gSym` could be project-declared volatile), and every deref
+ *  `varRooted`. */
 const hoistableRead = (e: Expr, ownNames: ReadonlySet<string>, volatileLocals: ReadonlySet<string>): boolean => {
-  if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+  if (e.k === 'call' || e.k === 'marker' || e.k === 'postincr' || e.k === 'addr') {
     return false;
   }
   if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {

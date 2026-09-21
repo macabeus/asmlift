@@ -56,6 +56,9 @@ function renameVar(e: Expr, from: string, to: string): Expr {
   if (e.k === 'var') {
     return e.name === from ? { k: 'var', name: to } : e;
   }
+  if (e.k === 'postincr') {
+    return e.name === from ? { ...e, name: to } : e;
+  }
   return mapExprChildren(e, (c) => renameVar(c, from, to));
 }
 

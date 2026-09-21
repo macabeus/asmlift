@@ -48,7 +48,11 @@ const BODY: Stmt[] = [
         cond: { k: 'field', base: v('s'), name: 'field_4' },
         body: [
           { k: 'if', cond: v('t'), then: [{ k: 'break' }], else: [{ k: 'continue' }] },
-          { k: 'while', cond: { k: 'marker', reason: 'r', args: [v('u')] }, body: [] },
+          {
+            k: 'while',
+            cond: { k: 'marker', reason: 'r', args: [v('u'), { k: 'postincr', name: 'w', by: 1 }] },
+            body: [],
+          },
         ],
       },
     ],
@@ -109,6 +113,7 @@ test('the walk is document order, parents before children', () => {
     'var:t',
     'marker',
     'var:u',
+    'postincr',
     // switch: scrutinee, then the arms with the default spliced in at defaultAt
     'var:sw',
     'const:11',
@@ -144,7 +149,7 @@ test('the walk agrees with the recursion on 200 random bodies', () => {
   };
   const mkExpr = (depth: number): Expr => {
     if (depth <= 0 || rnd(3) === 0) {
-      return rnd(2) === 0 ? v(`v${rnd(5)}`) : c(rnd(100));
+      return rnd(3) === 0 ? { k: 'postincr', name: `v${rnd(5)}`, by: 1 } : rnd(2) === 0 ? v(`v${rnd(5)}`) : c(rnd(100));
     }
     switch (rnd(5)) {
       case 0:

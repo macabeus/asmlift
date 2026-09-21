@@ -90,7 +90,7 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
     }
     for (const e of stmtExprs(s)) {
       walkExpr(e, (x, isIndexBase) => {
-        if (x.k === 'var' || x.k === 'addr') {
+        if (x.k === 'var' || x.k === 'addr' || x.k === 'postincr') {
           const m = seen(x.name, at);
           if (m) {
             if (x.k === 'addr') {
@@ -99,6 +99,11 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
               m.baseUses++;
             } else {
               m.otherUses++;
+            }
+            // `v++` reads AND writes, so it counts on both sides. `topAssignAt`/`constValue` stay
+            // untouched: they describe a top-level `assign` STATEMENT, which this is not.
+            if (x.k === 'postincr') {
+              m.assigns++;
             }
           }
         }
@@ -126,8 +131,9 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
  *  rewriting and go stale.
  *
  *  TOTAL over the vocabulary by construction: `assign` is the only `Stmt` carrying a bare name and
- *  `var`/`addr` the only `Expr`s, and both walks are derived from `stmtChildren`/`stmtExprs` — so a
- *  `for`'s init and inc, a `switch`'s scrutinee, its cases and its default are all covered. */
+ *  `var`/`addr`/`postincr` the only `Expr`s, and both walks are derived from
+ *  `stmtChildren`/`stmtExprs` — so a `for`'s init and inc, a `switch`'s scrutinee, its cases and its
+ *  default are all covered. */
 function scanMentions(stmts: readonly Stmt[], names: ReadonlySet<string>, first: boolean): Set<string> {
   // TWO FLAT SWEEPS, not one expression walk per nesting level. `walkExprs` already descends
   // `stmtChildren` (ast.ts), so calling it per statement from inside a recursion that ALSO
@@ -149,7 +155,7 @@ function scanMentions(stmts: readonly Stmt[], names: ReadonlySet<string>, first:
     stack.push(...stmtChildren(s));
   }
   for (const e of walkExprs(body)) {
-    if ((e.k === 'var' || e.k === 'addr') && names.has(e.name)) {
+    if ((e.k === 'var' || e.k === 'addr' || e.k === 'postincr') && names.has(e.name)) {
       found.add(e.name);
       if (first) {
         return found;

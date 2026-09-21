@@ -6,6 +6,7 @@ import {
   assertDerefsTyped,
   assertEffectsPreserved,
   assertLocalsWritten,
+  assertPostIncrUnshared,
   assertResolved,
   assertTypesRecovered,
 } from './contracts';
@@ -382,11 +383,13 @@ export function structureChecked(
   assertResolved(raw);
   assertDerefsTyped(raw);
   assertLocalsWritten(raw);
+  assertPostIncrUnshared(raw);
   assertEffectsPreserved(fn, raw);
   // The hoist moves the deref cast from each `index` node onto the local's initializer, so
   // re-validate deref typing on the rewritten tree.
   const sfn = readabilityRewrites(raw);
   assertDerefsTyped(sfn);
+  assertPostIncrUnshared(sfn);
   // Re-checked after the readability rewrites for the same reason deref typing is: a pass that
   // merges arms or drops statements must not be able to lose or duplicate a call.
   assertEffectsPreserved(fn, sfn);
