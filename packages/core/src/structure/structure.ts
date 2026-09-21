@@ -5125,9 +5125,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // the body each one belongs. WHERE is not recomputed here: `sinkablePreUpdateSlots` cleared each
   // slot at one position and hands it back, so `atDef` keys the ones homed at a latch op by that op,
   // for that block's `sideEffects` walk, and `leading` opens the body with the rest. The sink's gates
-  // are stated against `exprWith(null)` — every name the walk
-  // stops at holds, anywhere in the body ahead of the update, what it held where the edge read it —
-  // so the arg is spelled with no substitution. Slot order keeps it deterministic.
+  // are stated against `exprWith(null)` — every name the walk stops at holds, anywhere in the body
+  // ahead of the update, what it held where the edge read it — so the arg is spelled with no
+  // substitution. Slot order keeps it deterministic.
   //
   // NOT `expr`: an ambient `activeSub` is an ENCLOSING loop's post-loop naming, which the sink's
   // walk does not model, so a REBUILT tree here would be spelled under names that substitution has
@@ -5138,9 +5138,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // The destination name is read as an invariant, not checked: every block param carries one.
   // `assertResolved` is what catches a widening that breaks that.
   //
-  // `home` is the loop HEADER — the block whose body these copies open, and so the block from which
-  // the write is reachable. Recorded rather than inferred because `exit` says the opposite (see
-  // `sunkCopyHomes`).
+  // `home` is the loop HEADER, which dominates every point inside the body a copy is rebuilt at, and
+  // so the block from which every one of these writes is reachable. Recorded rather than inferred
+  // because `exit` says the opposite (see `sunkCopyHomes`).
   const preUpdateCopies = (
     exit: Block,
     exitArgs: readonly Value[],

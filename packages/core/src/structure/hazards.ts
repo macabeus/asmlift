@@ -373,15 +373,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // The last is the narrow case and the one a wider sink would widen — the value has a position, it
   // is just not in the block whose `sideEffects` walk is handed the copies.
   //
-  // The two answers are not interchangeable, and `arg-safe-to-reevaluate` reads the difference. At
-  // the def's own position every op under the arg has already run wherever the copy runs, so the
-  // rebuilt tree evaluates on exactly the paths the original did and MOVES only against whatever
-  // sits between each op and that point. Opening the body it does neither: it re-evaluates the tree
-  // ahead of every statement the body makes, and on iterations an early-`return` arm left first.
-  //
-  // PRIVATE TO THIS FILE, because a position the emitter derives for itself is a position no gate
-  // cleared: `sinkablePreUpdateSlots` hands each admitted slot the home it was judged at.
-  //
   // READING AN OP'S INDEX AS THE SOURCE'S STATEMENT ORDER IS A COMPILER CLAIM, and the project
   // names the direction next door: target.ts's `readsStayWhereWritten` declares from compiled pairs
   // that a compiler EMITS a read in the block the source spelled it in, and states outright that
@@ -501,10 +492,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
     // slot its own block on the taken edge rather than a later index in the latch, and `i < 0`
-    // then refuses it as a def this block does not hold. No non-agbcc row inhabits this scan.
+    // then refuses it as a def this block does not hold.
     //
-    // A def in ANOTHER block is refused by that same `i < 0` and needs no test of its own: the
-    // copy's position is in the latch, so the two are separated by whole blocks nothing here walks.
+    // `i < 0` carries a second refusal: a def in ANOTHER block, separated from the copy's position
+    // in the latch by whole blocks nothing here walks. Its witness is hazards.test.ts's `a read from
+    // ANOTHER body block is refused even though the arg itself is a latch op`.
     //
     // THE BETWEEN-SET DOES NOT EXEMPT THE TREE BEING REBUILT, where `pattern/engine.ts`'s
     // index-order scan does exempt its own cone — a cone member is inlined into the very expression
