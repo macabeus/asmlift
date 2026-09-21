@@ -98,4 +98,13 @@ test('the rewrite refuses unless the rendered test names the variable exactly on
   expect(spellUpdateInCond(le(v('v2')), 'v1', 1)).toBe(null);
   // `&v1` is not a read of v1, so it is not the leaf the update goes to either
   expect(spellUpdateInCond(le({ k: 'addr', name: 'v1' }), 'v1', 1)).toBe(null);
+  // …and beside a readable leaf it is still a second mention: C89's rule counts `&v1`, so the `++`
+  // has nowhere to go here either
+  expect(
+    spellUpdateInCond(
+      { k: 'bin', op: '&&', l: { k: 'call', fn: 'f', args: [{ k: 'addr', name: 'v1' }] }, r: le(v('v1')) },
+      'v1',
+      1,
+    ),
+  ).toBe(null);
 });

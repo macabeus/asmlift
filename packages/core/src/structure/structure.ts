@@ -958,7 +958,10 @@ export const ARITH_TO_BIN: Record<string, BinOp> = {
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
 
 // Spell a loop update at the place the bottom test reads the variable: the one `name` leaf becomes
-// `name++`. Returns null unless the rendered test holds EXACTLY one such leaf.
+// `name++`. Returns null unless the rendered test MENTIONS `name` exactly once, and that mention is
+// a readable leaf. `&v1` is a mention the `++` cannot be placed on and cannot be counted out of —
+// a callee reads the object through it — so a test holding one alongside a bare `v1` is refused
+// here rather than left to `assertPostIncrUnshared`, which would abort the lift instead.
 //
 // `preUpdateCondFold` decided that on the DEF TREE, and this asks the same question of what the
 // lowering actually produced. The two can disagree — an idiom fold spells a value its operands do
@@ -971,7 +974,11 @@ const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
 // (test/loop-preupdate-cond.test.ts) — the discipline `sunkCopyOverDroppedUndef` is held to.
 export function spellUpdateInCond(cond: Expr, name: string, by: 1 | -1): Expr | null {
   let found = 0;
+  let mentions = 0;
   const rec = (e: Expr): Expr => {
+    if (mentionedName(e) === name) {
+      mentions++;
+    }
     if (e.k === 'var' && e.name === name) {
       found++;
       return { k: 'postincr', name, by };
@@ -979,7 +986,7 @@ export function spellUpdateInCond(cond: Expr, name: string, by: 1 | -1): Expr | 
     return mapExprChildren(e, rec);
   };
   const out = rec(cond);
-  return found === 1 ? out : null;
+  return found === 1 && mentions === 1 ? out : null;
 }
 
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
