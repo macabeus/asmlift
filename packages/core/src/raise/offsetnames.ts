@@ -482,7 +482,12 @@ export function offsetNameRefusals(
  *  whose only reachable name is its import is not censusable at all
  *  (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). It is not a pass
  *  LIST because the ordering question a list answers is already answered here: this pass has one
- *  seat, stated above. */
+ *  seat, stated above.
+ *
+ *  What a LIST would also buy is the invariant `PRE_RECOVERY_PASSES` states in its own header —
+ *  add a pass there and every driver picks it up. Three hand-written calls have no such
+ *  invariant, so `offset-names.test.ts` supplies it: it wraps this record and asserts all three
+ *  drivers reach it. Delete any one call and that test is the only thing that fails. */
 export const OFFSET_NAME_PASS: { run: (fn: Fn, symbols: SymbolMap) => string[] } = {
   run: (fn, symbols) => nameOffsetAddresses(fn, symbols),
 };

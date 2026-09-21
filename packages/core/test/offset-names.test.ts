@@ -14,9 +14,11 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
-import { OFFSET_NAME_GATES, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
+import { OFFSET_NAME_GATES, OFFSET_NAME_PASS, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
+import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { decompileTraced } from '../src/trace';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
 const thumb = (name: string, body: string, pool: string): string =>
@@ -119,6 +121,32 @@ describe('a walked-to address the map names', () => {
     expect(src('back', back, DMA)).toContain('REG_DMA0CNT_H = 1;');
     expect(refusals('back', back, DMA)).toEqual([['REG_DMA1CNT_H-12', null]]);
   });
+});
+
+// THE SEAT IS HAND-WIRED, so this is what keeps the three copies in step. `OFFSET_NAME_PASS` is a
+// record and not an entry in `PRE_RECOVERY_PASSES`, so nothing adds the pass to a driver that
+// forgets it: delete the call in any one of the three and every other suite here stays green while
+// that driver silently spells the walk as arithmetic.
+test('every driver reaches the pass through its record', () => {
+  const restore = OFFSET_NAME_PASS.run;
+  const seen: string[] = [];
+  const run = (label: string, f: () => unknown): void => {
+    OFFSET_NAME_PASS.run = (fn, symbols) => {
+      seen.push(label);
+      return restore(fn, symbols);
+    };
+    try {
+      f();
+    } finally {
+      OFFSET_NAME_PASS.run = restore;
+    }
+  };
+  run('pipeline', () => decompile('walk', WALK, ARMV4T_AGBCC, { symbols: DMA }));
+  run('trace', () =>
+    decompileTraced('walk', WALK, targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags), { symbols: DMA }),
+  );
+  run('rank', () => enumerateCandidates('walk', WALK, ARMV4T_AGBCC, { symbols: DMA }));
+  expect(new Set(seen)).toEqual(new Set(['pipeline', 'trace', 'rank']));
 });
 
 describe('what the result says about it', () => {
