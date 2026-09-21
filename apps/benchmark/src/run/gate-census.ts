@@ -20,10 +20,11 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHAT PUTS A PASS IN THE REGISTRY BELOW. Seventeen passes in `packages/core/src` take their gate
-// table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
-// CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Six have
-// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, four passes in
+// WHAT PUTS A PASS IN THE REGISTRY BELOW. Taking the gate table as a parameter is necessary and
+// NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
+// that do, and carrying the count here instead would be the smallest possible copy of that list.
+// The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
+// holding the call. Six passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, four passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
 // core swaps and the driver then calls, and `nameOffsetAddresses`, whose record stands alone

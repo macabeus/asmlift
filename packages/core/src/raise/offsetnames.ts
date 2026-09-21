@@ -27,7 +27,10 @@
 // `raise/struct-arrays.ts` and `raise/memberarrays.ts` match the same `add(gaddr, K)` shape this
 // pass consumes, and `interior-offset` below cedes the in-object case back to them — so the
 // question "is this address an object of its own?" is answered first and what it refuses is handed
-// on untouched. THE CORPUS DOES NOT REFEREE THE SEAT: run instead from `raiseRecovered`'s
+// on untouched. The passes on the OTHER side of the question are `l3/nearbase.ts` and
+// `l3/basecse.ts`: they BUILD the one-base-many-cells form this one un-spells — `nearbase`'s own
+// example is `add #72` / `add #74` off one pool word — which is why the walk stays reachable from
+// `/raw-globals`, where no map name exists to replace it. THE CORPUS DOES NOT REFEREE THE SEAT: run instead from `raiseRecovered`'s
 // `beforeRecover` hook, after every recognizer, and `pnpm bench gates --pass offsetnames` reports
 // the identical counts on all six rows that refuse or name anything, with
 // `kleod:DeleteAllSaveData:agbcc` the same winner at the same 0/81. The argument is about which
@@ -69,7 +72,13 @@
 // best `/raw-globals` candidate is 72/97. The unit tests below carry the rest.
 //
 // WHAT REFUSES is `OFFSET_NAME_GATES` below, and every rejection leaves the arithmetic exactly as
-// the frontend emitted it — the spelling that is valid under any declaration.
+// the frontend emitted it. That is a spelling whose BYTES are right under any declaration, and it
+// is not a neutral one: the `add` it leaves behind is what makes `structure.ts` classify the base
+// AGGREGATE, so a refusal here still de-names the symbol at its off-0 sites and drops the
+// `volatile` (`gVolA = 0;` becomes `*(u16 *)&gVolA = 0;` the moment one refused walk stands beside
+// it). The per-SITE classification that would answer it lives at `scalarGlobals`, three levels
+// away and booked in `docs/level-tower.md`; a refusal here is the safe answer to the question this
+// pass asks and not a cost-free one.
 //
 // WHICH GATE BOUNDS THE CORPUS PATH — `pnpm bench gates --pass offsetnames`, plus one run per real
 // project (`--only <project>:`), counting a refusal per EVALUATION rather than per site (a row

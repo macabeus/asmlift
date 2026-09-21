@@ -265,7 +265,7 @@ describe('what refuses', () => {
     ]);
   });
 
-  test('const-target-store — a store through a const-declared name does not compile', () => {
+  test('const-target-store — a store through a const-declared name violates the constraint', () => {
     const rom: SymbolMap = new Map([
       [0x040000ba, [reg('REG_DMA0CNT_H')]],
       [0x040000c6, [{ ...reg('REG_DMA1CNT_H'), name: 'gRomWord', const: true }]],
