@@ -111,6 +111,14 @@ export interface DecompileResult {
    *  bare, and every name the caller's own map described (raise/globalshape.ts `assumedShapes`
    *  computes that narrowing and names the corpus row behind each half). */
   assumedSymbols: SymbolInfo[];
+  /** THE NAMES THIS SOURCE REACHED BY ARITHMETIC, not by the map alone (raise/offsetnames.ts).
+   *  A pool-loaded `gaddr` is the map answering about an address the machine code carries; a
+   *  walked one is asmlift computing `addr(base) + K` and asking about THAT — so the base's own
+   *  address in the map is load-bearing for a name the reader sees spelled bare. Sibling of
+   *  `assumedSymbols` and reported beside it (`main.ts`'s `[walked]` block, the trace's
+   *  `stage:offsetnames`), and it is also the only thing in a result that says a walk spelling
+   *  stopped being enumerable here. Empty on every run with no symbol map. */
+  walkedNames: string[];
 }
 
 export function decompile(
@@ -170,9 +178,7 @@ function runTower(
   // `inferredSymbols`, and the ORDER licence only enables a cast spelling that is byte-correct
   // under any declaration. Measured: with this call moved ABOVE both readings, the three corpus
   // rows the pass fires on keep their fan size, their winner and their score exactly.
-  if (opts.symbols) {
-    OFFSET_NAME_PASS.run(fn, opts.symbols);
-  }
+  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -212,6 +218,7 @@ function runTower(
     // spell bare, and a name the caller's own map described, are both obligations this reader
     // does not have (raise/globalshape.ts `assumedShapes`).
     assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
+    walkedNames,
   };
 }
 
@@ -463,8 +470,9 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     ir: { raw: '', folded: '', recovered: '' },
     patternHits: 0,
     diagnostics: [{ stage, reason: msg }],
-    // A stub spells no global, so it assumes nothing about one.
+    // A stub spells no global, so it assumes nothing about one and walked to none.
     assumedSymbols: [],
+    walkedNames: [],
   };
 }
 

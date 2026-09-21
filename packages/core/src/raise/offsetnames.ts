@@ -243,8 +243,7 @@ export const OFFSET_NAME_GATES: readonly Gate<OffsetAddress>[] = [
     id: 'access-behind-merge',
     why: 'a use of this address is a block argument, so the accesses made through it are not this census to count',
     sound: true,
-    guardedBy:
-      'offset-names.test.ts: without `access-behind-merge` a word store behind a merge names a halfword cell',
+    guardedBy: 'offset-names.test.ts: without `access-behind-merge` a word store behind a merge names a halfword cell',
     rejects: (c) => c.crossesMerge,
   },
   {
@@ -432,12 +431,16 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
   return out;
 }
 
-/** Rewrite every admitted site into the `gaddr` the map names, in place. Returns how many. */
+/** Rewrite every admitted site into the `gaddr` the map names, in place. Returns THE NAMES it
+ *  spelled, in block order — what a caller has to be told, because a name this pass produced does
+ *  not rest on the map alone the way a pool-loaded one does: it rests on `addr(base) + K` landing
+ *  on the map entry it names. `DecompileResult.walkedNames` and the trace's `stage:offsetnames`
+ *  carry it out; nothing else can tell from a result that a walk was named. */
 export function nameOffsetAddresses(
   fn: Fn,
   symbols: SymbolMap,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
-): number {
+): string[] {
   // Every site is judged against the PRE-REWRITE defs, so a chain's later links resolve through
   // the base they were lifted from and the answer does not depend on the order links are visited.
   const admitted = offsetSites(fn, symbols).filter((s) => firstRejection(gates, s.addr) === null);
@@ -450,7 +453,7 @@ export function nameOffsetAddresses(
     dce(fn); // the constants and the walked-off base the rewrite just orphaned
     verify(fn);
   }
-  return admitted.length;
+  return admitted.map((s) => s.addr.target!.name);
 }
 
 /** Which rule refused each offset site this function builds — one entry per SITE, in block order,
@@ -480,6 +483,6 @@ export function offsetNameRefusals(
  *  (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). It is not a pass
  *  LIST because the ordering question a list answers is already answered here: this pass has one
  *  seat, stated above. */
-export const OFFSET_NAME_PASS: { run: (fn: Fn, symbols: SymbolMap) => number } = {
+export const OFFSET_NAME_PASS: { run: (fn: Fn, symbols: SymbolMap) => string[] } = {
   run: (fn, symbols) => nameOffsetAddresses(fn, symbols),
 };

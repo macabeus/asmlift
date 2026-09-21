@@ -863,11 +863,22 @@ export async function runCli(
         : `asmlift: [assumed] ${result.assumedSymbols.length} array shape(s) derived from this assembly — the ` +
           `source spells them BARE, so it is about these declarations; check them against your headers:\n` +
           indentedDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })));
+    // …and THE NAMES REACHED BY ARITHMETIC, beside them. A pool-loaded name is the map answering
+    // about an address this machine code carries; a walked one is asmlift adding a displacement to
+    // a base address and asking about the result, so the base's ADDRESS in the map decides which
+    // cell the bare name touches. Same obligation, different fact to check.
+    const walkedNote =
+      result.walkedNames.length === 0
+        ? ''
+        : `asmlift: [walked] ${result.walkedNames.length} name(s) reached by arithmetic off a named address, not ` +
+          `read from a pool word — check the base addresses your map gives them:\n` +
+          [...new Set(result.walkedNames)].map((n) => `  ${n}\n`).join('');
     const stderr =
       runTrace +
       warn +
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
+      walkedNote +
       protoNote;
     return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {

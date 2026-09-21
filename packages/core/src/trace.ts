@@ -216,16 +216,16 @@ function traceTower(
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
   // runTower.
-  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : 0;
+  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
   trace.push({
     id: 'stage:offsetnames',
     title: 'Name a walked-to address the symbol map knows',
     irDump: irDump(fn),
     verified: true,
     note:
-      named === 0
+      named.length === 0
         ? 'no address built off a named one lands on a symbol the map names'
-        : `${named} address${named === 1 ? '' : 'es'} named`,
+        : `${named.length} address${named.length === 1 ? '' : 'es'} named: ${named.join(', ')}`,
   });
 
   // (2) idiom fold (capability-gated), with an optional probed score per pattern boundary —

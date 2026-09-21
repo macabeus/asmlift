@@ -121,6 +121,24 @@ describe('a walked-to address the map names', () => {
   });
 });
 
+describe('what the result says about it', () => {
+  test('the walked-to names travel with the source', () => {
+    expect(decompile('walk', WALK, ARMV4T_AGBCC, { symbols: DMA }).walkedNames).toEqual([
+      'REG_DMA1CNT_H',
+      'REG_DMA2CNT_H',
+    ]);
+  });
+
+  test('a run with no symbol map walked to nothing', () => {
+    expect(decompile('walk', WALK, ARMV4T_AGBCC, {}).walkedNames).toEqual([]);
+  });
+
+  test('a refused site is not reported as walked to', () => {
+    const lone: SymbolMap = new Map([[0x040000ba, [reg('REG_DMA0CNT_H')]]]);
+    expect(decompile('walk', WALK, ARMV4T_AGBCC, { symbols: lone }).walkedNames).toEqual([]);
+  });
+});
+
 describe('what refuses', () => {
   /** The same walk, judged against a map that differs in one fact. */
   const judged = (symbols: SymbolMap, asm = WALK) => refusals('walk', asm, symbols);
