@@ -89,7 +89,7 @@ import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
-import { type SymbolInfo, type SymbolMap, lookupSymbol } from '../symbols';
+import { type SymbolInfo, type SymbolMap, accessSignedness, lookupSymbol } from '../symbols';
 
 /** One `add`/`sub` whose address the gates judge. Built only for an op that already resolves to a
  *  named base plus a NON-ZERO constant — a zero offset names the base itself, which the pool path
@@ -138,7 +138,7 @@ function accessUnit(info: SymbolInfo): { width: number; signed: boolean } | null
         : info.shape === 'pointer'
           ? [4, false]
           : [undefined, false];
-  return width === undefined ? null : { width, signed: signed && width < 4 };
+  return width === undefined ? null : { width, signed: accessSignedness(width, signed) };
 }
 
 /** Everything the gates below read off a `SymbolInfo` beyond its identity: the name they spell,
@@ -379,14 +379,14 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
         const w = op.attrs.width as number;
         a.widths.add(w);
         if (op.opcode === 'load') {
-          a.signs.add((op.attrs.signed as boolean) === true && w < 4);
+          a.signs.add(accessSignedness(w, op.attrs.signed as boolean | undefined));
         }
       } else if (op.opcode === 'aload' || op.opcode === 'astore') {
         const a = accessOf(op.operands[0]);
         const w = op.attrs.elemSize as number;
         a.widths.add(w);
         if (op.opcode === 'aload') {
-          a.signs.add((op.attrs.signed as boolean) === true && w < 4);
+          a.signs.add(accessSignedness(w, op.attrs.signed as boolean | undefined));
         }
       }
     }

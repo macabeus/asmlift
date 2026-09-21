@@ -11,7 +11,7 @@
 import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import type { SymbolInfo } from './symbols';
+import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS } from './target';
 
 /** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
@@ -42,7 +42,7 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
           } else {
             a.widths.add(op.attrs.width as number);
             if (op.opcode === 'load') {
-              a.signs.add(((op.attrs.signed as boolean) ?? false) && (op.attrs.width as number) < 4);
+              a.signs.add(accessSignedness(op.attrs.width as number, op.attrs.signed as boolean | undefined));
             }
           }
         }
