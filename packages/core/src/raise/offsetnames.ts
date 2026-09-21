@@ -55,9 +55,9 @@
 // The named one is address-identical by construction and restores the `volatile` the cast form
 // erases (see the AGGREGATE note above); the walk is reachable from `/raw-globals`, which is the
 // arm that drops every map name at once. The price is measured and real — a default rewrite
-// removes the walk spelling from the fan at every admitted site, shrinking
-// `ButtonConfigurationScreenInit`'s to 0.95x and `sub_0804E708`'s to 0.88x — and it buys 0 lost
-// rows. A per-site variation would be the third answer, and nothing in the corpus asks for it yet.
+// removes the walk spelling from the fan at every admitted site, and `sub_0804E708`'s falls 8 -> 7
+// against `origin/main` — and it buys 0 lost rows. A per-site variation would be the third answer,
+// and nothing in the corpus asks for it yet.
 //
 // WHY THERE IS NO SYNTHETIC ROW, measured rather than conceded. A walk only happens where the
 // compiler saw LITERAL addresses — spelled as `extern`s the pool words are relocations, agbcc
@@ -84,14 +84,19 @@
 // project (`--only <project>:`), counting a refusal per EVALUATION rather than per site (a row
 // lifts more than once, which that command's own footer states):
 //
-//   interior-offset   25   pokeemerald 13, synthetic `sbscope` 6, marioparty3 4, kleod 2
-//   base-unsized       1   snowboardkids2 `func_80014440_15040`'s `gDefaultFontPalette+2`
-//   everything else    0
+//   interior-offset     25   pokeemerald 13, synthetic `sbscope` 6, marioparty3 4, kleod 2
+//   access-behind-merge   1   kleod `ButtonConfigurationScreenInit`
+//   base-unsized          1   snowboardkids2 `func_80014440_15040`'s `gDefaultFontPalette+2`
+//   everything else       0
 //
-// Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. The
-// SOUND rules — a code address at either end, a width the map does not state, a width that
-// disagrees with the access, an access this census cannot see, a store onto a `const` name, an
-// address the map spells two ways at either end — refuse NOTHING here and are pinned by
+// Two of the three heuristics decide the whole path — `no-symbol-at-offset` fires nowhere. Of the
+// seven SOUND rules exactly one refuses anything here, once: `access-behind-merge`, on the single
+// site in `ButtonConfigurationScreenInit` whose address is merged from two arms. That row scores
+// 107/212 whether the site is named or refused, and its fan moves 440 -> 446 against `origin/main`
+// rather than the other way, because what a refusal leaves is arithmetic and the respell
+// variations have something to apply to again. The other six — a code address at either end, a
+// width the map does not state, a width that disagrees with the access, a store onto a `const`
+// name, an address the map spells two ways — refuse NOTHING here and are pinned by
 // `offset-names.test.ts` alone. Say so rather than letting the table read as though all eleven were
 // load-bearing.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
