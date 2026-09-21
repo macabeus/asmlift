@@ -1993,27 +1993,47 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
-    fn,
-    returnsVoid,
-    {
-      defs,
-      dom,
-      rereadGlobals,
-      materializeJoinFeeds,
-      homeSharedAddresses,
-      homeLoopExprs,
-      homeDerivedReads,
-      homeMergeFeeds,
-      homeEscapingExtensions,
-      readsStayWhereWritten,
-      // the map's own declaration truth: a volatile object's read may not be duplicated or moved
-      volatileGlobal: (n) => {
-        const si = symbols?.get(n);
-        return si?.volatile === true || (si?.layout ?? []).some((f) => f.volatile === true);
-      },
+  const {
+    useSitesOf,
+    opIndex,
+    opBlock,
+    liveIn,
+    materialize,
+    reachFrom,
+    emitPos,
+    memWriteBetween,
+    volatileGuardedRead,
+  } = analyze(fn, returnsVoid, {
+    defs,
+    dom,
+    rereadGlobals,
+    materializeJoinFeeds,
+    homeSharedAddresses,
+    homeLoopExprs,
+    homeDerivedReads,
+    homeMergeFeeds,
+    homeEscapingExtensions,
+    readsStayWhereWritten,
+    // the map's own declaration truth: a volatile object's read may not be duplicated or moved
+    volatileGlobal: (n) => {
+      const si = symbols?.get(n);
+      return si?.volatile === true || (si?.layout ?? []).some((f) => f.volatile === true);
     },
-  );
+  });
+
+  // A VOLATILE READ THE RENDERED `&&`/`||` DECIDES THE EXISTENCE OF. The connective evaluates its
+  // guarded operand conditionally and the machine's branch did not, for anything the fold brought
+  // into it; a read is exempt from that hazard because C's own short circuit re-guards it at the new
+  // point — but only where re-guarding it is a spelling choice. For a cell the map declares volatile
+  // the two placements are a missing hardware access and a duplicated one, and which one the asm had
+  // is what the fold erased (see `volatileGuardedRead`). Nothing here can re-place it, so decline
+  // LOUD — the answer `testSkipsAnEffect` gives for an effect in the same position.
+  if (volatileGuardedRead !== null) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
+        `'${volatileGuardedRead}', and which side of the branch the asm read it on is not recoverable`,
+    );
+  }
 
   // THE FOLLOW OF A DIVERGENT `if`, over the paths that do not return early. Post-dominance gives
   // such an `if` no join — its arms reach two different `ret`s, and EXIT is the only block on every

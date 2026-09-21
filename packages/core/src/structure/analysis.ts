@@ -49,7 +49,8 @@ function rendersAsAddress(op: Op): boolean {
  *  emits it above the guard the source wrote (`p != 0 && *p != 0` becoming `v0 = *p;` above its own
  *  null check). Asked by the def-block placement rule and by the merge-feed-home scope; the
  *  guarded-call rule asks the same set for the opposite answer, since `call` is hoist-unsafe and so
- *  was never folded into the cone in the first place. */
+ *  was never folded into the cone in the first place, and `volatileGuardedRead` asks it for the read
+ *  whose two placements are not a spelling choice. */
 function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
   const guarded = new Set<Value>();
   const work: Value[] = [];
@@ -733,6 +734,9 @@ export interface StructureAnalysis {
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
    *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
+  /** the name of a VOLATILE object read inside a `&&`/`||`'s guarded operand cone, if any — the one
+   *  value in that cone no placement here can answer for, reported for the caller to decline on */
+  volatileGuardedRead: string | null;
 }
 
 export interface AnalyzeOptions {
@@ -1516,7 +1520,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
    *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
    *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
-   *  emit `v0 = *p;` above its own null check.
+   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches, and
+   *  `volatileGuardedRead` below is the read it does not cover.
    *
    *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
@@ -1525,6 +1530,36 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  An operand[0] cone is unconditional and neither rule touches it; only the guarded side is
    *  collected. */
   const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
+  /** A read of an object the map declares VOLATILE, inside that guarded cone. Both placements the
+   *  rules above can reach are observable there, and the fold erased which one the asm had: a read
+   *  it LIFTED out of the arm belongs under the `&&`, where C's short circuit re-guards it, while a
+   *  read that was already above the branch ran unconditionally and belongs ahead of the test.
+   *  agbcc emits the two spellings as two objects (`int t = gVolReg; if (a > 0 && t != 0)` puts the
+   *  `ldr` above the `cmp`; `if (a > 0 && gVolReg != 0)` puts it below the `ble`), so for an
+   *  ordinary cell the choice is a matching question and for this one it is a missing access
+   *  against a duplicated one. Reading the fold's own motion back is the fold's to record, a
+   *  capability this rule does not have, so the caller declines instead.
+   *
+   *  A constant-offset `load` only, the scope the re-read rule takes below: an `aload`'s runtime
+   *  index names no single cell. */
+  const volatileGuardedRead = ((): string | null => {
+    if (!defs || !volatileGlobal) {
+      return null;
+    }
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        const v = op.results[0];
+        if (op.opcode !== 'load' || v === undefined || !shortCircuitGuarded.has(v)) {
+          continue;
+        }
+        const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
+        if (cell && volatileGlobal(cell.name)) {
+          return cell.name;
+        }
+      }
+    }
+    return null;
+  })();
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -1855,5 +1890,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
   }
-  return { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween };
+  return {
+    useSitesOf,
+    opIndex,
+    opBlock,
+    liveIn,
+    materialize,
+    reachFrom,
+    emitPos,
+    memWriteBetween,
+    volatileGuardedRead,
+  };
 }
