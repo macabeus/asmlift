@@ -7,10 +7,13 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
+import type { Stmt } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
 import {
+  PREUPDATE_COND_GATES,
   PREUPDATE_SINK_GATES,
+  type PreUpdateCondCandidate,
   type SinkCandidate,
   makeLoopHazards,
   sunkCopyOverDroppedUndef,
@@ -643,6 +646,181 @@ describe('sinkablePreUpdateSlots', () => {
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, latch, empty, new Set(['v0']))).toEqual(new Map());
+  });
+});
+
+describe('preUpdateCondFold', () => {
+  // The agbcc shape the fold exists for: a self-loop carrying `v1`, whose bottom test is
+  // `v0 != 0 && v1 <= 9` — the second arm reading `v1` one update AHEAD of the copy at the foot of
+  // the body. Everything the predicate weighs is a knob on it: which connective joins the arms,
+  // which arm the variable is in, what the update spells, and who reads its result after the loop.
+  //
+  // `test-is-readable` is the one refusal that needs two of those turned at once — its opaque op
+  // has to sit where the walk meets it AFTER the variable, or an earlier gate answers first and
+  // the ablation measures nothing.
+  const nine = (): Value => v();
+  const scaffold = (opts: { leftArm?: boolean; connective?: 'logic_and' | 'logic_or' } = {}) => {
+    const p = v(); // the loop variable, named v1
+    const u = v(); // its back-edge arg — post-update, so `sub` maps it to the same name
+    const other = v(); // the other arm's value, named v0
+    const k = nine();
+    const cmp = v();
+    const zero = v();
+    const ne = v();
+    const cond = v();
+    const cmpOp = mkOp('icmp_ule', { operands: [p, k], results: [cmp] });
+    const neOp = mkOp('icmp_ne', { operands: [other, zero], results: [ne] });
+    const arms = opts.leftArm === true ? [cmp, ne] : [ne, cmp];
+    const condOp = mkOp(opts.connective ?? 'logic_and', { operands: arms, results: [cond] });
+    const header: Block = { params: [p], ops: [] };
+    return {
+      p,
+      u,
+      cond,
+      header,
+      body: new Set([header]),
+      defs: new Map<Value, Op>([
+        [cond, condOp],
+        [cmp, cmpOp],
+        [ne, neOp],
+      ]),
+      varName: new Map([
+        [p, 'v1'],
+        [other, 'v0'],
+      ]),
+      cmpOp,
+    };
+  };
+  const step = (value: number): Stmt[] => [
+    { k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: { k: 'var', name: 'v1' }, r: { k: 'const', value } } },
+  ];
+  const writes = new Set(['v1']);
+  const ask = (
+    f: ReturnType<typeof scaffold>,
+    over: {
+      updates?: Stmt[];
+      useSitesOf?: Map<Value, UseSite[]>;
+      respelledDefs?: Map<Op, unknown>;
+      exitArgs?: Value[];
+      gates?: readonly Gate<PreUpdateCondCandidate>[];
+    } = {},
+  ) =>
+    make({
+      defs: f.defs,
+      varName: f.varName,
+      useSitesOf: over.useSitesOf ?? new Map(),
+      respelledDefs: over.respelledDefs ?? new Map(),
+    }).preUpdateCondFold(
+      f.cond,
+      false,
+      f.header,
+      [f.u],
+      over.exitArgs ?? [],
+      f.body,
+      new Map([[f.u, 'v1']]),
+      over.updates ?? step(1),
+      writes,
+      over.gates,
+    );
+
+  test('the pre-update read in the second arm of an && folds into it', () => {
+    expect(ask(scaffold())).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('a decrement folds as `--`', () => {
+    const f = scaffold();
+    expect(
+      ask(f, {
+        updates: [
+          {
+            k: 'assign',
+            name: 'v1',
+            value: { k: 'bin', op: '-', l: { k: 'var', name: 'v1' }, r: { k: 'const', value: 1 } },
+          },
+        ],
+      }),
+    ).toEqual({
+      name: 'v1',
+      by: -1,
+    });
+  });
+
+  test('an update that is not a unit step has no operator to fold into', () => {
+    expect(ask(scaffold(), { updates: step(2) })).toBe(null);
+  });
+
+  test('a test with no pre-update read at all is not this predicate’s business', () => {
+    const f = scaffold();
+    // every leaf post-update: the condition reads the back-edge arg, which `sub` maps
+    const post = make({ defs: f.defs, varName: f.varName }).preUpdateCondFold(
+      f.u,
+      false,
+      f.header,
+      [f.u],
+      [],
+      f.body,
+      new Map([[f.u, 'v1']]),
+      step(1),
+      writes,
+    );
+    expect(post).toBe(null);
+  });
+
+  test('ablating test-is-readable folds through a respelled def', () => {
+    // The `v1 <= 9` arm moves FIRST, so the variable is noted before the walk meets the opaque op —
+    // and the opaque op is the other arm, whose rendering this walk never sees. It may name `v1`
+    // again, which would make the emitted expression C89-undefined.
+    const f = scaffold({ leftArm: true });
+    const opaque = f.defs.get(f.cond)!.operands[1];
+    const respelled = new Map<Op, unknown>([[[...f.defs].find(([val]) => val === opaque)![1], 'a global member read']]);
+    expect(ask(f, { respelledDefs: respelled })).toBe(null);
+    expect(ask(f, { respelledDefs: respelled, gates: without(PREUPDATE_COND_GATES, 'test-is-readable') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('ablating variable-named-once folds a test that reads the variable twice', () => {
+    // `v1 != 0 && v1 <= 9`: both arms read the loop variable, and only one of them can carry the
+    // `++`. The other read would then see whichever value the compiler chose — C89 leaves it open.
+    const f = scaffold();
+    const ne = f.defs.get(f.cond)!.operands[0];
+    f.defs.set(ne, mkOp('icmp_ne', { operands: [f.p, v()], results: [ne] }));
+    expect(ask(f)).toBe(null);
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'variable-named-once') })).toEqual({ name: 'v1', by: 1 });
+  });
+
+  test('ablating folded-on-every-continue folds a leaf under the right operand of an ||', () => {
+    // `v0 != 0 || v1 <= 9` continues whenever the FIRST arm is true, on an iteration that never
+    // evaluated the `++` — while the back edge still carries `v1 + 1`.
+    const f = scaffold({ connective: 'logic_or' });
+    expect(ask(f)).toBe(null);
+    expect(ask(f, { gates: without(PREUPDATE_COND_GATES, 'folded-on-every-continue') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('ablating folded-on-the-exit-too folds a leaf an exiting iteration skips', () => {
+    // The same `&&` as the accepted case, with the updated value now READ after the loop. The
+    // iteration that leaves on a false first arm never evaluates the `++`, so the name it leaves
+    // behind is one short of what the back edge would have computed.
+    const f = scaffold();
+    const outside: Block = { params: [], ops: [] };
+    const seen = new Map<Value, UseSite[]>([[f.u, [use(outside)]]]);
+    expect(ask(f, { useSitesOf: seen })).toBe(null);
+    expect(ask(f, { useSitesOf: seen, gates: without(PREUPDATE_COND_GATES, 'folded-on-the-exit-too') })).toEqual({
+      name: 'v1',
+      by: 1,
+    });
+  });
+
+  test('the same post-loop read is fine when the leaf sits where every iteration evaluates it', () => {
+    // The one-fact control for the gate above: move the arm to the LEFT of the `&&`, which every
+    // iteration evaluates whichever way the test answers.
+    const f = scaffold({ leftArm: true });
+    const outside: Block = { params: [], ops: [] };
+    expect(ask(f, { useSitesOf: new Map([[f.u, [use(outside)]]]) })).toEqual({ name: 'v1', by: 1 });
   });
 });
 

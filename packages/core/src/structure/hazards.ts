@@ -48,7 +48,7 @@
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value } from '../ir/core';
 import { NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
-import { Stmt } from '../l3/ast';
+import { Expr, Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
 
@@ -88,7 +88,20 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region: Set<Block> | null,
+    condRepaired?: boolean,
   ): boolean;
+  preUpdateCondFold(
+    condV: Value,
+    negated: boolean,
+    header: Block,
+    backArgs: readonly Value[],
+    exitArgs: readonly Value[],
+    body: Set<Block>,
+    sub: Map<Value, string>,
+    updates: Stmt[],
+    updateWrites: Set<string>,
+    gates?: readonly Gate<PreUpdateCondCandidate>[],
+  ): { name: string; by: 1 | -1 } | null;
   sinkablePreUpdateSlots(
     header: Block,
     exit: Block,
@@ -170,6 +183,130 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     rejects: (c) => c.destBusyInLoop,
   },
 ];
+
+/** Why a bottom test's pre-update read of a loop variable cannot be spelled `n++` — see the note
+ *  above `PREUPDATE_COND_GATES`. */
+export interface PreUpdateCondCandidate {
+  /** the step the update spells: `n = n + 1` is 1, `n = n - 1` is -1, anything else null */
+  step: 1 | -1 | null;
+  /** loop variables the test reads at their pre-update value */
+  preUpdateNames: number;
+  /** how often the rendered test names THIS variable, its own `++` included */
+  mentions: number;
+  /** an op in the test renders something its operand tree does not show (a respelled def) */
+  unreadable: boolean;
+  /** the folded leaf is evaluated on every iteration that takes the back edge */
+  onContinue: boolean;
+  /** …and on the iteration that leaves the loop */
+  onExit: boolean;
+  /** the value the update computes is read somewhere other than the back edge */
+  updateObserved: boolean;
+}
+
+/** When a loop update may be folded into the bottom test that reads the variable BEFORE it —
+ *  `do { … } while (v0 != 0 && v1++ <= 9)` in place of an update copy at the foot of the body and a
+ *  test one iteration off.
+ *
+ *  THE FOLD IS ABOUT WHEN THE UPDATE RUNS, and C answers that with the short-circuit operators on
+ *  the path from the test's root down to the leaf. Two obligations come out of that, and they are
+ *  the two gates a reader should look for first. The back edge carries `n + 1`, so every iteration
+ *  that re-enters the loop must have evaluated the `++`: that is `folded-on-every-continue`, and it
+ *  is what turns away a leaf under the RIGHT operand of an `||`, where a true left operand
+ *  re-enters the loop having skipped it. And after the loop the variable's name is read as the
+ *  value the back edge computed (`latchSub`), which the exiting iteration only leaves there if it
+ *  evaluated the `++` too — `folded-on-the-exit-too`, asked only where something reads it.
+ *
+ *  Neither obligation is a claim about where the machine put its own update. Where the two disagree
+ *  the emitted C is still correct and the candidate merely does not match, which is the direction to
+ *  be wrong in — and on the agbcc shape the fold exists for they agree, because the short-circuit
+ *  fold (raise/shortcircuit.ts) is what merged the test's blocks into one in the first place.
+ *
+ *  `variable-named-once` is C89's own rule rather than this pass's: an object modified between two
+ *  sequence points may not be read again there, and `contracts.ts`'s `assertPostIncrUnshared` is the
+ *  loud backstop for a later pass bringing a second read in. */
+export const PREUPDATE_COND_GATES: readonly Gate<PreUpdateCondCandidate>[] = [
+  {
+    id: 'update-is-a-unit-step',
+    why: 'C has no read-then-update operator but ++ and --, so no other update has a spelling inside the test',
+    sound: false,
+    rejects: (c) => c.step === null,
+  },
+  {
+    id: 'one-pre-update-variable',
+    why: 'two variables read ahead of their updates would need both updates folded into one expression',
+    sound: false,
+    rejects: (c) => c.preUpdateNames !== 1,
+  },
+  {
+    id: 'test-is-readable',
+    why: 'an op that renders something its operand tree does not show hides whether the test names the variable again',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating test-is-readable folds through a respelled def',
+    rejects: (c) => c.unreadable,
+  },
+  {
+    id: 'variable-named-once',
+    why: 'C89 leaves undefined which value a second read of an object updated in the same expression sees',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating variable-named-once folds a test that reads the variable twice',
+    rejects: (c) => c.mentions !== 1,
+  },
+  {
+    id: 'folded-on-every-continue',
+    why: 'a short-circuit ahead of the leaf would skip the update on an iteration that re-enters the loop',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating folded-on-every-continue folds a leaf under the right operand of an ||',
+    rejects: (c) => !c.onContinue,
+  },
+  {
+    id: 'folded-on-the-exit-too',
+    why: 'the value after the loop is read, so the update has to run on the iteration that leaves as well',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating folded-on-the-exit-too folds a leaf an exiting iteration skips',
+    rejects: (c) => c.updateObserved && !c.onExit,
+  },
+];
+
+/** Whether a position inside the bottom test is evaluated on the iterations where the whole test
+ *  answers TRUE, and on the ones where it answers FALSE. Stated about the test's own value rather
+ *  than about the loop's edges because the polarity is the caller's (`negated`). */
+interface Reach {
+  onTrue: boolean;
+  onFalse: boolean;
+}
+
+const ALWAYS: Reach = { onTrue: true, onFalse: true };
+
+/** The reach each operand of a SHORT-CIRCUIT op inherits. These two are the whole set: they are the
+ *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||`, and `Expr` has no conditional form
+ *  besides them — no ternary — so every other op evaluates all of its operands whenever it is
+ *  itself evaluated, and they inherit its reach unchanged.
+ *
+ *  In `a && b`, `b` runs only where `a` was true: a TRUE whole implies it ran, a FALSE whole does
+ *  not. `a || b` is the dual. */
+const SHORT_CIRCUIT_ARMS: Readonly<Record<string, (i: number, r: Reach) => Reach>> = {
+  logic_and: (i, r) => (i === 0 ? r : { onTrue: r.onTrue, onFalse: false }),
+  logic_or: (i, r) => (i === 0 ? r : { onTrue: false, onFalse: r.onFalse }),
+};
+
+/** How many values the reach walk may visit. It does not memoise — a value two consumers read
+ *  renders twice, and the count is the fact being measured — so a shared def tree costs it once per
+ *  path. Exhausting the budget answers `unreadable`, the same refusal an op the walk cannot see
+ *  through gets. */
+const WALK_BUDGET = 4096;
+
+/** The `± 1` an update spells, or null for every other update — `n = n + 1`, `n = 1 + n` and
+ *  `n = n - 1` are the forms with a `++`/`--`. A cast anywhere in the value is null: the cast would
+ *  have to be spelled around the update, which the operator cannot do. */
+function unitStep(value: Expr, name: string): 1 | -1 | null {
+  if (value.k !== 'bin' || (value.op !== '+' && value.op !== '-')) {
+    return null;
+  }
+  const isVar = (e: Expr): boolean => e.k === 'var' && e.name === name;
+  const one = (e: Expr): number | null => (e.k === 'const' && Math.abs(e.value) === 1 ? e.value : null);
+  const k = isVar(value.l) ? one(value.r) : value.op === '+' && isVar(value.r) ? one(value.l) : null;
+  return k === null ? null : ((value.op === '-' ? -k : k) as 1 | -1);
+}
 
 // `x + 0` / `x - 0` / `x | 0` are `x`. Substituting a loop variable by its init constant turns
 // ordinary index arithmetic into exactly these, and a guard that spells the same value without
@@ -359,10 +496,99 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region: Set<Block> | null,
+    // The bottom test's own read is spelled `n++` instead of declining (`preUpdateCondFold`), so
+    // the caller has already answered this disjunct. The other two are untouched by that fold: the
+    // update still runs, so an exit slot and an escaped body value still read the post-update name.
+    condRepaired = false,
   ): boolean =>
-    readsClobbered(condV, sub, updateWrites) ||
+    (!condRepaired && readsClobbered(condV, sub, updateWrites)) ||
     exitArgs.some((a) => readsClobbered(a, sub, updateWrites)) ||
     loopEscapeHazard(body, sub, updateWrites, region);
+
+  // WHICH SPELLING A PRE-UPDATE READ IN THE BOTTOM TEST HAS. Returns the update to fold and the
+  // step to fold it as, or null — `PREUPDATE_COND_GATES` above carries the refusals and the
+  // argument. Non-null implies the condition's hazard is REPAIRED, and nothing else: the exit slots
+  // and the escaped body values are `loopUpdateHazard`'s other two disjuncts and are unaffected by
+  // the fold, which is why they are asked for separately and why `one-pre-update-variable` keeps
+  // this to the single-variable case.
+  //
+  // The walk is `readsClobbered`'s, with two things added that the boolean does not need: it COUNTS
+  // occurrences instead of stopping at the first (C89's sequence-point rule is about the count), and
+  // it tracks, per name, whether the leaf's position is reached when the whole test is TRUE and when
+  // it is FALSE (`SHORT_CIRCUIT_ARMS`). A name reached twice takes the INTERSECTION of the two
+  // positions' reach, which `variable-named-once` then refuses anyway — kept so the field means the
+  // same thing whichever gate is ablated.
+  //
+  // NOT MEMOISED, unlike `readsClobbered`'s `seen`: a value read twice renders twice, and that is
+  // the fact being counted. `WALK_BUDGET` bounds the DAG blow-up that costs, and exhausting it is
+  // `unreadable` — the same answer a def whose lowering the walk cannot see gets.
+  const preUpdateCondFold = (
+    condV: Value,
+    negated: boolean,
+    header: Block,
+    backArgs: readonly Value[],
+    exitArgs: readonly Value[],
+    body: Set<Block>,
+    sub: Map<Value, string>,
+    updates: Stmt[],
+    updateWrites: Set<string>,
+    gates: readonly Gate<PreUpdateCondCandidate>[] = PREUPDATE_COND_GATES,
+  ): { name: string; by: 1 | -1 } | null => {
+    let budget = WALK_BUDGET;
+    let unreadable = false;
+    const mentions = new Map<string, number>();
+    const pre = new Map<string, Reach>();
+    const note = (name: string, r: Reach): void => {
+      mentions.set(name, (mentions.get(name) ?? 0) + 1);
+      if (!updateWrites.has(name)) {
+        return;
+      }
+      const was = pre.get(name);
+      pre.set(name, was === undefined ? r : { onTrue: was.onTrue && r.onTrue, onFalse: was.onFalse && r.onFalse });
+    };
+    const walk = (x: Value, r: Reach): void => {
+      if (budget-- <= 0) {
+        unreadable = true;
+        return;
+      }
+      const post = sub.get(x);
+      if (post !== undefined) {
+        mentions.set(post, (mentions.get(post) ?? 0) + 1); // a post-update read: no hazard, still a mention
+        return;
+      }
+      const own = varName.get(x);
+      if (own !== undefined) {
+        note(own, r);
+        return;
+      }
+      const d = defs.get(x);
+      if (d === undefined) {
+        return;
+      }
+      if (respelledDefs.has(d)) {
+        unreadable = true;
+        return;
+      }
+      const arm = SHORT_CIRCUIT_ARMS[d.opcode];
+      d.operands.forEach((o, i) => walk(o, arm === undefined ? r : arm(i, r)));
+    };
+    walk(condV, ALWAYS);
+    const [name] = [...pre.keys()];
+    const reach = name === undefined ? ALWAYS : pre.get(name)!;
+    const assigns = updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign' && st.name === name);
+    const u = backArgs[header.params.findIndex((p) => varName.get(p) === name)];
+    const c: PreUpdateCondCandidate = {
+      step: assigns.length === 1 ? unitStep(assigns[0].value, name) : null,
+      preUpdateNames: pre.size,
+      mentions: mentions.get(name) ?? 0,
+      unreadable,
+      onContinue: negated ? reach.onFalse : reach.onTrue,
+      onExit: negated ? reach.onTrue : reach.onFalse,
+      updateObserved:
+        u === undefined || exitArgs.includes(u) || (useSitesOf.get(u) ?? []).some((s) => !body.has(s.blk)),
+    };
+    return firstRejection(gates, c) === null ? { name, by: c.step! } : null;
+  };
 
   // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
   // there, so the point it belongs at is the one its value was computed at: the arg's own defining
@@ -580,6 +806,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     readsClobbered,
     loopEscapeHazard,
     loopUpdateHazard,
+    preUpdateCondFold,
     sinkablePreUpdateSlots,
     sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
     loopWriteSet,
