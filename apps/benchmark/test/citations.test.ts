@@ -79,8 +79,12 @@ const found = SCANNED.flatMap((dir) =>
 /** Prose also cites a place in the SOURCE, and `docs/level-tower.md`'s convention is a findable
  *  phrase rather than a line number, because a line number rots on the next edit above it and
  *  nothing notices. This asserts the phrase is still there. A `file.ts:N` is deliberately NOT
- *  checked: the dated attribution docs are full of them and they describe a snapshot, not a rule. */
-const ANCHORED = ['docs', '.claude/commands'];
+ *  checked: the dated attribution docs are full of them and they describe a snapshot, not a rule.
+ *
+ *  The SOURCE trees are scanned for anchors too, not only prose ones. The convention belongs to the
+ *  construct, not to the directory it is written in: a source comment that tells the reader to
+ *  `grep -n` for a phrase rots exactly the way a doc's does. */
+const ANCHORED = [...SCANNED, '.claude/commands'];
 const ANCHOR = /grep -n "([^"]+)" ([\w./-]+)/g;
 
 const anchors = ANCHORED.flatMap((dir) =>
