@@ -1866,12 +1866,41 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // THE ONE-WAY DOOR, and this row is here so a later round cannot quietly walk back through it.
   // agbcc spells a 64-bit OR as two plain `orr`s — ordinary 32-bit instructions that ordinary
-  // 32-bit C reaches — so the halves stay two words and nothing here is a 64-bit operation. The
-  // same is true of `&`, `^`, `~`, every constant shift and every compare.
+  // 32-bit C reaches — so no 64-bit OPERATION is needed for the halves themselves, and the same
+  // goes for `&`, `^`, `~`, every constant shift and every compare. What the row scores is the
+  // RETURN: both `orr`s are there and the high one has nowhere to go, so it reads `1/3` with the
+  // high half deleted. The door it holds shut is a 64-bit `or` opcode nothing needs; the gap it
+  // measures is the pair coming back out.
   {
     sym: 'llorr',
     src: 'long long llorr(long long a,long long b){ return a|b; }',
     features: ['int64'],
+    toolchains: ALL,
+  },
+  // THE WIDTH TWIN OF `llmul`, and the two differ in one register. A 64-bit-returning function
+  // ends `bl __muldi3; pop {r2}; bx r2`; this one narrows, so agbcc is free to pop its scratch
+  // into r1 — which is the pair's HIGH register. The epilogue is therefore the only place the
+  // return width is written down, and a recovery that reads the register pair off the value graph
+  // answers 64 for both. (Without `-mthumb-interwork` the two really are the same object, and no
+  // row can pin what no function carries.)
+  {
+    sym: 'lomul',
+    src: 'int lomul(long long a,long long b){ return (int)(a*b); }',
+    features: ['int64', 'arithmetic', 'cast', 'narrow'],
+    toolchains: ALL,
+  },
+  // THE CALL BOUNDARY THE PAIR DOES NOT CROSS, and a refusal row rather than a match. A prototype
+  // states a callee's arity in argument REGISTERS, so `void llsink(long long)` and `void
+  // llsink(int)` reach the frontend as the same fact — and both of the answers it could give
+  // (hand over the low half; hand over the two halves as two words) recompile to the `bl` being
+  // lifted. The differ scores the wrong one exactly as it scores the right one, which is why this
+  // declines instead of matching.
+  {
+    sym: 'llpass',
+    src: 'int llpass(long long a,long long b){ llsink(a*b); return 0; }',
+    ctx: 'void llsink(long long);',
+    proto: { llsink: { params: ['long long'] } },
+    features: ['int64', 'arithmetic'],
     toolchains: ALL,
   },
 
