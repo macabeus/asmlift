@@ -44,7 +44,7 @@ const CASES: OfflineCase[] = [
     sym: 'deref',
     target: ARMV4T_AGBCC,
     note: 'pointer load (*p)',
-    expect: 's32 deref(s32 * a0) {\n    return *a0;\n}\n',
+    expect: 's32 deref(s32 *a0) {\n    return *a0;\n}\n',
   },
 
   // ── IDO (N64) ──────────────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ const CASES: OfflineCase[] = [
     sym: 'aget',
     target: MIPS_GCC,
     note: 'variable-index array (recognizeArrays) — GCC scaled-operand-first order',
-    expect: 's32 aget(s32 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 aget(s32 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   },
 
   // ── Sibling pair: SAME C source, DIFFERENT compiler → different codegen (compiler-as-spec) ─
@@ -147,7 +147,7 @@ const CASES: OfflineCase[] = [
     sym: 'deref',
     target: PPC_MWCC,
     note: 'pointer load (lwz)',
-    expect: 's32 deref(s32 * a0) {\n    return *a0;\n}\n',
+    expect: 's32 deref(s32 *a0) {\n    return *a0;\n}\n',
   },
   {
     file: 'ppc-shl3.asm',

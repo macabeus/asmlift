@@ -81,7 +81,7 @@ describe('end-to-end: a not-provably-pointer base gets the reinterpret cast at a
 
   test('a well-typed deref is untouched — no spurious cast on the ordinary path', () => {
     const res = decompile('deref', 'deref:\n\tldr\tr0, [r0]\n\tbx\tlr\n', ARMV4T_AGBCC);
-    expect(res.source).toBe('s32 deref(s32 * a0) {\n    return *a0;\n}\n');
+    expect(res.source).toBe('s32 deref(s32 *a0) {\n    return *a0;\n}\n');
   });
 });
 

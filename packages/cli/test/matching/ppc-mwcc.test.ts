@@ -34,7 +34,7 @@ const HAVE = ppcDockerGate('ppc-mwcc', 'mwcc_242_81');
 // CodeWarrior codegen asmlift reproduces byte-exact — the flow works AND the PPC-specific shapes
 // (extended mnemonics, cr0 fusion, conditional-return) are handled.
 const MATCH_CASES: { sym: string; c: string; expect: string }[] = [
-  { sym: 'deref', c: 'int deref(int *p){ return *p; }', expect: 's32 deref(s32 * a0) {\n    return *a0;\n}\n' },
+  { sym: 'deref', c: 'int deref(int *p){ return *p; }', expect: 's32 deref(s32 *a0) {\n    return *a0;\n}\n' },
   {
     sym: 'sub',
     c: 'int sub(int a,int b){ return a-b; }', // `subf rD,rA,rB` = rB-rA (reversed operands)
@@ -160,18 +160,18 @@ const INDEXED_CASES: { sym: string; c: string; proto?: Prototypes; expect: strin
   {
     sym: 'aget',
     c: 'int aget(int *a, int i){ return a[i]; }', // slwi + lwzx
-    expect: 's32 aget(s32 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 aget(s32 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   },
   {
     sym: 'aset',
     c: 'void aset(int *a, int i, int v){ a[i] = v; }',
     proto: { aset: { returnsVoid: true } }, // slwi + stwx
-    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
+    expect: 'void aset(s32 *a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
   },
   {
     sym: 'asget',
     c: 'short asget(short *a, int i){ return a[i]; }', // slwi #1 + lhax (sign-extend)
-    expect: 's32 asget(s16 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 asget(s16 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   },
 ];
 

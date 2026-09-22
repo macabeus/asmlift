@@ -25,28 +25,28 @@ import { describe, expect, test } from 'vitest';
 
 // ── C backend: constant-offset memory, all byte-exact ─────────────────────────────────────
 const C_CASES: { sym: string; c: string; proto?: Prototypes; expect: string }[] = [
-  { sym: 'mderef', c: 'int mderef(int *p){ return *p; }', expect: 's32 mderef(s32 * a0) {\n    return *a0;\n}\n' }, // lw v0,0(a0)
+  { sym: 'mderef', c: 'int mderef(int *p){ return *p; }', expect: 's32 mderef(s32 *a0) {\n    return *a0;\n}\n' }, // lw v0,0(a0)
   {
     sym: 'mfield',
     c: 'struct S{ int a; int b; int c; }; int mfield(struct S *s){ return s->c; }',
-    expect: 's32 mfield(s32 * a0) {\n    return a0[2];\n}\n',
+    expect: 's32 mfield(s32 *a0) {\n    return a0[2];\n}\n',
   }, // lw v0,8(a0)
   {
     sym: 'mbyte',
     c: 'int mbyte(unsigned char *p){ return p[2]; }',
-    expect: 's32 mbyte(u8 * a0) {\n    return a0[2];\n}\n',
+    expect: 's32 mbyte(u8 *a0) {\n    return a0[2];\n}\n',
   }, // lbu v0,2(a0)
   {
     sym: 'msetp',
     c: 'void msetp(int *p, int v){ *p = v; }',
     proto: { msetp: { returnsVoid: true } },
-    expect: 'void msetp(s32 * a0, s32 a1) {\n    *a0 = a1;\n}\n',
+    expect: 'void msetp(s32 *a0, s32 a1) {\n    *a0 = a1;\n}\n',
   }, // sw a1,0(a0)
   {
     sym: 'mfieldw',
     c: 'struct S{ int a; int b; }; void mfieldw(struct S *s, int v){ s->b = v; }',
     proto: { mfieldw: { returnsVoid: true } },
-    expect: 'void mfieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n}\n',
+    expect: 'void mfieldw(s32 *a0, s32 a1) {\n    a0[1] = a1;\n}\n',
   }, // sw a1,4(a0)
   // STRUCT RECOVERY: a HETEROGENEOUS-width access pattern on one base (`char`@0 + `int`@4) is
   // inconsistent with any homogeneous array, so the access-pattern discriminator
@@ -57,24 +57,24 @@ const C_CASES: { sym: string; c: string; proto?: Prototypes; expect: string }[] 
     sym: 'stagv',
     c: 'struct S{ char tag; int val; }; int stagv(struct S *s){ return s->tag + s->val; }',
     expect:
-      'struct Struct0 { u8 field_0; s32 field_4; };\ns32 stagv(struct Struct0 * a0) {\n    return a0->field_0 + a0->field_4;\n}\n',
+      'struct Struct0 { u8 field_0; s32 field_4; };\ns32 stagv(struct Struct0 *a0) {\n    return a0->field_0 + a0->field_4;\n}\n',
   }, // lbu v0,0(a0); lw v1,4(a0); addu
   // VARIABLE-INDEX array access — the earned second op-vocabulary (aload/astore, raise/arrays.ts).
   {
     sym: 'aget',
     c: 'int aget(int *a, int i){ return a[i]; }',
-    expect: 's32 aget(s32 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 aget(s32 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   }, // sll #2; addu; lw
   {
     sym: 'aset',
     c: 'void aset(int *a, int i, int v){ a[i] = v; }',
     proto: { aset: { returnsVoid: true } },
-    expect: 'void aset(s32 * a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
+    expect: 'void aset(s32 *a0, s32 a1, s32 a2) {\n    a0[a1] = a2;\n}\n',
   }, // sll #2; addu; sw
   {
     sym: 'asget',
     c: 'short asget(short *a, int i){ return a[i]; }',
-    expect: 's32 asget(s16 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 asget(s16 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   }, // sll #1; addu; lh (elemSize 2)
 ];
 

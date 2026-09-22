@@ -127,7 +127,7 @@ describe('a parameter extended in the prologue is declared at that width', () =>
   test('two `zext {8}` extensions narrow both parameters', () => {
     const { n } = run(PROLOGUE_TWO_U8);
     expect(n).toBe(2);
-    expect(emit(PROLOGUE_TWO_U8)).toContain('void f(u8 a0, u8 a1, s32 * a2)');
+    expect(emit(PROLOGUE_TWO_U8)).toContain('void f(u8 a0, u8 a1, s32 *a2)');
   });
 
   test('a materialization among the extensions does not end the prologue', () => {

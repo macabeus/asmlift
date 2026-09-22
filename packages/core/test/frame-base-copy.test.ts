@@ -56,9 +56,7 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     // `u16` and not `s16`: `ldrh` zero-extends, so that IS the type the machine used. No
     // `volatile` — the address never leaves the function, so nothing outside can observe a store
     // and the object must not pay volatile's codegen.
-    expect(lift(SPILL).source).toBe(
-      's32 f(u16 * a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n',
-    );
+    expect(lift(SPILL).source).toBe('s32 f(u16 *a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n');
   });
 
   test('accesses in different blocks name ONE object', () => {

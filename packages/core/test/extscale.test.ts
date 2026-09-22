@@ -430,7 +430,7 @@ describe('what the fold hands the passes below it', () => {
     // where the wide lift scores 5, and the ranked winner 2 where it is MATCH with the fold off. Flip
     // this expectation when the frontend's pool words become distinguishable from immediates.
     const src = source('extscale', 'agbcc-extscale-numpool.s');
-    expect(src).toContain('void extscale(u8 a0, u16 * a1)');
+    expect(src).toContain('void extscale(u8 a0, u16 *a1)');
   });
 
   test('a fold nobody claims prints as the pair it replaced', () => {

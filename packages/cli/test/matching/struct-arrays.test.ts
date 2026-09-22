@@ -16,7 +16,7 @@ const CASES: { name: string; c: string; returnsVoid?: boolean; expect: string }[
     c: `struct Ent { int hp; int x; char pad[100]; };
 int get_hp(struct Ent *arr, int i){ return arr[i].hp; }`,
     expect:
-      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\ns32 get_hp(struct Elem0 * a0, s32 a1) {\n    return a0[a1].field_0;\n}\n',
+      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\ns32 get_hp(struct Elem0 *a0, s32 a1) {\n    return a0[a1].field_0;\n}\n',
   },
   // Field at NONZERO offset 4 → leading pad seats it exactly.
   {
@@ -24,7 +24,7 @@ int get_hp(struct Ent *arr, int i){ return arr[i].hp; }`,
     c: `struct Ent { int hp; int x; char pad[100]; };
 int get_x(struct Ent *arr, int i){ return arr[i].x; }`,
     expect:
-      'struct Elem0 { u8 _pad0[4]; s32 field_4; u8 _pad1[100]; };\ns32 get_x(struct Elem0 * a0, s32 a1) {\n    return a0[a1].field_4;\n}\n',
+      'struct Elem0 { u8 _pad0[4]; s32 field_4; u8 _pad1[100]; };\ns32 get_x(struct Elem0 *a0, s32 a1) {\n    return a0[a1].field_4;\n}\n',
   },
   // Multiple fields, power-of-2 stride 8 (agbcc emits `lsl #3`) — DmaSprite's real {u32@0,u16@4,u16@6}.
   {
@@ -32,7 +32,7 @@ int get_x(struct Ent *arr, int i){ return arr[i].x; }`,
     c: `struct Gfx { unsigned src; unsigned short f4; unsigned short tiles; };
 int gfx_sum(struct Gfx *arr, int i){ return arr[i].f4 + arr[i].tiles; }`,
     expect:
-      'struct Elem0 { u8 _pad0[4]; u16 field_4; u16 field_6; };\ns32 gfx_sum(struct Elem0 * a0, s32 a1) {\n    return a0[a1].field_4 + a0[a1].field_6;\n}\n',
+      'struct Elem0 { u8 _pad0[4]; u16 field_4; u16 field_6; };\ns32 gfx_sum(struct Elem0 *a0, s32 a1) {\n    return a0[a1].field_4 + a0[a1].field_6;\n}\n',
   },
   // Store into an array-of-struct field, non-power-of-2 stride.
   {
@@ -41,7 +41,7 @@ int gfx_sum(struct Gfx *arr, int i){ return arr[i].f4 + arr[i].tiles; }`,
 void set_hp(struct Ent *arr, int i, int v){ arr[i].hp = v; }`,
     returnsVoid: true,
     expect:
-      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\nvoid set_hp(struct Elem0 * a0, s32 a1, s32 a2) {\n    a0[a1].field_0 = a2;\n}\n',
+      'struct Elem0 { s32 field_0; u8 _pad0[104]; };\nvoid set_hp(struct Elem0 *a0, s32 a1, s32 a2) {\n    a0[a1].field_0 = a2;\n}\n',
   },
 ];
 

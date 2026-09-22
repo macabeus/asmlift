@@ -170,7 +170,7 @@ test('array-of-struct recovery, as emitted C (the shared raise spine)', () => {
   const sfn = structureChecked(fn, { ...structureOptionsFor(ARMV4T_AGBCC, false), onGap: 'strict' });
   expect(cBackend.emit(sfn)).toBe(
     'struct Elem0 { s32 field_0; u16 field_4; u8 _pad0[2]; };\n' +
-      's32 sget(struct Elem0 * a0, s32 a1) {\n    return a0[a1].field_0 + a0[a1].field_4;\n}\n',
+      's32 sget(struct Elem0 *a0, s32 a1) {\n    return a0[a1].field_0 + a0[a1].field_4;\n}\n',
   );
 });
 

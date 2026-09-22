@@ -411,7 +411,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // whatever the registers happen to hold.
     const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
     expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
-      's32 f(u8 * a0, u8 * a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
+      's32 f(u8 *a0, u8 *a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
     );
     // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
     // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved

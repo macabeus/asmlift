@@ -83,7 +83,7 @@ export function cType(t: IrType): string {
  *  the prefix `cType name`. A NESTED array spells every extent after the name in declaration
  *  order (`u8 unk8[6][8]`) — one declarator, not an element type that is itself an array, which
  *  C has no syntax for and `cType` marks ill-formed as a prefix. */
-function cDeclare(t: IrType, name: string): string {
+export function cDeclare(t: IrType, name: string): string {
   if (t.kind === 'array') {
     const extents: number[] = [];
     let e: IrType = t;
@@ -575,9 +575,9 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
     // pointer declarator to the pointee — the INNERMOST one for a multi-level pointer
     // (`volatile u16 **p`). An object-volatile POINTER (`u16 *volatile p`) has no inhabitant —
-    // no variation or recognizer produces one. The NAME is placed by `cDeclare`, because a local
-    // is the one declaration position an array type reaches: it spells the storage extent a
-    // frame object pins, and C puts those extents after the name.
+    // no variation or recognizer produces one. The NAME is placed by `cDeclare`, the one
+    // placement every declaration position in this backend uses: a local can carry an array type
+    // — the storage extent a frame object pins — and C puts those extents after the name.
     lines.push(`    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cDeclare(l.type, l.name)};`);
   }
   for (const s of fn.body) {

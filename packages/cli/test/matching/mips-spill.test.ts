@@ -3,7 +3,7 @@
 // IDO spills a narrow (`signed char`/`unsigned char`) parameter to its o32 ABI home slot with
 // `sw a0,0(sp)`. Lifting that as a store THROUGH `sp` read as an ordinary register makes `sp` a
 // spurious pointer parameter (type-recovered to `s32 *`) and displaces the real argument —
-// garbage like `s32 sextb(s32 * a0, s32 a1){ *a0 = a1; ... }`. Instead (frontend/mips.ts,
+// garbage like `s32 sextb(s32 *a0, s32 a1){ *a0 = a1; ... }`. Instead (frontend/mips.ts,
 // isStackPtr/stackSlot) a word `sp`-relative store/load is modelled as an SSA stack SLOT keyed by
 // offset: a never-reloaded home-slot spill has no uses and simply drops, and `sp` never
 // materializes as a value. These assertions lock the mislift out.

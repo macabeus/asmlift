@@ -1,8 +1,8 @@
-// A local declaration is a C DECLARATOR, not a type followed by a name: an array puts its
-// extents after the name and a pointer binds its `*` to the declarator. `cType` spells a type
-// where no declarator is involved (a cast, a return type) and marks its array arm ill-formed as
-// a prefix — the local list is the one printing position that can reach that arm, because an
-// array-typed local is the storage-extent recovery and an array-typed PARAMETER has no C syntax.
+// A declaration is a C DECLARATOR, not a type followed by a name: an array puts its extents
+// after the name and a pointer binds its `*` to the declarator. `cType` spells a type where no
+// declarator is involved (a cast, a return type) and marks its array arm ill-formed as a prefix.
+// Every declaration position in the C backend — the local list, the struct fields and the
+// parameter list — goes through `cDeclare`, so one function cannot spell its pointers two ways.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -37,4 +37,25 @@ test('either volatility fact still renders at the prefix, where C reads it', () 
 
 test('a struct local declares as the plain prefix form', () => {
   expect(emit([{ name: 'sp0', type: T.struct('Blob', []) }])).toContain('    struct Blob sp0;');
+});
+
+test('a pointer PARAMETER binds its star the same way a local does', () => {
+  // the two positions in one signature: a mixed spelling (`u16 * a0` over `u16 *p`) is what
+  // routing only the locals through the declarator produced
+  const out = cBackend.emit({
+    name: 'f',
+    params: [
+      { name: 'a0', type: T.ptr(T.u(16)) },
+      { name: 'a1', type: T.s(32) },
+    ],
+    locals: [{ name: 'p', type: T.ptr(T.u(16)) }],
+    retType: T.void(),
+    body: [],
+  });
+  expect(out).toContain('void f(u16 *a0, s32 a1)');
+  expect(out).toContain('    u16 *p;');
+});
+
+test('a parameter list with no parameters is still `void`', () => {
+  expect(cBackend.emit({ name: 'f', params: [], locals: [], retType: T.void(), body: [] })).toContain('f(void)');
 });

@@ -58,7 +58,7 @@ describe('the pointee asmlift emits is SYNTHESIZED from the asm, not declared', 
   test('a pointer parameter recovers a struct tag and an interior spelling on its own', () => {
     const [defaultSource] = sources(STRUCT_PARAM, {});
     expect(defaultSource).toContain('struct Struct0 { s32 field_0; u16 field_4; u8 field_6; s32 field_8; };');
-    expect(defaultSource).toContain('void f(u32 a0, struct Struct0 * a1)');
+    expect(defaultSource).toContain('void f(u32 a0, struct Struct0 *a1)');
     expect(defaultSource).toContain('a1->field_6 = a0;');
   });
 
@@ -133,7 +133,7 @@ describe('the block-copy shape is the named next step, and it is not a pointee g
         .map((c) => c.source)
         .join('\n');
     const asVoid = spell(['void *', 'void *']);
-    expect(asVoid).toContain('void copy_struct(s32 * a0, s32 * a1)');
+    expect(asVoid).toContain('void copy_struct(s32 *a0, s32 *a1)');
     expect(asVoid).toContain('*a0 = *a1;');
     expect(asVoid).toContain('a0[2] = v1;');
     expect(spell(['struct S *', 'struct S *'])).toBe(asVoid);

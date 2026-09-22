@@ -4671,7 +4671,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      2  …and the now-redundant inner narrowing dropped (`-(t0 & 2)` for `-(s16)(t0 & 2)`)
   //      0  the home given the NARROW type (`s16 t0 = (s16)a0;`)
   //      0  the parameter declared `s16`
-  //   Today asmlift emits the last rung itself — `void sxparam(s16 a0, s32 * a1)`, 2 candidates,
+  //   Today asmlift emits the last rung itself — `void sxparam(s16 a0, s32 *a1)`, 2 candidates,
   //   `unsigned: 0`. The NARROW parameter is recovered from the prologue extension, not handed
   //   over: dropping `--proto` leaves the same 2 candidates and the same `unsigned: 0 (match)`
   //   with `s16 a0` still declared (only the return type falls back to `s32`, which is the one

@@ -27,13 +27,13 @@ const MATCH_CASES: { sym: string; c: string; proto?: Prototypes; patterns?: Rewr
     c: 'int add3(int a, int b, int c){ return a + b + c; }',
     expect: 's32 add3(s32 a0, s32 a1, s32 a2) {\n    return a0 + a1 + a2;\n}\n',
   },
-  { sym: 'deref', c: 'int deref(int *p){ return *p; }', expect: 's32 deref(s32 * a0) {\n    return *a0;\n}\n' },
+  { sym: 'deref', c: 'int deref(int *p){ return *p; }', expect: 's32 deref(s32 *a0) {\n    return *a0;\n}\n' },
   // Variable-index array (raise/arrays.ts) — GCC reuses a1 and orders `addu a1,a1,a0` (scaled
   // operand FIRST) vs IDO's temps + `addu t7,a0,t6`; the recognizer is operand-order-agnostic.
   {
     sym: 'aget',
     c: 'int aget(int *a, int i){ return a[i]; }',
-    expect: 's32 aget(s32 * a0, s32 a1) {\n    return a0[a1];\n}\n',
+    expect: 's32 aget(s32 *a0, s32 a1) {\n    return a0[a1];\n}\n',
   },
   // Signed /2: GCC strength-reduces to the SAME shift idiom as agbcc (despite N64 hw-divide), but
   // emits `addu v0,v0,a0` (shifted operand FIRST) — folds via the compiler-tagged, commutativity-

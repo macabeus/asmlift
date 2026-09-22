@@ -163,7 +163,7 @@ describe('C++ mangled-C spike: the plain-C backend reaches a C++ target as mangl
       TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
     );
     const r = decompile(sym, asm, PPC_MWCC); // DEFAULT C backend — mangled-C
-    expect(r.source).toBe(`s32 ${sym}(s32 * a0, s32 * a1) {\n    return *a0 * *a1 + a0[1] * a1[1];\n}\n`);
+    expect(r.source).toBe(`s32 ${sym}(s32 *a0, s32 *a1) {\n    return *a0 * *a1 + a0[1] * a1[1];\n}\n`);
     const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags); // compiled as plain C, scored vs the C++ target
     expect(s.score).toBe(0);
     expect(s.match).toBe(true);
