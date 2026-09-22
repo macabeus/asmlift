@@ -153,7 +153,7 @@ describe('a pattern keyed on an English word claims sentences that are not about
   // grows "other", so the anchor at the bottom of this file cannot see it. Every marker here is a
   // core message copied from its throw site.
   test.each([
-    // `switch-shapes` used to match the bare word `fall-through`. This is `frontend/ppc.ts`'s
+    // `switch-shapes` must not reach the bare word `fall-through`. This is `frontend/ppc.ts`'s
     // generic conditional-branch refusal; there is no switch anywhere in it.
     [
       "lift: cannot lift 'f': conditional branch 'bge' at 0x20 has a target/fall-through that is not a block " +
@@ -163,8 +163,8 @@ describe('a pattern keyed on an English word claims sentences that are not about
     // …and its recovered-dispatch refusal says BOTH "jump-table" and "not a block boundary", so
     // the two classes have to be told apart by phrase, not by which one is listed first.
     ["lift: cannot lift 'f': jump-table target is not a block boundary", 'switch-shapes'],
-    // `branch-form` (then `control-flow`) used to match the bare words `indirect` and `computed`.
-    // This is an address-taken-local refusal and a published marker of `sa3:ProcessOamBuffers`.
+    // `branch-form` must not reach the bare words `indirect` and `computed`. This is an
+    // address-taken-local refusal and a published marker of `sa3:ProcessOamBuffers`.
     [
       "lift: cannot lift 'ProcessOamBuffers': stack pointer used as data — the address of a stack local is " +
         'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',

@@ -48,7 +48,9 @@
 // the defect this file exists to remove. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls". They have no rows, so they wait for one.
+// gotos / register tail calls". So is the sixth kind of the naming family: `reloc-symbol.ts`
+// `unspellableReason` refuses six ways and five have a class here, while "names 'X', which is not
+// a C identifier" has none. They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {
@@ -90,10 +92,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /never stores it|never stored/,
   },
   {
-    // `stack-passed` used to be an alternative here and could never fire: its one producer,
-    // `frontend/mips.ts`'s never-stored slot load, opens with "was never stored", which
-    // `uninit-local` above claims first. An alternative no string core emits can reach is inert,
-    // and this repo refuses inert refusal declarations elsewhere (`pattern/engine.ts`).
+    // No `stack-passed` alternative, although `frontend/mips.ts` spells that phrase: its message
+    // opens with "was never stored", which `unstored-slot` above claims first, so no string core
+    // emits could reach it. An alternative nothing can reach is inert, and this repo refuses inert
+    // refusal declarations elsewhere (`pattern/engine.ts`).
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
@@ -269,8 +271,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Call argument registers with no prototype',
     pattern: /has no prototype/,
   },
-  // The three control-transfer gaps, ABOVE the `control-flow` catch-all that would otherwise take
-  // all of them on `unmodelled control transfer`.
+  // The three control-transfer gaps, ABOVE the `branch-form` residue that would otherwise take all
+  // of them on `unmodelled control transfer`.
   {
     key: 'indirect-call',
     label: 'Indirect calls (virtual dispatch / call through a pointer)',
