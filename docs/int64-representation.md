@@ -261,6 +261,14 @@ matches the hexadecimal ADDRESS column — `adc:`, `ade:` — and returns **12**
 `marioparty4:fn_1_B5C:mwcc_242_81` and `marioparty4:HuDvdErrorWatch:mwcc_247_107` are address text
 with no carry instruction in them.
 
+And scan for carry CONSUMERS specifically. `addc`, `subfc` and `addic` only WRITE `XER[CA]`;
+`adc`/`sbc`, `adde`, `addze` and `subfe` READ it. Admitting producers adds
+`synthetic:dowhile:mwcc_242_81`, whose `addic. r3,r3,-1 ; bgt+` is a decrementing loop counter
+branching on `CR0` with its carry output dead — and that row is MATCHED by both tools. So the
+"blast radius 0" above is a claim about carry consumers, and a producer-inclusive scan appears to
+refute it while counting a row no carry model would ever rewrite. The zero rests on that split, not
+on the size of the population.
+
 - **`srawi; addze` is signed division by a power of two.** Four sites over three rows —
   `marioparty4:fn_1_83C8:mwcc_242_81` (`srawi r0,r0,5; addze r27,r0`),
   `pikmin:calcDataSize__6TexImgFiii:mwcc_233_163n` (×2) and
