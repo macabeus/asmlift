@@ -133,7 +133,7 @@ describe('a control transfer is named by what it is, not by the catch-all', () =
     [
       "lift: cannot lift 'calcDataSize__6TexImgFiii': unmodelled control transfer 'bctr' at 0x20 (CTR-counted " +
         'loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)',
-      'ctr-loop',
+      'ctr-transfer',
     ],
     [
       "lift: cannot lift 'mem_clear': branch to 0x30 is not a block boundary (out-of-range / mid-instruction " +
@@ -189,21 +189,21 @@ describe('a pattern keyed on an English word claims sentences that are not about
 });
 
 describe('a slot that is never written is not a frame the lifter cannot model', () => {
-  // `stack-frames` and `uninit-local` are both about an sp slot and only their ORDER tells them
+  // `stack-frames` and `unstored-slot` are both about an sp slot and only their ORDER tells them
   // apart. The frontends spell the same refusal two ways, one per reading site.
   test.each([
     [
       "lift: cannot lift 'uninit_join': sp@4 is read on a path that never stores it, and lies outside this " +
         "function's frame partition (uninitialised local, or storage it does not own) — not modelled",
-      'uninit-local',
+      'unstored-slot',
     ],
     // Verbatim from `frontend/mips.ts` — and it is why `stack-frames` no longer carries a
-    // `stack-passed` alternative. That site is its only producer, `uninit-local` claims it on
+    // `stack-passed` alternative. That site is its only producer, `unstored-slot` claims it on
     // "was never stored" first, so nothing core emits could ever have reached the alternative.
     [
       "lift: cannot lift 'f': load from stack slot sp@8 that was never stored (stack-passed argument beyond " +
         'the 4 register args, or an address-taken/uninitialised local) — not modelled',
-      'uninit-local',
+      'unstored-slot',
     ],
     ["lift: cannot lift 'f': reload of a stack local ('8(r1)') — local stack frames not supported", 'stack-frames'],
   ])('%s -> %s', (marker, want) => {
@@ -348,12 +348,16 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //
   //   branch-likely  A RESIDUE. PR #226 modelled the capability — a likely branch nullifies its
   //                  delay slot, modelled by placement — and `mips.ts` :386, :642 and :647 are what
-  //                  it left behind. 457 MIPS rows carry 192 likely branches across 88 functions,
-  //                  and 15 of those rows also carry a computed `jr`. Not one is in a shape
-  //                  `normaliseBranchLikely` refuses — a delay slot that is itself a control
-  //                  transfer, a delay slot some branch targets, a likely branch inside another
-  //                  transfer's slot — and not one collides with a recovered table. The population
-  //                  is here; the hazard is not, and no compiler emits one.
+  //                  it left behind. The population is enormous and the hazard is absent: across
+  //                  the three Splat asm trees in `apps/benchmark/checkouts`, 24,570 functions,
+  //                  7,440 of them carry a likely branch and there are 18,841 in total (`bnel`
+  //                  7,613, `beql` 6,652, `bc1fl` 1,911, `bc1tl` 1,464, then the zero-compare
+  //                  forms). Each of the three shapes `normaliseBranchLikely` refuses reads ZERO:
+  //                  a delay slot that is itself a control transfer, a likely branch sitting in
+  //                  another transfer's slot, a delay slot some branch targets. An earlier scan
+  //                  printed 15 for the second of those; its mnemonic set began with the bare
+  //                  alternative `b` under `re.match`, so `break` — a trap, not a branch — was
+  //                  counted as one. Re-run with every mnemonic fullmatched, it is 0.
   //   pic-globals    NOT REACHED, and reachable. 29 of 301 PPC rows read memory through a
   //                  literal-0 base over 110 sites and one of them MATCHES, so the relocated form
   //                  is lifted post-#221 and the PPC arm guards a base no relocation fills. The
@@ -399,8 +403,11 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   });
 
   test('branch-likely says in its LABEL that it is a residue, because 0 rows reads as "cannot"', () => {
-    // The Pareto renders the label and nothing else. A reader who finds "Branch-likely delay slots"
-    // in a gap list concludes asmlift cannot lift one; it can, since #226.
+    // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
+    // markers it saw. `DeclinePicker` in `components/FeaturePicker.tsx` is what renders it, one
+    // option per class with zero-count ones `disabled`, so the label is the whole of what a reader
+    // finds. "Branch-likely delay slots" alone reads as "asmlift cannot lift one"; it can, since
+    // #226.
     expect(DECLINE_CLASSES.find((c) => c.key === 'branch-likely')?.label).toMatch(/residual/);
   });
 
@@ -424,8 +431,8 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     [
       "lift: cannot lift 'f': CTR loop body contains 'mtctr' at 0x20 which clobbers CTR (loop trip count not recoverable)",
     ],
-  ])('%s -> ctr-loop', (marker) => {
-    expect(classOf(marker)).toBe('ctr-loop');
+  ])('%s -> ctr-transfer', (marker) => {
+    expect(classOf(marker)).toBe('ctr-transfer');
   });
 });
 

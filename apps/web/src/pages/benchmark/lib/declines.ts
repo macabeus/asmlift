@@ -22,6 +22,33 @@
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
 // 301 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
+//
+// THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
+// `packages/core/src` throws 118 distinct decline messages (the texts reached by
+// `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
+// harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
+// replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
+// there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
+// are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
+//
+//   frontend/thumb.ts   24  ARM-mode function, raw data in the code stream, a base alignment the
+//                           input does not determine, pc used as a data base, `stm` with its own
+//                           base in the list, control falling off the end
+//   structure.ts        15  ten more loop and post-loop naming refusals beside the two
+//                           `loop-exit-values` claims, plus an unsupported terminator
+//   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, a missing
+//                           delay slot
+//   frontend/ppc.ts      8  `stwu` with update, an `@l`/`@ha` half whose immediate is not the
+//                           expected placeholder, a relocation on a stack-pointer adjust
+//   frontend/splat.ts    7  a data directive in the code stream, a tail call / cross-function
+//                           branch, an unparsable constant expression
+//   frontend/disasm.ts   7  the objdump `...` elision family
+//
+// Named here rather than given classes, because a class with no inhabitant and no witness row is
+// the defect this file exists to remove. Two control-transfer capabilities are in that residue and
+// are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
+// calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
+// gotos / register tail calls". They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {
@@ -47,10 +74,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // ABOVE `stack-frames`, which would otherwise claim these on `never stored`: a slot read on a
     // path that never writes it is not a frame the lifter cannot model but a value that does not
-    // exist, and the `uninit-local` feature tag names it as its own gap. `ssa.ts` spells it
-    // "never stores it" for a read and `mips.ts` "was never stored" for a load.
-    key: 'uninit-local',
-    label: 'Uninitialised locals (a slot read on a path that never stores it)',
+    // exist. `ssa.ts` spells it "never stores it" for a read and `mips.ts` "was never stored" for
+    // a load.
+    //
+    // THE LABEL NAMES TWO CAPABILITIES BECAUSE THE MESSAGE DOES. `frontend/mips.ts` refuses with
+    // "(stack-passed argument beyond the 4 register args, or an address-taken/uninitialised
+    // local)" and says in its own comment that the two are separable and that the Thumb frontend
+    // already separates them — O32's 16-byte home area is what stops it doing the same. Two of the
+    // three rows here arrive by that spelling, so a label reading "Uninitialised locals" would
+    // assert a cause the marker does not carry, and no gate could notice. The durable fix is to
+    // split the refusal at the throw, where the frame arithmetic is in hand; a regex in the web app
+    // is the wrong layer to decide it.
+    key: 'unstored-slot',
+    label: 'Slots nothing stores (an uninitialised local, or an incoming stack argument)',
     pattern: /never stores it|never stored/,
   },
   {
@@ -241,8 +277,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /an indirect call/,
   },
   {
-    key: 'ctr-loop',
-    label: 'CTR-counted loops and indirect branches (mwcc -O4 unrolling)',
+    // NOT "loop unrolling", although `frontend/ppc.ts` says so. Its branch denylist has one throw
+    // with two arms, and the non-`bctrl`/`blrl` arm prints "CTR-counted loop or indirect branch —
+    // mwcc -O4 loop unrolling is not yet supported" for ANY unmodelled `b*`. All three rows that
+    // reach it are a `bctr` the switch recovery did not claim — a jump-table dispatch — and one of
+    // them, `synthetic:sw_jtfall`, is a `switch` with no loop in it at all. A label taken from that
+    // arm sends a reader to build loop unrolling for three dispatch rows.
+    //
+    // The label therefore names the disjunction the message carries, dispatch side first, because
+    // that is the side the corpus inhabits. The durable fix is to split the arm at the throw, which
+    // is decidable there from the mnemonic; it is not in this diff because it rewrites three
+    // published markers and so owes a whole-tier bench.
+    key: 'ctr-transfer',
+    label: 'Branches through CTR (an unclaimed jump-table dispatch, or a CTR-counted loop)',
     // `frontend/ppc.ts` refuses a CTR loop at three sites, not one, and the other two are the ones
     // that say the trip count is unrecoverable — a `bdnz` with no reaching `mtctr`, and a body that
     // clobbers CTR. Keyed on the single spelling the artifact carried, both would arrive as
