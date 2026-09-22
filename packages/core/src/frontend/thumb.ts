@@ -2453,9 +2453,9 @@ function auditFrameObjects({
     // acceptance did not fire is as much an attribution as the reason a lift declined, and one
     // sentence covering all of them is how several gaps come to look like one.
     //
-    // THREE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, and the callee's
-    // declared return — and each has a test that fails without it. The rest are marked where they
-    // sit.
+    // FOUR CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an address that
+    // reaches memory rather than a callee, and the callee's declared return — and each has a test
+    // that fails without it. The precautionary ones are marked where they sit.
     const notTheWholeArea = (off: number): string | null => {
       if (objects.size !== 1) {
         return 'another address-taken object shares the frame, so the reservation is not this one alone';
@@ -2464,8 +2464,8 @@ function auditFrameObjects({
         const lowest = [...usedSlotOffsets].sort((a, b) => a - b)[0];
         return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
       }
-      // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not take
-      // three dead lines for three live rules, and knows what would wake each one. They are kept
+      // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not read
+      // three dead lines as live rules, and knows what would wake each one. They are kept
       // because every one of them guards a SILENT wrong answer: storage declared over bytes the
       // object does not own is a frame the recompile lays out differently, with no diagnostic.
       //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
@@ -2488,7 +2488,6 @@ function auditFrameObjects({
       if (!escaped.has(off)) {
         return 'the address never leaves this function, so there is no writer of the storage to size it for';
       }
-
       if (!passedToCallee.has(off)) {
         return 'the address is published rather than passed as an argument, and nothing declares what reads it';
       }
@@ -2702,8 +2701,8 @@ function auditFrameObjects({
     // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
     // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
     // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
-    // is `notTheWholeArea`'s own three live clauses: a second object, a slot inside the area, and
-    // the callee's declared return.
+    // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
+    // that reaches memory rather than a callee, and the callee's declared return.
     if (mayWrite.size > 0) {
       const accountedWords = new Set<number>();
       for (const [off, obj] of extent) {

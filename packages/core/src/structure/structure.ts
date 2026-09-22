@@ -5916,9 +5916,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // spill, is the referee — stamp them then, and `l3/slotorder.ts` needs no change to use it.
       ...[...lastLaddrOf].map(([name, op]) => ({
         name,
-        // `count` elements of `width` bytes (ir/opcodes.ts): a scalar is one element typed by the
-        // access the machine used, and a count above 1 is storage the audit sized but no access
-        // typed, which declares as the `u8 name[count]` the frame reserved.
         type: laddrType(op),
         // the asm materialized this slot's address, and this is how many times it
         // loaded and stored through it — both asm facts, and the gate the

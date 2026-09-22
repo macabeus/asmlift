@@ -6636,7 +6636,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // witness rather than of who was told what: the pair differs in the ASM, not in the context.
   // Not symmetrically, and the asymmetry is asmlift's to carry: m2c's `ctx` spells the RETURN
   // (`struct Blob64 makeblob(const void *);`) and `FnProto` cannot spell a struct return at all,
-  // so asmlift is told strictly less about the one fact the pair turns on.
+  // so asmlift is told strictly less about the one fact the pair turns on. Told it, m2c uses it —
+  // its published `stkextsret` source is `makeblob(/* return */ &sp0, &gBlob);`.
   //
   // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
   // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128
@@ -6652,13 +6653,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // shape `stkextsret` is about needs a struct larger than a word and nothing more; 64 is simply
   // the size the PAIR shares, so that its two targets differ in the call and in nothing else.
   //
-  // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
-  // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
-  // the exception in the other direction: read off the artifact, m2c MATCHES it at score 0. The
-  // out-parameter idiom is one m2c already spells byte-exactly, so nothing in that row's m2c
-  // column is a handicap. MEASURED — m2c
-  // run with `--context` carrying THE ROW'S OWN declaration, its `src` header verbatim, and its
-  // output scored with that same context prepended:
+  // THE m2c SIDE. Every row here but `outparam` is `declined` for m2c on its OWN self-reported
+  // gap — it emits `extern ? gTbl;`, or `extern ? gBlob;` on the two extent rows, and the
+  // `? placeholder` is what the classifier reads. `outparam` is the exception in the other
+  // direction: read off the artifact, m2c MATCHES it at score 0. The out-parameter idiom is one
+  // m2c already spells byte-exactly, so nothing in that row's m2c column is a handicap.
+  // MEASURED over the six array rows — m2c run with `--context` carrying THE ROW'S OWN
+  // declaration, its `src` header verbatim, and its output scored with that same context
+  // prepended:
   //
   //   harr      `return (u32) gTbl[i];`                          score 0, MATCH
   //   arrbias   `return (u32) (gTbl + 1)[i];`                    score 0, MATCH
