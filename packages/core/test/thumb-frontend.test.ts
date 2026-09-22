@@ -142,13 +142,24 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     );
 
     // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
-    // adjacent pair, a LOAD between them (loads leave the flags alone), and a HIGH-register move
-    // (the high-register forms do not set flags — this is agbcc's callee-saved shuffling).
+    // adjacent pair, a LOAD between them (loads leave the flags alone), and a move to a HIGH
+    // register.
     const folds = (mid: string) =>
       dc('ok', `\tcmp\tr0, r1\n${mid}\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`).source;
     expect(folds('')).toContain('if (a0 != a1)');
     expect(folds('\tldr\tr2, [r3]\n')).toContain('if (a0 != a1)');
     expect(folds('\tmov\tr8, r2\n')).toContain('if (a0 != a1)');
+
+    // The guard reads the DESTINATION, so only that half of the high-register form is transparent.
+    // `mov r7, sl` writes no flags on the machine either — Thumb-1 takes the flag-free encoding
+    // whenever EITHER operand is high — and it is a clobber here. Pinned as a DECLINE rather than
+    // quietly left to a comment claiming the opposite: agbcc's callee-saved shuffling is spelled
+    // exactly this way (the row this branch lifted holds seven of them), and the direction of the
+    // error is what makes it sound. 405 such sites across the benchmark's 450 agbcc rows, 0 of
+    // them reached with a compare still live.
+    expect(() => dc('highsrc', `\tcmp\tr0, r1\n\tmov\tr7, sl\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`)).toThrow(
+      /the flags it tests were written by 'mov'/,
+    );
   });
 
   test('a CALL between a cmp and its branch declines loud — the callee left the flags', () => {
@@ -298,6 +309,28 @@ describe('the condition flags reach across a straight-line edge, and across a ru
       expect(() => dc('f', asm)).not.toThrow(/sets the flags/);
       expect(() => dc('f', asm)).not.toThrow(/edges reach it|predecessor/);
     }
+  });
+
+  test('`tst` and `cmn` write the flags too, and the decline names them', () => {
+    // Neither defines a register, so the destination test that judges `sub` cannot see them, and
+    // the decline used to say "nothing in its block sets the flags, and its block has no
+    // predecessor to inherit them from" — both clauses false of four lines of asm, and the second
+    // one sending the reader to a block that does not exist. Counted over the vendored kleod, sa3,
+    // pokeemerald and klonoa checkouts, 115 `.s` sites put a `tst` (99) or a `cmn` (16) on the
+    // line immediately before a conditional branch — blank and comment lines skipped or not, the
+    // number is the same.
+    for (const mn of ['tst', 'cmn']) {
+      expect(() => dc('flagonly', `\t${mn}\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).toThrow(
+        `conditional branch 'bne' has no reaching compare: the flags it tests were written by '${mn}', ` +
+          "and only a compare's are modelled",
+      );
+    }
+    // …and a compare they displace is not folded in behind them. This shape used to emit a
+    // `cond_br` over the stale `cmp` and was loud only because the `opaque` a `tst` mints is
+    // unresolvable — the right answer resting on an accident of an unrelated model.
+    expect(() => dc('stale', `\tcmp\tr0, r1\n\ttst\tr2, r3\n\tbge\t.Ltrue\n${TAIL}`)).toThrow(
+      "the flags it tests were written by 'tst', over the compare that reached it",
+    );
   });
 
   test('a predecessor that ends in a CONDITIONAL branch declines — unbuilt, not unsound', () => {

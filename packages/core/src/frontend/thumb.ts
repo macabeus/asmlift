@@ -338,11 +338,14 @@ type PendingCmp = { lhs: Value; rhs: Value };
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
-// Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
-// — they set flags but define no register, and `cmp` is the very instruction that seeds the pending
-// compare. Loads, stores, push/pop and the high-register forms leave the flags alone. A CALL is
-// not in this set either, and is invalidated separately: `bl` writes no flags itself, but the
-// function it enters does.
+// Used to invalidate a pending compare: see the decode loop. Loads, stores and push/pop leave the
+// flags alone. Three mnemonics that DO write them are absent, each for its own reason, and lumping
+// them under one was how `cmn`/`tst` came to be described as instructions that set no flags:
+//   * `cmp` seeds the pending compare instead of invalidating it — it is the modelled one;
+//   * `cmn`/`tst` write the flags and define no register, so the membership test below (which
+//     reads a destination) cannot judge them — `FLAG_ONLY` does;
+//   * a CALL is not an instruction's flag write at all: `bl` writes none itself, but the function
+//     it enters retires compares of its own, and AAPCS lets it. Invalidated separately.
 const FLAG_SETTING = new Set([
   'mov',
   'movs',
@@ -379,6 +382,21 @@ const FLAG_SETTING = new Set([
   'sbc',
   'sbcs',
 ]);
+
+// The flag writers with no destination to read. `tst`/`cmn` compute a value they throw away and
+// keep only the flags, so `FLAG_SETTING`'s destination test cannot see them — yet they take the
+// flags from a pending compare exactly as `sub` does, and the branch that follows tests THEIRS.
+//
+// Unconditional, unlike `FLAG_SETTING`: neither has a destination whose width could pick a
+// non-flag-setting encoding, and Thumb-1 encodes both on low registers only.
+//
+// They still decode to an `opaque` (the default arm), so a function containing one declines either
+// way and this changes no verdict — only which decline, and the terminator's is the true one.
+// Without it `cmp r0,r1 / tst r2,r3 / bge` FOLDED the stale compare into the condition and was
+// loud solely because the opaque it minted is unresolvable: the right answer resting on an
+// accident of an unrelated model. Making `tst` transparent instead — it defines nothing, so a
+// `tst` no branch reads is dead — is a capability with no row in this corpus to earn it.
+const FLAG_ONLY = new Set(['tst', 'cmn']);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
@@ -3867,11 +3885,24 @@ export function lift(
       // and let the terminator's "no reaching compare" decline fire, naming this instruction — the
       // loud answer, since modelling arithmetic flags is a capability asmlift does not have.
       //
-      // The HIGH-register forms (`mov rD,rH`, `add rD,rH`) do NOT set flags and stay transparent,
-      // which is what keeps agbcc's callee-saved shuffling from tripping this. Measured free: across
-      // every agbcc row in the benchmark, no conditional-branch block has ANY instruction between its
-      // compare and the branch — compilers keep the pair adjacent. The inhabitant this guards is
-      // hand-written asm in the playground, where there is no oracle to catch a lie.
+      // THE TEST BELOW READS THE DESTINATION, AND THAT IS AN OVER-APPROXIMATION, not the ISA rule.
+      // Thumb-1 picks the high-register encoding — which writes no flags — whenever EITHER operand
+      // is high, so `mov r7, sl` and `add r0, r8` are transparent on the machine and a clobber
+      // here. The error's direction is a decline, never a condition on the wrong operands, so it
+      // is sound; it is not free by construction, and `mov rLow, rHigh` is not exotic — it is
+      // literally agbcc's callee-saved shuffling.
+      //
+      // Measured on the population it can reach, by ablating the guard to the operand-wide test:
+      // across the 450 agbcc rows of the benchmark there are 405 such sites, in 62 rows, and 0 of
+      // them are reached with a compare still live — so 0 of the 450 rows change outcome. It costs
+      // nothing today, and what would earn the accurate test is a row where one of those 405 sits
+      // between a compare and its branch. `add rD, sp, #imm` and `add rD, pc, #imm` are the same
+      // over-approximation with the same sign.
+      //
+      // The inhabitant the guard itself exists for is hand-written asm in the playground, where
+      // there is no oracle to catch a lie.
+      //
+      // `tst`/`cmn` take them with no destination to read at all (`FLAG_ONLY`, above).
       //
       // A CALL takes them too, and this is the one flag writer that is not an instruction: `bl`
       // writes no flags, but the function it enters retires compares of its own, and the ABI lets
@@ -3879,7 +3910,7 @@ export function lift(
       // CALLEE's last compare. `cmp r0,r1 / bl f / bge .L` emitted `if (a0 < a1)`: the caller's
       // operands under the callee's flags, with nothing to show it.
       const tookFlags =
-        FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))
+        FLAG_ONLY.has(ins.mnemonic) || (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? '')))
           ? `'${ins.mnemonic}'`
           : ins.mnemonic === 'bl' || ins.mnemonic === 'blx'
             ? 'a call'
