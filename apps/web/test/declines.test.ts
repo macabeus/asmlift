@@ -283,13 +283,18 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //   pic-globals    NOT REACHED, and reachable. 29 of 301 PPC rows read memory through a
   //                  literal-0 base over 110 sites and one of them MATCHES, so the relocated form
   //                  is lifted post-#221 and the PPC arm guards a base no relocation fills. The
-  //                  MIPS arm has no row because every corpus toolchain compiles non-PIC:
-  //                  `-non_shared -G 0` for ido7.1, `-mno-abicalls -fno-PIC -G 0` for
-  //                  gcc2.7.2kmc. That is a flag, not a limit — a synthetic row may set its own
-  //                  `cflags`, and `int gCounter; int f(int n){ gCounter += n; return gCounter; }`
-  //                  at ido7.1 `-mips2 -O2 -32 -KPIC -G 0` emits the GOT prologue and
-  //                  `lw v1,0(gp)`, which declines with this class's message verbatim. The row is
-  //                  owed; it is not impossible.
+  //                  MIPS arm has no row because every corpus toolchain compiles with no
+  //                  small-data threshold: `-non_shared -G 0` for ido7.1,
+  //                  `-mno-abicalls -fno-PIC -G 0` for gcc2.7.2kmc. That is a flag, not a limit —
+  //                  a synthetic row may set its own `cflags` and three already do. With
+  //                  `int gCounter; int tax_gprel(int n){ gCounter += n; return gCounter; }` and
+  //                  ido7.1's canonical set at `-G 8` instead of `-G 0`, the global moves to
+  //                  small data and the body becomes `lw v1,0(gp)` / `addu` / `jr ra` /
+  //                  `sw v0,0(gp)`, both halves carrying `R_MIPS_GPREL16 gCounter`, which
+  //                  declines with this class's message verbatim. `-KPIC -G 0` reaches the same
+  //                  refusal the long way, through the GOT prologue; `-G 8` is the row to write,
+  //                  because it is one token off canonical and has no second cause in it. The row
+  //                  is owed; it is not impossible.
   //
   // Until it exists, the test that keeps both honest is that core still spells the refusal: a class
   // may not outlive the message it classifies.
