@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=181.9s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=91.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -135,6 +135,26 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   the guard off with no output at all (still enumerating the 77,760-candidate row at 25 s, against
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
+
+Summed out of the committed artifact of 2026-09-22: the ranked pass alone is **813 s over 185 real
+rows** and **477 s over 726 synthetic rows**; wall clock was 174.9 s and 195.6 s, and 262.3 s end
+to end because the tiers overlap. THIS TREE WAS BENCHED TWICE AND THE FIRST RUN IS WHY. It walled
+304.5 s and 351.3 s, 491.6 s end to end, and summed 1,281 s and 630 s — the same outcomes, the same
+fan, and a 1.58× swing in the real sum, the second run reading the store the first had warmed. It was re-run for a
+different reason: the first run's artifact carried two `droppedCandidates` on
+`kleod:WorldMapScreenIsValidPath:agbcc` whose error was `Could not read file magic`, objdiff failing
+to read an object rather than anything a decompiler emitted. A scoped re-run of that row alone
+(61.2 s) gave the same 100/207, the same 1,260-candidate fan and no dropped entry, and the second
+whole run carries none on any row — the eleven rows that do carry one all carry a compiler
+REJECTING a candidate, which is a decompiler output and not an IO failure. Transient bad magic under
+eight parallel shards is worth knowing about before a round spends an afternoon attributing one.
+`origin/main`'s artifact reads 1,281 s and 630 s over the same 1,218 rows: `bench diff` against it
+reports **8 field changes, 0 added, 0 removed**, 0 lost and 0 gained, and the fan **unmoved at
+67,331 (1.00×) over 910 comparable rows** with one more row priced here. All eight fields are ONE
+ROW — `kleod:LoadObjects_World2Select:agbcc`, which leaves `declined` for `nonmatch 212/554` because
+a compare now reaches its branch across the block boundary agbcc's literal pool opened. The cost
+list is entirely faster, six rows over 10 s and 1.5× between 0.32× and 0.61×, outcome, score and fan
+unmoved on each. Read the fan, not the seconds.
 
 Summed out of the committed artifact of 2026-09-22: the ranked pass alone is **1,281 s over 184
 real rows** and **630 s over 726 synthetic rows**; wall clock is lower because eight shards run in
@@ -298,7 +318,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 151 s of that real total — **12% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 120 s of that real total — **15% of the tier
 in one row**, over a fan of 30,240 of which 35 are compiled. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
