@@ -229,10 +229,18 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     case 'const':
       return String(e.value);
     case 'addr': {
-      // `&gSym` — the address of a named global. A prefix operator; parenthesizes under a POSTFIX
-      // parent like the other prefix forms. An array's address is the bare name (see `array` on
-      // the node): an identifier binds tighter than every parent, so it never parenthesizes.
-      if (e.array === true) {
+      // `&gSym` — the address of a named global or of a frame-local object. A prefix operator;
+      // parenthesizes under a POSTFIX parent like the other prefix forms.
+      //
+      // AN ARRAY DECAYS INSTEAD, and the declared type is what says so, which is why the decision
+      // is here rather than on the node: `&` on `u8 sp0[16]` spells a `u8 (*)[16]` — a different
+      // type for the same byte, which every typed pointer parameter rejects (`passing arg 1 from
+      // incompatible pointer type`) — where the bare name is the `u8 *` the machine produced.
+      // Compiled both ways, the object is identical, so the `&` buys a diagnostic and nothing
+      // else. An identifier binds tighter than every parent, so the decayed form never
+      // parenthesizes. A name this env cannot type keeps the `&`: an unknown shape is not an
+      // array, and dropping the operator on a scalar would spell its value.
+      if (vt.type(e.name)?.kind === 'array') {
         return e.name;
       }
       const g = `&${e.name}`;

@@ -7,7 +7,7 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
-import { type SFn } from '../src/l3/ast';
+import { type Expr, type SFn } from '../src/l3/ast';
 
 const emit = (locals: SFn['locals']): string =>
   cBackend.emit({ name: 'f', params: [{ name: 'a0', type: T.ptr(T.u(8)) }], locals, retType: T.void(), body: [] });
@@ -40,8 +40,8 @@ test('a struct local declares as the plain prefix form', () => {
 });
 
 test('a pointer PARAMETER binds its star the same way a local does', () => {
-  // the two positions in one signature: a mixed spelling (`u16 * a0` over `u16 *p`) is what
-  // routing only the locals through the declarator produced
+  // the two positions in one signature: routing only the locals through the declarator would
+  // spell one function's pointers two ways (`u16 * a0` over `u16 *p`)
   const out = cBackend.emit({
     name: 'f',
     params: [
@@ -58,4 +58,46 @@ test('a pointer PARAMETER binds its star the same way a local does', () => {
 
 test('a parameter list with no parameters is still `void`', () => {
   expect(cBackend.emit({ name: 'f', params: [], locals: [], retType: T.void(), body: [] })).toContain('f(void)');
+});
+
+// AND THE DECLARATION DECIDES HOW AN ADDRESS IS SPELLED. `&` on an array yields a pointer to the
+// WHOLE array — `u8 (*)[16]`, which every typed pointer parameter rejects — where the bare name is
+// the element pointer the machine produced. That is C declarator grammar rather than anything
+// about the address, so the printer reads it off the name's declared type and the L3 node carries
+// nothing about it. It covers a GLOBAL of array shape for the same reason it covers a local.
+const callWith = (arg: Expr): SFn['body'] => [{ k: 'exprstmt', value: { k: 'call', fn: 'fill', args: [arg] } }];
+
+test('an array local`s address is its bare name', () => {
+  const out = cBackend.emit({
+    name: 'f',
+    params: [],
+    locals: [{ name: 'sp0', type: T.array(T.u(8), 16) }],
+    retType: T.void(),
+    body: callWith({ k: 'addr', name: 'sp0' }),
+  });
+  expect(out).toContain('fill(sp0);');
+});
+
+test('a scalar local`s address keeps the `&`, and so does a name nothing declares', () => {
+  const out = cBackend.emit({
+    name: 'f',
+    params: [],
+    locals: [{ name: 'sp0', type: T.s(32) }],
+    retType: T.void(),
+    body: [...callWith({ k: 'addr', name: 'sp0' }), ...callWith({ k: 'addr', name: 'gUndeclared' })],
+  });
+  expect(out).toContain('fill(&sp0);');
+  expect(out).toContain('fill(&gUndeclared);');
+});
+
+test('an array GLOBAL of known shape decays exactly as a local does', () => {
+  const out = cBackend.emit({
+    name: 'f',
+    params: [],
+    locals: [],
+    globals: [{ name: 'gQueue', type: T.array(T.u(8), 64) }],
+    retType: T.void(),
+    body: callWith({ k: 'addr', name: 'gQueue' }),
+  });
+  expect(out).toContain('fill(gQueue);');
 });
