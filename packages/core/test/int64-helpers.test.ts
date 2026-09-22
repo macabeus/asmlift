@@ -31,18 +31,44 @@ describe('a register pair read as one value', () => {
 });
 
 describe('what refuses', () => {
-  // Both refusals fire on this one function, which is why it is one function: a parameter that is
-  // also used on its own, and an epilogue whose scratch is the high half of the return pair.
+  // `b` is BOTH the shift count and an addend, so it is a word this function uses as a word.
   test('a parameter used on its own is a word, and is not fused into a pair', () => {
     const src = lift('llhalfuse');
     expect(src).toContain('s64 a0, s32 a1');
     expect(src).not.toContain('s64 a1');
   });
 
-  test('a 64-bit return whose high half the epilogue overwrote is not widened', () => {
-    // `pop {r1}; bx r1` leaves r1 holding the return ADDRESS, so it is not the product's high
-    // half and the return stays a word. The witness refutes itself — nothing else has to check.
-    expect(lift('llhalfuse')).toMatch(/^s32 llhalfuse\(/);
+  // THE WIDTH IS THE EPILOGUE'S, and these two functions are the same four instructions apart
+  // from which register the scratch pop names. `pop {r2}` cannot touch the return pair; `pop {r1}`
+  // fills its high register with the return ADDRESS. Nothing in the value graph can tell them
+  // apart, because this frontend models no write for a `pop` at all.
+  test('a pair the epilogue pops over is not a 64-bit return', () => {
+    expect(lift('lomul')).toBe('s32 lomul(s64 a0, s64 a1) {\n    return (s32)(a0 * a1);\n}\n');
+  });
+
+  test('…and the twin that pops elsewhere still is one', () => {
+    expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
+  });
+
+  // A CALL DESTROYS THE HIGH HALF WITHOUT NAMING IT — r1 is caller-saved. agbcc cannot build this
+  // shape (a 64-bit return keeps both halves across the call; a 32-bit one carries the epilogue
+  // above), so the inhabitant is hand-written asm, which is what the playground lifts.
+  test('a call between the pair and the return takes the high half with it', () => {
+    const handWritten = [
+      '\t.code\t16',
+      '\t.globl\tlokeep',
+      '\t.thumb_func',
+      'lokeep:',
+      '\tpush\t{r4, lr}',
+      '\tbl\t__muldi3',
+      '\tadd\tr4, r0, #0',
+      '\tbl\tsink',
+      '\tadd\tr0, r4, #0',
+      '\tpop\t{r4}',
+      '\tpop\t{pc}',
+      '',
+    ].join('\n');
+    expect(decompile('lokeep', handWritten, ARMV4T_AGBCC).source).toMatch(/^s32 lokeep\(/);
   });
 });
 

@@ -2,11 +2,15 @@
 @   s64 llmul(s64 a, s64 b){ return a*b; }
 @   s64 llmulw(s32 a, s32 b){ return (s64)a*(s64)b; }
 @   s32 llhalfuse(s64 a, s32 b){ return (s32)(a>>b) + b; }
+@   s32 lomul(s64 a, s64 b){ return (s32)(a*b); }
 @
 @ The third one is why the parameter fusion needs its second condition: `b` is BOTH the shift
-@ count and an addend, so it is a word this function uses as a word — and the epilogue pops its
-@ scratch into r1, which is the high half of a 64-bit return pair, so the widened return refutes
-@ itself there.
+@ count and an addend, so it is a word this function uses as a word.
+@
+@ THE LAST TWO ARE THE WIDTH PAIR, and they differ in one register. `llmul` returns the pair and
+@ pops its scratch into r2; `lomul` returns a word and pops into r1, which is the pair's high
+@ register — so the epilogue is where the return width is written down, and the two are otherwise
+@ the same four instructions.
 	.code	16
 .gcc2_compiled.:
 .text
@@ -54,3 +58,14 @@ llhalfuse:
 	bx	r1
 .Lfe3:
 	.size	 llhalfuse,.Lfe3-llhalfuse
+	.align	2, 0
+	.globl	lomul
+	.type	 lomul,function
+	.thumb_func
+lomul:
+	push	{lr}
+	bl	__muldi3
+	pop	{r1}
+	bx	r1
+.Lfe4:
+	.size	 lomul,.Lfe4-lomul

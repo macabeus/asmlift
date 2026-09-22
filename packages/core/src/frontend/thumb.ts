@@ -423,6 +423,37 @@ function expandRegList(tokens: string[]): string[] {
   return out;
 }
 
+// Whether an instruction so much as NAMES a register, in every operand spelling this ISA's asm
+// uses for one. TWO SPELLINGS OF ONE INSTRUCTION MUST NOT GIVE TWO VERDICTS, which is the whole
+// reason this is one function and not a test written out per caller, and it takes both halves:
+//
+//   • RANGE-EXPANDED first, because a range spells none of the registers it touches. `pop {r0-r3}`
+//     writes r2 with the string `r2` nowhere in the instruction, so a bare `\bR\b` test let a dead
+//     capture survive the `pop` that destroyed it — the acceptance below fired on a frame that
+//     really did stage an outgoing argument, and the lift dropped all five of that call's
+//     arguments.
+//   • CASE-INSENSITIVE on both halves, because GNU as accepts `R1`. The `toLowerCase` is a belt to
+//     `upperCaseRegIn`'s braces: nothing upper-case should reach here, and an acceptance is the
+//     wrong place to depend on that.
+//
+// The word-boundary fallback covers the operand forms the token split does not reach.
+//
+// Its two callers are ACCEPTANCES — `frameBasePassedToCallee` and `wideReturn` — so they may never
+// over-approximate, and both want the same blunt answer for the same reason: over-killing costs a
+// decline, under-killing costs a wrong value. MENTION, not "writes": a `cmp` on the register ends
+// both walks, which is the direction that is safe to be wrong in.
+function mentionsReg(ins: { ops: string[] }, r: string): boolean {
+  const tokens = expandRegList(
+    ins.ops
+      .join(' ')
+      .toLowerCase()
+      .replace(/[[\]{}!#]/g, ' ')
+      .split(/[,\s]+/)
+      .filter(Boolean),
+  );
+  return tokens.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o));
+}
+
 // Expand a register list and vouch that every entry is a DEFINITE register, or return null.
 //
 // ONE validation for every consumer, because the hand-rolled versions had drifted to unequal
@@ -3193,14 +3224,16 @@ export function lift(
     // than reading the two halves out of registers that do not hold them.
     return wordsOf(h.params) <= target.argRegs.length ? h : null;
   };
-  // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects. A pair that goes straight back
-  // out as one — a helper's result becoming the next helper's argument — re-fuses to the value
-  // itself instead of rebuilding a `concat` nothing above it would recognise.
-  const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi' }>();
-  const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi'): Value => {
+  // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects, and the INSTRUCTION that put
+  // the pair in registers. A pair that goes straight back out as one — a helper's result becoming
+  // the next helper's argument — re-fuses to the value itself instead of rebuilding a `concat`
+  // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
+  // since the question it asks is about the machine rather than about the value graph.
+  const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi'; at: Instr }>();
+  const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
     const v = mkValue(T.unk(32));
     irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
-    halfOf.set(v, { whole, half });
+    halfOf.set(v, { whole, half, at });
     return v;
   };
   const fuseHalves = (irb: Block, lo: Value, hi: Value): Value => {
@@ -3213,18 +3246,51 @@ export function lift(
     irb.ops.push(mkOp('concat', { operands: [lo, hi], results: [v] }));
     return v;
   };
-  /** The 64-bit value a `ret` is really returning, or null. A POSITIVE witness off the value graph:
-   *  the return register holds the low half of some `v` and the pair's high register holds that same
-   *  `v`'s high half. It refutes itself where the machine says so — an agbcc epilogue that pops its
-   *  scratch into the high register leaves that register holding the return ADDRESS, so the second
-   *  read is not a `hi32` and the return stays 32 bits wide. */
+  /** The 64-bit value a `ret` is really returning, or null. The return register has to hold the LOW
+   *  half of some `v`, and the pair's high register has to still hold that same `v`'s high half when
+   *  the function returns.
+   *
+   *  THE SECOND HALF IS READ OFF THE ASM, NOT OFF THE VALUE GRAPH, because the frame is transparent
+   *  to it. `push {lr}; bl __muldi3; pop {r1}; bx r1` pops the RETURN ADDRESS into r1 and this
+   *  frontend models no write for a `pop` at all, so a register read there still answers `hi32` —
+   *  and that is not a corner: it is how agbcc spells a 32-bit-returning function's interworking
+   *  epilogue. The 64-bit-returning twin pops into r2 instead, precisely because it may not touch
+   *  the pair. So the epilogue's choice of scratch register is what pins the width, and the only
+   *  place that fact exists is the instructions.
+   *
+   *  A CALL KILLS IT WITHOUT NAMING IT: the high register is caller-saved, so a `bl` between the
+   *  pair and the return destroys the high half while mentioning nothing. agbcc cannot build that
+   *  shape — a function that returns 64 bits keeps both halves across the call, and one that
+   *  returns 32 has the discriminating epilogue above — so the witness for this arm is hand-written
+   *  asm, which the playground lifts and no oracle referees.
+   *
+   *  BLOCK-LOCAL, like every other acceptance here. A pair produced in another block reaches this
+   *  return through phis that the frame ops are equally invisible to, so there is no answer to give
+   *  and `indexOf` refusing to find the site is the whole of that condition.
+   *
+   *  WHERE THE EPILOGUE DOES NOT DISCRIMINATE, THE WIDTH IS NOT PINNED, and this widens. Without
+   *  `-mthumb-interwork` both spellings compile to `push {lr}; bl __muldi3; pop {pc}`, byte for
+   *  byte: nothing in that function distinguishes them, so what is published recompiles to the
+   *  target either way and only a PROTOTYPE copied out of it can be wrong. Every agbcc row in the
+   *  corpus carries `-mthumb-interwork`. */
   const wideReturn = (lo: Value, bi: number): Value | null => {
     const a = halfOf.get(lo);
     if (a?.half !== 'lo') {
       return null;
     }
-    const b = halfOf.get(readVar(target.argRegs[1], bi));
-    return b?.half === 'hi' && b.whole === a.whole ? a.whole : null;
+    const hi = target.argRegs[1];
+    const instrs = asmBlocks[bi].instrs;
+    const from = instrs.indexOf(a.at);
+    if (from < 0) {
+      return null;
+    }
+    for (const ins of instrs.slice(from + 1)) {
+      const call = ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
+      if ((call && callClobbers.includes(hi)) || mentionsReg(ins, hi)) {
+        return null;
+      }
+    }
+    return a.whole;
   };
 
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
@@ -3267,24 +3333,13 @@ export function lift(
             ? reg(ins.ops[0] ?? '')
             : null;
         // The OPERAND TOKENS, not the mnemonic: `asWritten` carries only the normalised mnemonic,
-        // so the operands are the only place a written register can appear — and they are
-        // RANGE-EXPANDED first, because a range spells none of the registers it writes. `pop
-        // {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, so the bare `\bR\b`
-        // test let a dead capture survive the `pop` that destroyed it, the acceptance fired on a
-        // frame that really did stage an outgoing argument, and the lift dropped all five of that
-        // call's arguments. Two spellings of one instruction must not give two verdicts. The
-        // `toLowerCase` is the belt to `upperCaseRegIn`'s braces: nothing upper-case reaches this
-        // function, and an acceptance is the wrong place to depend on that.
-        const mentions = expandRegList(
-          ins.ops
-            .join(' ')
-            .toLowerCase()
-            .replace(/[[\]{}!#]/g, ' ')
-            .split(/[,\s]+/)
-            .filter(Boolean),
-        );
+        // so the operands are the only place a written register can appear. `mentionsReg` owns how
+        // one is spotted, including the range expansion — `pop {r0-r3}` writes r2 with the string
+        // `r2` nowhere in the instruction, and a dead capture surviving that `pop` made this
+        // acceptance fire on a frame that really did stage an outgoing argument, dropping all five
+        // of that call's arguments.
         for (const r of [...held]) {
-          if (mentions.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o))) {
+          if (mentionsReg(ins, r)) {
             held.delete(r);
           }
         }
@@ -4606,8 +4661,8 @@ export function lift(
             // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
             // named here and neither is in the clobber set — which is the acceptance arm of the
             // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
-            writeData(target.returnReg, bi, projectHalf(irb, res, 'lo'));
-            writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi'));
+            writeData(target.returnReg, bi, projectHalf(irb, res, 'lo', ins));
+            writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi', ins));
             ssa.noteCall(bi, pairReturnClobbers);
             break;
           }
