@@ -276,6 +276,30 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Unmodelled store-class instructions (a non-FPU store)',
     pattern: /unmodelled store-class/,
   },
+  {
+    // A 64-bit value reaching an ordinary callee's argument list. `Prototypes` counts argument
+    // REGISTERS, so a header's `void sink(long long)` and `void sink(int)` are the same fact by the
+    // time the frontend reads them, and both answers it could give — the low half alone, or the two
+    // halves as two words — recompile to the `bl` being lifted. What closes it is a parameter
+    // vocabulary that carries WIDTHS across that boundary, which today only the runtime-helper
+    // table has.
+    key: 'wide-call-arg',
+    label: 'A 64-bit value handed to a call (no width in the prototype)',
+    pattern: /half of a 64-bit value/,
+  },
+  {
+    // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody
+    // decoded, but a call into the compiler's own runtime that no recognizer folded into the
+    // operation it computes. It is a REFUSAL rather than a miss — re-emitting `__div2i(a, b)` as
+    // source recompiles to the `bl __div2i` it was lifted from, so the alternative is a row that
+    // scores the broken candidate exactly as it scores the right one.
+    //
+    // Its rows are the mwcc 64-bit family: the PPC frontend does not yet read a register PAIR at a
+    // call, so `raise/widehelpers.ts` declines on arity and this is what it declines to.
+    key: 'runtime-helper',
+    label: "Runtime-helper calls with no model (a compiler's own libcall)",
+    pattern: /no model for the runtime helper/,
+  },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
   // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an
   // `opaque` makes its block impure, so a shape recognizer refuses and the message names the SHAPE

@@ -762,9 +762,17 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // the `adc` marker that has been masking the wrong value beside it on
   // `pokeemerald:MathUtil_Mul32:agbcc`, so the row moves to it the next time the artifact is
   // regenerated — and this entry comes out with the same commit that regenerates it.
-  const NO_ROWS = ['branch-form', 'branch-likely', 'clobbered-value', 'cross-block-flags-arm', 'store-class'];
+  const NO_ROWS = [
+    'branch-form',
+    'branch-likely',
+    'clobbered-value',
+    'cross-block-flags-arm',
+    'runtime-helper',
+    'store-class',
+    'wide-call-arg',
+  ];
 
-  test('every other class is inhabited, and exactly these five are not', () => {
+  test('every other class is inhabited, and exactly these seven are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
@@ -843,7 +851,7 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 62 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -876,6 +884,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'carries a small-data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
+    ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -1005,6 +1015,10 @@ describe('the classifier is measured against the messages core can throw, not on
     // is shared with a different capability (flags written by arithmetic or a call). Both halves
     // are pinned above, and the shapes themselves are pinned in `thumb-frontend.test.ts`.
     'cross-block-flags-arm': 'thumb.ts interpolates the reason, and the class keys on the reason',
+    // Same shape, one layer down: `l3/ast.ts`'s `gapReasonFor` builds this one and `structure.ts`
+    // writes it into a marker, which `pipeline.ts` then interpolates into its throw. Pinned by hand
+    // in `SPELT_BY` against the file that spells it, as `opaque-ops`'s sibling phrase is.
+    'runtime-helper': "l3/ast.ts's gapReasonFor builds the reason; the throw interpolates it",
   };
 
   test('every class matches a message core can throw', () => {
