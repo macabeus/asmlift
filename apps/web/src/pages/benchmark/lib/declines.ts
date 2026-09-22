@@ -20,7 +20,7 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 308 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
@@ -30,13 +30,16 @@
 // `packages/core/src` throws 118 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 68 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 70 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts   24  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts   26  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
-//                           base in the list, control falling off the end
+//                           base in the list, control falling off the end, a register spelled in
+//                           upper case, and the reaching-compare throw whose reason is
+//                           interpolated (`cross-block-flags-arm` keys on one of its reasons, so
+//                           the template with a placeholder in it matches nothing)
 //   structure.ts        16  eleven loop and post-loop naming refusals beside the two
 //                           `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
@@ -68,7 +71,7 @@
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 253 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 252 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
@@ -159,15 +162,22 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // THE ARM SIDE, and the leftovers of a capability that landed rather than one that is missing —
-    // the same reading `branch-likely` below asks for. Thumb carries a compare across a single
-    // straight-line edge into a block with one predecessor, so what still refuses is what that
-    // model leaves over: two edges into the block, a back edge, an edge leaving a conditional
-    // branch or a jump-table dispatch, a predecessor whose compare did not survive to its last
-    // instruction, and a compare the block itself overwrote. No compiled row in the corpus reaches
-    // any of them, so the class reads 0; deleting it would assert that nothing is left.
+    // the same reading `branch-likely` below asks for. Thumb carries a compare across a run of
+    // straight-line edges into blocks with one predecessor each, so what still refuses is what that
+    // model leaves over: two edges into the block, no predecessor at all, a back edge, an edge
+    // leaving a conditional branch or a jump-table dispatch, and a predecessor whose compare did
+    // not survive to its last instruction. No compiled row in the corpus reaches any of them, so
+    // the class reads 0; deleting it would assert that nothing is left.
+    //
+    // KEYED ON THE REASON, not on the headline, and that is the whole point. The same throw also
+    // fires when the flags a branch tests were written by ARITHMETIC or by a call — a different
+    // capability entirely, and one no edge model would move. `/no reaching compare: /` caught it
+    // and filed it under a label that says "across an edge", which is the over-claim the
+    // `stack-frames` class was fixed for. Arithmetic flags have no row, so they stay in the
+    // residue the header paragraph names rather than take a class of their own.
     key: 'cross-block-flags-arm',
     label: 'Condition flags across an edge (ARM) — residual shapes only',
-    pattern: /no reaching compare: /,
+    pattern: /no reaching compare: nothing in its block sets the flags/,
   },
   {
     // THE LEFTOVER SHAPES OF A CAPABILITY THAT LANDED, not a capability that is missing — the one
