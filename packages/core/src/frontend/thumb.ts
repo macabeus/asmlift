@@ -318,6 +318,12 @@ const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp:
 // a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
 const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
 
+/** The operands of a `cmp` whose flags are still live — the whole of the condition state this
+ *  frontend models, and what a conditional branch folds into its `cond_br`. ARM/Thumb writes one
+ *  implicit flags register, so there is one of these at a time (PowerPC's eight `cr` fields are a
+ *  map of them: see `cmpDef` in ppc.ts). */
+type PendingCmp = { lhs: Value; rhs: Value };
+
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
 // Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
@@ -3647,7 +3653,11 @@ export function lift(
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   const fillBlock = (ab: AsmBlock, bi: number) => {
     const irb = irBlocks[bi];
-    let pendingCmp: { lhs: Value; rhs: Value } | null = null;
+    let pendingCmp: PendingCmp | null = null;
+    // Why there are no flags to fold, kept alongside the `null` that says there are none. A block
+    // that made a compare and then overwrote it is a different gap from one that never had a
+    // compare at all, and a single message for both makes two gaps read as one.
+    let noCmpWhy = 'nothing in its block sets the flags, and they are not carried across a block boundary';
     // Tracks the frame through this block's linear instruction order. Meaningful for the entry
     // block; elsewhere a `[sp,#N]` access declines. Both dependencies are read HERE rather than
     // closed over: `preds` is final long before the first `fillBlock` runs, so the boolean is the
@@ -3731,8 +3741,8 @@ export function lift(
       // assembler picks the flag-setting encoding) — so an instruction between a `cmp` and its branch
       // REPLACES the flags the branch will test. Folding the earlier `cmp` in anyway would emit a
       // condition on the wrong operands: silently wrong C with no marker. Drop the pending compare
-      // and let the terminator's existing "no reaching compare in its block" decline fire — the loud
-      // answer, since modelling arithmetic flags is a capability asmlift does not have.
+      // and let the terminator's "no reaching compare" decline fire, naming this instruction — the
+      // loud answer, since modelling arithmetic flags is a capability asmlift does not have.
       //
       // The HIGH-register forms (`mov rD,rH`, `add rD,rH`) do NOT set flags and stay transparent,
       // which is what keeps agbcc's callee-saved shuffling from tripping this. Measured free: across
@@ -3740,6 +3750,9 @@ export function lift(
       // compare and the branch — compilers keep the pair adjacent. The inhabitant this guards is
       // hand-written asm in the playground, where there is no oracle to catch a lie.
       if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
+        if (pendingCmp) {
+          noCmpWhy = `the compare in its block was clobbered by '${ins.mnemonic}'`;
+        }
         pendingCmp = null;
       }
       frame.step(ins);
@@ -4337,10 +4350,10 @@ export function lift(
       irb.ops.push(mkOp('br', { successors: [succ(last.ops[0])] }));
     } else if (kind === 'cond') {
       // `pendingCmp` is block-local; a `cmp` split from its branch by a label means the flags
-      // cross a block boundary — not modelled. Decline loud.
+      // cross a block boundary — not modelled. Decline loud, naming which gap this is.
       if (!pendingCmp) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare in its block`,
+          `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare: ${noCmpWhy}`,
         );
       }
       const cond = mkValue(T.unk(32));

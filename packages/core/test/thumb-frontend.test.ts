@@ -91,7 +91,7 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     // The label between `cmp` and `bge` splits the block, so the branch has no reaching compare in
     // its own block. Must be the DESIGNED FrontendUnsupportedError, not a null-deref crash.
     const body = '\tcmp\tr0, r1\n.Lmid:\n\tbge\t.Ltrue\n\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('splitcmp', body)).toThrow(/no reaching compare/);
+    expect(() => dc('splitcmp', body)).toThrow(/no reaching compare: nothing in its block sets the flags/);
   });
 
   test('a flag-setting instruction between a cmp and its branch declines loud', () => {
@@ -99,10 +99,11 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     // flags, `s`-suffix or not (agbcc spells `adds r0,r0,r3` as `add r0,r0,r3` and the assembler
     // picks the flag-setting encoding). So the `add` below REPLACES the flags `beq` tests: folding
     // the earlier `cmp` in emitted `if (a0 != a1)` where the hardware branches on `r0 + 1 == 0`.
-    // Silent wrong C — now the same loud decline the label-split case above gets.
+    // Silent wrong C — now a loud decline that names the instruction that took the flags.
     const clobbered =
       '\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('flagclobber', clobbered)).toThrow(/no reaching compare/);
+    expect(() => dc('flagclobber', clobbered)).toThrow(/no reaching compare: the compare in its block/);
+    expect(() => dc('flagclobber', clobbered)).toThrow(/clobbered by 'add'/);
 
     // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
     // adjacent pair, a LOAD between them (loads leave the flags alone), and a HIGH-register move
