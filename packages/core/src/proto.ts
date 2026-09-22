@@ -107,9 +107,14 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
  *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
  *
  *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
- *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. */
+ *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The
+ *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
+ *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
+ *  here, and a raw TypeError would leave through neither the decline channel nor anything a
+ *  caller can act on. Every other reader of this table — `protoArity`, and `declaredCall`
+ *  through it — answers "nothing is declared" for such an entry, and so does this. */
 export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
-  if (Object.hasOwn(prototypes, callee) && prototypes[callee].returnsVoid === true) {
+  if (Object.hasOwn(prototypes, callee) && prototypes[callee]?.returnsVoid === true) {
     return true;
   }
   if (!Object.hasOwn(STANDARD_SIGNATURES, callee)) {
