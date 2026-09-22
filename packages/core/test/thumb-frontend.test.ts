@@ -379,6 +379,30 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     expect(dc('laidout', laidOut).source).toContain(FOLDED);
   });
 
+  test('a case block of a JUMP TABLE names the dispatch, not the bounds branch', () => {
+    // The one arm of `inheritedCmp` that had no test, and the ablation says something different
+    // from what it looks like it says. A case block DOES have exactly one predecessor — the bounds
+    // block, whose successors `buildCfg` replaces with the case labels — so without an arm of its
+    // own its `bge` would fold the `cmp r1, #0x1` that selected the case. It does not, and it would
+    // not even with this arm deleted: `recoverJumpTable` only recognises a table whose bounds block
+    // ends in `bhi`/`bls`, so the conditional-branch arm below catches every block in `tables`
+    // anyway. Ablated, this fixture declines with "it leaves 'jtcase' through a conditional
+    // branch".
+    //
+    // So the arm buys a TRUER SENTENCE, not a verdict: the edge into a case is a switch edge, and
+    // the bounds guard is not the branch that made it. Worth keeping and worth saying, but not
+    // worth claiming a wrong answer for — the soundness here is the conditional-branch arm's.
+    const table =
+      '\tcmp\tr1, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
+      '\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '.Lc0:\n\tbge\t.Ltrue\n\tmov\tr0, #10\n\tbx\tlr\n' +
+      '.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n' +
+      `${TAIL}\t.align 2\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n`;
+    expect(() => dc('jtcase', table)).toThrow(
+      "no compare crosses the edge into '.Lc0': it leaves the jump-table dispatch in 'jtcase'",
+    );
+  });
+
   test('a branch with no compare anywhere still declines, and says so', () => {
     expect(() => dc('nocmp', `\tbge\t.Ltrue\n${TAIL}`)).toThrow(
       "no compare reaches 'nocmp', and it has no predecessor to inherit any from",

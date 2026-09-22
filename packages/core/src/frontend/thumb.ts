@@ -3794,6 +3794,11 @@ export function lift(
     if (carried === undefined) {
       return `no compare crosses the edge into '${here}': its only predecessor '${pb.label}' is lifted after it`;
     }
+    // A REFINEMENT OF THE ARM BELOW, not a second guarantee. `recoverJumpTable` only recognises a
+    // table whose bounds block ends in `bhi`/`bls`, so every key of `tables` also answers `cond`
+    // and deleting this would cost the sentence, never the verdict. It earns its place on the
+    // sentence alone: the edge into a case is a switch edge, and the bounds guard is not the
+    // branch that made it. `thumb-frontend.test.ts` runs that ablation rather than asserting it.
     if (tables.has(pb)) {
       return `no compare crosses the edge into '${here}': it leaves the jump-table dispatch in '${pb.label}'`;
     }
