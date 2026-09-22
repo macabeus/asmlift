@@ -330,6 +330,35 @@ describe('the audit judges each frame object on its own bytes', () => {
       ).toThrow(/`makeblob` takes it at argument 0 and nothing says what that callee returns/);
     });
 
+    // WHERE THE ADDRESS WENT ACQUITS A CALL, not an object. A hidden return pointer is argument 0
+    // and nothing else, so a call that took the buffer at argument 1 cannot be one whatever it
+    // returns — and a second call that took it at argument 0 is left exactly as ambiguous.
+    test('a buffer handed over at argument 1 needs no statement about the return', () => {
+      // `void f(void *dst){ u8 b[0x10]; g(dst, b, sizeof b); }`. `g` is declared with an arity and
+      // nothing else: three parameters place the buffer at argument 1, and what `g` returns stays
+      // unsaid because no hidden pointer is ever passed there.
+      const atArg1 = copy('\tmov\tr1, sp\n\tmov\tr2, #0x10\n\tbl\tg\n');
+      expect(decompile('f', atArg1, ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } }).source).toContain(
+        'u8 sp0[16];',
+      );
+    });
+
+    test('…and a second call taking it at argument 0 is still unaccounted for', () => {
+      const alsoAtArg0 = copy('\tmov\tr1, sp\n\tmov\tr2, #0x10\n\tbl\tg\n\tmov\tr0, sp\n\tbl\th\n');
+      expect(() => decompile('f', alsoAtArg0, ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } })).toThrow(
+        /`h` takes it at argument 0 and nothing says what that callee returns/,
+      );
+    });
+
+    test('an address that only reaches memory says so, and is not called an argument', () => {
+      // published to a global and handed to no callee: nothing declares what reads it, which is a
+      // different gap from a callee whose return is unknown, and reads as a different refusal
+      const published =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tldr\tr3, .L2\n\tmov\tr2, sp\n\tstr\tr2, [r3]\n' +
+        '\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\tgPtr\n';
+      expect(() => lift(published)).toThrow(/the address is published rather than passed as an argument/);
+    });
+
     test('a ONE-WORD frame reaches the extent rule through both arms, and declares its bytes', () => {
       // the reserved area is one word, so `capturedObjectIsTheWholeFrame` holds AND the object
       // has no access of its own — the two arms ask the same question of the same callee and the
@@ -341,7 +370,7 @@ describe('the audit judges each frame object on its own bytes', () => {
       // the one-word arm asks first, so ITS refusal is the one that fires — the same fact, named
       // at the earlier site
       expect(() => decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'] } } })).toThrow(
-        /the one-word frame is handed to a callee as argument 0 and never written here/,
+        /the one-word frame is never written here, and `fill` takes it at argument 0/,
       );
       expect(
         decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'], returnsVoid: true } } })

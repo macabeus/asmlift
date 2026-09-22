@@ -2266,15 +2266,13 @@ function auditFrameObjects({
     // `volatile` at the stamp keys on. Reading either off `escaped` gets the other one wrong.
     const passedToCallee = new Set<number>();
     const published = new Set<number>();
-    // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
-    // struct-return pointer can occupy. A `call`'s operand index IS the argument index here (the
-    // `bl` arm reads r0..r<argc-1> in order), so an address handed over at r1 or above is an
-    // argument the source wrote.
-    const passedAboveArg0 = new Set<number>();
-    // …and WHICH CALLEE took it at argument 0, because that callee's declared RETURN TYPE is the
-    // one fact that tells an out-parameter from a hidden struct return. `null` is the narrowing of
-    // an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and reads as a
-    // callee nothing can be declared about, so it refuses.
+    // …and WHICH CALLEE took it at ARGUMENT 0, because that is the one position a hidden
+    // struct-return pointer can occupy and that callee's declared RETURN TYPE is the one fact that
+    // tells an out-parameter from one. A `call`'s operand index IS the argument index here (the
+    // `bl` arm reads r0..r<argc-1> in order), so an address that appears in no entry of this map
+    // was handed over at r1 or above every time — an argument the source wrote. `null` is the
+    // narrowing of an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and
+    // reads as a callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
     for (const off of objects.keys()) {
       accesses.set(off, []);
@@ -2315,9 +2313,7 @@ function auditFrameObjects({
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
-              if (idx > 0) {
-                passedAboveArg0.add(off);
-              } else {
+              if (idx === 0) {
                 const t = op.attrs.target;
                 const cs = arg0Callees.get(off) ?? new Set<string | null>();
                 cs.add(typeof t === 'string' ? t : null);
@@ -2352,14 +2348,20 @@ function auditFrameObjects({
     // sp,#-4 / mov r0,sp / bl mk / ldr r0,[sp]`, instruction for instruction an out-parameter
     // call. Left alone that lifted as `mk(&sp0, a0)` — a call the real prototype rejects.
     //
-    // THREE facts rule it out and any one will do, because a return temp is storage the CALLEE
-    // owns outright: it is written only by the callee, its pointer is argument 0, always
-    // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
-    // up), and the callee RETURNS the struct THROUGH IT. So a store of our own says the object is
-    // one this function fills; an address handed over at r1 or above says the same by position;
-    // and a callee whose RETURN is known to need no hidden pointer says it by the ABI — a
-    // function that returns nothing, or returns in a register, has no such pointer to be given,
-    // whatever sits in r0.
+    // TWO facts rule it out and either will do, because a return temp is storage the CALLEE owns
+    // outright: it is written only by the callee, and the callee RETURNS the struct THROUGH IT.
+    // So a store of our own says the object is one this function fills; and a callee whose RETURN
+    // is known to need no hidden pointer says the same by the ABI — a function that returns
+    // nothing, or returns in a register, has no such pointer to be given, whatever sits in r0.
+    //
+    // AND THE QUESTION IS PER-CALL, which is what bounds how far it has to be asked: the pointer
+    // is argument 0, always (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all
+    // three real arguments up), so an address NO call takes at argument 0 cannot be one, whatever
+    // else the function does with it. That is the whole of `hiddenReturnPointerStands` below and
+    // it is why the block-copy idiom `memcpy(dst, buf, sizeof buf)` — buffer at argument 1 — needs
+    // no declaration at all. Per-call and not per-object: an address handed over at argument 1
+    // somewhere leaves the call that takes it at argument 0 exactly as ambiguous as before, so
+    // position acquits a call rather than an object.
     //
     // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
     // switches off on something other than the instruction stream. `returnsWithoutHiddenPointer`
@@ -2396,12 +2398,22 @@ function auditFrameObjects({
     // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
     // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
     // still declines with it.
-    const arg0NoHiddenReturnPointer = (off: number): boolean => {
+    //
+    // ONE SOURCE FOR THE DECISION AND ITS REASON, because both arms of this audit ask it and a
+    // predicate beside a message is two things that can disagree. Returns why the pointer is not
+    // ruled out — the caller frames it for its own arm — or null.
+    const hiddenReturnPointerStands = (off: number): string | null => {
       const cs = arg0Callees.get(off);
+      if (cs === undefined || cs.size === 0) {
+        return null;
+      }
+      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
+      if (unknown.length === 0) {
+        return null;
+      }
       return (
-        cs !== undefined &&
-        cs.size > 0 &&
-        [...cs].every((c) => c !== null && returnsWithoutHiddenPointer(c, prototypes))
+        `\`${unknown.map((c) => c ?? '?').join('`, `')}\` takes it at argument 0 and nothing says ` +
+        'what that callee returns — a struct returned through a hidden pointer is handed this same frame'
       );
     };
     if (capturedObjectIsTheWholeFrame) {
@@ -2411,12 +2423,10 @@ function auditFrameObjects({
             'no call in the lifted function takes it — so nothing rules out an outgoing stack argument at [sp,#0]',
         );
       }
-      if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0) && !arg0NoHiddenReturnPointer(0)) {
-        fail(
-          'the one-word frame is handed to a callee as argument 0 and never written here, which ' +
-            'is how a hidden struct-return pointer looks — and nothing says what the callee returns, so ' +
-            'nothing says it does not own the storage',
-        );
+      const writtenHere = accesses.get(0)?.some((a) => !a.isLoad) === true;
+      const whyItStands = writtenHere ? null : hiddenReturnPointerStands(0);
+      if (whyItStands !== null) {
+        fail(`the one-word frame is never written here, and ${whyItStands}`);
       }
     }
 
@@ -2480,21 +2490,12 @@ function auditFrameObjects({
         return 'the address never leaves this function, so there is no writer of the storage to size it for';
       }
 
-      const callees = arg0Callees.get(off);
-      if (callees === undefined || callees.size === 0) {
+      if (!passedToCallee.has(off)) {
         return 'the address is published rather than passed as an argument, and nothing declares what reads it';
       }
-      // A hidden struct-return pointer is passed in argument 0 too, and the same declaration that
-      // rules it out for a one-word frame rules it out here — the frame's SIZE changes nothing
-      // about whose storage it is.
-      const unknown = [...callees].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
-      if (unknown.length > 0) {
-        return (
-          `\`${unknown.map((c) => c ?? '?').join('`, `')}\` takes it at argument 0 and nothing says ` +
-          'what that callee returns — a struct returned through a hidden pointer is handed this same frame'
-        );
-      }
-      return null;
+      // The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question
+      // is the one the one-word arm asks, asked here of the same callees.
+      return hiddenReturnPointerStands(off);
     };
 
     // The SHAPE of each object — `count` elements of `width` bytes, spanning `width * count` —

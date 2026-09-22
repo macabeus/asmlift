@@ -1222,9 +1222,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tbl\tuse2\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(/hidden struct-return pointer/);
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(
+        /a struct returned through a hidden pointer is handed this same frame/,
+      );
       expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } })).toThrow(
-        /hidden struct-return pointer/,
+        /a struct returned through a hidden pointer is handed this same frame/,
       );
       // CONTROLS, one per fact. A store of OURS before the call is an in-out parameter no struct
       // return can be…
@@ -1260,7 +1262,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       const declines = (prototypes: Record<string, { params?: number; returnsVoid?: boolean }>) =>
         expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes })).toThrow(
-          /nothing says what the callee returns/,
+          /nothing says what that callee returns/,
         );
       declines({});
       declines({ mk: { params: 2 } });
@@ -1285,7 +1287,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
       // Told the truth (or told nothing), it declines — the guard doing its job.
       expect(() => decompile('sret', realStructReturn, ARMV4T_AGBCC, { prototypes: {} })).toThrow(
-        /nothing says what the callee returns/,
+        /nothing says what that callee returns/,
       );
       // Told that `mk` returns nothing, it believes the manifest and models the callee's own
       // storage as this function's local. The argument goes too, because the same entry fixes the
@@ -1298,8 +1300,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(wrong).not.toContain('mk(&sp0, a0)');
     });
 
-    // TWO callees at argument 0 and only one declared: the ambiguity stands for the object, so the
-    // whole lift refuses. The rule is per OBJECT, not per call — one register file, one decision.
+    // TWO callees at argument 0 and only one declared: position acquits a CALL, but a call that
+    // took the address at argument 0 is acquitted only by its return — so one undescribed callee
+    // leaves the object ambiguous and the whole lift refuses.
     test('every callee that took the address at argument 0 must have its return described', () => {
       const twoCallees =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tfill\n' +
@@ -1308,7 +1311,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         decompile('f', twoCallees, ARMV4T_AGBCC, {
           prototypes: { fill: { params: 1, returnsVoid: true }, mk: { params: 1 } },
         }),
-      ).toThrow(/nothing says what the callee returns/);
+      ).toThrow(/nothing says what that callee returns/);
       // …and with BOTH declared it lifts
       expect(
         decompile('f', twoCallees, ARMV4T_AGBCC, {
