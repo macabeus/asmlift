@@ -1538,7 +1538,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  `ldr` above the `cmp`; `if (a > 0 && gVolReg != 0)` puts it below the `ble`), so for an
    *  ordinary cell the choice is a matching question and for this one it is a missing access
    *  against a duplicated one. Reading the fold's own motion back is the fold's to record, a
-   *  capability this rule does not have, so the caller declines instead.
+   *  capability this rule does not have, so the caller declines instead — which costs no row: the
+   *  shape is 0 of the corpus's 1,203 rows, swept under both map modes.
    *
    *  A constant-offset `load` only, the scope the re-read rule takes below: an `aload`'s runtime
    *  index names no single cell. */
@@ -1750,11 +1751,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           continue;
         }
         // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
-        // give it away. `shortCircuitGuarded` above is why the direction is decidable: a call in
-        // that cone was never lifted into it, so the asm ran it above the connective's branch.
-        // Compiled, `do { r = cb(p); } while (i++ <= n && r != 0);` puts `bl cb` ahead of both
-        // compares; inlined at the `&&` the recovered C calls `cb` only while the counter's arm
-        // holds, so the callee runs fewer times and whatever it wrote goes with it.
+        // give it away. Two facts, and only the second is `shortCircuitGuarded`'s: a def DOMINATES
+        // its uses (ir/verify.ts), so the call ran on every path that evaluates the connective and
+        // inlining it there runs it on fewer — compiled, `do { r = cb(p); } while (i++ <= n && r !=
+        // 0);` puts `bl cb` ahead of both compares, and inlined the recovered C would call `cb` only
+        // while the counter's arm holds, so the callee runs fewer times and whatever it wrote goes
+        // with it. That the DEF is where to put it back is the set's half: `call` is hoist-unsafe, so
+        // no fold lifted one into that cone. `opaque`, the other hoist-unsafe op with a result,
+        // needs no placement — neither position spells compilable C — and a bottom test holding one
+        // still declines in `testSkipsAnEffect`, which is that guard's remaining population.
         if (isCall && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;
