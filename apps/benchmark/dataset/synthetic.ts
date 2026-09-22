@@ -40,7 +40,7 @@ export interface SynthSpec {
   proto?: Prototypes; // asmlift prototypes (void-ness / callee params)
   note?: string;
   /** THE FLAGS THIS ROW COMPILES AND DECOMPILES AT, when its own toolchain's canonical set is not
-   *  the thing being measured. Absent — which is every row but one — means the canonical set, so
+   *  the thing being measured. Absent — which is all but four rows — means the canonical set, so
    *  the tier is unchanged by this field existing. What it buys is an OPTIMISATION LEVEL of the
    *  row's own: a spelling the compiler erases at -O2 is invisible at the canonical flags, and a
    *  row that cannot fix its level cannot pin one. Both sides get the same flags (`codegenFor`
@@ -448,8 +448,9 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['baseline'],
     toolchains: ['agbcc', 'mwcc_242_81'],
   },
-  // `retflat` — THE ROW THAT PINS `return;` SPELLING, first of the three rows that follow, the only
-  // rows in the tier that set their own `cflags`. Every other synthetic row compiles at -O2, where a
+  // `retflat` — THE ROW THAT PINS `return;` SPELLING, first of the three rows that follow. They and
+  // `tax_gprel` in the memory family are the four rows in the tier that set their own `cflags`.
+  // Every other synthetic row compiles at -O2, where a
   // redundant trailing `return;` is free: written both ways, 124 of 125 agbcc sources give identical
   // objects at -O2 and at -O1, so no row at the canonical flags can tell a decompiler that emits one
   // from a decompiler that does not. At -O0 it is not free — every source `return;` becomes its own
@@ -786,6 +787,49 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int *ptradd(int *p,int n){ return p+n; }',
     features: ['memory', 'pointer'],
     toolchains: ALL,
+  },
+  // `tax_gprel` — THE WITNESS FOR A GLOBAL REACHED THROUGH gp, and the only row here that exists to
+  // be DECLINED. The benchmark's decline taxonomy (`apps/web/src/pages/benchmark/lib/declines.ts`)
+  // names a small-data class that no row inhabited, and a class with no inhabitant is a claim
+  // nobody can check: it reads the same whether the refusal is still emitted, has been reworded, or
+  // was never reachable, and those three have opposite fixes.
+  //
+  // It is not reachable at the canonical flags, and that is a FLAG and not a limit. Every MIPS
+  // toolchain in the corpus compiles with no small-data threshold — `-non_shared -G 0` for ido7.1,
+  // `-mno-abicalls -fno-PIC -G 0` for gcc2.7.2kmc — so no corpus object has ever carried a
+  // gp-relative access. `-G 8` is one token off ido7.1's canonical set and puts an `int` in
+  // `.sbss`, where IDO reaches it off `gp`:
+  //
+  //     -G 0   lui v1,0x0 / addiu v1,v1,0 / lw t6,0(v1) / addu / sw    R_MIPS_HI16 + R_MIPS_LO16
+  //     -G 8   lw v1,0(gp) / addu v0,v1,a0 / jr ra / sw v0,0(gp)       R_MIPS_GPREL16 x2
+  //
+  // MEASURED BOTH WAYS, because a flag asserted to be load-bearing is a claim about the compiler:
+  // at `-G 8` the lift refuses with "gp used as data (PIC / small-data global access)", and at
+  // `-G 0` the same source does not reach that refusal at all. `-KPIC -G 0` arrives at a gp read
+  // the long way, through the PIC prologue and a GOT load, so it would pin two causes and neither
+  // of them cleanly; this shape has one.
+  //
+  // ido7.1 only. The gcc2.7.2kmc build would need its own flag change and would witness the same
+  // refusal twice, and neither PPC nor agbcc reaches this site — PPC's small-data refusals are
+  // `frontend/ppc.ts`'s own, under `R_PPC_EMB_SDA21`.
+  //
+  // BOTH DECOMPILERS MISS IT, differently, which is what makes the row worth publishing rather than
+  // merely worth declining: asmlift refuses loudly and names the gap, and m2c emits a body naming
+  // `saved_reg_gp`, which IDO then rejects ("'saved_reg_gp' undefined"). One is a decline and the
+  // other a noncompile, and the row records the pair.
+  //
+  // NO `sda-global` TAG, although that tag names exactly this capability: it is CODEGEN-DERIVED and
+  // `src/cases/features.ts` derives it from `R_PPC_EMB_SDA21`, the PowerPC spelling. The MIPS
+  // spelling of the same mechanism is `R_MIPS_GPREL16` and the derivation does not read it, so this
+  // row publishes `global` and the tag stays PowerPC-only until something widens it. Authoring
+  // `sda-global` here is not the fix — `features.test.ts` requires authored tags to be judgement
+  // tags, and a hand-written codegen tag is the assertion a derivation exists to replace.
+  {
+    sym: 'tax_gprel',
+    src: 'int gTaxRate;\nint tax_gprel(int n){ gTaxRate += n; return gTaxRate; }',
+    cflags: ['-mips2', '-O2', '-32', '-non_shared', '-G', '8'],
+    features: ['memory', 'global', 'load', 'store'],
+    toolchains: ['ido7.1'],
   },
 
   // ── structs (layout NOT in context — must be recovered) ─────────────────────────────────
