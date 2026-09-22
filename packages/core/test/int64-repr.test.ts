@@ -178,7 +178,7 @@ describe('the rank a rendered expression carries', () => {
   // The closure this soundness rests on, asserted rather than argued: memory and calls do not
   // carry a 64-bit integer here, so nothing else can make this answer 64.
   test('memory and a call are NOT ways a 64-bit value enters a rendered expression', () => {
-    const idx: Expr = { k: 'index', base: v('p'), index: { k: 'const', value: 0 }, width: 4, signed: true };
+    const idx: Expr = { k: 'index', base: v('p'), idx: { k: 'const', value: 0 }, width: 4, signed: true };
     expect(exprIntWidth(idx, env)).toBe(32);
     expect(exprIntWidth({ k: 'call', fn: 'f', args: [] }, env)).toBe(32);
   });
