@@ -175,6 +175,26 @@ describe('the rank a rendered expression carries', () => {
     expect(exprIntWidth(bin('<<', v('w'), v('n')), env)).toBe(64);
   });
 
+  // THE NODES THAT ARE `int` WHATEVER THEY ARE OVER, which is the same list
+  // `renderedIntSignedness` enumerates — a comparison, a logical connective and `!` all yield `int`
+  // in C, and none of them is an arithmetic node taking the wider of its operands. A rank of 64
+  // here reaches `pinnedOperands`, which spells `(u64)(a < b) / c` and calls `__udivdi3` where the
+  // machine called `__udivsi3`.
+  test('a comparison, a connective and `!` are `int`, however wide their operands', () => {
+    for (const op of ['<', '<=', '>', '>=', '==', '!=', '&&', '||'] as BinOp[]) {
+      expect(exprIntWidth(bin(op, v('w'), v('w')), env)).toBe(32);
+      expect(exprIntWidth(bin(op, v('w'), v('n')), env)).toBe(32);
+    }
+    expect(exprIntWidth({ k: 'un', op: '!', e: v('w') }, env)).toBe(32);
+  });
+
+  // …and the two unary operators that are NOT, for the same reason they are not in that list: each
+  // carries the promoted type of its operand.
+  test("`-` and `~` keep their operand's rank", () => {
+    expect(exprIntWidth({ k: 'un', op: '-', e: v('w') }, env)).toBe(64);
+    expect(exprIntWidth({ k: 'un', op: '~', e: v('w') }, env)).toBe(64);
+  });
+
   // The closure this soundness rests on, asserted rather than argued: memory and calls do not
   // carry a 64-bit integer here, so nothing else can make this answer 64.
   test('memory and a call are NOT ways a 64-bit value enters a rendered expression', () => {
@@ -191,6 +211,9 @@ describe('the rank a rendered expression carries', () => {
     // …and at EQUAL rank it still does.
     expect(arithConversionSignedness({ k: 'cast', to: T.u(32), e: v('n') }, v('n'), env)).toBe(false);
     expect(arithConversionSignedness(v('uw'), v('w'), env)).toBe(false);
+    // A COMPARISON OVER 64-BIT OPERANDS IS STILL `int`, so this pair is equal rank and the
+    // unsigned side wins. Reading the comparison as 64 makes it the wider side and answers signed.
+    expect(arithConversionSignedness(bin('<', v('w'), v('n')), { k: 'cast', to: T.u(32), e: v('n') }, env)).toBe(false);
   });
 });
 
