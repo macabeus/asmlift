@@ -230,7 +230,11 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return String(e.value);
     case 'addr': {
       // `&gSym` — the address of a named global. A prefix operator; parenthesizes under a POSTFIX
-      // parent like the other prefix forms.
+      // parent like the other prefix forms. An array's address is the bare name (see `array` on
+      // the node): an identifier binds tighter than every parent, so it never parenthesizes.
+      if (e.array === true) {
+        return e.name;
+      }
       const g = `&${e.name}`;
       return parentPrec < 2 ? `(${g})` : g;
     }

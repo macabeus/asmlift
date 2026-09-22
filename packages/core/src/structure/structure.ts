@@ -3761,7 +3761,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // gaddr's local twin: the address of the frame-local object the Thumb frontend PROVED
       // (frame-object audit — width/signed are stamped machine facts). The NAME is this layer's:
       // see laddrName. Renders `&sp0`; the object itself is declared in `locals`.
-      return { k: 'addr', name: laddrName.get(d)! };
+      //
+      // AN ARRAY DECAYS INSTEAD, because `&` on one spells a different type for the same address:
+      // `u8 sp0[16]` makes `&sp0` a `u8 (*)[16]`, which every typed pointer parameter rejects
+      // (`passing arg 1 from incompatible pointer type`), where the bare name is the `u8 *` the
+      // machine produced. Compiled both ways, the object is identical — so the `&` buys a
+      // diagnostic and nothing else.
+      const name = laddrName.get(d)!;
+      return laddrType(d).kind === 'array' ? { k: 'addr', name, array: true } : { k: 'addr', name };
     }
     if (d.opcode === 'undef') {
       // An uninitialised local. NEVER emit a definition for it: the declaration in `locals` is the

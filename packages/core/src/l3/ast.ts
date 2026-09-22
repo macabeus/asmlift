@@ -45,7 +45,13 @@ export type Expr =
   // and `(&gSym)[i]` as `gSym[i]` (a global name decays to a pointer). Only a genuinely
   // address-TAKEN global (passed by address, `&gSym` as a call arg) prints the `&` form. The
   // global's type comes from the project headers, so it is never declared as a local.
-  | { k: 'addr'; name: string }
+  //
+  // `array` says the named object IS an array, so this address is spelled by the bare name: `&`
+  // on an array yields a pointer to the WHOLE array (`u8 (*)[16]`), a different type for the same
+  // byte, and every typed pointer parameter rejects it. A SPELLING flag and nothing more — the
+  // node is still the address, so every rule that reads `k === 'addr'` (the write channel in
+  // contracts.ts among them) is unchanged.
+  | { k: 'addr'; name: string; array?: true }
   // A memory access `base[idx]` (printed `*base` when idx is the constant 0), CARRYING the
   // access's element width (bytes) and signedness. `idx` counts elements of `width` bytes.
   // Because the node carries the width, EACH BACKEND owns its own legalization: the C family

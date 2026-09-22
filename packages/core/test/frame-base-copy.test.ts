@@ -282,7 +282,7 @@ describe('the audit judges each frame object on its own bytes', () => {
     const FILL = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n';
 
     test('the reservation is the declared extent, and it declares as an array', () => {
-      expect(lift(copy(FILL)).source).toBe('s32 f(s32 a0) {\n    u8 sp0[16];\n    return memcpy(&sp0, a0, 16);\n}\n');
+      expect(lift(copy(FILL)).source).toBe('s32 f(s32 a0) {\n    u8 sp0[16];\n    return memcpy(sp0, a0, 16);\n}\n');
     });
 
     test('the extent follows the reservation, not the copy length', () => {
@@ -349,6 +349,19 @@ describe('the audit judges each frame object on its own bytes', () => {
         decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'], returnsVoid: true } } })
           .source,
       ).toContain('u8 sp0[4];');
+    });
+
+    test('an array object`s address is spelled by DECAY, not by `&`', () => {
+      // `&sp0` on `u8 sp0[16]` is a `u8 (*)[16]` — the same byte at a type every typed pointer
+      // parameter rejects. Compiled at the corpus's agbcc flags, `fill(&sp0)` against
+      // `void fill(u8 *)` warns `passing arg 1 of 'fill' from incompatible pointer type` and
+      // `fill(sp0)` does not, and the two objects are byte-identical — so the `&` buys the
+      // diagnostic and nothing else. A SCALAR still takes it: `&sp0` is the only spelling there.
+      expect(lift(copy(FILL)).source).toContain('memcpy(sp0, a0, 16)');
+      // the SCALAR control, one letter of asm apart: a store of its own types the object, so it
+      // declares as `s32 sp0` and `&` is the only spelling of its address
+      const typed = copy('\tmov\tr3, sp\n\tstr\tr0, [r3]\n\tmov\tr0, sp\n\tbl\tg\n', '0x4');
+      expect(lift(typed).source).toContain('g(&sp0)');
     });
 
     test('a slot in the reserved area is not this object`s, and refuses', () => {
