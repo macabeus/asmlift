@@ -27,22 +27,34 @@
 // `packages/core/src` throws 118 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 78 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
 //   frontend/thumb.ts   24  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
 //                           base in the list, control falling off the end
-//   structure.ts        15  ten more loop and post-loop naming refusals beside the two
-//                           `loop-exit-values` claims, plus an unsupported terminator
-//   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, a missing
-//                           delay slot
+//   structure.ts        20  eleven loop and post-loop naming refusals beside the two
+//                           `loop-exit-values` claims, five jump-table and switch shapes, an
+//                           unsupported terminator, a volatile read behind a `&&`/`||`, and two
+//                           internal invariants (an ambiguous array offset, a parallel-copy bug)
+//   frontend/mips.ts    10  a relocation with an addend, an address below the symbol, an indirect
+//                           `jr`, a `lui` high half with no relocation on it, and four refusals
+//                           about a disassembly the reader cannot account for
 //   frontend/ppc.ts      8  `stwu` with update, an `@l`/`@ha` half whose immediate is not the
-//                           expected placeholder, a relocation on a stack-pointer adjust
+//                           expected placeholder, a small-data relocation whose operand is not the
+//                           expected placeholder, a data relocation on an unmodelled consumer, a
+//                           relocation on a stack-pointer adjust
 //   frontend/splat.ts    7  a data directive in the code stream, a tail call / cross-function
 //                           branch, an unparsable constant expression
 //   frontend/disasm.ts   7  the objdump `...` elision family
+//   frontend/format.ts   1  the input/frontend mismatch — an input error
+//   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
+//
+// THAT COUNT IS A GATE, not a comment. `declines.test.ts` re-runs the harvest and holds the total
+// and the per-file breakdown, because this paragraph was re-measured once and then went stale
+// inside the same hour, across four commits, with every other gate green. Move a family out of the
+// residue and into a class and the gate goes red with the new number.
 //
 // Named here rather than given classes, because a class with no inhabitant and no witness row is
 // the defect this file exists to remove. Two control-transfer capabilities are in that residue and
@@ -243,11 +255,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // Keyed on the three producers rather than on the bare words `fall-through` and `jump-table`,
     // which are English before they are a switch: `fall-through` alone claimed `frontend/ppc.ts`'s
     // generic tail-branch refusal ("a target/fall-through that is not a block boundary"), which has
-    // no switch in it, and the Pascal backend's own unrelated refusal — a BACKEND spelling inside a
-    // lifting-gap taxonomy. Tightening rather than reordering removes the overlap with
-    // `block-boundary` entirely, so neither class depends on where the other sits: `ppc.ts`'s
-    // recovered-dispatch refusal ("jump-table target is not a block boundary") matches only this
-    // one, and its conditional-branch refusal only that one.
+    // no switch in it. Tightening it to the phrases its three producers guarantee stopped that.
+    //
+    // IT DID NOT REMOVE THE ORDERING DEPENDENCY, and an earlier draft of this comment claimed it
+    // had. `jump-table target is not a block boundary` is a strict SUPERSTRING of `not a block
+    // boundary`, so `frontend/ppc.ts`'s recovered-dispatch refusal matches this class AND
+    // `block-boundary`, and it is attributed here only because this class is listed first. The
+    // artifact cannot show it — the one `switch-shapes` row declines on "the jump table's case arms
+    // do not linearize" — so `declines.test.ts` checks the overlap table over core's own messages
+    // as well as over the published markers, and this pair is in it.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern: /case arms do not linearize|jump-table target is not a block boundary|a case body reaches/,

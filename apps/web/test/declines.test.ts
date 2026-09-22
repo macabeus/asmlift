@@ -4,13 +4,86 @@
 // bucket — the classes still all existed, the counts just moved. These pin the orderings that
 // actually overlap.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DECLINE_CLASSES, declineClassesOf } from '../src/pages/benchmark/lib/declines';
+import { DECLINE_CLASSES, declineClassesOf, OTHER_CLASS } from '../src/pages/benchmark/lib/declines';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
+const CORE_SRC = join(ROOT, 'packages/core/src');
+
+/** A source file with its COMMENT LINES removed — a line whose first non-space character opens or
+ *  continues one. Every phrase check below runs against this rather than the raw text, because a
+ *  phrase that survives only in prose pins nothing: `frontend/opaque.ts` says "unmodelled
+ *  instruction" six times, all of them in comments, and `frontend/thumb.ts` says "local stack
+ *  frames not supported" once, in a comment explaining that it no longer emits it. Both pins were
+ *  green against files that had stopped emitting the phrase. */
+const codeOf = (file: string): string =>
+  readFileSync(join(ROOT, file), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+
+/** Every decline message `packages/core/src` can throw, as a template.
+ *
+ *  A DECLINE is what the benchmark publishes as a marker: the pipeline catches these four
+ *  constructors and annotates. Each site's balanced-paren argument is taken, its string-literal
+ *  pieces kept and every `${…}` replaced by a placeholder — so an interpolated MNEMONIC or SYMBOL
+ *  becomes `X` here, which is why a class keyed on a mnemonic alternation cannot be exercised from
+ *  this corpus and is pinned by hand instead (see `NOT_IN_TEMPLATES`). */
+const DECLINE_CTORS = new Set(['FrontendUnsupportedError', 'PpcUnsupportedError', 'RaiseUnsupportedError', 'StructureError']);
+
+const coreDeclineTemplates = (): { file: string; line: number; text: string }[] => {
+  const files: string[] = [];
+  (function walk(d: string) {
+    for (const e of readdirSync(d)) {
+      const p = join(d, e);
+      if (statSync(p).isDirectory()) {
+        walk(p);
+      } else if (p.endsWith('.ts')) {
+        files.push(p);
+      }
+    }
+  })(CORE_SRC);
+  const out: { file: string; line: number; text: string }[] = [];
+  for (const f of files.sort()) {
+    const src = readFileSync(f, 'utf8');
+    const re = /throw new (\w+)\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      if (!DECLINE_CTORS.has(m[1])) {
+        continue;
+      }
+      let i = m.index + m[0].length;
+      let depth = 1;
+      const start = i;
+      while (i < src.length && depth > 0) {
+        if (src[i] === '(') {
+          depth++;
+        } else if (src[i] === ')') {
+          depth--;
+        }
+        i++;
+      }
+      const arg = src.slice(start, i - 1);
+      const pieces: string[] = [];
+      const lit = /`((?:[^`\\]|\\.)*)`|'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g;
+      let l: RegExpExecArray | null;
+      while ((l = lit.exec(arg))) {
+        pieces.push(l[1] ?? l[2] ?? l[3] ?? '');
+      }
+      const text = pieces.join('').replace(/\$\{[^}]*\}/g, 'X').replace(/\s+/g, ' ').trim();
+      if (text) {
+        out.push({ file: f.slice(CORE_SRC.length + 1), line: src.slice(0, m.index).split('\n').length, text });
+      }
+    }
+  }
+  return out;
+};
+
+const CORE_TEMPLATES = coreDeclineTemplates();
+const classOfText = (t: string) => DECLINE_CLASSES.find((c) => c.pattern.test(t))?.key ?? OTHER_CLASS.key;
 
 /** a declined row carrying exactly these markers */
 const row = (...errorMarkers: string[]) =>
@@ -614,13 +687,30 @@ describe('a class may not outlive the message it classifies', () => {
   // One entry per class, naming the phrase the classifier keys on and the file that emits it. It
   // is deliberately not the whole pattern: an alternative is here when it is the only thing
   // standing between its class and "other", or when a reviewer would want to know it moved.
+  //
+  // THE CHECK RUNS AGAINST CODE, NOT AGAINST PROSE (`codeOf`). Two of these were pinned to files
+  // that only TALK about the phrase: `float` to `frontend/opaque.ts`, which says "unmodelled
+  // instruction" six times and throws it never — the one producer is `l3/ast.ts`'s `gapReasonFor`,
+  // whose own comment says it is THE spelling "in one place" — and `stack-frames` to
+  // `frontend/thumb.ts`, whose only occurrence of "local stack frames not supported" is a comment
+  // saying that phrase was a false attribution and is no longer emitted there. Rewording
+  // `gapReasonFor` would have sent `float` and `opaque-ops` — 82 of 307 declines — into "other"
+  // with this list green.
+  //
+  // FREEZING 53 PHRASES ACROSS 13 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // carries: a red line here is an instruction, not a veto. If core reworded the message on
+  // purpose, reword the pattern and the entry in that commit; the point is that the two move
+  // together and that the second app hears about it.
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/thumb.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
-    ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/thumb.ts'],
+    ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
+    ['stack-frames', 'stack pointer used as data', 'packages/core/src/frontend/thumb.ts'],
+    ['address-taken-local', 'address-taken local / frame arithmetic', 'packages/core/src/frontend/ppc.ts'],
+    ['address-taken-local', 'address-taken local / frame arithmetic', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
@@ -635,7 +725,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'non-register memory base', 'packages/core/src/frontend/ppc.ts'],
     ['pic-globals', 'SDA/global-relative access not supported', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
-    ['float', 'unmodelled instruction', 'packages/core/src/frontend/opaque.ts'],
+    ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -669,7 +759,7 @@ describe('a class may not outlive the message it classifies', () => {
   ];
 
   test.each(SPELT_BY)('%s keys on "%s", which %s still emits', (_key, phrase, file) => {
-    expect(readFileSync(join(ROOT, file), 'utf8')).toContain(phrase);
+    expect(codeOf(file)).toContain(phrase);
   });
 
   test('every class is pinned — a new class arrives with its producer named', () => {
@@ -680,5 +770,116 @@ describe('a class may not outlive the message it classifies', () => {
   test('…and every pin names a class that exists', () => {
     const keys = new Set(DECLINE_CLASSES.map((c) => c.key));
     expect([...new Set(SPELT_BY.map(([key]) => key))].filter((k) => !keys.has(k))).toEqual([]);
+  });
+});
+
+describe('the classifier is measured against the messages core can throw, not only against the corpus', () => {
+  // THE ANCHOR ABOVE IS BOUNDED BY THE CORPUS. It proves the artifact leaves nothing unclassified,
+  // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
+  // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
+  // sites themselves. The residue they measure is the honest one, and the file's header paragraph
+  // names it by file; before this gate existed that paragraph was re-measured once and then went
+  // stale inside the hour, across four commits, with every other gate green.
+
+  test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
+    // Without this, deleting the walk would make every gate below vacuously pass.
+    expect(CORE_TEMPLATES.length).toBeGreaterThan(100);
+    expect(new Set(CORE_TEMPLATES.map((t) => t.file)).size).toBeGreaterThan(8);
+  });
+
+  // The count the header paragraph publishes. It is a RESIDUE and not a defect — some of these are
+  // input errors rather than capability gaps (`disasm.ts` "symbol not found", `format.ts`'s
+  // frontend mismatch), and the rest are gaps nothing in the corpus has reached, which is why they
+  // are named in prose rather than given classes with no inhabitant. What this gate buys is that
+  // the paragraph cannot drift: move a family into a class and this goes red with the new number.
+  const RESIDUE_BY_FILE: [file: string, count: number][] = [
+    ['frontend/thumb.ts', 24],
+    ['structure/structure.ts', 20],
+    ['frontend/mips.ts', 10],
+    ['frontend/ppc.ts', 8],
+    ['frontend/disasm.ts', 7],
+    ['frontend/splat.ts', 7],
+    ['frontend/format.ts', 1],
+    ['pipeline.ts', 1],
+  ];
+  const RESIDUE_TOTAL = 78;
+
+  test('the residue the header paragraph names is the residue that is there', () => {
+    const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');
+    const byFile = new Map<string, number>();
+    for (const t of unclassified) {
+      const file = CORE_TEMPLATES.find((x) => x.text === t)!.file;
+      byFile.set(file, (byFile.get(file) ?? 0) + 1);
+    }
+    expect({
+      total: unclassified.length,
+      byFile: [...byFile.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+    }).toEqual({ total: RESIDUE_TOTAL, byFile: RESIDUE_BY_FILE });
+  });
+
+  // AN ALTERNATIVE NOTHING CAN REACH IS INERT, and the file refuses those by name — but it refused
+  // them by reading, and reading is how four of `float`'s alternatives survived a commit that was
+  // about `float`. This is the mechanical version: a class earns its place by matching a message
+  // core actually throws.
+  //
+  // `float` cannot be checked this way and is the only one that cannot: every alternative in it is
+  // a MNEMONIC, which is an interpolation, and the harvest replaces an interpolation with a
+  // placeholder. Its alternatives are pinned by hand at the top of this file, one test per
+  // mnemonic family, which is what caught the four inert ones.
+  const NOT_IN_TEMPLATES: Record<string, string> = {
+    float: 'every alternative is a mnemonic, which the harvest replaces with a placeholder',
+    // These five are BUILT by a helper and RETURNED, then interpolated into a throw elsewhere, so
+    // the throw site carries a placeholder where the phrase is. `reloc-symbol.ts`'s
+    // `unspellableReason` returns four of them and `thumb.ts`'s `analyzeOutgoingArgs` the fifth.
+    // Each is pinned above against a published marker instead.
+    'outgoing-stack-args': "thumb.ts's outgoing-argument analysis returns the reason; the throw interpolates it",
+    'pooled-literal': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
+    'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
+    'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
+    'section-label': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
+  };
+
+  test('every class matches a message core can throw', () => {
+    const unreachable = DECLINE_CLASSES.filter(
+      (c) => !(c.key in NOT_IN_TEMPLATES) && !CORE_TEMPLATES.some((t) => c.pattern.test(t.text)),
+    ).map((c) => c.key);
+    expect(unreachable).toEqual([]);
+  });
+
+  test('…and every listed exception is a class that exists', () => {
+    const keys = new Set(DECLINE_CLASSES.map((c) => c.key));
+    expect(Object.keys(NOT_IN_TEMPLATES).filter((k) => !keys.has(k))).toEqual([]);
+  });
+
+  // THE OVERLAP TABLE ABOVE IS ALSO BOUNDED BY THE CORPUS, and its blind spot is stated wrongly in
+  // `declines.ts` today: `switch-shapes` and `block-boundary` DO overlap — "jump-table target is
+  // not a block boundary" is a strict superstring of "not a block boundary" — and the artifact
+  // cannot see it, because its one `switch-shapes` row declines on a different spelling. This is
+  // the same table taken over core's messages instead, so an ordering dependency exists here
+  // whether or not a row has ever printed it. Read `a > b` as "a is listed above b, and a wins".
+  const TEMPLATE_OVERLAPS: string[] = [
+    // thumb.ts's one sp-as-data throw: the `why` naming an address-taken local also carries the
+    // phrase `stack-frames` keys on, and first-match is what decides it.
+    'address-taken-local > stack-frames',
+    // ppc.ts's branch denylist is one throw with two arms, so the harvested template holds BOTH
+    // arms' prose and matches all three transfer classes at once. No published marker does — a row
+    // prints one arm — which is why the artifact table lists the two pairs separately.
+    'indirect-call > ctr-transfer > branch-form',
+    // The one the file used to deny in prose. `jump-table target is not a block boundary` is a
+    // strict superstring of `not a block boundary`, so ppc.ts's recovered-dispatch refusal matches
+    // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
+    // its single `switch-shapes` row declines on `the jump table's case arms do not linearize`.
+    'switch-shapes > block-boundary',
+  ];
+
+  test('every core message more than one class matches is attributed by a listed ordering', () => {
+    const chains = new Set<string>();
+    for (const t of CORE_TEMPLATES) {
+      const all = DECLINE_CLASSES.filter((c) => c.pattern.test(t.text)).map((c) => c.key);
+      if (all.length > 1) {
+        chains.add(all.join(' > '));
+      }
+    }
+    expect([...chains].sort()).toEqual(TEMPLATE_OVERLAPS);
   });
 });
