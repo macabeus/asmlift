@@ -43,7 +43,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
-import { AGBCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
+import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
 
 /** What a compiler's OBJECT shows for a narrow declared parameter — see
@@ -693,6 +693,7 @@ export const PPC_MWCC: TargetDescription = {
   // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
+  runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring compiler behaviors are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the

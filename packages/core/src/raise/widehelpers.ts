@@ -45,3 +45,46 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
   }
   return changed;
 }
+
+/** Turn every surviving call to one of the target's runtime helpers into a gap. Returns whether
+ *  anything changed. Runs after the two recognisers, so what it sees is what they declined.
+ *
+ *  RE-EMITTING A COMPILER'S OWN RUNTIME CALL IS NOT A RECOVERY, and it is worse than a plain
+ *  miss: it MATCHES. Hand `mwcceppc` the source `return __div2i(a, b);` and it emits the `bl
+ *  __div2i` the row was lifted from, byte for byte — so the differ scores asmlift's failure to
+ *  model 64-bit division exactly as it would score modelling it. A row that cannot tell the two
+ *  apart is measuring nothing, and four cells of the synthetic 64-bit family were banking that.
+ *
+ *  ONLY THE NAMES THE TARGET CARRIES. A helper table is a measured claim about one compiler's
+ *  runtime, so a target without one keeps the old pass-through and a name outside the table is an
+ *  ordinary callee — which is right, because a project's own `__`-prefixed function is not this
+ *  compiler's runtime and asmlift cannot tell them apart by spelling.
+ *
+ *  An `opaque` rather than a throw, so the gap behaves like every other one: strict mode declines
+ *  naming it, annotate mode marks it and leaves the rest of the function standing. */
+export function refuseUnmodelledHelpers(fn: Fn, target: TargetDescription): boolean {
+  const table = target.runtimeHelpers;
+  if (!table) {
+    return false;
+  }
+  let changed = false;
+  for (const b of fn.blocks) {
+    for (let i = 0; i < b.ops.length; i++) {
+      const op = b.ops[i];
+      if (op.opcode !== 'call' || !(String(op.attrs.target) in table)) {
+        continue;
+      }
+      b.ops.splice(
+        i,
+        1,
+        mkOp('opaque', {
+          operands: [...op.operands],
+          results: [...op.results],
+          attrs: { helper: op.attrs.target },
+        }),
+      );
+      changed = true;
+    }
+  }
+  return changed;
+}

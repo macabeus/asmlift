@@ -7,9 +7,14 @@
 //   • the SIGNATURE, so the call's arguments are recovered at all (the frontend's arity lookup
 //     falls back to this behind any caller-supplied prototype);
 //   • the OPERATION, so the call is rewritten to the op it computes and the structurer prints
-//     `a / b` rather than the uncompilable `__divsi3(a, b)`.
-// The second is optional: a soft-FLOAT helper has a signature here and no `op`, because asmlift has
-// no float model to rewrite it into, and the signature alone is what stops its arguments being lost.
+//     `a / b` rather than `__divsi3(a, b)`.
+//
+// AN ENTRY HERE IS ALSO A REFUSAL. Where no recogniser folds a call to a name in this table,
+// `raise/widehelpers.ts` turns it into a gap instead of letting the backend spell it. Re-emitting
+// the compiler's own runtime call as source is not a recovery — it is the one shape that MATCHES
+// for free, because a compiler handed `__div2i(a, b)` emits the `bl __div2i` it was lifted from.
+// A helper nothing here can fold therefore declines; a helper nothing here NAMES still passes
+// through, which is what makes adding a name a decision rather than a note.
 //
 // WHICH HELPERS A COMPILER EMITS IS A COMPILER FACT, so the table hangs off `TargetDescription`
 // rather than off a pass. `proto.ts` holds signatures fixed by the C STANDARD, which a runtime
@@ -59,8 +64,10 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  operand SET-UP instead — `asr rN,rM,#31` per half for signed, `mov rN,#0` for unsigned. The
  *  DIVISIONS do split, and their entries say so.
  *
- *  The soft-FLOAT helpers carry a signature and no op: without one, `bl __addsf3` loses both its
- *  arguments and publishes `__addsf3()`, which scores against a call the machine made with two. */
+ *  THE SOFT-FLOAT HELPERS ARE NOT HERE, deliberately. asmlift has no float model to fold one into,
+ *  so naming `__addsf3` would decline every function that adds two floats where today it publishes
+ *  `__addsf3()` — a pass-through, and one that scores against a call the machine made with two
+ *  arguments. That is a trade to make with a measurement of the float rows, not on the way past. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -79,4 +86,32 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __ashrdi3: { op: 'shr_s', params: [64, 32], returns: 64 },
   __lshrdi3: { op: 'shr_u', params: [64, 32], returns: 64 },
   __negdi2: { op: 'neg', params: [64], returns: 64 },
+};
+
+/** CodeWarrior's PowerPC runtime (`Runtime.PPCEABI.H`), as the GameCube projects vendor it.
+ *
+ *  A DIFFERENT FAMILY ENTIRELY, which is the reason this table is per target and not per repo: a
+ *  scan for `__*di3` reports zero on every one of these. These seven are the integer set, agreed
+ *  on by all three PPC checkouts' own vendored `runtime.c` (each at a different path), where every
+ *  one is an `ASM` function whose body states its register contract: `__div2i` takes r3:r4 and
+ *  r5:r6 and returns r3:r4, `__shl2i` takes r3:r4 and a count in r5.
+ *
+ *  ONE SHIFT LEFT AND TWO RIGHT, which is the same signedness rule agbcc's `__ashldi3` follows:
+ *  the bits a left shift brings in are zero whatever the operand is, so there is nothing for a
+ *  `__shl2u` to do differently.
+ *
+ *  NO MULTIPLY, and that is a fact about this compiler rather than a hole here: mwcc open-codes a
+ *  64-bit multiply. `synthetic:llmul:mwcc_242_81` is the evidence and it is in the corpus — its
+ *  target is 28 bytes of `mulhwu` and two `mullw` with no relocation at all, against 32 bytes and
+ *  an `R_PPC_REL24` to `__div2i` for `lldivs` beside it. The float and decimal helpers of the same
+ *  runtime (`__cvt_sll_flt`, `__num2dec`) are left out for the reason the agbcc table leaves out
+ *  its own. */
+export const PPC_MWCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
+  __div2i: { op: 'sdiv', params: [64, 64], returns: 64 },
+  __div2u: { op: 'udiv', params: [64, 64], returns: 64 },
+  __mod2i: { op: 'smod', params: [64, 64], returns: 64 },
+  __mod2u: { op: 'umod', params: [64, 64], returns: 64 },
+  __shl2i: { op: 'shl', params: [64, 32], returns: 64 },
+  __shr2i: { op: 'shr_s', params: [64, 32], returns: 64 },
+  __shr2u: { op: 'shr_u', params: [64, 32], returns: 64 },
 };

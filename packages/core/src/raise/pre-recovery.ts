@@ -39,7 +39,7 @@ import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
 import { TRUNC_LOAD_GATES, foldTruncatedLoads } from './truncload';
-import { recognizeWideHelpers } from './widehelpers';
+import { recognizeWideHelpers, refuseUnmodelledHelpers } from './widehelpers';
 
 /** Per-call options for the pass list — ONE field per pass that takes any, named for the pass, so
  *  a caller reads which recognizer it is steering and a pass that takes none says so by absence.
@@ -138,6 +138,17 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   {
     id: 'widehelpers',
     run: (fn, _self, _opts, target) => recognizeWideHelpers(fn, target),
+    dce: false,
+  },
+  // AFTER both helper recognizers, because what it refuses is precisely what they declined: a call
+  // to a name the target's runtime table carries that neither `softdiv` nor `widehelpers` folded.
+  // Re-emitting the compiler's own runtime call as source is the one failure that MATCHES, so the
+  // gap has to be written here rather than left to the backend. See raise/widehelpers.ts.
+  //
+  // `dce: false` — an `opaque` carries `effects`, so nothing it replaces becomes dead.
+  {
+    id: 'helperrefuse',
+    run: (fn, _self, _opts, target) => refuseUnmodelledHelpers(fn, target),
     dce: false,
   },
   // AFTER it, because the `concat`s it reads are the ones the frontend built at the call the pass
