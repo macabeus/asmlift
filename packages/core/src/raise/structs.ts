@@ -81,7 +81,13 @@ function isArray(accesses: Access[]): boolean {
  *  offsets. Throws LOUD only on a layout natural C alignment cannot reproduce: two accesses
  *  overlapping in bytes (a union — same offset with differing widths, OR distinct offsets whose
  *  ranges collide), or a field at an offset its own natural alignment could not place it at (a
- *  PACKED layout). */
+ *  PACKED layout).
+ *
+ *  ONE CLASS OF OVERLAP NEVER REACHES HERE: a narrow LOAD covering the low-order end of a wider
+ *  access at the same base is a cast of that access rather than a second field, and
+ *  raise/truncload.ts folds it into one before this pass runs. What is left is what the asm does
+ *  not settle — a narrow STORE, a read above the low-order end, a literal device address — and it
+ *  still declines. */
 function buildStruct(name: string, accesses: Access[]): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();

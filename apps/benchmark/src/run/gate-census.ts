@@ -61,6 +61,7 @@ import {
 } from '@asmlift/core/raise/offsetnames';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
+import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
@@ -130,6 +131,27 @@ export const PASSES: Record<string, CensusablePass> = {
       const armReread = w[0] as readonly Gate<ArmRereadSite>[];
       pass.run = (fn, self, opts, target, lifted) =>
         restore(fn, self, { ...opts, shortCircuit: { ...opts.shortCircuit, armReread } }, target, lifted);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  truncload: {
+    // raise/truncload.ts's `TRUNC_LOAD_GATES` — which narrow reads may become a cast of a wider
+    // one. ONE table, asked once per narrow load a strictly wider access at the same base already
+    // covers, so a base with no overlap contributes nothing and the count is a population of
+    // OVERLAPS rather than of loads.
+    tables: [['read', TRUNC_LOAD_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'truncload');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'truncload' — the pass's caller-side seam moved");
+      }
+      const gates = w[0] as readonly Gate<TruncatedLoad>[];
+      const restore = pass.run;
+      pass.run = (fn, _self, _opts, target) =>
+        foldTruncatedLoads(fn, target.capabilities.endianness === 'little', gates);
       return () => {
         pass.run = restore;
       };
