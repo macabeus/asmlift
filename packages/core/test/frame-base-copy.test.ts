@@ -291,36 +291,64 @@ describe('the audit judges each frame object on its own bytes', () => {
       expect(lift(copy(FILL, '0x20')).source).toContain('u8 sp0[32];');
     });
 
-    test('a GUESSED arity is no witness: the callee must be declared', () => {
-      // `g` is undeclared, so the call`s arity IS the register count and agrees with itself. A
-      // hidden struct-return pointer sets argument 0 exactly like an out-parameter does.
-      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'))).toThrow(
-        /`g` takes it at argument 0 with no declared arity accounting for the argument registers/,
-      );
+    const CALL_G = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n';
+
+    test('an undeclared callee is no witness: nothing says what it returns', () => {
+      // a hidden struct-return pointer occupies argument 0 exactly like an out-parameter does,
+      // and `g` is a callee nothing has said anything about
+      expect(() => lift(copy(CALL_G))).toThrow(/`g` takes it at argument 0 and nothing says what that callee returns/);
     });
 
-    test('…and a declaration supplies it, whoever declares it', () => {
-      // the project`s own header, reaching the same acceptance `memcpy` reaches through the
-      // standard-signature table
-      const withProto = decompile(
-        'f',
-        copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'),
-        ARMV4T_AGBCC,
-        {
-          prototypes: { g: { params: 3 } },
-        },
-      );
+    test('…and the project`s own `returnsVoid` supplies it', () => {
+      // the same acceptance `memcpy` reaches through the standard-signature table, reached here
+      // through a header instead
+      const withProto = decompile('f', copy(CALL_G), ARMV4T_AGBCC, {
+        prototypes: { g: { params: 3, returnsVoid: true } },
+      });
       expect(withProto.source).toContain('u8 sp0[16];');
     });
 
-    test('a declaration SHORTER than the registers the call sets is the struct return, and refuses', () => {
-      // two declared parameters, three argument registers set — the extra one is the hidden
-      // return pointer, which is exactly the reading the witness has to exclude
+    test('an ARITY is not a statement about the return, and does not witness', () => {
+      // three declared parameters against the three argument registers the call sets: the count
+      // agrees exactly, and it still says nothing about whether `g` returns through a pointer
+      expect(() => decompile('f', copy(CALL_G), ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } })).toThrow(
+        /`g` takes it at argument 0 and nothing says what that callee returns/,
+      );
+    });
+
+    test('the argument registers a call WROTE cannot witness it — a pass-through parameter is written by nobody', () => {
+      // agbcc's own output for `void f(const void *a, const void *b){ struct Blob64 s =
+      // makeblob(b); }`: the callee's declared argument arrives in r1 already, so the only
+      // register the function writes is the hidden return pointer in r0. One written register
+      // against one declared parameter — a count that agrees while the frame is the CALLEE's.
       expect(() =>
-        decompile('f', copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'), ARMV4T_AGBCC, {
-          prototypes: { g: { params: 2 } },
-        }),
-      ).toThrow(/`g` takes it at argument 0 with no declared arity/);
+        decompile(
+          'f',
+          'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tmov\tr0, sp\n\tbl\tmakeblob\n' +
+            '\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n',
+          ARMV4T_AGBCC,
+          { prototypes: { makeblob: { params: 1 } } },
+        ),
+      ).toThrow(/`makeblob` takes it at argument 0 and nothing says what that callee returns/);
+    });
+
+    test('a ONE-WORD frame reaches the extent rule through both arms, and declares its bytes', () => {
+      // the reserved area is one word, so `capturedObjectIsTheWholeFrame` holds AND the object
+      // has no access of its own — the two arms ask the same question of the same callee and the
+      // answer has to be the same one. What it declares is the RESERVATION, not the declared
+      // parameter's pointee: a declared width vetoes and never pins (proto.ts `ParamType`).
+      const oneWord =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tfill\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      // the one-word arm asks first, so ITS refusal is the one that fires — the same fact, named
+      // at the earlier site
+      expect(() => decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'] } } })).toThrow(
+        /the one-word frame is handed to a callee as argument 0 and never written here/,
+      );
+      expect(
+        decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'], returnsVoid: true } } })
+          .source,
+      ).toContain('u8 sp0[4];');
     });
 
     test('a slot in the reserved area is not this object`s, and refuses', () => {

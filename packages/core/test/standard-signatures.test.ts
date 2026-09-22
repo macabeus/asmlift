@@ -5,6 +5,7 @@
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { returnsWithoutHiddenPointer } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // four incoming parameters, all live at the call — `r3` is kept by a copy so it has a reaching
@@ -26,4 +27,25 @@ test('`memcpy` takes three, because the standard says so and no header is needed
 test('the project`s own header still wins over the standard table', () => {
   // a decomp may be building against its own re-declaration, and that is the one that decides
   expect(lift('memcpy', { memcpy: { params: 2 } })).toContain('memcpy(a0, a1)');
+});
+
+// THE RETURN IS PART OF WHAT THE STANDARD FIXES, and it is the half no project header ever
+// carried: `FnProto` has `returnsVoid` and nothing else about a return, so before an entry spelled
+// one there was no way to say "this callee returns in a register". The frame-object audit is the
+// consumer — a captured frame address handed over at argument 0 is an out-parameter or a hidden
+// struct-return pointer, and only a statement about the return tells them apart.
+test('the standard fixes `memcpy`s return, so nothing needs to declare it', () => {
+  expect(returnsWithoutHiddenPointer('memcpy', {})).toBe(true);
+});
+
+test('a callee nobody has described returns nothing known, and the answer is no', () => {
+  expect(returnsWithoutHiddenPointer('g', {})).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: 3 } })).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: 3, returnsVoid: true } })).toBe(true);
+});
+
+test('a callee named after an `Object.prototype` member is not described by that', () => {
+  // `'toString' in STANDARD_SIGNATURES` is true, and a decomp may well have a `valueOf`
+  expect(returnsWithoutHiddenPointer('toString', {})).toBe(false);
+  expect(returnsWithoutHiddenPointer('valueOf', { valueOf: { params: 1 } })).toBe(false);
 });

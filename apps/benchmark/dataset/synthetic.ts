@@ -6587,12 +6587,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE ROW'S GATE IS ITS `proto` ENTRY, and it is load-bearing rather than inert. Measured, one
   // candidate, `[ranked] 1 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best
   // unsigned: 0 (match)`; run the same command with `--proto` dropped and the whole function
-  // declines again, at the `arg0AllDeclaredVoid` guard in `packages/core/src/frontend/thumb.ts`:
+  // declines again, at the `arg0NoHiddenReturnPointer` guard in
+  // `packages/core/src/frontend/thumb.ts`:
   //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
   //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
-  //     looks — and the callee is not declared `void`, so nothing says it does not own the storage
+  //     looks — and nothing says what the callee returns, so nothing says it does not own the
+  //     storage
   // So a `returnsVoid` regression on this row is detectable, and the refusal survives narrowed:
-  // an undeclared or non-void callee still declines.
+  // a callee whose return nothing describes still declines.
   //
   // `stkext` and `stkextsret` are the same idiom one size up, where the frame is a BUFFER and no
   // access in the function types it. Nothing dereferences the captured address, so nothing pins a
@@ -6603,15 +6605,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //   stkext      push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp / mov r2,#0x40 / bl memcpy
   //   stkextsret  push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp /               bl makeblob
   //
-  // `stkext` sets THREE argument registers for a callee the C standard declares with three
-  // parameters (`proto.ts` STANDARD_SIGNATURES), so the declaration accounts for every register
-  // the call sets and no hidden return pointer can be hiding among them: **MATCH**, one candidate.
-  // `stkextsret` sets TWO for a callee declared with ONE, and that extra register IS the hidden
-  // pointer — the frame is agbcc's return temporary, not a local at all. It declines:
+  // `stkext` calls a function whose RETURN the C standard fixes — `memcpy` returns `void *`, in a
+  // register (`proto.ts` STANDARD_SIGNATURES), so there is no hidden pointer for argument 0 to be
+  // carrying and the frame is this function's: **MATCH**, one candidate. `stkextsret` calls one
+  // whose return nothing describes, and that is the whole difference — the frame is agbcc's return
+  // temporary, not a local at all. It declines:
   //     cannot lift 'stkextsret': address-taken stack local — the captured address is never
   //     dereferenced in this function, so nothing pins the local object type — and `makeblob`
-  //     takes it at argument 0 with no declared arity accounting for the argument registers the
-  //     call sets — which is how a hidden struct-return pointer looks
+  //     takes it at argument 0 and nothing says what that callee returns — a struct returned
+  //     through a hidden pointer is handed this same frame
+  // THE ARGUMENT REGISTERS ARE NOT THE WITNESS, though the pair looks like they might be: three
+  // set against three declared on one side, two against one on the other. They are not, because a
+  // register already holding an incoming parameter is written by nobody — compiled,
+  // `void f(const void *a, const void *b){ struct Blob64 s = makeblob(b); }` sets exactly ONE
+  // register for a one-parameter declaration and is still a struct return. What the pair measures
+  // is a statement about the RETURN.
   // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
   // witness rather than of who was told what: the pair differs in the ASM, not in the context.
   //

@@ -21,7 +21,14 @@
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, STANDARD_SIGNATURES, declaredWidth, protoArity } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  STANDARD_SIGNATURES,
+  declaredWidth,
+  protoArity,
+  returnsWithoutHiddenPointer,
+} from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -2007,7 +2014,6 @@ interface FrameObjectAudit {
   /** the outgoing stack-argument area the frame stages at [0, area), and whether the analysis
    *  LICENSED that answer — a refusal also reports area 0, so the number alone proves nothing */
   outgoingArgs: { area: number; licensed: boolean };
-  arityWitnessed: ReadonlySet<Op>;
   capturedObjectIsTheWholeFrame: boolean;
   prototypes: Prototypes;
   symbols: SymbolMap | undefined;
@@ -2032,7 +2038,6 @@ function auditFrameObjects({
   localArea,
   usedSlotOffsets,
   outgoingArgs,
-  arityWitnessed,
   capturedObjectIsTheWholeFrame,
   prototypes,
   symbols,
@@ -2271,9 +2276,6 @@ function auditFrameObjects({
     // an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and reads as a
     // callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
-    // …and the call OPS themselves, which the arity witness keys on (a name cannot: the same
-    // callee may be called twice, declared once and guessed once).
-    const arg0Calls = new Map<number, Set<Op>>();
     for (const off of objects.keys()) {
       accesses.set(off, []);
     }
@@ -2320,9 +2322,6 @@ function auditFrameObjects({
                 const cs = arg0Callees.get(off) ?? new Set<string | null>();
                 cs.add(typeof t === 'string' ? t : null);
                 arg0Callees.set(off, cs);
-                const ops = arg0Calls.get(off) ?? new Set<Op>();
-                ops.add(op);
-                arg0Calls.set(off, ops);
               }
             } else {
               published.add(off); // written to memory — the DMA idiom's `*dmaReg = &tmp`
@@ -2356,17 +2355,28 @@ function auditFrameObjects({
     // THREE facts rule it out and any one will do, because a return temp is storage the CALLEE
     // owns outright: it is written only by the callee, its pointer is argument 0, always
     // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
-    // up), and the callee RETURNS the struct. So a store of our own says the object is one this
-    // function fills; an address handed over at r1 or above says the same by position; and a
-    // callee the project declares `void` says it by the ABI — a function that returns nothing has
-    // no hidden return pointer to be given, whatever sits in r0.
+    // up), and the callee RETURNS the struct THROUGH IT. So a store of our own says the object is
+    // one this function fills; an address handed over at r1 or above says the same by position;
+    // and a callee whose RETURN is known to need no hidden pointer says it by the ABI — a
+    // function that returns nothing, or returns in a register, has no such pointer to be given,
+    // whatever sits in r0.
     //
     // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
-    // switches off on something other than the instruction stream. `FnProto.returnsVoid` is the
-    // project's own header fact, arriving through the same table whose `params` this file already
-    // trusts to decide a call's arity. It is asked of EVERY callee that took the address at
-    // argument 0, because the object gets one decision: one callee undeclared or declared
-    // non-void leaves the ambiguity standing and the refusal fires.
+    // switches off on something other than the instruction stream. `returnsWithoutHiddenPointer`
+    // (proto.ts) is where it is answered, from the project's own `returnsVoid` or from the
+    // `returns` of a signature the C standard fixes — the same table whose `params` this file
+    // already trusts to decide a call's arity. It is asked of EVERY callee that took the address
+    // at argument 0, because the object gets one decision: one callee about whose return nothing
+    // is known leaves the ambiguity standing and the refusal fires.
+    //
+    // AN ARITY CANNOT ANSWER IT, which is worth saying because the count is right there and looks
+    // like evidence: a hidden pointer does set one argument register more than the callee
+    // declares, but the register count is what the machine WROTE, and a register already holding
+    // this function's own incoming parameter is written by nobody. Compiled: `void f(const void
+    // *a, const void *b){ struct Blob64 s = makeblob(b); }` emits `add sp,#-0x40 / mov r0,sp /
+    // bl makeblob` — one written register against one declared parameter — so counting registers
+    // reads a real struct return as an out-parameter and declares the callee's own storage as a
+    // local. The question is about the RETURN and only a statement about the return decides it.
     //
     // WHAT IT COSTS WHEN THE DECLARATION IS WRONG, measured rather than compared. On the `sret`
     // shape above, with `mk` (which really returns `struct S4`) declared `params: 1,
@@ -2380,15 +2390,19 @@ function auditFrameObjects({
     // same instructions in the same order, the slot is read back at a scalar width in both, and
     // in both the value read back is what the function returns — so an asm-side corroboration
     // would be a rule with no discriminating input. The mitigation is that under-declaring is the
-    // safe direction (an undeclared or non-void callee still declines) and that `FnProto` says
-    // so at the field.
+    // safe direction (a callee whose return nothing describes still declines) and that `FnProto`
+    // says so at the field.
     //
     // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
     // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
     // still declines with it.
-    const arg0AllDeclaredVoid = (off: number): boolean => {
+    const arg0NoHiddenReturnPointer = (off: number): boolean => {
       const cs = arg0Callees.get(off);
-      return cs !== undefined && cs.size > 0 && [...cs].every((c) => c !== null && prototypes[c]?.returnsVoid === true);
+      return (
+        cs !== undefined &&
+        cs.size > 0 &&
+        [...cs].every((c) => c !== null && returnsWithoutHiddenPointer(c, prototypes))
+      );
     };
     if (capturedObjectIsTheWholeFrame) {
       if (!passedToCallee.has(0)) {
@@ -2397,10 +2411,10 @@ function auditFrameObjects({
             'no call in the lifted function takes it — so nothing rules out an outgoing stack argument at [sp,#0]',
         );
       }
-      if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0) && !arg0AllDeclaredVoid(0)) {
+      if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0) && !arg0NoHiddenReturnPointer(0)) {
         fail(
           'the one-word frame is handed to a callee as argument 0 and never written here, which ' +
-            'is how a hidden struct-return pointer looks — and the callee is not declared `void`, so ' +
+            'is how a hidden struct-return pointer looks — and nothing says what the callee returns, so ' +
             'nothing says it does not own the storage',
         );
       }
@@ -2429,8 +2443,9 @@ function auditFrameObjects({
     // acceptance did not fire is as much an attribution as the reason a lift declined, and one
     // sentence covering all of them is how several gaps come to look like one.
     //
-    // THREE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, and the arity
-    // witness — and each has a test that fails without it. The rest are marked where they sit.
+    // THREE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, and the callee's
+    // declared return — and each has a test that fails without it. The rest are marked where they
+    // sit.
     const notTheWholeArea = (off: number): string | null => {
       if (objects.size !== 1) {
         return 'another address-taken object shares the frame, so the reservation is not this one alone';
@@ -2465,20 +2480,18 @@ function auditFrameObjects({
         return 'the address never leaves this function, so there is no writer of the storage to size it for';
       }
 
-      const calls = arg0Calls.get(off);
-      if (calls === undefined || calls.size === 0) {
+      const callees = arg0Callees.get(off);
+      if (callees === undefined || callees.size === 0) {
         return 'the address is published rather than passed as an argument, and nothing declares what reads it';
       }
-      // A hidden struct-return pointer is passed in argument 0 too, and sets one argument register
-      // MORE than the callee declares. A declaration accounting for every register the call sets
-      // is what rules that reading out; a GUESSED arity cannot, because the guess IS the register
-      // count and would only ever agree with itself.
-      const guessed = [...calls].filter((c) => !arityWitnessed.has(c));
-      if (guessed.length > 0) {
-        const names = [...new Set(guessed.map((c) => (typeof c.attrs.target === 'string' ? c.attrs.target : '?')))];
+      // A hidden struct-return pointer is passed in argument 0 too, and the same declaration that
+      // rules it out for a one-word frame rules it out here — the frame's SIZE changes nothing
+      // about whose storage it is.
+      const unknown = [...callees].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
+      if (unknown.length > 0) {
         return (
-          `\`${names.join('`, `')}\` takes it at argument 0 with no declared arity accounting for ` +
-          'the argument registers the call sets — which is how a hidden struct-return pointer looks'
+          `\`${unknown.map((c) => c ?? '?').join('`, `')}\` takes it at argument 0 and nothing says ` +
+          'what that callee returns — a struct returned through a hidden pointer is handed this same frame'
         );
       }
       return null;
@@ -3545,17 +3558,6 @@ export function lift(
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
-  // Calls whose ARITY IS WITNESSED: a declaration exists AND it accounts for every argument
-  // register the machine set up. Recorded here because only the lifting scan sees both halves —
-  // the declaration and the register evidence — and the frame-object audit, which needs them to
-  // tell an out-parameter from a hidden struct-return pointer, sees neither.
-  //
-  // A FACT AGAINST A GUESS, deliberately, and the error direction is what makes it safe.
-  // `fallbackArgc` is best-effort and can OVER-count (a stale reaching def in r3). The shape this
-  // witnesses against is the struct return, where the machine sets the callee's declared N
-  // registers PLUS the hidden pointer — evidence = declared + 1. So an over-count only ever
-  // withholds the witness, and never grants one that is not there.
-  const arityWitnessed = new Set<Op>();
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
   // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
@@ -4263,9 +4265,6 @@ export function lift(
           }
           const res = mkValue(T.unk(32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
-          if (declared !== null && declared.arity >= argRegsSet) {
-            arityWitnessed.add(callOp);
-          }
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
@@ -4359,7 +4358,6 @@ export function lift(
     localArea,
     usedSlotOffsets,
     outgoingArgs: { area: outgoingArgs.area, licensed: outgoingArgs.blocker === null },
-    arityWitnessed,
     capturedObjectIsTheWholeFrame,
     prototypes,
     symbols,
