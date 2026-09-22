@@ -3854,9 +3854,20 @@ export function lift(
             ? 'a call'
             : null;
       if (tookFlags) {
-        if (pendingCmp) {
-          noCmpWhy = `the compare in its block was clobbered by ${tookFlags}`;
-        }
+        // THE SAME SITE DECIDES AND EXPLAINS, on every path through it. Assigning the reason only
+        // when a compare was displaced left the inherited reason standing behind an instruction
+        // that had since written the flags, and the decline then asserted that nothing in the
+        // block sets them — of a block whose `sub` sets them, and whose branch tests exactly that.
+        // The gap named has to be the one the reader would have to close: arithmetic flags, not an
+        // edge. Whether a compare was displaced is a detail of the same sentence, not a second one.
+        //
+        // Named "reaching it" rather than "in its block": the displaced compare may have been made
+        // here or inherited from the predecessor, and a reader sent to the wrong block finds no
+        // `cmp` and concludes the message is broken.
+        noCmpWhy =
+          `the flags it tests were written by ${tookFlags}` +
+          (pendingCmp ? ', over the compare that reached it' : '') +
+          `, and only a compare's are modelled`;
         pendingCmp = null;
       }
       frame.step(ins);

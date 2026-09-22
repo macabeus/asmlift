@@ -136,8 +136,10 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     // Silent wrong C — now a loud decline that names the instruction that took the flags.
     const clobbered =
       '\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('flagclobber', clobbered)).toThrow(/no reaching compare: the compare in its block/);
-    expect(() => dc('flagclobber', clobbered)).toThrow(/clobbered by 'add'/);
+    expect(() => dc('flagclobber', clobbered)).toThrow(
+      "conditional branch 'beq' has no reaching compare: the flags it tests were written by 'add', " +
+        "over the compare that reached it, and only a compare's are modelled",
+    );
 
     // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
     // adjacent pair, a LOAD between them (loads leave the flags alone), and a HIGH-register move
@@ -156,8 +158,10 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     // operands and the wrong flags, which no marker reports and no reviewer can see.
     const across =
       '\tpush\t{r4, lr}\n\tcmp\tr0, r1\n\tbl\tfoo\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('flagsacrosscall', across)).toThrow(/no reaching compare: the compare in its block/);
-    expect(() => dc('flagsacrosscall', across)).toThrow(/clobbered by a call/);
+    expect(() => dc('flagsacrosscall', across)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by a call, " +
+        "over the compare that reached it, and only a compare's are modelled",
+    );
 
     // The compare AFTER the call is the shape every compiler emits, and it must still fold.
     const after =
@@ -250,7 +254,36 @@ describe('the condition flags reach across one unconditional edge', () => {
     // it judges a compare the block made itself. Seeding at the TERMINATOR instead would skip that
     // clear and fold a compare the `add` had already overwritten.
     const gone = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tbge\t.Ltrue\n${TAIL}`;
-    expect(() => dc('clobberedinsucc', gone)).toThrow(/clobbered by 'add'/);
+    // The whole sentence, because the part that was wrong was the part no pattern asserted: the
+    // displaced compare was in the PREDECESSOR, and the message said "in its block".
+    expect(() => dc('clobberedinsucc', gone)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'add', " +
+        "over the compare that reached it, and only a compare's are modelled",
+    );
+  });
+
+  test('a block whose ARITHMETIC set the flags is not a block that set none', () => {
+    // The gap here is arithmetic flags, and the decline has to say so. Reporting the edge instead
+    // sends the reader to build a cross-block meet that would not move either of these one inch:
+    // both blocks write their own flags, so there is nothing for an edge to disagree about.
+    //
+    // The loop is verbatim `MultiBootWaitSendDone` (sa3, src/multi_boot.s) — the corpus shape, not
+    // an invented one.
+    const loop = `\tmov\tr1, #4\n.LWait:\n\tsub\tr0, r1\n\tbgt\t.LWait\n\tbx\tlr\n`;
+    expect(() => dc('arithloop', loop)).toThrow(
+      "conditional branch 'bgt' has no reaching compare: the flags it tests were written by 'sub', " +
+        "and only a compare's are modelled",
+    );
+    // …and with no edge in the picture at all, where blaming one is plainly absurd.
+    const straight = `\tsub\tr0, r0, r1\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('arithstraight', straight)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'sub', " +
+        "and only a compare's are modelled",
+    );
+    for (const asm of [loop, straight]) {
+      expect(() => dc('f', asm)).not.toThrow(/sets the flags/);
+      expect(() => dc('f', asm)).not.toThrow(/edges reach it|predecessor/);
+    }
   });
 
   test('a predecessor that ends in a CONDITIONAL branch declines — unbuilt, not unsound', () => {
