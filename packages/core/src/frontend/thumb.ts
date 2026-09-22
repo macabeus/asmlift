@@ -764,7 +764,18 @@ const REG_SPELLINGS = /^(r\d+|sp|lr|pc|sb|sl|fp|ip)$/i;
  *  Words, not tokens, because `splitOperands` keeps `[r0, #4]` and `{r4, r5}` whole. A word starts
  *  at an underscore as readily as at a letter, so the symbol `_R0` is one word and not a register
  *  with a prefix. A symbol spelled exactly like a register (`bl FP`) declines here instead of
- *  lifting — loud, and no such symbol exists in any checkout. */
+ *  lifting — loud, and no such symbol exists in any checkout.
+ *
+ *  NO BENCHMARK ROW HOSTS THIS REFUSAL, and the reason is measured rather than an oversight: 0 of
+ *  the 2,216 `.s` files in the vendored kleod, sa3, pokeemerald and klonoa checkouts spells a
+ *  register in upper case in an instruction OPERAND. Eight files spell one elsewhere — all in `@`
+ *  comments, a `.string`, and a `#if 0` block in agbcc's own `setjmp.s` — and none is a word this
+ *  scan reads, which is why the population has to be counted on operands and not on lines. So no
+ *  real row can reach it. An authored synthetic one would subtract a permanently-declining row from
+ *  a corpus whose denominator is a claim about reach, to cover a LEXICAL rule with no compiler
+ *  behaviour behind it — the three wrong-C shapes named above are what the rule is worth, and
+ *  `thumb-frontend.test.ts` pins each of them directly. A row would become the right home the day
+ *  a project spells one, which is exactly what makes this a null and not a policy. */
 const upperCaseRegIn = (ops: string[]): string | null =>
   ops.flatMap((o) => o.match(/[A-Za-z_]\w*/g) ?? []).find((w) => REG_SPELLINGS.test(w) && w !== w.toLowerCase()) ??
   null;
