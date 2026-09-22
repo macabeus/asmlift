@@ -20,7 +20,7 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 308 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
@@ -192,9 +192,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it — and
     // the two ppc.ts refusals for an SDA relocation whose operand or immediate is NOT that
     // placeholder are the same capability, which the residue paragraph left unnamed while this
-    // class was described as having no inhabitant anywhere. The class reads 0 because the canonical IDO flags are `-non_shared -G 0` (`toolchain.ts`), which
-    // is a flag choice rather than a shape the toolchain cannot emit. `declines.test.ts` carries
-    // the two-line source and the flags that do emit it, measured; the row itself is still owed.
+    // class was described as having no inhabitant anywhere. It had none because the canonical IDO
+    // flags are `-non_shared -G 0` (`toolchain.ts`) — a flag choice rather than a shape the
+    // toolchain cannot emit. `synthetic:tax_gprel` sets `-G 8` and is the row that witnesses it.
     key: 'pic-globals',
     label: 'Small-data globals (gp-relative / GPREL / an SDA base with no relocation)',
     // One alternative per producer, each the whole phrase that site emits. Bare `PIC` and bare

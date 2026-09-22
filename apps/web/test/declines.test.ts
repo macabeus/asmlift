@@ -578,7 +578,7 @@ describe('a class is decided inside the PUBLISHED marker, not inside the full re
 describe('the classes with no corpus row are alive, not dead entries', () => {
   // A class with zero rows is three different findings with three different fixes: its refusal is
   // gone from core (delete the class), its refusal is still emitted but reworded (fix the pattern),
-  // or nothing in the corpus reaches it (leave it, and say what it still guards). Both of these are
+  // or nothing in the corpus reaches it (leave it, and say what it still guards). All of these are
   // the third, measured on the committed artifact:
   //
   //   branch-likely  LEFTOVER SHAPES. PR #226 modelled the capability — a likely branch nullifies its
@@ -600,20 +600,19 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //                  refusing a listing it cannot account for, which would make them unreachable by
   //                  construction — but nothing here measures that, and a coverage claim owes its
   //                  whole gate list rather than the arms it happened to scan.
-  //   pic-globals    NOT REACHED, and reachable — measured by compiling, not by reasoning. The
-  //                  class reads 0 because every corpus toolchain compiles with no small-data
-  //                  threshold: `-non_shared -G 0` for ido7.1, `-mno-abicalls -fno-PIC -G 0` for
-  //                  gcc2.7.2kmc. That is a flag, not a shape the toolchain cannot emit, and a
-  //                  synthetic row may set its own `cflags`. At ido7.1's canonical set with `-G 8`
-  //                  instead of `-G 0`, `int gTaxRate; int tax_gprel(int n){ gTaxRate += n;
-  //                  return gTaxRate; }` compiles to `lw v1,0(gp)` / `addu` / `jr ra` /
-  //                  `sw v0,0(gp)` with `R_MIPS_GPREL16 gTaxRate` on both halves, and lifting that
-  //                  through `MIPS_IDO` declines with this class's message verbatim. The flag is
-  //                  load-bearing, checked the other way: the same source at `-G 0` emits
-  //                  `lui`/`addiu` with `R_MIPS_HI16`/`LO16` and reaches a different refusal
-  //                  entirely. `-KPIC -G 0` arrives at the gp read the long way, through the GOT
-  //                  prologue, so it would pin two causes and neither cleanly. `-G 8` is the row
-  //                  to write, because it is one token off canonical with no second cause in it.
+  //   store-class    ALL 13 of its rows were floating-point stores and `float` now takes them, so
+  //                  it emptied in the commit that admitted the store-class prefix there. Not
+  //                  dead: the ISA store policies reach `stwbrx`, `swl`, `sb` and `stmia`, pinned
+  //                  above.
+  //
+  // `pic-globals` used to be the third entry here and is not any more, which is what a class in
+  // this list is supposed to do. It was NOT REACHED and reachable, because every corpus toolchain
+  // compiles with no small-data threshold — `-non_shared -G 0` for ido7.1, `-mno-abicalls -fno-PIC
+  // -G 0` for gcc2.7.2kmc — which is a flag and not a shape the toolchain cannot emit.
+  // `synthetic:tax_gprel` sets `-G 8` on ido7.1's canonical set, the global moves to `.sbss`, and
+  // the row declines with this class's message verbatim. The flag was audited in both directions:
+  // the same source at `-G 0` emits `lui`/`addiu` under `R_MIPS_HI16`/`LO16` and does not reach
+  // the refusal at all.
   //
   // Until it exists, the test that keeps both honest is that core still spells the refusal: a class
   // may not outlive the message it classifies. Both are in `SPELT_BY` at the end of this file,
@@ -689,16 +688,13 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These four have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
-  // of these four disappears, an unnamed gap found an inhabitant or somebody wrote the `tax_gprel`
-  // row — good news, and this list moves in the commit that earns it.
-  //
-  //   store-class    ALL 13 of its rows were floating-point stores (`stfd` 7, `swc1` 2, `sdc1` 2,
-  //                  `stfs` 2) and `float` now takes them, which is why this class emptied in the
-  //                  same commit that admitted the store-class prefix there. It is not dead: the
-  //                  ISA policies reach `stwbrx`, `swl`, `sb` and `stmia`, pinned above.
-  const NO_ROWS = ['branch-form', 'branch-likely', 'pic-globals', 'store-class'];
+  // These three have no rows for reasons that are measured and written down beside them, not
+  // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
+  // of these three disappears, an unnamed gap found an inhabitant — good news, and this list moves
+  // in the commit that earns it. It just did: `pic-globals` left this list when
+  // `synthetic:tax_gprel` was written, which is the disposition this comment asked for.
+
+  const NO_ROWS = ['branch-form', 'branch-likely', 'store-class'];
 
   test('every other class is inhabited, and exactly these three are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
@@ -780,7 +776,7 @@ describe('a class may not outlive the message it classifies', () => {
   // whose own comment says it is THE spelling "in one place" — and `stack-frames` to
   // `frontend/thumb.ts`, whose only occurrence of "local stack frames not supported" is a comment
   // saying that phrase was a false attribution and is no longer emitted there. Rewording
-  // `gapReasonFor` would have sent `float` and `opaque-ops` — 82 of 307 declines — into "other"
+  // `gapReasonFor` would have sent `float` and `opaque-ops` — 82 of 308 declines — into "other"
   // with this list green.
   //
   // FREEZING 53 PHRASES ACROSS 13 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
@@ -870,7 +866,7 @@ describe('a class may not outlive the message it classifies', () => {
 
 describe('the classifier is measured against the messages core can throw, not only against the corpus', () => {
   // THE ANCHOR ABOVE IS BOUNDED BY THE CORPUS. It proves the artifact leaves nothing unclassified,
-  // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
+  // which is a claim about 308 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
   // names it by file; before this gate existed that paragraph was re-measured once and then went
