@@ -6623,10 +6623,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
   // witness rather than of who was told what: the pair differs in the ASM, not in the context.
   //
-  // SIXTY-FOUR BYTES IS LOAD-BEARING on `stkext`, and the reason is agbcc's BUILTIN `memcpy`: a
-  // constant copy of 32 bytes or fewer expands inline as `ldmia`/`stmia` and leaves no call for
-  // the address to escape into, so at 16 the shape this row is about is not in the target at all.
-  // Measured at 16/32/64/128 — the call appears at 64.
+  // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
+  // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128
+  // bytes, agbcc emits `bl memcpy` at EVERY size, with the declaration present or absent: the
+  // builtin does not expand a `memcpy` CALL inline here at all. The inline `ldmia`/`stmia`
+  // expansion belongs to a DIFFERENT construct — a struct ASSIGNMENT (`struct S b = gS;`), which
+  // agbcc moves in registers at 4 and 8 bytes, expands inline at 16 and 32, and turns into
+  // `bl memcpy` at 64.
+  //
+  // WHAT IS LOAD-BEARING IS ON THE OTHER SIDE OF THE PAIR, and its threshold is ONE WORD.
+  // Compiled: a 4-byte struct comes back from `makeblob` in r0 with no frame reserved at all,
+  // while 8, 16 and 64 each reserve the frame and hand its address over at argument 0. So the
+  // shape `stkextsret` is about needs a struct larger than a word and nothing more; 64 is simply
+  // the size the PAIR shares, so that its two targets differ in the call and in nothing else.
   //
   // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
   // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
@@ -6746,17 +6755,20 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   {
     sym: 'stkext',
-    // SIXTY-FOUR BYTES, NOT SIXTEEN, and the size is load-bearing: agbcc's BUILTIN `memcpy`
-    // expands a constant copy of 32 bytes or fewer inline (`ldmia`/`stmia`), and an inlined copy
-    // leaves no call for the address to escape into — the shape this row is about would not be
-    // in the target at all. At 64 the builtin emits `bl memcpy`, whatever the translation unit
-    // declares, so the row measures the capability rather than the builtin's threshold.
+    // The size is not doing work here — agbcc emits `bl memcpy` at every size from 1 to 128 at
+    // these flags (family comment above). Sixty-four is the size `stkextsret` needs, and the two
+    // rows share it so their targets differ in the call alone.
+    //
+    // THE THIRD PARAMETER IS `unsigned long`, which is what agbcc's builtin declares: spelling it
+    // `u32` makes every build of this target emit `warning: conflicting types for built-in
+    // function 'memcpy'`. Compiled both ways, the object is identical — the warning is the whole
+    // difference.
     src:
-      'void *memcpy(void *, const void *, u32);\nextern const u8 gBlob[64];\n' +
+      'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gBlob[64];\n' +
       'void stkext(void){ u8 b[64]; memcpy(&b[0], gBlob, sizeof b); }',
     features: ['stack-addr'],
     toolchains: ['agbcc'],
-    ctx: 'void *memcpy(void *, const void *, u32);\nvoid stkext(void);',
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nvoid stkext(void);',
   },
   {
     sym: 'stkextsret',
