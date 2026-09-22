@@ -320,8 +320,20 @@ const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12',
 
 /** The operands of a `cmp` whose flags are still live — the whole of the condition state this
  *  frontend models, and what a conditional branch folds into its `cond_br`. ARM/Thumb writes one
- *  implicit flags register, so there is one of these at a time (PowerPC's eight `cr` fields are a
- *  map of them: see `cmpDef` in ppc.ts). */
+ *  implicit flags register, so there is one of these at a time.
+ *
+ *  IS THIS THE SAME CAPABILITY AS POWERPC'S? Decomposed, because the answer is neither yes nor no:
+ *    * the STATE is two things. One slot here; a map keyed `cr0`–`cr7`, each entry carrying its own
+ *      signedness, in `cmpDef` (ppc.ts). A parameterised "flag model" over those would be one name
+ *      wearing two implementations.
+ *    * the CLOBBER RULE is two things. Here it is `FLAG_SETTING` plus a call; there it is the
+ *      record-form `.` suffix plus a call.
+ *    * the EDGE RULE is ONE thing — one predecessor, already filled, not a jump-table dispatch,
+ *      leaving through an unconditional branch or a fall-through — and it is where all the
+ *      soundness lives. It is not extracted, because `inheritedCmp` is its only caller. The
+ *      PowerPC rows that still decline on a cross-block compare are what would earn the
+ *      extraction, and a round that builds that side should take the rule from here rather than
+ *      write a second one. */
 type PendingCmp = { lhs: Value; rhs: Value };
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
@@ -3702,13 +3714,30 @@ export function lift(
    *  predecessor dominates, so those values dominate every use on this side, while re-reading `r0`
    *  here would pick up whatever this block redefined it to.
    *
+   *  TRANSITIVE, over as many edges as the chain has: each block runs this and writes its own
+   *  `exitCmp`, so a compare reaches the end of a run of straight-line blocks and refuses at the
+   *  first one that breaks the chain. That is not decoration — agbcc emits `.LBB`/`.LBE`/`.LM`
+   *  debug labels freely, and a chain is the ordinary case rather than the exotic one.
+   *
+   *  NOT THE BLOCK-PARAMETER MACHINERY, though this frontend has SSA with block parameters and
+   *  `readData` already does cross-block lookup with phi insertion. Three reasons, and the last is
+   *  the one a later "improvement" would get wrong:
+   *    * the flags are not a register anything reads, so there is nothing for `readData` to look
+   *      up — the compare is consumed by the terminator, never by a named operand;
+   *    * a phi over two predecessors would merge two COMPARES, and a merged compare is not a value
+   *      a `cond_br` can fold into a condition: `icmp(lhs, rhs)` needs one pair, not a choice;
+   *    * `preds.length === 1` is deliberately STRONGER than dominance. A dominating predecessor's
+   *      flags can still be overwritten on a longer path that rejoins here, so answering this from
+   *      the dominator tree would state a condition that holds on one path in.
+   *
    *  Refuses when either half of that sentence fails:
    *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
    *      and picking one states a condition the machine does not promise;
    *    * the only predecessor has not been filled: a back edge;
    *    * the edge is not straight-line — it leaves a conditional branch or a jump-table dispatch.
    *      Thumb's `b<cc>` does preserve the flags, so this one is UNBUILT rather than unsound: it is
-   *      the PowerPC frontend's cross-block shape and has no ARM inhabitant to earn it here;
+   *      exactly the PowerPC shape (a `cmpwi` read by the fall-through of the `bc` that already
+   *      consumed it, see `cmpDef` in ppc.ts) and has no ARM inhabitant to earn it here;
    *    * no compare survives to the predecessor's last instruction.
    *
    *  Not a `Gate` table, on docs/level-tower.md's structural bar rather than on cost: every refusal
@@ -3729,11 +3758,13 @@ export function lift(
     if (tables.has(pb)) {
       return `${lead} its only edge leaves the jump-table dispatch in '${pb.label}'`;
     }
+    // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it is
+    // in nobody's `preds`, and an `indirect` one throws before the CFG is built — so an arm for
+    // either would be an arm no input reaches, which is an arm no test can be failing on purpose.
+    // `uncond` and a fall-through (`null`) are the edges this whole function exists to carry.
     const plast = pb.instrs[pb.instrs.length - 1];
-    const pkind = plast ? classifyXfer(plast) : null;
-    if (pkind !== null && pkind !== 'uncond') {
-      const how = pkind === 'cond' ? 'a conditional branch' : `a '${plast!.mnemonic}'`;
-      return `${lead} its only edge leaves '${pb.label}' through ${how}`;
+    if (plast && classifyXfer(plast) === 'cond') {
+      return `${lead} its only edge leaves '${pb.label}' through a conditional branch`;
     }
     return exitCmp.get(ps[0]) ?? `${lead} no compare reaches the end of its only predecessor '${pb.label}'`;
   };

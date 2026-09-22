@@ -218,7 +218,7 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
 // Every refusal below is one of the two facts behind that sentence failing — the entry is not
 // unique, or the edge itself writes flags — and each has its own sentence in the decline, because a
 // catch-all makes several gaps look like one.
-describe('the condition flags reach across one unconditional edge', () => {
+describe('the condition flags reach across a straight-line edge, and across a run of them', () => {
   const TAIL = '\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
   // `bge .Ltrue` folded and then structured: the sense inverts because the fall-through arm leads.
   const FOLDED = 'if (a0 < a1)';
@@ -227,6 +227,20 @@ describe('the condition flags reach across one unconditional edge', () => {
     // The agbcc shape, with the pool itself elided: `cmp`, the jump over the pool, and the `bge`
     // alone under the label the jump targets.
     expect(dc('poolsplit', `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`).source).toContain(FOLDED);
+  });
+
+  test('a RUN of straight-line blocks carries them the whole way', () => {
+    // The model is transitive: every block runs the inheritance and writes its own exit state, so
+    // the chain is as long as the labels make it. Not exotic — agbcc emits `.LBB`/`.LBE`/`.LM`
+    // debug labels freely, so several in a row between a compare and its branch is ordinary. An
+    // audit scoped to a single edge is scoped to the wrong thing.
+    const hops = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tb\t.L3\n.L3:\n\tb\t.L4\n.L4:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('chain', hops).source).toContain(FOLDED);
+    const labels = `\tcmp\tr0, r1\n.LM1:\n.LM2:\n.LM3:\n.LM4:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('labelrun', labels).source).toContain(FOLDED);
+    // …and one clobber anywhere in the run breaks it, at the hop that did the clobbering.
+    const broken = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tb\t.L3\n.L3:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('chainbroken', broken)).toThrow(/no compare reaches the end of its only predecessor '.L2'/);
   });
 
   test('a label alone between the cmp and the branch carries them too', () => {
