@@ -4,11 +4,11 @@
 // bucket — the classes still all existed, the counts just moved. These pin the orderings that
 // actually overlap.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DECLINE_CLASSES, declineClassesOf, OTHER_CLASS } from '../src/pages/benchmark/lib/declines';
+import { DECLINE_CLASSES, OTHER_CLASS, declineClassesOf } from '../src/pages/benchmark/lib/declines';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const CORE_SRC = join(ROOT, 'packages/core/src');
@@ -32,7 +32,12 @@ const codeOf = (file: string): string =>
  *  pieces kept and every `${…}` replaced by a placeholder — so an interpolated MNEMONIC or SYMBOL
  *  becomes `X` here, which is why a class keyed on a mnemonic alternation cannot be exercised from
  *  this corpus and is pinned by hand instead (see `NOT_IN_TEMPLATES`). */
-const DECLINE_CTORS = new Set(['FrontendUnsupportedError', 'PpcUnsupportedError', 'RaiseUnsupportedError', 'StructureError']);
+const DECLINE_CTORS = new Set([
+  'FrontendUnsupportedError',
+  'PpcUnsupportedError',
+  'RaiseUnsupportedError',
+  'StructureError',
+]);
 
 const coreDeclineTemplates = (): { file: string; line: number; text: string }[] => {
   const files: string[] = [];
@@ -73,7 +78,11 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
       while ((l = lit.exec(arg))) {
         pieces.push(l[1] ?? l[2] ?? l[3] ?? '');
       }
-      const text = pieces.join('').replace(/\$\{[^}]*\}/g, 'X').replace(/\s+/g, ' ').trim();
+      const text = pieces
+        .join('')
+        .replace(/\$\{[^}]*\}/g, 'X')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (text) {
         out.push({ file: f.slice(CORE_SRC.length + 1), line: src.slice(0, m.index).split('\n').length, text });
       }
@@ -202,7 +211,7 @@ describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
   // as work the branch-likely round left undone. The `bltzall` row holds the other half of the
-  // split: a transfer named by neither class stays in the `branch-form` residue.
+  // split: a transfer named by neither class stays in `branch-form`.
   test.each([
     [
       "lift: cannot lift 'absi': branch-likely 'bltzl' at 0x4 — the delay slot is itself a control transfer",
@@ -274,17 +283,25 @@ describe('a pattern keyed on an English word claims sentences that are not about
     expect(classOf(marker)).toBe(want);
   });
 
-  // These two are not misfiled any more; they are unnamed, which is the honest answer and the one
-  // the residue list at the top of `declines.ts` records. A backend has no place in a lifting-gap
-  // taxonomy at all, and a loop-naming refusal is not control flow.
-  test.each([
-    ['backend: pascal backend: switch fall-through has no faithful IDO Pascal case-of spelling'],
-    [
-      "structure: cannot structure 'f': a pre-update exit copy would rebuild a computed value inside a loop " +
-        "nested in another loop's post-loop naming",
-    ],
-  ])('%s is unclassified rather than misfiled', (marker) => {
-    expect(classOf(marker)).toBe('other');
+  // This one is not misfiled any more; it is unnamed, which is the honest answer and the one the
+  // residue list at the top of `declines.ts` records. A loop-naming refusal is not control flow.
+  //
+  // An earlier version of this block also pinned `backend: pascal backend: switch fall-through has
+  // no faithful IDO Pascal case-of spelling`. The TEXT is real (`packages/core/src/backend/
+  // pascal.ts`) but the MARKER is not: it is thrown as a plain `Error`, `Diagnostic.stage` in
+  // `pipeline.ts` is `lift | raise | structure | contract | verify | internal` with no `backend`,
+  // and `apps/benchmark/src/eval/asmlift.ts` builds every marker as `${d.stage}: …`. Measured over
+  // the artifact, every marker on a declined row opens `lift:` (252), `structure:` (49) or
+  // `raise:` (18). A negative test against a string the channel cannot carry asserts a hazard that
+  // does not exist, and `ppc.ts`'s tail-branch refusal — pinned above, and a real published marker
+  // — is the whole of the case for not keying on the word `fall-through`.
+  test('a loop-naming refusal is unclassified rather than misfiled as control flow', () => {
+    expect(
+      classOf(
+        "structure: cannot structure 'f': a pre-update exit copy would rebuild a computed value inside a loop " +
+          "nested in another loop's post-loop naming",
+      ),
+    ).toBe('other');
   });
 });
 
@@ -564,33 +581,39 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   // or nothing in the corpus reaches it (leave it, and say what it still guards). Both of these are
   // the third, measured on the committed artifact:
   //
-  //   branch-likely  A RESIDUE. PR #226 modelled the capability — a likely branch nullifies its
+  //   branch-likely  LEFTOVER SHAPES. PR #226 modelled the capability — a likely branch nullifies its
   //                  delay slot, modelled by placement — and `mips.ts` :386, :642 and :647 are what
   //                  it left behind. The population is enormous and the hazard is absent: across
   //                  the three Splat asm trees in `apps/benchmark/checkouts`, 24,570 functions,
   //                  7,440 of them carry a likely branch and there are 18,841 in total (`bnel`
   //                  7,613, `beql` 6,652, `bc1fl` 1,911, `bc1tl` 1,464, then the zero-compare
-  //                  forms). Each of the three shapes `normaliseBranchLikely` refuses reads ZERO:
-  //                  a delay slot that is itself a control transfer, a likely branch sitting in
-  //                  another transfer's slot, a delay slot some branch targets. An earlier scan
+  //                  forms). Each of the three shapes `normaliseBranchLikely` SCANS FOR reads
+  //                  ZERO: a delay slot that is itself a control transfer, a likely branch sitting
+  //                  in another transfer's slot, a delay slot some branch targets. An earlier scan
   //                  printed 15 for the second of those; its mnemonic set began with the bare
   //                  alternative `b` under `re.match`, so `break` — a trap, not a branch — was
   //                  counted as one. Re-run with every mnemonic fullmatched, it is 0.
-  //   pic-globals    NOT REACHED, and reachable. 29 of 301 PPC rows read memory through a
-  //                  literal-0 base over 110 sites and one of them MATCHES, so the relocated form
-  //                  is lifted post-#221 and the PPC arm guards a base no relocation fills. The
-  //                  MIPS arm has no row because every corpus toolchain compiles with no
-  //                  small-data threshold: `-non_shared -G 0` for ido7.1,
-  //                  `-mno-abicalls -fno-PIC -G 0` for gcc2.7.2kmc. That is a flag, not a limit —
-  //                  a synthetic row may set its own `cflags` and three already do. With
-  //                  `int gCounter; int tax_gprel(int n){ gCounter += n; return gCounter; }` and
-  //                  ido7.1's canonical set at `-G 8` instead of `-G 0`, the global moves to
-  //                  small data and the body becomes `lw v1,0(gp)` / `addu` / `jr ra` /
-  //                  `sw v0,0(gp)`, both halves carrying `R_MIPS_GPREL16 gCounter`, which
-  //                  declines with this class's message verbatim. `-KPIC -G 0` reaches the same
-  //                  refusal the long way, through the GOT prologue; `-G 8` is the row to write,
-  //                  because it is one token off canonical and has no second cause in it. The row
-  //                  is owed; it is not impossible.
+  //                  THE THROW HAS SEVEN ARMS, NOT THREE, and the scan covers three of them. The
+  //                  other four refuse a disassembly the reader cannot account for: an unresolved
+  //                  branch target, and no instruction at the delay slot, at the not-taken edge, or
+  //                  before the branch. `mips.ts:396` says `parseDisasm` guarantees those by
+  //                  refusing a listing it cannot account for, which would make them unreachable by
+  //                  construction — but nothing here measures that, and a coverage claim owes its
+  //                  whole gate list rather than the arms it happened to scan.
+  //   pic-globals    NOT REACHED, and reachable — measured by compiling, not by reasoning. The
+  //                  class reads 0 because every corpus toolchain compiles with no small-data
+  //                  threshold: `-non_shared -G 0` for ido7.1, `-mno-abicalls -fno-PIC -G 0` for
+  //                  gcc2.7.2kmc. That is a flag, not a shape the toolchain cannot emit, and a
+  //                  synthetic row may set its own `cflags`. At ido7.1's canonical set with `-G 8`
+  //                  instead of `-G 0`, `int gTaxRate; int tax_gprel(int n){ gTaxRate += n;
+  //                  return gTaxRate; }` compiles to `lw v1,0(gp)` / `addu` / `jr ra` /
+  //                  `sw v0,0(gp)` with `R_MIPS_GPREL16 gTaxRate` on both halves, and lifting that
+  //                  through `MIPS_IDO` declines with this class's message verbatim. The flag is
+  //                  load-bearing, checked the other way: the same source at `-G 0` emits
+  //                  `lui`/`addiu` with `R_MIPS_HI16`/`LO16` and reaches a different refusal
+  //                  entirely. `-KPIC -G 0` arrives at the gp read the long way, through the GOT
+  //                  prologue, so it would pin two causes and neither cleanly. `-G 8` is the row
+  //                  to write, because it is one token off canonical with no second cause in it.
   //
   // Until it exists, the test that keeps both honest is that core still spells the refusal: a class
   // may not outlive the message it classifies. Both are in `SPELT_BY` at the end of this file,
@@ -610,12 +633,13 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(classOf(marker)).toBe(want);
   });
 
-  test('branch-likely says in its LABEL that it is a residue, because 0 rows reads as "cannot"', () => {
+  test('branch-likely says in its LABEL that it is leftover, because 0 rows reads as "cannot"', () => {
     // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
-    // markers it saw. `DeclinePicker` in `components/FeaturePicker.tsx` is what renders it, one
-    // option per class with zero-count ones `disabled`, so the label is the whole of what a reader
-    // finds. "Branch-likely delay slots" alone reads as "asmlift cannot lift one"; it can, since
-    // #226.
+    // markers it saw, so `GapAnalysis.tsx`, the panel that calls itself the roadmap view, does not
+    // render one. `DeclinePicker` in `components/FeaturePicker.tsx` does: one option per class with
+    // the zero-count ones `disabled`, so the label is the whole of what a reader finds, on a filter
+    // dropdown rather than on the roadmap. "Branch-likely delay slots" alone reads as "asmlift
+    // cannot lift one"; it can, since #226.
     expect(DECLINE_CLASSES.find((c) => c.key === 'branch-likely')?.label).toMatch(/residual/);
   });
 
@@ -694,7 +718,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   //
   // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
   // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
-  // are the three control-transfer capabilities sitting above the branch-form residue.
+  // are the three control-transfer capabilities sitting above `branch-form`.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['float > opaque-ops', 56],
     ['float > store-class', 13],

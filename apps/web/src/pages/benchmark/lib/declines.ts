@@ -20,10 +20,13 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 301 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
+// RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
+// class here claims. It is not what a landed capability left behind (`branch-likely` below says
+// "leftover shapes" for that) and it is not a catch-all class.
 // `packages/core/src` throws 118 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
@@ -56,7 +59,18 @@
 // residue and into a class and the gate goes red with the new number.
 //
 // Named here rather than given classes, because a class with no inhabitant and no witness row is
-// the defect this file exists to remove. Two control-transfer capabilities are in that residue and
+// the defect this file exists to remove. A class that HAS a name and no rows is read in only one
+// place: `DeclinePicker` in `components/FeaturePicker.tsx` renders one option per class and
+// disables the zero-count ones, so the label is the whole of what a reader gets. `GapAnalysis.tsx`
+// — the panel whose own subtitle calls itself the roadmap view — renders `declinePareto`, which
+// accumulates only from markers it saw, so a zero-row class does not appear there at all. A label
+// written for the roadmap reader lands on the picker.
+//
+// `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
+// with a compiler's own error text: 13 `c.c:` markers and 11 more compiler lines in the artifact
+// belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
+// `raise:` — 252 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
 // gotos / register tail calls". So is the sixth kind of the naming family: `reloc-symbol.ts`
@@ -89,7 +103,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // that pile was `&local`.
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
-    pattern: /address-taken stack local|address of a stack local is (taken|computed)|address-taken local \/ frame arithmetic/,
+    pattern:
+      /address-taken stack local|address of a stack local is (taken|computed)|address-taken local \/ frame arithmetic/,
   },
   {
     key: 'outgoing-stack-args',
@@ -141,14 +156,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /no reaching compare/,
   },
   {
-    // A RESIDUE of a capability that LANDED, not a capability that is missing — the one class here
-    // that a reader would otherwise misread in the worse direction. Branch-likely is modelled: a
-    // likely branch nullifies its delay slot, and the slot becomes its own block on the taken edge.
-    // What still refuses is what that model left over — `normaliseBranchLikely` in
+    // THE LEFTOVER SHAPES OF A CAPABILITY THAT LANDED, not a capability that is missing — the one
+    // class here that a reader would otherwise misread in the worse direction. Branch-likely is
+    // modelled: a likely branch nullifies its delay slot, and the slot becomes its own block on the
+    // taken edge. What still refuses is what that model left over — `normaliseBranchLikely` in
     // `packages/core/src/frontend/mips.ts` (the throw at :386) on the shapes the ISA leaves
     // undefined, and the two recovered-switch interactions at :642 and :647. No compiled row in the
     // corpus reaches any of them, so the class reads 0; deleting it would assert that nothing is
     // left, which is the opposite falsehood.
+    //
+    // THAT THROW HAS SEVEN ARMS AND ONLY THREE WERE SCANNED. The other four refuse a disassembly
+    // the reader cannot account for — an unresolved branch target, and no instruction at the slot,
+    // at the not-taken edge, or before the branch. `mips.ts:396` says `parseDisasm` guarantees
+    // those by refusing a listing it cannot account for, so they are plausibly unreachable by
+    // construction; nothing measures that, and a coverage claim owes its whole gate list.
     key: 'branch-likely',
     label: 'Branch-likely delay slots (MIPS) — residual shapes only',
     pattern: /branch-likely/,
@@ -342,8 +363,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Call argument registers with no prototype',
     pattern: /has no prototype/,
   },
-  // The three control-transfer gaps, ABOVE the `branch-form` residue that would otherwise take all
-  // of them on `unmodelled control transfer`.
+  // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
+  // `unmodelled control transfer`.
   {
     key: 'indirect-call',
     label: 'Indirect calls (virtual dispatch / call through a pointer)',
