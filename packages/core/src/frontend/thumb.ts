@@ -21,7 +21,7 @@
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaredWidth, protoArity } from '../proto';
+import { type FnProto, type Prototypes, STANDARD_SIGNATURES, declaredWidth, protoArity } from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -3373,8 +3373,11 @@ export function lift(
   const declaredCall = (
     callee: string,
   ): { arity: number; block: readonly number[] | null; wide: string | null } | null => {
+    // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
+    // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
+    // last two wins — it may be building against its own re-declaration.
     const own = prototypes[callee];
-    const proto = protoArity(own) !== undefined ? own : RUNTIME_HELPERS[callee];
+    const proto = protoArity(own) !== undefined ? own : (RUNTIME_HELPERS[callee] ?? STANDARD_SIGNATURES[callee]);
     const arity = protoArity(proto);
     if (arity === undefined) {
       return null;

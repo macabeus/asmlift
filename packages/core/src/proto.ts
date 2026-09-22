@@ -66,6 +66,24 @@ export function protoArity(p: FnProto | undefined): number | undefined {
   return undefined;
 }
 
+/** Signatures FIXED BY THE C STANDARD, so they are not a project fact and need no header to be
+ *  known. Consumed by a frontend's arity lookup behind both the caller-supplied prototype and the
+ *  compiler's own runtime helpers (raise/softdiv.ts) — a project that declares one of these wins,
+ *  because a decomp may legitimately be building against its own re-declaration.
+ *
+ *  WHAT AN ENTRY BUYS, which is not the same as what it changes: the arity a call recovers is
+ *  usually the same number the arg-register heuristic already guessed, so an entry moves no code.
+ *  What it moves is what is KNOWN — a guess cannot witness anything, and an entry can. The
+ *  frame-object audit takes one as half of its declared-arity witness (frontend/thumb.ts).
+ *
+ *  THE LIST IS SHORT ON PURPOSE. `memcpy` is here because a corpus row exercises it and its price
+ *  was measured. `memset`, `strcpy` and the rest of the standard library are equally fixed by the
+ *  standard and equally addable, and they are absent because nothing measures them — a table
+ *  grown by appetite would be a table nobody priced. */
+export const STANDARD_SIGNATURES: Prototypes = {
+  memcpy: { params: ['void *', 'const void *', 'u32'] },
+};
+
 /** Bit width per C89 base type on every target asmlift lifts (all ILP32). `long` is 32 here and
  *  would not be on an LP64 host, so it is a target fact rather than a language one. */
 const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
