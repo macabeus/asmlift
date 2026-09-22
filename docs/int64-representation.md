@@ -17,11 +17,43 @@ built, it says so.
 **Where the blocker sits, by level.** `docs/level-tower.md`'s bar has two halves — a capability
 that genuinely cannot be expressed in the current representation, _and_ a differ that can prove the
 result matches. §1 clears the second half at the **backend**: the bytes are reachable only from C
-that declares a 64-bit local, and one compile proves it. §2 is about the first half, and it does
-**not** land where the first draft of this file put it. The IR can already produce two 32-bit halves
-of one 64-bit machine result (§2.1). What it cannot do is let such a pair survive as a **value** —
-which is an `L2`→`L3` and backend question (a type in `C_TYPEDEFS`, a width in `SCALAR_WIDTHS`, a
-rendering), not a new IR op. Section 3 prices that side and is the expensive one.
+that declares a 64-bit local, and one compile proves it. The first half splits across two levels,
+and only one of the two is expensive.
+
+**L1 — the refusal this row actually hits is not about 64-bit values at all.** `adc` has no decode
+arm. The mnemonic occurs exactly once in the Thumb frontend, in
+`grep -n "const FLAG_SETTING" packages/core/src/frontend/thumb.ts`'s set, so the decode falls to the
+default, degrades to an `opaque` op, and surfaces as the generic unmodelled-instruction loud-fail.
+A function with no 64-bit anything in it shows that the marker is generic:
+
+```
+	add	r0, r0, r1
+	adc	r2, r2, r3
+	add	r0, r0, r2
+```
+
+```
+$ asmlift bareadc.asm --target agbcc --name bareadc
+s32 bareadc(s32 a0, s32 a1, s32 a2, s32 a3) {
+    return a0 + a1 + ASMLIFT_ERROR("unmodelled instruction 'adc'", a2, a3);
+}
+asmlift: [structure] unmodelled instruction 'adc'
+EXIT=1
+```
+
+Closing that needs **no new op**. `adc rd, rn, rm` is `rn + rm + (prev_sum <u prev_a)`, which is
+`add` + `icmp_ult` + `zext`, all three already in `OPCODES`, over a flag-setter the frontend already
+identifies. That is a per-instruction faithful model, and it is a DIFFERENT object from the "reads
+the carry bit ⇒ high half of a 64-bit add" pairing model §4.1 and §4.2 demolish. §6.1 states the
+precondition that binds it, and it is not free of hazards — §4.2 measures them — but it is not §3.
+
+**L2→L3 and the backend — the part §3 prices.** The IR can already produce two 32-bit halves of one
+64-bit machine result (§2.1). What it cannot do is let such a pair survive as a **value**: a type in
+`C_TYPEDEFS`, a width in `SCALAR_WIDTHS`, a rendering. That is not a new IR op either, and it is the
+expensive side.
+
+**So §3 does not price this row's decline; it prices the value.** A round that pays §3 in full and
+builds `s64` meets the same `adc` refusal at L1 until the model above exists.
 
 ## 1. It is required by the bytes, not preferred by the design
 
@@ -59,9 +91,9 @@ pins the width, and the bias pins `/256` over `>>8`.
 ## 2. What is actually in the way
 
 The obvious alternative is to leave the type alone and let a call return two 32-bit results. The
-first draft of this file argued that no op in the IR has more than one result, therefore a pair
+tempting argument against it is that no op in the IR has more than one result, therefore a pair
 return must be one value, therefore the route is closed. The premise is true — every entry in
-`OPCODES` is `results: 0` (×6) or `results: 1` (×42) — and the inference from it is wrong.
+`OPCODES` is `results: 0` (×6) or `results: 1` (×42) — and the inference from it does not follow.
 
 ### 2.1 The IR already models one machine operation producing two 32-bit halves
 
@@ -93,7 +125,7 @@ about the structurer which will be rediscovered by anyone who tries the field ed
 Even granting a perfect pair-lift, the backend has to print the high half. m2c does model the pair
 and prints `SECOND_REG(temp_ret)`.
 
-**What the harness does with that is a separate defect, and this file previously got it wrong.** m2c
+**What the harness does with that is a separate defect.** m2c
 is declined on `pokeemerald:MathUtil_Mul32:agbcc` on its `M2C_CARRY` marker, NOT on `SECOND_REG` —
 `SECOND_REG` is not in the decline vocabulary at all
 (`grep -n "const DECLINE_MARKERS" apps/benchmark/src/eval/outcome.ts`), although the comment beside
@@ -128,9 +160,9 @@ The other unequal-rank combinations come back `undefined` rather than `false`, b
 inside `renderedIntSignedness` answers definitely only at width `< 32` or `== 32`. A rank-aware
 repair has to extend that too.
 
-**`undefined` is NOT the safe outcome.** The three named consumers below is where the first draft of
-this file stopped, on the reasoning that an unknown only costs a redundant cast. With a 64-bit value
-that reasoning inverts: **the cast that resolves an unknown is hardcoded to 32 bits, so it
+**`undefined` is NOT the safe outcome.** It is tempting to stop at the three named consumers below,
+on the reasoning that an unknown only costs a redundant cast. With a 64-bit value that reasoning
+inverts: **the cast that resolves an unknown is hardcoded to 32 bits, so it
 truncates.** Feeding `emitCFamily` this row's own winning spelling with `r` declared `s64` prints:
 
 ```c
@@ -157,13 +189,15 @@ The cast sites, all hardcoded at 32:
 | `grep -n "const pinSigned = (x: Expr): Expr =>" packages/core/src/structure/structure.ts`  | the signed-compare pin, `T.s(32)`                                     |
 | `grep -n "r = { k: 'cast', to: T.u(32), e: r };" packages/core/src/structure/structure.ts` | the unsigned-compare pin, `T.u(32)`, both arms                        |
 
-And the three consumers of the wrong ANSWER:
+And the three consumers of the wrong ANSWER. Only the first is measured — the table above is its
+measurement. The other two are DERIVED from it by reading what each does with the answer, and
+neither has been run:
 
-| consumer                                                                                        | verdict   | what goes wrong                                                                                                                                                                                                                                                          |
-| ----------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `grep -n "return arithConversionSignedness(e.l, e.r, varType);" packages/core/src/l3/typing.ts` | **WRONG** | the binary-op tail of `renderedIntSignedness`, _the_ one rendered-signedness judgment. A wrong `false` here propagates to every consumer of that function — including the two `structure.ts` pins above, which is why the repair cannot be costed from this table alone. |
-| `grep -n "The compare-meaning gate (see SCOPE)" packages/core/src/l3/initfirst.ts`              | **WRONG** | the gate accepts when `before === after`. Substituting a 32-bit `v` for a 64-bit operand `X` against an unsigned 32-bit operand computes `false` on both sides while the compare's real signedness flips, so the gate accepts a substitution that changes the meaning.   |
-| `grep -n "function pinnedOperands" packages/core/src/backend/cfamily.ts`                        | **WRONG** | emits no cast when the computed verdict already equals `wantSigned`. A division whose pair really renders signed, wanted unsigned, is printed uncast — C that means something other than the IR, in the last stage before bytes.                                         |
+| consumer                                                                                        | verdict             | what goes wrong                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `grep -n "return arithConversionSignedness(e.l, e.r, varType);" packages/core/src/l3/typing.ts` | **WRONG**, measured | the binary-op tail of `renderedIntSignedness`, _the_ one rendered-signedness judgment. A wrong `false` here propagates to every consumer of that function — including the two `structure.ts` pins above, which is why the repair cannot be costed from this table alone. |
+| `grep -n "The compare-meaning gate (see SCOPE)" packages/core/src/l3/initfirst.ts`              | **WRONG**, derived  | the gate accepts when `before === after`. Substituting a 32-bit `v` for a 64-bit operand `X` against an unsigned 32-bit operand computes `false` on both sides while the compare's real signedness flips, so the gate accepts a substitution that changes the meaning.   |
+| `grep -n "function pinnedOperands" packages/core/src/backend/cfamily.ts`                        | **WRONG**, derived  | emits no cast when the computed verdict already equals `wantSigned`. A division whose pair really renders signed, wanted unsigned, is printed uncast — C that means something other than the IR, in the last stage before bytes.                                         |
 
 `initfirst`'s gate carries a second, independent break, visible in its own sufficiency argument. The
 comment at `grep -n "then represents any 32-bit-or-narrower X exactly" packages/core/src/l3/initfirst.ts`
@@ -183,7 +217,8 @@ estimate that they are small is a judgement, not a result.
 ## 4. The clientele, counted
 
 Rows whose published record names a 64-bit compiler runtime helper — `__muldi3`, `__ashrdi3`,
-`__ashldi3`, `__divdi3`, `__shl2i`, `__shr2i` — over the whole 1,203-row corpus: **10**.
+`__ashldi3`, `__divdi3`, `__shl2i`, `__shr2i` — over the whole 1,203-row corpus: **10**. Every count
+in this section is read off the committed artifact at `58704aba` and moves when the corpus does.
 
 | row                                              | today                                     |
 | ------------------------------------------------ | ----------------------------------------- |
@@ -214,7 +249,17 @@ above, so the carry population is not a separate clientele: outside this row it 
 synthetic `ll*` rows that exist to pin this family.
 
 Scanning `targetAsm` for a carry-consuming mnemonic over all 1,203 rows finds **10** rows, all
-declined, and they are at least three unrelated idioms:
+declined, and they are at least three unrelated idioms.
+
+**All ten are declined, and no MATCHED row in the corpus carries a carry-consuming mnemonic at
+all.** That is the number that makes the hazards below affordable to get wrong once: a carry
+capability's blast radius on the existing match count is 0 before it ships, so every hazard here
+bounds "wrong new output", never "lost match".
+
+Anchor the scan to the MNEMONIC column. A `\b(adc|adde|…)\b` over a PowerPC objdump listing also
+matches the hexadecimal ADDRESS column — `adc:`, `ade:` — and returns **12**, of which
+`marioparty4:fn_1_B5C:mwcc_242_81` and `marioparty4:HuDvdErrorWatch:mwcc_247_107` are address text
+with no carry instruction in them.
 
 - **`srawi; addze` is signed division by a power of two.** Four sites over three rows —
   `marioparty4:fn_1_83C8:mwcc_242_81` (`srawi r0,r0,5; addze r27,r0`),
@@ -232,6 +277,25 @@ neg. r5,r5`, with the surrounding `xoris rX,rY,32768` flipping the sign bit so t
   `ac-decomp:JW_JUTGamePad_read:mwcc_242_81` declines EARLIER, at lift, so its carry opcodes never
   reach the structurer's refusal. The marker count is a floor on the clientele, not a measure of it.
 
+**The two ISA facts a SHARED carry fold would get backwards.** Seven of the ten carry-asm rows are
+PowerPC, and the pair conventions are mirror images. From the committed artifact's own `targetAsm`,
+same reference source compiled by both toolchains:
+
+| row                           | bytes                             | low half | high half |
+| ----------------------------- | --------------------------------- | -------- | --------- |
+| `synthetic:lladd:agbcc`       | `add r0,r0,r2 ; adc r1,r1,r3`     | `r0`     | `r1`      |
+| `synthetic:lladd:mwcc_242_81` | `addc r4,r4,r6 ; adde r3,r3,r5`   | `r4`     | **`r3`**  |
+| `synthetic:llsub:agbcc`       | `sub r0,r0,r2 ; sbc r1,r1,r3`     | `r0`     | `r1`      |
+| `synthetic:llsub:mwcc_242_81` | `subfc r4,r6,r4 ; subfe r3,r5,r3` | `r4`     | **`r3`**  |
+
+- **"The higher-numbered register is the high half" is right on ARM and backwards on PowerPC.** It
+  is an endianness fact, not a convention: the big-endian ABI passes and returns a 64-bit pair
+  high-half-first, so the high half lands in the LOWER-numbered register of each pair.
+- **`subf rD, rA, rB` computes `rB - rA`.** A `sub`/`sbc` ↔ `subfc`/`subfe` fold that does not
+  invert its sources computes `b - a`. `docs/level-tower.md`'s rule that a shared fold's divergence
+  needs an ISA fact is exactly this: two facts, both in the corpus, neither inferable from the other
+  target.
+
 ### 4.2 The agbcc `adc` population is narrow, and all three of its shapes break a naive pairing
 
 Hazards predicted and NOT reproduced on agbcc, at this row's flags: `u64 x << 1` lowers to
@@ -240,11 +304,29 @@ Hazards predicted and NOT reproduced on agbcc, at this row's flags: `u64 x << 1`
 `__negdi2`. So "the carry was set by a shift" and "`adc` as a conditional increment" do not arise
 here. What does:
 
-| C                       | agbcc                                                 | why it breaks a naive pairing                                                                       |
-| ----------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `u64 t = x; t += t;`    | `add r0,r0,r0 ; adc r1,r1,r1`                         | both `adc` sources are the SAME register; the value is `x+x`, not `a+b`                             |
-| `(u64)a + b`, a,b `u32` | `mov r4,#0 ; mov r2,#0 ; add r3,r3,r1 ; adc r4,r4,r2` | both `adc` sources are literal ZERO — the carry bit is the entire value; fold `0+0` and it vanishes |
-| `a + 1`, a `u64`        | `mov r0,#1 ; mov r1,#0 ; add r0,r0,r2 ; adc r1,r1,r3` | the constant is pre-loaded into the DESTINATION; operand order is reversed against the source       |
+| C                       | agbcc                                                 | why it breaks a naive pairing                                                                                                                                |
+| ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `u64 t = x; t += t;`    | `add r0,r0,r0 ; adc r1,r1,r1`                         | both `adc` sources are the SAME register; the value is `x+x`, not `a+b`                                                                                      |
+| `(u64)a + b`, a,b `u32` | `mov r4,#0 ; mov r2,#0 ; add r3,r3,r1 ; adc r4,r4,r2` | both `adc` sources are literal ZERO — the carry bit is the entire value; fold `0+0` and it vanishes                                                          |
+| `a + 1`, a `u64`        | `mov r0,#1 ; mov r1,#0 ; add r0,r0,r2 ; adc r1,r1,r3` | the constant is pre-loaded into the DESTINATION; operand order is reversed against the source                                                                |
+| `a * 3`, a `u64`        | `… lsl r0,r2,#0x1 ; add r0,r0,r2 ; adc r1,r1,r3`      | the C contains no 64-bit ADD at all — this is a strength-reduced MULTIPLY, and one addend is a compiler-synthesised shift result that is not a named C value |
+
+The last one is the reason a pairing rule cannot key on "both addends are C values" or "the source
+wrote `+`". It is arithmetically benign — the recovered addition IS what the machine does — so it is
+a completeness gap rather than a soundness one, but a rule that assumes the source operator survives
+into the asm fails here. (`a * 2` is pure shifts and emits no `adc`.)
+
+**The one thing that measured as a POSITIVE, and it is what a sound model needs.** Thirteen agbcc
+probes at this row's flags — plain, three-term, five-term spilled-to-stack, loop-accumulated,
+struct-held and global-held `u64` add; two independent 64-bit adds with both results stored; dead
+high half; halves rotated so the low half feeds the high; `*2`; `*3`; subtract; a sum consumed by a
+compare — emit **sixteen** carry pairs between them, and **every one is strictly adjacent**. No
+probe produced an instruction between an `add`/`sub` and the `adc`/`sbc` that consumes its carry.
+
+That matters because the alternative is to scan backwards for whatever set the carry, and on Thumb-1
+an intervening `lsl`, `sub`, `cmp` or `neg` sets C too — a scan is unsound where a required adjacency
+is not. Sixteen pairs is a measured property of agbcc's codegen, not a proof; but a requirement that
+turns out to be too strong REFUSES a row, which is the direction a refusal is allowed to be wrong in.
 
 ## 5. The fabricated signatures are a SEPARATE defect, and they cost nothing to fix
 
@@ -285,9 +367,41 @@ Four measured facts about the repair:
 
    The same command without `--proto` emits `s32 fadd(void) { return __addsf3(); }`.
 
-2. **The honest spelling costs 0 MATCHES.** Both spellings compiled at the row's own `decomp.yaml`
-   agbcc line and disassembled: the only differing line is the objdump filename header. The `.text`
-   is byte-identical, so the match is not resting on the fabrication.
+2. **The honest spelling costs 0 MATCHES — measured per row, on each row's own toolchain.** Not
+   generalised from one of them: each row's published source and its honest-arity source were
+   scored against that row's own reference target with the harness's own objdiff scorer
+   (`scoreC` for agbcc, `scoreCPpc` for mwcc). Score is objdiff differences; 0 is byte-exact.
+
+   | row                           | published | honest arity |
+   | ----------------------------- | --------- | ------------ |
+   | `synthetic:fadd:agbcc`        | 0         | **0**        |
+   | `synthetic:fsub:agbcc`        | 0         | **0**        |
+   | `synthetic:fmul:agbcc`        | 0         | **0**        |
+   | `synthetic:fdiv:agbcc`        | 0         | **0**        |
+   | `synthetic:fcmp:agbcc`        | 0         | **0**        |
+   | `synthetic:f2i:agbcc`         | 0         | **0**        |
+   | `synthetic:i2f:agbcc`         | 0         | **0**        |
+   | `synthetic:llshl:mwcc_242_81` | 0         | **0**        |
+   | `synthetic:llshr:mwcc_242_81` | 0         | **0**        |
+
+   **Nine of nine keep the match.** None of the nine needs a 64-bit RETURN type either: the two
+   `ll*` rows return `long long`, and on mwcc_242_81 the published `s32 llshl(void)`, the honest
+   `s32 llshl(s32, s32, s32)`, an `s64` return over a declared `s64 __shl2i()`, and the reference
+   source itself all compile to byte-identical `.text`. The PowerPC object does not decide the
+   return width here — `r3`/`r4` are both volatile and the epilogue's scratch is `r0`.
+
+   **On agbcc it would.** Holding arity and the callee's declaration fixed, `s32 f(…)` epilogues
+   `pop {r1} ; bx r1` and `s64 f(…)` epilogues `pop {r2} ; bx r2`, because `r1` is then half the
+   return value and the scratch moves. So an honest RETURN type is free on this PowerPC shape and
+   is not free on agbcc — and no agbcc row among the nine needs one, because all seven are 32-bit
+   soft-float helpers whose honest return is `s32`. Anyone extending this from arity to return type
+   owes that measurement again, per toolchain.
+
+   **The control that keeps this from reading wrong.** `asmlift --proto` emits the DEFAULT
+   candidate, and `synthetic:fcmp:agbcc`'s published source is a fan WINNER carrying
+   `["unsigned", "defsite"]`. Comparing the two directly reads as a lost match at score 7. It is
+   not: the winner's own shape with the honest arity scores 0, and the published `void` arity with
+   the DEFAULT shape scores the same 7. The 7 is the branch-arm variation, not the signature.
 
 3. **asmlift ALREADY WARNS.** The un-`--proto`'d run prints `asmlift: [proto] 1 callee(s) have no
 declared arity, guessed from the argument registers: __addsf3 — pass --proto …`. The loud channel
@@ -362,7 +476,43 @@ arithmetically wrong C.
 
 For this row, `r1` after the call is the callee's HIGH HALF — a result, not a clobber — so the
 narrow fix is the pair-return model and not the general clobber model. That is a statement about
-THIS row, not about the corpus.
+THIS row, not about the corpus, and it closes `r1` ONLY.
+
+**`r2` and `r3` are not reachable by any pair-return model, and their hole is the worse-shaped
+one.** Under AAPCS a call's result is `r0`, or `r0:r1` for a 64-bit one; `r2` and `r3` are never a
+result of anything, so no result model can ever explain a read of them after a `bl`. And the stale
+value does not have to arrive as a bare `return 42;`, which at least looks odd. It launders into
+arithmetic:
+
+```
+	mov  r2, #0x11
+	mov  r0, #0x3
+	bl   callee
+	add  r4, r0, #0
+	add  r5, r2, #0
+	add  r0, r4, r5
+```
+
+```
+$ asmlift clobber_r2.asm --target agbcc --name probe_r2 --proto '{"callee":{"params":1}}'
+s32 probe_r2(void) {
+    return callee(3) + 17;
+}
+EXIT=0
+```
+
+`17` is `r2`'s pre-call value, inside plausible C that compiles and scores. So: the pair-return
+model closes `r1`-after-`bl`; `r2`/`r3`-after-`bl` stays an open silent-wrong-value defect on
+`main`, corpus reach 0, user reach non-zero.
+
+**And the pair-return model needs a witness this file has not sited.** `r1` after a `bl` is a result
+only if the callee returns 64 bits, and the instruction stream is identical when a 32-bit-returning
+callee's `r1` is merely read — the asm does not decide it. For a RECOGNISED compiler runtime helper
+the symbol name is the witness, which is exactly what a helper table is: `__muldi3` is 64-bit by
+libgcc's naming the way `__divsi3` is 32-bit, and `SOFT_DIV` already reads a name that way. For an
+arbitrary callee there is no witness at all, which is why the clobber question and the pair-return
+question do not have the same answer. That makes §6.1's narrow fix and §5's separate defect two
+sides of the SAME unbuilt signature table, whose home §5 leaves open — they are not independent.
 
 ### 6.2 Recognising the `*di3` family on `raise/softdiv.ts`'s template
 
