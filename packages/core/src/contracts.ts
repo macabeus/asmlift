@@ -192,7 +192,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         const t = op.attrs.target;
         irCalls.set(t, (irCalls.get(t) ?? 0) + 1);
       } else if (op.opcode === 'opaque') {
-        irOpaques.add(gapReasonFor(op.attrs.mnemonic));
+        irOpaques.add(gapReasonFor(op.attrs));
       }
     }
   }

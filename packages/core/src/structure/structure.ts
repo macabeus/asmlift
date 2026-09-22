@@ -3851,7 +3851,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       );
     }
     return d.opcode === 'opaque'
-      ? mkGap(gapReasonFor(d.attrs.mnemonic), d.operands.map(e))
+      ? mkGap(gapReasonFor(d.attrs), d.operands.map(e))
       : mkGap(`no lowering for op '${d.opcode}'`, d.operands.map(e));
   };
 

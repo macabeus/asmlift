@@ -518,12 +518,20 @@ export function exprEquals(a: Expr, b: Expr): boolean {
   }
 }
 
-/** THE spelling of an unmodelled instruction's gap reason, in one place: `structure.ts` writes it
- *  into the marker, `contracts.ts` matches on it to prove the gap was not dropped, and the benchmark
+/** THE spelling of an `opaque`'s gap reason, in one place: `structure.ts` writes it into the
+ *  marker, `contracts.ts` matches on it to prove the gap was not dropped, and the benchmark
  *  classifies declines by it. Two spellings make that contract silently vacuous — enforced-looking
- *  and never firing. `?` when a frontend stamps no mnemonic. */
-export function gapReasonFor(mnemonic: unknown): string {
-  return `unmodelled instruction '${typeof mnemonic === 'string' ? mnemonic : '?'}'`;
+ *  and never firing, since it is an EQUALITY between what the IR carries and what the output shows.
+ *
+ *  TWO PRODUCERS, TWO SENTENCES, and they name different capabilities: an INSTRUCTION no frontend
+ *  decodes (`adc`), and a call into the compiler's own RUNTIME that no recogniser folded
+ *  (`__div2i`). The attrs decide which, so a producer chooses by what it stamps rather than by
+ *  spelling a string. `?` when a frontend stamps neither. */
+export function gapReasonFor(attrs: { mnemonic?: unknown; helper?: unknown }): string {
+  if (typeof attrs.helper === 'string') {
+    return `no model for the runtime helper '${attrs.helper}'`;
+  }
+  return `unmodelled instruction '${typeof attrs.mnemonic === 'string' ? attrs.mnemonic : '?'}'`;
 }
 
 // ── the ONE traversal vocabulary ───────────────────────────────────────────────────────────────
