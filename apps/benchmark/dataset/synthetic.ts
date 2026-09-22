@@ -6587,12 +6587,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE ROW'S GATE IS ITS `proto` ENTRY, and it is load-bearing rather than inert. Measured, one
   // candidate, `[ranked] 1 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best
   // unsigned: 0 (match)`; run the same command with `--proto` dropped and the whole function
-  // declines again, at the `arg0NoHiddenReturnPointer` guard in
+  // declines again, at the `hiddenReturnPointerStands` guard in
   // `packages/core/src/frontend/thumb.ts`:
-  //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
-  //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
-  //     looks — and nothing says what the callee returns, so nothing says it does not own the
-  //     storage
+  //     cannot lift 'outparam': address-taken stack local — the one-word frame is never written
+  //     here, and `fill` takes it at argument 0 and nothing says what that callee returns — a
+  //     struct returned through a hidden pointer is handed this same frame
   // So a `returnsVoid` regression on this row is detectable, and the refusal survives narrowed:
   // a callee whose return nothing describes still declines.
   //
@@ -6620,8 +6619,24 @@ export const SYNTHETIC: SynthSpec[] = [
   // `void f(const void *a, const void *b){ struct Blob64 s = makeblob(b); }` sets exactly ONE
   // register for a one-parameter declaration and is still a struct return. What the pair measures
   // is a statement about the RETURN.
+  //
+  // WHICH SIDE CARRIES THE WITNESS, measured on the rows' own targets rather than read off the
+  // guard. It is `stkext`'s, and it comes from the STANDARD table rather than from anything the
+  // row says: rename its callee to `blockcopy` and the row declines in `stkextsret`'s words;
+  // declare `blockcopy` `returnsVoid` and it lifts again. `stkextsret`'s own `proto` entry is
+  // INERT for its refusal — with it, without it, and at `params: 2`, the decline is the same
+  // sentence character for character, because an arity is not a statement about a return.
+  //
+  // A CHANGE THAT MAKES `stkextsret` LIFT IS A REGRESSION, not a gain. It is the one row in this
+  // family whose DECLINE is the result, so `bench diff` reporting it gained reads as progress and
+  // is the opposite: nothing in the asm tells this frame from `stkext`'s, so whatever accepts it
+  // accepts a callee's own storage declared as a local.
+  //
   // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
   // witness rather than of who was told what: the pair differs in the ASM, not in the context.
+  // Not symmetrically, and the asymmetry is asmlift's to carry: m2c's `ctx` spells the RETURN
+  // (`struct Blob64 makeblob(const void *);`) and `FnProto` cannot spell a struct return at all,
+  // so asmlift is told strictly less about the one fact the pair turns on.
   //
   // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
   // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128
@@ -6782,9 +6797,9 @@ export const SYNTHETIC: SynthSpec[] = [
     features: [],
     toolchains: ['agbcc'],
     ctx: 'struct Blob64 { u32 w[16]; };\nstruct Blob64 makeblob(const void *);\nvoid stkextsret(void);',
-    // Asmlift is told exactly what m2c is told, and the declaration is the REFUSAL's evidence
-    // rather than a hint withheld: ONE declared parameter against TWO argument registers the
-    // machine sets is the hidden return pointer, counted.
+    // REQUIRED BY THE ctx/proto SYMMETRY GATE — the `ctx` declares `makeblob`, so asmlift is
+    // handed the arity too. INERT for the refusal, which turns on the unknown RETURN and is the
+    // same sentence with the entry, without it, and at a different arity (family comment above).
     proto: { makeblob: { params: 1 } },
   },
 
