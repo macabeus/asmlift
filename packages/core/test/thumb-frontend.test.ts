@@ -747,12 +747,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
     });
 
-    test('…across the HOLE a 64-bit return spans, where the later register is the only evidence', () => {
-      // agbcc's soft-64 shift: `__muldi3`'s product occupies r0 AND r1, so argument 1 cannot be
-      // filled from the register file at all — the pre-call `asr r1` it would read is the value the
-      // callee overwrote. The caller's own `add r2` still proves the call takes arguments, so the
-      // run keeps r0 and stops at the hole rather than reading the site as argument-less.
-      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('__ashrdi3(__muldi3())');
+    test('…and the HOLE a 64-bit return spans is not a hole once the helper table states its width', () => {
+      // agbcc's soft-64 shift. `__muldi3`'s product occupies r0 AND r1, which is what made
+      // argument 1 unfillable from the register file: the pre-call `asr r1` a guess would read is
+      // the value the callee overwrote. Nothing has to be guessed now — the helper table states
+      // each C parameter's WIDTH, so the frontend reads the pair as ONE value and the second call
+      // takes the first call's whole result. The guessed-arity machinery never sees the site.
+      //
+      // Both results are dropped here, and a recognised 64-bit helper is a PURE op, so the body is
+      // dead and nothing is emitted — the same answer `__divsi3` has always given for a dead
+      // soft-division. The signature is what shows the pair was read.
+      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('s64 a0, s64 a1, s32 a2');
     });
 
     test('a JOIN of that result with a caller-computed value stays an argument', () => {

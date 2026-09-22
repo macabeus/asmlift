@@ -32,12 +32,14 @@ import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
+import { fuseParamPairs } from './pairparams';
 import { PARAM_WIDTH_GATES, narrowEntryParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
 import { TRUNC_LOAD_GATES, foldTruncatedLoads } from './truncload';
+import { recognizeWideHelpers } from './widehelpers';
 
 /** Per-call options for the pass list — ONE field per pass that takes any, named for the pass, so
  *  a caller reads which recognizer it is steering and a pass that takes none says so by absence.
@@ -123,7 +125,25 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // ending in `br`. Verified by running it before and after each of them — same result. It sits
   // beside magicdiv so that a reader looking for division recovery finds both together.
   { id: 'divpow2', run: recognizeDivPow2, dce: true },
-  { id: 'softdiv', run: (fn) => recognizeSoftDiv(fn), dce: false, gate: (t) => !t.capabilities.hwDivide },
+  {
+    id: 'softdiv',
+    run: (fn, _self, _opts, target) => recognizeSoftDiv(fn, target),
+    dce: false,
+    gate: (t) => !t.capabilities.hwDivide,
+  },
+  // NOT gated, where its neighbour above is, and the asymmetry is the argument: a soft DIVISION is
+  // a division the ISA has no instruction for, so a target with a divider never emits one — while
+  // no ISA this repo targets has 64-bit integer arithmetic at all, so a 64-bit helper is software
+  // on every one of them whatever `hwDivide` says.
+  {
+    id: 'widehelpers',
+    run: (fn, _self, _opts, target) => recognizeWideHelpers(fn, target),
+    dce: false,
+  },
+  // AFTER it, because the `concat`s it reads are the ones the frontend built at the call the pass
+  // above has just rewritten — and because a pair the rewrite refused is a pair this must not fuse
+  // into a signature either.
+  { id: 'pairparams', run: (fn) => fuseParamPairs(fn), dce: false },
   // AFTER `const`, which folds a shift pair over a constant to the constant it computes, and BEFORE
   // the three array recognizers, whose input this pass produces: `shl(ext(x), k)` is an element
   // scale they legalize and the fused pair is not. `dce: true` — the `shl` a fold leaves readerless.

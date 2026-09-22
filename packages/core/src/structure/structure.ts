@@ -3759,6 +3759,43 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ? { k: 'cast', to: T.int(w, d.opcode === 'sext'), e: e(d.operands[0]) }
         : mkGap(`no C type for a ${w}-bit '${d.opcode}'`, [e(d.operands[0])]);
     }
+    // The recovered integer type of a value, where it has one. `lo32`/`hi32`/`concat` all cast to
+    // one, and a value recovery left as anything else has no cast to spell.
+    const asInt = (t: IrType) => (t.kind === 'int' ? t : undefined);
+    // THE TWO HALVES OF A 64-BIT VALUE, which C spells exactly: the low half is a truncating cast,
+    // the high half a shift and then the same cast. The RESULT's own recovered type is what the
+    // cast is to, and the shift's kind comes from the 64-bit operand's — `>>` over a signed value
+    // and `>>>` over an unsigned one is what the machine did, and what the C backend's operand pin
+    // is spelled in terms of.
+    if (d.opcode === 'lo32' || d.opcode === 'hi32') {
+      const src = e(d.operands[0]);
+      const half = asInt(d.results[0].type) ?? T.u(32);
+      const shifted: Expr =
+        d.opcode === 'lo32'
+          ? src
+          : { k: 'bin', op: asInt(d.operands[0].type)?.signed ? '>>' : '>>>', l: src, r: { k: 'const', value: 32 } };
+      return { k: 'cast', to: half, e: shifted };
+    }
+    // …AND THE WIDEN THAT BUILDS ONE, which the machine spells as a PAIR rather than as a cast —
+    // `asr rN,rM,#31` for the signed extension of a word, `mov rN,#0` for the unsigned one. So the
+    // shape is what says HOW the half was widened, and the cast this renders is to whatever 64-bit
+    // type recovery gave the value: an UNSIGNED widen of a word reads `(s64)(u32)x` in a signed
+    // context, which is what C does and what the machine did.
+    //
+    // A `concat` of anything else is a 64-bit value this pipeline has no C spelling for, and it
+    // falls through to the loud gap at the bottom — which is the whole safety story for the
+    // representation. A pair that tried to cross a join matches nothing here.
+    if (d.opcode === 'concat') {
+      const [lo, hi] = d.operands;
+      const hiDef = defs.get(hi);
+      const whole = asInt(d.results[0].type);
+      const signedWiden = hiDef?.opcode === 'shr_s' && hiDef.operands[0] === lo && hiDef.attrs.imm === 31;
+      const unsignedWiden = hiDef?.opcode === 'const' && hiDef.attrs.value === 0;
+      if (whole && (signedWiden || unsignedWiden)) {
+        const word = e(lo);
+        return { k: 'cast', to: whole, e: unsignedWiden ? { k: 'cast', to: T.u(32), e: word } : word };
+      }
+    }
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }

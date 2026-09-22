@@ -43,6 +43,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
+import { AGBCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
 
 /** What a compiler's OBJECT shows for a narrow declared parameter — see
@@ -93,6 +94,14 @@ export interface TargetDescription {
    *  construction one the callee may destroy — and `clobberedByCall` (frontend/ssa.ts) checks that
    *  rather than trusting it, the way `checkedLiveInModel` checks the register partition. */
   callerSaved: readonly string[];
+  /** The COMPILER RUNTIME HELPERS this compiler's codegen calls, and what each computes
+   *  (runtime-helpers.ts). A compiler fact, which is why it lives here and not in `proto.ts`: that
+   *  file holds signatures fixed by the C STANDARD, and a helper name is fixed by a runtime
+   *  library — agbcc calls `__muldi3`, CodeWarrior `__div2i`, IDO `__ll_mul`.
+   *
+   *  ABSENT ⇒ no helper is recognised, so every such call stays an opaque call with its arguments
+   *  guessed. That is the direction a target that has not been measured should take. */
+  runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -433,6 +442,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
   // same (`thumb.h` CALL_USED_REGISTERS). Both spellings of r12 for the reason `nonArgRegs` carries
   // both: the ATPCS aliases are what this ISA's asm writes.
   callerSaved: ['r0', 'r1', 'r2', 'r3', 'r12', 'ip', 'lr'],
+  runtimeHelpers: AGBCC_RUNTIME_HELPERS,
   // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
   // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
   capabilities: {
