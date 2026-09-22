@@ -358,7 +358,7 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //                  printed 15 for the second of those; its mnemonic set began with the bare
   //                  alternative `b` under `re.match`, so `break` — a trap, not a branch — was
   //                  counted as one. Re-run with every mnemonic fullmatched, it is 0.
-  //   pic-globals    NOT REACHED, and reachable. 29 of 301 PPC rows read memory through a
+  //   pic-globals    NOT REACHED, and reachable. 29 of the PPC rows read memory through a
   //                  literal-0 base over 110 sites and one of them MATCHES, so the relocated form
   //                  is lifted post-#221 and the PPC arm guards a base no relocation fills. The
   //                  MIPS arm has no row because every corpus toolchain compiles with no
