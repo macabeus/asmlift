@@ -462,6 +462,15 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
         'emitted — C fall-through only reaches the arm below',
       'switch-shapes',
     ],
+    // …and the same message under a 90-character C++ name, which pushes its LAST clause past the
+    // 200-character cap this file opens with. Keyed on "C fall-through only reaches the arm below"
+    // this classified as "other" while the short-name case above classified — the exact failure
+    // the cap rule exists to prevent, and the reason the pattern reads the opening clause.
+    [
+      `structure: cannot structure '${'A'.repeat(90)}': case 3/4 falls through into an arm that is not ` +
+        'the next one emitted — C fall-through only reaches the arm below',
+      'switch-shapes',
+    ],
     [
       "structure: cannot structure 'f': the case fallen into takes a value from the switch edge, which " +
         'the fall-through path would re-run',
@@ -821,7 +830,11 @@ describe('a class may not outlive the message it classifies', () => {
     ['switch-shapes', 'a case body reaches', 'packages/core/src/structure/switch-recover.ts'],
     ['switch-shapes', 'jump-table cases share a target block', 'packages/core/src/structure/structure.ts'],
     ['switch-shapes', 'a jump-table case runs on into the next case', 'packages/core/src/structure/structure.ts'],
-    ['switch-shapes', 'C fall-through only reaches the arm below', 'packages/core/src/structure/structure.ts'],
+    [
+      'switch-shapes',
+      'through into an arm that is not the next one emitted',
+      'packages/core/src/structure/structure.ts',
+    ],
     ['switch-shapes', 'takes a value from the switch edge', 'packages/core/src/structure/structure.ts'],
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],

@@ -295,10 +295,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // an arm falling through into one that is not the next emitted, and the arm fallen into taking
     // a value from the switch edge that the fall-through path would re-run. Same capability, same
     // site, and they sat in the residue a reader is asked to trust.
+    //
+    // The fall-through-POSITION one is keyed on the clause that opens its sentence, not on the one
+    // that ends it. This file opens with the rule that a class is decided inside the first 200
+    // characters of the reason, and "C fall-through only reaches the arm below" is where that
+    // message ends: under a 90-character C++ name it falls past the cap and the row arrives
+    // unclassified, while a short name classifies. The opening clause reaches character 34 plus
+    // the function's own name. It is spelt without the word "falls" because the producer splits
+    // the template there (`… falls ` + `through into an arm …`), and a phrase this file keys on has
+    // to exist literally in the file that emits it, or the pin below cannot see it.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|C fall-through only reaches the arm below|takes a value from the switch edge/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge/,
   },
   {
     key: 'structs',
