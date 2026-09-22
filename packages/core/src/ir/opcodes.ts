@@ -267,6 +267,13 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  plus synthetic:breakloop and synthetic:strcmp1), so the argument was load-bearing rather than
  *  merely plausible. Not re-measured since the kleod row's retirement.
  *
+ *  AND IT COVERS THE VALUE, NOT THE ACCESS, which is the second class where the re-guard argument
+ *  does not carry: a read of an object the project's map declares VOLATILE. Re-guarding it at the
+ *  new point moves an observable access rather than a value, so the two placements are a missing
+ *  hardware access against a duplicated one and the fold erased which the asm had. The reads stay
+ *  OUT of this set — the exemption is worth the three byte-matches above — and the structurer
+ *  declines the function on one instead (structure/analysis.ts, `volatileGuardedRead`).
+ *
  *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
  *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
  *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does

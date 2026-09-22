@@ -1774,7 +1774,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // with it. That the DEF is where to put it back is the set's half: `call` is hoist-unsafe, so
         // no fold lifted one into that cone. `opaque`, the other hoist-unsafe op with a result,
         // needs no placement — neither position spells compilable C — and a bottom test holding one
-        // still declines in `testSkipsAnEffect`, which is that guard's remaining population.
+        // still declines in `testSkipsAnEffect`, which is that guard's remaining population. What
+        // this clause reaches is the row that pins it, 1 of the corpus's 1,203, swept in both map
+        // modes.
         if (isCall && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;

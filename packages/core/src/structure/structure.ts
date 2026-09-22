@@ -2037,6 +2037,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // the two placements are a missing hardware access and a duplicated one, and which one the asm had
   // is what the fold erased (see `volatileGuardedRead`). Nothing here can re-place it, so decline
   // LOUD — the answer `testSkipsAnEffect` gives for an effect in the same position.
+  //
+  // WHAT IT STANDS IN FOR is a roster: both placements minted, each published only at a byte-exact
+  // score — `Candidate.matchOnly`, the licence l3/unreduce.ts takes for a spelling whose semantics
+  // no gate over the C can settle. That licence is a VARIATION's, and it is spent standing beside a
+  // default whose semantics the pass did establish; here the fold erased the fact both spellings
+  // rest on, so neither is that default. And the callers with no target object — the playground, a
+  // run without `--score-against` — have no differ to referee a pair with at all.
   if (volatileGuardedRead !== null) {
     throw new StructureError(
       `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
