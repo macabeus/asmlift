@@ -280,6 +280,59 @@ describe('a pattern keyed on an English word claims sentences that are not about
         'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',
       'address-taken-local',
     ],
+    // `cross-block-flags-arm` must not reach the bare headline `no reaching compare: `. Thumb
+    // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
+    // inheritance model left over; flags written by arithmetic, by `tst`/`cmn` or by a call, which
+    // no edge model would move; and a block with no predecessor, where there is no edge to carry
+    // anything. The arithmetic one has 97 sites in kleod's and sa3's hand-written asm and 2 in
+    // their built `.s`, so filing it under a label that reads "across an edge" would send a roadmap
+    // reader to build the wrong thing — the same over-claim the `stack-frames` class was narrowed
+    // for.
+    [
+      "lift: cannot lift 'MultiBootWaitSendDone': conditional branch 'bgt' has no reaching compare: the flags " +
+        "it tests were written by 'sub' in '.LWait', and only a compare's are modelled",
+      'other',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
+        "written by a call in 'f', over the compare that reached it, and only a compare's are modelled",
+      'other',
+    ],
+    // …INCLUDING when the writer is a block away, which is the shape that used to be filed as an
+    // edge problem. The sentence the predecessor wrote is what crosses, so one gap reads the same
+    // however the labels fall, and it classifies the same too.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
+        "written by 'add' in '.L2', over the compare that reached it, and only a compare's are modelled",
+      'other',
+    ],
+    // …and a branch whose block nothing reaches is not an edge shape either.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare reaches 'f', and " +
+        'it has no predecessor to inherit any from',
+      'other',
+    ],
+    // …while the four shapes the model really does leave at an edge land in the class.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edges " +
+        "into '.L2': 2 meet there, and the flags need not agree on all of them",
+      'cross-block-flags-arm',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.L1': its only predecessor '.L2' is lifted after it",
+      'cross-block-flags-arm',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.L2': it leaves 'f' through a conditional branch",
+      'cross-block-flags-arm',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.Lc0': it leaves the jump-table dispatch in 'f'",
+      'cross-block-flags-arm',
+    ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
@@ -696,14 +749,18 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These three have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
-  // of these three disappears, an unnamed gap found an inhabitant — good news, and this list moves
+  // These four have no rows for reasons that are measured and written down beside them, not
+  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
+  // of these four disappears, an unnamed gap found an inhabitant — good news, and this list moves
   // in the commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
+  //
+  // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
+  // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
+  // lift, so the class names what the model left over rather than what it refuses today.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'store-class'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
 
-  test('every other class is inhabited, and exactly these three are not', () => {
+  test('every other class is inhabited, and exactly these four are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
@@ -779,7 +836,7 @@ describe('a class may not outlive the message it classifies', () => {
   // THE CHECK RUNS AGAINST CODE, NOT AGAINST PROSE (`codeOf`), and the file each entry names is
   // the one that THROWS the phrase: `float` keys on `l3/ast.ts`'s `gapReasonFor`, not on the
   // `frontend/opaque.ts` comments that quote it. Pinned to a file that only talks about it, a
-  // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 308 declines — into "other"
+  // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
   // FREEZING 62 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
@@ -799,7 +856,10 @@ describe('a class may not outlive the message it classifies', () => {
     ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
-    ['cross-block-cr', 'no reaching compare', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-cr', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-flags-arm', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edge into ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edges into ', 'packages/core/src/frontend/thumb.ts'],
     ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],
@@ -873,7 +933,7 @@ describe('a class may not outlive the message it classifies', () => {
 
 describe('the classifier is measured against the messages core can throw, not only against the corpus', () => {
   // THE ANCHOR ABOVE IS BOUNDED BY THE CORPUS. It proves the artifact leaves nothing unclassified,
-  // which is a claim about 308 declined rows — not about asmlift. These three gates are the other
+  // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
   // names it by file — a paragraph of figures about 118 distinct messages across 11 files, which
@@ -891,7 +951,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 24],
+    ['frontend/thumb.ts', 26],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
     ['frontend/disasm.ts', 7],
@@ -900,7 +960,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 68;
+  const RESIDUE_TOTAL = 70;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');
@@ -935,6 +995,11 @@ describe('the classifier is measured against the messages core can throw, not on
     'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'section-label': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
+    // Same shape one level in: thumb.ts's reaching-compare throw interpolates its REASON, and the
+    // class keys on one reason rather than on the headline — deliberately, because the headline
+    // is shared with a different capability (flags written by arithmetic or a call). Both halves
+    // are pinned above, and the shapes themselves are pinned in `thumb-frontend.test.ts`.
+    'cross-block-flags-arm': 'thumb.ts interpolates the reason, and the class keys on the reason',
   };
 
   test('every class matches a message core can throw', () => {

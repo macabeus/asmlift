@@ -318,11 +318,34 @@ const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp:
 // a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
 const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
 
+/** The operands of a `cmp` whose flags are still live — the whole of the condition state this
+ *  frontend models, and what a conditional branch folds into its `cond_br`. ARM/Thumb writes one
+ *  implicit flags register, so there is one of these at a time.
+ *
+ *  IS THIS THE SAME CAPABILITY AS POWERPC'S? Decomposed, because the answer is neither yes nor no:
+ *    * the STATE is two things. One slot here; a map keyed `cr0`–`cr7`, each entry carrying its own
+ *      signedness, in `cmpDef` (ppc.ts). A parameterised "flag model" over those would be one name
+ *      wearing two implementations.
+ *    * the CLOBBER RULE is two things. Here it is `FLAG_SETTING` plus a call; there it is the
+ *      record-form `.` suffix plus a call.
+ *    * the EDGE RULE is ONE thing — one predecessor, already filled, not a jump-table dispatch,
+ *      leaving through an unconditional branch or a fall-through — and it is where all the
+ *      soundness lives. It is not extracted, because `inheritedCmp` is its only caller. The
+ *      PowerPC rows that still decline on a cross-block compare are what would earn the
+ *      extraction, and a round that builds that side should take the rule from here rather than
+ *      write a second one. */
+type PendingCmp = { lhs: Value; rhs: Value };
+
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
-// Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
-// — they set flags but define no register, and `cmp` is the very instruction that seeds the pending
-// compare. Loads, stores, push/pop, `bl` and the high-register forms leave the flags alone.
+// Used to invalidate a pending compare: see the decode loop. Loads, stores and push/pop leave the
+// flags alone. Three mnemonics that DO write them are absent, each for its own reason, and lumping
+// them under one was how `cmn`/`tst` came to be described as instructions that set no flags:
+//   * `cmp` seeds the pending compare instead of invalidating it — it is the modelled one;
+//   * `cmn`/`tst` write the flags and define no register, so the membership test below (which
+//     reads a destination) cannot judge them — `FLAG_ONLY` does;
+//   * a CALL is not an instruction's flag write at all: `bl` writes none itself, but the function
+//     it enters retires compares of its own, and AAPCS lets it. Invalidated separately.
 const FLAG_SETTING = new Set([
   'mov',
   'movs',
@@ -359,6 +382,21 @@ const FLAG_SETTING = new Set([
   'sbc',
   'sbcs',
 ]);
+
+// The flag writers with no destination to read. `tst`/`cmn` compute a value they throw away and
+// keep only the flags, so `FLAG_SETTING`'s destination test cannot see them — yet they take the
+// flags from a pending compare exactly as `sub` does, and the branch that follows tests THEIRS.
+//
+// Unconditional, unlike `FLAG_SETTING`: neither has a destination whose width could pick a
+// non-flag-setting encoding, and Thumb-1 encodes both on low registers only.
+//
+// They still decode to an `opaque` (the default arm), so a function containing one declines either
+// way and this changes no verdict — only which decline, and the terminator's is the true one.
+// Without it `cmp r0,r1 / tst r2,r3 / bge` FOLDED the stale compare into the condition and was
+// loud solely because the opaque it minted is unresolvable: the right answer resting on an
+// accident of an unrelated model. Making `tst` transparent instead — it defines nothing, so a
+// `tst` no branch reads is dead — is a capability with no row in this corpus to earn it.
+const FLAG_ONLY = new Set(['tst', 'cmn']);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
@@ -398,17 +436,14 @@ function expandRegList(tokens: string[]): string[] {
 // for one and `Number.isNaN(undefined)` is false. An empty list is a malformed list, not an empty
 // transfer.
 //
-// LOWERCASE-ONLY IS A HOLE, NOT A FREEBIE. GNU as accepts `PUSH {R4, LR}`, and the three consumers
-// of this predicate do not agree
-// about it. The ldm/stm arm degrades to a loud opaque and the frame walk poisons its depth, both of
-// which decline; `savedRegs` does neither. It `break`s out of the prologue scan on an unreadable
-// list, which yields a SMALLER save set rather than no answer, so the def-less `r4` it should have
-// partitioned into an uninitialised local becomes a parameter instead. Measured 2026-09-06 on
-// `push {r4,lr}; add r0,r4,#0; pop {r4}; bx lr`: lowercase gives `s32 f(void)` with `uninit_r4`,
-// while both `push {R4, LR}` and `PUSH {r4, lr}` give `s32 f(s32 a0) { return a0; }`. Nothing in
-// the corpus reaches it — 0 uppercase register tokens across the reference asm of the benchmark's
-// agbcc rows — but folding case belongs in `expandRegList`, where it also changes classifyXfer's
-// `popsPc`, i.e. block splitting. That is a measured change, not a free one.
+// LOWERCASE-ONLY, and safely so: `upperCaseRegIn` refuses the function before any list reaches
+// here, so this predicate never has to decide what `{R4, LR}` means. It matters that something
+// does decide it — the three consumers of this predicate disagreed. The ldm/stm arm degrades to a
+// loud opaque and the frame walk poisons its depth, both of which decline; `savedRegs` does
+// neither. It `break`s out of the prologue scan on an unreadable list, which yields a SMALLER save
+// set rather than no answer, so the def-less `r4` it should have partitioned into an uninitialised
+// local became a parameter instead: `push {R4, LR}` gave `s32 f(s32 a0) { return a0; }` where the
+// lowercase spelling gives `s32 f(void)` with `uninit_r4`.
 function definiteRegList(tokens: string[]): string[] | null {
   const list = expandRegList(tokens);
   if (list.length === 0) {
@@ -493,10 +528,10 @@ function parseAddr(operand: string): { base: string; off: number; regOff?: strin
 
 const reg = (s: string) => s.replace(/[[\]]/g, '');
 
-// THE one test for "is this token the stack pointer". Case-insensitive because GNU as accepts
-// uppercase register names, and a case-sensitive test here is a silent-wrong-answer hole rather
-// than a cosmetic one: `add r0, SP, #4` is `&local`, and missing it fabricates a phantom
-// parameter and emits confident arithmetic on it.
+// THE one test for "is this token the stack pointer". Case-insensitive as defence in depth —
+// `upperCaseRegIn` refuses `SP` before this runs — because what a case-sensitive test here misses
+// is a silent-wrong-answer hole rather than a cosmetic one: `add r0, SP, #4` is `&local`, and
+// missing it fabricates a phantom parameter and emits confident arithmetic on it.
 const isSpReg = (s: string | undefined): boolean => {
   const r = reg(s ?? '').toLowerCase();
   return r === 'sp' || r === 'r13';
@@ -706,6 +741,44 @@ const spAdjust = (ins: Instr): number | null => {
 };
 
 const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
+
+// Every register spelling this frontend recognises, in the ONE case it recognises them in. Used to
+// refuse the others (see `upperCaseRegIn`), so nothing downstream has to ask the question again.
+const REG_SPELLINGS = /^(r\d+|sp|lr|pc|sb|sl|fp|ip)$/i;
+
+/** The first operand word that names a register in any case but lower — or null.
+ *
+ *  A register here is a SPELLING, not a number (see HIGH_REGS), and GNU as accepts `R2` for `r2`.
+ *  That splits the predicates: `isSpReg` folds case, `isThumbReg` and the flag-clobber test in the
+ *  decode loop do not, and the ones that do not read an upper-case register as "not a register at
+ *  all". Every consequence is silently wrong C rather than a decline — `mov R0, #5` dropped the
+ *  write and minted a parameter for the `r0` a later instruction read, `add R2, r0, #1` left a
+ *  clobbered compare pending so the branch folded the wrong operands, and `mov PC, lr` stopped
+ *  being a return.
+ *
+ *  Refused once, here, rather than folded into each predicate: the folding predicates are the
+ *  reason the non-folding ones were invisible, and a case rule spread over a dozen tests is a rule
+ *  the next test silently opts out of. An upper-case MNEMONIC already declines loudly (it matches
+ *  no arm of the decode switch), so this is the half of the same question that did not.
+ *
+ *  Words, not tokens, because `splitOperands` keeps `[r0, #4]` and `{r4, r5}` whole. A word starts
+ *  at an underscore as readily as at a letter, so the symbol `_R0` is one word and not a register
+ *  with a prefix. A symbol spelled exactly like a register (`bl FP`) declines here instead of
+ *  lifting — loud, and no such symbol exists in any checkout.
+ *
+ *  NO BENCHMARK ROW HOSTS THIS REFUSAL, and the reason is measured rather than an oversight: 0 of
+ *  the 2,216 `.s` files in the vendored kleod, sa3, pokeemerald and klonoa checkouts spells a
+ *  register in upper case in an instruction OPERAND. Eight files spell one elsewhere — all in `@`
+ *  comments, a `.string`, and a `#if 0` block in agbcc's own `setjmp.s` — and none is a word this
+ *  scan reads, which is why the population has to be counted on operands and not on lines. So no
+ *  real row can reach it. An authored synthetic one would subtract a permanently-declining row from
+ *  a corpus whose denominator is a claim about reach, to cover a LEXICAL rule with no compiler
+ *  behaviour behind it — the three wrong-C shapes named above are what the rule is worth, and
+ *  `thumb-frontend.test.ts` pins each of them directly. A row would become the right home the day
+ *  a project spells one, which is exactly what makes this a null and not a policy. */
+const upperCaseRegIn = (ops: string[]): string | null =>
+  ops.flatMap((o) => o.match(/[A-Za-z_]\w*/g) ?? []).find((w) => REG_SPELLINGS.test(w) && w !== w.toLowerCase()) ??
+  null;
 
 /** Parse one function's GNU-as text into labelled basic blocks + the CFG, plus the inline `.word`
  *  data tables (label → the list of label operands under it) — the jump-table target arrays agbcc
@@ -2869,6 +2942,15 @@ export function lift(
   // itself (recursion), or a sibling a shared-tail slice extends through.
   for (const ab of asmBlocks) {
     for (const ins of ab.instrs) {
+      // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
+      // register in some other function's body is not this one's problem.
+      const upper = upperCaseRegIn(ins.ops);
+      if (upper !== null) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
+            `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
+        );
+      }
       if (classifyXfer(ins) === 'indirect') {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
@@ -3136,9 +3218,9 @@ export function lift(
         // {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, so the bare `\bR\b`
         // test let a dead capture survive the `pop` that destroyed it, the acceptance fired on a
         // frame that really did stage an outgoing argument, and the lift dropped all five of that
-        // call's arguments. Two spellings of one instruction must not give two verdicts, and CASE
-        // is a third spelling of the same one — `expandRegList` is lowercase-only, so `{R0-R3}`
-        // leaked through the expansion exactly as the range leaked through the regex.
+        // call's arguments. Two spellings of one instruction must not give two verdicts. The
+        // `toLowerCase` is the belt to `upperCaseRegIn`'s braces: nothing upper-case reaches this
+        // function, and an acceptance is the wrong place to depend on that.
         const mentions = expandRegList(
           ins.ops
             .join(' ')
@@ -3644,10 +3726,122 @@ export function lift(
   // Best-effort call arity via the shared helper (frontend/ssa.ts).
   const fallbackArgcHere = (b: number): number => fallbackArgc(ssa, target.argRegs, b);
 
+  // What each block leaves in the flags for a successor to pick up: the live compare, or — when
+  // there is none — THE SENTENCE SAYING WHY, which crosses the edge with the state rather than
+  // being re-invented on the far side. Minting a fresh reason at the edge is how a block whose
+  // `sub` wrote the flags came to be described as a block that set none: the successor could see
+  // that nothing arrived, and not what stopped it.
+  //
+  // Every such sentence names the block it is about, so it needs no re-pointing as it travels and
+  // one gap reads the same however the labels fall. Written as the block is filled, so a lookup
+  // can only find a block filled EARLIER — which is what makes an unlifted predecessor answer "not
+  // known" rather than "none".
+  const exitCmp = new Map<number, PendingCmp | string>();
+
+  /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
+   *  it starts with none. One call answers both, so a refusal and its reason cannot drift apart.
+   *
+   *  ARM/Thumb writes ONE implicit flags register, so a block entered from exactly one predecessor
+   *  begins with exactly the flags that predecessor left. agbcc depends on it: a function long
+   *  enough to need a mid-function literal pool gets a `b` over the pool between a `cmp` and the
+   *  branch that reads it, leaving the branch alone under a label.
+   *
+   *  What crosses the edge is the compare's SSA values, never its register names — a lone
+   *  predecessor dominates, so those values dominate every use on this side, while re-reading `r0`
+   *  here would pick up whatever this block redefined it to.
+   *
+   *  TRANSITIVE, over as many edges as the chain has: each block runs this and writes its own
+   *  `exitCmp`, so a compare reaches the end of a run of straight-line blocks and refuses at the
+   *  first one that breaks the chain. That is not decoration — agbcc emits `.LBB`/`.LBE`/`.LM`
+   *  debug labels freely, and a chain is the ordinary case rather than the exotic one.
+   *
+   *  NOT THE BLOCK-PARAMETER MACHINERY, though this frontend has SSA with block parameters and
+   *  `readData` already does cross-block lookup with phi insertion. Three reasons, and the last is
+   *  the one a later "improvement" would get wrong:
+   *    * the flags are not a register anything reads, so there is nothing for `readData` to look
+   *      up — the compare is consumed by the terminator, never by a named operand;
+   *    * the value a phi would carry does not exist yet on the predecessor's side. The condition
+   *      IS materialised as an ordinary op with a result (the `cond` terminator below builds an
+   *      `icmp`), and a phi over two of those is something a `cond_br` would take — but WHICH
+   *      comparison it is comes from the branch's mnemonic, at the SUCCESSOR's terminator, while
+   *      the predecessor is filled first. Flags are not a condition until a branch names one, so
+   *      at the edge there is nothing yet to phi;
+   *    * `preds.length === 1` is deliberately STRONGER than dominance. A dominating predecessor's
+   *      flags can still be overwritten on a longer path that rejoins here, so answering this from
+   *      the dominator tree would state a condition that holds on one path in.
+   *
+   *  Refuses when either half of that sentence fails:
+   *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
+   *      and picking one states a condition the machine does not promise;
+   *    * the only predecessor has not been filled yet, so this pass has nothing to read;
+   *    * the edge leaves a CONDITIONAL branch. Thumb's `b<cc>` does preserve the flags, so this one
+   *      is UNBUILT rather than unsound: it is exactly the PowerPC shape (a `cmpwi` read by the
+   *      fall-through of the `bc` that already consumed it, see `cmpDef` in ppc.ts) and has no ARM
+   *      inhabitant to earn it here. A jump-table dispatch answers before it and says so instead,
+   *      which is a truer sentence over the same verdict rather than a fifth refusal — see the
+   *      note at the arm.
+   *
+   *  It does NOT refuse when no compare survives to the predecessor's last instruction, because
+   *  that is not this function's gap to report: the predecessor already wrote down what took the
+   *  flags, and that sentence is what crosses the edge.
+   *
+   *  Not a `Gate` table, on docs/level-tower.md's structural bar rather than on cost: every refusal
+   *  reads `exitCmp`, which exists only because of the order this pass fills blocks in, so its
+   *  input cannot be prepared as a getter at any price. */
+  const inheritedCmp = (bi: number): PendingCmp | string => {
+    const here = asmBlocks[bi].label;
+    const ps = preds[bi];
+    if (ps.length !== 1) {
+      return ps.length === 0
+        ? `no compare reaches '${here}', and it has no predecessor to inherit any from`
+        : `no compare crosses the edges into '${here}': ${ps.length} meet there, and the flags need not agree on all of them`;
+    }
+    const pb = asmBlocks[ps[0]];
+    const carried = exitCmp.get(ps[0]);
+    // Named for the fill order that decides it, not for a loop: this is true of any predecessor
+    // not yet lifted, and a CFG with no cycle in it can be laid out so that one is (`f: b .L2` /
+    // `.L1: bge` / `.L2: cmp; b .L1`). Saying "a back edge" sent a reader to look for a loop that
+    // is not there, and named a property of the CFG for a property of the walk over it — a
+    // reverse-postorder fill is what would close this, which is why the sentence has to point at
+    // the walk.
+    if (carried === undefined) {
+      return `no compare crosses the edge into '${here}': its only predecessor '${pb.label}' is lifted after it`;
+    }
+    // A REFINEMENT OF THE ARM BELOW, not a second guarantee. `recoverJumpTable` only recognises a
+    // table whose bounds block ends in `bhi`/`bls`, so every key of `tables` also answers `cond`
+    // and deleting this would cost the sentence, never the verdict. It earns its place on the
+    // sentence alone: the edge into a case is a switch edge, and the bounds guard is not the
+    // branch that made it. `thumb-frontend.test.ts` runs that ablation rather than asserting it.
+    if (tables.has(pb)) {
+      return `no compare crosses the edge into '${here}': it leaves the jump-table dispatch in '${pb.label}'`;
+    }
+    // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it is
+    // in nobody's `preds`, and an `indirect` one throws before the CFG is built — so an arm for
+    // either would be an arm no input reaches, which is an arm no test can be failing on purpose.
+    // `uncond` and a fall-through (`null`) are the edges this whole function exists to carry.
+    const plast = pb.instrs[pb.instrs.length - 1];
+    if (plast && classifyXfer(plast) === 'cond') {
+      return `no compare crosses the edge into '${here}': it leaves '${pb.label}' through a conditional branch`;
+    }
+    // Whatever the predecessor left — the compare, or ITS reason, verbatim. The reason already
+    // names the block the chain broke in, so it is as true here as it was there, and a run of ten
+    // straight-line blocks reports the one instruction that took the flags rather than reporting
+    // the last edge it crossed.
+    return carried;
+  };
+
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   const fillBlock = (ab: AsmBlock, bi: number) => {
     const irb = irBlocks[bi];
-    let pendingCmp: { lhs: Value; rhs: Value } | null = null;
+    // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
+    // judged by the in-block clear below exactly as one this block made itself would be: a block
+    // that inherits flags and then writes its own must lose them.
+    const inherited = inheritedCmp(bi);
+    let pendingCmp: PendingCmp | null = typeof inherited === 'string' ? null : inherited;
+    // Why there are no flags to fold, kept alongside the `null` that says there are none. A block
+    // that made a compare and then overwrote it is a different gap from one that never had a
+    // compare at all, and a single message for both makes two gaps read as one.
+    let noCmpWhy = typeof inherited === 'string' ? inherited : '';
     // Tracks the frame through this block's linear instruction order. Meaningful for the entry
     // block; elsewhere a `[sp,#N]` access declines. Both dependencies are read HERE rather than
     // closed over: `preds` is final long before the first `fillBlock` runs, so the boolean is the
@@ -3731,15 +3925,59 @@ export function lift(
       // assembler picks the flag-setting encoding) — so an instruction between a `cmp` and its branch
       // REPLACES the flags the branch will test. Folding the earlier `cmp` in anyway would emit a
       // condition on the wrong operands: silently wrong C with no marker. Drop the pending compare
-      // and let the terminator's existing "no reaching compare in its block" decline fire — the loud
-      // answer, since modelling arithmetic flags is a capability asmlift does not have.
+      // and let the terminator's "no reaching compare" decline fire, naming this instruction — the
+      // loud answer, since modelling arithmetic flags is a capability asmlift does not have.
       //
-      // The HIGH-register forms (`mov rD,rH`, `add rD,rH`) do NOT set flags and stay transparent,
-      // which is what keeps agbcc's callee-saved shuffling from tripping this. Measured free: across
-      // every agbcc row in the benchmark, no conditional-branch block has ANY instruction between its
-      // compare and the branch — compilers keep the pair adjacent. The inhabitant this guards is
-      // hand-written asm in the playground, where there is no oracle to catch a lie.
-      if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
+      // THE TEST BELOW READS THE DESTINATION, AND THAT IS AN OVER-APPROXIMATION, not the ISA rule.
+      // Thumb-1 picks the high-register encoding — which writes no flags — whenever EITHER operand
+      // is high, so `mov r7, sl` and `add r0, r8` are transparent on the machine and a clobber
+      // here. The error's direction is a decline, never a condition on the wrong operands, so it
+      // is sound; it is not free by construction, and `mov rLow, rHigh` is not exotic — it is
+      // literally agbcc's callee-saved shuffling.
+      //
+      // Measured on the population it can reach, by ablating the guard to the operand-wide test:
+      // across the 450 agbcc rows of the benchmark there are 405 such sites, in 62 rows, and 0 of
+      // them are reached with a compare still live — so 0 of the 450 rows change outcome. It costs
+      // nothing today, and what would earn the accurate test is a row where one of those 405 sits
+      // between a compare and its branch. `add rD, sp, #imm` and `add rD, pc, #imm` are the same
+      // over-approximation with the same sign.
+      //
+      // The inhabitant the guard itself exists for is hand-written asm in the playground, where
+      // there is no oracle to catch a lie.
+      //
+      // `tst`/`cmn` take them with no destination to read at all (`FLAG_ONLY`, above).
+      //
+      // A CALL takes them too, and this is the one flag writer that is not an instruction: `bl`
+      // writes no flags, but the function it enters retires compares of its own, and the ABI lets
+      // it — AAPCS lists N/Z/C/V as corruptible across a call. So a branch after a call tests the
+      // CALLEE's last compare. `cmp r0,r1 / bl f / bge .L` emitted `if (a0 < a1)`: the caller's
+      // operands under the callee's flags, with nothing to show it.
+      const tookFlags =
+        FLAG_ONLY.has(ins.mnemonic) || (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? '')))
+          ? `'${ins.mnemonic}'`
+          : ins.mnemonic === 'bl' || ins.mnemonic === 'blx'
+            ? 'a call'
+            : null;
+      if (tookFlags) {
+        // THE SAME SITE DECIDES AND EXPLAINS, on every path through it. Assigning the reason only
+        // when a compare was displaced left the inherited reason standing behind an instruction
+        // that had since written the flags, and the decline then asserted that nothing in the
+        // block sets them — of a block whose `sub` sets them, and whose branch tests exactly that.
+        // The gap named has to be the one the reader would have to close: arithmetic flags, not an
+        // edge. Whether a compare was displaced is a detail of the same sentence, not a second one.
+        //
+        // Named "reaching it" rather than "in its block": the displaced compare may have been made
+        // here or inherited from the predecessor, and a reader sent to the wrong block finds no
+        // `cmp` and concludes the message is broken.
+        //
+        // THE WRITER'S BLOCK IS NAMED EVEN WHEN IT IS THE BRANCH'S OWN, and that is what lets the
+        // sentence cross an edge unchanged: one gap gets one sentence whether the `sub` sits above
+        // the branch or a `b` away from it. Leaving it out meant the successor had to invent its
+        // own wording, and what it invented blamed the edge.
+        noCmpWhy =
+          `the flags it tests were written by ${tookFlags} in '${ab.label}'` +
+          (pendingCmp ? ', over the compare that reached it' : '') +
+          `, and only a compare's are modelled`;
         pendingCmp = null;
       }
       frame.step(ins);
@@ -4304,6 +4542,17 @@ export function lift(
       }
     }
 
+    // What this block leaves in the flags, for a single successor to inherit — the compare, or the
+    // reason there is none. Recorded for EVERY block, including those whose outgoing edge
+    // `inheritedCmp` will refuse: the edge rule lives in one place, and a second copy of it here
+    // could disagree with the first. No terminator form writes flags, so the state after the loop
+    // above is the state at the block's last instruction.
+    //
+    // `noCmpWhy` is non-empty exactly when `pendingCmp` is null — it is set on every path that
+    // nulls one, and the only path that starts null is the one that took it from `inheritedCmp`'s
+    // sentence — so this never stores an empty reason for a successor to repeat.
+    exitCmp.set(bi, pendingCmp ?? noCmpWhy);
+
     // terminator (via classifyXfer — the single source of truth shared with decode/succLabels)
     const last = ab.instrs[ab.instrs.length - 1];
     const kind = last ? classifyXfer(last) : null;
@@ -4337,10 +4586,10 @@ export function lift(
       irb.ops.push(mkOp('br', { successors: [succ(last.ops[0])] }));
     } else if (kind === 'cond') {
       // `pendingCmp` is block-local; a `cmp` split from its branch by a label means the flags
-      // cross a block boundary — not modelled. Decline loud.
+      // cross a block boundary — not modelled. Decline loud, naming which gap this is.
       if (!pendingCmp) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare in its block`,
+          `cannot lift '${name}': conditional branch '${last.mnemonic}' has no reaching compare: ${noCmpWhy}`,
         );
       }
       const cond = mkValue(T.unk(32));

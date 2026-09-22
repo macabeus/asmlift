@@ -86,32 +86,101 @@ describe('a PC write is a control transfer under either spelling', () => {
   });
 });
 
-describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
-  test('a conditional branch split from its cmp by a label declines loud', () => {
-    // The label between `cmp` and `bge` splits the block, so the branch has no reaching compare in
-    // its own block. Must be the DESIGNED FrontendUnsupportedError, not a null-deref crash.
-    const body = '\tcmp\tr0, r1\n.Lmid:\n\tbge\t.Ltrue\n\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('splitcmp', body)).toThrow(/no reaching compare/);
+// THE SAME QUESTION FOR A REGISTER'S CASE. GNU as accepts `R2` for `r2`; this frontend identifies
+// registers by spelling, and its predicates disagreed about that — `isSpReg` folds case, the
+// flag-clobber test and `isThumbReg` did not. Each thing the non-folding ones then missed was
+// silently wrong C, never a decline, so they are refused once at the seam instead of folded one
+// predicate at a time.
+describe('a register spelled in upper case is refused, not half-modelled', () => {
+  const TAIL = '\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
+
+  test('an upper-case destination no longer eats its own write', () => {
+    // Emitted `s32 f(s32 a0) { return a0; }` — the store to `R0` went to a register nothing reads,
+    // and the `r0` the return needs was never written, so it became a parameter.
+    expect(() => dc('f', '\tmov\tR0, #5\n\tbx\tlr\n')).toThrow(
+      /register 'R0' in 'mov R0, #5' is spelled in upper case/,
+    );
   });
 
+  test('an upper-case destination no longer survives a compare it clobbers', () => {
+    // The `add` writes the flags `bge` tests. Read as "not a register" it left the inherited
+    // compare pending, and the branch folded the CALLER's operands under the `add`'s flags.
+    const gone = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tR2, r0, #1\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('f', gone)).toThrow(/register 'R2' .* is spelled in upper case/);
+  });
+
+  test('an upper-case PC write no longer stops being a return', () => {
+    expect(() => dc('f', '\tmov\tr0, #5\n\tmov\tPC, lr\n')).toThrow(/register 'PC' .* is spelled in upper case/);
+  });
+
+  test.each([
+    ['a destination', '\tmov\tr0, #5\n\tbx\tlr\n'],
+    ['a PC write', '\tmov\tr0, #5\n\tmov\tpc, lr\n'],
+  ])('control: %s in lower case lifts', (_what, body) => {
+    expect(dc('f', body).source).toContain('return 5;');
+  });
+
+  test('a SYMBOL that merely starts with a register spelling is not a register', () => {
+    // The scan reads words, and a word starts at an underscore as readily as at a letter — without
+    // that, `_R0` would be read as `R0` with a prefix and the call would decline.
+    expect(dc('f', '\tpush\t{lr}\n\tbl\t_R0\n\tpop\t{r1}\n\tbx\tr1\n').source).toContain('_R0(');
+  });
+});
+
+describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
   test('a flag-setting instruction between a cmp and its branch declines loud', () => {
     // On Thumb-1 nearly every data-processing instruction on LOW registers writes the condition
     // flags, `s`-suffix or not (agbcc spells `adds r0,r0,r3` as `add r0,r0,r3` and the assembler
     // picks the flag-setting encoding). So the `add` below REPLACES the flags `beq` tests: folding
     // the earlier `cmp` in emitted `if (a0 != a1)` where the hardware branches on `r0 + 1 == 0`.
-    // Silent wrong C — now the same loud decline the label-split case above gets.
+    // Silent wrong C — now a loud decline that names the instruction that took the flags.
     const clobbered =
       '\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('flagclobber', clobbered)).toThrow(/no reaching compare/);
+    expect(() => dc('flagclobber', clobbered)).toThrow(
+      "conditional branch 'beq' has no reaching compare: the flags it tests were written by 'add' in " +
+        "'flagclobber', over the compare that reached it, and only a compare's are modelled",
+    );
 
     // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
-    // adjacent pair, a LOAD between them (loads leave the flags alone), and a HIGH-register move
-    // (the high-register forms do not set flags — this is agbcc's callee-saved shuffling).
+    // adjacent pair, a LOAD between them (loads leave the flags alone), and a move to a HIGH
+    // register.
     const folds = (mid: string) =>
       dc('ok', `\tcmp\tr0, r1\n${mid}\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`).source;
     expect(folds('')).toContain('if (a0 != a1)');
     expect(folds('\tldr\tr2, [r3]\n')).toContain('if (a0 != a1)');
     expect(folds('\tmov\tr8, r2\n')).toContain('if (a0 != a1)');
+
+    // The guard reads the DESTINATION, so only that half of the high-register form is transparent.
+    // `mov r7, sl` writes no flags on the machine either — Thumb-1 takes the flag-free encoding
+    // whenever EITHER operand is high — and it is a clobber here. Pinned as a DECLINE rather than
+    // quietly left to a comment claiming the opposite: agbcc's callee-saved shuffling is spelled
+    // exactly this way (the row this branch lifted holds seven of them), and the direction of the
+    // error is what makes it sound. 405 such sites across the benchmark's 450 agbcc rows, 0 of
+    // them reached with a compare still live.
+    expect(() =>
+      dc(
+        'highsrc',
+        `\tcmp\tr0, r1\n\tmov\tr7, sl\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`,
+      ),
+    ).toThrow(/the flags it tests were written by 'mov'/);
+  });
+
+  test('a CALL between a cmp and its branch declines loud — the callee left the flags', () => {
+    // The `bl` instruction writes no flags, but the function it enters does: AAPCS lists N/Z/C/V as
+    // corruptible across a call, so what `bge` tests here is whatever compare the callee retired
+    // last. Folding the caller's `cmp` in emitted `if (a0 < a1)` — a condition on the right
+    // operands and the wrong flags, which no marker reports and no reviewer can see.
+    const across =
+      '\tpush\t{r4, lr}\n\tcmp\tr0, r1\n\tbl\tfoo\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+    expect(() => dc('flagsacrosscall', across)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by a call in " +
+        "'flagsacrosscall', over the compare that reached it, and only a compare's are modelled",
+    );
+
+    // The compare AFTER the call is the shape every compiler emits, and it must still fold.
+    const after =
+      '\tpush\t{r4, lr}\n\tbl\tfoo\n\tcmp\tr0, r1\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+    expect(dc('flagsaftercall', after).source).toContain('if (');
   });
 
   test('an unmodelled op that reaches the output FAILS LOUD (no silent wrong C)', () => {
@@ -152,6 +221,204 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(src).toContain('do {');
     expect(src).toContain('} while (v0 != 0);');
     expect(src).not.toContain('ASMLIFT_ERROR'); // no decline / use-before-def
+  });
+});
+
+// ARM/Thumb has ONE implicit flags register, so a block entered from exactly one predecessor starts
+// with exactly the flags that predecessor left. agbcc relies on it: a function long enough to need a
+// mid-function literal pool gets its `cmp` and its conditional branch separated by the `b` that
+// jumps over the pool, and the branch then sits alone in a block of its own.
+//
+// Every refusal below is one of the two facts behind that sentence failing — the entry is not
+// unique, or the edge itself writes flags — and each has its own sentence in the decline, because a
+// catch-all makes several gaps look like one.
+describe('the condition flags reach across a straight-line edge, and across a run of them', () => {
+  const TAIL = '\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
+  // `bge .Ltrue` folded and then structured: the sense inverts because the fall-through arm leads.
+  const FOLDED = 'if (a0 < a1)';
+
+  test('a `b` over a literal pool carries the flags to the branch on the far side', () => {
+    // The agbcc shape, with the pool itself elided: `cmp`, the jump over the pool, and the `bge`
+    // alone under the label the jump targets.
+    expect(dc('poolsplit', `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`).source).toContain(FOLDED);
+  });
+
+  test('a RUN of straight-line blocks carries them the whole way', () => {
+    // The model is transitive: every block runs the inheritance and writes its own exit state, so
+    // the chain is as long as the labels make it. Not exotic — agbcc emits `.LBB`/`.LBE`/`.LM`
+    // debug labels freely, so several in a row between a compare and its branch is ordinary. An
+    // audit scoped to a single edge is scoped to the wrong thing.
+    const hops = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tb\t.L3\n.L3:\n\tb\t.L4\n.L4:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('chain', hops).source).toContain(FOLDED);
+    const labels = `\tcmp\tr0, r1\n.LM1:\n.LM2:\n.LM3:\n.LM4:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('labelrun', labels).source).toContain(FOLDED);
+    // …and one clobber anywhere in the run breaks it, at the hop that did the clobbering.
+    const broken = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tb\t.L3\n.L3:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('chainbroken', broken)).toThrow(
+      "the flags it tests were written by 'add' in '.L2', over the compare that reached it",
+    );
+  });
+
+  test('a label alone between the cmp and the branch carries them too', () => {
+    // Same question one edge kind over: the predecessor ends in no transfer at all and control
+    // falls through the label. Nothing between the pair writes flags either way.
+    expect(dc('splitcmp', `\tcmp\tr0, r1\n.L2:\n\tbge\t.Ltrue\n${TAIL}`).source).toContain(FOLDED);
+  });
+
+  test('TWO edges into the block decline — the flags need not agree on both', () => {
+    // `beq` reaches .L2 with the flags of the first compare, the fall-through path with those of
+    // the second. There is no single answer to inherit, and picking either is a coin toss the
+    // emitted C would state as fact.
+    const two = `\tcmp\tr0, r1\n\tbeq\t.L2\n\tcmp\tr0, #5\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('twoedges', two)).toThrow(
+      "no reaching compare: no compare crosses the edges into '.L2': 2 meet there, and the flags need not " +
+        'agree on all of them',
+    );
+  });
+
+  test('a compare clobbered before the predecessor ENDS does not reach the branch', () => {
+    const gone = `\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    // The reason CROSSES the edge: the predecessor wrote down what took the flags, and the
+    // successor repeats it rather than minting one of its own. Minting one produced "no compare
+    // reaches the end of its only predecessor 'clobberedinpred'" — true, and it named the edge for
+    // a gap no edge model would move, then sent the reader to a block whose first instruction is
+    // the `cmp` the message says is missing.
+    expect(() => dc('clobberedinpred', gone)).toThrow(
+      "the flags it tests were written by 'add' in 'clobberedinpred', over the compare that reached it",
+    );
+    // A CALL in the predecessor is the same question through a different flag-taker, and the same
+    // sentence has to cross. This is the shape a reader meets first: agbcc puts the `bl` and the
+    // branch either side of a `.LBB` label as readily as inside one block.
+    const called = `\tpush\t{lr}\n\tcmp\tr0, r1\n\tbl\tg\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('calledinpred', called)).toThrow(
+      "the flags it tests were written by a call in 'calledinpred', over the compare that reached it",
+    );
+  });
+
+  test('a compare clobbered AFTER it is inherited does not reach the branch either', () => {
+    // The seed arrives at the block's first instruction, so the in-block clear judges it exactly as
+    // it judges a compare the block made itself. Seeding at the TERMINATOR instead would skip that
+    // clear and fold a compare the `add` had already overwritten.
+    const gone = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tbge\t.Ltrue\n${TAIL}`;
+    // The whole sentence, because the part that was wrong was the part no pattern asserted: the
+    // displaced compare was in the PREDECESSOR, and the message said "in its block".
+    expect(() => dc('clobberedinsucc', gone)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'add' in " +
+        "'.L2', over the compare that reached it, and only a compare's are modelled",
+    );
+  });
+
+  test('a block whose ARITHMETIC set the flags is not a block that set none', () => {
+    // The gap here is arithmetic flags, and the decline has to say so. Reporting the edge instead
+    // sends the reader to build a cross-block meet that would not move either of these one inch:
+    // both blocks write their own flags, so there is nothing for an edge to disagree about.
+    //
+    // The loop is verbatim `MultiBootWaitSendDone` (sa3, src/multi_boot.s) — the corpus shape, not
+    // an invented one.
+    const loop = `\tmov\tr1, #4\n.LWait:\n\tsub\tr0, r1\n\tbgt\t.LWait\n\tbx\tlr\n`;
+    expect(() => dc('arithloop', loop)).toThrow(
+      "conditional branch 'bgt' has no reaching compare: the flags it tests were written by 'sub' in " +
+        "'.LWait', and only a compare's are modelled",
+    );
+    // …and with no edge in the picture at all, where blaming one is plainly absurd.
+    const straight = `\tsub\tr0, r0, r1\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('arithstraight', straight)).toThrow(
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'sub' in " +
+        "'arithstraight', and only a compare's are modelled",
+    );
+    // Stated over the vocabulary the messages use TODAY, because a negative assertion written
+    // against a phrase nothing emits any more passes whatever the code does.
+    for (const asm of [loop, straight]) {
+      expect(() => dc('f', asm)).not.toThrow(/crosses the edges? into|predecessor/);
+    }
+  });
+
+  test('`tst` and `cmn` write the flags too, and the decline names them', () => {
+    // Neither defines a register, so the destination test that judges `sub` cannot see them, and
+    // the decline used to say "nothing in its block sets the flags, and its block has no
+    // predecessor to inherit them from" — both clauses false of four lines of asm, and the second
+    // one sending the reader to a block that does not exist. Counted over the vendored kleod, sa3,
+    // pokeemerald and klonoa checkouts, 115 `.s` sites put a `tst` (99) or a `cmn` (16) on the
+    // line immediately before a conditional branch — blank and comment lines skipped or not, the
+    // number is the same.
+    for (const mn of ['tst', 'cmn']) {
+      expect(() => dc('flagonly', `\t${mn}\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).toThrow(
+        `conditional branch 'bne' has no reaching compare: the flags it tests were written by '${mn}' ` +
+          "in 'flagonly', and only a compare's are modelled",
+      );
+    }
+    // …and a compare they displace is not folded in behind them. This shape used to emit a
+    // `cond_br` over the stale `cmp` and was loud only because the `opaque` a `tst` mints is
+    // unresolvable — the right answer resting on an accident of an unrelated model.
+    expect(() => dc('stale', `\tcmp\tr0, r1\n\ttst\tr2, r3\n\tbge\t.Ltrue\n${TAIL}`)).toThrow(
+      "the flags it tests were written by 'tst' in 'stale', over the compare that reached it",
+    );
+  });
+
+  test('a predecessor that ends in a CONDITIONAL branch declines — unbuilt, not unsound', () => {
+    // The flags do survive `beq` on ARM, so this shape is liftable; it is the PowerPC frontend's
+    // inhabitant (a `cmpwi` read by the fall-through of the `beq` that already consumed it) and has
+    // no ARM inhabitant in the corpus. A rewrite with no inhabitant is not earned, so it refuses.
+    const condpred = `\tcmp\tr0, r1\n\tbeq\t.Ltrue\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('condpred', condpred)).toThrow(
+      /no compare crosses the edge into '.L2': it leaves '.*' through a conditional branch/,
+    );
+  });
+
+  test('a predecessor LIFTED AFTER this block declines, and the sentence says so', () => {
+    // The refusal is about the fill order, and it used to be reported as "a back edge". The CFG
+    // below has no cycle in it at all — `f → .L2 → .L1` — so a reader was sent to look for a loop
+    // that is not there, and the same CFG laid out the other way round lifts. The honest sentence
+    // names the walk, because a reverse-postorder fill is what would close it.
+    const back = `\tb\t.L2\n.L1:\n\tbge\t.Ltrue\n.L2:\n\tcmp\tr0, r1\n\tb\t.L1\n${TAIL}`;
+    expect(() => dc('backedge', back)).toThrow(
+      "no compare crosses the edge into '.L1': its only predecessor '.L2' is lifted after it",
+    );
+    // …and the other layout of that same CFG, which the fill order does reach.
+    const laidOut = `\tb\t.L2\n.L2:\n\tcmp\tr0, r1\n\tb\t.L1\n.L1:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('laidout', laidOut).source).toContain(FOLDED);
+  });
+
+  test('a case block of a JUMP TABLE names the dispatch, not the bounds branch', () => {
+    // The one arm of `inheritedCmp` that had no test, and the ablation says something different
+    // from what it looks like it says. A case block DOES have exactly one predecessor — the bounds
+    // block, whose successors `buildCfg` replaces with the case labels — so without an arm of its
+    // own its `bge` would fold the `cmp r1, #0x1` that selected the case. It does not, and it would
+    // not even with this arm deleted: `recoverJumpTable` only recognises a table whose bounds block
+    // ends in `bhi`/`bls`, so the conditional-branch arm below catches every block in `tables`
+    // anyway. Ablated, this fixture declines with "it leaves 'jtcase' through a conditional
+    // branch".
+    //
+    // So the arm buys a TRUER SENTENCE, not a verdict: the edge into a case is a switch edge, and
+    // the bounds guard is not the branch that made it. Worth keeping and worth saying, but not
+    // worth claiming a wrong answer for — the soundness here is the conditional-branch arm's.
+    const table =
+      '\tcmp\tr1, #0x1\n\tbhi\t.Ldef\n\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n' +
+      '\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+      '.Lc0:\n\tbge\t.Ltrue\n\tmov\tr0, #10\n\tbx\tlr\n' +
+      '.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n' +
+      `${TAIL}\t.align 2\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n`;
+    expect(() => dc('jtcase', table)).toThrow(
+      "no compare crosses the edge into '.Lc0': it leaves the jump-table dispatch in 'jtcase'",
+    );
+  });
+
+  test('a branch with no compare anywhere still declines, and says so', () => {
+    expect(() => dc('nocmp', `\tbge\t.Ltrue\n${TAIL}`)).toThrow(
+      "no compare reaches 'nocmp', and it has no predecessor to inherit any from",
+    );
+  });
+
+  test('what crosses the edge is the compare’s VALUES, not its register names', () => {
+    // `r0` is redefined on the far side of the edge, by a LOAD — which writes no flags, so the
+    // compare is still the one `bge` tests. Carrying register names would re-read `r0` here and
+    // state a condition over the loaded word; carrying the values the `cmp` consumed is what makes
+    // the block boundary invisible, and it is also why a single predecessor is required: it
+    // dominates, so those values dominate every use on this side.
+    const redef = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tldr\tr0, [r1]\n\tbge\t.Ltrue\n${TAIL}`;
+    const src = dc('redef', redef).source;
+    expect(src).toContain(FOLDED);
+    expect(src).not.toContain('*'); // the loaded word is not in the condition, so nothing reads it
   });
 });
 
@@ -1352,9 +1619,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
         `\tadd\tsp, sp, #0x4\n\tpop\t{${list}}\n\tadd\tsp, sp, #-0x4\n\tbl\tfive\n` +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
-      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'R0-R3', 'r1-r3']) {
+      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'r1-r3']) {
         expect(() => decompile('f', withList(list), ARMV4T_AGBCC)).toThrow(/never reloaded/);
       }
+      // CASE is a third spelling of the same instruction, and it declines too — earlier, on the
+      // spelling itself, because the whole frontend reads registers in one case only. Both
+      // verdicts are a refusal, which is the property that matters: no spelling of this `pop`
+      // lets the dead capture through.
+      expect(() => decompile('f', withList('R0-R3'), ARMV4T_AGBCC)).toThrow(/is spelled in upper case/);
       // …and the same for a range on a multi-load, which writes the list without popping it
       const viaLdmia =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
