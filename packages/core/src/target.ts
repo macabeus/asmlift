@@ -879,6 +879,12 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
   };
 }
 
+/** The scalar vocabulary every candidate's prelude declares. `s64`/`u64` are spelt `long long`
+ *  because every compiler this repo targets is a C89 one with the GNU/CW extension, which is what
+ *  the projects themselves use; the decomp checkouts all define the same two names, and the
+ *  harness keeps typedefs per NAME against the vendored ctx, so a unit that already has them gets
+ *  no redefinition. */
 export const C_TYPEDEFS =
   'typedef unsigned char u8;typedef unsigned short u16;typedef unsigned int u32;' +
-  'typedef signed char s8;typedef short s16;typedef int s32;\n';
+  'typedef signed char s8;typedef short s16;typedef int s32;' +
+  'typedef long long s64;typedef unsigned long long u64;\n';

@@ -109,6 +109,32 @@ export const OPCODES = {
   // which recompiles to the branch diamond the source emitted.
   logic_and: { operands: 2, results: 1 },
   logic_or: { operands: 2, results: 1 },
+  // --- a 64-bit value and its two halves ---
+  // A 64-bit integer is ONE value of `{kind:'int'|'unknown', width:64}`, never two results and never
+  // a new `IrType` kind. The rule that decides it: for TYPES, widen the number that is already
+  // there; for OPERATIONS, add a new opcode. Existing code tests `t.kind === 'int'` and reads
+  // `t.width`, so a wider width makes a pass that is wrong about it fail LOUDLY, while a new kind
+  // would make the same pass skip SILENTLY. Existing code switches on `op.opcode`, so a new opcode
+  // makes an existing pass skip, which is the safe direction there.
+  //
+  // So the arithmetic opcodes above gain NOTHING: `add`, `sub`, `mul`, the shifts and the `icmp_*`
+  // family carry the width in their operand types. Only the three ops that have no 32-bit spelling
+  // are new — building a 64-bit value out of two halves, and reading either half back.
+  //
+  // `concat lo, hi` is TRANSIENT the way `mulh` is: it renders only in the shapes something above
+  // it recognises (a widen, a literal, an ABI pair), and one that survives to the structurer is a
+  // loud gap. `lo32`/`hi32` invert that property and are PERMANENT, because C spells them exactly —
+  // `(u32)v` and `(u32)(v >> 32)`.
+  //
+  // WHY `hi32` AND NOT `lo32(shr_u v {imm:32})`, which is the same value in two ops rather than
+  // three: spelling a projection as a 64-bit SHIFT puts a 64-bit arithmetic op into the IR at every
+  // pair site, and hands it to every pass that matches a shift — `raise/divpow2.ts` on
+  // `shr_s {imm}`, `raise/extscale.ts` on `shl`, `raise/narrow.ts` on a narrow/re-widen pair. Those
+  // passes would then be REACHED by a 64-bit operand instead of skipping it. A third opcode nothing
+  // else matches is what buys the isolation.
+  concat: { operands: 2, results: 1 }, // concat lo, hi → the 64-bit value whose low half is `lo`
+  lo32: { operands: 1, results: 1 },
+  hi32: { operands: 1, results: 1 },
   // --- memory ---
   load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
@@ -206,11 +232,21 @@ export const OPCODES = {
  *  does not. */
 export type Opcode = keyof typeof OPCODES;
 
+/** The width of a 64-bit IR value, named once so the three places that build one and the verifier
+ *  that checks them cannot come to disagree about it. */
+export const WIDE_BITS = 64;
+
 /** The widths a `zext`/`sext` carries — a fact about those two opcodes, so it lives with them
  *  rather than re-declared per consumer (raise/narrow.ts pairs a narrowing op with its re-widening,
  *  raise/paramwidth.ts declares a parameter at one). Every frontend that produces the pair produces
  *  one of these: agbcc's gated shift-pair fold (pattern/engine.ts CAST_PATTERNS) and PPC's
- *  `extsb`/`extsh` (frontend/ppc.ts). A third width would be a C type the backend cannot spell. */
+ *  `extsb`/`extsh` (frontend/ppc.ts). A third width would be a C type the backend cannot spell.
+ *
+ *  32 IS NOT ONE OF THEM, and the widening to 64 does not come here. The machine spells that widen
+ *  as a PAIR — agbcc `asr rN,rM,#31` or `mov rN,#0`, PPC `srawi`, MIPS `sra` — so it is a `concat`
+ *  shape (`concat(x, shr_s(x,31))` signed, `concat(x, const 0)` unsigned), which is also the only
+ *  form that says HOW the half was widened. This set keeps its one job: refuse an extension with no
+ *  C spelling. */
 export const CAST_WIDTHS: ReadonlySet<number> = new Set([8, 16]);
 
 /** Signature lookup by RUNTIME opcode string (Op.opcode is a plain string — IR consumers switch

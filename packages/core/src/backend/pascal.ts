@@ -52,6 +52,13 @@ function pasType(t: IrType): string {
     return '^' + pasType(t.to);
   }
   if (t.kind === 'int') {
+    // `Integer`/`Cardinal` are the machine word, and a NARROWER integer fits in one — which is what
+    // this backend has always spelled it as. A WIDER one does not: upas has no verified 64-bit type,
+    // and spelling a 64-bit value `Integer` would silently drop its high half. Loud, like every
+    // other unspellable construct in this backend.
+    if (t.width > 32) {
+      throw new Error(`pascal backend: no spelling for a ${t.width}-bit integer`);
+    }
     return t.signed ? 'Integer' : 'Cardinal';
   }
   // `unknown` reaching a backend means recovery's totality contract already failed upstream —

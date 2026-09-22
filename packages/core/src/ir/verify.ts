@@ -5,13 +5,55 @@
 //   3. SSA: each value defined once; every use is defined; def dominates use
 //   4. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
-import { Block, Fn, Value, dominators } from './core';
-import { opSig } from './opcodes';
+import { Block, Fn, Op, Value, dominators } from './core';
+import { WIDE_BITS, opSig } from './opcodes';
+import type { IrType } from './types';
 
 export class VerifyError extends Error {}
 
 // Opcodes admitting EITHER a 2-operand register form OR a 1-operand + `imm` attr form.
 const TWO_OR_IMM = new Set(['sdiv', 'shl', 'shr_u', 'shr_s']);
+
+// ── 64 DOES NOT MIX ────────────────────────────────────────────────────────────────────────────
+// A 64-bit value is one `Value` whose type carries width 64 (ir/opcodes.ts, `concat`), so every
+// pass that reads `t.width` and is wrong about it is wrong HERE rather than three stages later. The
+// rule below is a QUARANTINE and not full width agreement, and the difference is measured rather
+// than stylistic: full agreement is already false on 32-bit IR, because `raise/paramwidth.ts`
+// narrows a parameter to 8 or 16 bits and `add(p_u8, x_s32)` is an ordinary correct shape. What
+// must hold is that a 64-bit operand never meets a 32-bit one in an op that computes on both.
+//
+// `unknown` PARTICIPATES, and that is the whole point: at L1 every value is `unknown`, so a rule
+// that skipped it would be vacuous exactly where this is meant to be red. The shifts count only
+// their SHIFTED operand — a 64-bit shift by a 32-bit count is what the machine does.
+const WIDTH_UNIFORM = new Set(['add', 'sub', 'mul', 'and', 'or', 'xor', 'neg', 'not', 'sdiv', 'udiv', 'smod', 'umod']);
+// The shifts count only their SHIFTED operand: a 64-bit value shifted by a 32-bit count is what
+// every one of these machines does. The comparisons count only their OPERANDS: the result of a C
+// comparison is an `int` whatever it compared, which is what `raise/recover.ts` already types it.
+const SHIFTS = new Set(['shl', 'shr_u', 'shr_s']);
+const COMPARES = new Set([
+  'icmp_slt',
+  'icmp_sle',
+  'icmp_sgt',
+  'icmp_sge',
+  'icmp_ult',
+  'icmp_ule',
+  'icmp_ugt',
+  'icmp_uge',
+  'icmp_eq',
+  'icmp_ne',
+]);
+/** Whether `t` takes part in the width rule at all. `ptr`, `struct`, `array` and `void` do not — a
+ *  pointer's width is the machine's and says nothing about the integer it addresses. */
+const widthOf = (t: IrType): number | null => (t.kind === 'int' || t.kind === 'unknown' ? t.width : null);
+/** The types an op's width rule quantifies over. */
+const widthParticipants = (op: Op): IrType[] => {
+  const operands = op.operands.map((o) => o.type);
+  if (COMPARES.has(op.opcode)) {
+    return operands;
+  }
+  const results = op.results.map((r) => r.type);
+  return SHIFTS.has(op.opcode) ? [...results, ...operands.slice(0, 1)] : [...results, ...operands];
+};
 
 export function verify(fn: Fn): void {
   if (fn.blocks.length === 0) {
@@ -120,6 +162,37 @@ export function verify(fn: Fn): void {
               throw new VerifyError(
                 `'laddr' of ${count} elements is storage no access typed, so it must be unsigned bytes — ` +
                   `got width ${String(op.attrs.width)}, signed ${String(op.attrs.signed)}`,
+              );
+            }
+          }
+          // A 64-bit value is BUILT and TAKEN APART by exactly these three, so their shape is
+          // checked here rather than left to whoever reads a half. `concat` is the only producer.
+          if (op.opcode === 'concat' || op.opcode === 'lo32' || op.opcode === 'hi32') {
+            const wide = op.opcode === 'concat' ? op.results[0].type : op.operands[0].type;
+            const narrow = op.opcode === 'concat' ? op.operands.map((o) => o.type) : op.results.map((r) => r.type);
+            const wideW = widthOf(wide);
+            if (wideW !== WIDE_BITS) {
+              throw new VerifyError(
+                `'${op.opcode}' ${op.opcode === 'concat' ? 'result' : 'operand'} must be an integer of ` +
+                  `width ${WIDE_BITS}, got ${String(wideW ?? wide.kind)}`,
+              );
+            }
+            for (const t of narrow) {
+              if (widthOf(t) !== 32) {
+                throw new VerifyError(
+                  `'${op.opcode}' half must be an integer of width 32, got ${String(widthOf(t) ?? t.kind)}`,
+                );
+              }
+            }
+          }
+          // …and everywhere else, 64 does not mix (see the header above this file's checks).
+          if (WIDTH_UNIFORM.has(op.opcode) || SHIFTS.has(op.opcode) || COMPARES.has(op.opcode)) {
+            const ws = widthParticipants(op)
+              .map(widthOf)
+              .filter((w): w is number => w !== null);
+            if (ws.some((w) => w === WIDE_BITS) && ws.some((w) => w !== WIDE_BITS)) {
+              throw new VerifyError(
+                `'${op.opcode}' mixes a ${WIDE_BITS}-bit operand with a narrower one (widths ${ws.join(', ')})`,
               );
             }
           }
