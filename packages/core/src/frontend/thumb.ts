@@ -3715,10 +3715,17 @@ export function lift(
   // Best-effort call arity via the shared helper (frontend/ssa.ts).
   const fallbackArgcHere = (b: number): number => fallbackArgc(ssa, target.argRegs, b);
 
-  // The condition flags each block leaves behind, for a successor to pick up. Written as the block
-  // is filled, so a lookup can only find a block filled EARLIER — which is what makes a back edge
-  // answer "not known" rather than "none".
-  const exitCmp = new Map<number, PendingCmp | null>();
+  // What each block leaves in the flags for a successor to pick up: the live compare, or — when
+  // there is none — THE SENTENCE SAYING WHY, which crosses the edge with the state rather than
+  // being re-invented on the far side. Minting a fresh reason at the edge is how a block whose
+  // `sub` wrote the flags came to be described as a block that set none: the successor could see
+  // that nothing arrived, and not what stopped it.
+  //
+  // Every such sentence names the block it is about, so it needs no re-pointing as it travels and
+  // one gap reads the same however the labels fall. Written as the block is filled, so a lookup
+  // can only find a block filled EARLIER — which is what makes an unlifted predecessor answer "not
+  // known" rather than "none".
+  const exitCmp = new Map<number, PendingCmp | string>();
 
   /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
    *  it starts with none. One call answers both, so a refusal and its reason cannot drift apart.
@@ -3742,8 +3749,12 @@ export function lift(
    *  the one a later "improvement" would get wrong:
    *    * the flags are not a register anything reads, so there is nothing for `readData` to look
    *      up — the compare is consumed by the terminator, never by a named operand;
-   *    * a phi over two predecessors would merge two COMPARES, and a merged compare is not a value
-   *      a `cond_br` can fold into a condition: `icmp(lhs, rhs)` needs one pair, not a choice;
+   *    * the value a phi would carry does not exist yet on the predecessor's side. The condition
+   *      IS materialised as an ordinary op with a result (the `cond` terminator below builds an
+   *      `icmp`), and a phi over two of those is something a `cond_br` would take — but WHICH
+   *      comparison it is comes from the branch's mnemonic, at the SUCCESSOR's terminator, while
+   *      the predecessor is filled first. Flags are not a condition until a branch names one, so
+   *      at the edge there is nothing yet to phi;
    *    * `preds.length === 1` is deliberately STRONGER than dominance. A dominating predecessor's
    *      flags can still be overwritten on a longer path that rejoins here, so answering this from
    *      the dominator tree would state a condition that holds on one path in.
@@ -3751,30 +3762,40 @@ export function lift(
    *  Refuses when either half of that sentence fails:
    *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
    *      and picking one states a condition the machine does not promise;
-   *    * the only predecessor has not been filled: a back edge;
+   *    * the only predecessor has not been filled yet, so this pass has nothing to read;
    *    * the edge is not straight-line — it leaves a conditional branch or a jump-table dispatch.
    *      Thumb's `b<cc>` does preserve the flags, so this one is UNBUILT rather than unsound: it is
    *      exactly the PowerPC shape (a `cmpwi` read by the fall-through of the `bc` that already
-   *      consumed it, see `cmpDef` in ppc.ts) and has no ARM inhabitant to earn it here;
-   *    * no compare survives to the predecessor's last instruction.
+   *      consumed it, see `cmpDef` in ppc.ts) and has no ARM inhabitant to earn it here.
+   *
+   *  It does NOT refuse when no compare survives to the predecessor's last instruction, because
+   *  that is not this function's gap to report: the predecessor already wrote down what took the
+   *  flags, and that sentence is what crosses the edge.
    *
    *  Not a `Gate` table, on docs/level-tower.md's structural bar rather than on cost: every refusal
    *  reads `exitCmp`, which exists only because of the order this pass fills blocks in, so its
    *  input cannot be prepared as a getter at any price. */
   const inheritedCmp = (bi: number): PendingCmp | string => {
-    const lead = 'nothing in its block sets the flags, and';
+    const here = asmBlocks[bi].label;
     const ps = preds[bi];
     if (ps.length !== 1) {
       return ps.length === 0
-        ? `${lead} its block has no predecessor to inherit them from`
-        : `${lead} ${ps.length} edges reach it — the flags need not agree on all of them`;
+        ? `no compare reaches '${here}', and it has no predecessor to inherit any from`
+        : `no compare crosses the edges into '${here}': ${ps.length} meet there, and the flags need not agree on all of them`;
     }
     const pb = asmBlocks[ps[0]];
-    if (!exitCmp.has(ps[0])) {
-      return `${lead} its only predecessor '${pb.label}' is a back edge`;
+    const carried = exitCmp.get(ps[0]);
+    // Named for the fill order that decides it, not for a loop: this is true of any predecessor
+    // not yet lifted, and a CFG with no cycle in it can be laid out so that one is (`f: b .L2` /
+    // `.L1: bge` / `.L2: cmp; b .L1`). Saying "a back edge" sent a reader to look for a loop that
+    // is not there, and named a property of the CFG for a property of the walk over it — a
+    // reverse-postorder fill is what would close this, which is why the sentence has to point at
+    // the walk.
+    if (carried === undefined) {
+      return `no compare crosses the edge into '${here}': its only predecessor '${pb.label}' is lifted after it`;
     }
     if (tables.has(pb)) {
-      return `${lead} its only edge leaves the jump-table dispatch in '${pb.label}'`;
+      return `no compare crosses the edge into '${here}': it leaves the jump-table dispatch in '${pb.label}'`;
     }
     // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it is
     // in nobody's `preds`, and an `indirect` one throws before the CFG is built — so an arm for
@@ -3782,9 +3803,13 @@ export function lift(
     // `uncond` and a fall-through (`null`) are the edges this whole function exists to carry.
     const plast = pb.instrs[pb.instrs.length - 1];
     if (plast && classifyXfer(plast) === 'cond') {
-      return `${lead} its only edge leaves '${pb.label}' through a conditional branch`;
+      return `no compare crosses the edge into '${here}': it leaves '${pb.label}' through a conditional branch`;
     }
-    return exitCmp.get(ps[0]) ?? `${lead} no compare reaches the end of its only predecessor '${pb.label}'`;
+    // Whatever the predecessor left — the compare, or ITS reason, verbatim. The reason already
+    // names the block the chain broke in, so it is as true here as it was there, and a run of ten
+    // straight-line blocks reports the one instruction that took the flags rather than reporting
+    // the last edge it crossed.
+    return carried;
   };
 
   // --- fill each block in order, sealing blocks as their predecessors complete ---
@@ -3926,8 +3951,13 @@ export function lift(
         // Named "reaching it" rather than "in its block": the displaced compare may have been made
         // here or inherited from the predecessor, and a reader sent to the wrong block finds no
         // `cmp` and concludes the message is broken.
+        //
+        // THE WRITER'S BLOCK IS NAMED EVEN WHEN IT IS THE BRANCH'S OWN, and that is what lets the
+        // sentence cross an edge unchanged: one gap gets one sentence whether the `sub` sits above
+        // the branch or a `b` away from it. Leaving it out meant the successor had to invent its
+        // own wording, and what it invented blamed the edge.
         noCmpWhy =
-          `the flags it tests were written by ${tookFlags}` +
+          `the flags it tests were written by ${tookFlags} in '${ab.label}'` +
           (pendingCmp ? ', over the compare that reached it' : '') +
           `, and only a compare's are modelled`;
         pendingCmp = null;
@@ -4494,11 +4524,16 @@ export function lift(
       }
     }
 
-    // What this block leaves in the flags, for a single successor to inherit. Recorded for EVERY
-    // block, including those whose outgoing edge `inheritedCmp` will refuse: the edge rule lives in
-    // one place, and a second copy of it here could disagree with the first. No terminator form
-    // writes flags, so the state after the loop above is the state at the block's last instruction.
-    exitCmp.set(bi, pendingCmp);
+    // What this block leaves in the flags, for a single successor to inherit — the compare, or the
+    // reason there is none. Recorded for EVERY block, including those whose outgoing edge
+    // `inheritedCmp` will refuse: the edge rule lives in one place, and a second copy of it here
+    // could disagree with the first. No terminator form writes flags, so the state after the loop
+    // above is the state at the block's last instruction.
+    //
+    // `noCmpWhy` is non-empty exactly when `pendingCmp` is null — it is set on every path that
+    // nulls one, and the only path that starts null is the one that took it from `inheritedCmp`'s
+    // sentence — so this never stores an empty reason for a successor to repeat.
+    exitCmp.set(bi, pendingCmp ?? noCmpWhy);
 
     // terminator (via classifyXfer — the single source of truth shared with decode/succLabels)
     const last = ab.instrs[ab.instrs.length - 1];

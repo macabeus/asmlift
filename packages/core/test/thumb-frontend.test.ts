@@ -137,8 +137,8 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     const clobbered =
       '\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
     expect(() => dc('flagclobber', clobbered)).toThrow(
-      "conditional branch 'beq' has no reaching compare: the flags it tests were written by 'add', " +
-        "over the compare that reached it, and only a compare's are modelled",
+      "conditional branch 'beq' has no reaching compare: the flags it tests were written by 'add' in " +
+        "'flagclobber', over the compare that reached it, and only a compare's are modelled",
     );
 
     // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
@@ -157,9 +157,12 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     // exactly this way (the row this branch lifted holds seven of them), and the direction of the
     // error is what makes it sound. 405 such sites across the benchmark's 450 agbcc rows, 0 of
     // them reached with a compare still live.
-    expect(() => dc('highsrc', `\tcmp\tr0, r1\n\tmov\tr7, sl\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`)).toThrow(
-      /the flags it tests were written by 'mov'/,
-    );
+    expect(() =>
+      dc(
+        'highsrc',
+        `\tcmp\tr0, r1\n\tmov\tr7, sl\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`,
+      ),
+    ).toThrow(/the flags it tests were written by 'mov'/);
   });
 
   test('a CALL between a cmp and its branch declines loud — the callee left the flags', () => {
@@ -170,8 +173,8 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     const across =
       '\tpush\t{r4, lr}\n\tcmp\tr0, r1\n\tbl\tfoo\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
     expect(() => dc('flagsacrosscall', across)).toThrow(
-      "conditional branch 'bge' has no reaching compare: the flags it tests were written by a call, " +
-        "over the compare that reached it, and only a compare's are modelled",
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by a call in " +
+        "'flagsacrosscall', over the compare that reached it, and only a compare's are modelled",
     );
 
     // The compare AFTER the call is the shape every compiler emits, and it must still fold.
@@ -251,7 +254,9 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     expect(dc('labelrun', labels).source).toContain(FOLDED);
     // …and one clobber anywhere in the run breaks it, at the hop that did the clobbering.
     const broken = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tb\t.L3\n.L3:\n\tbge\t.Ltrue\n${TAIL}`;
-    expect(() => dc('chainbroken', broken)).toThrow(/no compare reaches the end of its only predecessor '.L2'/);
+    expect(() => dc('chainbroken', broken)).toThrow(
+      "the flags it tests were written by 'add' in '.L2', over the compare that reached it",
+    );
   });
 
   test('a label alone between the cmp and the branch carries them too', () => {
@@ -265,13 +270,29 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // the second. There is no single answer to inherit, and picking either is a coin toss the
     // emitted C would state as fact.
     const two = `\tcmp\tr0, r1\n\tbeq\t.L2\n\tcmp\tr0, #5\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
-    expect(() => dc('twoedges', two)).toThrow(/no reaching compare: nothing in its block sets the flags/);
-    expect(() => dc('twoedges', two)).toThrow(/2 edges reach it/);
+    expect(() => dc('twoedges', two)).toThrow(
+      "no reaching compare: no compare crosses the edges into '.L2': 2 meet there, and the flags need not " +
+        'agree on all of them',
+    );
   });
 
   test('a compare clobbered before the predecessor ENDS does not reach the branch', () => {
     const gone = `\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
-    expect(() => dc('clobberedinpred', gone)).toThrow(/no compare reaches the end of its only predecessor/);
+    // The reason CROSSES the edge: the predecessor wrote down what took the flags, and the
+    // successor repeats it rather than minting one of its own. Minting one produced "no compare
+    // reaches the end of its only predecessor 'clobberedinpred'" — true, and it named the edge for
+    // a gap no edge model would move, then sent the reader to a block whose first instruction is
+    // the `cmp` the message says is missing.
+    expect(() => dc('clobberedinpred', gone)).toThrow(
+      "the flags it tests were written by 'add' in 'clobberedinpred', over the compare that reached it",
+    );
+    // A CALL in the predecessor is the same question through a different flag-taker, and the same
+    // sentence has to cross. This is the shape a reader meets first: agbcc puts the `bl` and the
+    // branch either side of a `.LBB` label as readily as inside one block.
+    const called = `\tpush\t{lr}\n\tcmp\tr0, r1\n\tbl\tg\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('calledinpred', called)).toThrow(
+      "the flags it tests were written by a call in 'calledinpred', over the compare that reached it",
+    );
   });
 
   test('a compare clobbered AFTER it is inherited does not reach the branch either', () => {
@@ -282,8 +303,8 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // The whole sentence, because the part that was wrong was the part no pattern asserted: the
     // displaced compare was in the PREDECESSOR, and the message said "in its block".
     expect(() => dc('clobberedinsucc', gone)).toThrow(
-      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'add', " +
-        "over the compare that reached it, and only a compare's are modelled",
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'add' in " +
+        "'.L2', over the compare that reached it, and only a compare's are modelled",
     );
   });
 
@@ -296,18 +317,19 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // an invented one.
     const loop = `\tmov\tr1, #4\n.LWait:\n\tsub\tr0, r1\n\tbgt\t.LWait\n\tbx\tlr\n`;
     expect(() => dc('arithloop', loop)).toThrow(
-      "conditional branch 'bgt' has no reaching compare: the flags it tests were written by 'sub', " +
-        "and only a compare's are modelled",
+      "conditional branch 'bgt' has no reaching compare: the flags it tests were written by 'sub' in " +
+        "'.LWait', and only a compare's are modelled",
     );
     // …and with no edge in the picture at all, where blaming one is plainly absurd.
     const straight = `\tsub\tr0, r0, r1\n\tbge\t.Ltrue\n${TAIL}`;
     expect(() => dc('arithstraight', straight)).toThrow(
-      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'sub', " +
-        "and only a compare's are modelled",
+      "conditional branch 'bge' has no reaching compare: the flags it tests were written by 'sub' in " +
+        "'arithstraight', and only a compare's are modelled",
     );
+    // Stated over the vocabulary the messages use TODAY, because a negative assertion written
+    // against a phrase nothing emits any more passes whatever the code does.
     for (const asm of [loop, straight]) {
-      expect(() => dc('f', asm)).not.toThrow(/sets the flags/);
-      expect(() => dc('f', asm)).not.toThrow(/edges reach it|predecessor/);
+      expect(() => dc('f', asm)).not.toThrow(/crosses the edges? into|predecessor/);
     }
   });
 
@@ -321,15 +343,15 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // number is the same.
     for (const mn of ['tst', 'cmn']) {
       expect(() => dc('flagonly', `\t${mn}\tr0, r1\n\tbne\t.Ltrue\n${TAIL}`)).toThrow(
-        `conditional branch 'bne' has no reaching compare: the flags it tests were written by '${mn}', ` +
-          "and only a compare's are modelled",
+        `conditional branch 'bne' has no reaching compare: the flags it tests were written by '${mn}' ` +
+          "in 'flagonly', and only a compare's are modelled",
       );
     }
     // …and a compare they displace is not folded in behind them. This shape used to emit a
     // `cond_br` over the stale `cmp` and was loud only because the `opaque` a `tst` mints is
     // unresolvable — the right answer resting on an accident of an unrelated model.
     expect(() => dc('stale', `\tcmp\tr0, r1\n\ttst\tr2, r3\n\tbge\t.Ltrue\n${TAIL}`)).toThrow(
-      "the flags it tests were written by 'tst', over the compare that reached it",
+      "the flags it tests were written by 'tst' in 'stale', over the compare that reached it",
     );
   });
 
@@ -338,16 +360,29 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     // inhabitant (a `cmpwi` read by the fall-through of the `beq` that already consumed it) and has
     // no ARM inhabitant in the corpus. A rewrite with no inhabitant is not earned, so it refuses.
     const condpred = `\tcmp\tr0, r1\n\tbeq\t.Ltrue\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
-    expect(() => dc('condpred', condpred)).toThrow(/its only edge leaves '.*' through a conditional branch/);
+    expect(() => dc('condpred', condpred)).toThrow(
+      /no compare crosses the edge into '.L2': it leaves '.*' through a conditional branch/,
+    );
   });
 
-  test('a BACK edge declines — the predecessor has not been lifted yet', () => {
+  test('a predecessor LIFTED AFTER this block declines, and the sentence says so', () => {
+    // The refusal is about the fill order, and it used to be reported as "a back edge". The CFG
+    // below has no cycle in it at all — `f → .L2 → .L1` — so a reader was sent to look for a loop
+    // that is not there, and the same CFG laid out the other way round lifts. The honest sentence
+    // names the walk, because a reverse-postorder fill is what would close it.
     const back = `\tb\t.L2\n.L1:\n\tbge\t.Ltrue\n.L2:\n\tcmp\tr0, r1\n\tb\t.L1\n${TAIL}`;
-    expect(() => dc('backedge', back)).toThrow(/its only predecessor '.L2' is a back edge/);
+    expect(() => dc('backedge', back)).toThrow(
+      "no compare crosses the edge into '.L1': its only predecessor '.L2' is lifted after it",
+    );
+    // …and the other layout of that same CFG, which the fill order does reach.
+    const laidOut = `\tb\t.L2\n.L2:\n\tcmp\tr0, r1\n\tb\t.L1\n.L1:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(dc('laidout', laidOut).source).toContain(FOLDED);
   });
 
   test('a branch with no compare anywhere still declines, and says so', () => {
-    expect(() => dc('nocmp', `\tbge\t.Ltrue\n${TAIL}`)).toThrow(/no predecessor to inherit them from/);
+    expect(() => dc('nocmp', `\tbge\t.Ltrue\n${TAIL}`)).toThrow(
+      "no compare reaches 'nocmp', and it has no predecessor to inherit any from",
+    );
   });
 
   test('what crosses the edge is the compare’s VALUES, not its register names', () => {

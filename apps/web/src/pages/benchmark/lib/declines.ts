@@ -164,20 +164,25 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // THE ARM SIDE, and the leftovers of a capability that landed rather than one that is missing —
     // the same reading `branch-likely` below asks for. Thumb carries a compare across a run of
     // straight-line edges into blocks with one predecessor each, so what still refuses is what that
-    // model leaves over: two edges into the block, no predecessor at all, a back edge, an edge
-    // leaving a conditional branch or a jump-table dispatch, and a predecessor whose compare did
-    // not survive to its last instruction. No compiled row in the corpus reaches any of them, so
-    // the class reads 0; deleting it would assert that nothing is left.
+    // model leaves over, and it is exactly four shapes: two or more edges meet at the block, the
+    // one predecessor is lifted after it, or the edge leaves a conditional branch or a jump-table
+    // dispatch. No compiled row in the corpus reaches any of them, so the class reads 0; deleting
+    // it would assert that nothing is left.
     //
-    // KEYED ON THE REASON, not on the headline, and that is the whole point. The same throw also
-    // fires when the flags a branch tests were written by ARITHMETIC or by a call — a different
-    // capability entirely, and one no edge model would move. `/no reaching compare: /` caught it
-    // and filed it under a label that says "across an edge", which is the over-claim the
-    // `stack-frames` class was fixed for. Arithmetic flags have no row, so they stay in the
-    // residue the header paragraph names rather than take a class of their own.
+    // KEYED ON THE REASON, not on the headline, and that is the whole point. The same throw fires
+    // for two more subjects that no edge model would move, and both say so in their own words
+    // rather than in this one:
+    //   * the flags were written by ARITHMETIC, by `tst`/`cmn` or by a call — the message names
+    //     the instruction and the block it sits in, and it crosses an edge unchanged, so the run
+    //     of straight-line blocks between the writer and the branch does not turn it into an edge
+    //     problem;
+    //   * the branch's block has no predecessor at all, so there is no edge to carry anything.
+    // `/no reaching compare: /` caught all three and filed them under a label that says "across an
+    // edge", which is the over-claim the `stack-frames` class was fixed for. Neither of the two has
+    // a row, so they stay in the residue the header paragraph names rather than take a class each.
     key: 'cross-block-flags-arm',
     label: 'Condition flags across an edge (ARM) — residual shapes only',
-    pattern: /no reaching compare: nothing in its block sets the flags/,
+    pattern: /no compare crosses the edges? into /,
   },
   {
     // THE LEFTOVER SHAPES OF A CAPABILITY THAT LANDED, not a capability that is missing — the one

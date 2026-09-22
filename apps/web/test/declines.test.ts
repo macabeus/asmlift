@@ -281,30 +281,56 @@ describe('a pattern keyed on an English word claims sentences that are not about
       'address-taken-local',
     ],
     // `cross-block-flags-arm` must not reach the bare headline `no reaching compare: `. Thumb
-    // throws that headline for TWO capabilities: the edge shapes its inheritance model left over,
-    // and flags written by arithmetic or by a call, which no edge model would move. The second has
-    // 97 sites in kleod's and sa3's hand-written asm and 2 in their built `.s`, so filing it under
-    // a label that reads "across an edge" would send a roadmap reader to build the wrong thing —
-    // the same over-claim the `stack-frames` class was narrowed for.
+    // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
+    // inheritance model left over; flags written by arithmetic, by `tst`/`cmn` or by a call, which
+    // no edge model would move; and a block with no predecessor, where there is no edge to carry
+    // anything. The arithmetic one has 97 sites in kleod's and sa3's hand-written asm and 2 in
+    // their built `.s`, so filing it under a label that reads "across an edge" would send a roadmap
+    // reader to build the wrong thing — the same over-claim the `stack-frames` class was narrowed
+    // for.
     [
       "lift: cannot lift 'MultiBootWaitSendDone': conditional branch 'bgt' has no reaching compare: the flags " +
-        "it tests were written by 'sub', and only a compare's are modelled",
+        "it tests were written by 'sub' in '.LWait', and only a compare's are modelled",
       'other',
     ],
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
-        "written by a call, over the compare that reached it, and only a compare's are modelled",
+        "written by a call in 'f', over the compare that reached it, and only a compare's are modelled",
       'other',
     ],
-    // …and the edge shapes it DOES name still land in it.
+    // …INCLUDING when the writer is a block away, which is the shape that used to be filed as an
+    // edge problem. The sentence the predecessor wrote is what crosses, so one gap reads the same
+    // however the labels fall, and it classifies the same too.
     [
-      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: nothing in its block sets " +
-        'the flags, and 2 edges reach it — the flags need not agree on all of them',
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: the flags it tests were " +
+        "written by 'add' in '.L2', over the compare that reached it, and only a compare's are modelled",
+      'other',
+    ],
+    // …and a branch whose block nothing reaches is not an edge shape either.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare reaches 'f', and " +
+        'it has no predecessor to inherit any from',
+      'other',
+    ],
+    // …while the four shapes the model really does leave at an edge land in the class.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edges " +
+        "into '.L2': 2 meet there, and the flags need not agree on all of them",
       'cross-block-flags-arm',
     ],
     [
-      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: nothing in its block sets " +
-        "the flags, and no compare reaches the end of its only predecessor '.L2'",
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.L1': its only predecessor '.L2' is lifted after it",
+      'cross-block-flags-arm',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.L2': it leaves 'f' through a conditional branch",
+      'cross-block-flags-arm',
+    ],
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
+        "into '.Lc0': it leaves the jump-table dispatch in 'f'",
       'cross-block-flags-arm',
     ],
   ])('%s -> %s', (marker, want) => {
@@ -832,7 +858,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-cr', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-flags-arm', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
-    ['cross-block-flags-arm', 'nothing in its block sets the flags', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edge into ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edges into ', 'packages/core/src/frontend/thumb.ts'],
     ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],
