@@ -87,6 +87,35 @@ export function globalCellOf(defs: Map<Value, Op>, addr: Value, off: number): Gl
 }
 
 /**
+ * The named global an address value is DERIVED FROM, through defs alone — `gaddr`, an `add` where
+ * exactly one side reaches a name, and the LEFT side of a `sub`, whose right side is a distance and
+ * never a second object. Where {@link globalCellOf} asks which CELL an
+ * address denotes and answers null the moment a runtime term enters, this asks only which OBJECT
+ * it reaches, which a runtime index does not change: `gVolArr[i]` names no cell and one object.
+ *
+ * So it answers a DECLARATION question — volatile, const, the qualifiers that hold for every byte
+ * of the object — and never an aliasing one: two accesses this gives the same name are not thereby
+ * the same cell. Null when nothing reaches a name, and when two sides do (a sum of two `gaddr`s is
+ * a base the defs cannot tell apart); null is UNKNOWN rather than "no global", so a caller that
+ * refuses on a declared property must read it as "the map cannot say".
+ */
+export function globalBaseOf(defs: Map<Value, Op>, addr: Value): string | null {
+  const d = defs.get(addr);
+  if (d?.opcode === 'gaddr') {
+    return d.attrs.sym as string;
+  }
+  if (d?.opcode === 'add' && d.operands.length === 2) {
+    const a = globalBaseOf(defs, d.operands[0]);
+    const b = globalBaseOf(defs, d.operands[1]);
+    return a !== null && b !== null ? null : (a ?? b);
+  }
+  if (d?.opcode === 'sub' && d.operands.length === 2) {
+    return globalBaseOf(defs, d.operands[0]);
+  }
+  return null;
+}
+
+/**
  * The NUMERIC address an access denotes, resolved through defs alone — a literal base, or the sum
  * of two literals — plus the access's own `off`. Null when the address
  * does not reduce to a literal: a `gaddr` (ask {@link globalCellOf} instead), a parameter, a

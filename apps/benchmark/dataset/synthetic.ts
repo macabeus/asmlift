@@ -1353,13 +1353,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // this row the gate would refuse nothing a command can show. It is also the shape no C spelling
   // could pin: `+` leaves its operands' evaluation order unspecified even where both values agree.
   //
-  // AND BESIDE THE THREE, ONE REFUSAL THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
+  // AND BESIDE THE THREE, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
-  // so everything else in the test rides along: the CALL the body's value comes from lands in an arm
-  // the emitted `&&` skips on every iteration the counter's arm answers true, while agbcc ran the
-  // `bl` ahead of that arm's branch. Compiled and executed both ways the admitted spelling returns a
-  // different value, not merely a different call count. `testSkipsAnEffect` (structure/hazards.ts)
-  // declines it, and asks the same question of every `do-while` rather than only of a folded one.
+  // so everything else in the test rides along: the CALL the body's value comes from would land in an
+  // arm the emitted `&&` skips on every iteration the counter's arm answers true, while agbcc ran the
+  // `bl` ahead of that arm's branch. Compiled and executed both ways, within one invocation the two
+  // return the same `i` and differ in how many times `cb` ran and in what it wrote through `p`;
+  // carried across invocations the shifted callee state changes the return too. What the row holds is
+  // the PLACEMENT that keeps them apart — a call in a connective's guarded operand is materialized at
+  // its def (structure/analysis.ts) — and, behind it, `testSkipsAnEffect` (structure/hazards.ts),
+  // which then finds a name in that position and asks the same question of every `do-while` rather
+  // than only of a folded one. What still reaches that guard is an `opaque`, the only other
+  // effectful op that defines a value, for which no placement rule exists.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
@@ -1385,8 +1390,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { cb: { params: 1 } },
     note:
       "the same pre-update read in the bottom test, with a CALL's result as the other arm. agbcc " +
-      'calls before either branch, so the emitted `&&` would hand the call a position it skips — ' +
-      'the decline is the whole point of the row',
+      'calls before either branch, so the call has to be emitted ahead of the test rather than in ' +
+      'the position the `&&` skips',
   },
   {
     sym: 'preupdate_exit',
