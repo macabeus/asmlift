@@ -10,7 +10,7 @@
 //     "does this function hold a value the variation would home at all" so rank.ts can skip a
 //     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
-import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { disjointConstSlots, globalBaseOf, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -1549,8 +1549,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  capability this rule does not have, so the caller declines instead — which costs no row: the
    *  shape is 0 of the corpus's 1,203 rows, swept under both map modes.
    *
-   *  A constant-offset `load` only, the scope the re-read rule takes below: an `aload`'s runtime
-   *  index names no single cell. */
+   *  Keyed on the OBJECT the access's base reaches, not on the cell it resolves to, because
+   *  volatility is declared of the object: a subscript reaches it while naming no cell — an `aload`,
+   *  or a `load` through walked arithmetic where the map carries no array shape — and both are the
+   *  same hazard the scalar is. Where the offset IS pinned the question is asked of that byte, so a
+   *  plain member beside a `vu16` one keeps its connective. A base that reaches no name — a pointer
+   *  parameter, a raw MMIO address the map declares nothing about — is unknown and does not refuse,
+   *  the posture no map at all has. */
   const volatileGuardedRead = ((): string | null => {
     if (!defs || !volatileGlobal) {
       return null;
@@ -1558,12 +1563,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         const v = op.results[0];
-        if (op.opcode !== 'load' || v === undefined || !shortCircuitGuarded.has(v)) {
+        if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
           continue;
         }
-        const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
-        if (cell && volatileGlobal(cell.name, cell.byte)) {
-          return cell.name;
+        const base = globalBaseOf(defs, op.operands[0]);
+        const cell = op.opcode === 'load' ? globalCellOf(defs, op.operands[0], op.attrs.off as number) : null;
+        if (base !== null && volatileGlobal(base, cell === null ? null : cell.byte)) {
+          return base;
         }
       }
     }

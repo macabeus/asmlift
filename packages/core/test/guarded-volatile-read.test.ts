@@ -65,6 +65,71 @@ test('the FIRST operand is unconditional, so a volatile read there is placed alr
   expect(src).toContain('gVolReg != 0 && a0 > 0');
 });
 
+// `extern volatile int gVolArr[8]; … if (a > 0 && gVolArr[i] != 0) g(a);` — the same hazard reached
+// by a SUBSCRIPT, which names the object and no cell. Both agbcc objects (the `ldr` above the `cmp`
+// and below the `ble`) lift to this `aload`; the walked twin below is what a map carrying no array
+// shape gets, `gaddr + (i << 2)` with a plain `load` over it.
+const GUARDED_ELEMENT = `fn v {
+^bb0(%0: s32, %1: s32):
+  %2: s32* = gaddr {sym="gVolArr"}
+  %3: s32 = aload %2, %1 {elemSize=4, signed=true}
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_sgt %0, %4
+  %6: u32 = icmp_ne %3, %4
+  %7: u32 = logic_and %5, %6
+  cond_br %7, ^bb1(), ^bb2()
+^bb1():
+  %8: s32 = call %0 {target="g"}
+  br ^bb2()
+^bb2():
+  ret
+}
+`;
+
+const GUARDED_WALKED = `fn v {
+^bb0(%0: s32, %1: s32):
+  %2: s32* = gaddr {sym="gVolArr"}
+  %3: s32 = const {value=2}
+  %4: s32 = shl %1, %3
+  %5: s32* = add %2, %4
+  %6: s32 = load %5 {off=0, signed=true, width=4}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_sgt %0, %7
+  %9: u32 = icmp_ne %6, %7
+  %10: u32 = logic_and %8, %9
+  cond_br %10, ^bb1(), ^bb2()
+^bb1():
+  %11: s32 = call %0 {target="g"}
+  br ^bb2()
+^bb2():
+  ret
+}
+`;
+
+const VOLATILE_ARRAY = new Map<string, SymbolInfo>([
+  [
+    'gVolArr',
+    {
+      name: 'gVolArr',
+      kind: 'data',
+      volatile: true,
+      shape: 'array',
+      size: 32,
+      elemSize: 4,
+      elemSigned: true,
+      dims: [8],
+    },
+  ],
+]);
+
+test.each([
+  ['a subscript', GUARDED_ELEMENT],
+  ['walked arithmetic', GUARDED_WALKED],
+  ['a walk that counts down', GUARDED_WALKED.replace('add %2, %4', 'sub %2, %4')],
+])('%s reaches the same volatile object, so it declines too', (_label, ir) => {
+  expect(() => emitWith(ir, VOLATILE_ARRAY)).toThrow(/guard a read of the volatile object 'gVolArr'/);
+});
+
 // A MIXED-VOLATILITY STRUCT, which is what the `vu16 field;` idiom produces: pokeemerald's `gMain`
 // declares 23 members and qualifies one, and six more of the corpus's mapped globals have the same
 // shape. The guarded read is decided per MEMBER — the qualified one is the hazard above, an
