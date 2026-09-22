@@ -2014,10 +2014,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds,
     homeEscapingExtensions,
     readsStayWhereWritten,
-    // the map's own declaration truth: a volatile object's read may not be duplicated or moved
-    volatileGlobal: (n) => {
+    // the map's own declaration truth: a volatile object's read may not be duplicated or moved.
+    // A qualified MEMBER answers only for the bytes it spans — the `vu16 field;` idiom puts one in
+    // a struct whose other members are ordinary cells — and a field of unknown extent spans
+    // whatever follows it, which is the refusing way to be wrong.
+    volatileGlobal: (n, byte) => {
       const si = symbols?.get(n);
-      return si?.volatile === true || (si?.layout ?? []).some((f) => f.volatile === true);
+      if (si?.volatile === true) {
+        return true;
+      }
+      return (si?.layout ?? []).some(
+        (f) =>
+          f.volatile === true && (byte === null || (byte >= f.offset && (f.size === null || byte < f.offset + f.size))),
+      );
     },
   });
 

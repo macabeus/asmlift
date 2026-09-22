@@ -64,3 +64,49 @@ test('the FIRST operand is unconditional, so a volatile read there is placed alr
   const src = emitWith(GUARDED_READ.replace('logic_and %4, %5', 'logic_and %5, %4'), VOLATILE_MAP);
   expect(src).toContain('gVolReg != 0 && a0 > 0');
 });
+
+// A MIXED-VOLATILITY STRUCT, which is what the `vu16 field;` idiom produces: pokeemerald's `gMain`
+// declares 23 members and qualifies one, and six more of the corpus's mapped globals have the same
+// shape. The guarded read is decided per MEMBER — the qualified one is the hazard above, an
+// ordinary one beside it is an ordinary cell whose placement is a matching question.
+const GUARDED_MEMBER = (off: number): string => `fn v {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gIo"}
+  %2: s32 = load %1 {off=${off}, signed=true, width=4}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sgt %0, %3
+  %5: u32 = icmp_ne %2, %3
+  %6: u32 = logic_and %4, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: s32 = call %0 {target="g"}
+  br ^bb2()
+^bb2():
+  ret
+}
+`;
+
+const MIXED_STRUCT = new Map<string, SymbolInfo>([
+  [
+    'gIo',
+    {
+      name: 'gIo',
+      kind: 'data',
+      shape: 'struct',
+      structName: 'S',
+      size: 8,
+      layout: [
+        { name: 'a', offset: 0, size: 4, signed: true },
+        { name: 'b', offset: 4, size: 4, signed: true, volatile: true },
+      ],
+    },
+  ],
+]);
+
+test('a plain member of a partly-volatile struct keeps the connective', () => {
+  expect(emitWith(GUARDED_MEMBER(0), MIXED_STRUCT)).toContain('a0 > 0 && gIo.a != 0');
+});
+
+test('the volatile member of that same struct declines', () => {
+  expect(() => emitWith(GUARDED_MEMBER(4), MIXED_STRUCT)).toThrow(/guard a read of the volatile object 'gIo'/);
+});

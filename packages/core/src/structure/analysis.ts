@@ -771,12 +771,20 @@ export interface AnalyzeOptions {
    *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
    *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
-  /** "does the project declare this global volatile?" — a read of a volatile object may NOT be
+  /** "does the project declare this CELL volatile?" — a read of a volatile object may NOT be
    *  duplicated or moved, so the variation above refuses on one. Answers false for a symbol the map
    *  does not carry (and for no map at all), which is the same posture the multi-render rule has
    *  always had: without a declaration nothing here can know, and the differ referees the extra
-   *  load. Where the map DOES know, the variation is silent about it rather than wrong. */
-  volatileGlobal?: (name: string) => boolean;
+   *  load. Where the map DOES know, the variation is silent about it rather than wrong.
+   *
+   *  The BYTE is what makes it a cell question: the `vu16 field;` idiom qualifies one member of a
+   *  plainly-declared struct (pokeemerald's `gMain` declares 23 members and qualifies one), so the
+   *  object's own name cannot answer for the member an access names. `null` is an access whose
+   *  offset is not pinned — a runtime index reaches every member — and any volatile one answers it.
+   *
+   *  The second consumer is not silent: `volatileGuardedRead` declines the whole function on a
+   *  read this answers true for, so a declaration a project adds can cost it that function. */
+  volatileGlobal?: (name: string, byte: number | null) => boolean;
   /** The in-place-join variation (rank.ts `/inplace`). A load whose result is a `cond_br` successor
    *  ARG feeds a merge: rendered inline it has no name, so the merge param mints a fresh variable
    *  and BOTH arms must assign it. Materialized, the naming walk can home the merge in the load's
@@ -1554,7 +1562,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           continue;
         }
         const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
-        if (cell && volatileGlobal(cell.name)) {
+        if (cell && volatileGlobal(cell.name, cell.byte)) {
           return cell.name;
         }
       }
@@ -1724,7 +1732,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           rereadGlobals && defs && op.opcode === 'load'
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
             : null;
-        const barsThisRead = cell && defs && !volatileGlobal?.(cell.name) ? mayWriteGlobal(defs, cell.name) : null;
+        const barsThisRead =
+          cell && defs && !volatileGlobal?.(cell.name, cell.byte) ? mayWriteGlobal(defs, cell.name) : null;
         if (materializeJoinFeeds && op.opcode === 'load' && condBrArgFed.has(r)) {
           materialize.add(op);
           continue;
