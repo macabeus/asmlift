@@ -2011,9 +2011,9 @@ interface FrameObjectAudit {
   irBlocks: Block[];
   localArea: number;
   usedSlotOffsets: ReadonlySet<number>;
-  /** the outgoing stack-argument area the frame stages at [0, area), and whether the analysis
-   *  LICENSED that answer — a refusal also reports area 0, so the number alone proves nothing */
-  outgoingArgs: { area: number; licensed: boolean };
+  /** the outgoing stack-argument area the frame stages at [0, area) — the bottom of the reserved
+   *  area, which is where an untyped object claims to start */
+  outgoingArea: number;
   capturedObjectIsTheWholeFrame: boolean;
   prototypes: Prototypes;
   symbols: SymbolMap | undefined;
@@ -2029,7 +2029,7 @@ interface FrameObjectAudit {
  *  loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
  *  used.
  *
- *  Takes its inputs explicitly rather than closing over `lift`. All eight are READ, none is
+ *  Takes its inputs explicitly rather than closing over `lift`. Every one of them is READ, none is
  *  reassigned, and the only mutation is to the ops reachable through `irBlocks` — the widths,
  *  signedness and `volatile` this stamps onto each surviving `laddr`. */
 function auditFrameObjects({
@@ -2037,7 +2037,7 @@ function auditFrameObjects({
   irBlocks,
   localArea,
   usedSlotOffsets,
-  outgoingArgs,
+  outgoingArea,
   capturedObjectIsTheWholeFrame,
   prototypes,
   symbols,
@@ -2465,23 +2465,22 @@ function auditFrameObjects({
         return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
       }
       // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not take
-      // four dead lines for four live rules, and knows what would wake each one. They are kept
+      // three dead lines for three live rules, and knows what would wake each one. They are kept
       // because every one of them guards a SILENT wrong answer: storage declared over bytes the
       // object does not own is a frame the recompile lays out differently, with no diagnostic.
-      //   • An outgoing block that is actually consumed keys its offsets as slots (the `bl` case
-      //     adds them), so the slot clause above fires first; `area` is only ever read here when
-      //     an analysis licensed a block no call used. The `licensed` half is the one that could
-      //     still fire: a refusal reports `area` 0 too, and a function with no `[sp,#k]` access
-      //     lifts with the slot model off.
+      //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
+      //     object claims to start, and neither way in reaches: a block stored on every path keys
+      //     its offsets as slots at the call, so the slot clause above fires first, and a block
+      //     NOT stored on every path is `analyzeOutgoingArgs`'s own blocker, which turns the slot
+      //     model OFF — and no untyped object survives that, because every `laddr` mint is behind
+      //     `slotsOk`. The second half is also why nothing here asks whether the analysis LICENSED
+      //     the block: an `laddr` exists only in a function where it did, by construction.
       //   • `off` is 0 for an untyped object because a capture is spelled `mov rD, sp` and
       //     nothing else is modelled — `add rD, sp, #k` declines at the sp guard, by name.
       //   • An address that neither accesses nor escapes already declines where the audit
       //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
-      if (!outgoingArgs.licensed) {
-        return "this frame's outgoing stack-argument block could not be laid out, so nothing says the reserved area is locals at all";
-      }
-      if (outgoingArgs.area > 0) {
-        return `[sp,#0) to [sp,#${outgoingArgs.area}) stages outgoing stack arguments, which belong to the callee`;
+      if (outgoingArea > 0) {
+        return `[sp,#0) to [sp,#${outgoingArea}) stages outgoing stack arguments, which belong to the callee`;
       }
       if (off !== 0 || localArea <= 0) {
         return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
@@ -4361,7 +4360,7 @@ export function lift(
     irBlocks,
     localArea,
     usedSlotOffsets,
-    outgoingArgs: { area: outgoingArgs.area, licensed: outgoingArgs.blocker === null },
+    outgoingArea: outgoingArgs.area,
     capturedObjectIsTheWholeFrame,
     prototypes,
     symbols,
