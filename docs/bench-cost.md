@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=96.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=115.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,15 +136,16 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-22, stamped `4cdb6c5f`**: the ranked pass alone
-is **929 s over 185 real rows** and **563 s over 726 synthetic rows**; wall clock was 200.2 s and
-237.2 s, and 318.9 s end to end (`real 319.64` under `/usr/bin/time -p`) because the tiers overlap.
-THIS TREE HAS NOW BEEN BENCHED THREE TIMES, and the three readings are the cheapest evidence in
+Summed out of the committed artifact of **2026-09-23, stamped `f5dad786`**: the ranked pass alone
+is **1,009 s over 185 real rows** and **533 s over 726 synthetic rows**; wall clock was 210.2 s and
+212.3 s, and 299.8 s end to end (`real 299.82` under `/usr/bin/time -p`) because the tiers overlap.
+THIS TREE HAS NOW BEEN BENCHED FOUR TIMES, and the four readings are the cheapest evidence in
 this file that the seconds are not the measurement: **1,281 s + 630 s** (491.6 s wall, cold),
-**813 s + 477 s** (262.3 s wall, warm), and this one at **929 s + 563 s** (318.9 s wall) on a tree
-whose only change since the second is a decline's wording, a refusal with 0 corpus inhabitants and
-two comment blocks. Same corpus, same 1,218 rows, same outcomes bar this branch's own row — and the
-real sum spans 1.14× between the last two and 1.58× across all three. `origin/main`'s artifact
+**813 s + 477 s** (262.3 s wall, warm), **929 s + 563 s** (318.9 s wall), and this one at
+**1,009 s + 533 s** (299.8 s wall) on a tree whose only change since the third is decline wording,
+one new test and three comment blocks. Same corpus, same 1,218 rows, same outcomes bar this
+branch's own row — and the real sum spans 1.58× across the four, with the two runs of the SAME
+verdicts 1.09× and 1.24× apart. `origin/main`'s artifact
 reads 1,281 s and 630 s over the same 1,218 rows: `bench diff --base 28b36aca` against it reports
 **8 field changes, 0 added, 0 removed** (exit 1), `bench regression --base 28b36aca` **0 lost, 0
 missing, 0 retired, 0 added, 0 gained, 1 other flip** (exit 0), and the fan **unmoved at 67,331
@@ -332,7 +333,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 135 s of that real total — **15% of the
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 127 s of that real total — **13% of the
 tier in one row**, over a fan of 30,240 of which 35 are compiled. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
