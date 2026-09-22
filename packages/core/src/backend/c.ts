@@ -14,9 +14,9 @@ export const cBackend: LanguageBackend = {
   id: 'c',
   spellsSwitchFallthrough: true,
   emit(fn: SFn): string {
-    // The SAME declarator placement the local list and the struct-field printer use. Spelling the
-    // type as a prefix here put the `*` on the type in the signature and on the declarator two
-    // lines below it, so one function declared its pointers two ways.
+    // The SAME declarator placement the local list and the struct-field printer use, so one
+    // function cannot spell the `*` on the type in its signature and on the declarator two lines
+    // below it.
     const params = fn.params.map((p) => cDeclare(p.type, p.name)).join(', ') || 'void';
     return emitCFamily(`${cType(fn.retType)} ${fn.name}(${params})`, fn);
   },

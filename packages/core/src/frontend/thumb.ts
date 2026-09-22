@@ -2021,13 +2021,13 @@ interface FrameObjectAudit {
 }
 
 /** FRAME-OBJECT AUDIT. Every `laddr` the frontend emitted is only a CLAIM that the address it
- *  names is used as "the address of one scalar local"; this proves it, over the finished function,
+ *  names is used as "the address of one local object"; this proves it, over the finished function,
  *  the same boundary-total style as the slot-escape assert in finish(). The address may flow
  *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
  *  MEMORY access through it must be at offset 0, with one agreed width and one agreed extension,
  *  its bytes must belong to nothing else in the frame, and any use the audit cannot vouch for declines the whole function
- *  loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
- *  used.
+ *  loudly. Nothing here guesses: a scalar's declared type is exactly the access type the machine
+ *  used, and an object NO access reaches is sized by the frame reservation and left untyped.
  *
  *  Takes its inputs explicitly rather than closing over `lift`. Every one of them is READ, none is
  *  reassigned, and the only mutation is to the ops reachable through `irBlocks` — the widths,
@@ -2525,6 +2525,12 @@ function auditFrameObjects({
         // reach the same object where `u8 x[0xC]` and `u8 x[0x11]` do not. What is declared is
         // the RESERVATION, which is the thing the asm carries; every source extent inside one
         // word of it emits the same object, so no member of that class is more right than this.
+        //
+        // NO COMPILER TERM, unlike `capturedObjectIsTheWholeFrame`, whose one-word reading is a
+        // fact about what agbcc puts in a four-byte frame. This argument needs only that the
+        // reservation ROUNDS UP to some granularity, which is a property of every stack ABI, and
+        // it declares the reservation rather than a guess inside it — so a coarser rounding makes
+        // the declared extent coarser too, never wrong about the bytes the machine reserved.
         extent.set(off, { width: 1, count: localArea });
         continue;
       }
@@ -2692,6 +2698,12 @@ function auditFrameObjects({
     // cannot be built here at all — the second access that would reach it is a `[+4]` the
     // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
     // would then have to judge.
+    //
+    // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
+    // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
+    // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
+    // is `notTheWholeArea`'s own three live clauses: a second object, a slot inside the area, and
+    // the callee's declared return.
     if (mayWrite.size > 0) {
       const accountedWords = new Set<number>();
       for (const [off, obj] of extent) {
@@ -4244,8 +4256,7 @@ export function lift(
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const declared = declaredCall(targetSym);
-          const argRegsSet = fallbackArgcHere(bi);
-          const argc = declared?.arity ?? argRegsSet;
+          const argc = declared?.arity ?? fallbackArgcHere(bi);
           // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
           // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
           // `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack argument can
@@ -4353,8 +4364,8 @@ export function lift(
 
   ssa.finish();
 
-  // Prove every `laddr` this function emitted really does name one scalar local, or decline
-  // (auditFrameObjects).
+  // Prove every `laddr` this function emitted really does name storage of this function's own, at
+  // a shape the machine states, or decline (auditFrameObjects).
   auditFrameObjects({
     name,
     irBlocks,
