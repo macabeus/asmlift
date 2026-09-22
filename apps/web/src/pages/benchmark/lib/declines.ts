@@ -426,8 +426,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // The ABI destroyed the value, and nothing about the register file says so: the read has a
     // reaching definition, and it names bytes the callee overwrote. A capability rather than an
-    // input error — what closes it is a model for whatever the callee left there, which for the one
-    // row that reaches it today is a 64-bit return occupying a REGISTER PAIR.
+    // input error — what closes it is a model for whatever the callee left there. Its row,
+    // `synthetic:llfrom`, is the case that model has to cover first: an ordinary callee returning
+    // a 64-bit value leaves it in a register PAIR, and only the runtime-helper table says which
+    // callees do that, so the high register reads as a destroyed one.
     key: 'clobbered-value',
     label: 'A value a call destroyed (caller-saved register read back)',
     pattern: /is read on a path where a call has destroyed it/,

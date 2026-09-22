@@ -758,10 +758,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
 
-  // `clobbered-value` is here for ONE artifact only. Its producer refuses in the frontend, ahead of
-  // the `adc` marker that has been masking the wrong value beside it on
-  // `pokeemerald:MathUtil_Mul32:agbcc`, so the row moves to it the next time the artifact is
-  // regenerated — and this entry comes out with the same commit that regenerates it.
+  // `clobbered-value`, `runtime-helper` and `wide-call-arg` each name a refusal whose intended
+  // inhabitant is in the dataset — `synthetic:llfrom`, the mwcc 64-bit family, `synthetic:llpass`
+  // — and is not yet in the committed artifact. Which of them a regeneration inhabits is the
+  // artifact's answer and not the row author's, so this list is re-derived from the artifact it is
+  // asserted against, in the commit that changes it.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',

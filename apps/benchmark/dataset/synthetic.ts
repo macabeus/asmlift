@@ -1910,6 +1910,38 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['int64', 'arithmetic'],
     toolchains: ALL,
   },
+  // THE SAME BOUNDARY FROM THE OTHER SIDE, and a different refusal. A pair ARRIVES from an
+  // ordinary callee the way it arrives from a runtime helper — in the register pair the ABI names
+  // — but only the helper table says which callees return one, so the read of the high register
+  // has a reaching definition naming bytes the callee overwrote. The frontend declines rather
+  // than hand back the caller's stale value. What closes it is a return WIDTH in the prototype
+  // vocabulary, which today only the helper table carries: the mirror of `llpass`, where the
+  // width is missing on the way in.
+  //
+  // agbcc alone, by `llhi`'s rule and for both of its halves. On big-endian PPC the high half IS
+  // r3, so mwcc's whole body is `bl llsrc` and a frame: asmlift matches it with `return llsrc();`
+  // — the LOW half, the opposite projection — and the object is identical either way, so that
+  // cell scores the right answer and a wrong one alike. Both MIPS builds decline before they
+  // reach the boundary at all, on `function call 'jal' — MIPS calls not yet modelled`, so they
+  // referee a different capability. agbcc is the one that pays an instruction for the
+  // projection, `add r0,r1,#0`, and declines naming the register.
+  //
+  // TOLD, AND STILL REFUSING, which is the part that names the capability. `FnProto` carries a
+  // callee's arity and its void-ness and nothing about the WIDTH it returns, so `llsrc` is
+  // declared to both decompilers and asmlift still cannot know the pair is there. The refusal is
+  // the vocabulary's, not a missing declaration's.
+  //
+  // The declaration is in `src` because a synthetic row's TARGET is built from `src` alone — `ctx`
+  // reaches m2c and the candidate compile, not the reference. Without it `llsrc` is implicitly
+  // `int`, and the target becomes a 32-bit `asr` by 32 over a function returning a word.
+  {
+    sym: 'llfrom',
+    src: 'long long llsrc(void);\nint llfrom(void){ return (int)(llsrc() >> 32); }',
+    ctx: 'long long llsrc(void);',
+    proto: { llsrc: { params: [] } },
+    features: ['int64', 'cast', 'narrow'],
+    toolchains: ['agbcc'],
+  },
 
   // ── division / modulo by constant (magic-number division) ───────────────────────────────────
   {
