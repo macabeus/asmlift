@@ -3779,8 +3779,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // …AND THE WIDEN THAT BUILDS ONE, which the machine spells as a PAIR rather than as a cast —
     // `asr rN,rM,#31` for the signed extension of a word, `mov rN,#0` for the unsigned one. So the
     // shape is what says HOW the half was widened, and the cast this renders is to whatever 64-bit
-    // type recovery gave the value: an UNSIGNED widen of a word reads `(s64)(u32)x` in a signed
-    // context, which is what C does and what the machine did.
+    // type recovery gave the value.
+    //
+    // THE WORD'S OWN SIGNEDNESS IS WHAT THE WIDEN MEANS, and it is pinned the way every other
+    // signedness-carrying operand in this function is: cast only where the operand does not
+    // already render that way. Leaving the signed arm to whatever `x` happens to render as reads
+    // the widen off the DECLARATION rather than off the `asr` — under `/unsigned` the parameter is
+    // declared `u32` and `(s64)x` then says zero-extend, against an instruction that says
+    // otherwise.
     //
     // A `concat` of anything else is a 64-bit value this pipeline has no C spelling for, and it
     // falls through to the loud gap at the bottom — which is the whole safety story for the
@@ -3793,7 +3799,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const unsignedWiden = hiDef?.opcode === 'const' && hiDef.attrs.value === 0;
       if (whole && (signedWiden || unsignedWiden)) {
         const word = e(lo);
-        return { k: 'cast', to: whole, e: unsignedWiden ? { k: 'cast', to: T.u(32), e: word } : word };
+        const half =
+          renderedIntSignedness(word, vtEnv) === signedWiden
+            ? word
+            : { k: 'cast' as const, to: T.int(32, signedWiden), e: word };
+        return { k: 'cast', to: whole, e: half };
       }
     }
     if (d.opcode === 'call') {

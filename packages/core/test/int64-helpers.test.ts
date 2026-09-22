@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper, wordsOf } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -27,6 +28,19 @@ describe('a register pair read as one value', () => {
     // `asr rN,rM,#31` per half is the signed one. The callee name cannot say: agbcc's libgcc has
     // no `__umuldi3`, so the unsigned spelling calls this very helper.
     expect(lift('llmulw')).toBe('s64 llmulw(s32 a0, s32 a1) {\n    return (s64)a0 * (s64)a1;\n}\n');
+  });
+
+  // …AND THE `asr` KEEPS SAYING IT WHEN THE DECLARATION DISAGREES. The signedness variation
+  // declares the parameters `u32`, and a widen that renders as `(s64)a0` over one of those says
+  // ZERO-extend — reading the extension off the declaration instead of off the instruction. Both
+  // candidates of the pair must spell the same machine fact, so the cast is pinned where the
+  // operand does not already carry it, exactly as the compare operands are.
+  test('the extension survives a signedness variation that contradicts it', () => {
+    const spelt = new Map(
+      enumerateCandidates('llmulw', asm, ARMV4T_AGBCC, {}).map((c) => [c.variations.join('+'), c.source]),
+    );
+    expect(spelt.get('signed')).toContain('(s64)a0 * (s64)a1');
+    expect(spelt.get('unsigned')).toContain('(s64)(s32)a0 * (s64)(s32)a1');
   });
 });
 
