@@ -13,9 +13,11 @@ import { parse } from '../src/ir/parse';
 import { T, parseType, typeToString } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
 import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { initFirstGuards } from '../src/l3/initfirst';
 import { arithConversionSignedness, exprIntWidth } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
-import { C_TYPEDEFS } from '../src/target';
+import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, C_TYPEDEFS, structureOptionsFor } from '../src/target';
 
 const fnOf = (blocks: Block[]): Fn => ({
   name: 'f',
@@ -257,5 +259,57 @@ describe('what the C backend prints over a 64-bit operand', () => {
       fn([{ k: 'assign', name: 'n', value: { k: 'bin', op: '/u', l: v('n'), r: { k: 'const', value: 3 } } }]),
     );
     expect(src).toContain('(u32)n');
+  });
+});
+
+// THE OTHER TWO PLACES THE RANK IS READ. Both are written at 64 and neither had anything to
+// exercise it: no frontend builds a 64-bit compare, so the wide branch of each was reachable only
+// from hand-authored IR and from a hand-built tree. These build them, at the level each gate is
+// written at.
+describe('the gates that read a 64-bit rank', () => {
+  const v = (name: string): Expr => ({ k: 'var', name });
+
+  // `(u32)a` over a 64-bit operand does not pin the compare's signedness, it truncates the
+  // operand — so the cast the structurer inserts is at the OPERAND's own rank.
+  test('a compare pin casts at the operand rank, not at 32', () => {
+    const emit = (ir: string, opts: Record<string, unknown> = {}): string => {
+      const fn = parse(ir);
+      verify(fn);
+      recoverTypes(fn);
+      return cBackend.emit(structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, false), ...opts }));
+    };
+    const ltu = 'fn ltu {\n^bb0(%0: s64, %1: s64):\n  %2: u32 = icmp_ult %0, %1\n  ret %2\n}\n';
+    expect(emit(ltu, { unsignedCompareSpelling: true })).toContain('(u64)a0 < a1');
+    const lts = 'fn lts {\n^bb0(%0: u64, %1: u64):\n  %2: u32 = icmp_slt %0, %1\n  ret %2\n}\n';
+    expect(emit(lts)).toContain('(s64)a0 < (s64)a1');
+  });
+
+  // /initfirst substitutes X into the guard behind `v = X`, and every signedness step of that
+  // rests on `v` holding X exactly. A 64-bit X assigned to a 32-bit `v` truncates, so the
+  // premise is gone and the rewrite refuses.
+  test('/initfirst refuses to substitute a 64-bit value through a 32-bit variable', () => {
+    const guard = (x: Expr): SFn => ({
+      name: 'f',
+      params: [
+        { name: 'n', type: T.s(32) },
+        { name: 'w', type: T.s(64) },
+      ],
+      locals: [{ name: 'v0', type: T.s(32) }],
+      retType: T.void(),
+      body: [
+        {
+          k: 'if',
+          cond: { k: 'bin', op: '<', l: x, r: v('n') },
+          then: [
+            { k: 'assign', name: 'v0', value: x },
+            { k: 'dowhile', cond: { k: 'bin', op: '<', l: v('v0'), r: v('n') }, body: [] },
+          ],
+          else: [],
+        },
+      ],
+    });
+    expect(initFirstGuards(guard(v('w')))).toBeNull();
+    // …and the same shape one rank down still rewrites, so it is the WIDTH that refused.
+    expect(initFirstGuards(guard(v('n')))).not.toBeNull();
   });
 });
