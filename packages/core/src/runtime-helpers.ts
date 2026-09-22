@@ -24,8 +24,11 @@
 //
 // `params` is a list of C parameter WIDTHS in bits, not a word count, and the difference is the
 // whole point of the field: `__ashrdi3` takes a 64-bit value and a 32-bit count — two C parameters
-// occupying THREE argument registers. `wordsOf` is the one place that conversion happens.
-import type { Opcode } from './ir/opcodes';
+// occupying THREE argument registers. A stated width is read two ways and both conversions live
+// here: `wordsOf` counts the argument REGISTERS the list occupies, and `irWidthOf` gives the IR
+// width one parameter ARRIVES at once a frontend has paired those registers up.
+import { type Opcode, WIDE_BITS } from './ir/opcodes';
+import { type IrType, intWidth } from './ir/types';
 import type { Prototypes } from './proto';
 
 export interface RuntimeHelper {
@@ -55,6 +58,46 @@ export function lookupHelper(
   callee: string,
 ): RuntimeHelper | undefined {
   return table && Object.hasOwn(table, callee) ? table[callee] : undefined;
+}
+
+/** The IR width a C parameter of `bits` arrives at: one 64-bit value for anything wider than a
+ *  register, because a frontend that reads such a parameter fuses its registers into a single
+ *  value; a machine word for everything else, whatever narrower width the C type carries. The
+ *  counterpart of `wordsOf` — same threshold, different vocabulary. */
+export function irWidthOf(bits: number): number {
+  return bits > 32 ? WIDE_BITS : 32;
+}
+
+/** Whether a call ARRIVED in the shape this helper's signature states: one result at the returned
+ *  width, and each operand at the IR width its C parameter carries.
+ *
+ *  A COUNT IS NOT A WIDTH, and the gap between them is where a 64-bit operation gets invented over
+ *  two 32-bit words. Two ordinary shapes reach a fold with the right operand count and the wrong
+ *  contents: a call whose arity came off a caller-supplied prototype rather than off this table, so
+ *  no frontend ever built the pair; and a call on a target whose frontend does not pair registers
+ *  at all, where an argument register that is not live at the call gets trimmed and the survivors
+ *  happen to number what the table states. Either one folded publishes an operation over one half
+ *  of each value, at exit 0 and with no gap — so the pair construction IS the precondition, and a
+ *  shape that lacks it belongs to `refuseUnmodelledHelpers`.
+ *
+ *  AN OPERAND THAT CARRIES NO INTEGER WIDTH REFUSES, which is `intWidth` returning null for a
+ *  pointer or an aggregate. `ir/verify.ts` reads that same null as "does not take part in the width
+ *  rule"; here it means there is no width to check the claim against, and a fold may not proceed on
+ *  a claim it cannot check.
+ *
+ *  A `returns: 0` entry can never satisfy this, because no result carries width 0. A void helper
+ *  computing on a 64-bit value is a shape there is no operation to fold it into. */
+export function arrivesAsDeclared(
+  helper: RuntimeHelper,
+  operands: readonly IrType[],
+  results: readonly IrType[],
+): boolean {
+  if (results.length !== 1 || intWidth(results[0]) !== helper.returns) {
+    return false;
+  }
+  return (
+    operands.length === helper.params.length && operands.every((t, i) => intWidth(t) === irWidthOf(helper.params[i]))
+  );
 }
 
 /** Whether a helper computes on a value wider than a register — the ones the 64-bit representation

@@ -50,3 +50,23 @@ describe('a runtime helper nothing folded is a gap, not a call', () => {
     }
   });
 });
+
+// ARITY IS NOT EVIDENCE OF A PAIR, and on this target there is never a pair: `frontend/ppc.ts`
+// reads guessed argument registers and fuses none of them, so a helper the table states takes two
+// 64-bit parameters arrives as four words — until the liveness trim drops one. `__shr2u(v, n)` in
+// a loop with its count hoisted into the preheader is ordinary codegen, and it leaves exactly as
+// many operands as the table's `params` list is long. Folding those publishes the low half shifted
+// by the HIGH half, with the real shift count dropped, at exit 0 and with no gap.
+describe('a trimmed argument list is not a register pair', () => {
+  const loop =
+    PRO +
+    'c:\tli      r5,4\n10:\tmr      r30,r3\n14:\tmr      r31,r4\n18:\tmr      r3,r30\n1c:\tmr      r4,r31\n' +
+    '20:\tbl      20 <f+0x20>\n' +
+    rel('20', '__shr2u') +
+    '24:\tmr      r30,r3\n28:\tmr      r31,r4\n2c:\tcmpwi   r3,0\n30:\tbne     18 <f+0x18>\n' +
+    '34:\tlwz     r0,20(r1)\n38:\tmtlr    r0\n3c:\taddi    r1,r1,16\n40:\tblr\n';
+
+  test('a helper call whose surviving operands merely COUNT right declines', () => {
+    expect(() => dis('f', loop)).toThrow(/no model for the runtime helper '__shr2u'/);
+  });
+});

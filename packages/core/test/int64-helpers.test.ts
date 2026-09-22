@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import type { FnProto } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper, wordsOf } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -105,6 +106,27 @@ describe('what refuses', () => {
     expect(() => decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC)).toThrow(
       /argument 1 of the call to 'sink' is the low half of a 64-bit value/,
     );
+  });
+});
+
+// A COUNT IS NOT A WIDTH. The evidence a fold rests on is the register PAIR the frontend built,
+// and a call can carry the right number of operands without one — here because the arity came off
+// a caller-supplied prototype, so no pair was ever built. Folding it publishes a 32-bit multiply
+// of two words for a 64-bit multiply of two register pairs, which compiles and scores.
+describe('a 64-bit fold needs the widths, not the arity', () => {
+  test('a prototype for a wide helper declines; it does not silently narrow the operation', () => {
+    // Two C parameters is the header spelling and the one a user reaches for after reading
+    // `no model for the runtime helper '__muldi3'`; four is the word arity. `validatePrototypes`
+    // accepts all three, and all three must decline.
+    for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
+      expect(() => decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params } } })).toThrow(
+        /no model for the runtime helper '__muldi3'/,
+      );
+    }
+  });
+
+  test('…and with no prototype the same function recovers the 64-bit multiply', () => {
+    expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
   });
 });
 

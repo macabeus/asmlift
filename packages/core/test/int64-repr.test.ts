@@ -10,7 +10,7 @@ import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { Block, Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
-import { T, parseType, typeToString } from '../src/ir/types';
+import { T, intWidth, parseType, typeToString } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
 import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
 import { initFirstGuards } from '../src/l3/initfirst';
@@ -40,6 +40,22 @@ describe('the type already had the width', () => {
   test('a width-64 add parses and verifies, with no new arithmetic opcode', () => {
     const fn = parse(`fn f {\n^bb0(%0: s64, %1: s64):\n  %2: s64 = add %0, %1\n  ret %2\n}\n`);
     expect(() => verify(fn)).not.toThrow();
+  });
+
+  // THE PREDICATE ITSELF, over every `IrType` kind, because two consumers read it under opposite
+  // policies: the verifier reads a null as "does not take part in the width rule, so pass", and
+  // `arrivesAsDeclared` reads the same null as "no width to check a fold's claim against, so
+  // refuse". A seventh kind added to `IrType` has to answer here before either of them is right.
+  test('a width belongs to an integer and to an unrecovered value, and to nothing else', () => {
+    expect(intWidth(T.s(64))).toBe(64);
+    expect(intWidth(T.u(8))).toBe(8);
+    expect(intWidth(T.unk(32))).toBe(32);
+    // A pointer's own width is the machine's and says nothing about what it addresses; an
+    // aggregate and `void` have no single width at all.
+    expect(intWidth(T.ptr(T.s(32)))).toBeNull();
+    expect(intWidth(T.struct('S', [{ off: 0, type: T.s(32), name: 'a' }]))).toBeNull();
+    expect(intWidth(T.array(T.u(8), 4))).toBeNull();
+    expect(intWidth(T.void())).toBeNull();
   });
 });
 
@@ -79,6 +95,17 @@ describe('the three opcodes have a shape, and it is checked', () => {
     const [v, lo] = [narrow(), narrow()];
     expect(() => verify(oneBlock([v], [mkOp('lo32', { operands: [v], results: [lo] })]))).toThrow(
       /'lo32' operand must be an integer of width 64/,
+    );
+  });
+
+  // A POINTER IS NOT A 32-BIT HALF, and the distinction is not academic: the shape that produces
+  // one is `bl __muldi3; ldr r0,[r0]`, where recovery types the low half by how it is used. A
+  // pointer's own width is the machine's, so answering 32 for it would accept a half this
+  // representation has no claim about.
+  test('a half recovered as a POINTER is rejected, not treated as a word', () => {
+    const [v, lo] = [wide(), mkValue(T.ptr(T.s(32)))];
+    expect(() => verify(oneBlock([v], [mkOp('lo32', { operands: [v], results: [lo] })]))).toThrow(
+      /'lo32' half must be an integer of width 32, got ptr/,
     );
   });
 

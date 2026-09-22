@@ -3221,8 +3221,19 @@ export function lift(
     // is that table's designated safe reader — it answers "nothing is declared" for an entry that
     // is not an `FnProto`, whatever it is.
     const h = lookupHelper(target.runtimeHelpers, callee);
-    if (!h || !isWideHelper(h) || protoArity(prototypes[callee]) !== undefined) {
-      return null; // not a wide helper, or the project re-declared it and its header wins
+    if (!h || !isWideHelper(h)) {
+      return null;
+    }
+    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it, and the comment
+    // that said the header "wins" oversold both arms. A runtime helper's signature is its
+    // COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
+    // not — so a header declaring `__muldi3` is not a better source for the same fact; it is a
+    // claim that the name is the project's own function. Neither reading can be honoured: as the
+    // table's helper it would contradict the header, and as an ordinary call it becomes the
+    // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
+    // call, at whichever arity was declared.
+    if (protoArity(prototypes[callee]) !== undefined) {
+      return null;
     }
     // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
     // cannot lay out — agbcc splits it, low half in r3 and high half at [sp,#0] — so the pair is

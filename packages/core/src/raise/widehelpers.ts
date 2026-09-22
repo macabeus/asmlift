@@ -14,7 +14,7 @@
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
 import { Fn, mkOp } from '../ir/core';
-import { isWideHelper, lookupHelper } from '../runtime-helpers';
+import { arrivesAsDeclared, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
@@ -32,11 +32,23 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
       if (!helper?.op || !isWideHelper(helper)) {
         continue;
       }
-      // Its C PARAMETERS, not its argument registers: the frontend has paired the registers up, so
-      // a `__ashrdi3` that occupied three of them arrives here with two operands. A call whose
-      // arity did not come out as the table says is left alone rather than folded into an op with
-      // the wrong number of operands.
-      if (op.operands.length !== helper.params.length || op.results.length !== 1) {
+      // ITS C PARAMETERS AT THEIR STATED WIDTHS, not its argument registers and not their count:
+      // the frontend has paired the registers up, so a `__ashrdi3` that occupied three of them
+      // arrives here as a 64-bit value and a word. That pair construction is the evidence the fold
+      // rests on, and `arrivesAsDeclared` is the precondition for reading it — an operand count
+      // says nothing about what the operands hold, and a call carrying the right count of the
+      // wrong things folds into an operation over one half of each value.
+      //
+      // WHAT DECLINES HERE DOES NOT PASS THROUGH: `refuseUnmodelledHelpers` below gaps every
+      // surviving call to a name this table carries, so a shape this cannot fold gets the loud
+      // answer rather than a plausible one.
+      if (
+        !arrivesAsDeclared(
+          helper,
+          op.operands.map((o) => o.type),
+          op.results.map((r) => r.type),
+        )
+      ) {
         continue;
       }
       b.ops.splice(i, 1, mkOp(helper.op, { operands: [...op.operands], results: [op.results[0]] }));

@@ -7,7 +7,7 @@
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
 import { Block, Fn, Op, Value, dominators } from './core';
 import { WIDE_BITS, opSig } from './opcodes';
-import type { IrType } from './types';
+import { type IrType, intWidth } from './types';
 
 export class VerifyError extends Error {}
 
@@ -42,9 +42,10 @@ const COMPARES = new Set([
   'icmp_eq',
   'icmp_ne',
 ]);
-/** Whether `t` takes part in the width rule at all. `ptr`, `struct`, `array` and `void` do not — a
- *  pointer's width is the machine's and says nothing about the integer it addresses. */
-const widthOf = (t: IrType): number | null => (t.kind === 'int' || t.kind === 'unknown' ? t.width : null);
+/** Whether `t` takes part in the width rule at all: it does exactly when it carries an integer
+ *  width. `ir/types.ts` owns that question — `raise/widehelpers.ts` asks it too, of the same kinds,
+ *  and reads the null with the opposite polarity. */
+const widthOf = intWidth;
 /** The types an op's width rule quantifies over. */
 const widthParticipants = (op: Op): IrType[] => {
   const operands = op.operands.map((o) => o.type);
