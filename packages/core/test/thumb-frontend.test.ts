@@ -115,6 +115,22 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(folds('\tmov\tr8, r2\n')).toContain('if (a0 != a1)');
   });
 
+  test('a CALL between a cmp and its branch declines loud — the callee left the flags', () => {
+    // The `bl` instruction writes no flags, but the function it enters does: AAPCS lists N/Z/C/V as
+    // corruptible across a call, so what `bge` tests here is whatever compare the callee retired
+    // last. Folding the caller's `cmp` in emitted `if (a0 < a1)` — a condition on the right
+    // operands and the wrong flags, which no marker reports and no reviewer can see.
+    const across =
+      '\tpush\t{r4, lr}\n\tcmp\tr0, r1\n\tbl\tfoo\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+    expect(() => dc('flagsacrosscall', across)).toThrow(/no reaching compare: the compare in its block/);
+    expect(() => dc('flagsacrosscall', across)).toThrow(/clobbered by a call/);
+
+    // The compare AFTER the call is the shape every compiler emits, and it must still fold.
+    const after =
+      '\tpush\t{r4, lr}\n\tbl\tfoo\n\tcmp\tr0, r1\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+    expect(dc('flagsaftercall', after).source).toContain('if (');
+  });
+
   test('an unmodelled op that reaches the output FAILS LOUD (no silent wrong C)', () => {
     // `clz` (count-leading-zeros) is not modelled. If dropped, the function would return a
     // stale/absent r0; instead it emits an opaque the boundary contract rejects — loud.

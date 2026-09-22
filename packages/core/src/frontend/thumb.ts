@@ -328,7 +328,9 @@ type PendingCmp = { lhs: Value; rhs: Value };
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
 // Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
 // — they set flags but define no register, and `cmp` is the very instruction that seeds the pending
-// compare. Loads, stores, push/pop, `bl` and the high-register forms leave the flags alone.
+// compare. Loads, stores, push/pop and the high-register forms leave the flags alone. A CALL is
+// not in this set either, and is invalidated separately: `bl` writes no flags itself, but the
+// function it enters does.
 const FLAG_SETTING = new Set([
   'mov',
   'movs',
@@ -3749,9 +3751,21 @@ export function lift(
       // every agbcc row in the benchmark, no conditional-branch block has ANY instruction between its
       // compare and the branch — compilers keep the pair adjacent. The inhabitant this guards is
       // hand-written asm in the playground, where there is no oracle to catch a lie.
-      if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
+      //
+      // A CALL takes them too, and this is the one flag writer that is not an instruction: `bl`
+      // writes no flags, but the function it enters retires compares of its own, and the ABI lets
+      // it — AAPCS lists N/Z/C/V as corruptible across a call. So a branch after a call tests the
+      // CALLEE's last compare. `cmp r0,r1 / bl f / bge .L` emitted `if (a0 < a1)`: the caller's
+      // operands under the callee's flags, with nothing to show it.
+      const tookFlags =
+        FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))
+          ? `'${ins.mnemonic}'`
+          : ins.mnemonic === 'bl' || ins.mnemonic === 'blx'
+            ? 'a call'
+            : null;
+      if (tookFlags) {
         if (pendingCmp) {
-          noCmpWhy = `the compare in its block was clobbered by '${ins.mnemonic}'`;
+          noCmpWhy = `the compare in its block was clobbered by ${tookFlags}`;
         }
         pendingCmp = null;
       }
