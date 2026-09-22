@@ -696,14 +696,18 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These three have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
-  // of these three disappears, an unnamed gap found an inhabitant — good news, and this list moves
+  // These four have no rows for reasons that are measured and written down beside them, not
+  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
+  // of these four disappears, an unnamed gap found an inhabitant — good news, and this list moves
   // in the commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
+  //
+  // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
+  // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
+  // lift, so the class names what the model left over rather than what it refuses today.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'store-class'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
 
-  test('every other class is inhabited, and exactly these three are not', () => {
+  test('every other class is inhabited, and exactly these four are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
@@ -799,7 +803,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
-    ['cross-block-cr', 'no reaching compare', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-cr', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-flags-arm', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
     ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],

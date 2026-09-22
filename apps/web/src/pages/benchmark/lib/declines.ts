@@ -148,9 +148,26 @@ export const DECLINE_CLASSES: DeclineClass[] = [
       /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
   },
   {
+    // KEYED ON THE FIELD THE MESSAGE NAMES, because two frontends write this subject and only one
+    // of them has fields to name. PowerPC has eight condition-register fields and says which one
+    // it wanted (`(cr0)`, `(cr1)`); ARM/Thumb has one, so it spends the same space on the reason
+    // instead. A pattern over `no reaching compare` alone caught both and filed an ARM row under a
+    // label that says PPC.
     key: 'cross-block-cr',
     label: 'Cross-block condition flags (PPC cr)',
-    pattern: /no reaching compare/,
+    pattern: /no reaching compare \(/,
+  },
+  {
+    // THE ARM SIDE, and the leftovers of a capability that landed rather than one that is missing —
+    // the same reading `branch-likely` below asks for. Thumb carries a compare across a single
+    // straight-line edge into a block with one predecessor, so what still refuses is what that
+    // model leaves over: two edges into the block, a back edge, an edge leaving a conditional
+    // branch or a jump-table dispatch, a predecessor whose compare did not survive to its last
+    // instruction, and a compare the block itself overwrote. No compiled row in the corpus reaches
+    // any of them, so the class reads 0; deleting it would assert that nothing is left.
+    key: 'cross-block-flags-arm',
+    label: 'Condition flags across an edge (ARM) — residual shapes only',
+    pattern: /no reaching compare: /,
   },
   {
     // THE LEFTOVER SHAPES OF A CAPABILITY THAT LANDED, not a capability that is missing — the one
