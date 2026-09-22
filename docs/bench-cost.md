@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=98.0s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=181.9s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,10 +136,12 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-22: the ranked pass alone is **1,032 s over 184
-real rows** and **758 s over 726 synthetic rows**; wall clock is lower because eight shards run in
-parallel — that run walled 226.2 s and 245.2 s, 326.0 s for both tiers together, the cheapest whole
-run this file records.
+Summed out of the committed artifact of 2026-09-22: the ranked pass alone is **1,281 s over 184
+real rows** and **630 s over 726 synthetic rows**; wall clock is lower because eight shards run in
+parallel — that run walled 264.8 s and 259.0 s, 523.8 s for both tiers together. It is the SECOND
+whole run of this tree: the first, taken before the rebase onto `d0a83bb1`, walled 326.0 s and
+summed 1,032 s and 758 s. Same tree's outcomes, a 1.24x swing in the real sum and a 0.83x swing in
+the synthetic one — another entry for the standing point that the seconds are not the measurement.
 `origin/main`'s artifact reads 1,531 s and 669 s over 1,215 rows: `bench diff` against it reports
 **378 field changes, 2 added, 0 removed**, 0 lost and 0 gained on an existing row, the fan
 **unmoved at 67,306 (1.00×) over 908 comparable rows** with two more rows priced here, and the
@@ -296,7 +298,7 @@ artifacts of the same corpus read 818 s and 417 s off a warm store, 941 s and 88
 machine. Read a figure beside the cache state AND the load of the run you are planning, not on its
 own.
 
-The single row `kleod:PauseMenuScreenHandler:agbcc` is 134 s of that real total — **13% of the tier
+The single row `kleod:PauseMenuScreenHandler:agbcc` is 151 s of that real total — **12% of the tier
 in one row**, over a fan of 30,240 of which 35 are compiled. It is also the row that will strand a shard: in an earlier
 round's first full run it was still ranking 14 minutes after the other fifteen shards had finished.
 
