@@ -28,6 +28,14 @@ import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 
 import { pickDiagnostics } from '../compile/util';
 
+// THE RESIDUE: `SECOND_REG`, m2c's spelling for a call's second return register, is a
+// cannot-express marker of the same family as `M2C_CARRY` and `(bitwise ` below and is NOT in this
+// table. Two rows are scored on m2c output that carries it, with no marker, no compile error and
+// real scores — neither of their contexts defines the macro, so it compiles as a K&R implicit
+// declaration. Listing it is a correctness fix and it MOVES PUBLISHED m2c NUMBERS on those two
+// rows, so it owes a full bench and a labelled commit of its own rather than a quiet addition here.
+// `grep -n "C has no spelling for the second return register" docs/int64-representation.md`
+// measures it.
 const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   { name: 'ASMLIFT_ERROR', re: /ASMLIFT_ERROR/ }, // asmlift annotate-mode gap marker
   { name: 'M2C_ERROR', re: /M2C_ERROR/ }, // m2c undecodable instruction / unhandled construct
