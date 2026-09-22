@@ -1858,11 +1858,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE HIGH HALF AS A PROJECTION, and a constant shift of 32 leaves no shift opcode to key on:
   // agbcc emits `add r0,r1,#0` and nothing else, so the recovery is a fact about the register pair
   // rather than about an instruction.
+  //
+  // NOT ON mwcc, and the omission is the row's own rule applied honestly. Each of the other three
+  // objects does SOMETHING with the shift — `add r0,r1,#0` on agbcc, a sign-extended pair and
+  // `move v0,a1` on kmc, a call to a shift helper with a count of 32 on IDO. Big-endian PPC puts
+  // the high half in r3 already, so the whole function is `blr`: four bytes, and not one of them
+  // responds to the source. A cell whose target scores the right answer and every wrong one alike
+  // is not a gate, so it is not one of this row's cells.
   {
     sym: 'llhi',
     src: 'int llhi(long long x){ return (int)(x>>32); }',
     features: ['int64', 'cast', 'narrow'],
-    toolchains: ALL,
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
   },
   // THE ONE-WAY DOOR, and this row is here so a later round cannot quietly walk back through it.
   // agbcc spells a 64-bit OR as two plain `orr`s — ordinary 32-bit instructions that ordinary
