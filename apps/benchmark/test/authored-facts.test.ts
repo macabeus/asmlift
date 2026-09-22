@@ -22,6 +22,7 @@
 // fail on a hosted runner with no compilers, not only where someone can run the benchmark.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { renderDeclarations } from '@asmlift/core/declare';
+import { STANDARD_SIGNATURES } from '@asmlift/core/proto';
 import { arrayInnerExtents, declaredFields } from '@asmlift/core/symbols';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -307,8 +308,14 @@ describe("the README's account of what m2c is told", () => {
 // The vendored `m2cCtx` blob is out of scope by construction — it is a whole project's headers,
 // not a per-row claim about what a callee looks like.
 const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: string): string[] => {
-  const inCtx = declaredFunctionNames(ctx).filter((n) => n !== sym);
-  const inProto = protoKeys.filter((n) => n !== sym);
+  // A name whose signature the C STANDARD fixes is not a per-row claim by either side: asmlift's
+  // arity lookup knows it without being told (core proto.ts STANDARD_SIGNATURES) and the row's
+  // author did not choose it. It is outside the question this check asks, in BOTH directions —
+  // counting it on the `ctx` side reads every row calling `memcpy` as an asymmetry, and counting
+  // it on the `proto` side reads every row NOT calling one as the mirror asymmetry.
+  const authored = (n: string) => n !== sym && !(n in STANDARD_SIGNATURES);
+  const inCtx = declaredFunctionNames(ctx).filter(authored);
+  const inProto = protoKeys.filter(authored);
   return [
     ...inCtx.filter((n) => !inProto.includes(n)).map((n) => `${where}: m2c is told about \`${n}\`, asmlift is not`),
     ...inProto.filter((n) => !inCtx.includes(n)).map((n) => `${where}: asmlift is told about \`${n}\`, m2c is not`),
