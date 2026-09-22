@@ -743,6 +743,16 @@ export function lift(
     };
 
     // cr-field compare state, so a following branch fuses. Keyed by cr name ("cr0" default).
+    //
+    // BLOCK-LOCAL, and the Thumb frontend's `PendingCmp` is not. There a compare is inherited
+    // across a straight-line edge, under a rule (`inheritedCmp` in thumb.ts) that is the same rule
+    // this map would need: one predecessor, already filled, not a jump-table dispatch, and left
+    // through an unconditional branch or a fall-through. Only the STATE differs — one implicit
+    // flags register there, this eight-entry map with per-entry signedness here — and the clobber
+    // rule, which is `FLAG_SETTING` there and the record-form `.` suffix plus a call here.
+    //
+    // The edge rule is not extracted because it has one caller. The rows that would earn the
+    // extraction are the PowerPC ones still declining at the throw below.
     const cmpDef = new Map<string, { lhs: Value; rhs: Value; signed: boolean }>();
     // One operand-grammar normalizer for the four compare decodes: `cmpX rA,…` (cr0 implicit)
     // or `cmpX crN,rA,…` → the cr field, the lhs register token, and the rhs token (register or
@@ -1250,6 +1260,13 @@ export function lift(
       const cmp = cmpDef.get(crName);
       // `cmpDef` is block-local; a compare split from its branch by a block boundary is a
       // cross-block cr dependency this frontend does not model. Decline loud.
+      //
+      // UNBUILT AND KNOWN, not absent. The Thumb frontend carries a compare across a straight-line
+      // edge and refuses the rest by name (`inheritedCmp`): two edges into the block, a back edge,
+      // an edge out of a jump-table dispatch, and an edge leaving a CONDITIONAL branch. That last
+      // refusal is where this side lives — a `cmpwi` read by the fall-through of the `bc` that
+      // already consumed it is the shape these rows carry, and Thumb declines it only because no
+      // ARM row inhabits it. Whoever builds this reads that rule rather than writing a second one.
       if (!cmp) {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': conditional branch '${base}' has no reaching compare (${crName}) in its block`,
