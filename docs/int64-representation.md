@@ -29,7 +29,7 @@ row's own `ctx.i`, each disassembled and diffed against the row's `target.o`:
 
 **No 32-bit spelling emits `bl __muldi3` at all.** The target instruction is unreachable from any
 C that does not name a 64-bit type, so a decompiler with no 64-bit value cannot reach these bytes
-by any route. The two near misses each pin one axis: `u64` pins the signedness (its disassembly
+by any route. The two near misses each pin one fact: `u64` pins the signedness (its disassembly
 carries no `asr` sign-extends and no bias), and `>>= 8` pins the operator (the `+255`-when-negative
 bias is what distinguishes `/` from `>>`, which is `raise/divpow2.ts`'s existing territory).
 
