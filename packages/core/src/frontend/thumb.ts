@@ -2754,6 +2754,13 @@ function auditFrameObjects({
     // dropping the qualifier here cannot cost a store.
     //
     // An object whose address never leaves the function needs no volatile and must not pay it.
+    //
+    // AN UNTYPED OBJECT REACHES THIS RULE TOO, where the address is both published and handed to
+    // a callee whose return is declared. It cannot pay the price above — that price is a read the
+    // compiler may no longer fold, and an object with no access in this function has none —
+    // compiled at the corpus's flags, the qualified and plain spellings are byte-identical and
+    // differ in two `discards qualifiers` warnings. So the rule is the same rule, and the reason
+    // it is free here is not the reason it is free on a scalar read once.
     for (const [off, ops] of objects) {
       const { width, count } = extent.get(off)!;
       const signed = accesses.get(off)!.some((a) => a.signed);

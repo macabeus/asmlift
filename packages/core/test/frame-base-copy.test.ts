@@ -391,6 +391,22 @@ describe('the audit judges each frame object on its own bytes', () => {
       expect(lift(typed).source).toContain('g(&sp0)');
     });
 
+    test('an object that is BOTH published and passed keeps the published spelling', () => {
+      // `volatile` keys on PUBLICATION, and an untyped object reaches that rule too: the address
+      // goes to a global AND to a callee whose return is declared, so the extent arm accepts and
+      // the qualifier lands on an array. It cannot pay volatile's codegen here — the rule's cost
+      // is a read the compiler may no longer fold, and this object has no access at all in the
+      // function (compiled at the corpus's agbcc flags, the volatile and plain spellings produce
+      // BYTE-IDENTICAL objects; the difference is two `discards qualifiers` warnings).
+      const publishedAndPassed =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tldr\tr3, .L2\n\tmov\tr2, sp\n\tstr\tr2, [r3]\n' +
+        '\tmov\tr0, sp\n\tbl\tvf\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\tgPtr\n';
+      expect(
+        decompile('f', publishedAndPassed, ARMV4T_AGBCC, { prototypes: { vf: { params: 1, returnsVoid: true } } })
+          .source,
+      ).toContain('volatile u8 sp0[16];');
+    });
+
     test('a slot in the reserved area is not this object`s, and refuses', () => {
       expect(() => lift(copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
         /the slot model keys \[sp,#12\], so part of the reserved area is not this object/,
