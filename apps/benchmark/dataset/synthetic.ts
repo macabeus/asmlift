@@ -1808,6 +1808,72 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['int64', 'compare'],
     toolchains: ALL,
   },
+  // The helper family, and what each row PINS. `llmul` is the plainest shape there is: a 64-bit
+  // value in a register pair going into a call and coming back out of one.
+  {
+    sym: 'llmul',
+    src: 'long long llmul(long long a,long long b){ return a*b; }',
+    features: ['int64', 'arithmetic'],
+    toolchains: ALL,
+  },
+  // THE PAIR THAT PROVES THE CALLEE NAME CANNOT DECIDE SIGNEDNESS. agbcc's libgcc has no
+  // `__umuldi3` at all — `optabs.c` initialises the only integer multiply libfunc from the MODE,
+  // and `expmed.c` routes every multiply through it — so these two compile to the SAME
+  // `bl __muldi3` and differ only in how each argument was widened: `asr rN,rM,#31` per half here,
+  // `mov rN,#0` in the twin below.
+  {
+    sym: 'llmulw',
+    src: 'long long llmulw(int a,int b){ return (long long)a*(long long)b; }',
+    features: ['int64', 'arithmetic', 'sign-extend'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'llmulwu',
+    src: 'unsigned long long llmulwu(unsigned a,unsigned b){ return (unsigned long long)a*(unsigned long long)b; }',
+    features: ['int64', 'arithmetic', 'unsigned'],
+    toolchains: ALL,
+  },
+  // …and the pair where the name DOES decide it. Division splits into `__divdi3`/`__udivdi3`, so
+  // these two are the reason a helper table carries an op per NAME rather than one per shape.
+  {
+    sym: 'lldivs',
+    src: 'long long lldivs(long long a,long long b){ return a/b; }',
+    features: ['int64', 'arithmetic', 'signed'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'lldivu',
+    src: 'unsigned long long lldivu(unsigned long long a,unsigned long long b){ return a/b; }',
+    features: ['int64', 'arithmetic', 'unsigned'],
+    toolchains: ALL,
+  },
+  // The unsigned widen, `i2ll`'s twin: `mov rN,#0` where that one has `asr rN,rM,#31`. The shape
+  // is what says which extension the machine performed, and it is the only thing that does.
+  {
+    sym: 'u2ull',
+    src: 'unsigned long long u2ull(unsigned x){ return x; }',
+    features: ['int64', 'zero-extend', 'unsigned'],
+    toolchains: ALL,
+  },
+  // THE HIGH HALF AS A PROJECTION, and a constant shift of 32 leaves no shift opcode to key on:
+  // agbcc emits `add r0,r1,#0` and nothing else, so the recovery is a fact about the register pair
+  // rather than about an instruction.
+  {
+    sym: 'llhi',
+    src: 'int llhi(long long x){ return (int)(x>>32); }',
+    features: ['int64', 'cast', 'narrow'],
+    toolchains: ALL,
+  },
+  // THE ONE-WAY DOOR, and this row is here so a later round cannot quietly walk back through it.
+  // agbcc spells a 64-bit OR as two plain `orr`s — ordinary 32-bit instructions that ordinary
+  // 32-bit C reaches — so the halves stay two words and nothing here is a 64-bit operation. The
+  // same is true of `&`, `^`, `~`, every constant shift and every compare.
+  {
+    sym: 'llorr',
+    src: 'long long llorr(long long a,long long b){ return a|b; }',
+    features: ['int64'],
+    toolchains: ALL,
+  },
 
   // ── division / modulo by constant (magic-number division) ───────────────────────────────────
   {
