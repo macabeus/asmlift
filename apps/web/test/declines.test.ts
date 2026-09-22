@@ -428,6 +428,68 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     expect(classOf(marker)).toBe('pool-word-shape');
   });
 
+  // THE SIBLINGS EACH CLASS WAS TOO TIGHT FOR. Ten core messages, every one a member of a family
+  // that already has a class here, all of them classified as unnamed until this commit. Each is
+  // the throw-site text with its interpolations filled in.
+  test.each([
+    // `structure/structure.ts` refuses a jump table five ways; `case arms do not linearize` was the
+    // only one the class read, and it had one row.
+    ["structure: cannot structure 'f': jump-table cases share a target block with differing phi args", 'switch-shapes'],
+    [
+      "structure: cannot structure 'f': a jump-table case runs on into the next case, and the target " +
+        'language has no fall-through in its case statement',
+      'switch-shapes',
+    ],
+    [
+      "structure: cannot structure 'f': case 3/4 falls through into an arm that is not the next one " +
+        'emitted — C fall-through only reaches the arm below',
+      'switch-shapes',
+    ],
+    [
+      "structure: cannot structure 'f': the case fallen into takes a value from the switch edge, which " +
+        'the fall-through path would re-run',
+      'switch-shapes',
+    ],
+    // PR #222's placeholder law in the MIPS frontend: a relocation that never arrived is not the
+    // address zero. It is reachable with an ordinary lift of a `-G 0` object whose side table was
+    // not supplied.
+    [
+      "lift: cannot lift 'f': 'lui' at 0x0 loads the high half 0x0 with no relocation on it — that is an " +
+        'unrelocated placeholder, not the value',
+      'reloc-halves',
+    ],
+    // …and its PPC twin, which ends in the same clause as the alternative this class already had.
+    [
+      "lift: cannot lift 'f': 'addi' at 0x4 carries a data relocation ('gFoo') — the printed immediate " +
+        'is a link-time placeholder, not the value',
+      'reloc-halves',
+    ],
+    [
+      "lift: cannot lift 'f': 'addi' at 0x4 carries the '@l' half of 'gFoo' but its immediate is '8', not " +
+        'the expected 0 placeholder',
+      'reloc-halves',
+    ],
+    [
+      "lift: cannot lift 'f': 'lis' at 0x0 carries the '@ha' half of 'gFoo' but its immediate is '2', not " +
+        'the expected 0 placeholder',
+      'reloc-halves',
+    ],
+    // The two small-data siblings. The file spent a paragraph explaining that `pic-globals` had no
+    // inhabitant anywhere while these sat unnamed in the residue.
+    [
+      "lift: cannot lift 'f': 'lwz' at 0x8 carries a small-data relocation ('gFoo') but its memory " +
+        "operand is '4(r13)', not the expected '0(0)' placeholder",
+      'pic-globals',
+    ],
+    [
+      "lift: cannot lift 'f': 'addi' at 0xc carries a small-data relocation ('gFoo') but its immediate " +
+        "is '4', not the expected 0 placeholder",
+      'pic-globals',
+    ],
+  ])('%s -> %s', (marker, want) => {
+    expect(classOf(marker)).toBe(want);
+  });
+
   test('an unpaired half carried by an FPU load is about the half, not about the FPU', () => {
     // `reloc-halves` sits BELOW `float`, and this marker names `lwc1`. It classifies as the half
     // because `float` matches only `unmodelled instruction '<mnemonic>'` — loosen that alternation
@@ -724,6 +786,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'small-data / PIC data access', 'packages/core/src/frontend/splat.ts'],
     ['pic-globals', 'non-register memory base', 'packages/core/src/frontend/ppc.ts'],
     ['pic-globals', 'SDA/global-relative access not supported', 'packages/core/src/frontend/ppc.ts'],
+    ['pic-globals', 'carries a small-data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
@@ -736,6 +799,10 @@ describe('a class may not outlive the message it classifies', () => {
     ['switch-shapes', 'case arms do not linearize', 'packages/core/src/structure/structure.ts'],
     ['switch-shapes', 'jump-table target is not a block boundary', 'packages/core/src/frontend/ppc.ts'],
     ['switch-shapes', 'a case body reaches', 'packages/core/src/structure/switch-recover.ts'],
+    ['switch-shapes', 'jump-table cases share a target block', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'a jump-table case runs on into the next case', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'C fall-through only reaches the arm below', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'takes a value from the switch edge', 'packages/core/src/structure/structure.ts'],
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
     ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
@@ -748,6 +815,10 @@ describe('a class may not outlive the message it classifies', () => {
     ['pool-word-shape', 'literal-pool load of', 'packages/core/src/frontend/thumb.ts'],
     ['reloc-halves', 'high half of', 'packages/core/src/frontend/high-half.ts'],
     ['reloc-halves', 'not a modelled consumer of it', 'packages/core/src/frontend/mips.ts'],
+    ['reloc-halves', 'loads the high half', 'packages/core/src/frontend/mips.ts'],
+    ['reloc-halves', 'carries a data relocation', 'packages/core/src/frontend/ppc.ts'],
+    ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
+    ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
@@ -794,15 +865,15 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 24],
-    ['structure/structure.ts', 20],
-    ['frontend/mips.ts', 10],
-    ['frontend/ppc.ts', 8],
+    ['structure/structure.ts', 16],
+    ['frontend/mips.ts', 9],
     ['frontend/disasm.ts', 7],
     ['frontend/splat.ts', 7],
+    ['frontend/ppc.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 78;
+  const RESIDUE_TOTAL = 68;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

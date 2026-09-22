@@ -27,27 +27,26 @@
 // `packages/core/src` throws 118 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 78 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 68 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
 //   frontend/thumb.ts   24  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
 //                           base in the list, control falling off the end
-//   structure.ts        20  eleven loop and post-loop naming refusals beside the two
-//                           `loop-exit-values` claims, five jump-table and switch shapes, an
-//                           unsupported terminator, a volatile read behind a `&&`/`||`, and two
-//                           internal invariants (an ambiguous array offset, a parallel-copy bug)
-//   frontend/mips.ts    10  a relocation with an addend, an address below the symbol, an indirect
-//                           `jr`, a `lui` high half with no relocation on it, and four refusals
-//                           about a disassembly the reader cannot account for
-//   frontend/ppc.ts      8  `stwu` with update, an `@l`/`@ha` half whose immediate is not the
-//                           expected placeholder, a small-data relocation whose operand is not the
-//                           expected placeholder, a data relocation on an unmodelled consumer, a
-//                           relocation on a stack-pointer adjust
+//   structure.ts        16  eleven loop and post-loop naming refusals beside the two
+//                           `loop-exit-values` claims, an unsupported terminator, a volatile read
+//                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
+//                           and two internal invariants (an ambiguous array offset, a
+//                           parallel-copy bug)
+//   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, an indirect
+//                           `jr`, a non-numeric immediate, and five refusals about a disassembly
+//                           the reader cannot account for
 //   frontend/splat.ts    7  a data directive in the code stream, a tail call / cross-function
 //                           branch, an unparsable constant expression
 //   frontend/disasm.ts   7  the objdump `...` elision family
+//   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
+//                           two-armed branch denylist, whose template is interpolation end to end
 //   frontend/format.ts   1  the input/frontend mismatch — an input error
 //   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -169,8 +168,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // relocation operand the Splat reader cannot resolve (`splat.ts` `small-data / PIC data
     // access`), and a memory base that is not a register (`ppc.ts` `SDA/global-relative`). The PPC
     // one is narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
-    // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it. The
-    // class reads 0 because the canonical IDO flags are `-non_shared -G 0` (`toolchain.ts`), which
+    // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it — and
+    // the two ppc.ts refusals for an SDA relocation whose operand or immediate is NOT that
+    // placeholder are the same capability, which the residue paragraph left unnamed while this
+    // class was described as having no inhabitant anywhere. The class reads 0 because the canonical IDO flags are `-non_shared -G 0` (`toolchain.ts`), which
     // is a flag choice rather than a shape the toolchain cannot emit. `declines.test.ts` carries
     // the two-line source and the flags that do emit it, measured; the row itself is still owed.
     key: 'pic-globals',
@@ -181,7 +182,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // than as floating point. `non-register memory base` is the PPC site's EARLY anchor — its own
     // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
     // pushes it past the 200-character cap this file opens with.
-    pattern: /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative/,
+    pattern:
+      /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
   },
   {
     key: 'float',
@@ -264,9 +266,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // artifact cannot show it — the one `switch-shapes` row declines on "the jump table's case arms
     // do not linearize" — so `declines.test.ts` checks the overlap table over core's own messages
     // as well as over the published markers, and this pair is in it.
+    //
+    // FOUR SIBLINGS FROM THE SAME PRODUCER WERE LEFT WITH NOWHERE TO GO by that tightening, while
+    // this class held one row. `structure/structure.ts` refuses a jump table five ways and only one
+    // of them said "linearize": cases sharing a target block with differing phi args, a case
+    // running on into the next where the target language has no fall-through in its case statement,
+    // an arm falling through into one that is not the next emitted, and the arm fallen into taking
+    // a value from the switch edge that the fall-through path would re-run. Same capability, same
+    // site, and they sat in the residue a reader is asked to trust.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
-    pattern: /case arms do not linearize|jump-table target is not a block boundary|a case body reaches/,
+    pattern:
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|C fall-through only reaches the arm below|takes a value from the switch edge/,
   },
   {
     key: 'structs',
@@ -315,13 +326,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /literal-pool load of/,
   },
   {
-    // Both halves of a MIPS address are relocated, and both refusals are about a half arriving
-    // somewhere it cannot be used: a `%hi` read as a value with no matching `%lo` to consume it, and
-    // a relocation carried by an instruction that is not a modelled consumer of it. Either way the
-    // printed immediate is a link-time placeholder rather than the address.
+    // An address arrives in halves, and every refusal here is a half arriving somewhere it cannot
+    // be used: a `%hi` read as a value with no matching `%lo` to consume it, a relocation carried by
+    // an instruction that is not a modelled consumer of it, a `lui` whose high half is the literal 0
+    // because no relocation ever arrived for it, and a PPC `@l`/`@ha` half or data relocation whose
+    // immediate is not the placeholder the linker will overwrite. Either way the printed immediate
+    // is a link-time placeholder rather than the address — PR #222's law, spelt in both frontends,
+    // which is why the class is no longer named for one of them.
     key: 'reloc-halves',
-    label: 'Relocated address halves (MIPS %hi / %lo)',
-    pattern: /high half of|not a modelled consumer of it/,
+    label: 'Relocated address halves (%hi / %lo, @l / @ha)',
+    pattern: /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half/,
   },
   {
     key: 'no-prototype-args',
