@@ -172,13 +172,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative/,
   },
   {
-    key: 'store-class',
-    label: 'Unmodelled store-class instructions',
-    pattern: /unmodelled store-class/,
-  },
-  {
     key: 'float',
-    label: 'Floating point',
+    label: 'Floating point (FPU arithmetic, FPU loads and stores, paired singles)',
     // The alternation is anchored by the closing quote, so a bare `add\.` would require the literal
     // `add.'` and match nothing. `[\w.]+` after the dot covers the one-part (`add.s`) and two-part
     // (`c.lt.s`, `cvt.s.w`) MIPS FPU formats alike.
@@ -191,8 +186,31 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // single-precision op with a trailing `s` and a record form with a trailing `.`, so both are
     // optional suffixes here rather than separate alternatives; `psq_*`/`ps_*` are the GameCube
     // paired singles, which are floating point on the same FPU.
+    //
+    // AND IT ADMITS THE STORE-CLASS PREFIX, or four of its alternatives are inert. `opaque.ts`
+    // tests `policy.storeClass` FIRST, before anything can become an opaque, so `swc1`, `sdc1`,
+    // `stfs` and `stfd` can only ever arrive spelt "unmodelled store-class instruction" — the
+    // `unmodelled (?:effect )?instruction '` prefix meant those four could never fire. Measured:
+    // all four match `store-class`' message and none matched this class's.
     pattern:
-      /unmodelled (?:effect )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|f(?:add|sub|mul|div|madd|msub|nmadd|nmsub|sqrt|res|rsqrte|sel|abs|nabs|neg|mr|rsp)s?\.?|fcmp\w*|fct\w*|lfd\w*|lfs\w*|stfd\w*|stfs\w*|psq_\w+|ps_[\w.]+)'/,
+      /unmodelled (?:effect |store-class )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|f(?:add|sub|mul|div|madd|msub|nmadd|nmsub|sqrt|res|rsqrte|sel|abs|nabs|neg|mr|rsp)s?\.?|fcmp\w*|fct\w*|lfd\w*|lfs\w*|stfd\w*|stfs\w*|psq_\w+|ps_[\w.]+)'/,
+  },
+  {
+    // WHAT IS LEFT AFTER `float` TAKES ITS OWN, which is everything this class had: all 13 of its
+    // rows were floating-point stores (`stfd` 7, `swc1` 2, `sdc1` 2, `stfs` 2), so the Pareto's top
+    // bar read 56 when the honest floating-point number was 69, and a roadmap reader was offered a
+    // separate 13-row capability that nobody should build.
+    //
+    // The class stays, because the ISA policies reach further than the FPU — `mips.ts` lists
+    // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr`, `thumb.ts` `^(str|stm)`, `ppc.ts` `^st`, so `stwbrx` or an
+    // unaligned `swl` reaches it — and because what it names is real: core throws here to say a
+    // MEMORY WRITE cannot degrade to a register opaque, which is a different refusal from an
+    // unresolvable value. But that is a property of the throw, not a capability to build; the
+    // capability is whatever instruction it is. So the class is now uninhabited, and it is in
+    // `NO_ROWS` with that measurement beside it.
+    key: 'store-class',
+    label: 'Unmodelled store-class instructions (a non-FPU store)',
+    pattern: /unmodelled store-class/,
   },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
   // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an

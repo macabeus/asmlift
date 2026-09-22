@@ -53,6 +53,32 @@ describe('specific instruction families beat the generic opaque bucket', () => {
       expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe('opaque-ops');
     },
   );
+
+  // A STORE IS SPELT AT A DIFFERENT SITE, and for four mnemonics it is the ONLY site. `opaque.ts`
+  // tests `policy.storeClass` before anything becomes an opaque, so nothing can ever print
+  // "unmodelled instruction 'swc1'" — these four alternatives of `float` were inert, and all 13
+  // rows of `store-class` were floating-point stores under a label that named a mechanism.
+  test.each(['swc1', 'sdc1', 'stfs', 'stfd'])("the store-class spelling of '%s' is floating point", (mnemonic) => {
+    expect(
+      classOf(
+        `lift: cannot lift 'f @0x4': unmodelled store-class instruction '${mnemonic}' — a memory write cannot ` +
+          'be skipped or degraded to a register opaque',
+      ),
+    ).toBe('float');
+  });
+
+  // …and the half that stops the widened prefix becoming the next catch-all. The ISA store
+  // policies are `sb|sh|sw|swl|swr|sc|sd|sdl|sdr` (mips.ts), `^(str|stm)` (thumb.ts) and `^st`
+  // (ppc.ts), so `store-class` is uninhabited today rather than dead, and these are what would
+  // inhabit it.
+  test.each(['stwbrx', 'swl', 'sb', 'stmia'])("a non-FPU store stays in store-class: '%s'", (mnemonic) => {
+    expect(
+      classOf(
+        `lift: cannot lift 'f @0x4': unmodelled store-class instruction '${mnemonic}' — a memory write cannot ` +
+          'be skipped or degraded to a register opaque',
+      ),
+    ).toBe('store-class');
+  });
 });
 
 describe('the instruction cause beats the shape symptom', () => {
@@ -90,7 +116,8 @@ describe('all three "unmodelled …" message spellings are classified', () => {
   test.each([
     ["structure: unmodelled instruction 'mtc1'", 'float'],
     ["lift: unmodelled effect instruction 'mtc1' — no register destination to degrade", 'float'],
-    ["lift: unmodelled store-class instruction 'swc1' — a memory write cannot be skipped", 'store-class'],
+    ["lift: unmodelled store-class instruction 'swc1' — a memory write cannot be skipped", 'float'],
+    ["lift: unmodelled store-class instruction 'stwbrx' — a memory write cannot be skipped", 'store-class'],
     ["structure: unmodelled instruction 'clz'", 'opaque-ops'],
     ["lift: unmodelled effect instruction 'teq' — no register destination to degrade", 'opaque-ops'],
   ])('%s -> %s', (marker, want) => {
@@ -503,11 +530,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These three have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
-  // of these three disappears, a residue found an inhabitant or somebody wrote the `tax_gprel`
+  // These four have no rows for reasons that are measured and written down beside them, not
+  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
+  // of these four disappears, an unnamed gap found an inhabitant or somebody wrote the `tax_gprel`
   // row — good news, and this list moves in the commit that earns it.
-  const NO_ROWS = ['branch-form', 'branch-likely', 'pic-globals'];
+  //
+  //   store-class    ALL 13 of its rows were floating-point stores (`stfd` 7, `swc1` 2, `sdc1` 2,
+  //                  `stfs` 2) and `float` now takes them, which is why this class emptied in the
+  //                  same commit that admitted the store-class prefix there. It is not dead: the
+  //                  ISA policies reach `stwbrx`, `swl`, `sb` and `stmia`, pinned above.
+  const NO_ROWS = ['branch-form', 'branch-likely', 'pic-globals', 'store-class'];
 
   test('every other class is inhabited, and exactly these three are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
@@ -530,6 +562,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // are the three control-transfer capabilities sitting above the branch-form residue.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['float > opaque-ops', 56],
+    ['float > store-class', 13],
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 3],
     ['outgoing-stack-args > stack-frames', 2],
