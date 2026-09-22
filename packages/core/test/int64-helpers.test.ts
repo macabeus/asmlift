@@ -52,23 +52,35 @@ describe('what refuses', () => {
 
   // A CALL DESTROYS THE HIGH HALF WITHOUT NAMING IT — r1 is caller-saved. agbcc cannot build this
   // shape (a 64-bit return keeps both halves across the call; a 32-bit one carries the epilogue
-  // above), so the inhabitant is hand-written asm, which is what the playground lifts.
+  // above), so the inhabitant is hand-written asm, which is what the playground lifts. `sink` is
+  // declared void-of-nothing so that the call reads no argument register: with an arity to guess
+  // it would read the low half and hit the refusal below instead, and then this would be testing
+  // that one.
+  const handWritten = (mid: string[]) =>
+    ['\t.code\t16', '\t.globl\tlokeep', '\t.thumb_func', 'lokeep:', '\tpush\t{r4, lr}', '\tbl\t__muldi3', ...mid]
+      .concat(['\tadd\tr0, r4, #0', '\tpop\t{r4}', '\tpop\t{pc}', ''])
+      .join('\n');
+
   test('a call between the pair and the return takes the high half with it', () => {
-    const handWritten = [
-      '\t.code\t16',
-      '\t.globl\tlokeep',
-      '\t.thumb_func',
-      'lokeep:',
-      '\tpush\t{r4, lr}',
-      '\tbl\t__muldi3',
-      '\tadd\tr4, r0, #0',
-      '\tbl\tsink',
-      '\tadd\tr0, r4, #0',
-      '\tpop\t{r4}',
-      '\tpop\t{pc}',
-      '',
-    ].join('\n');
-    expect(decompile('lokeep', handWritten, ARMV4T_AGBCC).source).toMatch(/^s32 lokeep\(/);
+    const src = decompile('lokeep', handWritten(['\tadd\tr4, r0, #0', '\tbl\tsink']), ARMV4T_AGBCC, {
+      prototypes: { sink: { params: 0 } },
+    }).source;
+    expect(src).toMatch(/^s32 lokeep\(/);
+  });
+
+  test('…and with nothing in between, the same shape returns the pair', () => {
+    const src = decompile('lokeep', handWritten(['\tadd\tr4, r0, #0']), ARMV4T_AGBCC, {
+      prototypes: { sink: { params: 0 } },
+    }).source;
+    expect(src).toMatch(/^s64 lokeep\(/);
+  });
+
+  // THE CALL BOUNDARY IS WHERE THE PAIR STOPS. Handing a half to a callee whose parameter widths
+  // nothing states is the wrong answer that recompiles to the right bytes, so it declines.
+  test('a half handed to an ordinary callee declines, and names the half', () => {
+    expect(() => decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC)).toThrow(
+      /argument 1 of the call to 'sink' is the low half of a 64-bit value/,
+    );
   });
 });
 

@@ -4648,6 +4648,28 @@ export function lift(
             usedSlotOffsets.add(off);
             args.push(readVar(slotKey(off), bi));
           }
+          // A 64-BIT VALUE MAY NOT LEAVE AS A WORD. A pair occupies two argument registers, and
+          // nothing here knows how many of them an ordinary callee's parameters take: `Prototypes`
+          // counts argument REGISTERS, so a header's `void sink(long long)` and `void sink(int)`
+          // arrive at this point as the same fact. Passing the low half alone invents a truncation
+          // the asm never wrote; passing both halves as two words contradicts a one-parameter
+          // declaration. Both recompile to the very `bl` being lifted, so the differ scores them
+          // exactly as it scores the right answer and nothing downstream can referee either.
+          //
+          // The helper table is the one place that does know (`wide`, above), so the pair crosses a
+          // call boundary there and declines everywhere else. What that costs is a function that
+          // computes a 64-bit value and hands a HALF of it to an undeclared callee — an honest
+          // narrowing, refused because it is spelled the same way as the wrong answer.
+          for (const [k, v] of args.entries()) {
+            const half = halfOf.get(v);
+            if (half) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': argument ${k + 1} of the call to '${targetSym}' is the ` +
+                  `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and no prototype ` +
+                  `says how many argument registers that callee's parameters occupy`,
+              );
+            }
+          }
           const res = mkValue(T.unk(wide?.returns === 64 ? 64 : 32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
           irb.ops.push(callOp);
