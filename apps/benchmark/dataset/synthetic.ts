@@ -6639,8 +6639,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
   // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
-  // `noncompile` for m2c: it emits `fill(&unksp0);` with no declaration of `unksp0`, the same
-  // pre-existing class already carried by `stkaddr`, `maskhome` and `dmastride`. MEASURED — m2c
+  // the exception in the other direction: read off the artifact, m2c MATCHES it at score 0. The
+  // out-parameter idiom is one m2c already spells byte-exactly, so nothing in that row's m2c
+  // column is a handicap. MEASURED — m2c
   // run with `--context` carrying THE ROW'S OWN declaration, its `src` header verbatim, and its
   // output scored with that same context prepended:
   //
