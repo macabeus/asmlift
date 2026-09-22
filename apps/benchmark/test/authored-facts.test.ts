@@ -320,8 +320,12 @@ const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: 
   //
   // THE EXEMPTION IS ONLY AS GOOD AS THE AGREEMENT, so it is conditioned on one: a row that
   // declares its own `memcpy` — a different arity, or one returning a struct — is telling m2c
-  // something asmlift is NOT told, and the standard table is not what it knows. That row is back
-  // inside the check and must declare the callee to both (`standardSignatureAgrees`).
+  // something asmlift is NOT told, and the standard table is not what it knows
+  // (`standardSignatureAgrees`). WHAT HAPPENS THEN is what happens to any other callee: the name
+  // is back inside the check, so the row fails this gate unless it declares the callee to both,
+  // and the failure names it — `m2c is told about \`memcpy\`, asmlift is not`. The fix is a
+  // `proto` entry, which is the channel asmlift reads and the one a re-declaration has to go
+  // through.
   const standard = (n: string) => Object.hasOwn(STANDARD_SIGNATURES, n) && standardSignatureAgrees(ctx, n);
   const authored = (n: string) => n !== sym && !standard(n);
   const inCtx = declaredFunctionNames(ctx).filter(authored);
