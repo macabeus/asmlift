@@ -61,7 +61,7 @@ import {
   walkExprs,
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
-import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -3435,10 +3435,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
       ) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
+        // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
+        // compare to its low half. `exprIntWidth` is total and answers 64 only where it proves it.
+        const pinUnsigned = (x: Expr): Expr => ({ k: 'cast', to: T.u(exprIntWidth(x, vtEnv)), e: x });
         if (!irUnsigned(d.operands[0]) && irUnsigned(d.operands[1])) {
-          r = { k: 'cast', to: T.u(32), e: r };
+          r = pinUnsigned(r);
         } else {
-          l = { k: 'cast', to: T.u(32), e: l };
+          l = pinUnsigned(l);
         }
       }
       // The SIGNED direction of the same hole, and a DEFAULT rather than an alternative of that variation —
@@ -3462,7 +3465,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // compare them signed.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
-          renderedIntSignedness(x, vtEnv) === true || ptrSide(x) ? x : { k: 'cast', to: T.s(32), e: x };
+          renderedIntSignedness(x, vtEnv) === true || ptrSide(x)
+            ? x
+            : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
       }

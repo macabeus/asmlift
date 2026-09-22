@@ -20,6 +20,7 @@ import {
   declaredTypes,
   derefStrideOk,
   exprCType,
+  exprIntWidth,
   printEnv,
   renderedIntSignedness,
   writesNonPointerIntoPointer,
@@ -166,18 +167,23 @@ function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Ex
       };
 }
 
-/** The 32-bit integer cast that PINS an operand's signedness.
+/** The integer cast that PINS an operand's signedness, AT THE OPERAND'S OWN RANK.
  *
- *  An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g`
- *  are the same bytes, and the arithmetic rules upstream do emit that inner cast (intifyAddr).
- *  The replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an
- *  assertion the differ cannot referee the loss of, which is why l3/initfirst.ts's
- *  `stripWideIntCast` refuses the same peel one pass over. */
-function recast32(x: Expr, signed: boolean): Expr {
-  const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x : undefined;
+ *  The width is not a constant: `(s32)a / (s32)b` over two `s64`s does not pin a signedness, it
+ *  truncates the operation to 32 bits and calls a different helper than the machine did. So the
+ *  rank comes from `exprIntWidth`, which is total and answers 64 only where it can prove it.
+ *
+ *  An existing integer cast AT THE SAME WIDTH is REPLACED rather than wrapped — `(u32)(s32)&g` and
+ *  `(u32)&g` are the same bytes, and the arithmetic rules upstream do emit that inner cast
+ *  (intifyAddr). A cast at a DIFFERENT width is a narrowing the source wrote and must be kept. The
+ *  replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an assertion the
+ *  differ cannot referee the loss of, which is why l3/initfirst.ts's `stripWideIntCast` refuses the
+ *  same peel one pass over. */
+function recastInt(x: Expr, signed: boolean, width: 32 | 64): Expr {
+  const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === width ? x : undefined;
   return {
     k: 'cast',
-    to: T.int(32, signed),
+    to: T.int(width, signed),
     ...(replaced?.volatile === true ? { volatile: true as const } : {}),
     e: replaced ? replaced.e : x,
   };
@@ -205,14 +211,18 @@ function recast32(x: Expr, signed: boolean): Expr {
  *  the division unsigned. Verified by compiling: `((u32)a / b) / 7` calls `__udivsi3` twice,
  *  `(s32)((u32)a / b) / 7` calls `__udivsi3` then `__divsi3`. */
 function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt: PrintEnv): [Expr, Expr] {
+  // A shift reads its LEFT operand's rank; a divide reads the wider of the two, which is what the
+  // usual arithmetic conversions make the operation's own rank.
   if (e0.op === '>>' || e0.op === '>>>') {
-    return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recast32(e0.l, wantSigned), e0.r];
+    const w = exprIntWidth(e0.l, vt.type);
+    return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recastInt(e0.l, wantSigned, w), e0.r];
   }
   if (arithConversionSignedness(e0.l, e0.r, vt.type) === wantSigned) {
     return [e0.l, e0.r];
   }
-  const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recast32(x, true));
-  return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recast32(e0.l, false), e0.r];
+  const w = exprIntWidth(e0.l, vt.type) === 64 || exprIntWidth(e0.r, vt.type) === 64 ? 64 : 32;
+  const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recastInt(x, true, w));
+  return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recastInt(e0.l, false, w), e0.r];
 }
 
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {

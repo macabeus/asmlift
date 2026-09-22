@@ -6,11 +6,14 @@
 // already carries its width in its operand types.
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { Block, Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T, parseType, typeToString } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
+import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { arithConversionSignedness, exprIntWidth } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { C_TYPEDEFS } from '../src/target';
 
@@ -151,5 +154,85 @@ describe('what the backends can spell', () => {
         body: [],
       }),
     ).toThrow(/no spelling for a 64-bit integer/);
+  });
+});
+
+describe('the rank a rendered expression carries', () => {
+  const env = (name: string) => (name === 'w' ? T.s(64) : name === 'uw' ? T.u(64) : T.s(32));
+  const v = (name: string): Expr => ({ k: 'var', name });
+  const bin = (op: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });
+
+  test('a 64-bit declaration is the only thing that makes it 64', () => {
+    expect(exprIntWidth(v('w'), env)).toBe(64);
+    expect(exprIntWidth(v('n'), env)).toBe(32);
+    expect(exprIntWidth({ k: 'const', value: 7 }, env)).toBe(32);
+    expect(exprIntWidth({ k: 'cast', to: T.u(64), e: v('n') }, env)).toBe(64);
+  });
+
+  test('arithmetic takes the wider side; a shift takes its left operand alone', () => {
+    expect(exprIntWidth(bin('+', v('n'), v('w')), env)).toBe(64);
+    expect(exprIntWidth(bin('<<', v('n'), v('w')), env)).toBe(32);
+    expect(exprIntWidth(bin('<<', v('w'), v('n')), env)).toBe(64);
+  });
+
+  // The closure this soundness rests on, asserted rather than argued: memory and calls do not
+  // carry a 64-bit integer here, so nothing else can make this answer 64.
+  test('memory and a call are NOT ways a 64-bit value enters a rendered expression', () => {
+    const idx: Expr = { k: 'index', base: v('p'), index: { k: 'const', value: 0 }, width: 4, signed: true };
+    expect(exprIntWidth(idx, env)).toBe(32);
+    expect(exprIntWidth({ k: 'call', fn: 'f', args: [] }, env)).toBe(32);
+  });
+
+  test('at UNEQUAL rank the wider side decides, where at equal rank unsigned would have', () => {
+    // `unsigned int / long long` is SIGNED: C converts to the wider type first. The equal-rank
+    // shortcut would answer `false` here and spell an unsigned divide over a signed one.
+    expect(arithConversionSignedness({ k: 'cast', to: T.u(32), e: v('n') }, v('w'), env)).toBe(true);
+    expect(arithConversionSignedness(v('w'), { k: 'cast', to: T.u(32), e: v('n') }, env)).toBe(true);
+    // …and at EQUAL rank it still does.
+    expect(arithConversionSignedness({ k: 'cast', to: T.u(32), e: v('n') }, v('n'), env)).toBe(false);
+    expect(arithConversionSignedness(v('uw'), v('w'), env)).toBe(false);
+  });
+});
+
+describe('what the C backend prints over a 64-bit operand', () => {
+  const fn = (body: Stmt[]): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'w', type: T.s(64) },
+      { name: 'n', type: T.s(32) },
+    ],
+    locals: [],
+    retType: T.void(),
+    body,
+  });
+  const v = (name: string): Expr => ({ k: 'var', name });
+
+  test('a 64-bit divide is not pinned down to 32 bits', () => {
+    const src = cBackend.emit(
+      fn([{ k: 'assign', name: 'w', value: { k: 'bin', op: '/', l: v('w'), r: { k: 'const', value: 256 } } }]),
+    );
+    expect(src).toContain('w = w / 256;');
+    expect(src).not.toContain('(s32)w');
+  });
+
+  test('an operand that needs the pin gets it at its OWN rank', () => {
+    const src = cBackend.emit(
+      fn([
+        {
+          k: 'assign',
+          name: 'w',
+          value: { k: 'bin', op: '/u', l: v('w'), r: { k: 'const', value: 256 } },
+        },
+      ]),
+    );
+    expect(src).toContain('(u64)w');
+    expect(src).not.toContain('(u32)w');
+  });
+
+  test('a 32-bit operand is pinned exactly as before', () => {
+    const src = cBackend.emit(
+      fn([{ k: 'assign', name: 'n', value: { k: 'bin', op: '/u', l: v('n'), r: { k: 'const', value: 3 } } }]),
+    );
+    expect(src).toContain('(u32)n');
   });
 });
