@@ -3490,7 +3490,10 @@ export function lift(
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
     const own = prototypes[callee];
-    const proto = protoArity(own) !== undefined ? own : (RUNTIME_HELPERS[callee] ?? STANDARD_SIGNATURES[callee]);
+    // `Object.hasOwn` on both tables: a callee named `toString` or `valueOf` would otherwise read
+    // a `Function` off `Object.prototype` as its prototype entry.
+    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+    const proto = protoArity(own) !== undefined ? own : (known(RUNTIME_HELPERS) ?? known(STANDARD_SIGNATURES));
     const arity = protoArity(proto);
     if (arity === undefined) {
       return null;

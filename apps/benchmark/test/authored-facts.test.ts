@@ -313,7 +313,10 @@ const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: 
   // author did not choose it. It is outside the question this check asks, in BOTH directions —
   // counting it on the `ctx` side reads every row calling `memcpy` as an asymmetry, and counting
   // it on the `proto` side reads every row NOT calling one as the mirror asymmetry.
-  const authored = (n: string) => n !== sym && !(n in STANDARD_SIGNATURES);
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so a callee named `toString`,
+  // `valueOf` or `constructor` would answer true and drop itself from the check in BOTH
+  // directions — a gate quietly excusing the rows it was written to catch.
+  const authored = (n: string) => n !== sym && !Object.hasOwn(STANDARD_SIGNATURES, n);
   const inCtx = declaredFunctionNames(ctx).filter(authored);
   const inProto = protoKeys.filter(authored);
   return [
