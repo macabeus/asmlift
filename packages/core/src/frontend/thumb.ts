@@ -406,17 +406,14 @@ function expandRegList(tokens: string[]): string[] {
 // for one and `Number.isNaN(undefined)` is false. An empty list is a malformed list, not an empty
 // transfer.
 //
-// LOWERCASE-ONLY IS A HOLE, NOT A FREEBIE. GNU as accepts `PUSH {R4, LR}`, and the three consumers
-// of this predicate do not agree
-// about it. The ldm/stm arm degrades to a loud opaque and the frame walk poisons its depth, both of
-// which decline; `savedRegs` does neither. It `break`s out of the prologue scan on an unreadable
-// list, which yields a SMALLER save set rather than no answer, so the def-less `r4` it should have
-// partitioned into an uninitialised local becomes a parameter instead. Measured 2026-09-06 on
-// `push {r4,lr}; add r0,r4,#0; pop {r4}; bx lr`: lowercase gives `s32 f(void)` with `uninit_r4`,
-// while both `push {R4, LR}` and `PUSH {r4, lr}` give `s32 f(s32 a0) { return a0; }`. Nothing in
-// the corpus reaches it — 0 uppercase register tokens across the reference asm of the benchmark's
-// agbcc rows — but folding case belongs in `expandRegList`, where it also changes classifyXfer's
-// `popsPc`, i.e. block splitting. That is a measured change, not a free one.
+// LOWERCASE-ONLY, and safely so: `upperCaseRegIn` refuses the function before any list reaches
+// here, so this predicate never has to decide what `{R4, LR}` means. It matters that something
+// does decide it — the three consumers of this predicate disagreed. The ldm/stm arm degrades to a
+// loud opaque and the frame walk poisons its depth, both of which decline; `savedRegs` does
+// neither. It `break`s out of the prologue scan on an unreadable list, which yields a SMALLER save
+// set rather than no answer, so the def-less `r4` it should have partitioned into an uninitialised
+// local became a parameter instead: `push {R4, LR}` gave `s32 f(s32 a0) { return a0; }` where the
+// lowercase spelling gives `s32 f(void)` with `uninit_r4`.
 function definiteRegList(tokens: string[]): string[] | null {
   const list = expandRegList(tokens);
   if (list.length === 0) {
@@ -501,10 +498,10 @@ function parseAddr(operand: string): { base: string; off: number; regOff?: strin
 
 const reg = (s: string) => s.replace(/[[\]]/g, '');
 
-// THE one test for "is this token the stack pointer". Case-insensitive because GNU as accepts
-// uppercase register names, and a case-sensitive test here is a silent-wrong-answer hole rather
-// than a cosmetic one: `add r0, SP, #4` is `&local`, and missing it fabricates a phantom
-// parameter and emits confident arithmetic on it.
+// THE one test for "is this token the stack pointer". Case-insensitive as defence in depth —
+// `upperCaseRegIn` refuses `SP` before this runs — because what a case-sensitive test here misses
+// is a silent-wrong-answer hole rather than a cosmetic one: `add r0, SP, #4` is `&local`, and
+// missing it fabricates a phantom parameter and emits confident arithmetic on it.
 const isSpReg = (s: string | undefined): boolean => {
   const r = reg(s ?? '').toLowerCase();
   return r === 'sp' || r === 'r13';
@@ -714,6 +711,33 @@ const spAdjust = (ins: Instr): number | null => {
 };
 
 const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
+
+// Every register spelling this frontend recognises, in the ONE case it recognises them in. Used to
+// refuse the others (see `upperCaseRegIn`), so nothing downstream has to ask the question again.
+const REG_SPELLINGS = /^(r\d+|sp|lr|pc|sb|sl|fp|ip)$/i;
+
+/** The first operand word that names a register in any case but lower — or null.
+ *
+ *  A register here is a SPELLING, not a number (see HIGH_REGS), and GNU as accepts `R2` for `r2`.
+ *  That splits the predicates: `isSpReg` folds case, `isThumbReg` and the flag-clobber test in the
+ *  decode loop do not, and the ones that do not read an upper-case register as "not a register at
+ *  all". Every consequence is silently wrong C rather than a decline — `mov R0, #5` dropped the
+ *  write and minted a parameter for the `r0` a later instruction read, `add R2, r0, #1` left a
+ *  clobbered compare pending so the branch folded the wrong operands, and `mov PC, lr` stopped
+ *  being a return.
+ *
+ *  Refused once, here, rather than folded into each predicate: the folding predicates are the
+ *  reason the non-folding ones were invisible, and a case rule spread over a dozen tests is a rule
+ *  the next test silently opts out of. An upper-case MNEMONIC already declines loudly (it matches
+ *  no arm of the decode switch), so this is the half of the same question that did not.
+ *
+ *  Words, not tokens, because `splitOperands` keeps `[r0, #4]` and `{r4, r5}` whole. A word starts
+ *  at an underscore as readily as at a letter, so the symbol `_R0` is one word and not a register
+ *  with a prefix. A symbol spelled exactly like a register (`bl FP`) declines here instead of
+ *  lifting — loud, and no such symbol exists in any checkout. */
+const upperCaseRegIn = (ops: string[]): string | null =>
+  ops.flatMap((o) => o.match(/[A-Za-z_]\w*/g) ?? []).find((w) => REG_SPELLINGS.test(w) && w !== w.toLowerCase()) ??
+  null;
 
 /** Parse one function's GNU-as text into labelled basic blocks + the CFG, plus the inline `.word`
  *  data tables (label → the list of label operands under it) — the jump-table target arrays agbcc
@@ -2877,6 +2901,15 @@ export function lift(
   // itself (recursion), or a sibling a shared-tail slice extends through.
   for (const ab of asmBlocks) {
     for (const ins of ab.instrs) {
+      // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
+      // register in some other function's body is not this one's problem.
+      const upper = upperCaseRegIn(ins.ops);
+      if (upper !== null) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
+            `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
+        );
+      }
       if (classifyXfer(ins) === 'indirect') {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
@@ -3144,9 +3177,9 @@ export function lift(
         // {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, so the bare `\bR\b`
         // test let a dead capture survive the `pop` that destroyed it, the acceptance fired on a
         // frame that really did stage an outgoing argument, and the lift dropped all five of that
-        // call's arguments. Two spellings of one instruction must not give two verdicts, and CASE
-        // is a third spelling of the same one — `expandRegList` is lowercase-only, so `{R0-R3}`
-        // leaked through the expansion exactly as the range leaked through the regex.
+        // call's arguments. Two spellings of one instruction must not give two verdicts. The
+        // `toLowerCase` is the belt to `upperCaseRegIn`'s braces: nothing upper-case reaches this
+        // function, and an acceptance is the wrong place to depend on that.
         const mentions = expandRegList(
           ins.ops
             .join(' ')

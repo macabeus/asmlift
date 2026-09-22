@@ -196,9 +196,10 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   // can only come from hand-written asm, where dropping it would leave a stale compare for a
   // following conditional branch to fold into a silently wrong direction.
   expect(thumb('\tadds\tsp, sp, #0x4\n')).toThrow(spAsData);
-  // GNU as accepts uppercase register names; a case-sensitive sp test would let `&local` through
-  // as confident arithmetic on a fabricated parameter.
-  expect(thumb('\tadd\tr0, SP, #0x8\n')).toThrow(spAsData);
+  // GNU as accepts uppercase register names, and this frontend reads registers in one case only,
+  // so the spelling is refused before the sp guard is reached. It is still a refusal: what must
+  // never happen is `&local` lifting as confident arithmetic on a fabricated parameter.
+  expect(thumb('\tadd\tr0, SP, #0x8\n')).toThrow(/is spelled in upper case/);
   // …and the shapes that made the guard belong on the WRITE rather than in a list of decode arms.
   // An enumeration of arms covers only the arms someone thought of: each of these wrote sp through
   // an arm nobody had enumerated, and lifted with the write silently dropped.

@@ -86,6 +86,47 @@ describe('a PC write is a control transfer under either spelling', () => {
   });
 });
 
+// THE SAME QUESTION FOR A REGISTER'S CASE. GNU as accepts `R2` for `r2`; this frontend identifies
+// registers by spelling, and its predicates disagreed about that — `isSpReg` folds case, the
+// flag-clobber test and `isThumbReg` did not. Each thing the non-folding ones then missed was
+// silently wrong C, never a decline, so they are refused once at the seam instead of folded one
+// predicate at a time.
+describe('a register spelled in upper case is refused, not half-modelled', () => {
+  const TAIL = '\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
+
+  test('an upper-case destination no longer eats its own write', () => {
+    // Emitted `s32 f(s32 a0) { return a0; }` — the store to `R0` went to a register nothing reads,
+    // and the `r0` the return needs was never written, so it became a parameter.
+    expect(() => dc('f', '\tmov\tR0, #5\n\tbx\tlr\n')).toThrow(
+      /register 'R0' in 'mov R0, #5' is spelled in upper case/,
+    );
+  });
+
+  test('an upper-case destination no longer survives a compare it clobbers', () => {
+    // The `add` writes the flags `bge` tests. Read as "not a register" it left the inherited
+    // compare pending, and the branch folded the CALLER's operands under the `add`'s flags.
+    const gone = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tR2, r0, #1\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('f', gone)).toThrow(/register 'R2' .* is spelled in upper case/);
+  });
+
+  test('an upper-case PC write no longer stops being a return', () => {
+    expect(() => dc('f', '\tmov\tr0, #5\n\tmov\tPC, lr\n')).toThrow(/register 'PC' .* is spelled in upper case/);
+  });
+
+  test.each([
+    ['a destination', '\tmov\tr0, #5\n\tbx\tlr\n'],
+    ['a PC write', '\tmov\tr0, #5\n\tmov\tpc, lr\n'],
+  ])('control: %s in lower case lifts', (_what, body) => {
+    expect(dc('f', body).source).toContain('return 5;');
+  });
+
+  test('a SYMBOL that merely starts with a register spelling is not a register', () => {
+    // The scan reads words, and a word starts at an underscore as readily as at a letter — without
+    // that, `_R0` would be read as `R0` with a prefix and the call would decline.
+    expect(dc('f', '\tpush\t{lr}\n\tbl\t_R0\n\tpop\t{r1}\n\tbx\tr1\n').source).toContain('_R0(');
+  });
+});
+
 describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
   test('a flag-setting instruction between a cmp and its branch declines loud', () => {
     // On Thumb-1 nearly every data-processing instruction on LOW registers writes the condition
@@ -1439,9 +1480,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
         `\tadd\tsp, sp, #0x4\n\tpop\t{${list}}\n\tadd\tsp, sp, #-0x4\n\tbl\tfive\n` +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
-      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'R0-R3', 'r1-r3']) {
+      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'r1-r3']) {
         expect(() => decompile('f', withList(list), ARMV4T_AGBCC)).toThrow(/never reloaded/);
       }
+      // CASE is a third spelling of the same instruction, and it declines too — earlier, on the
+      // spelling itself, because the whole frontend reads registers in one case only. Both
+      // verdicts are a refusal, which is the property that matters: no spelling of this `pop`
+      // lets the dead capture through.
+      expect(() => decompile('f', withList('R0-R3'), ARMV4T_AGBCC)).toThrow(/is spelled in upper case/);
       // …and the same for a range on a multi-load, which writes the list without popping it
       const viaLdmia =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
