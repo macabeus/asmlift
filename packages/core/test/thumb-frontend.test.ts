@@ -755,8 +755,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // takes the first call's whole result. The guessed-arity machinery never sees the site.
       //
       // Both results are dropped here, and a recognised 64-bit helper is a PURE op, so the body is
-      // dead and nothing is emitted — the same answer `__divsi3` has always given for a dead
-      // soft-division. The signature is what shows the pair was read.
+      // dead and nothing is emitted — the answer `__divsi3` gives for a dead soft-division. The
+      // signature is what shows the pair was read.
       expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('s64 a0, s64 a1, s32 a2');
     });
 

@@ -1,8 +1,8 @@
 // A caller-saved register read back after a call (frontend/ssa.ts `refuseStaleCallerSavedReads`).
 //
 // The SSA builder is right that the register has a reaching definition — the ABI is what makes that
-// definition worthless. Nothing about the register file says so, which is why the read used to
-// resolve to the pre-call value and the function lifted, silently, at exit 0.
+// definition worthless. Nothing about the register file says so, so without the refusal the read
+// resolves to the pre-call value and the function lifts, silently, at exit 0.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';

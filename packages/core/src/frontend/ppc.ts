@@ -782,8 +782,9 @@ export function lift(
           break;
         // --- call + frame/link-register bookkeeping ---
         // `bl <sym>`: read the argument registers (r3..), produce the return value in r3. The
-        // callee symbol comes from the relocation (ins.reloc); caller-saved clobbering is implicit
-        // (anything live across the call has already been moved to a callee-saved register).
+        // callee symbol comes from the relocation (ins.reloc), and the caller-saved set is recorded
+        // as destroyed (`ssa.noteCall`, below) — a read of one past here names bytes the callee
+        // overwrote, and it has a reaching definition all the same.
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';

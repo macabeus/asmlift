@@ -52,8 +52,8 @@ function pasType(t: IrType): string {
     return '^' + pasType(t.to);
   }
   if (t.kind === 'int') {
-    // `Integer`/`Cardinal` are the machine word, and a NARROWER integer fits in one — which is what
-    // this backend has always spelled it as. A WIDER one does not: upas has no verified 64-bit type,
+    // `Integer`/`Cardinal` are the machine word, and a NARROWER integer fits in one, which is what
+    // this backend spells it as. A WIDER one does not: upas has no verified 64-bit type,
     // and spelling a 64-bit value `Integer` would silently drop its high half. Loud, like every
     // other unspellable construct in this backend.
     if (t.width > 32) {
