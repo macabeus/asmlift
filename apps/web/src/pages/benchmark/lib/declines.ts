@@ -54,10 +54,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /never stores it|never stored/,
   },
   {
+    // `stack-passed` used to be an alternative here and could never fire: its one producer,
+    // `frontend/mips.ts`'s never-stored slot load, opens with "was never stored", which
+    // `uninit-local` above claims first. An alternative no string core emits can reach is inert,
+    // and this repo refuses inert refusal declarations elsewhere (`pattern/engine.ts`).
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer .* used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-passed/,
+      /stack pointer .* used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
   },
   {
     key: 'cross-block-cr',
@@ -98,9 +102,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // the two-line source and the flags that do emit it, measured; the row itself is still owed.
     key: 'pic-globals',
     label: 'Small-data globals (gp-relative / GPREL / an SDA base with no relocation)',
-    // `PIC` is bounded because it is three upper-case letters with no other anchor: unbounded, a
-    // mangled C++ symbol carrying that substring would be filed as a small-data access.
-    pattern: /gp used as data|\bPIC\b|small-data|SDA|global-relative/,
+    // One alternative per producer, each the whole phrase that site emits. Bare `PIC` and bare
+    // `SDA` are three upper-case letters with nothing to anchor them, and a mangled C++ symbol
+    // carries substrings: `draw__3SDAFv` declining on an `stfd` would have been filed here rather
+    // than as floating point. `non-register memory base` is the PPC site's EARLY anchor — its own
+    // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
+    // pushes it past the 200-character cap this file opens with.
+    pattern: /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative/,
   },
   {
     key: 'store-class',
@@ -202,9 +210,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /section-relative label/,
   },
   {
+    // Keyed on the throw (`frontend/thumb.ts`, "literal-pool load of ${why} — not modelled") rather
+    // than on the one `why` the corpus printed. Three `why`s reach it: a word that is not a symbol
+    // ± offset, an offset that is not a whole word in the pool, and a word the reader cannot parse.
+    // Keying on `pool word` matched only the first, so the other two — the same capability at the
+    // same site — would arrive as unclassified.
     key: 'pool-word-shape',
-    label: 'Literal-pool words that are not symbol ± offset',
-    pattern: /literal-pool load of pool word/,
+    label: 'Literal-pool words the reader cannot resolve',
+    pattern: /literal-pool load of/,
   },
   {
     // Both halves of a MIPS address are relocated, and both refusals are about a half arriving
@@ -230,7 +243,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     key: 'ctr-loop',
     label: 'CTR-counted loops and indirect branches (mwcc -O4 unrolling)',
-    pattern: /CTR-counted loop/,
+    // `frontend/ppc.ts` refuses a CTR loop at three sites, not one, and the other two are the ones
+    // that say the trip count is unrecoverable — a `bdnz` with no reaching `mtctr`, and a body that
+    // clobbers CTR. Keyed on the single spelling the artifact carried, both would arrive as
+    // unclassified the first time a row reached them.
+    pattern: /CTR-counted loop|without a reaching 'mtctr'|clobbers CTR/,
   },
   {
     key: 'block-boundary',

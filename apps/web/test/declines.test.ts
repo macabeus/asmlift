@@ -113,10 +113,7 @@ describe('the two MIPS delay-slot gaps are told apart', () => {
       "lift: cannot lift 'fcmp': floating-point condition-code branch 'bc1f' at 0x8 — the FP condition code is not modelled",
       'fp-cond-branch',
     ],
-    [
-      "lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form",
-      'branch-form',
-    ],
+    ["lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form", 'branch-form'],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
@@ -143,10 +140,7 @@ describe('a control transfer is named by what it is, not by the catch-all', () =
         'target — tail branch or unrecovered control flow)',
       'block-boundary',
     ],
-    [
-      "lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form",
-      'branch-form',
-    ],
+    ["lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form", 'branch-form'],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
@@ -203,7 +197,14 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
         "function's frame partition (uninitialised local, or storage it does not own) — not modelled",
       'uninit-local',
     ],
-    ["lift: cannot lift 'f': load from stack slot sp@8 that was never stored — not modelled", 'uninit-local'],
+    // Verbatim from `frontend/mips.ts` — and it is why `stack-frames` no longer carries a
+    // `stack-passed` alternative. That site is its only producer, `uninit-local` claims it on
+    // "was never stored" first, so nothing core emits could ever have reached the alternative.
+    [
+      "lift: cannot lift 'f': load from stack slot sp@8 that was never stored (stack-passed argument beyond " +
+        'the 4 register args, or an address-taken/uninitialised local) — not modelled',
+      'uninit-local',
+    ],
     ["lift: cannot lift 'f': reload of a stack local ('8(r1)') — local stack frames not supported", 'stack-frames'],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
@@ -255,6 +256,20 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
+  });
+
+  test.each([
+    // All three `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
+    // the corpus happened to print, only the first classified, and the other two — the same
+    // capability at the same site — would have arrived as unclassified.
+    [
+      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+-0x8' is not a symbol, symbol±offset, " +
+        'or number — not modelled',
+    ],
+    ["lift: cannot lift 'f': literal-pool load of offset 3 is not a whole word in pool '_pool_1' — not modelled"],
+    ["lift: cannot lift 'f': literal-pool load of unparsable word '.word gFoo+' — not modelled"],
+  ])('%s -> pool-word-shape', (marker) => {
+    expect(classOf(marker)).toBe('pool-word-shape');
   });
 
   test('an unpaired half carried by an FPU load is about the half, not about the FPU', () => {
@@ -389,10 +404,28 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(DECLINE_CLASSES.find((c) => c.key === 'branch-likely')?.label).toMatch(/residual/);
   });
 
-  test('PIC is matched as a word, so a symbol that merely contains it is not a small-data access', () => {
-    expect(classOf("lift: cannot lift 'SetPICMode': unmodelled control transfer 'bltzall' at 0x0")).toBe(
-      'branch-form',
-    );
+  // `PIC` and `SDA` are three upper-case letters, and a marker opens with the function's own name,
+  // so an unanchored alternative classifies by what the SYMBOL is called. Both of these carry a
+  // refusal about something else entirely.
+  test.each([
+    ["lift: cannot lift 'SetPICMode': unmodelled control transfer 'bltzall' at 0x0", 'branch-form'],
+    [
+      "lift: cannot lift 'draw__3SDAFv': unmodelled effect instruction 'stfd' — no register destination to degrade",
+      'float',
+    ],
+  ])('%s is classified by its refusal, not by its symbol', (marker, want) => {
+    expect(classOf(marker)).toBe(want);
+  });
+
+  test.each([
+    // `frontend/ppc.ts` refuses a CTR loop at three sites. Keyed on the one spelling the artifact
+    // carried, the two that say the trip count is unrecoverable arrived unclassified.
+    ["lift: cannot lift 'f': 'bdnz' at 0x10 without a reaching 'mtctr' (CTR loop count not recoverable)"],
+    [
+      "lift: cannot lift 'f': CTR loop body contains 'mtctr' at 0x20 which clobbers CTR (loop trip count not recoverable)",
+    ],
+  ])('%s -> ctr-loop', (marker) => {
+    expect(classOf(marker)).toBe('ctr-loop');
   });
 });
 
