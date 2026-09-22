@@ -269,6 +269,92 @@ describe('the audit judges each frame object on its own bytes', () => {
     ).toThrow(/overlap — one byte, two models/);
   });
 
+  // THE RESERVATION AS AN EXTENT. An object with no access of its own is untyped, but a frame
+  // reserved for it alone still says how many BYTES it is — and bytes are all a block copy needs.
+  // Every refusal below runs the accepted fixture first, so a decline for an unrelated reason
+  // cannot read as a pass.
+  describe('a frame reserved for one untyped object is that object`s extent', () => {
+    // `memcpy(sp, a0, 16)` over a 16-byte frame: the buffer is filled by the callee and never read
+    // here, so no access in this function types it. agbcc's own shape for `u8 b[0x10];
+    // memcpy(b, src, sizeof b);`.
+    const copy = (body: string, reserve = '0x10') =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-${reserve}\n${body}\tadd\tsp, sp, #${reserve}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const FILL = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n';
+
+    test('the reservation is the declared extent, and it declares as an array', () => {
+      expect(lift(copy(FILL)).source).toBe('s32 f(s32 a0) {\n    u8 sp0[16];\n    return memcpy(&sp0, a0, 16);\n}\n');
+    });
+
+    test('the extent follows the reservation, not the copy length', () => {
+      // the `mov r2, #0x10` is an ARGUMENT, not evidence about the object — a 32-byte frame
+      // copied into for 16 bytes is still a 32-byte object
+      expect(lift(copy(FILL, '0x20')).source).toContain('u8 sp0[32];');
+    });
+
+    test('a GUESSED arity is no witness: the callee must be declared', () => {
+      // `g` is undeclared, so the call`s arity IS the register count and agrees with itself. A
+      // hidden struct-return pointer sets argument 0 exactly like an out-parameter does.
+      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'))).toThrow(
+        /`g` takes it at argument 0 with no declared arity accounting for the argument registers/,
+      );
+    });
+
+    test('…and a declaration supplies it, whoever declares it', () => {
+      // the project`s own header, reaching the same acceptance `memcpy` reaches through the
+      // standard-signature table
+      const withProto = decompile(
+        'f',
+        copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'),
+        ARMV4T_AGBCC,
+        {
+          prototypes: { g: { params: 3 } },
+        },
+      );
+      expect(withProto.source).toContain('u8 sp0[16];');
+    });
+
+    test('a declaration SHORTER than the registers the call sets is the struct return, and refuses', () => {
+      // two declared parameters, three argument registers set — the extra one is the hidden
+      // return pointer, which is exactly the reading the witness has to exclude
+      expect(() =>
+        decompile('f', copy('\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n'), ARMV4T_AGBCC, {
+          prototypes: { g: { params: 2 } },
+        }),
+      ).toThrow(/`g` takes it at argument 0 with no declared arity/);
+    });
+
+    test('a slot in the reserved area is not this object`s, and refuses', () => {
+      expect(() => lift(copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
+        /the slot model keys \[sp,#12\], so part of the reserved area is not this object/,
+      );
+    });
+
+    test('a second address-taken object means the reservation is not this one`s', () => {
+      const withNeighbour = '\tmov\tr3, sp\n\tstrh\tr1, [r3, #0xc]\n\tmov\tr3, sp\n\tldrh\tr4, [r3, #0xc]\n';
+      expect(() => lift(copy(withNeighbour + FILL))).toThrow(
+        /another address-taken object shares the frame, so the reservation is not this one alone/,
+      );
+    });
+
+    // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
+    // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
+    // the shape — these assert that the earlier refusal is the one that fires, so a change that
+    // relaxes one of them shows up here as a message that moved.
+    test('a computed capture declines before the extent is ever considered', () => {
+      // `off` can only be 0 for an untyped object because this is what happens to any other
+      // spelling — the clause guarding a nonzero offset is precaution, not a live rule
+      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
+        /only a plain `mov rD, sp` capture is modelled/,
+      );
+    });
+
+    test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
+      expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
+        /the captured address flows into `ret` — not an access, an escape, or a phi/,
+      );
+    });
+  });
+
   test('an object past the reserved local area declines', () => {
     // above the local area is the callee-saved block the epilogue pops, then the caller's frame
     expect(() => lift(DISJOINT)).not.toThrow();

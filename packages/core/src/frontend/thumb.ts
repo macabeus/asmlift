@@ -2004,6 +2004,10 @@ interface FrameObjectAudit {
   irBlocks: Block[];
   localArea: number;
   usedSlotOffsets: ReadonlySet<number>;
+  /** the outgoing stack-argument area the frame stages at [0, area), and whether the analysis
+   *  LICENSED that answer — a refusal also reports area 0, so the number alone proves nothing */
+  outgoingArgs: { area: number; licensed: boolean };
+  arityWitnessed: ReadonlySet<Op>;
   capturedObjectIsTheWholeFrame: boolean;
   prototypes: Prototypes;
   symbols: SymbolMap | undefined;
@@ -2027,6 +2031,8 @@ function auditFrameObjects({
   irBlocks,
   localArea,
   usedSlotOffsets,
+  outgoingArgs,
+  arityWitnessed,
   capturedObjectIsTheWholeFrame,
   prototypes,
   symbols,
@@ -2265,6 +2271,9 @@ function auditFrameObjects({
     // an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and reads as a
     // callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
+    // …and the call OPS themselves, which the arity witness keys on (a name cannot: the same
+    // callee may be called twice, declared once and guessed once).
+    const arg0Calls = new Map<number, Set<Op>>();
     for (const off of objects.keys()) {
       accesses.set(off, []);
     }
@@ -2311,6 +2320,9 @@ function auditFrameObjects({
                 const cs = arg0Callees.get(off) ?? new Set<string | null>();
                 cs.add(typeof t === 'string' ? t : null);
                 arg0Callees.set(off, cs);
+                const ops = arg0Calls.get(off) ?? new Set<Op>();
+                ops.add(op);
+                arg0Calls.set(off, ops);
               }
             } else {
               published.add(off); // written to memory — the DMA idiom's `*dmaReg = &tmp`
@@ -2405,8 +2417,76 @@ function auditFrameObjects({
       }
     };
 
-    // The declared type of each object, and then that its bytes belong to nothing else.
-    const extent = new Map<number, number>();
+    // THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
+    // `add sp, sp, #-0x10` reserves sixteen bytes; if exactly one address-taken object sits at the
+    // bottom of them, the slot model keys none of them, and no outgoing argument block is staged
+    // in them, then there is nothing else those bytes can be — a compiler does not reserve frame
+    // for nothing. That is the frame-accounting equation the escape rules below already solve word
+    // by word, asked in the other direction: they check that the objects and slots TILE the
+    // reserved area, this reads the area off as the one object's size.
+    //
+    // Returns why it does not apply, or null. Every clause refuses in its own words: the reason an
+    // acceptance did not fire is as much an attribution as the reason a lift declined, and one
+    // sentence covering all of them is how several gaps come to look like one.
+    //
+    // THREE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, and the arity
+    // witness — and each has a test that fails without it. The rest are marked where they sit.
+    const notTheWholeArea = (off: number): string | null => {
+      if (objects.size !== 1) {
+        return 'another address-taken object shares the frame, so the reservation is not this one alone';
+      }
+      if (usedSlotOffsets.size > 0) {
+        const lowest = [...usedSlotOffsets].sort((a, b) => a - b)[0];
+        return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
+      }
+      // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not take
+      // four dead lines for four live rules, and knows what would wake each one. They are kept
+      // because every one of them guards a SILENT wrong answer: storage declared over bytes the
+      // object does not own is a frame the recompile lays out differently, with no diagnostic.
+      //   • An outgoing block that is actually consumed keys its offsets as slots (the `bl` case
+      //     adds them), so the slot clause above fires first; `area` is only ever read here when
+      //     an analysis licensed a block no call used. The `licensed` half is the one that could
+      //     still fire: a refusal reports `area` 0 too, and a function with no `[sp,#k]` access
+      //     lifts with the slot model off.
+      //   • `off` is 0 for an untyped object because a capture is spelled `mov rD, sp` and
+      //     nothing else is modelled — `add rD, sp, #k` declines at the sp guard, by name.
+      //   • An address that neither accesses nor escapes already declines where the audit
+      //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
+      if (!outgoingArgs.licensed) {
+        return "this frame's outgoing stack-argument block could not be laid out, so nothing says the reserved area is locals at all";
+      }
+      if (outgoingArgs.area > 0) {
+        return `[sp,#0) to [sp,#${outgoingArgs.area}) stages outgoing stack arguments, which belong to the callee`;
+      }
+      if (off !== 0 || localArea <= 0) {
+        return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
+      }
+      if (!escaped.has(off)) {
+        return 'the address never leaves this function, so there is no writer of the storage to size it for';
+      }
+
+      const calls = arg0Calls.get(off);
+      if (calls === undefined || calls.size === 0) {
+        return 'the address is published rather than passed as an argument, and nothing declares what reads it';
+      }
+      // A hidden struct-return pointer is passed in argument 0 too, and sets one argument register
+      // MORE than the callee declares. A declaration accounting for every register the call sets
+      // is what rules that reading out; a GUESSED arity cannot, because the guess IS the register
+      // count and would only ever agree with itself.
+      const guessed = [...calls].filter((c) => !arityWitnessed.has(c));
+      if (guessed.length > 0) {
+        const names = [...new Set(guessed.map((c) => (typeof c.attrs.target === 'string' ? c.attrs.target : '?')))];
+        return (
+          `\`${names.join('`, `')}\` takes it at argument 0 with no declared arity accounting for ` +
+          'the argument registers the call sets — which is how a hidden struct-return pointer looks'
+        );
+      }
+      return null;
+    };
+
+    // The SHAPE of each object — `count` elements of `width` bytes, spanning `width * count` —
+    // and then that its bytes belong to nothing else.
+    const extent = new Map<number, { width: number; count: number }>();
     for (const [off, acc] of accesses) {
       if (acc.length === 0) {
         // An object with no access of its own has no declared type and no extent, and the two
@@ -2414,7 +2494,26 @@ function auditFrameObjects({
         // model, which one byte is enough to decide; otherwise nothing in-function pins it at
         // all, and a guessed declaration is the plausible-but-wrong class.
         failIfSlotKeysIt(off, 1);
-        fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+        const why = notTheWholeArea(off);
+        if (why !== null) {
+          fail(
+            'the captured address is never dereferenced in this function, so nothing pins the ' +
+              `local object type — and ${why}`,
+          );
+        }
+        // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
+        // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
+        // and to nothing else: `u8 name[localArea]`, unsigned bytes because no access named an
+        // element type and inventing one is the guess this refuses everywhere else.
+        //
+        // THE EXTENT IS A ROUNDED ONE, stated because it is not a defect. agbcc reserves the
+        // local area in whole words, so a source object of 13, 14, 15 or 16 bytes all reserve
+        // sixteen — compiled and diffed at the row's own flags, `u8 x[0xD]` and `u8 x[0x10]`
+        // reach the same object where `u8 x[0xC]` and `u8 x[0x11]` do not. What is declared is
+        // the RESERVATION, which is the thing the asm carries; every source extent inside one
+        // word of it emits the same object, so no member of that class is more right than this.
+        extent.set(off, { width: 1, count: localArea });
+        continue;
       }
       const widths = new Set(acc.map((a) => a.width));
       if (widths.size > 1) {
@@ -2428,21 +2527,22 @@ function auditFrameObjects({
       if (signs.size > 1) {
         fail('the loads through the captured address disagree on signedness — one declared type extends one way');
       }
-      extent.set(off, acc[0].width);
+      extent.set(off, { width: acc[0].width, count: 1 });
     }
     // Each object must own its bytes outright: inside the reserved local area, clear of every SSA
     // slot, and clear of every other object.
     const objs = [...extent].sort((x, y) => x[0] - y[0]);
-    for (const [off, width] of objs) {
-      if (off < 0 || off + width > localArea) {
-        fail(`the object at [sp,#${off}) of width ${width} lies outside the reserved local area`);
+    const span = (o: { width: number; count: number }) => o.width * o.count;
+    for (const [off, obj] of objs) {
+      if (off < 0 || off + span(obj) > localArea) {
+        fail(`the object at [sp,#${off}) of width ${span(obj)} lies outside the reserved local area`);
       }
-      failIfSlotKeysIt(off, width);
+      failIfSlotKeysIt(off, span(obj));
     }
     for (let i = 1; i < objs.length; i++) {
-      const [off, width] = objs[i];
-      const [prev, prevWidth] = objs[i - 1];
-      if (overlaps(prev, prevWidth, off, width)) {
+      const [off, obj] = objs[i];
+      const [prev, prevObj] = objs[i - 1];
+      if (overlaps(prev, span(prevObj), off, span(obj))) {
         fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
       }
     }
@@ -2581,8 +2681,8 @@ function auditFrameObjects({
     // would then have to judge.
     if (mayWrite.size > 0) {
       const accountedWords = new Set<number>();
-      for (const [off, width] of extent) {
-        for (let w = off - (off % 4); w < off + width; w += 4) {
+      for (const [off, obj] of extent) {
+        for (let w = off - (off % 4); w < off + obj.width * obj.count; w += 4) {
           accountedWords.add(w);
         }
       }
@@ -2630,10 +2730,10 @@ function auditFrameObjects({
     //
     // An object whose address never leaves the function needs no volatile and must not pay it.
     for (const [off, ops] of objects) {
-      const width = extent.get(off)!;
+      const { width, count } = extent.get(off)!;
       const signed = accesses.get(off)!.some((a) => a.signed);
       for (const op of ops) {
-        op.attrs = { ...op.attrs, width, signed, ...(published.has(off) ? { volatile: true } : {}) };
+        op.attrs = { ...op.attrs, width, signed, count, ...(published.has(off) ? { volatile: true } : {}) };
       }
     }
   }
@@ -3445,6 +3545,17 @@ export function lift(
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
+  // Calls whose ARITY IS WITNESSED: a declaration exists AND it accounts for every argument
+  // register the machine set up. Recorded here because only the lifting scan sees both halves —
+  // the declaration and the register evidence — and the frame-object audit, which needs them to
+  // tell an out-parameter from a hidden struct-return pointer, sees neither.
+  //
+  // A FACT AGAINST A GUESS, deliberately, and the error direction is what makes it safe.
+  // `fallbackArgc` is best-effort and can OVER-count (a stale reaching def in r3). The shape this
+  // witnesses against is the struct return, where the machine sets the callee's declared N
+  // registers PLUS the hidden pointer — evidence = declared + 1. So an over-count only ever
+  // withholds the witness, and never grants one that is not there.
+  const arityWitnessed = new Set<Op>();
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
   // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
@@ -4128,7 +4239,8 @@ export function lift(
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const declared = declaredCall(targetSym);
-          const argc = declared?.arity ?? fallbackArgcHere(bi);
+          const argRegsSet = fallbackArgcHere(bi);
+          const argc = declared?.arity ?? argRegsSet;
           // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
           // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
           // `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack argument can
@@ -4151,6 +4263,9 @@ export function lift(
           }
           const res = mkValue(T.unk(32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
+          if (declared !== null && declared.arity >= argRegsSet) {
+            arityWitnessed.add(callOp);
+          }
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
@@ -4243,6 +4358,8 @@ export function lift(
     irBlocks,
     localArea,
     usedSlotOffsets,
+    outgoingArgs: { area: outgoingArgs.area, licensed: outgoingArgs.blocker === null },
+    arityWitnessed,
     capturedObjectIsTheWholeFrame,
     prototypes,
     symbols,

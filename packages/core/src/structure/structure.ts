@@ -230,6 +230,17 @@ function spellsAccessType(declared: boolean | undefined, width: number, signed: 
   return typeEquals(T.int(width * 8, declared), scalarTypeForAccess(width, signed));
 }
 
+/** The declared type of a frame-local object, from the three facts its `laddr` carries: `count`
+ *  elements of `width` bytes, signed or not. ONE element is a SCALAR typed by the access every
+ *  access agreed on. More is STORAGE the frontend's frame-object audit sized without typing —
+ *  no access pins an element type there, so the audit stamps bytes and this declares the array
+ *  that spells them. Both arms are the audit's own facts; neither infers anything here. */
+function laddrType(op: Op): IrType {
+  const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
+  const count = op.attrs.count as number;
+  return count === 1 ? elem : T.array(elem, count);
+}
+
 /** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
  *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
  *  qualifier the name reintroduces changes what the compiler emits:
@@ -5904,7 +5915,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // spill, is the referee — stamp them then, and `l3/slotorder.ts` needs no change to use it.
       ...[...lastLaddrOf].map(([name, op]) => ({
         name,
-        type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+        // `count` elements of `width` bytes (ir/opcodes.ts): a scalar is one element typed by the
+        // access the machine used, and a count above 1 is storage the audit sized but no access
+        // typed, which declares as the `u8 name[count]` the frame reserved.
+        type: laddrType(op),
         // the asm materialized this slot's address, and this is how many times it
         // loaded and stored through it — both asm facts, and the gate the
         // l3/volatileval.ts variation reads (see the SFn.locals doc)
