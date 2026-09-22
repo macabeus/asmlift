@@ -19,6 +19,16 @@ import { ARMV4T_AGBCC } from '../src/target';
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC).source;
 
+/** Callers of callees whose names are members of `Object.prototype`, which a C symbol may be. */
+const objectProtoCallers = (...names: string[]) =>
+  names
+    .map((sym) =>
+      ['\t.code\t16', `\t.globl\tcalls_${sym}`, '\t.thumb_func', `calls_${sym}:`, '\tpush\t{lr}']
+        .concat([`\tbl\t${sym}`, '\tpop\t{r2}', '\tbx\tr2'])
+        .join('\n'),
+    )
+    .join('\n');
+
 describe('a register pair read as one value', () => {
   test('a 64-bit helper recovers the operation, not the call', () => {
     expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
@@ -95,6 +105,20 @@ describe('what refuses', () => {
     expect(() => decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC)).toThrow(
       /argument 1 of the call to 'sink' is the low half of a 64-bit value/,
     );
+  });
+});
+
+// A C function may be named `toString`, and both helper tables are object literals — so a bare
+// index answers with a `Function` off `Object.prototype`. The wrong answer is not a wrong value
+// here but a wrong CHANNEL: an internal TypeError out of `isWideHelper`, and on the target whose
+// table was read with `in`, a decline whose stated reason names a runtime helper that does not
+// exist. Both must be an ordinary call.
+describe('the helper table is read by name, not by prototype chain', () => {
+  test('a callee named after an Object.prototype member is an ordinary call', () => {
+    const asmOf = objectProtoCallers('toString', 'valueOf', 'hasOwnProperty', 'constructor');
+    for (const sym of ['toString', 'valueOf', 'hasOwnProperty', 'constructor']) {
+      expect(decompile(`calls_${sym}`, asmOf, ARMV4T_AGBCC).source).toContain(`${sym}(`);
+    }
   });
 });
 

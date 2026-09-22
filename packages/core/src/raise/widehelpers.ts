@@ -14,7 +14,7 @@
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
 import { Fn, mkOp } from '../ir/core';
-import { isWideHelper } from '../runtime-helpers';
+import { isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
@@ -28,7 +28,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
       if (op.opcode !== 'call') {
         continue;
       }
-      const helper = table[op.attrs.target as string];
+      const helper = lookupHelper(table, String(op.attrs.target));
       if (!helper?.op || !isWideHelper(helper)) {
         continue;
       }
@@ -71,7 +71,10 @@ export function refuseUnmodelledHelpers(fn: Fn, target: TargetDescription): bool
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
       const op = b.ops[i];
-      if (op.opcode !== 'call' || !(String(op.attrs.target) in table)) {
+      // Membership, through the table's one reader: `in` would also answer for `toString` and every
+      // other name on `Object.prototype`, and this is the refusal, so the fabricated reason would be
+      // the whole of what a caller saw.
+      if (op.opcode !== 'call' || lookupHelper(table, String(op.attrs.target)) === undefined) {
         continue;
       }
       b.ops.splice(

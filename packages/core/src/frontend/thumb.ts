@@ -29,7 +29,7 @@ import {
   protoArity,
   returnsWithoutHiddenPointer,
 } from '../proto';
-import { type RuntimeHelper, helperPrototypes, isWideHelper, wordsOf } from '../runtime-helpers';
+import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper, wordsOf } from '../runtime-helpers';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -3215,7 +3215,12 @@ export function lift(
   // reports zero on a compiler whose runtime spells them `__ll_*`.
   const helperProtos = helperPrototypes(target.runtimeHelpers);
   const wideHelper = (callee: string): RuntimeHelper | null => {
-    const h = target.runtimeHelpers?.[callee];
+    // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
+    // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
+    // `isWideHelper` to read. The `prototypes` read below needs no such guard because `protoArity`
+    // is that table's designated safe reader — it answers "nothing is declared" for an entry that
+    // is not an `FnProto`, whatever it is.
+    const h = lookupHelper(target.runtimeHelpers, callee);
     if (!h || !isWideHelper(h) || protoArity(prototypes[callee]) !== undefined) {
       return null; // not a wide helper, or the project re-declared it and its header wins
     }

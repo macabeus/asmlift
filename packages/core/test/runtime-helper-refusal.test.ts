@@ -41,4 +41,12 @@ describe('a runtime helper nothing folded is a gap, not a call', () => {
     // any of these targets, and refusing it would decline every function that calls one.
     expect(dis('f', callTo('__assert'))).toContain('__assert(');
   });
+
+  // A name on `Object.prototype` reached the table through a bare `in`, and the decline it produced
+  // named a runtime helper this target does not have. The reason a refusal gives is a claim.
+  test('a callee named after an Object.prototype member is not a runtime helper', () => {
+    for (const sym of ['toString', 'valueOf', 'hasOwnProperty', 'constructor']) {
+      expect(dis('f', callTo(sym))).toContain(`${sym}(`);
+    }
+  });
 });

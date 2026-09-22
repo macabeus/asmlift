@@ -43,6 +43,20 @@ export function wordsOf(params: readonly number[]): number {
   return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
 }
 
+/** The entry a target's table holds for `callee`, or undefined. THE ONE READER, because the table
+ *  is an object literal and a C function may be named `toString`: a bare index or an `in` answers
+ *  with a member of `Object.prototype` for eight names, and what each caller then does with that
+ *  `Function` differs — one reads `params` off it and throws a TypeError, another refuses while
+ *  naming a runtime helper the target does not have. `Object.hasOwn` is stated here so that no
+ *  caller can be the one that forgot it. (`proto.ts` states the same rule for the prototype
+ *  tables, which are read the same way for the same reason.) */
+export function lookupHelper(
+  table: Readonly<Record<string, RuntimeHelper>> | undefined,
+  callee: string,
+): RuntimeHelper | undefined {
+  return table && Object.hasOwn(table, callee) ? table[callee] : undefined;
+}
+
 /** Whether a helper computes on a value wider than a register — the ones the 64-bit representation
  *  is for, and the ones no hardware capability can make unnecessary. */
 export function isWideHelper(h: RuntimeHelper): boolean {
