@@ -528,3 +528,13 @@ repair of `arithConversionSignedness` cheaper than §3 estimates, each moves the
 spelling that reaches `MathUtil_Mul32`'s bytes falsifies §1 outright — the recipe is the table
 there, and one compile settles it. A consumer that can hold the `mul`+`mulh` pair as a value moves
 §2.1 from a relocation of the blocker to a removal of it.
+
+**One invariant the representation would be built on top of, verified on this branch.**
+`grep -n "export const CAST_WIDTHS" packages/core/src/ir/opcodes.ts` is `{8, 16}` — the extension
+widths that have a C type, every one of them NARROWER than `int` — and both `zext`/`sext` producers
+under `packages/core/src/raise/` consult it (`raise/extscale.ts` and `raise/narrow.ts`;
+`raise/narrowlocal.ts` and `raise/paramwidth.ts` gate on it as well). While every scalar is 32 bits
+that set has one job: refuse an extension with no C spelling. A 64-bit type gives it a second —
+deciding what may sit UNDER a wider access — so a producer added in the meantime that does not
+consult it is a hole this representation would sit on. The invariant holds as of `58704aba`; check
+it again rather than assume it when the ruling is made.
