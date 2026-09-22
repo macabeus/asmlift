@@ -143,7 +143,8 @@ The artifact before this one read 893 s and 510 s over one fewer synthetic row: 
 the pair reports **8 field changes over 1 row, 0 added, 0 removed**, 0 lost and **1 gained**, the fan
 unmoved at **66,932 → 66,932 (1.00×) over 901 comparable rows** with one more row priced here, and
 the ranked pass at **1.17×** — a branch that emits a call the rendered `&&`/`||` would skip at the
-position the asm ran it. Read the fan and not the seconds: the rule adds no candidate to any row, the
+position the asm ran it, and declines the function where the operand it would skip reads an object
+the map declares volatile. Read the fan and not the seconds: the rule adds no candidate to any row, the
 one row it moves had no fan at all before it (`-` → 2), and `bench diff`'s COST list is nine
 synthetic agbcc rows the earlier run had answered out of a warm store — `sizebound` 2.3 → 49.3 s,
 `dmascope` 1.4 → 34.9 s, `memscope` 0.7 → 30.6 s — which is the store and the load, not the branch.
