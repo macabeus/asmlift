@@ -27,8 +27,8 @@ test('mangled symbol, no user spec: demangle + synthesized word-field layout', (
   const r = decompile(sym, VEC_DOT_ASM, PPC_MWCC, { backend: cppBackend(spec), onGap: 'annotate' });
   expect(r.diagnostics).toEqual([]);
   expect(r.source).toBe(
-    'struct Vec { int field_0; int field_1; int dot(Vec * a); };\n' +
-      'int Vec::dot(Vec * a) {\n    return field_0 * a->field_0 + field_1 * a->field_1;\n}\n',
+    'struct Vec { int field_0; int field_1; int dot(Vec *a); };\n' +
+      'int Vec::dot(Vec *a) {\n    return field_0 * a->field_0 + field_1 * a->field_1;\n}\n',
   );
 });
 
@@ -51,7 +51,7 @@ test('user spec (the examples.ts Vec::dot JSON) reproduces the pinned ppc-cpp go
   );
   const r = decompile('dot__3VecFP3Vec', VEC_DOT_ASM, PPC_MWCC, { backend: cppBackend(spec), onGap: 'annotate' });
   expect(r.source).toBe(
-    'struct Vec { int x; int y; int dot(Vec * o); };\nint Vec::dot(Vec * o) {\n    return x * o->x + y * o->y;\n}\n',
+    'struct Vec { int x; int y; int dot(Vec *o); };\nint Vec::dot(Vec *o) {\n    return x * o->x + y * o->y;\n}\n',
   );
 });
 

@@ -14,7 +14,7 @@
 // field access. Virtual dispatch, references, and constructors/destructors are deliberately not
 // built ahead of an inhabitant.
 import { Expr, LanguageBackend, SFn } from '../l3/ast';
-import { type CppType, mangle, spellType } from '../mangle';
+import { type CppType, declareCpp, mangle, spellType } from '../mangle';
 import { LeafHook, cComment, emitCFamily } from './cfamily';
 
 export interface CppClass {
@@ -115,7 +115,7 @@ export function cppBackend(spec: CppFnSpec): LanguageBackend {
         return null;
       };
 
-      const paramList = spec.params.map((p) => `${spellType(p.type)} ${p.name}`).join(', ');
+      const paramList = spec.params.map((p) => declareCpp(p.type, p.name)).join(', ');
       const decls = classDecls(spec, paramList);
       const signature = `${spellType(spec.retType)} ${spec.cls ? spec.cls + '::' : ''}${spec.method}(${paramList})`;
       return (decls ? decls + '\n' : '') + emitCFamily(signature, fn, leaf);
@@ -140,7 +140,7 @@ function typeWidth(t: CppType): number {
 function classDecls(spec: CppFnSpec, paramList: string): string {
   const out: string[] = [];
   for (const [cname, cdef] of Object.entries(spec.classes ?? {})) {
-    const fields = cdef.fields.map((f) => `${spellType(f.type)} ${f.name};`).join(' ');
+    const fields = cdef.fields.map((f) => `${declareCpp(f.type, f.name)};`).join(' ');
     const method = cname === spec.cls ? ` ${spellType(spec.retType)} ${spec.method}(${paramList});` : '';
     out.push(`struct ${cname} { ${fields}${method} };`);
   }

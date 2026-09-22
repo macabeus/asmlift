@@ -79,7 +79,7 @@ describe('member-array recovery — the site model', () => {
   test('a trailing member takes its element count from the walking loop', () => {
     const c = emit(walk(COPY_AT_4, 5, MEMBER_AT_4));
     expect(c).toContain('struct Struct0 { u8 _pad0[4]; u16 field_4[6]; };');
-    expect(c).toContain('walk(struct Struct0 * a0, struct Struct0 * a1)');
+    expect(c).toContain('walk(struct Struct0 *a0, struct Struct0 *a1)');
     expect(c).toContain('a0->field_4[v0] = a1->field_4[v0];');
     // the cast spelling the recovery replaces is gone, and so is the member address
     expect(c).not.toContain('(u16 *)');

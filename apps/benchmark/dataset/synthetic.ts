@@ -4671,7 +4671,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //      2  …and the now-redundant inner narrowing dropped (`-(t0 & 2)` for `-(s16)(t0 & 2)`)
   //      0  the home given the NARROW type (`s16 t0 = (s16)a0;`)
   //      0  the parameter declared `s16`
-  //   Today asmlift emits the last rung itself — `void sxparam(s16 a0, s32 * a1)`, 2 candidates,
+  //   Today asmlift emits the last rung itself — `void sxparam(s16 a0, s32 *a1)`, 2 candidates,
   //   `unsigned: 0`. The NARROW parameter is recovered from the prologue extension, not handed
   //   over: dropping `--proto` leaves the same 2 candidates and the same `unsigned: 0 (match)`
   //   with `s16 a0` still declared (only the return type falls back to `s32`, which is the one
@@ -6587,19 +6587,80 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE ROW'S GATE IS ITS `proto` ENTRY, and it is load-bearing rather than inert. Measured, one
   // candidate, `[ranked] 1 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best
   // unsigned: 0 (match)`; run the same command with `--proto` dropped and the whole function
-  // declines again, at the `arg0AllDeclaredVoid` guard in `packages/core/src/frontend/thumb.ts`:
-  //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
-  //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
-  //     looks — and the callee is not declared `void`, so nothing says it does not own the storage
+  // declines again, at the `hiddenReturnPointerStands` guard in
+  // `packages/core/src/frontend/thumb.ts`:
+  //     cannot lift 'outparam': address-taken stack local — the one-word frame is never written
+  //     here, and `fill` takes it at argument 0 and nothing says what that callee returns — a
+  //     struct returned through a hidden pointer is handed this same frame
   // So a `returnsVoid` regression on this row is detectable, and the refusal survives narrowed:
-  // an undeclared or non-void callee still declines.
+  // a callee whose return nothing describes still declines.
   //
-  // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
-  // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
-  // `noncompile` for m2c: it emits `fill(&unksp0);` with no declaration of `unksp0`, the same
-  // pre-existing class already carried by `stkaddr`, `maskhome` and `dmastride`. MEASURED — m2c
-  // run with `--context` carrying THE ROW'S OWN declaration, its `src` header verbatim, and its
-  // output scored with that same context prepended:
+  // `stkext` and `stkextsret` are the same idiom one size up, where the frame is a BUFFER and no
+  // access in the function types it. Nothing dereferences the captured address, so nothing pins a
+  // TYPE; the frame reservation pins the EXTENT, and an extent is all a block copy needs. They are
+  // a two-sided pair over the one thing that separates a filled buffer from a struct-return
+  // temporary, which the asm does not say:
+  //
+  //   stkext      push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp / mov r2,#0x40 / bl memcpy
+  //   stkextsret  push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp /               bl makeblob
+  //
+  // `stkext` calls a function whose RETURN the C standard fixes — `memcpy` returns `void *`, in a
+  // register (`proto.ts` STANDARD_SIGNATURES), so there is no hidden pointer for argument 0 to be
+  // carrying and the frame is this function's: **MATCH**, one candidate. `stkextsret` calls one
+  // whose return nothing describes, and that is the whole difference — the frame is agbcc's return
+  // temporary, not a local at all. It declines:
+  //     cannot lift 'stkextsret': address-taken stack local — the captured address is never
+  //     dereferenced in this function, so nothing pins the local object type — and `makeblob`
+  //     takes it at argument 0 and nothing says what that callee returns — a struct returned
+  //     through a hidden pointer is handed this same frame
+  // THE ARGUMENT REGISTERS ARE NOT THE WITNESS, though the pair looks like they might be: three
+  // set against three declared on one side, two against one on the other. They are not, because a
+  // register already holding an incoming parameter is written by nobody — compiled,
+  // `void f(const void *a, const void *b){ struct Blob64 s = makeblob(b); }` sets exactly ONE
+  // register for a one-parameter declaration and is still a struct return. What the pair measures
+  // is a statement about the RETURN.
+  //
+  // WHICH SIDE CARRIES THE WITNESS, measured on the rows' own targets rather than read off the
+  // guard. It is `stkext`'s, and it comes from the STANDARD table rather than from anything the
+  // row says: rename its callee to `blockcopy` and the row declines in `stkextsret`'s words;
+  // declare `blockcopy` `returnsVoid` and it lifts again. `stkextsret`'s own `proto` entry is
+  // INERT for its refusal — with it, without it, and at `params: 2`, the decline is the same
+  // sentence character for character, because an arity is not a statement about a return.
+  //
+  // A CHANGE THAT MAKES `stkextsret` LIFT IS A REGRESSION, not a gain. It is the one row in this
+  // family whose DECLINE is the result, so `bench diff` reporting it gained reads as progress and
+  // is the opposite: nothing in the asm tells this frame from `stkext`'s, so whatever accepts it
+  // accepts a callee's own storage declared as a local.
+  //
+  // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
+  // witness rather than of who was told what: the pair differs in the ASM, not in the context.
+  // Not symmetrically, and the asymmetry is asmlift's to carry: m2c's `ctx` spells the RETURN
+  // (`struct Blob64 makeblob(const void *);`) and `FnProto` cannot spell a struct return at all,
+  // so asmlift is told strictly less about the one fact the pair turns on. Told it, m2c uses it —
+  // its published `stkextsret` source is `makeblob(/* return */ &sp0, &gBlob);`.
+  //
+  // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
+  // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128
+  // bytes, agbcc emits `bl memcpy` at EVERY size, with the declaration present or absent: the
+  // builtin does not expand a `memcpy` CALL inline here at all. The inline `ldmia`/`stmia`
+  // expansion belongs to a DIFFERENT construct — a struct ASSIGNMENT (`struct S b = gS;`), which
+  // agbcc moves in registers at 4 and 8 bytes, expands inline at 16 and 32, and turns into
+  // `bl memcpy` at 64.
+  //
+  // WHAT IS LOAD-BEARING IS ON THE OTHER SIDE OF THE PAIR, and its threshold is ONE WORD.
+  // Compiled: a 4-byte struct comes back from `makeblob` in r0 with no frame reserved at all,
+  // while 8, 16 and 64 each reserve the frame and hand its address over at argument 0. So the
+  // shape `stkextsret` is about needs a struct larger than a word and nothing more; 64 is simply
+  // the size the PAIR shares, so that its two targets differ in the call and in nothing else.
+  //
+  // THE m2c SIDE. Every row here but `outparam` is `declined` for m2c on its OWN self-reported
+  // gap — it emits `extern ? gTbl;`, or `extern ? gBlob;` on the two extent rows, and the
+  // `? placeholder` is what the classifier reads. `outparam` is the exception in the other
+  // direction: read off the artifact, m2c MATCHES it at score 0. The out-parameter idiom is one
+  // m2c already spells byte-exactly, so nothing in that row's m2c column is a handicap.
+  // MEASURED over the six array rows — m2c run with `--context` carrying THE ROW'S OWN
+  // declaration, its `src` header verbatim, and its output scored with that same context
+  // prepended:
   //
   //   harr      `return (u32) gTbl[i];`                          score 0, MATCH
   //   arrbias   `return (u32) (gTbl + 1)[i];`                    score 0, MATCH
@@ -6709,6 +6770,39 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void fill(s32 *p); s32 outparam(void);',
     proto: { fill: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'stkext',
+    // The size is not doing work here — agbcc emits `bl memcpy` at every size from 1 to 128 at
+    // these flags (family comment above). Sixty-four is the size `stkextsret` needs, and the two
+    // rows share it so their targets differ in the call alone.
+    //
+    // THE THIRD PARAMETER IS `unsigned long`, which is what agbcc's builtin declares: spelling it
+    // `u32` makes every build of this target emit `warning: conflicting types for built-in
+    // function 'memcpy'`. Compiled both ways, the object is identical — the warning is the whole
+    // difference.
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gBlob[64];\n' +
+      'void stkext(void){ u8 b[64]; memcpy(&b[0], gBlob, sizeof b); }',
+    features: ['stack-addr'],
+    toolchains: ['agbcc'],
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nvoid stkext(void);',
+  },
+  {
+    sym: 'stkextsret',
+    // NO `stack-addr` TAG, and that is the floor holding rather than an omission: the tag's floor
+    // is the `&`, and this source never writes one. The address is taken by the ABI, not by the
+    // programmer — which is exactly the thing that makes the row hard.
+    src:
+      'struct Blob64 { u32 w[16]; };\nextern struct Blob64 makeblob(const void *);\n' +
+      'extern const u8 gBlob[64];\nvoid stkextsret(void){ struct Blob64 b = makeblob(gBlob); }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'struct Blob64 { u32 w[16]; };\nstruct Blob64 makeblob(const void *);\nvoid stkextsret(void);',
+    // REQUIRED BY THE ctx/proto SYMMETRY GATE — the `ctx` declares `makeblob`, so asmlift is
+    // handed the arity too. INERT for the refusal, which turns on the unknown RETURN and is the
+    // same sentence with the entry, without it, and at a different arity (family comment above).
+    proto: { makeblob: { params: 1 } },
   },
 
   // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════

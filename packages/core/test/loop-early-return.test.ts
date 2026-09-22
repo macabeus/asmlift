@@ -51,9 +51,9 @@ const STRCMP_EARLY_RETURN = `fn strcmpearly {
 
 test('a body `if` whose arm returns joins at the loop, not at the merged epilogue', () => {
   expect(emit(STRCMP_EARLY_RETURN)).toBe(
-    's32 strcmpearly(u8 * a0, u8 * a1) {\n' +
-      '    u8 * v0;\n' +
-      '    u8 * v1;\n' +
+    's32 strcmpearly(u8 *a0, u8 *a1) {\n' +
+      '    u8 *v0;\n' +
+      '    u8 *v1;\n' +
       '    s32 v2;\n' +
       '    v0 = a0;\n' +
       '    v1 = a1;\n' +
@@ -123,7 +123,7 @@ const SCAN_RETURN_HIT = `fn findstore {
 
 test('an arm reading a loop-computed value is not a post-loop read of it', () => {
   expect(emit(SCAN_RETURN_HIT)).toBe(
-    's32 findstore(s32 * a0, s32 a1) {\n' +
+    's32 findstore(s32 *a0, s32 a1) {\n' +
       '    s32 v0;\n' +
       '    s32 v1;\n' +
       '    v0 = 0;\n' +
@@ -197,7 +197,7 @@ test('a conditional-latch arm stores the value the IR read, not the updated one'
   // The update moves into the arm that does NOT return: reaching the returning one means this
   // iteration ended there, so the increment it would have run never happens.
   expect(emit(LATCH_ARM_STORE)).toBe(
-    's32 latcharm(s32 * a0) {\n' +
+    's32 latcharm(s32 *a0) {\n' +
       '    s32 v0;\n' +
       '    s32 v1;\n' +
       '    v0 = 0;\n' +

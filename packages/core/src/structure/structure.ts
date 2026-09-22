@@ -230,6 +230,17 @@ function spellsAccessType(declared: boolean | undefined, width: number, signed: 
   return typeEquals(T.int(width * 8, declared), scalarTypeForAccess(width, signed));
 }
 
+/** The declared type of a frame-local object, from the three facts its `laddr` carries: `count`
+ *  elements of `width` bytes, signed or not. ONE element is a SCALAR typed by the access every
+ *  access agreed on. More is STORAGE the frontend's frame-object audit sized without typing —
+ *  no access pins an element type there, so the audit stamps bytes and this declares the array
+ *  that spells them. Both arms are the audit's own facts; neither infers anything here. */
+function laddrType(op: Op): IrType {
+  const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
+  const count = op.attrs.count as number;
+  return count === 1 ? elem : T.array(elem, count);
+}
+
 /** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
  *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
  *  qualifier the name reintroduces changes what the compiler emits:
@@ -3749,7 +3760,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (d.opcode === 'laddr') {
       // gaddr's local twin: the address of the frame-local object the Thumb frontend PROVED
       // (frame-object audit — width/signed are stamped machine facts). The NAME is this layer's:
-      // see laddrName. Renders `&sp0`; the object itself is declared in `locals`.
+      // see laddrName. Renders `&sp0`; the object itself is declared in `locals`, and an ARRAY
+      // one renders by decay, which the C printer reads off that declaration.
       return { k: 'addr', name: laddrName.get(d)! };
     }
     if (d.opcode === 'undef') {
@@ -5904,7 +5916,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // spill, is the referee — stamp them then, and `l3/slotorder.ts` needs no change to use it.
       ...[...lastLaddrOf].map(([name, op]) => ({
         name,
-        type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+        type: laddrType(op),
         // the asm materialized this slot's address, and this is how many times it
         // loaded and stored through it — both asm facts, and the gate the
         // l3/volatileval.ts variation reads (see the SFn.locals doc)

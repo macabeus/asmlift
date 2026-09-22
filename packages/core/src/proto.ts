@@ -66,6 +66,64 @@ export function protoArity(p: FnProto | undefined): number | undefined {
   return undefined;
 }
 
+/** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
+ *  prototype is a lower bound assembled from whatever a header extraction could read, and omits
+ *  what it could not. The standard omits nothing, so the RETURN is spelled here and is required —
+ *  it is the fact `returnsWithoutHiddenPointer` needs and the fact no header ever supplied. */
+interface StandardSignature extends FnProto {
+  /** the return type, as its C spelling (`"void *"`, `"u32"`, `"void"`) */
+  returns: ParamType;
+}
+
+/** Signatures FIXED BY THE C STANDARD, so they are not a project fact and need no header to be
+ *  known. Consumed by a frontend's arity lookup behind both the caller-supplied prototype and the
+ *  compiler's own runtime helpers (raise/softdiv.ts) — a project that declares one of these wins,
+ *  because a decomp may legitimately be building against its own re-declaration.
+ *
+ *  WHAT AN ENTRY BUYS, which is not the same as what it changes: the arity a call recovers is
+ *  usually the same number the arg-register heuristic already guessed, so an entry moves no code.
+ *  What it moves is what is KNOWN — a guess cannot witness anything, and an entry can. The
+ *  frame-object audit reads the `returns` of one to rule out a hidden struct-return pointer
+ *  (`returnsWithoutHiddenPointer`, consumed in frontend/thumb.ts).
+ *
+ *  THE LIST IS SHORT ON PURPOSE. `memcpy` is here because a corpus row exercises it and its price
+ *  was measured. `memset`, `strcpy` and the rest of the standard library are equally fixed by the
+ *  standard and equally addable, and they are absent because nothing measures them — a table
+ *  grown by appetite would be a table nobody priced. */
+export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
+  memcpy: { params: ['void *', 'const void *', 'u32'], returns: 'void *' },
+};
+
+/** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
+ *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
+ *  whose return travels in a register. Every other answer — including silence — is `false`,
+ *  because this is a fact a caller must be TOLD: the two frames are the same instructions in the
+ *  same order, so there is nothing in the assembly to read it off.
+ *
+ *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
+ *  disagree: `returnsVoid` from the project's own headers, and the `returns` of a signature the C
+ *  standard fixes, which is as known as its parameters. That a project may re-declare a standard
+ *  function differently is real and is why `declaredCall` ranks the two for ARITY — but a
+ *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
+ *
+ *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
+ *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The
+ *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
+ *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
+ *  here, and a raw TypeError would leave through neither the decline channel nor anything a
+ *  caller can act on. Every other reader of this table — `protoArity`, and `declaredCall`
+ *  through it — answers "nothing is declared" for such an entry, and so does this. */
+export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
+  if (Object.hasOwn(prototypes, callee) && prototypes[callee]?.returnsVoid === true) {
+    return true;
+  }
+  if (!Object.hasOwn(STANDARD_SIGNATURES, callee)) {
+    return false;
+  }
+  const t = STANDARD_SIGNATURES[callee].returns.trim();
+  return t === 'void' || declaredWidth(t) !== undefined;
+}
+
 /** Bit width per C89 base type on every target asmlift lifts (all ILP32). `long` is 32 here and
  *  would not be on an LP64 host, so it is a target fact rather than a language one. */
 const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([

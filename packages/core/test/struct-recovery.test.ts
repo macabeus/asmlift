@@ -48,7 +48,7 @@ describe('struct recovery — access-pattern evidence discriminator', () => {
     // The base is typed `struct Struct0 *`, the struct is declared, and both accesses are named
     // by offset — `a0[0]`/`a0[1]` never appear.
     expect(c).toContain('struct Struct0 { s8 field_0; s32 field_4; };');
-    expect(c).toContain('mix(struct Struct0 * a0)');
+    expect(c).toContain('mix(struct Struct0 *a0)');
     expect(c).toContain('a0->field_0 + a0->field_4');
     expect(c).not.toContain('a0[');
   });

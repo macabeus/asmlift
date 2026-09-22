@@ -27,7 +27,7 @@ function liftBoth(sym: string, thumbC: string, mipsC: string) {
 describe('backend seam is ISA-neutral: same access → identical C and Pascal from Thumb & MIPS', () => {
   test('pointer deref (*p / p^)', () => {
     const { c, pascal } = liftBoth('nderef', 'int nderef(int *p){ return *p; }', 'int nderef(int *p){ return *p; }');
-    expect(c.thumb).toBe('s32 nderef(s32 * a0) {\n    return *a0;\n}\n');
+    expect(c.thumb).toBe('s32 nderef(s32 *a0) {\n    return *a0;\n}\n');
     expect(c.mips).toBe(c.thumb); // C identical across ISAs
     expect(pascal.thumb).toBe('function nderef(a0: ^Integer): Integer;\nbegin\n  nderef := a0^;\nend;\n');
     expect(pascal.mips).toBe(pascal.thumb); // Pascal identical across ISAs
@@ -40,7 +40,7 @@ describe('backend seam is ISA-neutral: same access → identical C and Pascal fr
       `${S} int nfield(struct S *s){ return s->c; }`,
       `${S} int nfield(struct S *s){ return s->c; }`,
     );
-    expect(c.thumb).toBe('s32 nfield(s32 * a0) {\n    return a0[2];\n}\n');
+    expect(c.thumb).toBe('s32 nfield(s32 *a0) {\n    return a0[2];\n}\n');
     expect(c.mips).toBe(c.thumb);
     // NB: this Pascal (`a0[2]`) is emit-only — upas rejects bare-pointer indexing (see
     // mips-memory.test.ts). The seam still lowers it identically from both ISAs, which is the

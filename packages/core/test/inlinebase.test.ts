@@ -319,7 +319,7 @@ const ereaderCandidates = (): ReturnType<typeof enumerateCandidates> =>
 
 test('the default keeps the pointer local — the pool load is a fact, the name is not', () => {
   const plain = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned')!;
-  expect(plain.source).toContain('u16 * v0;');
+  expect(plain.source).toContain('u16 *v0;');
   expect(plain.source).toContain('v0 = (u16 *)67109384;');
 });
 

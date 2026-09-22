@@ -45,6 +45,10 @@ export type Expr =
   // and `(&gSym)[i]` as `gSym[i]` (a global name decays to a pointer). Only a genuinely
   // address-TAKEN global (passed by address, `&gSym` as a call arg) prints the `&` form. The
   // global's type comes from the project headers, so it is never declared as a local.
+  //
+  // An ARRAY's address is spelled by the bare name, and that is a fact of C's declarator grammar
+  // rather than of the address — so the C printer decides it from the name's declared type, and
+  // this node carries nothing about it (backend/cfamily.ts, `case 'addr'`).
   | { k: 'addr'; name: string }
   // A memory access `base[idx]` (printed `*base` when idx is the constant 0), CARRYING the
   // access's element width (bytes) and signedness. `idx` counts elements of `width` bytes.

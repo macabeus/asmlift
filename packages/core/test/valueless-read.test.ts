@@ -117,7 +117,7 @@ test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is 
   // truncated body is replaced by confident-looking C that computes a table index and discards it.
   expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;']);
   // …and the reason stated is the one that HOLDS. Widen the same EWRAM address to the three-store
-  // shape and `/volatile` mints `volatile s32 * p0;` over it — at EWRAM, exactly as at a device
+  // shape and `/volatile` mints `volatile s32 *p0;` over it — at EWRAM, exactly as at a device
   // register. So a REACHABILITY argument would admit ordinary RAM; only the EVIDENCE question
   // refuses it.
   const wide =
@@ -125,7 +125,7 @@ test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is 
     '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
     pool('0x02000100');
   const vol = enumerateCandidates('f', wide, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).filter((c) =>
-    /volatile s32 \* p0;/.test(c.source),
+    /volatile s32 \*p0;/.test(c.source),
   );
   expect(vol.length).toBeGreaterThan(0);
   expect(body(lift(wide, true)).some((l) => /^p0\[2\];$/.test(l))).toBe(false);
@@ -209,7 +209,7 @@ test('a map-declared VOLATILE register reached through a CAST refuses — the sp
     volatile: true,
   };
   expect(body(lift(asm, true, new Map([[0x040000d4, [reg]]])))).toEqual([
-    's32 * p0;',
+    's32 *p0;',
     'p0 = (s32 *)&REG_DMA3SAD;',
     '*p0 = 1;',
     'p0[1] = 1;',
@@ -273,7 +273,7 @@ test('the `/volatile` candidate carries the read through a qualified pointer loc
   const vol = cands.filter((c) => hasVariation(c.variations, 'volatile') && !hasVariation(c.variations, 'vol-store'));
   expect(vol.length).toBeGreaterThan(0);
   for (const c of vol) {
-    expect(c.source).toMatch(/volatile s32 \* p0;/);
+    expect(c.source).toMatch(/volatile s32 \*p0;/);
     expect(c.source).toMatch(/^\s*p0\[2\];$/m);
   }
 });

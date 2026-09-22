@@ -152,7 +152,7 @@ export const FIXTURES: DecompFixture[] = [
     referenceC: 'void g(int); void baseacrosscalls(void){ int *p=(int*)0x30056d0; g(p[1]); g(p[0]); g(p[2]); }',
     prototypes: { baseacrosscalls: { returnsVoid: true }, g: { params: 1 } },
     expectSource:
-      'void baseacrosscalls(void) {\n    s32 * v0;\n    v0 = (s32 *)50353872;\n' +
+      'void baseacrosscalls(void) {\n    s32 *v0;\n    v0 = (s32 *)50353872;\n' +
       '    g(v0[1]);\n    g(*v0);\n    g(v0[2]);\n}\n',
     note: 'const base live ACROSS calls — materialized into a local (the callee-saved register the compiler keeps it in), not re-inlined per use. A const NOT live across a call (small init immediate) must stay inlined — see sum_to.',
   },
@@ -161,14 +161,14 @@ export const FIXTURES: DecompFixture[] = [
     // the word load, and the zero-offset access prints as `*a0`.
     symbol: 'deref',
     referenceC: 'int deref(int *p){ return *p; }',
-    expectSource: 's32 deref(s32 * a0) {\n    return *a0;\n}\n',
+    expectSource: 's32 deref(s32 *a0) {\n    return *a0;\n}\n',
     note: 'memory — pointer load (*p)',
   },
   {
     // A struct-field / array load at a non-zero word offset: `ldr r0, [r0, #0x8]` → `a0[2]`.
     symbol: 'field',
     referenceC: 'struct S{ int a; int b; int c; }; int field(struct S *s){ return s->c; }',
-    expectSource: 's32 field(s32 * a0) {\n    return a0[2];\n}\n',
+    expectSource: 's32 field(s32 *a0) {\n    return a0[2];\n}\n',
     note: 'memory — word load at offset 8 (a0[2])',
   },
   {
@@ -176,7 +176,7 @@ export const FIXTURES: DecompFixture[] = [
     // offset scales by 1 → `a0[2]`.
     symbol: 'byte',
     referenceC: 'int byte(unsigned char *p){ return p[2]; }',
-    expectSource: 's32 byte(u8 * a0) {\n    return a0[2];\n}\n',
+    expectSource: 's32 byte(u8 *a0) {\n    return a0[2];\n}\n',
     note: 'memory — byte load, width-scaled offset (u8 *)',
   },
   {
@@ -185,7 +185,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'setp',
     referenceC: 'void setp(int *p, int v){ *p = v; }',
     prototypes: { setp: { returnsVoid: true } },
-    expectSource: 'void setp(s32 * a0, s32 a1) {\n    *a0 = a1;\n}\n',
+    expectSource: 'void setp(s32 *a0, s32 a1) {\n    *a0 = a1;\n}\n',
     note: 'memory — pointer store, void function',
   },
   {
@@ -193,7 +193,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'fieldw',
     referenceC: 'struct S{ int a; int b; }; void fieldw(struct S *s, int v){ s->b = v; }',
     prototypes: { fieldw: { returnsVoid: true } },
-    expectSource: 'void fieldw(s32 * a0, s32 a1) {\n    a0[1] = a1;\n}\n',
+    expectSource: 'void fieldw(s32 *a0, s32 a1) {\n    a0[1] = a1;\n}\n',
     note: 'memory — word store at offset 4 (a0[1])',
   },
   {
@@ -202,7 +202,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'rmw',
     referenceC: 'struct S{ int a; int b; }; void rmw(struct S *s){ s->a += s->b; }',
     prototypes: { rmw: { returnsVoid: true } },
-    expectSource: 'void rmw(s32 * a0) {\n    *a0 = *a0 + a0[1];\n}\n',
+    expectSource: 'void rmw(s32 *a0) {\n    *a0 = *a0 + a0[1];\n}\n',
     note: 'memory — read-modify-write (two loads + store)',
   },
 
@@ -619,8 +619,8 @@ export const FIXTURES: DecompFixture[] = [
     prototypes: { dmafill: { returnsVoid: true } },
     candidatePrelude: 'extern volatile unsigned int gDmaSrc;\n',
     expectSource:
-      'void dmafill(u16 * a0, s32 a1) {\n' +
-      '    u16 * v0;\n' +
+      'void dmafill(u16 *a0, s32 a1) {\n' +
+      '    u16 *v0;\n' +
       '    s32 v1;\n' +
       '    volatile u16 sp0;\n' +
       // `v1 = a1` (the count, which agbcc never copies — `n` stays in r1) ahead of `v0 = a0` (a real

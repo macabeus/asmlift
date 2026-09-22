@@ -27,6 +27,7 @@
 // themselves — a callee a row declares to m2c in its own `ctx` and not to asmlift — and that
 // comparison lives in the test, on `declaredFunctionNames` below.
 import { demangledName } from '@asmlift/core/mangle';
+import { STANDARD_SIGNATURES, declaredWidth } from '@asmlift/core/proto';
 import type { Prototypes } from '@asmlift/core/proto';
 
 import type { RealFunction } from './manifests';
@@ -369,6 +370,29 @@ export function declaredFunctionNames(ctx: string): string[] {
   return [...ctx.matchAll(/\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*;/g)]
     .map((m) => m[1])
     .filter((n) => !TYPE_KEYWORDS.has(n) && !STATEMENT_KEYWORDS.has(n) && !n.startsWith('__') && n !== 'typedef');
+}
+
+/** Does a hand-written context declare `name` the way the C standard fixes it? Only asked of a
+ *  name in `STANDARD_SIGNATURES`, and only to decide whether that name is a PER-ROW claim: a row
+ *  declaring `memcpy` as the standard does tells m2c nothing asmlift does not already know, and a
+ *  row declaring some other function of that name tells it something asmlift is never told.
+ *
+ *  The two facts compared are the two asmlift reads from the table — the ARITY, and whether the
+ *  return travels in a register — and nothing else. A spelling comparison would be a C type
+ *  parser and would fail on `unsigned long` against `u32`, which name one width. `true` for a
+ *  name the context does not declare at all: there is no claim to disagree with. */
+export function standardSignatureAgrees(ctx: string, name: string): boolean {
+  const std = STANDARD_SIGNATURES[name];
+  const m = new RegExp(`([A-Za-z_][\\w\\s*]*?)\\b${name}\\s*\\(([^;{}]*)\\)\\s*;`).exec(ctx);
+  if (std === undefined || m === null) {
+    return true;
+  }
+  const args = m[2].trim();
+  const arity = args === '' || args === 'void' ? 0 : args.split(',').length;
+  const ret = m[1].trim().replace(/\s+/g, ' ');
+  const inRegister = (t: string) => t === 'void' || declaredWidth(t) !== undefined;
+  const declaredArity = Array.isArray(std.params) ? std.params.length : std.params;
+  return (declaredArity === undefined || arity === declaredArity) && inRegister(ret) === inRegister(std.returns);
 }
 
 /** The compiled signature of `sym`, or the reason there is no oracle for it. Both tiers: the real

@@ -306,6 +306,13 @@ export function makeSsaBuilder(
     // separately declared SCALARS; intra-aggregate offsets are fixed by the aggregate's layout at
     // expand time.
     //
+    // A FORM OF THAT RECOVERY EXISTS, and what keeps the condition unmet is a guard in another
+    // file. The Thumb frame-object audit declares an untyped frame object as `u8 name[N]` from
+    // the reservation (`notTheWholeArea`, frontend/thumb.ts), but only where the slot model keys
+    // NOTHING in the reserved area — so no reload spill can share a frame with one of those
+    // arrays and nothing here is ever asked to order the two. Widening that arm to a frame
+    // carrying slots is what meets the condition, and it has to bring `l3/slotorder.ts` with it.
+    //
     // UNION, not a choice (ir/core.ts `SlotHomes`): whether the earlier declaration rank is the
     // lower or the higher offset is a per-COMPILER fact, and this builder is handed a name, a
     // block count, a predecessor list and a live-in model — no target. `l3/slotorder.ts` reduces.

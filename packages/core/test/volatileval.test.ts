@@ -147,7 +147,7 @@ test('one machine load rendered as two reads declines — the same rule, other d
 test('a frame object whose address escapes the direct form carries no counts', () => {
   const fn = parse(`fn f {
 ^bb0(%0: s32*):
-  %1: u16* = laddr {off=0, width=2, signed=false}
+  %1: u16* = laddr {off=0, width=2, signed=false, count=1}
   %2: u16 = const {value=5}
   store %1, %2 {off=0, width=2, signed=false}
   store %0, %1 {off=0, width=4, signed=false}

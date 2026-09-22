@@ -134,10 +134,17 @@ export const OPCODES = {
   // proving every access agrees, and the structurer declares the local and renders `&name` exactly
   // as it renders a gaddr's `&sym`. Operand-free and pure, so GVN numbers it like gaddr and a dead
   // one is reaped.
-  // `width`/`signed` are stamped by the frontend's frame-object AUDIT — requiring them makes
-  // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
-  // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
-  laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
+  // `width`/`signed`/`count` are stamped by the frontend's frame-object AUDIT — requiring them
+  // makes "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits
+  // a laddr and skips the audit fails verify loudly instead of rendering `&undefined`. The SHAPE
+  // the three of them encode is checked there too (ir/verify.ts), because the attrs are
+  // disjunctive and only `count` tells the two arms apart.
+  // The object is `count` elements of `width` bytes, so its storage spans `width * count`. A
+  // SCALAR is count 1, typed by the access width and signedness every access agreed on. Count
+  // above 1 is STORAGE the audit sized without typing — no access pins an element type, so it is
+  // width 1, unsigned, and declares as `u8 name[count]`; nothing else may mint one, because the
+  // only thing that licenses an untyped object is the frame accounting the audit solves.
+  laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed', 'count'] },
   // An UNDEFINED value: a read of storage that carries no INPUT — nothing was entitled to hand this
   // function a value there, and none of its own stores reached it on this path. Deliberately NOT
   // "storage nobody could have written": a callee-saved register holds the CALLER's value at entry,

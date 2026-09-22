@@ -253,7 +253,7 @@ describe('audit regressions: pool symbols, register ranges, layout, crashes', ()
   });
   test('ldmia {r1-r3} expands to three loads, not one phantom register', () => {
     const asm = '	thumb_func_start lm\nlm:\n	ldmia r0!, {r1-r3}\n	adds r1, r1, r2\n	adds r1, r1, r3\n	mov r0, r1\n	bx lr\n';
-    expect(d('lm', asm).source).toBe('s32 lm(s32 * a0) {\n    return *a0 + a0[1] + a0[2];\n}\n');
+    expect(d('lm', asm).source).toBe('s32 lm(s32 *a0) {\n    return *a0 + a0[1] + a0[2];\n}\n');
   });
 
   // pc/r15 as a data base (a pc-relative load that escapes the layout rewrite) declines, never

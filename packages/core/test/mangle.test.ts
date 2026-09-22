@@ -5,7 +5,7 @@
 // will align to the target.
 import { describe, expect, test } from 'vitest';
 
-import { type CppSig, demangle, demangledName, mangle, spellType } from '../src/mangle';
+import { type CppSig, declareCpp, demangle, demangledName, mangle, spellType } from '../src/mangle';
 
 // sym ↔ signature, golden from real mwcceppc output where noted.
 const CASES: { sym: string; sig: CppSig; note: string }[] = [
@@ -93,6 +93,15 @@ test('spellType spells pointers and builtins for C++ source', () => {
   expect(spellType({ base: 'Vec', ptr: 1 })).toBe('Vec *');
   expect(spellType({ base: 'int', ptr: 0 })).toBe('int');
   expect(spellType({ base: 'unsigned int', ptr: 0 })).toBe('unsigned int');
+});
+
+// A DECLARATION is a declarator, in C++ as in C: the `*` binds to the name, not to the type. The
+// positions that declare — the parameter list and the class fields — go through this, so a C++
+// function cannot spell `unsigned short * a1` in its signature and `u16 *v1` in its body.
+test('declareCpp binds a pointer`s star to the name', () => {
+  expect(declareCpp({ base: 'Vec', ptr: 1 }, 'p')).toBe('Vec *p');
+  expect(declareCpp({ base: 'unsigned short', ptr: 2 }, 'a1')).toBe('unsigned short **a1');
+  expect(declareCpp({ base: 'int', ptr: 0 }, 'x')).toBe('int x');
 });
 
 test('demangledName reads the source name of a real CodeWarrior symbol, including what demangle refuses', () => {

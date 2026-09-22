@@ -21,7 +21,14 @@
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type FnProto, type Prototypes, declaredWidth, protoArity } from '../proto';
+import {
+  type FnProto,
+  type Prototypes,
+  STANDARD_SIGNATURES,
+  declaredWidth,
+  protoArity,
+  returnsWithoutHiddenPointer,
+} from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -2004,6 +2011,9 @@ interface FrameObjectAudit {
   irBlocks: Block[];
   localArea: number;
   usedSlotOffsets: ReadonlySet<number>;
+  /** the outgoing stack-argument area the frame stages at [0, area) — the bottom of the reserved
+   *  area, which is where an untyped object claims to start */
+  outgoingArea: number;
   capturedObjectIsTheWholeFrame: boolean;
   prototypes: Prototypes;
   symbols: SymbolMap | undefined;
@@ -2011,15 +2021,15 @@ interface FrameObjectAudit {
 }
 
 /** FRAME-OBJECT AUDIT. Every `laddr` the frontend emitted is only a CLAIM that the address it
- *  names is used as "the address of one scalar local"; this proves it, over the finished function,
+ *  names is used as "the address of one local object"; this proves it, over the finished function,
  *  the same boundary-total style as the slot-escape assert in finish(). The address may flow
  *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
  *  MEMORY access through it must be at offset 0, with one agreed width and one agreed extension,
  *  its bytes must belong to nothing else in the frame, and any use the audit cannot vouch for declines the whole function
- *  loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
- *  used.
+ *  loudly. Nothing here guesses: a scalar's declared type is exactly the access type the machine
+ *  used, and an object NO access reaches is sized by the frame reservation and left untyped.
  *
- *  Takes its inputs explicitly rather than closing over `lift`. All eight are READ, none is
+ *  Takes its inputs explicitly rather than closing over `lift`. Every one of them is READ, none is
  *  reassigned, and the only mutation is to the ops reachable through `irBlocks` — the widths,
  *  signedness and `volatile` this stamps onto each surviving `laddr`. */
 function auditFrameObjects({
@@ -2027,6 +2037,7 @@ function auditFrameObjects({
   irBlocks,
   localArea,
   usedSlotOffsets,
+  outgoingArea,
   capturedObjectIsTheWholeFrame,
   prototypes,
   symbols,
@@ -2255,15 +2266,13 @@ function auditFrameObjects({
     // `volatile` at the stamp keys on. Reading either off `escaped` gets the other one wrong.
     const passedToCallee = new Set<number>();
     const published = new Set<number>();
-    // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
-    // struct-return pointer can occupy. A `call`'s operand index IS the argument index here (the
-    // `bl` arm reads r0..r<argc-1> in order), so an address handed over at r1 or above is an
-    // argument the source wrote.
-    const passedAboveArg0 = new Set<number>();
-    // …and WHICH CALLEE took it at argument 0, because that callee's declared RETURN TYPE is the
-    // one fact that tells an out-parameter from a hidden struct return. `null` is the narrowing of
-    // an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and reads as a
-    // callee nothing can be declared about, so it refuses.
+    // …and WHICH CALLEE took it at ARGUMENT 0, because that is the one position a hidden
+    // struct-return pointer can occupy and that callee's declared RETURN TYPE is the one fact that
+    // tells an out-parameter from one. A `call`'s operand index IS the argument index here (the
+    // `bl` arm reads r0..r<argc-1> in order), so an address that appears in no entry of this map
+    // was handed over at r1 or above every time — an argument the source wrote. `null` is the
+    // narrowing of an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and
+    // reads as a callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
     for (const off of objects.keys()) {
       accesses.set(off, []);
@@ -2304,9 +2313,7 @@ function auditFrameObjects({
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
-              if (idx > 0) {
-                passedAboveArg0.add(off);
-              } else {
+              if (idx === 0) {
                 const t = op.attrs.target;
                 const cs = arg0Callees.get(off) ?? new Set<string | null>();
                 cs.add(typeof t === 'string' ? t : null);
@@ -2341,20 +2348,37 @@ function auditFrameObjects({
     // sp,#-4 / mov r0,sp / bl mk / ldr r0,[sp]`, instruction for instruction an out-parameter
     // call. Left alone that lifted as `mk(&sp0, a0)` — a call the real prototype rejects.
     //
-    // THREE facts rule it out and any one will do, because a return temp is storage the CALLEE
-    // owns outright: it is written only by the callee, its pointer is argument 0, always
-    // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
-    // up), and the callee RETURNS the struct. So a store of our own says the object is one this
-    // function fills; an address handed over at r1 or above says the same by position; and a
-    // callee the project declares `void` says it by the ABI — a function that returns nothing has
-    // no hidden return pointer to be given, whatever sits in r0.
+    // TWO facts rule it out and either will do, because a return temp is storage the CALLEE owns
+    // outright: it is written only by the callee, and the callee RETURNS the struct THROUGH IT.
+    // So a store of our own says the object is one this function fills; and a callee whose RETURN
+    // is known to need no hidden pointer says the same by the ABI — a function that returns
+    // nothing, or returns in a register, has no such pointer to be given, whatever sits in r0.
+    //
+    // AND THE QUESTION IS PER-CALL, which is what bounds how far it has to be asked: the pointer
+    // is argument 0, always (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all
+    // three real arguments up), so an address NO call takes at argument 0 cannot be one, whatever
+    // else the function does with it. That is the whole of `hiddenReturnPointerStands` below and
+    // it is why the block-copy idiom `memcpy(dst, buf, sizeof buf)` — buffer at argument 1 — needs
+    // no declaration at all. Per-call and not per-object: an address handed over at argument 1
+    // somewhere leaves the call that takes it at argument 0 exactly as ambiguous as before, so
+    // position acquits a call rather than an object.
     //
     // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
-    // switches off on something other than the instruction stream. `FnProto.returnsVoid` is the
-    // project's own header fact, arriving through the same table whose `params` this file already
-    // trusts to decide a call's arity. It is asked of EVERY callee that took the address at
-    // argument 0, because the object gets one decision: one callee undeclared or declared
-    // non-void leaves the ambiguity standing and the refusal fires.
+    // switches off on something other than the instruction stream. `returnsWithoutHiddenPointer`
+    // (proto.ts) is where it is answered, from the project's own `returnsVoid` or from the
+    // `returns` of a signature the C standard fixes — the same table whose `params` this file
+    // already trusts to decide a call's arity. It is asked of EVERY callee that took the address
+    // at argument 0, because the object gets one decision: one callee about whose return nothing
+    // is known leaves the ambiguity standing and the refusal fires.
+    //
+    // AN ARITY CANNOT ANSWER IT, which is worth saying because the count is right there and looks
+    // like evidence: a hidden pointer does set one argument register more than the callee
+    // declares, but the register count is what the machine WROTE, and a register already holding
+    // this function's own incoming parameter is written by nobody. Compiled: `void f(const void
+    // *a, const void *b){ struct Blob64 s = makeblob(b); }` emits `add sp,#-0x40 / mov r0,sp /
+    // bl makeblob` — one written register against one declared parameter — so counting registers
+    // reads a real struct return as an out-parameter and declares the callee's own storage as a
+    // local. The question is about the RETURN and only a statement about the return decides it.
     //
     // WHAT IT COSTS WHEN THE DECLARATION IS WRONG, measured rather than compared. On the `sret`
     // shape above, with `mk` (which really returns `struct S4`) declared `params: 1,
@@ -2368,15 +2392,29 @@ function auditFrameObjects({
     // same instructions in the same order, the slot is read back at a scalar width in both, and
     // in both the value read back is what the function returns — so an asm-side corroboration
     // would be a rule with no discriminating input. The mitigation is that under-declaring is the
-    // safe direction (an undeclared or non-void callee still declines) and that `FnProto` says
-    // so at the field.
+    // safe direction (a callee whose return nothing describes still declines) and that `FnProto`
+    // says so at the field.
     //
     // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
     // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
     // still declines with it.
-    const arg0AllDeclaredVoid = (off: number): boolean => {
+    //
+    // ONE SOURCE FOR THE DECISION AND ITS REASON, because both arms of this audit ask it and a
+    // predicate beside a message is two things that can disagree. Returns why the pointer is not
+    // ruled out — the caller frames it for its own arm — or null.
+    const hiddenReturnPointerStands = (off: number): string | null => {
       const cs = arg0Callees.get(off);
-      return cs !== undefined && cs.size > 0 && [...cs].every((c) => c !== null && prototypes[c]?.returnsVoid === true);
+      if (cs === undefined || cs.size === 0) {
+        return null;
+      }
+      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
+      if (unknown.length === 0) {
+        return null;
+      }
+      return (
+        `\`${unknown.map((c) => c ?? '?').join('`, `')}\` takes it at argument 0 and nothing says ` +
+        'what that callee returns — a struct returned through a hidden pointer is handed this same frame'
+      );
     };
     if (capturedObjectIsTheWholeFrame) {
       if (!passedToCallee.has(0)) {
@@ -2385,22 +2423,115 @@ function auditFrameObjects({
             'no call in the lifted function takes it — so nothing rules out an outgoing stack argument at [sp,#0]',
         );
       }
-      if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0) && !arg0AllDeclaredVoid(0)) {
-        fail(
-          'the one-word frame is handed to a callee as argument 0 and never written here, which ' +
-            'is how a hidden struct-return pointer looks — and the callee is not declared `void`, so ' +
-            'nothing says it does not own the storage',
-        );
+      const writtenHere = accesses.get(0)?.some((a) => !a.isLoad) === true;
+      const whyItStands = writtenHere ? null : hiddenReturnPointerStands(0);
+      if (whyItStands !== null) {
+        fail(`the one-word frame is never written here, and ${whyItStands}`);
       }
     }
 
-    // The declared type of each object, and then that its bytes belong to nothing else.
-    const extent = new Map<number, number>();
+    // TWO MODELS FOR ONE BYTE is a silent disagreement: the slot model keeps an SSA slot in a
+    // register, so a store through an object over the same bytes would never be seen there.
+    const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+    const failIfSlotKeysIt = (off: number, width: number): void => {
+      for (const slot of usedSlotOffsets) {
+        if (overlaps(off, width, slot, 4)) {
+          fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
+        }
+      }
+    };
+
+    // THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
+    // `add sp, sp, #-0x10` reserves sixteen bytes; if exactly one address-taken object sits at the
+    // bottom of them, the slot model keys none of them, and no outgoing argument block is staged
+    // in them, then there is nothing else those bytes can be — a compiler does not reserve frame
+    // for nothing. That is the frame-accounting equation the escape rules below already solve word
+    // by word, asked in the other direction: they check that the objects and slots TILE the
+    // reserved area, this reads the area off as the one object's size.
+    //
+    // Returns why it does not apply, or null. Every clause refuses in its own words: the reason an
+    // acceptance did not fire is as much an attribution as the reason a lift declined, and one
+    // sentence covering all of them is how several gaps come to look like one.
+    //
+    // FOUR CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an address that
+    // reaches memory rather than a callee, and the callee's declared return — and each has a test
+    // that fails without it. The precautionary ones are marked where they sit.
+    const notTheWholeArea = (off: number): string | null => {
+      if (objects.size !== 1) {
+        return 'another address-taken object shares the frame, so the reservation is not this one alone';
+      }
+      if (usedSlotOffsets.size > 0) {
+        const lowest = [...usedSlotOffsets].sort((a, b) => a - b)[0];
+        return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
+      }
+      // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not read
+      // three dead lines as live rules, and knows what would wake each one. They are kept
+      // because every one of them guards a SILENT wrong answer: storage declared over bytes the
+      // object does not own is a frame the recompile lays out differently, with no diagnostic.
+      //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
+      //     object claims to start, and neither way in reaches: a block stored on every path keys
+      //     its offsets as slots at the call, so the slot clause above fires first, and a block
+      //     NOT stored on every path is `analyzeOutgoingArgs`'s own blocker, which turns the slot
+      //     model OFF — and no untyped object survives that, because every `laddr` mint is behind
+      //     `slotsOk`. The second half is also why nothing here asks whether the analysis LICENSED
+      //     the block: an `laddr` exists only in a function where it did, by construction.
+      //   • `off` is 0 for an untyped object because a capture is spelled `mov rD, sp` and
+      //     nothing else is modelled — `add rD, sp, #k` declines at the sp guard, by name.
+      //   • An address that neither accesses nor escapes already declines where the audit
+      //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
+      if (outgoingArea > 0) {
+        return `[sp,#0) to [sp,#${outgoingArea}) stages outgoing stack arguments, which belong to the callee`;
+      }
+      if (off !== 0 || localArea <= 0) {
+        return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
+      }
+      if (!escaped.has(off)) {
+        return 'the address never leaves this function, so there is no writer of the storage to size it for';
+      }
+      if (!passedToCallee.has(off)) {
+        return 'the address is published rather than passed as an argument, and nothing declares what reads it';
+      }
+      // The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question
+      // is the one the one-word arm asks, asked here of the same callees.
+      return hiddenReturnPointerStands(off);
+    };
+
+    // The SHAPE of each object — `count` elements of `width` bytes, spanning `width * count` —
+    // and then that its bytes belong to nothing else.
+    const extent = new Map<number, { width: number; count: number }>();
     for (const [off, acc] of accesses) {
       if (acc.length === 0) {
-        // nothing in-function pins the object's type, and a guessed declaration is the
-        // plausible-but-wrong class — decline until an inhabitant needs this
-        fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+        // An object with no access of its own has no declared type and no extent, and the two
+        // ways it gets there are two different gaps. Its bytes may already be keyed by the slot
+        // model, which one byte is enough to decide; otherwise nothing in-function pins it at
+        // all, and a guessed declaration is the plausible-but-wrong class.
+        failIfSlotKeysIt(off, 1);
+        const why = notTheWholeArea(off);
+        if (why !== null) {
+          fail(
+            'the captured address is never dereferenced in this function, so nothing pins the ' +
+              `local object type — and ${why}`,
+          );
+        }
+        // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
+        // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
+        // and to nothing else: `u8 name[localArea]`, unsigned bytes because no access named an
+        // element type and inventing one is the guess this refuses everywhere else.
+        //
+        // THE EXTENT IS A ROUNDED ONE, stated because it is not a defect. agbcc reserves the
+        // local area in whole words, so a source object of 13, 14, 15 or 16 bytes all reserve
+        // sixteen — compiled and diffed at the row's own flags, `u8 x[0xD]` and `u8 x[0x10]`
+        // reach the same object where `u8 x[0xC]` and `u8 x[0x11]` do not. What is declared is
+        // the RESERVATION, which is the thing the asm carries; every source extent inside one
+        // word of it emits the same object, so no member of that class is more right than this.
+        //
+        // NO COMPILER TERM, unlike `capturedObjectIsTheWholeFrame`, whose one-word reading is a
+        // fact about what agbcc puts in a four-byte frame. This argument needs only that the
+        // reservation ROUNDS UP to some granularity, which is a property of every stack ABI, and
+        // it declares the reservation rather than a guess inside it — so a coarser rounding makes
+        // the declared extent coarser too, never wrong about the bytes the machine reserved.
+        extent.set(off, { width: 1, count: localArea });
+        continue;
       }
       const widths = new Set(acc.map((a) => a.width));
       if (widths.size > 1) {
@@ -2414,28 +2545,22 @@ function auditFrameObjects({
       if (signs.size > 1) {
         fail('the loads through the captured address disagree on signedness — one declared type extends one way');
       }
-      extent.set(off, acc[0].width);
+      extent.set(off, { width: acc[0].width, count: 1 });
     }
-    // TWO MODELS FOR ONE BYTE is a silent disagreement, so each object must own its bytes
-    // outright: inside the reserved local area, clear of every SSA slot (which the slot model
-    // keeps in registers, so a store through the object would not be seen there), and clear of
-    // every other object.
-    const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+    // Each object must own its bytes outright: inside the reserved local area, clear of every SSA
+    // slot, and clear of every other object.
     const objs = [...extent].sort((x, y) => x[0] - y[0]);
-    for (const [off, width] of objs) {
-      if (off < 0 || off + width > localArea) {
-        fail(`the object at [sp,#${off}) of width ${width} lies outside the reserved local area`);
+    const span = (o: { width: number; count: number }) => o.width * o.count;
+    for (const [off, obj] of objs) {
+      if (off < 0 || off + span(obj) > localArea) {
+        fail(`the object at [sp,#${off}) of width ${span(obj)} lies outside the reserved local area`);
       }
-      for (const slot of usedSlotOffsets) {
-        if (overlaps(off, width, slot, 4)) {
-          fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
-        }
-      }
+      failIfSlotKeysIt(off, span(obj));
     }
     for (let i = 1; i < objs.length; i++) {
-      const [off, width] = objs[i];
-      const [prev, prevWidth] = objs[i - 1];
-      if (overlaps(prev, prevWidth, off, width)) {
+      const [off, obj] = objs[i];
+      const [prev, prevObj] = objs[i - 1];
+      if (overlaps(prev, span(prevObj), off, span(obj))) {
         fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
       }
     }
@@ -2572,10 +2697,16 @@ function auditFrameObjects({
     // cannot be built here at all — the second access that would reach it is a `[+4]` the
     // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
     // would then have to judge.
+    //
+    // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
+    // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
+    // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
+    // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
+    // that reaches memory rather than a callee, and the callee's declared return.
     if (mayWrite.size > 0) {
       const accountedWords = new Set<number>();
-      for (const [off, width] of extent) {
-        for (let w = off - (off % 4); w < off + width; w += 4) {
+      for (const [off, obj] of extent) {
+        for (let w = off - (off % 4); w < off + obj.width * obj.count; w += 4) {
           accountedWords.add(w);
         }
       }
@@ -2622,11 +2753,18 @@ function auditFrameObjects({
     // dropping the qualifier here cannot cost a store.
     //
     // An object whose address never leaves the function needs no volatile and must not pay it.
+    //
+    // AN UNTYPED OBJECT REACHES THIS RULE TOO, where the address is both published and handed to
+    // a callee whose return is declared. It cannot pay the price above — that price is a read the
+    // compiler may no longer fold, and an object with no access in this function has none —
+    // compiled at the corpus's flags, the qualified and plain spellings are byte-identical and
+    // differ in two `discards qualifiers` warnings. So the rule is the same rule, and the reason
+    // it is free here is not the reason it is free on a scalar read once.
     for (const [off, ops] of objects) {
-      const width = extent.get(off)!;
+      const { width, count } = extent.get(off)!;
       const signed = accesses.get(off)!.some((a) => a.signed);
       for (const op of ops) {
-        op.attrs = { ...op.attrs, width, signed, ...(published.has(off) ? { volatile: true } : {}) };
+        op.attrs = { ...op.attrs, width, signed, count, ...(published.has(off) ? { volatile: true } : {}) };
       }
     }
   }
@@ -3366,8 +3504,14 @@ export function lift(
   const declaredCall = (
     callee: string,
   ): { arity: number; block: readonly number[] | null; wide: string | null } | null => {
+    // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
+    // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
+    // last two wins — it may be building against its own re-declaration.
     const own = prototypes[callee];
-    const proto = protoArity(own) !== undefined ? own : RUNTIME_HELPERS[callee];
+    // `Object.hasOwn` on both tables: a callee named `toString` or `valueOf` would otherwise read
+    // a `Function` off `Object.prototype` as its prototype entry.
+    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+    const proto = protoArity(own) !== undefined ? own : (known(RUNTIME_HELPERS) ?? known(STANDARD_SIGNATURES));
     const arity = protoArity(proto);
     if (arity === undefined) {
       return null;
@@ -4226,13 +4370,14 @@ export function lift(
 
   ssa.finish();
 
-  // Prove every `laddr` this function emitted really does name one scalar local, or decline
-  // (auditFrameObjects).
+  // Prove every `laddr` this function emitted really does name storage of this function's own, at
+  // a shape the machine states, or decline (auditFrameObjects).
   auditFrameObjects({
     name,
     irBlocks,
     localArea,
     usedSlotOffsets,
+    outgoingArea: outgoingArgs.area,
     capturedObjectIsTheWholeFrame,
     prototypes,
     symbols,

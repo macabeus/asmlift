@@ -56,9 +56,7 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     // `u16` and not `s16`: `ldrh` zero-extends, so that IS the type the machine used. No
     // `volatile` — the address never leaves the function, so nothing outside can observe a store
     // and the object must not pay volatile's codegen.
-    expect(lift(SPILL).source).toBe(
-      's32 f(u16 * a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n',
-    );
+    expect(lift(SPILL).source).toBe('s32 f(u16 *a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n');
   });
 
   test('accesses in different blocks name ONE object', () => {
@@ -237,6 +235,25 @@ describe('the audit judges each frame object on its own bytes', () => {
     );
   });
 
+  // An object with NO access of its own has no declared type and no extent — but the two ways it
+  // gets there are two different gaps, and one refusal for both makes them look like one.
+  test('an unpinned object over a byte the slot model already keys names the double model', () => {
+    // the word-slot model keeps [sp,#0] in a register, and the capture publishes the same
+    // address. The storage is keyed twice, and that is decidable from the object's FIRST BYTE
+    // alone — an extent it does not have is not needed to see the disagreement.
+    expect(() => lift(DISJOINT)).not.toThrow();
+    expect(() => lift(frame('\tstr\tr0, [sp]\n\tldr\tr2, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r2\n'))).toThrow(
+      /overlaps the SSA slot at \[sp,#0\] — one byte, two models/,
+    );
+  });
+
+  test('an unpinned object with no slot beneath it is unpinned, and says only that', () => {
+    expect(() => lift(DISJOINT)).not.toThrow();
+    expect(() => lift(frame('\tmov\tr0, sp\n\tbl\tg\n'))).toThrow(
+      /the captured address is never dereferenced in this function/,
+    );
+  });
+
   test('two objects sharing a byte decline', () => {
     // a word at [sp,#0] and a halfword at [sp,#2] are two declared locals over the same storage
     expect(() => lift(DISJOINT)).not.toThrow();
@@ -248,6 +265,178 @@ describe('the audit judges each frame object on its own bytes', () => {
         ),
       ),
     ).toThrow(/overlap — one byte, two models/);
+  });
+
+  // THE RESERVATION AS AN EXTENT. An object with no access of its own is untyped, but a frame
+  // reserved for it alone still says how many BYTES it is — and bytes are all a block copy needs.
+  // Every refusal below runs the accepted fixture first, so a decline for an unrelated reason
+  // cannot read as a pass.
+  describe('a frame reserved for one untyped object is that object`s extent', () => {
+    // `memcpy(sp, a0, 16)` over a 16-byte frame: the buffer is filled by the callee and never read
+    // here, so no access in this function types it. agbcc's own shape for `u8 b[0x10];
+    // memcpy(b, src, sizeof b);`.
+    const copy = (body: string, reserve = '0x10') =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-${reserve}\n${body}\tadd\tsp, sp, #${reserve}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const FILL = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n';
+
+    test('the reservation is the declared extent, and it declares as an array', () => {
+      expect(lift(copy(FILL)).source).toBe('s32 f(s32 a0) {\n    u8 sp0[16];\n    return memcpy(sp0, a0, 16);\n}\n');
+    });
+
+    test('the extent follows the reservation, not the copy length', () => {
+      // the `mov r2, #0x10` is an ARGUMENT, not evidence about the object — a 32-byte frame
+      // copied into for 16 bytes is still a 32-byte object
+      expect(lift(copy(FILL, '0x20')).source).toContain('u8 sp0[32];');
+    });
+
+    const CALL_G = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tg\n';
+
+    test('an undeclared callee is no witness: nothing says what it returns', () => {
+      // a hidden struct-return pointer occupies argument 0 exactly like an out-parameter does,
+      // and `g` is a callee nothing has said anything about
+      expect(() => lift(copy(CALL_G))).toThrow(/`g` takes it at argument 0 and nothing says what that callee returns/);
+    });
+
+    test('…and the project`s own `returnsVoid` supplies it', () => {
+      // the same acceptance `memcpy` reaches through the standard-signature table, reached here
+      // through a header instead
+      const withProto = decompile('f', copy(CALL_G), ARMV4T_AGBCC, {
+        prototypes: { g: { params: 3, returnsVoid: true } },
+      });
+      expect(withProto.source).toContain('u8 sp0[16];');
+    });
+
+    test('an ARITY is not a statement about the return, and does not witness', () => {
+      // three declared parameters against the three argument registers the call sets: the count
+      // agrees exactly, and it still says nothing about whether `g` returns through a pointer
+      expect(() => decompile('f', copy(CALL_G), ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } })).toThrow(
+        /`g` takes it at argument 0 and nothing says what that callee returns/,
+      );
+    });
+
+    test('the argument registers a call WROTE cannot witness it — a pass-through parameter is written by nobody', () => {
+      // agbcc's own output for `void f(const void *a, const void *b){ struct Blob64 s =
+      // makeblob(b); }`: the callee's declared argument arrives in r1 already, so the only
+      // register the function writes is the hidden return pointer in r0. One written register
+      // against one declared parameter — a count that agrees while the frame is the CALLEE's.
+      expect(() =>
+        decompile(
+          'f',
+          'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tmov\tr0, sp\n\tbl\tmakeblob\n' +
+            '\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n',
+          ARMV4T_AGBCC,
+          { prototypes: { makeblob: { params: 1 } } },
+        ),
+      ).toThrow(/`makeblob` takes it at argument 0 and nothing says what that callee returns/);
+    });
+
+    // WHERE THE ADDRESS WENT ACQUITS A CALL, not an object. A hidden return pointer is argument 0
+    // and nothing else, so a call that took the buffer at argument 1 cannot be one whatever it
+    // returns — and a second call that took it at argument 0 is left exactly as ambiguous.
+    test('a buffer handed over at argument 1 needs no statement about the return', () => {
+      // `void f(void *dst){ u8 b[0x10]; g(dst, b, sizeof b); }`. `g` is declared with an arity and
+      // nothing else: three parameters place the buffer at argument 1, and what `g` returns stays
+      // unsaid because no hidden pointer is ever passed there.
+      const atArg1 = copy('\tmov\tr1, sp\n\tmov\tr2, #0x10\n\tbl\tg\n');
+      expect(decompile('f', atArg1, ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } }).source).toContain(
+        'u8 sp0[16];',
+      );
+    });
+
+    test('…and a second call taking it at argument 0 is still unaccounted for', () => {
+      const alsoAtArg0 = copy('\tmov\tr1, sp\n\tmov\tr2, #0x10\n\tbl\tg\n\tmov\tr0, sp\n\tbl\th\n');
+      expect(() => decompile('f', alsoAtArg0, ARMV4T_AGBCC, { prototypes: { g: { params: 3 } } })).toThrow(
+        /`h` takes it at argument 0 and nothing says what that callee returns/,
+      );
+    });
+
+    test('an address that only reaches memory says so, and is not called an argument', () => {
+      // published to a global and handed to no callee: nothing declares what reads it, which is a
+      // different gap from a callee whose return is unknown, and reads as a different refusal
+      const published =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tldr\tr3, .L2\n\tmov\tr2, sp\n\tstr\tr2, [r3]\n' +
+        '\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\tgPtr\n';
+      expect(() => lift(published)).toThrow(/the address is published rather than passed as an argument/);
+    });
+
+    test('a ONE-WORD frame reaches the extent rule through both arms, and declares its bytes', () => {
+      // the reserved area is one word, so `capturedObjectIsTheWholeFrame` holds AND the object
+      // has no access of its own — the two arms ask the same question of the same callee and the
+      // answer has to be the same one. What it declares is the RESERVATION, not the declared
+      // parameter's pointee: a declared width vetoes and never pins (proto.ts `ParamType`).
+      const oneWord =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tfill\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      // the one-word arm asks first, so ITS refusal is the one that fires — the same fact, named
+      // at the earlier site
+      expect(() => decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'] } } })).toThrow(
+        /the one-word frame is never written here, and `fill` takes it at argument 0/,
+      );
+      expect(
+        decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { fill: { params: ['s32 *'], returnsVoid: true } } })
+          .source,
+      ).toContain('u8 sp0[4];');
+    });
+
+    test('an array object`s address is spelled by DECAY, not by `&`', () => {
+      // `&sp0` on `u8 sp0[16]` is a `u8 (*)[16]` — the same byte at a type every typed pointer
+      // parameter rejects. Compiled at the corpus's agbcc flags, `fill(&sp0)` against
+      // `void fill(u8 *)` warns `passing arg 1 of 'fill' from incompatible pointer type` and
+      // `fill(sp0)` does not, and the two objects are byte-identical — so the `&` buys the
+      // diagnostic and nothing else. A SCALAR still takes it: `&sp0` is the only spelling there.
+      expect(lift(copy(FILL)).source).toContain('memcpy(sp0, a0, 16)');
+      // the SCALAR control, one letter of asm apart: a store of its own types the object, so it
+      // declares as `s32 sp0` and `&` is the only spelling of its address
+      const typed = copy('\tmov\tr3, sp\n\tstr\tr0, [r3]\n\tmov\tr0, sp\n\tbl\tg\n', '0x4');
+      expect(lift(typed).source).toContain('g(&sp0)');
+    });
+
+    test('an object that is BOTH published and passed keeps the published spelling', () => {
+      // `volatile` keys on PUBLICATION, and an untyped object reaches that rule too: the address
+      // goes to a global AND to a callee whose return is declared, so the extent arm accepts and
+      // the qualifier lands on an array. It cannot pay volatile's codegen here — the rule's cost
+      // is a read the compiler may no longer fold, and this object has no access at all in the
+      // function (compiled at the corpus's agbcc flags, the volatile and plain spellings produce
+      // BYTE-IDENTICAL objects; the difference is two `discards qualifiers` warnings).
+      const publishedAndPassed =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tldr\tr3, .L2\n\tmov\tr2, sp\n\tstr\tr2, [r3]\n' +
+        '\tmov\tr0, sp\n\tbl\tvf\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\tgPtr\n';
+      expect(
+        decompile('f', publishedAndPassed, ARMV4T_AGBCC, { prototypes: { vf: { params: 1, returnsVoid: true } } })
+          .source,
+      ).toContain('volatile u8 sp0[16];');
+    });
+
+    test('a slot in the reserved area is not this object`s, and refuses', () => {
+      expect(() => lift(copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
+        /the slot model keys \[sp,#12\], so part of the reserved area is not this object/,
+      );
+    });
+
+    test('a second address-taken object means the reservation is not this one`s', () => {
+      const withNeighbour = '\tmov\tr3, sp\n\tstrh\tr1, [r3, #0xc]\n\tmov\tr3, sp\n\tldrh\tr4, [r3, #0xc]\n';
+      expect(() => lift(copy(withNeighbour + FILL))).toThrow(
+        /another address-taken object shares the frame, so the reservation is not this one alone/,
+      );
+    });
+
+    // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
+    // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
+    // the shape — these assert that the earlier refusal is the one that fires, so a change that
+    // relaxes one of them shows up here as a message that moved.
+    test('a computed capture declines before the extent is ever considered', () => {
+      // `off` can only be 0 for an untyped object because this is what happens to any other
+      // spelling — the clause guarding a nonzero offset is precaution, not a live rule
+      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
+        /only a plain `mov rD, sp` capture is modelled/,
+      );
+    });
+
+    test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
+      expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
+        /the captured address flows into `ret` — not an access, an escape, or a phi/,
+      );
+    });
   });
 
   test('an object past the reserved local area declines', () => {

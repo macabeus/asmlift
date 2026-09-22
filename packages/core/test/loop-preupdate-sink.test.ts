@@ -85,9 +85,9 @@ test('guard-fused `while`: the trailing copy moves into the body, seeded for the
   // `v1 = &head` before the loop is the seed the fusion would otherwise lose: the guard is gone,
   // so a zero-trip run would reach `return v1[1]` with nothing having assigned v1.
   expect(emit(TRAILING_PTR)).toBe(
-    's32 trailingptr(s32 * a0) {\n' +
-      '    s32 * v0;\n' +
-      '    s32 * v1;\n' +
+    's32 trailingptr(s32 *a0) {\n' +
+      '    s32 *v0;\n' +
+      '    s32 *v1;\n' +
       '    v1 = (s32 *)&head;\n' +
       '    for (v0 = (s32 *)&head; a0 != v0; v0 = (s32 *)*v0) {\n' +
       '        v1 = v0;\n' +
@@ -219,8 +219,8 @@ test('a trailing copy into an existing name needs no seed', () => {
   );
   expect(NAMED_HEAD).not.toBe(TRAILING_PTR);
   expect(emit(NAMED_HEAD)).toBe(
-    's32 trailingptr(s32 * a0, s32 * a1) {\n' +
-      '    s32 * v0;\n' +
+    's32 trailingptr(s32 *a0, s32 *a1) {\n' +
+      '    s32 *v0;\n' +
       '    for (v0 = a1; a0 != v0; v0 = (s32 *)*v0) {\n' +
       '        a1 = v0;\n' +
       '    }\n' +

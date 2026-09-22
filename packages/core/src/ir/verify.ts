@@ -104,6 +104,25 @@ export function verify(fn: Fn): void {
           if (!isTerm && op.successors.length) {
             throw new VerifyError(`non-terminator '${op.opcode}' has successors`);
           }
+          // `laddr` carries two shapes in one set of attrs and `count` is the only thing telling
+          // them apart: one element is a SCALAR typed by the accesses the frame-object audit read
+          // off the machine, and more than one is STORAGE that audit sized without typing, whose
+          // width and signedness are therefore not an access at all. The structurer declares the
+          // second as `u8 name[count]`, so a typed element there would be a type nothing pinned —
+          // the exact answer the audit refuses to invent. (One BYTE encodes like a real `u8`
+          // scalar either way; the declaration is the same one, so nothing has to tell them apart.)
+          if (op.opcode === 'laddr') {
+            const count = op.attrs.count;
+            if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) {
+              throw new VerifyError(`'laddr' count must be a positive integer, got ${String(count)}`);
+            }
+            if (count > 1 && (op.attrs.width !== 1 || op.attrs.signed !== false)) {
+              throw new VerifyError(
+                `'laddr' of ${count} elements is storage no access typed, so it must be unsigned bytes — ` +
+                  `got width ${String(op.attrs.width)}, signed ${String(op.attrs.signed)}`,
+              );
+            }
+          }
           for (const k of sig.requiredAttrs ?? []) {
             if (!(k in op.attrs)) {
               throw new VerifyError(`'${op.opcode}' missing required attr '${k}'`);

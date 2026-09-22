@@ -74,7 +74,7 @@ test('a STORE in a nullified slot is performed on the taken path ALONE', () => {
       '1c:\tnop',
     ),
   ).toBe(
-    's32 f(s32 * a0, s32 a1) {\n    if (a1 == 0) {\n        return 1;\n    } else {\n        *a0 = a1;\n        return 2;\n    }\n}\n',
+    's32 f(s32 *a0, s32 a1) {\n    if (a1 == 0) {\n        return 1;\n    } else {\n        *a0 = a1;\n        return 2;\n    }\n}\n',
   );
 });
 
@@ -90,7 +90,7 @@ test('a LOAD in a nullified slot does not happen on the not-taken path', () => {
       '18:\tnop',
     ),
   ).toBe(
-    's32 f(s32 a0, s32 * a1) {\n    if (a0 != 0) {\n        return 7;\n    } else {\n        return *a1;\n    }\n}\n',
+    's32 f(s32 a0, s32 *a1) {\n    if (a0 != 0) {\n        return 7;\n    } else {\n        return *a1;\n    }\n}\n',
   );
 });
 

@@ -411,7 +411,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // whatever the registers happen to hold.
     const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
     expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
-      's32 f(u8 * a0, u8 * a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
+      's32 f(u8 *a0, u8 *a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
     );
     // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
     // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved
@@ -1222,9 +1222,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tbl\tuse2\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(/hidden struct-return pointer/);
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(
+        /a struct returned through a hidden pointer is handed this same frame/,
+      );
       expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } })).toThrow(
-        /hidden struct-return pointer/,
+        /a struct returned through a hidden pointer is handed this same frame/,
       );
       // CONTROLS, one per fact. A store of OURS before the call is an in-out parameter no struct
       // return can be…
@@ -1241,24 +1243,27 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(decompile('f', outAtArg2, ARMV4T_AGBCC, { prototypes: { mk: { params: 3 } } }).source).toContain('&sp0');
       // …and the THIRD fact, which is the only one that reads a DECLARATION rather than the
-      // function's own instructions: a callee the project declares `void` returns nothing, so it
-      // has no hidden return pointer to be given whatever sits in r0. The bytes are identical
-      // either way — that is the whole difficulty — so the header is what separates them, arriving
-      // through the same table whose `params` this frontend already trusts for arity.
+      // function's own instructions: a callee known to return nothing, or to return in a
+      // register, has no hidden return pointer to be given whatever sits in r0. The bytes are
+      // identical either way — that is the whole difficulty — so the header is what separates
+      // them, arriving through the same table whose `params` this frontend already trusts for
+      // arity.
       expect(
         decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes: { mk: { params: 2, returnsVoid: true } } }).source,
       ).toContain('mk(&sp0');
     });
 
-    // The refusal SURVIVES, narrowed: only a callee the project actually declared `void` gets past
-    // it, and every callee that took the address at argument 0 has to be one.
-    test('the void discriminator is a declaration, and everything short of one still refuses', () => {
+    // The refusal SURVIVES, narrowed: only a callee whose RETURN is described gets past it, and
+    // every callee that took the address at argument 0 has to be one.
+    test('the return discriminator is a declaration, and everything short of one still refuses', () => {
       const oneWordReturn =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tbl\tuse2\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       const declines = (prototypes: Record<string, { params?: number; returnsVoid?: boolean }>) =>
-        expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes })).toThrow(/not declared `void`/);
+        expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes })).toThrow(
+          /nothing says what that callee returns/,
+        );
       declines({});
       declines({ mk: { params: 2 } });
       declines({ mk: { params: 2, returnsVoid: false } });
@@ -1282,7 +1287,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
       // Told the truth (or told nothing), it declines — the guard doing its job.
       expect(() => decompile('sret', realStructReturn, ARMV4T_AGBCC, { prototypes: {} })).toThrow(
-        /not declared `void`/,
+        /nothing says what that callee returns/,
       );
       // Told that `mk` returns nothing, it believes the manifest and models the callee's own
       // storage as this function's local. The argument goes too, because the same entry fixes the
@@ -1295,9 +1300,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(wrong).not.toContain('mk(&sp0, a0)');
     });
 
-    // TWO callees at argument 0 and only one declared: the ambiguity stands for the object, so the
-    // whole lift refuses. The rule is per OBJECT, not per call — one register file, one decision.
-    test('every callee that took the address at argument 0 must be declared void', () => {
+    // TWO callees at argument 0 and only one declared: position acquits a CALL, but a call that
+    // took the address at argument 0 is acquitted only by its return — so one undescribed callee
+    // leaves the object ambiguous and the whole lift refuses.
+    test('every callee that took the address at argument 0 must have its return described', () => {
       const twoCallees =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tfill\n' +
         '\tmov\tr0, sp\n\tbl\tmk\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
@@ -1305,7 +1311,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         decompile('f', twoCallees, ARMV4T_AGBCC, {
           prototypes: { fill: { params: 1, returnsVoid: true }, mk: { params: 1 } },
         }),
-      ).toThrow(/not declared `void`/);
+      ).toThrow(/nothing says what that callee returns/);
       // …and with BOTH declared it lifts
       expect(
         decompile('f', twoCallees, ARMV4T_AGBCC, {

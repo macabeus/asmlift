@@ -178,7 +178,17 @@ export function demangledName(sym: string): string | null {
   return null;
 }
 
-/** Spell a CppType as C++ source (`Vec *`, `unsigned int`). */
+/** Spell a CppType as C++ source where no declarator is involved — a return type, a cast
+ *  (`Vec *`, `unsigned int`). */
 export function spellType(t: CppType): string {
   return t.base + (t.ptr ? ' ' + '*'.repeat(t.ptr) : '');
+}
+
+/** Declare a name of a CppType, C declarator rules: a pointer binds its `*` to the declarator
+ *  (`Vec *p`), everything else is the prefix `spellType name`. The C-family backend's `cDeclare`
+ *  says the same of an `IrType`; C++ has its own type vocabulary (`CppType`, from the mangled
+ *  name) and so needs its own declarator, or one function spells its pointers two ways — the type
+ *  prefix in the parameter list and the declarator form in the body. */
+export function declareCpp(t: CppType, name: string): string {
+  return t.ptr > 0 ? `${t.base} ${'*'.repeat(t.ptr)}${name}` : `${t.base} ${name}`;
 }

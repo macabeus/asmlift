@@ -83,7 +83,7 @@ export function cType(t: IrType): string {
  *  the prefix `cType name`. A NESTED array spells every extent after the name in declaration
  *  order (`u8 unk8[6][8]`) — one declarator, not an element type that is itself an array, which
  *  C has no syntax for and `cType` marks ill-formed as a prefix. */
-function cDeclare(t: IrType, name: string): string {
+export function cDeclare(t: IrType, name: string): string {
   if (t.kind === 'array') {
     const extents: number[] = [];
     let e: IrType = t;
@@ -229,8 +229,20 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     case 'const':
       return String(e.value);
     case 'addr': {
-      // `&gSym` — the address of a named global. A prefix operator; parenthesizes under a POSTFIX
-      // parent like the other prefix forms.
+      // `&gSym` — the address of a named global or of a frame-local object. A prefix operator;
+      // parenthesizes under a POSTFIX parent like the other prefix forms.
+      //
+      // AN ARRAY DECAYS INSTEAD, and the declared type is what says so, which is why the decision
+      // is here rather than on the node: `&` on `u8 sp0[16]` spells a `u8 (*)[16]` — a different
+      // type for the same byte, which every typed pointer parameter rejects (`passing arg 1 from
+      // incompatible pointer type`) — where the bare name is the `u8 *` the machine produced.
+      // Compiled both ways, the object is identical, so the `&` buys a diagnostic and nothing
+      // else. An identifier binds tighter than every parent, so the decayed form never
+      // parenthesizes. A name this env cannot type keeps the `&`: an unknown shape is not an
+      // array, and dropping the operator on a scalar would spell its value.
+      if (vt.type(e.name)?.kind === 'array') {
+        return e.name;
+      }
       const g = `&${e.name}`;
       return parentPrec < 2 ? `(${g})` : g;
     }
@@ -570,9 +582,11 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
     // pointer declarator to the pointee — the INNERMOST one for a multi-level pointer
-    // (`volatile u16 ** p`). An object-volatile POINTER (`u16 *volatile p`) has no inhabitant —
-    // no variation or recognizer produces one.
-    lines.push(`    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cType(l.type)} ${l.name};`);
+    // (`volatile u16 **p`). An object-volatile POINTER (`u16 *volatile p`) has no inhabitant —
+    // no variation or recognizer produces one. The NAME is placed by `cDeclare`, the one
+    // placement every declaration position in this backend uses: a local can carry an array type
+    // — the storage extent a frame object pins — and C puts those extents after the name.
+    lines.push(`    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cDeclare(l.type, l.name)};`);
   }
   for (const s of fn.body) {
     lines.push(...printStmt(s, '    ', vt, leaf));

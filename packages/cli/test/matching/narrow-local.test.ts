@@ -44,7 +44,7 @@ const CASES: { name: string; c: string; returnsVoid?: boolean; expect: string }[
     c: 'void mergenarrow(s32 *out, s32 a, s32 b, s32 c){ s16 v; if (c) { v = a + b; } else { v = a - b; } out[0] = v; }',
     returnsVoid: true,
     expect:
-      'void mergenarrow(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    u16 v0;\n    if (a3 != 0) {\n' +
+      'void mergenarrow(s32 *a0, s32 a1, s32 a2, s32 a3) {\n    u16 v0;\n    if (a3 != 0) {\n' +
       '        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (s16)v0;\n    return;\n}\n',
   },
   // synthetic:mergecast — the ADVERSE control for that rule: the same merge written as a cast
@@ -55,7 +55,7 @@ const CASES: { name: string; c: string; returnsVoid?: boolean; expect: string }[
     c: 'void mergecast(s32 *out, s32 a, s32 b, s32 c){ s32 v; if (c) { v = a + b; } else { v = a - b; } out[0] = (s16)v; }',
     returnsVoid: true,
     expect:
-      'void mergecast(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n' +
+      'void mergecast(s32 *a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n' +
       '        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (s16)v0;\n    return;\n}\n',
   },
   // synthetic:widecnt — the CONTROL. A wide counter's sole reader is the `add` that increments it,
