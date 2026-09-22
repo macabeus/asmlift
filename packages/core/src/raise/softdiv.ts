@@ -21,15 +21,22 @@ import type { Prototypes } from '../proto';
 
 // runtime helper symbol → { the division op it computes, its argument count }.
 //
-// THE RESIDUE — the 64-bit helper family. `__muldi3`, `__ashrdi3`/`__ashldi3`/`__lshrdi3`,
-// `__divdi3` and PPC's `__shl2i`/`__shr2i` are runtime helpers this table does not hold, and
-// neither half of the pass can take them as it stands: each passes its 64-bit arguments as
-// REGISTER PAIRS and returns one, so (a) there is no op to rewrite to — no entry in
-// `ir/opcodes.ts` has more than one result — and (b) a signature alone would recover a second
-// argument register whose value after a `bl` is the callee's HIGH HALF, which the frontend
-// resolves to the caller's pre-call value. Recognising the family needs a 64-bit IR value first;
-// `docs/int64-representation.md` is the measured case for and against building one, and counts
-// the ten corpus rows that reach a helper here.
+// THE RESIDUE, part one — the division helpers this table omits. `__udivdi3`, `__moddi3` and
+// `__umoddi3` are this pass's own domain and are absent for want of a row that reaches them.
+//
+// THE RESIDUE, part two — the 64-bit helper family, which could never live here. `__muldi3`,
+// `__ashrdi3`/`__ashldi3`/`__lshrdi3`, `__divdi3` and PPC's `__shl2i`/`__shr2i` compute no
+// division, so there is no op to rewrite them to. A signature alone recovers their arguments
+// correctly where those arguments are the CALLER'S OWN parameters, and wrongly in the nested
+// composition `__ashrdi3(__muldi3(…))`, where the outer call's second argument register holds the
+// inner call's high half — which the frontend resolves to its pre-call value.
+//
+// What that residue DOES today, which is the part a reader needs before reaching for it: a helper
+// with no signature is not absent from the output, it is published as a call with a SHORT argument
+// list, and nine corpus rows — seven agbcc soft-float and two mwcc `ll*` — score a MATCH on a
+// zero-parameter signature their source never wrote. `docs/int64-representation.md` §5 measures
+// that the honest arity recompiles byte-identically, so fixing it costs no match; it is a
+// signature table rather than a capability, and its home is not this file.
 const SOFT_DIV: Record<string, { op: Opcode; params: number }> = {
   __divsi3: { op: 'sdiv', params: 2 },
   __udivsi3: { op: 'udiv', params: 2 },

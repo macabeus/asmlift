@@ -199,6 +199,9 @@ Per commit:
   particular **"earn the level"**: do not add a representation, opcode, or pass boundary that has no
   inhabitant. Prefer patterns-as-data over new imperative special cases. Respect the `L1 → L2 → L3`
   stage contracts (`packages/core/src/contracts.ts`) and keep `@asmlift/core` browser-pure.
+  [`docs/int64-representation.md`](../../docs/int64-representation.md) is a worked example of a
+  representation priced and NOT built — read it before proposing one, and add to it if your round
+  moves the trade.
 - If the step converts a pass's refusals to a `Gate` table — or you are tempted to, because you just
   patched a `return null` to log why it fired — read the passage
   `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md` finds, FIRST. It is settled: table the

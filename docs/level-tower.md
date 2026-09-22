@@ -977,6 +977,10 @@ followed the second inhabitant, never preceded it.
   current one _and_ the differ can prove the result matches. Constant-offset access did not clear
   that bar; variable indexing did. If the corpus stays leaf/arithmetic-heavy, the tower may never
   need to grow further — and that is a right-sized outcome, not a failure.
+  [`docs/int64-representation.md`](int64-representation.md) is the worked example of the two halves
+  coming apart: the differ proves a 64-bit integer value is the only way to reach one row's bytes,
+  and the same file prices the soundness invariant it would invalidate against a clientele of three
+  rows. Read it before re-deriving that trade.
 - Prefer **legalization over a new IR op** when the thing you are recognizing is a machine
   addressing/idiom shape; prefer a **new op** when downstream stages need to reason about the
   recovered concept as a first-class value.
