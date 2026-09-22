@@ -375,18 +375,8 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //                  is owed; it is not impossible.
   //
   // Until it exists, the test that keeps both honest is that core still spells the refusal: a class
-  // may not outlive the message it classifies.
-  test.each([
-    ['branch-likely', 'packages/core/src/frontend/mips.ts', "branch-likely '"],
-    ['branch-likely', 'packages/core/src/frontend/mips.ts', 'cannot annul its delay slot'],
-    ['branch-likely', 'packages/core/src/frontend/mips.ts', 'lands on its delay slot'],
-    ['pic-globals', 'packages/core/src/frontend/mips.ts', 'gp used as data (PIC / small-data global access)'],
-    ['pic-globals', 'packages/core/src/frontend/ppc.ts', 'SDA/global-relative access not supported'],
-    ['pic-globals', 'packages/core/src/frontend/splat.ts', 'small-data / PIC data access'],
-  ])('%s is still refused by %s', (_key, file, fragment) => {
-    expect(readFileSync(join(ROOT, file), 'utf8')).toContain(fragment);
-  });
-
+  // may not outlive the message it classifies. Both are in `SPELT_BY` at the end of this file,
+  // which is where that check now lives for every class rather than for these two.
   test.each([
     [
       "lift: cannot lift 'absi': branch-likely 'bnezl' at 0x0 — the delay slot is itself a control transfer ('b')",
@@ -471,6 +461,39 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
         .sort(),
     ).toEqual(NO_ROWS);
   });
+
+  // The two tests above catch TOTAL shadowing — a class emptied, or a marker nobody claims. They
+  // do not catch a PARTIAL swallow, where both classes keep rows and only the counts move, which
+  // is the more likely regression and the one with no symptom. Every published marker matched by
+  // more than one class is listed here with the key that wins, so a new overlap is a review
+  // question rather than a silent re-attribution. Read `a > b` as "a is listed above b, and a is
+  // the answer".
+  //
+  // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
+  // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
+  // are the three control-transfer capabilities sitting above the branch-form residue.
+  const OVERLAPS: [chain: string, markers: number][] = [
+    ['float > opaque-ops', 56],
+    ['indirect-call > branch-form', 10],
+    ['ctr-transfer > branch-form', 3],
+  ];
+
+  test('every marker that more than one class matches is attributed by a listed ordering', () => {
+    const seen = new Map<string, number>();
+    for (const r of artifact.results) {
+      if (r.asmlift.outcome !== 'declined') {
+        continue;
+      }
+      for (const m of r.asmlift.errorMarkers ?? []) {
+        const all = DECLINE_CLASSES.filter((c) => c.pattern.test(m)).map((c) => c.key);
+        if (all.length > 1) {
+          const chain = all.join(' > ');
+          seen.set(chain, (seen.get(chain) ?? 0) + 1);
+        }
+      }
+    }
+    expect([...seen.entries()].sort((a, b) => b[1] - a[1])).toEqual(OVERLAPS);
+  });
 });
 
 describe('the list is well-formed', () => {
@@ -487,5 +510,84 @@ describe('the list is well-formed', () => {
 
   test('an unrecognised reason is preserved as "other", never dropped', () => {
     expect(classOf('structure: something nobody has classified yet')).toBe('other');
+  });
+});
+
+describe('a class may not outlive the message it classifies', () => {
+  // The branch-likely and pic-globals pins above are the good idea in this file, and they covered
+  // 2 classes of 28. Every other class was a prose dependency on core with nothing checking it,
+  // and the repo's wide citation-anchor gate covers `packages/core`, `packages/cli`, `docs` and
+  // `apps/benchmark/src` — not `apps/web`. So a reworded refusal reaches "other" and the anchor
+  // below fires, but only once the artifact is regenerated; this fires on the next test run.
+  //
+  // One entry per class, naming the phrase the classifier keys on and the file that emits it. It
+  // is deliberately not the whole pattern: an alternative is here when it is the only thing
+  // standing between its class and "other", or when a reviewer would want to know it moved.
+  const SPELT_BY: [key: string, phrase: string, file: string][] = [
+    ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
+    ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
+    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/thumb.ts'],
+    ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
+    ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
+    ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/thumb.ts'],
+    ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
+    ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
+    ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-cr', 'no reaching compare', 'packages/core/src/frontend/ppc.ts'],
+    ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
+    ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
+    ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],
+    ['fp-cond-branch', 'floating-point condition-code branch', 'packages/core/src/frontend/mips.ts'],
+    ['mips-calls', 'MIPS calls not yet modelled', 'packages/core/src/frontend/mips.ts'],
+    ['pic-globals', 'gp used as data (PIC / small-data global access)', 'packages/core/src/frontend/mips.ts'],
+    ['pic-globals', 'small-data / PIC data access', 'packages/core/src/frontend/splat.ts'],
+    ['pic-globals', 'non-register memory base', 'packages/core/src/frontend/ppc.ts'],
+    ['pic-globals', 'SDA/global-relative access not supported', 'packages/core/src/frontend/ppc.ts'],
+    ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
+    ['float', 'unmodelled instruction', 'packages/core/src/frontend/opaque.ts'],
+    ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
+    ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
+    ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
+    ['loop-shapes', 'loop-recovery declined', 'packages/core/src/structure/structure.ts'],
+    ['loop-shapes', 'pre-update loop variable', 'packages/core/src/structure/structure.ts'],
+    ['loop-exit-values', 'post-loop read reaches a temp', 'packages/core/src/structure/structure.ts'],
+    ['loop-exit-values', 'do not reproduce on a zero-trip run', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'case arms do not linearize', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'jump-table target is not a block boundary', 'packages/core/src/frontend/ppc.ts'],
+    ['switch-shapes', 'a case body reaches', 'packages/core/src/structure/switch-recover.ts'],
+    ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
+    ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
+    ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
+    ['sub-word-table', 'sub-word data table', 'packages/core/src/frontend/thumb.ts'],
+    ['pooled-literal', 'anonymous constant pool entry', 'packages/core/src/frontend/reloc-symbol.ts'],
+    ['tu-scoped-name', 'function-scope static', 'packages/core/src/frontend/reloc-symbol.ts'],
+    ['cxx-symbol', 'C++ class-scoped symbol', 'packages/core/src/frontend/reloc-symbol.ts'],
+    ['cxx-symbol', 'C++ virtual table', 'packages/core/src/frontend/reloc-symbol.ts'],
+    ['section-label', 'section-relative label', 'packages/core/src/frontend/reloc-symbol.ts'],
+    ['pool-word-shape', 'literal-pool load of', 'packages/core/src/frontend/thumb.ts'],
+    ['reloc-halves', 'high half of', 'packages/core/src/frontend/high-half.ts'],
+    ['reloc-halves', 'not a modelled consumer of it', 'packages/core/src/frontend/mips.ts'],
+    ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
+    ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
+    ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
+    ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
+    ['ctr-transfer', 'clobbers CTR', 'packages/core/src/frontend/ppc.ts'],
+    ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
+    ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],
+    ['branch-form', 'not a modelled branch form', 'packages/core/src/frontend/mips.ts'],
+  ];
+
+  test.each(SPELT_BY)('%s keys on "%s", which %s still emits', (_key, phrase, file) => {
+    expect(readFileSync(join(ROOT, file), 'utf8')).toContain(phrase);
+  });
+
+  test('every class is pinned — a new class arrives with its producer named', () => {
+    const pinned = new Set(SPELT_BY.map(([key]) => key));
+    expect(DECLINE_CLASSES.map((c) => c.key).filter((k) => !pinned.has(k))).toEqual([]);
+  });
+
+  test('…and every pin names a class that exists', () => {
+    const keys = new Set(DECLINE_CLASSES.map((c) => c.key));
+    expect([...new Set(SPELT_BY.map(([key]) => key))].filter((k) => !keys.has(k))).toEqual([]);
   });
 });
