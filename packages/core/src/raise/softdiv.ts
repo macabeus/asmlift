@@ -20,6 +20,16 @@ import type { Opcode } from '../ir/opcodes';
 import type { Prototypes } from '../proto';
 
 // runtime helper symbol → { the division op it computes, its argument count }.
+//
+// THE RESIDUE — the 64-bit helper family. `__muldi3`, `__ashrdi3`/`__ashldi3`/`__lshrdi3`,
+// `__divdi3` and PPC's `__shl2i`/`__shr2i` are runtime helpers this table does not hold, and
+// neither half of the pass can take them as it stands: each passes its 64-bit arguments as
+// REGISTER PAIRS and returns one, so (a) there is no op to rewrite to — no entry in
+// `ir/opcodes.ts` has more than one result — and (b) a signature alone would recover a second
+// argument register whose value after a `bl` is the callee's HIGH HALF, which the frontend
+// resolves to the caller's pre-call value. Recognising the family needs a 64-bit IR value first;
+// `docs/int64-representation.md` is the measured case for and against building one, and counts
+// the ten corpus rows that reach a helper here.
 const SOFT_DIV: Record<string, { op: Opcode; params: number }> = {
   __divsi3: { op: 'sdiv', params: 2 },
   __udivsi3: { op: 'udiv', params: 2 },
