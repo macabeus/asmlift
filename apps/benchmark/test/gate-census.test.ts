@@ -43,7 +43,7 @@ describe('the gate census seam', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
     // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
-    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'offsetnames']);
+    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'truncload', 'offsetnames']);
   });
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {

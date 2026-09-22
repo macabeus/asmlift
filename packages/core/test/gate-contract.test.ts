@@ -51,6 +51,7 @@ import { OFFSET_NAME_GATES } from '../src/raise/offsetnames';
 import { PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { FALL_IN_GATES, SELECT_GATES } from '../src/raise/retsink';
 import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
+import { TRUNC_LOAD_GATES } from '../src/raise/truncload';
 import { PREUPDATE_COND_GATES, PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
@@ -87,6 +88,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
   ARM_REREAD_GATES: ARM_REREAD_GATES as readonly Gate<never>[],
+  TRUNC_LOAD_GATES: TRUNC_LOAD_GATES as readonly Gate<never>[],
   ADDRESS_GATES: ADDRESS_GATES as readonly Gate<never>[],
   SHAPE_GATES: SHAPE_GATES as readonly Gate<never>[],
   // the two halves `ORDER_LICENCE_GATES` ships — an address table minus the declaration rule, and

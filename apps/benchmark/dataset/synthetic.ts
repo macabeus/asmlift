@@ -812,9 +812,17 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // ── unions (the same storage read at two widths / in two type domains) ──────────────────
   // A union is only measurable when the SAME bytes are reached through members of different width
-  // or domain: that is what a decompiler has to reconstruct, and what asmlift currently declines on
-  // ("overlapping fields at offset N — unions not modelled"). A union whose members are never
+  // or domain: that is what a decompiler has to reconstruct. A union whose members are never
   // aliased compiles identically to a struct, so it would be unscorable — see `sfield`.
+  //
+  // OVERLAPPING WIDTHS ARE NOT A UNION QUESTION, which is the second thing this family measures.
+  // `unitrunc` declares no union at all — it reads one word member and its low byte — and produces
+  // exactly the instructions `utag` does. raise/truncload.ts folds the narrow read into a cast of
+  // the wider one where the bytes are the field's LOW-ORDER end, so the rows here split three ways
+  // and every one of the three is pinned: `unitrunc` and `utag` lift on a little-endian target,
+  // `uhalf` and `uniwrite` and `unidev` decline whatever the target (a read above the low-order
+  // end, a narrow STORE, and a literal device address), and `utag` declines on the big-endian
+  // toolchains for the first of those reasons.
   //
   // The aliasing probes take the union through a POINTER on purpose. As a local it lands in a stack
   // slot on the register-poor targets, and asmlift declines on the stack-frame gap BEFORE it ever
@@ -852,6 +860,36 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'union E; void ustore(union E*,int,s32);',
     proto: { ustore: { returnsVoid: true } },
+  },
+  // NOT A UNION, and that is what it measures: one word member, read whole and read as its low
+  // byte for a narrower use. The compiler emits the same `ldr`/`ldrb` pair a union would, at one
+  // offset and two widths, so nothing in the object tells the two spellings apart — and the cast
+  // is the one that needs no type the asm does not pin. Both endiannesses are inhabited by this one
+  // source: the low byte of the word sits at byte 0 on ARM and at byte 3 on the MIPS/PPC rows.
+  {
+    sym: 'unitrunc',
+    src: 'struct N{s32 w;s32 id;};\nint unitrunc(struct N*n){ return n->w + (u8)n->w + n->id; }',
+    features: ['struct', 'field', 'cast', 'narrow', 'mixed-width'],
+    toolchains: ALL,
+  },
+  // THE NARROW STORE, which `ustore` above does not reach: its own narrow write goes through a
+  // variable index, so it arrives as an element access rather than as a constant-offset one. Here
+  // there is no index, so the write lands on the refusal itself. Widening it would clobber the byte
+  // past it and no cast spells a partial write, so this row must keep declining.
+  {
+    sym: 'uniwrite',
+    src: 'union U{u16 h;u8 b;};\nu32 uniwrite(union U*u){ u->b=1; return u->h; }',
+    features: ['union', 'field', 'store', 'mixed-width'],
+    toolchains: ALL,
+  },
+  // A HARDWARE REGISTER read at two widths, where the ACCESS WIDTH is itself the observable event:
+  // the device answers a halfword read and a byte read differently, so the two reads are not one
+  // datum and the narrower is not a cast of the wider. Must keep declining on every toolchain.
+  {
+    sym: 'unidev',
+    src: 'u32 unidev(void){ return *(volatile u16*)0x4000004 + *(volatile u8*)0x4000004; }',
+    features: ['device-access', 'mixed-width'],
+    toolchains: ALL,
   },
 
   // ── loops ──────────────────────────────────────────────────────────────────────────────

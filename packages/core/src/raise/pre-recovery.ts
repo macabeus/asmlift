@@ -37,6 +37,7 @@ import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeS
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
+import { TRUNC_LOAD_GATES, foldTruncatedLoads } from './truncload';
 
 /** Per-call options for the pass list — ONE field per pass that takes any, named for the pass, so
  *  a caller reads which recognizer it is steering and a pass that takes none says so by absence.
@@ -91,8 +92,9 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
- *  scaled-extension → array-legalize → struct-array → member-array → struct-pointer → short-circuit →
- *  branch-short-circuit → narrow-reads → narrow-local → parameter-width → scaled-extension-restore.
+ *  scaled-extension → array-legalize → truncated-load → struct-array → member-array → struct-pointer →
+ *  short-circuit → branch-short-circuit → narrow-reads → narrow-local → parameter-width →
+ *  scaled-extension-restore.
  *  See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
@@ -134,6 +136,31 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     gate: foldsShiftPairCasts,
   },
   { id: 'arrays', run: recognizeArrays, dce: true },
+  // BEFORE the three struct synthesizers, and that is what the pass is FOR: `raise/structs.ts` is
+  // the pass that refuses one offset read at two widths, and it can only see one width per offset
+  // if the fold has already run. Below it the fold is dead — moved after `structs`,
+  // `pokeemerald:AnimTask_FlashHealthboxOnLevelUp_Step:agbcc` declines again on the same throw.
+  //
+  // EVERY POSITION ABOVE `structs` IS FREE, and that is measured rather than argued: two full
+  // `bench sweep --json` runs, this seat against the entry moved to index 0 — above `addrnum`,
+  // `const`, the three division recognizers, `extscale` and `arrays` — agree on all 2,430 records
+  // over 1,215 rows, compared by ROW IDENTITY on `src`/`len`/`diag`/`marks`/`asm`. (The 84
+  // `af:*:ido7.1` records whose `opts` digest churns between any two sweeps are the corpus-wide
+  // defect, which moves whatever anyone does; a LINE diff would report them as disagreement.)
+  //
+  // So the seat is a READING ORDER rather than a constraint: the three struct synthesizers follow
+  // each other here, and a reader looking for what happens to a base's access set finds them
+  // together. The one position that LOOKS like a prerequisite is `addrnum` — the fold groups
+  // accesses by base VALUE identity, so collapsing duplicate address definitions first reads as
+  // one. It is not, and index 0 is the run that shows it.
+  //
+  // `dce: false` — the rewrite retires nothing (the base keeps its use in the load the fold makes).
+  {
+    id: 'truncload',
+    run: (fn, _self, _opts, target) =>
+      foldTruncatedLoads(fn, target.capabilities.endianness === 'little', TRUNC_LOAD_GATES),
+    dce: false,
+  },
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
   // accesses must not be re-derived as constant-offset struct-pointer accesses).
