@@ -1262,11 +1262,12 @@ export function lift(
       // cross-block cr dependency this frontend does not model. Decline loud.
       //
       // UNBUILT AND KNOWN, not absent. The Thumb frontend carries a compare across a straight-line
-      // edge and refuses the rest by name (`inheritedCmp`): two edges into the block, a back edge,
-      // an edge out of a jump-table dispatch, and an edge leaving a CONDITIONAL branch. That last
-      // refusal is where this side lives — a `cmpwi` read by the fall-through of the `bc` that
-      // already consumed it is the shape these rows carry, and Thumb declines it only because no
-      // ARM row inhabits it. Whoever builds this reads that rule rather than writing a second one.
+      // edge and refuses the rest by name (`inheritedCmp`): two edges into the block, a predecessor
+      // lifted after it, an edge out of a jump-table dispatch, and an edge leaving a CONDITIONAL
+      // branch. That last refusal is where this side lives — a `cmpwi` read by the fall-through of
+      // the `bc` that already consumed it is the shape these rows carry, and Thumb declines it only
+      // because no ARM row inhabits it. Whoever builds this reads that rule rather than writing a
+      // second one.
       if (!cmp) {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': conditional branch '${base}' has no reaching compare (${crName}) in its block`,

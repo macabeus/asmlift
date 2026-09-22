@@ -3774,10 +3774,12 @@ export function lift(
    *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
    *      and picking one states a condition the machine does not promise;
    *    * the only predecessor has not been filled yet, so this pass has nothing to read;
-   *    * the edge is not straight-line — it leaves a conditional branch or a jump-table dispatch.
-   *      Thumb's `b<cc>` does preserve the flags, so this one is UNBUILT rather than unsound: it is
-   *      exactly the PowerPC shape (a `cmpwi` read by the fall-through of the `bc` that already
-   *      consumed it, see `cmpDef` in ppc.ts) and has no ARM inhabitant to earn it here.
+   *    * the edge leaves a CONDITIONAL branch. Thumb's `b<cc>` does preserve the flags, so this one
+   *      is UNBUILT rather than unsound: it is exactly the PowerPC shape (a `cmpwi` read by the
+   *      fall-through of the `bc` that already consumed it, see `cmpDef` in ppc.ts) and has no ARM
+   *      inhabitant to earn it here. A jump-table dispatch answers before it and says so instead,
+   *      which is a truer sentence over the same verdict rather than a fifth refusal — see the
+   *      note at the arm.
    *
    *  It does NOT refuse when no compare survives to the predecessor's last instruction, because
    *  that is not this function's gap to report: the predecessor already wrote down what took the
