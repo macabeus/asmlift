@@ -21,22 +21,24 @@ import type { Prototypes } from '../proto';
 
 // runtime helper symbol → { the division op it computes, its argument count }.
 //
-// THE RESIDUE, part one — the division helpers this table omits. `__udivdi3`, `__moddi3` and
-// `__umoddi3` are this pass's own domain and are absent for want of a row that reaches them.
+// THE RESIDUE. Every 32-bit integer division helper is here: libgcc's `SI` set is exactly these
+// four. What the corpus's asm holds beyond them is `__divsf3`, a soft-FLOAT divide — it computes a
+// division, but over floats, and both ops below are integer, so there is nothing to rewrite it to.
 //
-// THE RESIDUE, part two — the 64-bit helper family, which could never live here. `__muldi3`,
-// `__ashrdi3`/`__ashldi3`/`__lshrdi3`, `__divdi3` and PPC's `__shl2i`/`__shr2i` compute no
-// division, so there is no op to rewrite them to. A signature alone recovers their arguments
-// correctly where those arguments are the CALLER'S OWN parameters, and wrongly in the nested
-// composition `__ashrdi3(__muldi3(…))`, where the outer call's second argument register holds the
-// inner call's high half — which the frontend resolves to its pre-call value.
+// The other absent family is the `DI` (64-bit) one, and the reason it is absent is the
+// representation, not this table. `__divdi3`, `__udivdi3`, `__moddi3` and `__umoddi3` DO compute
+// divisions; their operands are 64-bit and no value can hold one. `__muldi3`,
+// `__ashrdi3`/`__ashldi3`/`__lshrdi3` and PPC's `__shl2i`/`__shr2i` compute no division on top of
+// that. `grep -n "The 64-bit integer representation" docs/int64-representation.md` prices the type.
 //
-// What that residue DOES today, which is the part a reader needs before reaching for it: a helper
-// with no signature is not absent from the output, it is published as a call with a SHORT argument
-// list, and nine corpus rows — seven agbcc soft-float and two mwcc `ll*` — score a MATCH on a
-// zero-parameter signature their source never wrote. `docs/int64-representation.md` §5 measures
-// that the honest arity recompiles byte-identically, so fixing it costs no match; it is a
-// signature table rather than a capability, and its home is not this file.
+// What the whole residue DOES today, which is the part a reader needs before reaching for it: a
+// helper with no signature is not absent from the output, it is published as a call with a SHORT
+// argument list, and rows score a MATCH on a zero-parameter signature their source never wrote.
+// The honest arity recompiles byte-identically on every one of them, so fixing it costs no match:
+// `grep -n "The fabricated signatures are a SEPARATE defect" docs/int64-representation.md` counts
+// them and measures it. That is a signature table rather than a capability, and its home is not
+// this file — `RUNTIME_HELPERS` below is DERIVED from this map, whose value type is a division
+// `Opcode`, so a helper that divides nothing cannot live here without a fake op.
 const SOFT_DIV: Record<string, { op: Opcode; params: number }> = {
   __divsi3: { op: 'sdiv', params: 2 },
   __udivsi3: { op: 'udiv', params: 2 },
