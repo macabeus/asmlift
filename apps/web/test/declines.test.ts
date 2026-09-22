@@ -1,7 +1,7 @@
 // The decline classifier is FIRST-MATCH over an ordered list, and its ORDER is the whole product:
-// it decides which missing capability the blocker Pareto tells the next round to build. Nothing
-// tested it, and reordering one entry silently collapsed the largest MIPS family into the generic
-// bucket — the classes still all existed, the counts just moved. These pin the orderings that
+// it decides which missing capability the blocker Pareto tells the next round to build. Reordering
+// one entry collapses the largest MIPS family into the generic bucket with every class still
+// present and only the counts moved, which no other gate can see. These pin the orderings that
 // actually overlap.
 import type { FunctionResult } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -17,8 +17,8 @@ const CORE_SRC = join(ROOT, 'packages/core/src');
  *  continues one. Every phrase check below runs against this rather than the raw text, because a
  *  phrase that survives only in prose pins nothing: `frontend/opaque.ts` says "unmodelled
  *  instruction" six times, all of them in comments, and `frontend/thumb.ts` says "local stack
- *  frames not supported" once, in a comment explaining that it no longer emits it. Both pins were
- *  green against files that had stopped emitting the phrase. */
+ *  frames not supported" once, in a comment saying it does not emit that phrase. Against the raw
+ *  text a pin on either file is green while the phrase has no producer left. */
 const codeOf = (file: string): string =>
   readFileSync(join(ROOT, file), 'utf8')
     .split('\n')
@@ -117,9 +117,10 @@ describe('specific instruction families beat the generic opaque bucket', () => {
 
   // PPC spells single precision with a trailing `s` and a record form with a trailing `.`, so a
   // list written against `fadd|fsub|fmul|fdiv` and a closing quote matches the double-precision
-  // spelling and nothing mwcc emits for a `float`. These seven markers were published as generic
-  // opaque instructions in the committed artifact — five synthetic rows plus two real ac-decomp
-  // functions — which is a floating-point gap reported as "we do not know what blocks these".
+  // spelling and nothing mwcc emits for a `float`. Seven of these eleven are published markers of
+  // the committed artifact — `fadds`, `fsubs`, `fmuls` (twice), `fdivs` on five synthetic rows,
+  // `fneg` and `fabs` on two real ac-decomp functions — so that alternation reports a
+  // floating-point gap as "we do not know what blocks these".
   test.each(['fadds', 'fsubs', 'fmuls', 'fdivs', 'fneg', 'fabs', 'fadd.', 'fmadds', 'fsel', 'psq_l', 'ps_madds0'])(
     "the PPC FPU mnemonic '%s' is floating point",
     (mnemonic) => {
@@ -138,8 +139,8 @@ describe('specific instruction families beat the generic opaque bucket', () => {
 
   // A STORE IS SPELT AT A DIFFERENT SITE, and for four mnemonics it is the ONLY site. `opaque.ts`
   // tests `policy.storeClass` before anything becomes an opaque, so nothing can ever print
-  // "unmodelled instruction 'swc1'" — these four alternatives of `float` were inert, and all 13
-  // rows of `store-class` were floating-point stores under a label that named a mechanism.
+  // "unmodelled instruction 'swc1'": without the store-class prefix these four alternatives of
+  // `float` are inert, and all 13 markers core spells that way are floating-point stores.
   test.each(['swc1', 'sdc1', 'stfs', 'stfd'])("the store-class spelling of '%s' is floating point", (mnemonic) => {
     expect(
       classOf(
@@ -193,7 +194,7 @@ describe('the instruction cause beats the shape symptom', () => {
 });
 
 describe('all three "unmodelled …" message spellings are classified', () => {
-  // The frontend and the structurer word this differently, and a spelling nobody matched fell into
+  // The frontend and the structurer word this differently, and a spelling no class reads falls into
   // "other" — which reads as "we do not know what blocks these" when in fact we do.
   test.each([
     ["structure: unmodelled instruction 'mtc1'", 'float'],
@@ -283,18 +284,18 @@ describe('a pattern keyed on an English word claims sentences that are not about
     expect(classOf(marker)).toBe(want);
   });
 
-  // This one is not misfiled any more; it is unnamed, which is the honest answer and the one the
-  // residue list at the top of `declines.ts` records. A loop-naming refusal is not control flow.
+  // A loop-naming refusal is not control flow, so being unnamed is the honest answer here and the
+  // residue list in `declines.ts` records it.
   //
-  // An earlier version of this block also pinned `backend: pascal backend: switch fall-through has
-  // no faithful IDO Pascal case-of spelling`. The TEXT is real (`packages/core/src/backend/
-  // pascal.ts`) but the MARKER is not: it is thrown as a plain `Error`, `Diagnostic.stage` in
-  // `pipeline.ts` is `lift | raise | structure | contract | verify | internal` with no `backend`,
-  // and `apps/benchmark/src/eval/asmlift.ts` builds every marker as `${d.stage}: …`. Measured over
-  // the artifact, every marker on a declined row opens `lift:` (252), `structure:` (49) or
-  // `raise:` (18). A negative test against a string the channel cannot carry asserts a hazard that
-  // does not exist, and `ppc.ts`'s tail-branch refusal — pinned above, and a real published marker
-  // — is the whole of the case for not keying on the word `fall-through`.
+  // THE OTHER TEMPTING NEGATIVE CASE CANNOT BE PUBLISHED AT ALL: `pascal backend: switch
+  // fall-through has no faithful IDO Pascal case-of spelling` is a real text
+  // (`packages/core/src/backend/pascal.ts`) and not a real marker — it is thrown as a plain
+  // `Error`, `Diagnostic.stage` in `pipeline.ts` is `lift | raise | structure | contract | verify |
+  // internal` with no `backend`, and `apps/benchmark/src/eval/asmlift.ts` builds every marker as
+  // `${d.stage}: …`. Measured over the artifact, every marker on a declined row opens `lift:`
+  // (253), `structure:` (49) or `raise:` (18). A negative test against a string the channel cannot
+  // carry asserts a hazard that does not exist; `ppc.ts`'s tail-branch refusal, a real published
+  // marker, is the whole of the case for not keying on the word `fall-through`.
   test('a loop-naming refusal is unclassified rather than misfiled as control flow', () => {
     expect(
       classOf(
@@ -314,9 +315,9 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
         "function's frame partition (uninitialised local, or storage it does not own) — not modelled",
       'unstored-slot',
     ],
-    // Verbatim from `frontend/mips.ts` — and it is why `stack-frames` no longer carries a
-    // `stack-passed` alternative. That site is its only producer, `unstored-slot` claims it on
-    // "was never stored" first, so nothing core emits could ever have reached the alternative.
+    // Verbatim from `frontend/mips.ts` — and it is why `stack-frames` carries no `stack-passed`
+    // alternative. That site is its only producer, `unstored-slot` claims it on "was never stored"
+    // first, so no string core emits could reach one.
     [
       "lift: cannot lift 'f': load from stack slot sp@8 that was never stored (stack-passed argument beyond " +
         'the 4 register args, or an address-taken/uninitialised local) — not modelled',
@@ -331,8 +332,8 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   // operand exactly as `frontend/thumb.ts` does — their comments say so — and refuse WITHOUT
   // resolving the cause, so their message is a disjunction where Thumb's is a decision. All three
   // spellings name an address-taken local first, and the first two are published markers of
-  // `ac-decomp`, `marioparty4`, `pikmin` and two synthetic rows. Filed under `stack-frames`, whose
-  // label reads "other sp uses", they were 17 of that class's 27 rows.
+  // `ac-decomp`, `marioparty4`, `pikmin` and two synthetic rows — 17 of the 20 rows of
+  // `address-taken-local`, against 3 that arrive by Thumb's decided spelling.
   test.each([
     [
       "lift: cannot lift 'step0_make_dl': stack pointer r1 used as data (address-taken local / frame " +
@@ -369,8 +370,7 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   // `frontend/thumb.ts` has ONE sp-as-data throw and appends ten different `why`s to it. Two name a
   // capability of their own and are claimed above by first-match; these eight are what the class
   // called "other sp uses" actually is, and all eight are verbatim from `slotModelBlocker`. Keyed
-  // on a single `why` — which is how `pool-word-shape` was first written — the first corpus row on
-  // any of them arrives unclassified.
+  // on a single `why`, the first corpus row on any of them arrives unclassified.
   test.each([
     'a register-offset sp access can alias any slot',
     'a sub-word sp access aliases the word-slot model',
@@ -385,8 +385,8 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
 });
 
 describe('a relocation refuses over the NAME or over the HALF, and they are different things to build', () => {
-  // The largest gap the old taxonomy hid: 23 rows of compiler-generated names plus 12 of unpaired
-  // address halves, all of them in "other". They are all relocation refusals and they are not one
+  // The largest single gap in the corpus after floating point: 23 rows of compiler-generated names
+  // plus 12 of unpaired address halves. They are all relocation refusals and they are not one
   // capability — a pooled literal is a value the object already carries, a function-scope static is
   // spellable once the counter suffix goes, a C++ entity needs a declaration seam that does not
   // exist, a section-relative label denotes an offset nothing declares, and an unpaired half is not
@@ -445,9 +445,9 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     expect(classOf(marker)).toBe('pool-word-shape');
   });
 
-  // THE SIBLINGS EACH CLASS WAS TOO TIGHT FOR. Ten core messages, every one a member of a family
-  // that already has a class here, all of them classified as unnamed until this commit. Each is
-  // the throw-site text with its interpolations filled in.
+  // THE SIBLINGS A TIGHTER CLASS WOULD MISS. Ten core messages, every one a member of a family
+  // that has a class here and none of them the spelling the corpus happened to print. Each is the
+  // throw-site text with its interpolations filled in.
   test.each([
     // `structure/structure.ts` refuses a jump table five ways; `case arms do not linearize` was the
     // only one the class read, and it had one row.
@@ -464,8 +464,8 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     ],
     // …and the same message under a 90-character C++ name, which pushes its LAST clause past the
     // 200-character cap this file opens with. Keyed on "C fall-through only reaches the arm below"
-    // this classified as "other" while the short-name case above classified — the exact failure
-    // the cap rule exists to prevent, and the reason the pattern reads the opening clause.
+    // the long name answers "other" and the short name classifies — the exact failure the cap rule
+    // exists to prevent, and the reason the pattern reads the opening clause.
     [
       `structure: cannot structure '${'A'.repeat(90)}': case 3/4 falls through into an arm that is not ` +
         'the next one emitted — C fall-through only reaches the arm below',
@@ -592,16 +592,16 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //
   //   branch-likely  LEFTOVER SHAPES. PR #226 modelled the capability — a likely branch nullifies its
   //                  delay slot, modelled by placement — and `mips.ts` :386, :642 and :647 are what
-  //                  it left behind. The population is enormous and the hazard is absent: across
-  //                  the three Splat asm trees in `apps/benchmark/checkouts`, 24,570 functions,
-  //                  7,440 of them carry a likely branch and there are 18,841 in total (`bnel`
-  //                  7,613, `beql` 6,652, `bc1fl` 1,911, `bc1tl` 1,464, then the zero-compare
-  //                  forms). Each of the three shapes `normaliseBranchLikely` SCANS FOR reads
-  //                  ZERO: a delay slot that is itself a control transfer, a likely branch sitting
-  //                  in another transfer's slot, a delay slot some branch targets. An earlier scan
-  //                  printed 15 for the second of those; its mnemonic set began with the bare
-  //                  alternative `b` under `re.match`, so `break` — a trap, not a branch — was
-  //                  counted as one. Re-run with every mnemonic fullmatched, it is 0.
+  //                  it left behind. The population is enormous and the hazard is absent: over the
+  //                  three MIPS Splat asm trees in `apps/benchmark/checkouts` (`af`,
+  //                  `marioparty3`, `snowboardkids2-decomp` — 24,651 `.s` files), 18,785
+  //                  instructions are likely branches — `bnel` 7,607, `beql` 6,623, `bc1fl` 1,909,
+  //                  `bc1tl` 1,461, then the zero-compare forms — and each of the three shapes
+  //                  `normaliseBranchLikely` SCANS FOR reads ZERO: a delay slot that is itself a
+  //                  control transfer, a likely branch sitting in another transfer's slot, a delay
+  //                  slot some branch targets. Scan with every mnemonic FULLMATCHED: a prefix
+  //                  match counts `break` — a trap, not a branch — as a transfer and reports a
+  //                  hazard that is not there.
   //                  THE THROW HAS SEVEN ARMS, NOT THREE, and the scan covers three of them. The
   //                  other four refuse a disassembly the reader cannot account for: an unresolved
   //                  branch target, and no instruction at the delay slot, at the not-taken edge, or
@@ -614,18 +614,17 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //                  dead: the ISA store policies reach `stwbrx`, `swl`, `sb` and `stmia`, pinned
   //                  above.
   //
-  // `pic-globals` used to be the third entry here and is not any more, which is what a class in
-  // this list is supposed to do. It was NOT REACHED and reachable, because every corpus toolchain
-  // compiles with no small-data threshold — `-non_shared -G 0` for ido7.1, `-mno-abicalls -fno-PIC
-  // -G 0` for gcc2.7.2kmc — which is a flag and not a shape the toolchain cannot emit.
-  // `synthetic:tax_gprel` sets `-G 8` on ido7.1's canonical set, the global moves to `.sbss`, and
-  // the row declines with this class's message verbatim. The flag was audited in both directions:
-  // the same source at `-G 0` emits `lui`/`addiu` under `R_MIPS_HI16`/`LO16` and does not reach
-  // the refusal at all.
+  // `pic-globals` is the fourth case, and the one that leaves this list: it was reachable and NOT
+  // REACHED, because every corpus toolchain compiles with no small-data threshold — `-non_shared
+  // -G 0` for ido7.1, `-mno-abicalls -fno-PIC -G 0` for gcc2.7.2kmc — which is a flag and not a
+  // shape the toolchain cannot emit. `synthetic:tax_gprel` sets `-G 8` on ido7.1's canonical set,
+  // the global moves to `.sbss`, and the row declines with this class's message verbatim. The flag
+  // was audited in both directions: the same source at `-G 0` emits `lui`/`addiu` under
+  // `R_MIPS_HI16`/`LO16` and does not reach the refusal at all.
   //
-  // Until it exists, the test that keeps both honest is that core still spells the refusal: a class
-  // may not outlive the message it classifies. Both are in `SPELT_BY` at the end of this file,
-  // which is where that check now lives for every class rather than for these two.
+  // For a class that stays here, the test that keeps it honest is that core still spells its
+  // refusal: a class may not outlive the message it classifies. That check lives in `SPELT_BY`,
+  // for every class rather than for these.
   test.each([
     [
       "lift: cannot lift 'absi': branch-likely 'bnezl' at 0x0 — the delay slot is itself a control transfer ('b')",
@@ -700,8 +699,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // These three have no rows for reasons that are measured and written down beside them, not
   // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
   // of these three disappears, an unnamed gap found an inhabitant — good news, and this list moves
-  // in the commit that earns it. It just did: `pic-globals` left this list when
-  // `synthetic:tax_gprel` was written, which is the disposition this comment asked for.
+  // in the commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
 
   const NO_ROWS = ['branch-form', 'branch-likely', 'store-class'];
 
@@ -769,26 +767,22 @@ describe('the list is well-formed', () => {
 });
 
 describe('a class may not outlive the message it classifies', () => {
-  // The branch-likely and pic-globals pins above are the good idea in this file, and they covered
-  // 2 classes of 28. Every other class was a prose dependency on core with nothing checking it,
-  // and the repo's wide citation-anchor gate covers `packages/core`, `packages/cli`, `docs` and
-  // `apps/benchmark/src` — not `apps/web`. So a reworded refusal reaches "other" and the anchor
-  // below fires, but only once the artifact is regenerated; this fires on the next test run.
+  // Every class here is a prose dependency on a message core emits, and the repo's wide
+  // citation-anchor gate covers `packages/core`, `packages/cli`, `docs` and `apps/benchmark/src` —
+  // not `apps/web`. So a reworded refusal reaches "other" and the artifact anchor fires, but only
+  // once the artifact is regenerated; this fires on the next test run.
   //
   // One entry per class, naming the phrase the classifier keys on and the file that emits it. It
   // is deliberately not the whole pattern: an alternative is here when it is the only thing
   // standing between its class and "other", or when a reviewer would want to know it moved.
   //
-  // THE CHECK RUNS AGAINST CODE, NOT AGAINST PROSE (`codeOf`). Two of these were pinned to files
-  // that only TALK about the phrase: `float` to `frontend/opaque.ts`, which says "unmodelled
-  // instruction" six times and throws it never — the one producer is `l3/ast.ts`'s `gapReasonFor`,
-  // whose own comment says it is THE spelling "in one place" — and `stack-frames` to
-  // `frontend/thumb.ts`, whose only occurrence of "local stack frames not supported" is a comment
-  // saying that phrase was a false attribution and is no longer emitted there. Rewording
-  // `gapReasonFor` would have sent `float` and `opaque-ops` — 82 of 308 declines — into "other"
+  // THE CHECK RUNS AGAINST CODE, NOT AGAINST PROSE (`codeOf`), and the file each entry names is
+  // the one that THROWS the phrase: `float` keys on `l3/ast.ts`'s `gapReasonFor`, not on the
+  // `frontend/opaque.ts` comments that quote it. Pinned to a file that only talks about it, a
+  // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 308 declines — into "other"
   // with this list green.
   //
-  // FREEZING 53 PHRASES ACROSS 13 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 62 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -882,8 +876,8 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 308 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file; before this gate existed that paragraph was re-measured once and then went
-  // stale inside the hour, across four commits, with every other gate green.
+  // names it by file — a paragraph of figures about 118 distinct messages across 11 files, which
+  // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
     // Without this, deleting the walk would make every gate below vacuously pass.
@@ -969,7 +963,7 @@ describe('the classifier is measured against the messages core can throw, not on
     // arms' prose and matches all three transfer classes at once. No published marker does — a row
     // prints one arm — which is why the artifact table lists the two pairs separately.
     'indirect-call > ctr-transfer > branch-form',
-    // The one the file used to deny in prose. `jump-table target is not a block boundary` is a
+    // The one no published marker can show. `jump-table target is not a block boundary` is a
     // strict superstring of `not a block boundary`, so ppc.ts's recovered-dispatch refusal matches
     // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
     // its single `switch-shapes` row declines on `the jump table's case arms do not linearize`.

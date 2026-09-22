@@ -13,7 +13,7 @@
 // tail of a long message tests a string the artifact does not carry. 17 markers in the published
 // artifact sit at that cap. The reload refusal in `packages/core/src/frontend/ppc.ts` is the shape
 // that pays for it: one throw with two arms, and on `pikmin:__ct__7ActFreeFP4Piki:mwcc_233_163n`
-// the second arm's "a local stack frame this frontend does not model" begins at character 199 —
+// the second arm's "a local stack frame this frontend does not model" begins at character 197 —
 // the published marker ends "which is a l". `stack-frames` keys on `a slot … was saved into`
 // instead, which that message reaches at character 64. A reason opens with the function's own
 // name, so a long C++ name pushes every later phrase toward the cap on its own.
@@ -25,8 +25,8 @@
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
-// class here claims. It is not what a landed capability left behind (`branch-likely` below says
-// "leftover shapes" for that) and it is not a catch-all class.
+// class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
+// "residual shapes only" for that) and it is not a catch-all class.
 // `packages/core/src` throws 118 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
@@ -54,9 +54,8 @@
 //   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
 //
 // THAT COUNT IS A GATE, not a comment. `declines.test.ts` re-runs the harvest and holds the total
-// and the per-file breakdown, because this paragraph was re-measured once and then went stale
-// inside the same hour, across four commits, with every other gate green. Move a family out of the
-// residue and into a class and the gate goes red with the new number.
+// and the per-file breakdown, so a paragraph of figures cannot drift away from the files it counts.
+// Move a family out of the residue and into a class and the gate goes red with the new number.
 //
 // Named here rather than given classes, because a class with no inhabitant and no witness row is
 // the defect this file exists to remove. A class that HAS a name and no rows is read in only one
@@ -67,9 +66,9 @@
 // written for the roadmap reader lands on the picker.
 //
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
-// with a compiler's own error text: 13 `c.c:` markers and 11 more compiler lines in the artifact
+// with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 252 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 253 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
@@ -94,13 +93,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
-    // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class.
-    //
-    // Those 17 rows used to land in `stack-frames`, whose label reads "other sp uses" — a class
-    // over-claiming, not a message mis-naming: the messages say address-taken and the pattern did
-    // not read them, because `address-taken stack local` requires a word only the Thumb frontend
-    // writes. The Pareto then told the next round to build a stack-frame model when the top of
-    // that pile was `&local`.
+    // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
+    // disjunction is 17 of the 20 rows, so a pattern requiring the word only Thumb writes claims
+    // three of them and leaves the rest to a class whose label reads "other sp uses".
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
     pattern:
@@ -141,10 +136,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // both claimed above by first-match). The other eight ARE this class — a register-offset or
     // sub-word sp access that can alias a word slot, a frame that moves between two accesses keyed
     // against it, a pop that reads the frame while the local area is still reserved. Keyed on one
-    // `why`, the first corpus row on any of the eight would have arrived unclassified. The
-    // previous spelling, `stack pointer .* used as data`, read as ISA-neutral and was not: `.*`
-    // with a space on both sides requires a word between "pointer" and "used", so it matched the
-    // PPC `r1` form alone and no Thumb message at all.
+    // `why`, the first corpus row on any of the eight arrives unclassified.
+    //
+    // THE SUBJECT IS SPELT DIFFERENTLY PER FRONTEND — PPC writes `stack pointer r1 used as data`,
+    // Thumb `stack pointer used as data` — so one alternative with a wildcard between "pointer"
+    // and "used" reads as ISA-neutral and is not: a space on both sides requires a word there, so
+    // it takes the PPC form alone.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
@@ -160,16 +157,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // class here that a reader would otherwise misread in the worse direction. Branch-likely is
     // modelled: a likely branch nullifies its delay slot, and the slot becomes its own block on the
     // taken edge. What still refuses is what that model left over — `normaliseBranchLikely` in
-    // `packages/core/src/frontend/mips.ts` (the throw at :386) on the shapes the ISA leaves
-    // undefined, and the two recovered-switch interactions at :642 and :647. No compiled row in the
-    // corpus reaches any of them, so the class reads 0; deleting it would assert that nothing is
-    // left, which is the opposite falsehood.
+    // `packages/core/src/frontend/mips.ts` on the shapes the ISA leaves undefined, and the two
+    // recovered-switch interactions in `lift` ("cannot annul its delay slot", "lands on its delay
+    // slot"). No compiled row in the corpus reaches any of them, so the class reads 0; deleting it
+    // would assert that nothing is left, which is the opposite falsehood.
     //
-    // THAT THROW HAS SEVEN ARMS AND ONLY THREE WERE SCANNED. The other four refuse a disassembly
-    // the reader cannot account for — an unresolved branch target, and no instruction at the slot,
-    // at the not-taken edge, or before the branch. `mips.ts:396` says `parseDisasm` guarantees
-    // those by refusing a listing it cannot account for, so they are plausibly unreachable by
-    // construction; nothing measures that, and a coverage claim owes its whole gate list.
+    // THAT THROW HAS SEVEN ARMS AND ONLY THREE ARE SCANNED. The other four refuse a disassembly the
+    // reader cannot account for — an unresolved branch target, and no instruction at the slot, at
+    // the not-taken edge, or before the branch. `normaliseBranchLikely`'s own comment says
+    // `parseDisasm` guarantees those by refusing a listing it cannot account for, so they are
+    // plausibly unreachable by construction; nothing measures that, and a coverage claim owes its
+    // whole gate list.
     key: 'branch-likely',
     label: 'Branch-likely delay slots (MIPS) — residual shapes only',
     pattern: /branch-likely/,
@@ -191,10 +189,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // one is narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
     // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it — and
     // the two ppc.ts refusals for an SDA relocation whose operand or immediate is NOT that
-    // placeholder are the same capability, which the residue paragraph left unnamed while this
-    // class was described as having no inhabitant anywhere. It had none because the canonical IDO
-    // flags are `-non_shared -G 0` (`toolchain.ts`) — a flag choice rather than a shape the
-    // toolchain cannot emit. `synthetic:tax_gprel` sets `-G 8` and is the row that witnesses it.
+    // placeholder are the same capability. Its one corpus inhabitant is `synthetic:tax_gprel`,
+    // because every MIPS toolchain's canonical set turns small data off (`TOOLCHAIN_TARGETS` in
+    // `packages/core/src/target.ts`: `-non_shared -G 0`, `-mno-abicalls -fno-PIC -G 0`) — a flag
+    // choice rather than a shape the toolchain cannot emit. That row sets `-G 8`.
     key: 'pic-globals',
     label: 'Small-data globals (gp-relative / GPREL / an SDA base with no relocation)',
     // One alternative per producer, each the whole phrase that site emits. Bare `PIC` and bare
@@ -215,34 +213,33 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     // THE PPC ARM IS WRITTEN AS THE ISA SPELLS THE FAMILY, NOT AS THE CORPUS HAPPENED TO PRINT IT.
     // Listing `fadd|fsub|fmul|fdiv` against a closing quote silently excludes every single-precision
-    // form — `fadds`, `fsubs`, `fmuls`, `fdivs` are the ones mwcc actually emits for `float`
-    // arithmetic — and `fneg`/`fabs` were absent outright, so 7 published markers over 7 rows,
-    // 2 of them real ac-decomp functions, were filed as generic opaque instructions. PPC spells a
-    // single-precision op with a trailing `s` and a record form with a trailing `.`, so both are
-    // optional suffixes here rather than separate alternatives; `psq_*`/`ps_*` are the GameCube
-    // paired singles, which are floating point on the same FPU.
+    // form — `fadds`, `fsubs`, `fmuls`, `fdivs` are the ones mwcc emits for `float` arithmetic —
+    // and leaves out `fneg`/`fabs` outright. PPC spells a single-precision op with a trailing `s`
+    // and a record form with a trailing `.`, so both are optional suffixes here rather than
+    // separate alternatives; `psq_*`/`ps_*` are the GameCube paired singles, which are floating
+    // point on the same FPU.
     //
     // AND IT ADMITS THE STORE-CLASS PREFIX, or four of its alternatives are inert. `opaque.ts`
-    // tests `policy.storeClass` FIRST, before anything can become an opaque, so `swc1`, `sdc1`,
-    // `stfs` and `stfd` can only ever arrive spelt "unmodelled store-class instruction" — the
-    // `unmodelled (?:effect )?instruction '` prefix meant those four could never fire. Measured:
-    // all four match `store-class`' message and none matched this class's.
+    // tests `policy.storeClass` FIRST, before anything can become an opaque, and `mips.ts` has
+    // `swc1|sdc1` in that policy while `ppc.ts`'s `^st` covers `stfs`/`stfd` — so those four can
+    // only ever arrive spelt "unmodelled store-class instruction", which the bare `unmodelled
+    // (?:effect )?instruction '` prefix cannot reach.
     pattern:
       /unmodelled (?:effect |store-class )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|f(?:add|sub|mul|div|madd|msub|nmadd|nmsub|sqrt|res|rsqrte|sel|abs|nabs|neg|mr|rsp)s?\.?|fcmp\w*|fct\w*|lfd\w*|lfs\w*|stfd\w*|stfs\w*|psq_\w+|ps_[\w.]+)'/,
   },
   {
-    // WHAT IS LEFT AFTER `float` TAKES ITS OWN, which is everything this class had: all 13 of its
-    // rows were floating-point stores (`stfd` 7, `swc1` 2, `sdc1` 2, `stfs` 2), so the Pareto's top
-    // bar read 56 when the honest floating-point number was 69, and a roadmap reader was offered a
-    // separate 13-row capability that nobody should build.
+    // WHAT IS LEFT AFTER `float` TAKES ITS OWN, which in this corpus is nothing: every one of the
+    // 13 markers core spells this way is a floating-point store (`stfd` 7, `swc1` 2, `sdc1` 2,
+    // `stfs` 2), and `float` is listed first, so the honest floating-point number is 69 and this
+    // class reads 0.
     //
     // The class stays, because the ISA policies reach further than the FPU — `mips.ts` lists
-    // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr`, `thumb.ts` `^(str|stm)`, `ppc.ts` `^st`, so `stwbrx` or an
-    // unaligned `swl` reaches it — and because what it names is real: core throws here to say a
-    // MEMORY WRITE cannot degrade to a register opaque, which is a different refusal from an
-    // unresolvable value. But that is a property of the throw, not a capability to build; the
-    // capability is whatever instruction it is. So the class is now uninhabited, and it is in
-    // `NO_ROWS` with that measurement beside it.
+    // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr` beside the FPU pair, `thumb.ts` `^(str|stm)`, `ppc.ts`
+    // `^st`, so `stwbrx` or an unaligned `swl` reaches it — and because what it names is real: core
+    // throws here to say a MEMORY WRITE cannot degrade to a register opaque, which is a different
+    // refusal from an unresolvable value. But that is a property of the throw, not a capability to
+    // build; the capability is whatever instruction it is. So the class is uninhabited, and it is
+    // in `NO_ROWS` with that measurement beside it.
     key: 'store-class',
     label: 'Unmodelled store-class instructions (a non-FPU store)',
     pattern: /unmodelled store-class/,
@@ -280,21 +277,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // generic tail-branch refusal ("a target/fall-through that is not a block boundary"), which has
     // no switch in it. Tightening it to the phrases its three producers guarantee stopped that.
     //
-    // IT DID NOT REMOVE THE ORDERING DEPENDENCY, and an earlier draft of this comment claimed it
-    // had. `jump-table target is not a block boundary` is a strict SUPERSTRING of `not a block
-    // boundary`, so `frontend/ppc.ts`'s recovered-dispatch refusal matches this class AND
-    // `block-boundary`, and it is attributed here only because this class is listed first. The
-    // artifact cannot show it — the one `switch-shapes` row declines on "the jump table's case arms
-    // do not linearize" — so `declines.test.ts` checks the overlap table over core's own messages
-    // as well as over the published markers, and this pair is in it.
+    // IT DOES NOT REMOVE THE ORDERING DEPENDENCY. `jump-table target is not a block boundary` is a
+    // strict SUPERSTRING of `not a block boundary`, so `frontend/ppc.ts`'s recovered-dispatch
+    // refusal matches this class AND `block-boundary`, and it is attributed here only because this
+    // class is listed first. The artifact cannot show it — the one `switch-shapes` row declines on
+    // "the jump table's case arms do not linearize" — so `declines.test.ts` checks the overlap
+    // table over core's own messages as well as over the published markers, and this pair is in it.
     //
-    // FOUR SIBLINGS FROM THE SAME PRODUCER WERE LEFT WITH NOWHERE TO GO by that tightening, while
-    // this class held one row. `structure/structure.ts` refuses a jump table five ways and only one
-    // of them said "linearize": cases sharing a target block with differing phi args, a case
-    // running on into the next where the target language has no fall-through in its case statement,
-    // an arm falling through into one that is not the next emitted, and the arm fallen into taking
-    // a value from the switch edge that the fall-through path would re-run. Same capability, same
-    // site, and they sat in the residue a reader is asked to trust.
+    // ONE PRODUCER, FIVE REFUSALS, AND ONLY ONE OF THEM SAYS "linearize". `structure/structure.ts`
+    // also refuses cases sharing a target block with differing phi args, a case running on into the
+    // next where the target language has no fall-through in its case statement, an arm falling
+    // through into one that is not the next emitted, and the arm fallen into taking a value from
+    // the switch edge that the fall-through path would re-run. Same capability, same site, so the
+    // pattern carries a phrase for each rather than the one the corpus happened to print.
     //
     // The fall-through-POSITION one is keyed on the clause that opens its sentence, not on the one
     // that ends it. This file opens with the rule that a class is decided inside the first 200
@@ -362,7 +357,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // because no relocation ever arrived for it, and a PPC `@l`/`@ha` half or data relocation whose
     // immediate is not the placeholder the linker will overwrite. Either way the printed immediate
     // is a link-time placeholder rather than the address — PR #222's law, spelt in both frontends,
-    // which is why the class is no longer named for one of them.
+    // which is why neither the key nor the label names one of them.
     key: 'reloc-halves',
     label: 'Relocated address halves (%hi / %lo, @l / @ha)',
     pattern: /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half/,
@@ -389,8 +384,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     // The label therefore names the disjunction the message carries, dispatch side first, because
     // that is the side the corpus inhabits. The durable fix is to split the arm at the throw, which
-    // is decidable there from the mnemonic; it is not in this diff because it rewrites three
-    // published markers and so owes a whole-tier bench.
+    // is decidable there from the mnemonic and which rewrites three published markers, so it owes a
+    // whole-tier bench of its own.
     key: 'ctr-transfer',
     label: 'Branches through CTR (an unclaimed jump-table dispatch, or a CTR-counted loop)',
     // `frontend/ppc.ts` refuses a CTR loop at three sites, not one, and the other two are the ones
@@ -405,15 +400,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /not a block boundary/,
   },
   {
-    // NOT a catch-all, and it may not become one again. It used to read `indirect|computed` as bare
-    // lowercase words, which is a SECOND catch-all sitting ABOVE `other` — and `other` is the only
-    // bucket the anchor watches, so anything this absorbed went unnamed for ever. It was already
-    // absorbing outside control flow: `sa3:ProcessOamBuffers` declines because "the address of a
-    // stack local is computed", and a loop-naming refusal in `structure/structure.ts` says
-    // "rebuild a computed value inside a loop". What is left is one producer phrase — the MIPS and
-    // PPC frontends' denylist for a branch mnemonic no frontend models — so the label names that
-    // and nothing else. What used to hide under it and now falls to `other` is named in the
-    // residue list at the top of this file, where it can be read.
+    // NOT a catch-all, and it may not become one. A pattern here reading `indirect|computed` as
+    // bare lowercase words is a SECOND catch-all sitting ABOVE `other` — and `other` is the only
+    // bucket the anchor watches, so whatever it absorbs goes unnamed for ever, control flow or not:
+    // `sa3:ProcessOamBuffers` declines because "the address of a stack local is computed", and a
+    // loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
+    // loop". So the pattern carries one producer phrase — the MIPS and PPC frontends' denylist for
+    // a branch mnemonic no frontend models — and the label names that and nothing else. Everything
+    // a wider pattern would swallow falls to `other`, where the residue list names it.
     key: 'branch-form',
     label: 'Unmodelled branch forms (a control transfer no frontend models)',
     pattern: /unmodelled control transfer|not a modelled branch form/,
