@@ -6594,6 +6594,32 @@ export const SYNTHETIC: SynthSpec[] = [
   // So a `returnsVoid` regression on this row is detectable, and the refusal survives narrowed:
   // an undeclared or non-void callee still declines.
   //
+  // `stkext` and `stkextsret` are the same idiom one size up, where the frame is a BUFFER and no
+  // access in the function types it. Nothing dereferences the captured address, so nothing pins a
+  // TYPE; the frame reservation pins the EXTENT, and an extent is all a block copy needs. They are
+  // a two-sided pair over the one thing that separates a filled buffer from a struct-return
+  // temporary, which the asm does not say:
+  //
+  //   stkext      push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp / mov r2,#0x40 / bl memcpy
+  //   stkextsret  push {lr} / add sp,#-0x40 / ldr r1,.L3 / mov r0,sp /               bl makeblob
+  //
+  // `stkext` sets THREE argument registers for a callee the C standard declares with three
+  // parameters (`proto.ts` STANDARD_SIGNATURES), so the declaration accounts for every register
+  // the call sets and no hidden return pointer can be hiding among them: **MATCH**, one candidate.
+  // `stkextsret` sets TWO for a callee declared with ONE, and that extra register IS the hidden
+  // pointer — the frame is agbcc's return temporary, not a local at all. It declines:
+  //     cannot lift 'stkextsret': address-taken stack local — the captured address is never
+  //     dereferenced in this function, so nothing pins the local object type — and `makeblob`
+  //     takes it at argument 0 with no declared arity accounting for the argument registers the
+  //     call sets — which is how a hidden struct-return pointer looks
+  // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
+  // witness rather than of who was told what: the pair differs in the ASM, not in the context.
+  //
+  // SIXTY-FOUR BYTES IS LOAD-BEARING on `stkext`, and the reason is agbcc's BUILTIN `memcpy`: a
+  // constant copy of 32 bytes or fewer expands inline as `ldmia`/`stmia` and leaves no call for
+  // the address to escape into, so at 16 the shape this row is about is not in the target at all.
+  // Measured at 16/32/64/128 — the call appears at 64.
+  //
   // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
   // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
   // `noncompile` for m2c: it emits `fill(&unksp0);` with no declaration of `unksp0`, the same
@@ -6709,6 +6735,36 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void fill(s32 *p); s32 outparam(void);',
     proto: { fill: { params: 1, returnsVoid: true } },
+  },
+  {
+    sym: 'stkext',
+    // SIXTY-FOUR BYTES, NOT SIXTEEN, and the size is load-bearing: agbcc's BUILTIN `memcpy`
+    // expands a constant copy of 32 bytes or fewer inline (`ldmia`/`stmia`), and an inlined copy
+    // leaves no call for the address to escape into — the shape this row is about would not be
+    // in the target at all. At 64 the builtin emits `bl memcpy`, whatever the translation unit
+    // declares, so the row measures the capability rather than the builtin's threshold.
+    src:
+      'void *memcpy(void *, const void *, u32);\nextern const u8 gBlob[64];\n' +
+      'void stkext(void){ u8 b[64]; memcpy(&b[0], gBlob, sizeof b); }',
+    features: ['stack-addr'],
+    toolchains: ['agbcc'],
+    ctx: 'void *memcpy(void *, const void *, u32);\nvoid stkext(void);',
+  },
+  {
+    sym: 'stkextsret',
+    // NO `stack-addr` TAG, and that is the floor holding rather than an omission: the tag's floor
+    // is the `&`, and this source never writes one. The address is taken by the ABI, not by the
+    // programmer — which is exactly the thing that makes the row hard.
+    src:
+      'struct Blob64 { u32 w[16]; };\nextern struct Blob64 makeblob(const void *);\n' +
+      'extern const u8 gBlob[64];\nvoid stkextsret(void){ struct Blob64 b = makeblob(gBlob); }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'struct Blob64 { u32 w[16]; };\nstruct Blob64 makeblob(const void *);\nvoid stkextsret(void);',
+    // Asmlift is told exactly what m2c is told, and the declaration is the REFUSAL's evidence
+    // rather than a hint withheld: ONE declared parameter against TWO argument registers the
+    // machine sets is the hidden return pointer, counted.
+    proto: { makeblob: { params: 1 } },
   },
 
   // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════
