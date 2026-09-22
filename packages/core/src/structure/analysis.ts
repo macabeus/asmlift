@@ -1528,8 +1528,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
    *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
    *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
-   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches, and
-   *  `volatileGuardedRead` below is the read it does not cover.
+   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches;
+   *  `volatileGuardedRead` is the read it does not cover.
    *
    *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
@@ -1538,24 +1538,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  An operand[0] cone is unconditional and neither rule touches it; only the guarded side is
    *  collected. */
   const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
-  /** A read of an object the map declares VOLATILE, inside that guarded cone. Both placements the
-   *  rules above can reach are observable there, and the fold erased which one the asm had: a read
-   *  it LIFTED out of the arm belongs under the `&&`, where C's short circuit re-guards it, while a
-   *  read that was already above the branch ran unconditionally and belongs ahead of the test.
-   *  agbcc emits the two spellings as two objects (`int t = gVolReg; if (a > 0 && t != 0)` puts the
-   *  `ldr` above the `cmp`; `if (a > 0 && gVolReg != 0)` puts it below the `ble`), so for an
-   *  ordinary cell the choice is a matching question and for this one it is a missing access
-   *  against a duplicated one. Reading the fold's own motion back is the fold's to record, a
-   *  capability this rule does not have, so the caller declines instead — which costs no row: the
-   *  shape is 0 of the corpus's 1,203 rows, swept under both map modes.
+  /** A read of an object the map declares VOLATILE, inside that guarded cone. The fold erased which
+   *  placement the asm had, and here both are observable: a read it LIFTED belongs under the `&&`,
+   *  one already above the branch belongs ahead of the test. agbcc emits the two as two objects
+   *  (`int t = gVolReg; if (a > 0 && t != 0)` puts the `ldr` above the `cmp`; `if (a > 0 && gVolReg
+   *  != 0)` puts it below the `ble`), so for an ordinary cell the choice is a matching question and
+   *  for this one it is a missing hardware access against a duplicated one. Recording its own motion
+   *  is the fold's to do, so this reports and the caller declines — which costs no row: the shape is
+   *  0 of the corpus's 1,203, swept under both map modes.
    *
-   *  Keyed on the OBJECT the access's base reaches, not on the cell it resolves to, because
-   *  volatility is declared of the object: a subscript reaches it while naming no cell — an `aload`,
-   *  or a `load` through walked arithmetic where the map carries no array shape — and both are the
-   *  same hazard the scalar is. Where the offset IS pinned the question is asked of that byte, so a
-   *  plain member beside a `vu16` one keeps its connective. A base that reaches no name — a pointer
-   *  parameter, a raw MMIO address the map declares nothing about — is unknown and does not refuse,
-   *  the posture no map at all has. */
+   *  Keyed on the OBJECT the base reaches rather than the cell, because volatility is declared of
+   *  the object and a subscript reaches it while naming no cell — an `aload`, or a `load` through
+   *  walked arithmetic where the map carries no array shape. Where the offset IS pinned the question
+   *  is asked of that byte, so a plain member beside a `vu16` one keeps its connective. A base that
+   *  reaches no name — a pointer parameter, a raw MMIO address — is unknown and does not refuse, the
+   *  posture no map at all has. */
   const volatileGuardedRead = ((): string | null => {
     if (!defs || !volatileGlobal) {
       return null;
@@ -1766,17 +1763,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           continue;
         }
         // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
-        // give it away. Two facts, and only the second is `shortCircuitGuarded`'s: a def DOMINATES
-        // its uses (ir/verify.ts), so the call ran on every path that evaluates the connective and
-        // inlining it there runs it on fewer — compiled, `do { r = cb(p); } while (i++ <= n && r !=
-        // 0);` puts `bl cb` ahead of both compares, and inlined the recovered C would call `cb` only
-        // while the counter's arm holds, so the callee runs fewer times and whatever it wrote goes
-        // with it. That the DEF is where to put it back is the set's half: `call` is hoist-unsafe, so
-        // no fold lifted one into that cone. `opaque`, the other hoist-unsafe op with a result,
-        // needs no placement — neither position spells compilable C — and a bottom test holding one
-        // still declines in `testSkipsAnEffect`, which is that guard's remaining population. What
-        // this clause reaches is the row that pins it, 1 of the corpus's 1,203, swept in both map
-        // modes.
+        // give it away. Two independent facts. A def DOMINATES its uses (ir/verify.ts), so a call
+        // the connective reads ran on every path that evaluates it, while the inlined C runs it on
+        // fewer and takes whatever the callee wrote with it — agbcc compiles `do { r = cb(p); }
+        // while (i++ <= n && r != 0);` to a `bl cb` ahead of both compares. And the DEF is where to
+        // put it back because `call` is hoist-unsafe, so no fold lifted one into this cone.
+        // `opaque`, the other hoist-unsafe op with a result, needs no placement — neither position
+        // spells compilable C — and a bottom test holding one still declines in `testSkipsAnEffect`,
+        // which is that guard's remaining population. What this clause reaches is the row that pins
+        // it, 1 of the corpus's 1,203, swept in both map modes.
         if (isCall && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;

@@ -87,8 +87,9 @@ export function globalCellOf(defs: Map<Value, Op>, addr: Value, off: number): Gl
 }
 
 /**
- * The named global an address value is DERIVED FROM, through defs alone — `gaddr`, and `add`/`sub`
- * chains where exactly one side reaches a name. Where {@link globalCellOf} asks which CELL an
+ * The named global an address value is DERIVED FROM, through defs alone — `gaddr`, an `add` where
+ * exactly one side reaches a name, and the LEFT side of a `sub`, whose right side is a distance and
+ * never a second object. Where {@link globalCellOf} asks which CELL an
  * address denotes and answers null the moment a runtime term enters, this asks only which OBJECT
  * it reaches, which a runtime index does not change: `gVolArr[i]` names no cell and one object.
  *

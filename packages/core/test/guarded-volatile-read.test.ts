@@ -68,7 +68,8 @@ test('the FIRST operand is unconditional, so a volatile read there is placed alr
 // `extern volatile int gVolArr[8]; … if (a > 0 && gVolArr[i] != 0) g(a);` — the same hazard reached
 // by a SUBSCRIPT, which names the object and no cell. The two agbcc objects, the `ldr` above the
 // `cmp` and below the `ble`, emitted one `if (a0 > 0 && gVolArr[a1] != 0)` between them. The walked
-// twin is what a map carrying no array shape gets: `gaddr + (i << 2)` under a plain `load`.
+// twin is the same access with no `aload` recovered: `gaddr + (i << 2)` under a plain `load`, which
+// is what the base has to answer for when the offset is a runtime term either way.
 const GUARDED_ELEMENT = `fn v {
 ^bb0(%0: s32, %1: s32):
   %2: s32* = gaddr {sym="gVolArr"}

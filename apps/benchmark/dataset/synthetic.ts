@@ -1363,8 +1363,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // the PLACEMENT that keeps them apart — a call in a connective's guarded operand is materialized at
   // its def (structure/analysis.ts) — and, behind it, `testSkipsAnEffect` (structure/hazards.ts),
   // which then finds a name in that position and asks the same question of every `do-while` rather
-  // than only of a folded one. What still reaches that guard is an `opaque`, the other member of
-  // `REPEATED_EFFECT`, for which no placement rule exists.
+  // than only of a folded one. What still reaches that guard is an `opaque`, the only other
+  // effectful op that defines a value, for which no placement rule exists.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
