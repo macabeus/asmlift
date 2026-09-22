@@ -734,8 +734,8 @@ export interface StructureAnalysis {
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
    *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
-  /** the name of a VOLATILE object read inside a `&&`/`||`'s guarded operand cone, if any — the one
-   *  value in that cone no placement here can answer for, reported for the caller to decline on */
+  /** the name of a VOLATILE object read inside a `&&`/`||`'s guarded operand cone, if any — a value
+   *  in that cone no placement here can answer for, reported for the caller to decline on */
   volatileGuardedRead: string | null;
 }
 
@@ -1535,8 +1535,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
    *  materializes it there rather than letting C's short circuit skip it.
    *
-   *  An operand[0] cone is unconditional and neither rule touches it; only the guarded side is
-   *  collected. */
+   *  Only the guarded side is SEEDED. A connective's own operand[0] is evaluated whenever the
+   *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
+   *  is reached through the outer's cone, operand[0] included, which is what C does with it. */
   const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
   /** A read of an object the map declares VOLATILE, inside that guarded cone. The fold erased which
    *  placement the asm had, and here both are observable: a read it LIFTED belongs under the `&&`,
