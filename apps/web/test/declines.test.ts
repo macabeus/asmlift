@@ -33,9 +33,26 @@ describe('specific instruction families beat the generic opaque bucket', () => {
     expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe(want);
   });
 
-  test('a mnemonic in no family still lands in opaque-ops', () => {
-    expect(classOf("structure: unmodelled instruction 'clz'")).toBe('opaque-ops');
-  });
+  // PPC spells single precision with a trailing `s` and a record form with a trailing `.`, so a
+  // list written against `fadd|fsub|fmul|fdiv` and a closing quote matches the double-precision
+  // spelling and nothing mwcc emits for a `float`. These seven markers were published as generic
+  // opaque instructions in the committed artifact — five synthetic rows plus two real ac-decomp
+  // functions — which is a floating-point gap reported as "we do not know what blocks these".
+  test.each(['fadds', 'fsubs', 'fmuls', 'fdivs', 'fneg', 'fabs', 'fadd.', 'fmadds', 'fsel', 'psq_l', 'ps_madds0'])(
+    "the PPC FPU mnemonic '%s' is floating point",
+    (mnemonic) => {
+      expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe('float');
+    },
+  );
+
+  // The other half: the PPC arm must not become "anything mwcc emits". Every one of these is a
+  // real opaque-ops inhabitant of the committed artifact.
+  test.each(['clz', 'rlwimi', 'rlwinm', 'xoris', 'subfe', 'addc', 'adde'])(
+    "a mnemonic in no family still lands in opaque-ops: '%s'",
+    (mnemonic) => {
+      expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe('opaque-ops');
+    },
+  );
 });
 
 describe('the instruction cause beats the shape symptom', () => {

@@ -113,8 +113,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // The alternation is anchored by the closing quote, so a bare `add\.` would require the literal
     // `add.'` and match nothing. `[\w.]+` after the dot covers the one-part (`add.s`) and two-part
     // (`c.lt.s`, `cvt.s.w`) MIPS FPU formats alike.
+    //
+    // THE PPC ARM IS WRITTEN AS THE ISA SPELLS THE FAMILY, NOT AS THE CORPUS HAPPENED TO PRINT IT.
+    // Listing `fadd|fsub|fmul|fdiv` against a closing quote silently excludes every single-precision
+    // form — `fadds`, `fsubs`, `fmuls`, `fdivs` are the ones mwcc actually emits for `float`
+    // arithmetic — and `fneg`/`fabs` were absent outright, so 7 published markers over 7 rows,
+    // 2 of them real ac-decomp functions, were filed as generic opaque instructions. PPC spells a
+    // single-precision op with a trailing `s` and a record form with a trailing `.`, so both are
+    // optional suffixes here rather than separate alternatives; `psq_*`/`ps_*` are the GameCube
+    // paired singles, which are floating point on the same FPU.
     pattern:
-      /unmodelled (?:effect )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|fadd|fsub|fmul|fdiv|fmr|fcmp\w*|frsp|fct\w*|lfs|lfd|stfs|stfd)'/,
+      /unmodelled (?:effect )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|f(?:add|sub|mul|div|madd|msub|nmadd|nmsub|sqrt|res|rsqrte|sel|abs|nabs|neg|mr|rsp)s?\.?|fcmp\w*|fct\w*|lfd\w*|lfs\w*|stfd\w*|stfs\w*|psq_\w+|ps_[\w.]+)'/,
   },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
   // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an
