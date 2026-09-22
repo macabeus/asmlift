@@ -37,6 +37,7 @@ import {
   oracleFor,
   protoFactProblems,
   quotedSignature,
+  standardSignatureAgrees,
 } from '../src/cases/authored-facts';
 import { REAL_DIR, type RealFunction, type RealManifest, type VendoredEntry } from '../src/cases/manifests';
 import { m2cOwnPrototype } from '../src/cases/real';
@@ -316,7 +317,13 @@ const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: 
   // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so a callee named `toString`,
   // `valueOf` or `constructor` would answer true and drop itself from the check in BOTH
   // directions — a gate quietly excusing the rows it was written to catch.
-  const authored = (n: string) => n !== sym && !Object.hasOwn(STANDARD_SIGNATURES, n);
+  //
+  // THE EXEMPTION IS ONLY AS GOOD AS THE AGREEMENT, so it is conditioned on one: a row that
+  // declares its own `memcpy` — a different arity, or one returning a struct — is telling m2c
+  // something asmlift is NOT told, and the standard table is not what it knows. That row is back
+  // inside the check and must declare the callee to both (`standardSignatureAgrees`).
+  const standard = (n: string) => Object.hasOwn(STANDARD_SIGNATURES, n) && standardSignatureAgrees(ctx, n);
+  const authored = (n: string) => n !== sym && !standard(n);
   const inCtx = declaredFunctionNames(ctx).filter(authored);
   const inProto = protoKeys.filter(authored);
   return [
@@ -326,6 +333,18 @@ const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: 
 };
 
 describe('neither decompiler is told a callee the other is not', () => {
+  // The exemption's own gate. A row is excused a standard name only while its context declares
+  // the function the standard fixes; these are the declarations that are NOT that function, and
+  // each of them is a per-row claim asmlift would never be handed.
+  test('a context that re-declares a standard name is not excused by the standard', () => {
+    expect(standardSignatureAgrees('void *memcpy(void *, const void *, unsigned long);', 'memcpy')).toBe(true);
+    expect(standardSignatureAgrees('void *memcpy(void *, const void *, u32);', 'memcpy')).toBe(true);
+    expect(standardSignatureAgrees('void *memcpy(void *, const void *);', 'memcpy')).toBe(false);
+    expect(standardSignatureAgrees('struct Blob memcpy(void *, const void *, u32);', 'memcpy')).toBe(false);
+    // a name the context never declares makes no claim to disagree with
+    expect(standardSignatureAgrees('void f(void);', 'memcpy')).toBe(true);
+  });
+
   test('every real row with a hand-written ctx declares the same callees to both', () => {
     const asymmetric = manifests.flatMap(({ man }) =>
       man.functions
