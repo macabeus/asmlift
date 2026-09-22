@@ -968,7 +968,7 @@
         }
       },
       "m2cCtx": true,
-      "note": "Long enough that agbcc splits it around a mid-function literal pool, which lands between a `cmp` and the conditional branch that reads it. asmlift’s condition flags are block-local, so that branch has no reaching compare in its own block and the whole function declines at lift.",
+      "note": "Long enough that agbcc splits it around a mid-function literal pool, which lands between a `cmp` and the conditional branch that reads it: the corpus’s only ARM inhabitant of condition flags reaching a branch across a block boundary. Past the lift it measures the DMA-wait macro, 21 near-identical regions of it — asmlift spells each busy-wait as an `if` over a `do`/`while` on one `volatile s32 *`, where the macro re-reads the control register through its own pointer.",
       "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0802688C.c#L321-L371"
     },
     {
