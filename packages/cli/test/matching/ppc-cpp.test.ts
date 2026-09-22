@@ -39,7 +39,7 @@ const CASES: { cpp: string; spec: CppFnSpec; expect: string; note: string }[] = 
     cpp: 'struct Vec{int x;int y;int dot(Vec*o);}; int Vec::dot(Vec*o){ return x*o->x + y*o->y; }',
     spec: { method: 'dot', cls: 'Vec', retType: INT, params: [{ name: 'o', type: VECP }], classes: { Vec: VEC } },
     expect:
-      'struct Vec { int x; int y; int dot(Vec * o); };\nint Vec::dot(Vec * o) {\n    return x * o->x + y * o->y;\n}\n',
+      'struct Vec { int x; int y; int dot(Vec *o); };\nint Vec::dot(Vec *o) {\n    return x * o->x + y * o->y;\n}\n',
   },
   {
     note: 'no-arg member: Vec::len2() — Fv mangling, this-only field access',
@@ -66,7 +66,7 @@ const CASES: { cpp: string; spec: CppFnSpec; expect: string; note: string }[] = 
       ],
       classes: { Vec: VEC },
     },
-    expect: 'struct Vec { int x; int y; };\nint dot(Vec * a, Vec * b) {\n    return a->x * b->x + a->y * b->y;\n}\n',
+    expect: 'struct Vec { int x; int y; };\nint dot(Vec *a, Vec *b) {\n    return a->x * b->x + a->y * b->y;\n}\n',
   },
 ];
 
@@ -143,7 +143,7 @@ describe('C++ backend — offline (committed disasm, no toolchain)', () => {
     };
     const r = decompile('dot__3VecFP3Vec', asm, PPC_MWCC, { backend: cppBackend(spec) });
     expect(r.source).toBe(
-      'struct Vec { int x; int y; int dot(Vec * o); };\nint Vec::dot(Vec * o) {\n    return x * o->x + y * o->y;\n}\n',
+      'struct Vec { int x; int y; int dot(Vec *o); };\nint Vec::dot(Vec *o) {\n    return x * o->x + y * o->y;\n}\n',
     );
   });
 });
