@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DECLINE_CLASSES, OTHER_CLASS, declineClassesOf } from '../src/pages/benchmark/lib/declines';
+import { DECLINE_CLASSES, declineClassesOf } from '../src/pages/benchmark/lib/declines';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
@@ -353,10 +353,24 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     expect(unclassified).toEqual([]);
   });
 
-  test('every class the artifact does exhibit is one this list declares', () => {
-    const declared = new Set([...DECLINE_CLASSES.map((c) => c.key), OTHER_CLASS.key]);
+  // The other half. "other" staying empty catches a marker nobody classifies; this catches the
+  // opposite failure — a class whose rows have been swallowed by one ordered above it, which moves
+  // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
+  // collapsed the largest MIPS family into the generic bucket and every class still existed.
+  //
+  // These three have no rows for reasons that are measured and written down beside them, not
+  // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
+  // of these three disappears, a residue found an inhabitant or somebody wrote the `tax_gprel`
+  // row — good news, and this list moves in the commit that earns it.
+  const NO_ROWS = ['branch-likely', 'control-flow', 'pic-globals'];
+
+  test('every other class is inhabited, and exactly these three are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
-    expect([...exhibited].filter((k) => !declared.has(k))).toEqual([]);
+    expect(
+      DECLINE_CLASSES.map((c) => c.key)
+        .filter((k) => !exhibited.has(k))
+        .sort(),
+    ).toEqual(NO_ROWS);
   });
 });
 
