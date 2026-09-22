@@ -885,7 +885,7 @@ describe('the block hoist is WIRED into enumeration', () => {
 
   test('it binds the register file alone and leaves the scalar cells inline', () => {
     const src = cands.find((x) => joinVariations(x.variations) === 'signed/livebase-block/volatile')!.source;
-    expect(src).toContain('volatile s32 * p0;');
+    expect(src).toContain('volatile s32 *p0;');
     expect(src).toContain('p0 = (s32 *)67109076;');
     expect(src).toContain('*(u16 *)50335816 = *(u16 *)50335816 + 1;');
     expect(src).not.toContain('50335816;'); // no init binds it
@@ -1078,7 +1078,7 @@ f:
     const ablated = without(without(BASECSE_GATES, 'cast-base'), 'single-use');
     expect(admittedBases(tree(), ablated)).toEqual([KEY]);
     const src = cBackend.emit(hoistBaseLocals(tree(), ablated, 'head'));
-    expect(src).toContain('struct Elem0 * p0;');
+    expect(src).toContain('struct Elem0 *p0;');
     expect(src).toContain('p0 = (struct Elem0 *)&gBgInfo;');
     expect(src).toContain('return p0[a0].field_16;');
   });

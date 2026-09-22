@@ -152,7 +152,7 @@ export const FIXTURES: DecompFixture[] = [
     referenceC: 'void g(int); void baseacrosscalls(void){ int *p=(int*)0x30056d0; g(p[1]); g(p[0]); g(p[2]); }',
     prototypes: { baseacrosscalls: { returnsVoid: true }, g: { params: 1 } },
     expectSource:
-      'void baseacrosscalls(void) {\n    s32 * v0;\n    v0 = (s32 *)50353872;\n' +
+      'void baseacrosscalls(void) {\n    s32 *v0;\n    v0 = (s32 *)50353872;\n' +
       '    g(v0[1]);\n    g(*v0);\n    g(v0[2]);\n}\n',
     note: 'const base live ACROSS calls — materialized into a local (the callee-saved register the compiler keeps it in), not re-inlined per use. A const NOT live across a call (small init immediate) must stay inlined — see sum_to.',
   },
@@ -620,7 +620,7 @@ export const FIXTURES: DecompFixture[] = [
     candidatePrelude: 'extern volatile unsigned int gDmaSrc;\n',
     expectSource:
       'void dmafill(u16 * a0, s32 a1) {\n' +
-      '    u16 * v0;\n' +
+      '    u16 *v0;\n' +
       '    s32 v1;\n' +
       '    volatile u16 sp0;\n' +
       // `v1 = a1` (the count, which agbcc never copies — `n` stays in r1) ahead of `v0 = a0` (a real

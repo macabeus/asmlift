@@ -194,7 +194,7 @@ test('pool-global recovery + base-CSE hoist, as emitted C (full pipeline)', () =
   // (`return 3` is r0 live at `bx lr` under the no-proto default — faithful to the asm; pass
   // returnsVoid to suppress. The golden pins the hoist: one typed local, offsets as p0[i].)
   expect(decompile('initcfg', `initcfg:\n${BASECSE_ASM}\n`, ARMV4T_AGBCC).source).toBe(
-    's32 initcfg(void) {\n    u8 * p0;\n    p0 = (u8 *)&gCfg;\n    *p0 = 1;\n    p0[1] = 2;\n' +
+    's32 initcfg(void) {\n    u8 *p0;\n    p0 = (u8 *)&gCfg;\n    *p0 = 1;\n    p0[1] = 2;\n' +
       '    p0[2] = 3;\n    return 3;\n}\n',
   );
 });

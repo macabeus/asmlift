@@ -38,6 +38,13 @@ import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation, hasVariations } from '../src/variation-tokens';
 import { count, traceOf, tracesDiffer } from './helpers';
 
+/** An emitted body with its local DECLARATIONS dropped — the leading run of declarator lines. */
+const statementsOf = (src: string): string =>
+  src
+    .split('\n')
+    .filter((l) => !/^ {4}(volatile )?(struct )?\w+ \*?\w+(\[\d+\])*;$/.test(l))
+    .join('\n');
+
 // Two halfword stores 2 bytes apart through ONE address register — the `REG_WININ` pair, reduced.
 const ADVANCE_IR = `fn advance {
 ^bb0(%0: s32):
@@ -172,7 +179,7 @@ const loopAt = (addr: number): Stmt => ({ k: 'while', cond: { k: 'var', name: 'a
 
 test('an advanced pair becomes one local moved in place', () => {
   const out = cBackend.emit(advancedBases(fnWith(PAIR))!);
-  expect(out).toMatch(/u16 \* p0;/);
+  expect(out).toMatch(/u16 \*p0;/);
   expect(out).toMatch(/p0 = \(u16 \*\)67108936;/);
   expect(out).toMatch(/p0 = p0 \+ 1;/);
   expect(count(out, '*p0 = a;')).toBe(2);
@@ -450,8 +457,10 @@ test.each([...ADVANCE_HEAD_GATES, ...ADVANCE_MEMBER_GATES])(
     expect(out).toContain(emits);
     if (derefs !== undefined) {
       // a `*p0` per chain member is right; the extra one is an access whose own address was
-      // absorbed into a pointer that does not hold it
-      expect(count(out, '*p0')).toBe(derefs);
+      // absorbed into a pointer that does not hold it. Counted over the STATEMENTS: a pointer
+      // local declares as `s32 *p0;`, which carries the same spelling without dereferencing
+      // anything.
+      expect(count(statementsOf(out), '*p0')).toBe(derefs);
       expect(derefs).toBeGreaterThan(2);
     }
     // A fractional or `NaN` step is the `noncompile` verdict and nothing else may carry one: both
@@ -504,7 +513,7 @@ test('the row enumerates the advanced spelling, qualified', () => {
   const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => hasVariations(c.variations, ['advance', 'volatile']));
   expect(qualified).toBeDefined();
   // The byte-exact spelling, compiled against the row's own target object.
-  expect(qualified!.source).toMatch(/volatile u16 \* p0;/);
+  expect(qualified!.source).toMatch(/volatile u16 \*p0;/);
   expect(qualified!.source).toMatch(/p0 = \(u16 \*\)67108936;/);
   expect(qualified!.source).toMatch(/p0 = p0 \+ 1;/);
   // …and the base init leads, because that is the order the target's own pool words record.

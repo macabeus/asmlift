@@ -52,8 +52,8 @@ const STRCMP_EARLY_RETURN = `fn strcmpearly {
 test('a body `if` whose arm returns joins at the loop, not at the merged epilogue', () => {
   expect(emit(STRCMP_EARLY_RETURN)).toBe(
     's32 strcmpearly(u8 * a0, u8 * a1) {\n' +
-      '    u8 * v0;\n' +
-      '    u8 * v1;\n' +
+      '    u8 *v0;\n' +
+      '    u8 *v1;\n' +
       '    s32 v2;\n' +
       '    v0 = a0;\n' +
       '    v1 = a1;\n' +

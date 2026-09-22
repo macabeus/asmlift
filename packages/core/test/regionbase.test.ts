@@ -313,7 +313,7 @@ describe('the variation is OFFERED, and it reaches the shape the row needs', () 
     const vol = cands.filter((c) => hasVariations(c.variations, ['regionbase', 'volatile']));
     expect(vol.length).toBeGreaterThan(0);
     // the qualifier lands on the DECLARATION of the minted locals, not on the cast
-    expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
+    expect(vol.every((c) => /volatile s32 \*p0;/.test(c.source))).toBe(true);
   });
 
   test('…and the store the variation leaves INLINE keeps its qualifier too', () => {
@@ -324,7 +324,7 @@ describe('the variation is OFFERED, and it reaches the shape the row needs', () 
     // this variation the winning source dropped a device qualifier the un-hoisted spelling carries.
     const triple = cands.filter((c) => hasVariations(c.variations, ['regionbase', 'volatile', 'vol-store']));
     expect(triple.length).toBeGreaterThan(0);
-    expect(triple.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
+    expect(triple.every((c) => /volatile s32 \*p0;/.test(c.source))).toBe(true);
     expect(triple.every((c) => /\(\(volatile s32 \*\)67109076\)\[2\] =/.test(c.source))).toBe(true);
     // and no candidate loses one: the pair-less spelling is still in the fan
     expect(

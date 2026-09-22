@@ -66,14 +66,14 @@ describe('gvn hoists to the ENTRY block, which is only free if nothing gives it 
 
 describe('the win is contingent on the symbol map — gvn.ts says so, this is the measurement', () => {
   test('WITH a rank-aware map the accesses spell bare, and no pass re-creates the local', () => {
-    expect(cBackend.emit(numbered(RANK_2))).not.toMatch(/u16 \* \w+;/);
+    expect(cBackend.emit(numbered(RANK_2))).not.toMatch(/u16 \*\w+;/);
   });
 
   test('WITHOUT one they spell `(u16 *)&gTable` and basecse hoists the local straight back', () => {
     // Not a defect to fix: it is the same address in the same place, one pass later, and it is why
     // gvn.ts calls its own win contingent. Pinned so the contingency cannot quietly stop being true.
     const src = cBackend.emit(numbered());
-    expect(src).toMatch(/u16 \* (\w+);\n\s+\1 = \(u16 \*\)&gTable;/);
+    expect(src).toMatch(/u16 \*(\w+);\n\s+\1 = \(u16 \*\)&gTable;/);
   });
 });
 
