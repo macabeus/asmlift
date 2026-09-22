@@ -749,18 +749,22 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These four have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
-  // of these four disappears, an unnamed gap found an inhabitant — good news, and this list moves
-  // in the commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
+  // These have no rows for reasons that are measured and written down beside them, not because
+  // something shadowed them. If a further name appears here, a class has gone dark. If one of
+  // these disappears, an unnamed gap found an inhabitant — good news, and this list moves in the
+  // commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
   //
   // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
+  // `clobbered-value` is here for ONE artifact only. Its producer refuses in the frontend, ahead of
+  // the `adc` marker that has been masking the wrong value beside it on
+  // `pokeemerald:MathUtil_Mul32:agbcc`, so the row moves to it the next time the artifact is
+  // regenerated — and this entry comes out with the same commit that regenerates it.
+  const NO_ROWS = ['branch-form', 'branch-likely', 'clobbered-value', 'cross-block-flags-arm', 'store-class'];
 
-  test('every other class is inhabited, and exactly these four are not', () => {
+  test('every other class is inhabited, and exactly these five are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
@@ -907,6 +911,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
+    ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],

@@ -242,7 +242,10 @@ describe('the audit judges each frame object on its own bytes', () => {
     // address. The storage is keyed twice, and that is decidable from the object's FIRST BYTE
     // alone — an extent it does not have is not needed to see the disagreement.
     expect(() => lift(DISJOINT)).not.toThrow();
-    expect(() => lift(frame('\tstr\tr0, [sp]\n\tldr\tr2, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r2\n'))).toThrow(
+    // The reload lands in r4, not r2: r4 is callee-saved, and a caller-saved register read back
+    // after the `bl` is a value the callee destroyed (frontend/ssa.ts), which would refuse this
+    // function ahead of the audit and hide what it is here to show.
+    expect(() => lift(frame('\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r4\n'))).toThrow(
       /overlaps the SSA slot at \[sp,#0\] — one byte, two models/,
     );
   });

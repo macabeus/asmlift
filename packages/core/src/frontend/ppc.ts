@@ -57,7 +57,7 @@ import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams } from './ssa';
-import { makeSsaBuilder } from './ssa';
+import { clobberedByCall, makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -467,6 +467,7 @@ export function lift(
   const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
+  const CALL_CLOBBERS = clobberedByCall(target);
 
   // Best-effort call arity when a callee has no prototype: the count of contiguous argument
   // registers (r3..) with a VALUE reaching the call. A prototype's `params` is authoritative when
@@ -789,8 +790,12 @@ export function lift(
           const declared = protoArity(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
+          // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by
+          // dropping the ones a call has been through; a DECLARED one asserts it, so a destroyed
+          // register read for it is a wrong value nothing retracts. See SsaBuilder.readGuessedArg.
           for (let k = 0; k < argc; k++) {
-            args.push(read(ARG_REGS[k]));
+            const r = ARG_REGS[k];
+            args.push(declared === undefined ? highHalves.guardRead(name, r, ssa.readGuessedArg(r, bi)) : read(r));
           }
           // Pushed with `tmp` rather than `emit` so the result register is written separately from
           // the op — r3.. are volatile under the EABI, so a GUESSED arity that counted a register
@@ -802,7 +807,7 @@ export function lift(
             ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
           }
           write(RET, res);
-          ssa.noteCall(bi);
+          ssa.noteCall(bi, CALL_CLOBBERS);
           break;
         }
         // Stack-frame + link-register bookkeeping. `stwu r1,-N(r1)` / `addi r1,r1,N` adjust the frame

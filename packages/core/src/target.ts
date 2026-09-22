@@ -78,6 +78,21 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
+  /** Registers a CALL destroys: after one, they hold whatever the callee left there, and no value
+   *  this function computed. The frontends hand this to the SSA builder so a read of one past a
+   *  call refuses instead of resolving to the pre-call definition (frontend/ssa.ts).
+   *
+   *  REQUIRED, unlike its two neighbours above, and the asymmetry is the point. An absent
+   *  `nonArgRegs` claims no partition, which only makes classification stricter; an absent
+   *  `scratchRegs` under-states a set whose own comment says under-stating is safe. An absent
+   *  caller-saved list takes the UNSOUND direction — nothing refuses, so a destroyed register keeps
+   *  resolving to a value the callee overwrote, silently and with exit 0. A channel whose omission
+   *  is unsound is a required argument, so that forgetting it is a type error.
+   *
+   *  `argRegs` must be a SUBSET of it — a register the caller passes arguments in is by
+   *  construction one the callee may destroy — and `clobberedByCall` (frontend/ssa.ts) checks that
+   *  rather than trusting it, the way `checkedLiveInModel` checks the register partition. */
+  callerSaved: readonly string[];
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -413,6 +428,11 @@ export const ARMV4T_AGBCC: TargetDescription = {
   // `mov ip, r1` in two switch arms, no save anywhere, and a `mov r0, ip` past a third arm that
   // writes nothing — an uninitialised local by construction.
   scratchRegs: ['r12', 'ip'],
+  // AAPCS: r0-r3 pass arguments and return, r12 (`ip`) is the intra-procedure-call scratch, and lr
+  // holds the return address the `bl` itself overwrites. agbcc's own machine description says the
+  // same (`thumb.h` CALL_USED_REGISTERS). Both spellings of r12 for the reason `nonArgRegs` carries
+  // both: the ATPCS aliases are what this ISA's asm writes.
+  callerSaved: ['r0', 'r1', 'r2', 'r3', 'r12', 'ip', 'lr'],
   // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
   // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
   capabilities: {
@@ -483,6 +503,29 @@ export const MIPS_IDO: TargetDescription = {
   compiler: 'ido',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. DECLARED and not yet exercised —
+  // `frontend/mips.ts` refuses a call outright, so nothing on this target reaches the read past one.
+  // Stated anyway, because the field is what makes the refusal unforgettable rather than optional.
+  callerSaved: [
+    'at',
+    'v0',
+    'v1',
+    'a0',
+    'a1',
+    'a2',
+    'a3',
+    't0',
+    't1',
+    't2',
+    't3',
+    't4',
+    't5',
+    't6',
+    't7',
+    't8',
+    't9',
+    'ra',
+  ],
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
@@ -525,6 +568,28 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // The same O32 convention MIPS_IDO carries, and declared for the same reason: the frontend
+  // refuses a call, so it is the field's presence rather than its use that matters here.
+  callerSaved: [
+    'at',
+    'v0',
+    'v1',
+    'a0',
+    'a1',
+    'a2',
+    'a3',
+    't0',
+    't1',
+    't2',
+    't3',
+    't4',
+    't5',
+    't6',
+    't7',
+    't8',
+    't9',
+    'ra',
+  ],
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other
@@ -614,6 +679,10 @@ export const PPC_MWCC: TargetDescription = {
   // PPC EABI: r3–r10 pass integer/pointer arguments; r3 also returns.
   argRegs: ['r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'],
   returnReg: 'r3',
+  // PPC EABI: r0 and r3-r12 are volatile, and lr carries the return address `bl` overwrites. r11
+  // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
+  // callee-saved.
+  callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring compiler behaviors are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the

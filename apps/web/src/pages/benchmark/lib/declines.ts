@@ -399,6 +399,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Call argument registers with no prototype',
     pattern: /has no prototype/,
   },
+  {
+    // The ABI destroyed the value, and nothing about the register file says so: the read has a
+    // reaching definition, and it names bytes the callee overwrote. A capability rather than an
+    // input error — what closes it is a model for whatever the callee left there, which for the one
+    // row that reaches it today is a 64-bit return occupying a REGISTER PAIR.
+    key: 'clobbered-value',
+    label: 'A value a call destroyed (caller-saved register read back)',
+    pattern: /is read on a path where a call has destroyed it/,
+  },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.
   {

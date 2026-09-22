@@ -38,7 +38,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
+import { abiSortEntryParams, clobberedByCall, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
 import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
@@ -3172,6 +3172,8 @@ export function lift(
   // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
   // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
   const slotKey = stackSlotKey; // shared spelling: frontend/ssa.ts
+  // What a `bl` leaves holding nothing this function can name — checked against `argRegs` there.
+  const callClobbers = clobberedByCall(target);
 
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -4493,9 +4495,9 @@ export function lift(
         }
         case 'bl':
         case 'blx': {
-          // A call: read the argument registers (r0..), produce the return value in r0. The
-          // callee's caller-saved clobber (r1..r3, lr) needs no modelling — agbcc has already
-          // moved anything live across the call into a callee-saved register (a copy we alias).
+          // A call: read the argument registers (r0..), produce the return value in r0, and record
+          // that the callee destroyed the rest of the caller-saved set — a read of one past here
+          // names bytes the callee overwrote, and `finish()` refuses it (frontend/ssa.ts).
           const targetSym = a;
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
@@ -4509,9 +4511,13 @@ export function lift(
           // decline names it rather than reading `r4` as if it were argument 5.
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
+          // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
+          // `finish()` answers by dropping the ones a call has been through; a DECLARED one asserts
+          // they exist, so a destroyed register read for it is a wrong value nothing retracts.
+          const readArg = declared === null ? ssa.readGuessedArg : readVar;
           for (let k = 0; k < argc; k++) {
             if (k < target.argRegs.length) {
-              args.push(readVar(`r${k}`, bi));
+              args.push(readArg(`r${k}`, bi));
               continue;
             }
             const off = stackArgs?.[k - target.argRegs.length];
@@ -4531,7 +4537,7 @@ export function lift(
             ssa.recordGuessedCall(callOp, bi, target);
           }
           writeData('r0', bi, res); // the callee defines r0 …
-          ssa.noteCall(bi); // … and the clobber is recorded after it, so that def is the CALLEE's
+          ssa.noteCall(bi, callClobbers); // … and the clobber is recorded after it, so that def is the CALLEE's
           break;
         }
         default:

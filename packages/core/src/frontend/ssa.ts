@@ -36,6 +36,21 @@ export interface SsaBuilder {
   irBlocks: Block[];
   /** Current SSA value of `reg` on entry to block `b` (creating phis/params as needed). */
   readVar(reg: string, b: number): Value;
+  /** Read `reg` as an argument register of a call whose arity was GUESSED — otherwise identical to
+   *  {@link readVar}, and used INSTEAD of it so the read carries no claim.
+   *
+   *  `fallbackArgc` counts argument registers by reaching definition, so a read here is a QUESTION
+   *  ("did the caller set this up?") rather than an assertion, and {@link trimClobberedCallArgs} is
+   *  what answers it. That answer already covers a register a call destroyed, and it covers it
+   *  EXHAUSTIVELY: destroyed on any path means not written-since-the-call on that path, so the
+   *  must-analysis drops it from the run and the operand goes — bar argument 0, which every ABI here
+   *  aliases onto the return register, and which `noteCall` never lists as destroyed for that very
+   *  reason. So none of these reads can leave a destroyed value in the graph, and refusing the
+   *  function over one would cost a row the trim has already made correct.
+   *
+   *  A DECLARED arity uses `readVar`, and must: there the callee says the argument exists, so
+   *  reading a destroyed register for it is a wrong value with nothing to retract it. */
+  readGuessedArg(reg: string, b: number): Value;
   /** Record that `reg` now holds `v` within block `b`. */
   writeVar(reg: string, b: number, v: Value): void;
   /** Mark block `b` fully emitted (terminator pushed); seals any now-ready successors. */
@@ -66,8 +81,15 @@ export interface SsaBuilder {
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
-   *  argument setup for whatever call comes next. */
-  noteCall(b: number): void;
+   *  argument setup for whatever call comes next.
+   *
+   *  `clobbers` are the registers the callee DESTROYS and leaves holding nothing this function can
+   *  name — {@link clobberedByCall} spells it, and it is the ABI's caller-saved set minus the
+   *  return register precisely because of the ordering above: the frontend has already written the
+   *  callee's own result there, so that one register does have a name. Required rather than
+   *  optional: a frontend that omitted it would keep resolving a destroyed register to its
+   *  pre-call value, silently. */
+  noteCall(b: number, clobbers: readonly string[]): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. */
@@ -194,6 +216,43 @@ function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
   return m;
 }
 
+/** A read whose register may be holding a callee's leftover — see `refuseStaleCallerSavedReads`. */
+interface StaleRead {
+  reg: string;
+  value: Value;
+  block: number;
+  /** the block's op count when the read happened. The uses this read answers for start here: an op
+   *  before it consumed a value read while the register was still this function's own, and the same
+   *  register really can be read on both sides of a call without its value changing. */
+  fromOp: number;
+  /** a call in this very block destroyed it, so the predecessors have nothing to add. */
+  local: boolean;
+}
+
+/** The registers a call leaves holding nothing the CALLER can name — what {@link SsaBuilder.noteCall}
+ *  wants. The ABI's caller-saved set minus the return register: every frontend writes the callee's
+ *  own result there before recording the clobber, so that one register does have a name and the
+ *  rest do not.
+ *
+ *  CHECKED rather than trusted, the way `checkedLiveInModel` checks the register partition: a
+ *  register the caller passes arguments in is by construction one the callee may destroy, so
+ *  `argRegs` must be a subset of `callerSaved`. A target spelling one of them differently in the two
+ *  lists would silently stop refusing reads of it. */
+export function clobberedByCall(target: {
+  callerSaved: readonly string[];
+  argRegs: readonly string[];
+  returnReg: string;
+}): readonly string[] {
+  const missing = target.argRegs.filter((r) => !target.callerSaved.includes(r));
+  if (missing.length > 0) {
+    throw new Error(
+      `this target passes arguments in ${missing.join(', ')} but does not list ${missing.length > 1 ? 'them' : 'it'} ` +
+        `as caller-saved, so a read of one past a call cannot be refused`,
+    );
+  }
+  return target.callerSaved.filter((r) => r !== target.returnReg);
+}
+
 export function makeSsaBuilder(
   name: string,
   blockCount: number,
@@ -243,6 +302,24 @@ export function makeSsaBuilder(
   // wrapper, and a MISSED write under-counts an arity — which drops a real argument silently.
   const writtenSinceCall: Array<Set<string>> = irBlocks.map(() => new Set());
   const callsIn = new Set<number>();
+  // WHAT A CALL DESTROYED, which is a DIFFERENT question from the one above and not its complement.
+  // `writtenSinceCall` asks "did the CALLER set this register up" — a MUST question, whose answer
+  // for the return register is deliberately no, because the frontend writes the callee's result
+  // there before recording the clobber. This asks "does this register still hold a value anyone can
+  // name" — a MAY question, whose answer for that same register is yes. One analysis serving both
+  // would have to be wrong about one of them, so they are two, and each names the other.
+  //
+  // `clobberedLocal[b]`: destroyed by a call in `b` with nothing written since. `decidedLocal[b]`:
+  // registers `b` has settled either way, so a register in neither inherits its fate from the
+  // predecessors.
+  const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
+  const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
+  const staleCandidates: StaleRead[] = [];
+  // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
+  // proportional to what a block READS rather than to how many times it reads it. The value a key
+  // holds only changes at a write, and the verdict only flips at a call, so a run of identical
+  // reads collapses to the earliest — which is the one whose uses cover the rest.
+  const staleSeen: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const guessedCalls: GuessedCallSite[] = [];
   let abiSeen: { argRegs: string[]; returnReg: string } = { argRegs: [], returnReg: '' };
 
@@ -376,12 +453,38 @@ export function makeSsaBuilder(
       firstEntryWrite.set(reg, v);
     }
     writtenSinceCall[b].add(reg);
+    clobberedLocal[b].delete(reg);
+    decidedLocal[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
   };
   const readVar = (reg: string, b: number): Value => {
+    const v = readAny(reg, b);
+    noteStaleCandidate(reg, b, v);
+    return v;
+  };
+  /** The lookup, with no claim attached. The FRONTEND's read is what asserts "this register holds
+   *  this value here"; the lookups this construction makes on its own — a single predecessor's
+   *  definition, a phi's operand at each in-edge — are how that one read is answered, not further
+   *  reads to be judged. Recording them would blame a use in one block on a read in another. */
+  const readAny = (reg: string, b: number): Value => {
     noteSlotTraffic(reg, null);
     return defs[b].get(reg) ?? readRecursive(reg, b);
+  };
+  /** Record a read whose register MIGHT be holding a callee's leftover, for `finish` to judge. A
+   *  register this block has already settled answers here and needs no record; one it has not takes
+   *  its answer from the predecessors, which are not all filled yet. */
+  const noteStaleCandidate = (reg: string, b: number, v: Value) => {
+    const local = clobberedLocal[b].has(reg);
+    if (decidedLocal[b].has(reg) && !local) {
+      return; // this function wrote it after the last call in this block: it is its own value
+    }
+    const key = `${reg}|${local ? 1 : 0}`;
+    if (staleSeen[b].get(key) === v) {
+      return;
+    }
+    staleSeen[b].set(key, v);
+    staleCandidates.push({ reg, value: v, block: b, fromOp: irBlocks[b].ops.length, local });
   };
 
   const newPhi = (reg: string, b: number): Value => {
@@ -446,7 +549,7 @@ export function makeSsaBuilder(
       return p;
     }
     if (ps.length === 1) {
-      const v = readVar(reg, ps[0]);
+      const v = readAny(reg, ps[0]);
       defs[b].set(reg, v);
       return v;
     }
@@ -460,7 +563,7 @@ export function makeSsaBuilder(
   // phi is wired the block may have written its key again, so `defs[b]` no longer names it.
   const addPhiOperands = (reg: string, b: number, phi: Value) => {
     for (const p of distinctPreds(b)) {
-      appendSuccessorArg(p, b, readVar(reg, p));
+      appendSuccessorArg(p, b, readAny(reg, p));
       const at = lastWriteAt[p].get(reg);
       if (at !== undefined) {
         const rec = writeOrder.lastWrite.get(irBlocks[p]) ?? new Map<Value, number>();
@@ -540,19 +643,90 @@ export function makeSsaBuilder(
     return walk(b, new Set<number>());
   };
 
+  /** REFUSE a value the ABI destroyed. The builder is RIGHT that a caller-saved register has a
+   *  reaching definition after a call; what it cannot see is that the call destroyed the bytes, so
+   *  that definition names something the callee overwrote. Resolving the read to it is a silently
+   *  wrong VALUE at exit 0 — `mov r3,#0x2a; bl f; add r4,r3,#0` reading as `return 42` — which is
+   *  the one failure a frontend may not produce.
+   *
+   *  It fires on a USE rather than on the read, and after two things in `finish` that legitimately
+   *  retract one: `trimClobberedCallArgs`, which drops a read that fed a guessed call's argument
+   *  list — the sound answer for those, and not a reason to refuse the function as well — and
+   *  `pruneDeadParams`, which drops one that fed a join nothing reads. A destroyed value nothing is
+   *  left holding is a dead register, not a wrong answer.
+   *
+   *  TWO-SIDED, so both sides are stated. TOO STRICT costs a row and nothing else: a register the
+   *  compiler rematerialised in a way no `writeVar` saw reads as destroyed and the function
+   *  declines. TOO LOOSE is the wrong value, and the MAY direction below is what rules it out — a
+   *  register destroyed on ANY path into a block is destroyed there, so a join cannot launder one. */
+  const refuseStaleCallerSavedReads = () => {
+    if (staleCandidates.length === 0) {
+      return;
+    }
+    // Destroyed on SOME path: the UNION, against `trimClobberedCallArgs`'s intersection, and for
+    // the opposite reason. That one proves the caller set a register up, which needs every path to
+    // agree; this one proves nobody can name it, which one path is enough for.
+    const destroyedIn: Array<Set<string>> = irBlocks.map(() => new Set());
+    const outOf = (b: number): Set<string> => {
+      const out = new Set(clobberedLocal[b]);
+      for (const r of destroyedIn[b]) {
+        if (!decidedLocal[b].has(r)) {
+          out.add(r);
+        }
+      }
+      return out;
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = 0; b < irBlocks.length; b++) {
+        for (const p of distinctPreds(b)) {
+          for (const r of outOf(p)) {
+            if (!destroyedIn[b].has(r)) {
+              destroyedIn[b].add(r);
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+    for (const c of staleCandidates) {
+      if (!c.local && !destroyedIn[c.block].has(c.reg)) {
+        continue;
+      }
+      const ops = irBlocks[c.block].ops;
+      if (ops.slice(c.fromOp).some((op) => op.operands.includes(c.value))) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${c.reg} is read on a path where a call has destroyed it, so what ` +
+            `it holds is the callee's and not a value this function named — not modelled`,
+        );
+      }
+    }
+  };
+
+  const dropPhiRecord = (p: Value) => {
+    phiBlock.delete(p);
+    phiKey.delete(p);
+    forgetOrder(p);
+  };
+
   return {
     fn,
     irBlocks,
     readVar,
+    readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
     writeVar,
     paramReg,
     ensureParam,
     hasReachingDef,
-    noteCall: (b: number) => {
+    noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see
       // the ordering contract on the interface
       writtenSinceCall[b] = new Set();
+      for (const r of clobbers) {
+        clobberedLocal[b].add(r);
+        decidedLocal[b].add(r);
+      }
     },
     recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
       abiSeen = abi;
@@ -592,21 +766,21 @@ export function makeSsaBuilder(
         });
       }
       irBlocks.forEach((blk, i) => writeOrder.writes.set(blk, writeCount[i]));
-      simplifyTrivialPhis(fn, (p) => {
-        phiBlock.delete(p);
-        phiKey.delete(p);
-        forgetOrder(p);
-      });
-      // Then the phis nothing reads at all — a register two paths leave holding different junk
-      // (a loop counter after its last use, a scratch the epilogue overwrites) still joins as a
-      // phi, and a dead phi is not junk downstream: its edge args become post-loop copies in the
-      // emitted C and block gates keyed on "this exit carries nothing". Order matters only for
-      // economy: trivial-phi removal can orphan a phi's last reader, never the reverse.
-      pruneDeadParams(fn, (p) => {
-        phiBlock.delete(p);
-        phiKey.delete(p);
-        forgetOrder(p);
-      });
+      // The phis nothing reads at all — a register two paths leave holding different junk (a loop
+      // counter after its last use, a scratch the epilogue overwrites) still joins as a phi, and a
+      // dead phi is not junk downstream: its edge args become post-loop copies in the emitted C and
+      // block gates keyed on "this exit carries nothing".
+      //
+      // IT RUNS FIRST NOW, and `refuseStaleCallerSavedReads` is why. That check asks whether a
+      // destroyed value still reaches a use, and a dead phi's edge arg is not one. The trivial-phi
+      // pass must not run before it for the opposite reason: that one REPLACES the phi's uses with
+      // the arg and splices the arg away, which takes the last visible use of a destroyed value out
+      // of sight. Running it twice is what keeps both true — trivial-phi removal can orphan a phi's
+      // last reader, never the reverse, so the second sweep is the one that pays for the first.
+      pruneDeadParams(fn, dropPhiRecord);
+      refuseStaleCallerSavedReads();
+      simplifyTrivialPhis(fn, dropPhiRecord);
+      pruneDeadParams(fn, dropPhiRecord);
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
       // write, because `pruneDeadParams` above is the last thing that can retire an entry
       // parameter, and an observation about a value no longer in the signature is one the reader
