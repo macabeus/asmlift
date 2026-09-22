@@ -87,13 +87,6 @@ describe('a PC write is a control transfer under either spelling', () => {
 });
 
 describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
-  test('a conditional branch split from its cmp by a label declines loud', () => {
-    // The label between `cmp` and `bge` splits the block, so the branch has no reaching compare in
-    // its own block. Must be the DESIGNED FrontendUnsupportedError, not a null-deref crash.
-    const body = '\tcmp\tr0, r1\n.Lmid:\n\tbge\t.Ltrue\n\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
-    expect(() => dc('splitcmp', body)).toThrow(/no reaching compare: nothing in its block sets the flags/);
-  });
-
   test('a flag-setting instruction between a cmp and its branch declines loud', () => {
     // On Thumb-1 nearly every data-processing instruction on LOW registers writes the condition
     // flags, `s`-suffix or not (agbcc spells `adds r0,r0,r3` as `add r0,r0,r3` and the assembler
@@ -169,6 +162,83 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(src).toContain('do {');
     expect(src).toContain('} while (v0 != 0);');
     expect(src).not.toContain('ASMLIFT_ERROR'); // no decline / use-before-def
+  });
+});
+
+// ARM/Thumb has ONE implicit flags register, so a block entered from exactly one predecessor starts
+// with exactly the flags that predecessor left. agbcc relies on it: a function long enough to need a
+// mid-function literal pool gets its `cmp` and its conditional branch separated by the `b` that
+// jumps over the pool, and the branch then sits alone in a block of its own.
+//
+// Every refusal below is one of the two facts behind that sentence failing — the entry is not
+// unique, or the edge itself writes flags — and each has its own sentence in the decline, because a
+// catch-all makes several gaps look like one.
+describe('the condition flags reach across one unconditional edge', () => {
+  const TAIL = '\tmov\tr0, #0\n\tbx\tlr\n.Ltrue:\n\tmov\tr0, #1\n\tbx\tlr\n';
+  // `bge .Ltrue` folded and then structured: the sense inverts because the fall-through arm leads.
+  const FOLDED = 'if (a0 < a1)';
+
+  test('a `b` over a literal pool carries the flags to the branch on the far side', () => {
+    // The agbcc shape, with the pool itself elided: `cmp`, the jump over the pool, and the `bge`
+    // alone under the label the jump targets.
+    expect(dc('poolsplit', `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`).source).toContain(FOLDED);
+  });
+
+  test('a label alone between the cmp and the branch carries them too', () => {
+    // Same question one edge kind over: the predecessor ends in no transfer at all and control
+    // falls through the label. Nothing between the pair writes flags either way.
+    expect(dc('splitcmp', `\tcmp\tr0, r1\n.L2:\n\tbge\t.Ltrue\n${TAIL}`).source).toContain(FOLDED);
+  });
+
+  test('TWO edges into the block decline — the flags need not agree on both', () => {
+    // `beq` reaches .L2 with the flags of the first compare, the fall-through path with those of
+    // the second. There is no single answer to inherit, and picking either is a coin toss the
+    // emitted C would state as fact.
+    const two = `\tcmp\tr0, r1\n\tbeq\t.L2\n\tcmp\tr0, #5\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('twoedges', two)).toThrow(/no reaching compare: nothing in its block sets the flags/);
+    expect(() => dc('twoedges', two)).toThrow(/2 edges reach it/);
+  });
+
+  test('a compare clobbered before the predecessor ENDS does not reach the branch', () => {
+    const gone = `\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tb\t.L2\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('clobberedinpred', gone)).toThrow(/no compare reaches the end of its only predecessor/);
+  });
+
+  test('a compare clobbered AFTER it is inherited does not reach the branch either', () => {
+    // The seed arrives at the block's first instruction, so the in-block clear judges it exactly as
+    // it judges a compare the block made itself. Seeding at the TERMINATOR instead would skip that
+    // clear and fold a compare the `add` had already overwritten.
+    const gone = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tadd\tr2, r0, #1\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('clobberedinsucc', gone)).toThrow(/clobbered by 'add'/);
+  });
+
+  test('a predecessor that ends in a CONDITIONAL branch declines — unbuilt, not unsound', () => {
+    // The flags do survive `beq` on ARM, so this shape is liftable; it is the PowerPC frontend's
+    // inhabitant (a `cmpwi` read by the fall-through of the `beq` that already consumed it) and has
+    // no ARM inhabitant in the corpus. A rewrite with no inhabitant is not earned, so it refuses.
+    const condpred = `\tcmp\tr0, r1\n\tbeq\t.Ltrue\n.L2:\n\tbge\t.Ltrue\n${TAIL}`;
+    expect(() => dc('condpred', condpred)).toThrow(/its only edge leaves '.*' through a conditional branch/);
+  });
+
+  test('a BACK edge declines — the predecessor has not been lifted yet', () => {
+    const back = `\tb\t.L2\n.L1:\n\tbge\t.Ltrue\n.L2:\n\tcmp\tr0, r1\n\tb\t.L1\n${TAIL}`;
+    expect(() => dc('backedge', back)).toThrow(/its only predecessor '.L2' is a back edge/);
+  });
+
+  test('a branch with no compare anywhere still declines, and says so', () => {
+    expect(() => dc('nocmp', `\tbge\t.Ltrue\n${TAIL}`)).toThrow(/no predecessor to inherit them from/);
+  });
+
+  test('what crosses the edge is the compare’s VALUES, not its register names', () => {
+    // `r0` is redefined on the far side of the edge, by a LOAD — which writes no flags, so the
+    // compare is still the one `bge` tests. Carrying register names would re-read `r0` here and
+    // state a condition over the loaded word; carrying the values the `cmp` consumed is what makes
+    // the block boundary invisible, and it is also why a single predecessor is required: it
+    // dominates, so those values dominate every use on this side.
+    const redef = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tldr\tr0, [r1]\n\tbge\t.Ltrue\n${TAIL}`;
+    const src = dc('redef', redef).source;
+    expect(src).toContain(FOLDED);
+    expect(src).not.toContain('*'); // the loaded word is not in the condition, so nothing reads it
   });
 });
 

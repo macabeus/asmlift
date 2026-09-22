@@ -3652,14 +3652,71 @@ export function lift(
   // Best-effort call arity via the shared helper (frontend/ssa.ts).
   const fallbackArgcHere = (b: number): number => fallbackArgc(ssa, target.argRegs, b);
 
+  // The condition flags each block leaves behind, for a successor to pick up. Written as the block
+  // is filled, so a lookup can only find a block filled EARLIER — which is what makes a back edge
+  // answer "not known" rather than "none".
+  const exitCmp = new Map<number, PendingCmp | null>();
+
+  /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
+   *  it starts with none. One call answers both, so a refusal and its reason cannot drift apart.
+   *
+   *  ARM/Thumb writes ONE implicit flags register, so a block entered from exactly one predecessor
+   *  begins with exactly the flags that predecessor left. agbcc depends on it: a function long
+   *  enough to need a mid-function literal pool gets a `b` over the pool between a `cmp` and the
+   *  branch that reads it, leaving the branch alone under a label.
+   *
+   *  What crosses the edge is the compare's SSA values, never its register names — a lone
+   *  predecessor dominates, so those values dominate every use on this side, while re-reading `r0`
+   *  here would pick up whatever this block redefined it to.
+   *
+   *  Refuses when either half of that sentence fails:
+   *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
+   *      and picking one states a condition the machine does not promise;
+   *    * the only predecessor has not been filled: a back edge;
+   *    * the edge is not straight-line — it leaves a conditional branch or a jump-table dispatch.
+   *      Thumb's `b<cc>` does preserve the flags, so this one is UNBUILT rather than unsound: it is
+   *      the PowerPC frontend's cross-block shape and has no ARM inhabitant to earn it here;
+   *    * no compare survives to the predecessor's last instruction.
+   *
+   *  Not a `Gate` table, on docs/level-tower.md's structural bar rather than on cost: every refusal
+   *  reads `exitCmp`, which exists only because of the order this pass fills blocks in, so its
+   *  input cannot be prepared as a getter at any price. */
+  const inheritedCmp = (bi: number): PendingCmp | string => {
+    const lead = 'nothing in its block sets the flags, and';
+    const ps = preds[bi];
+    if (ps.length !== 1) {
+      return ps.length === 0
+        ? `${lead} its block has no predecessor to inherit them from`
+        : `${lead} ${ps.length} edges reach it — the flags need not agree on all of them`;
+    }
+    const pb = asmBlocks[ps[0]];
+    if (!exitCmp.has(ps[0])) {
+      return `${lead} its only predecessor '${pb.label}' is a back edge`;
+    }
+    if (tables.has(pb)) {
+      return `${lead} its only edge leaves the jump-table dispatch in '${pb.label}'`;
+    }
+    const plast = pb.instrs[pb.instrs.length - 1];
+    const pkind = plast ? classifyXfer(plast) : null;
+    if (pkind !== null && pkind !== 'uncond') {
+      const how = pkind === 'cond' ? 'a conditional branch' : `a '${plast!.mnemonic}'`;
+      return `${lead} its only edge leaves '${pb.label}' through ${how}`;
+    }
+    return exitCmp.get(ps[0]) ?? `${lead} no compare reaches the end of its only predecessor '${pb.label}'`;
+  };
+
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   const fillBlock = (ab: AsmBlock, bi: number) => {
     const irb = irBlocks[bi];
-    let pendingCmp: PendingCmp | null = null;
+    // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
+    // judged by the in-block clear below exactly as one this block made itself would be: a block
+    // that inherits flags and then writes its own must lose them.
+    const inherited = inheritedCmp(bi);
+    let pendingCmp: PendingCmp | null = typeof inherited === 'string' ? null : inherited;
     // Why there are no flags to fold, kept alongside the `null` that says there are none. A block
     // that made a compare and then overwrote it is a different gap from one that never had a
     // compare at all, and a single message for both makes two gaps read as one.
-    let noCmpWhy = 'nothing in its block sets the flags, and they are not carried across a block boundary';
+    let noCmpWhy = typeof inherited === 'string' ? inherited : '';
     // Tracks the frame through this block's linear instruction order. Meaningful for the entry
     // block; elsewhere a `[sp,#N]` access declines. Both dependencies are read HERE rather than
     // closed over: `preds` is final long before the first `fillBlock` runs, so the boolean is the
@@ -4330,6 +4387,12 @@ export function lift(
           break;
       }
     }
+
+    // What this block leaves in the flags, for a single successor to inherit. Recorded for EVERY
+    // block, including those whose outgoing edge `inheritedCmp` will refuse: the edge rule lives in
+    // one place, and a second copy of it here could disagree with the first. No terminator form
+    // writes flags, so the state after the loop above is the state at the block's last instruction.
+    exitCmp.set(bi, pendingCmp);
 
     // terminator (via classifyXfer — the single source of truth shared with decode/succLabels)
     const last = ab.instrs[ab.instrs.length - 1];
