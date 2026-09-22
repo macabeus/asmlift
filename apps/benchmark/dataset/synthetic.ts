@@ -822,9 +822,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // and every one of the three is pinned: `unitrunc` and `utag` lift on a little-endian target,
   // `uhalf` and `uniwrite` and `unidev` decline whatever the target (a read above the low-order
   // end, a narrow STORE, and a literal device address), and `utag` declines on the big-endian
-  // toolchains for the first of those reasons. The decline this family used to measure everywhere
-  // ("overlapping fields at offset N — unions not modelled") is therefore now the REFUSING side's
-  // evidence rather than the family's baseline.
+  // toolchains for the first of those reasons.
   //
   // The aliasing probes take the union through a POINTER on purpose. As a local it lands in a stack
   // slot on the register-poor targets, and asmlift declines on the stack-frame gap BEFORE it ever

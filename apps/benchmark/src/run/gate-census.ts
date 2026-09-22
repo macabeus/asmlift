@@ -24,10 +24,10 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Six passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, four passes in
+// holding the call. Seven passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
-// core swaps and the driver then calls, and `nameOffsetAddresses`, whose record stands alone
+// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a
+// script outside core swaps and the driver then calls, and `nameOffsetAddresses`, whose record stands alone
 // (`OFFSET_NAME_PASS`) because its seat in the tower is fixed rather than a position in a list. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
 // `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has

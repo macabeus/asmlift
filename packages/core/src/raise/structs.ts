@@ -50,11 +50,88 @@ import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError } from './errors';
 
-// A single observed access to a base: byte offset, access width (bytes), signedness (loads only).
-interface Access {
+/** A single observed constant-offset access to a base: the op itself and its program point, its
+ *  byte offset, its access width (bytes), and the signedness a recovered field would take from it.
+ *
+ *  SHARED WITH raise/truncload.ts, which folds a narrow read into a cast of a wider one before this
+ *  pass runs. The two ask the same question of a function — "what does this base's access set look
+ *  like" — and a second copy of the walk would let them come to disagree about the answer while
+ *  each looked right on its own.
+ *
+ *  SIGNEDNESS ON THE STORE HALF IS A POLICY, not a reading: a store carries none, and a word store
+ *  makes an `s32` field where a narrower one makes an unsigned one. `buildStruct` then prefers a
+ *  LOAD's own signedness at the same offset, which is the reading. raise/truncload.ts never sees
+ *  this field — its `covering-store` rule refuses a store cover before the signedness is used. */
+export interface Access {
+  op: Op;
+  /** index into `fn.blocks`, for the dominance question raise/truncload.ts asks. */
+  block: number;
+  /** index into that block's `ops`, as they stood when this was collected. */
+  at: number;
   off: number;
   width: number;
   signed: boolean;
+  isLoad: boolean;
+}
+
+/** What one walk of a function yields about its constant-offset memory accesses. */
+export interface ConstOffsetAccesses {
+  /** every base's constant-offset accesses, in program order. */
+  accessesOf: Map<Value, Access[]>;
+  /** the bases, in FIRST-APPEARANCE order → deterministic struct names. */
+  order: Value[];
+  /** bases a VARIABLE-index access also reaches (`aload`/`astore`) — arrays, never struct-recovered. */
+  arrayBases: Set<Value>;
+}
+
+/** Collect every base's constant-offset accesses, plus the bases a variable-index access reaches.
+ *  ONE walk, two consumers: `recognizeStructs` below and raise/truncload.ts. */
+export function constOffsetAccesses(fn: Fn): ConstOffsetAccesses {
+  const accessesOf = new Map<Value, Access[]>();
+  const arrayBases = new Set<Value>();
+  const order: Value[] = [];
+  const note = (base: Value, a: Access) => {
+    let list = accessesOf.get(base);
+    if (!list) {
+      list = [];
+      accessesOf.set(base, list);
+      order.push(base);
+    }
+    list.push(a);
+  };
+  fn.blocks.forEach((b, block) => {
+    (b.ops as Op[]).forEach((op, at) => {
+      switch (op.opcode) {
+        case 'load':
+          note(op.operands[0], {
+            op,
+            block,
+            at,
+            off: op.attrs.off as number,
+            width: op.attrs.width as number,
+            signed: op.attrs.signed as boolean,
+            isLoad: true,
+          });
+          break;
+        case 'store':
+          note(op.operands[0], {
+            op,
+            block,
+            at,
+            off: op.attrs.off as number,
+            width: op.attrs.width as number,
+            signed: (op.attrs.width as number) === 4,
+            isLoad: false,
+          });
+          break;
+        case 'aload':
+        case 'astore':
+          arrayBases.add(op.operands[0]);
+          break;
+      }
+    });
+  });
+  return { accessesOf, order, arrayBases };
 }
 
 // Natural C size/alignment of a recovered scalar field type (all fields here are int/ptr ≤ 4 bytes,
@@ -84,10 +161,10 @@ function isArray(accesses: Access[]): boolean {
  *  PACKED layout).
  *
  *  ONE CLASS OF OVERLAP NEVER REACHES HERE: a narrow LOAD covering the low-order end of a wider
- *  access at the same base is a cast of that access rather than a second field, and
+ *  access that ran before it on every path is a cast of that access rather than a second field, and
  *  raise/truncload.ts folds it into one before this pass runs. What is left is what the asm does
- *  not settle — a narrow STORE, a read above the low-order end, a literal device address — and it
- *  still declines. */
+ *  not settle — a narrow STORE, a read above the low-order end, a cell at a constant address, and a
+ *  cover on a path the narrow read does not run — and it still declines. */
 function buildStruct(name: string, accesses: Access[]): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();
@@ -160,44 +237,7 @@ function accessWidth(f: StructField): number {
  *  before type recovery, so `recoverTypes` sees the base already typed and does not flatten it to a
  *  plain pointer. Returns the number of bases recovered as structs. */
 export function recognizeStructs(fn: Fn): number {
-  // Collect each base's constant-offset accesses, and the set of bases that are ALSO array bases
-  // (used by a variable-index aload/astore) — those are arrays, excluded from struct recovery.
-  const accessesOf = new Map<Value, Access[]>();
-  const arrayBases = new Set<Value>();
-  const order: Value[] = []; // first-appearance order → deterministic struct names
-  const note = (base: Value, a: Access) => {
-    let list = accessesOf.get(base);
-    if (!list) {
-      list = [];
-      accessesOf.set(base, list);
-      order.push(base);
-    }
-    list.push(a);
-  };
-  for (const b of fn.blocks) {
-    for (const op of b.ops as Op[]) {
-      switch (op.opcode) {
-        case 'load':
-          note(op.operands[0], {
-            off: op.attrs.off as number,
-            width: op.attrs.width as number,
-            signed: op.attrs.signed as boolean,
-          });
-          break;
-        case 'store':
-          note(op.operands[0], {
-            off: op.attrs.off as number,
-            width: op.attrs.width as number,
-            signed: (op.attrs.width as number) === 4,
-          });
-          break;
-        case 'aload':
-        case 'astore':
-          arrayBases.add(op.operands[0]);
-          break;
-      }
-    }
-  }
+  const { accessesOf, order, arrayBases } = constOffsetAccesses(fn);
 
   // Which values are the address of a NAMED global (`gaddr`)? Consulted only when synthesis
   // DECLINES: see the catch below.

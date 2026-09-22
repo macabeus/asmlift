@@ -141,18 +141,18 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // if the fold has already run. Below it the fold is dead — moved after `structs`,
   // `pokeemerald:AnimTask_FlashHealthboxOnLevelUp_Step:agbcc` declines again on the same throw.
   //
-  // AFTER `arrays`, and that half is load-bearing for ONE row of 1,215, which is measured rather
-  // than argued: two full `bench sweep --json` runs, this seat against the entry moved to index 0,
-  // disagree on `kleod:PauseMenuScreenHandler:agbcc` alone (a `noncompile` row, 7,048 → 7,044 bytes
-  // of C). At the head the fold claims a named global `arrays` claims here, spelling
-  // `(u8)((u16 *)&g)[6]` where this seat leaves `((u8 *)&g)[12]` — the same byte, read two ways.
-  // The seat is the one where the ARRAY question is settled first: a narrow read of an element is a
-  // claim about a stride, and strides belong to `arrays`. Every OTHER position above is free, and
-  // `addrnum` is the one that LOOKS like it should not be — the fold groups accesses by base VALUE
-  // identity, so collapsing duplicate address definitions first reads as a prerequisite. It is not:
-  // index 0 is above `addrnum`, `const`, the three division recognizers and `extscale`, and the
-  // target row lifts there at the same score. (The 84 `af:*:ido7.1` records those two sweeps also
-  // disagree on are the corpus-wide `opts`-digest defect, which moves whatever anyone does.)
+  // EVERY POSITION ABOVE `structs` IS FREE, and that is measured rather than argued: two full
+  // `bench sweep --json` runs, this seat against the entry moved to index 0 — above `addrnum`,
+  // `const`, the three division recognizers, `extscale` and `arrays` — agree on all 2,430 records
+  // over 1,215 rows, compared by ROW IDENTITY on `src`/`len`/`diag`/`marks`/`asm`. (The 84
+  // `af:*:ido7.1` records whose `opts` digest churns between any two sweeps are the corpus-wide
+  // defect, which moves whatever anyone does; a LINE diff would report them as disagreement.)
+  //
+  // So the seat is a READING ORDER rather than a constraint: the three struct synthesizers follow
+  // each other here, and a reader looking for what happens to a base's access set finds them
+  // together. The one position that LOOKS like a prerequisite is `addrnum` — the fold groups
+  // accesses by base VALUE identity, so collapsing duplicate address definitions first reads as
+  // one. It is not, and index 0 is the run that shows it.
   //
   // `dce: false` — the rewrite retires nothing (the base keeps its use in the load the fold makes).
   {

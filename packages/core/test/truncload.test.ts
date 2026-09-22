@@ -6,9 +6,14 @@
 // its low-order one, and one refusal per gate — each by ABLATING that gate and showing the fold
 // then happens, so "this rule is load-bearing" is executed rather than asserted.
 //
+// THE SHAPES ARE NOT ALL STRAIGHT-LINE, deliberately. A base is an ADDRESS, and the three address
+// forms a device cell takes (a bare literal, a sum reaching one, a named register) reach different
+// rules, while the question of whether the covering access runs at all is a question about EDGES.
+// A single-block envelope pins the fold and none of its refusals.
+//
 // The byte evidence is on the benchmark's own rows: `synthetic:unitrunc` and `synthetic:utag` are
 // the shapes that lift, and `synthetic:uhalf`, `synthetic:uniwrite` and `synthetic:unidev` are the
-// controls that must keep declining — one per gate.
+// controls that must keep declining.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -157,8 +162,11 @@ describe('truncated-load recovery — endianness decides which end is low-order'
 });
 
 describe('truncated-load recovery — one refusal per gate, each ablated', () => {
-  // A LITERAL ADDRESS. `*(vu16 *)0x4000004` and `*(vu8 *)0x4000004` are two device reads, and the
-  // widths are what the device answers — so the base is refused whole rather than folded.
+  // A CELL AT A CONSTANT ADDRESS, in each of the three spellings a source has for a hardware
+  // register. `*(vu16 *)0x4000004` lifts to a bare `const`; the same register reached as
+  // `REG_BASE + 4` lifts to a sum of two of them; and with a symbol map naming it, to a `gaddr`.
+  // All three are the same cell and all three must refuse — the widths are what the device
+  // answers, not two readings of one datum.
   const LITERAL = `fn t {
 ^bb0():
   %0: unk32 = const {value=67108868}
@@ -169,16 +177,95 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
   ret
 }
 `;
+  const SUM_OF_LITERALS = `fn t {
+^bb0():
+  %0: unk32 = const {value=67108864}
+  %1: unk32 = const {value=4}
+  %2: unk32 = add %0, %1
+  %3: unk32 = load %2 {off=0, width=2, signed=false}
+  %4: unk32 = load %2 {off=0, width=1, signed=false}
+  %5: unk32 = add %3, %4
+  store %2, %5 {off=0, width=2}
+  ret
+}
+`;
+  const NAMED_REGISTER = `fn t {
+^bb0():
+  %0: unk32 = gaddr {sym="REG_DISPSTAT"}
+  %1: unk32 = load %0 {off=0, width=2, signed=false}
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  %3: unk32 = add %1, %2
+  store %0, %3 {off=0, width=2}
+  ret
+}
+`;
 
-  test('a literal address is not narrowed', () => {
-    expect(refusals(LITERAL)).toEqual(['literal-base']);
-    const fn = parse(LITERAL);
+  test('a cell at a constant address is not narrowed', () => {
+    for (const ir of [LITERAL, SUM_OF_LITERALS, NAMED_REGISTER]) {
+      expect(refusals(ir)).toEqual(['fixed-cell']);
+      const fn = parse(ir);
+      verify(fn);
+      expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+      // ABLATED, the same input folds — the gate is what refuses it, not a shape the pass misses
+      const ablated = parse(ir);
+      verify(ablated);
+      expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'fixed-cell'))).toBe(1);
+    }
+  });
+
+  // THE SAME REFUSAL'S RESIDUE. A base joined on two edges has no definition to walk, so the rule
+  // above cannot ask whether the cell is constant — and one of the edges here carries a device
+  // literal. An `undef` base is the same shape: storage nothing was entitled to write.
+  const JOINED_BASE = `fn t {
+^bb0(%c: unk32):
+  %z: unk32 = const {value=0}
+  %t: u32 = icmp_eq %c, %z
+  cond_br %t, ^bb1(), ^bb2()
+^bb1():
+  %a: unk32 = const {value=67108868}
+  br ^bb3(%a)
+^bb2():
+  br ^bb3(%c)
+^bb3(%b: unk32):
+  %1: unk32 = load %b {off=0, width=2, signed=false}
+  %2: unk32 = load %b {off=0, width=1, signed=false}
+  %3: unk32 = add %1, %2
+  store %b, %3 {off=4, width=2}
+  ret
+}
+`;
+
+  test('a base joined on two edges is not narrowed', () => {
+    expect(refusals(JOINED_BASE)).toEqual(['unresolved-base']);
+    const fn = parse(JOINED_BASE);
     verify(fn);
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
-    // ABLATED, the same input folds — the gate is what refuses it, not a shape the pass misses
-    const ablated = parse(LITERAL);
+    const ablated = parse(JOINED_BASE);
     verify(ablated);
-    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'literal-base'))).toBe(1);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'unresolved-base'))).toBe(1);
+  });
+
+  // A WIDTH NO CAST SPELLS. Unreachable from every frontend today (a lifted load is 1, 2 or 4
+  // bytes), so the shape is written by hand — the rule is here to keep the fold from minting a
+  // `zext` the backend can only gap on if a frontend ever acquires a wider load.
+  const WIDE_NARROW = `fn t {
+^bb0(%0: unk32, %9: unk32):
+  %1: unk32 = load %0 {off=0, width=8, signed=true}
+  %2: unk32 = load %0 {off=0, width=4, signed=true}
+  %3: unk32 = add %1, %2
+  store %9, %3 {off=0, width=4}
+  ret
+}
+`;
+
+  test('a width no C type spells is refused', () => {
+    expect(refusals(WIDE_NARROW)).toEqual(['cast-width']);
+    const fn = parse(WIDE_NARROW);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const ablated = parse(WIDE_NARROW);
+    verify(ablated);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'cast-width'))).toBe(1);
   });
 
   // A READ ABOVE THE LOW-ORDER END: `lhu 6(a0)` inside `lw 4(a0)` on a little-endian target is
@@ -221,6 +308,116 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
     const ablated = parse(COVERING_STORE);
     verify(ablated);
     expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'covering-store'))).toBe(1);
+  });
+
+  // A COVER ON THE OTHER ARM. The two reads are on mutually exclusive paths, so no execution reads
+  // the word: widening the byte read would read three bytes this path never touched. The refusal
+  // matters more than the others because the differ CANNOT referee it — agbcc compiles the honest
+  // `(unsigned char)*p` and the folded `(u8)p->field_0` to a byte-identical `.text` — so the throw
+  // that `recognizeStructs` keeps is the only thing standing between the two readings.
+  const OTHER_ARM = `fn t {
+^bb0(%0: unk32, %c: unk32):
+  %z: unk32 = const {value=0}
+  %t: u32 = icmp_eq %c, %z
+  cond_br %t, ^bb1(), ^bb2()
+^bb1():
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  store %0, %1 {off=16, width=4}
+  br ^bb3()
+^bb2():
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  store %0, %2 {off=16, width=4}
+  br ^bb3()
+^bb3():
+  ret
+}
+`;
+
+  test('a cover on the other arm of a branch is not narrowed', () => {
+    expect(refusals(OTHER_ARM)).toEqual(['covering-dominates']);
+    const fn = parse(OTHER_ARM);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    expect(() => recognizeStructs(fn)).toThrow(/overlapping fields at offset 0/);
+    const ablated = parse(OTHER_ARM);
+    verify(ablated);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'covering-dominates'))).toBe(1);
+  });
+
+  test('a cover in a block that dominates the narrow read is taken', () => {
+    const fn = parse(`fn t {
+^bb0(%0: unk32, %c: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  store %0, %1 {off=16, width=4}
+  %z: unk32 = const {value=0}
+  %t: u32 = icmp_eq %c, %z
+  cond_br %t, ^bb1(), ^bb2()
+^bb1():
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  store %0, %2 {off=16, width=4}
+  br ^bb2()
+^bb2():
+  ret
+}
+`);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(1);
+    verify(fn);
+  });
+});
+
+describe('truncated-load recovery — the cover is picked from facts, not from emission order', () => {
+  // TWO COVERS OF THE SAME WIDTH, one of which the sound rules can admit. Reducing over the access
+  // list would take whichever the frontend emitted first, so the same access set would fold or
+  // refuse on instruction scheduling alone.
+  const order = (first: string, second: string) => `fn t {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=${first}, width=4, signed=true}
+  %2: unk32 = load %0 {off=${second}, width=4, signed=true}
+  %3: unk32 = load %0 {off=8, width=1, signed=false}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  store %0, %5 {off=32, width=4}
+  ret
+}
+`;
+
+  test('either emission order picks the cover the narrow read is the low-order end of', () => {
+    for (const ir of [order('8', '6'), order('6', '8')]) {
+      expect(refusals(ir)).toEqual([null]);
+      const fn = parse(ir);
+      verify(fn);
+      expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(1);
+      const wide = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.off === 8 && o.attrs.width === 4)!;
+      expect(wide).toBeDefined();
+    }
+  });
+});
+
+describe('truncated-load recovery — a dead read keeps the width the machine used', () => {
+  // A DEAD LOAD is the project's own `volatile` witness (`ir/opcodes.ts` SPELLED_WHEN_DEAD_OPS): an
+  // optimizing compiler deletes every dead read it is allowed to delete, so one still in the target
+  // is evidence the source qualified the access. The fold rewrites the narrow load into a `zext`,
+  // which is NOT in that set, and mints a fresh load, which is — so a widened dead read would carry
+  // the witness at the wrong width.
+  //
+  // `fixed-cell` is what stops it, and by construction rather than by luck: `structure.ts`'s
+  // `volatileQualifiable` answers yes only through `globalCellOf` or `constAddressOf`, which are
+  // the two predicates that rule asks, so a load the fold admits is one no qualifier can reach.
+  test('a dead narrow read at a named cell is not widened', () => {
+    const fn = parse(`fn t {
+^bb0():
+  %0: unk32 = gaddr {sym="gReg"}
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  store %0, %1 {off=8, width=4}
+  ret
+}
+`);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const dead = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.width === 1)!;
+    expect(dead.attrs).toEqual({ off: 0, width: 1, signed: false });
   });
 });
 
