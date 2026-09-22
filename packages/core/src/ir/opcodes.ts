@@ -136,7 +136,9 @@ export const OPCODES = {
   // one is reaped.
   // `width`/`signed`/`count` are stamped by the frontend's frame-object AUDIT — requiring them
   // makes "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits
-  // a laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
+  // a laddr and skips the audit fails verify loudly instead of rendering `&undefined`. The SHAPE
+  // the three of them encode is checked there too (ir/verify.ts), because the attrs are
+  // disjunctive and only `count` tells the two arms apart.
   // The object is `count` elements of `width` bytes, so its storage spans `width * count`. A
   // SCALAR is count 1, typed by the access width and signedness every access agreed on. Count
   // above 1 is STORAGE the audit sized without typing — no access pins an element type, so it is

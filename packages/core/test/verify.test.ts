@@ -78,6 +78,49 @@ test('rejects: missing required attr', () => {
   expect(() => verify(fnOf([block]))).toThrow(VerifyError);
 });
 
+// `laddr`'s attrs are DISJUNCTIVE — one element is a scalar the accesses typed, more than one is
+// storage the frame-object audit sized without typing — and `count` is the only discriminator. The
+// invariant is stated in `ir/opcodes.ts`, read in `structure.ts` and produced in `frontend/thumb.ts`,
+// which is three files and no check; it is checked here. A frontend that sized an extent in WORDS
+// rather than bytes is what makes this red.
+test('rejects: a multi-element laddr carrying a typed element', () => {
+  const x = mkValue(T.unk(32));
+  const block: Block = {
+    params: [],
+    ops: [
+      mkOp('laddr', { results: [x], attrs: { off: 0, width: 4, signed: false, count: 4 } }),
+      mkOp('ret', { operands: [x] }),
+    ],
+  };
+  expect(() => verify(fnOf([block]))).toThrow(/must be unsigned bytes/);
+});
+
+test('rejects: an laddr of no elements at all', () => {
+  const x = mkValue(T.unk(32));
+  const block: Block = {
+    params: [],
+    ops: [
+      mkOp('laddr', { results: [x], attrs: { off: 0, width: 1, signed: false, count: 0 } }),
+      mkOp('ret', { operands: [x] }),
+    ],
+  };
+  expect(() => verify(fnOf([block]))).toThrow(/positive integer/);
+});
+
+test('accepts: the two shapes an laddr may carry', () => {
+  const scalar = mkValue(T.unk(32));
+  const bytes = mkValue(T.unk(32));
+  const block: Block = {
+    params: [],
+    ops: [
+      mkOp('laddr', { results: [scalar], attrs: { off: 0, width: 2, signed: true, count: 1 } }),
+      mkOp('laddr', { results: [bytes], attrs: { off: 4, width: 1, signed: false, count: 16 } }),
+      mkOp('ret', { operands: [scalar] }),
+    ],
+  };
+  expect(() => verify(fnOf([block]))).not.toThrow();
+});
+
 test('rejects: use before def within a block', () => {
   const a = mkValue(T.s());
   const b = mkValue(T.s());
