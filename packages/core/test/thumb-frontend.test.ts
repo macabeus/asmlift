@@ -760,6 +760,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('s64 a0, s64 a1, s32 a2');
     });
 
+    test('…and the run STOPS at a hole, rather than resuming at a later register that is fresh', () => {
+      // An argument list has no holes, so evidence for argument 3 is not evidence for argument 2.
+      // TWO gates bound this and they stop the run for different reasons, which is why both shapes
+      // are here. `mov r1` gives r1 a reaching definition that `bl foo` then destroys, so the
+      // arity guess counts three and the CLOBBER TRIM cuts it back; without the `mov`, r1 has no
+      // reaching definition at all and the guess itself never gets past it.
+      expect(dc('\tmov\tr1, #7\n\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
+      expect(dc('\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
+      // …and it is the hole that stops them, not the end of the run: fill r1 and the same shape
+      // carries both, and two fresh registers past the hole still do not reach the list.
+      expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), a0);');
+      expect(dc('\tbl\tfoo\n\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
+    });
+
     test('a JOIN of that result with a caller-computed value stays an argument', () => {
       // `if (c > 5) x = gVar; else x = foo(); bar(x);` — r0 at `bar` is a merge, and the register
       // file cannot say which path put the value there. Reading it as the callee's own return drops
