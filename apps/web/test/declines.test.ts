@@ -209,6 +209,62 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
+
+  // ONE GUARD, THREE FRONTENDS. `frontend/ppc.ts` and `frontend/mips.ts` read r1/sp as a data
+  // operand exactly as `frontend/thumb.ts` does — their comments say so — and refuse WITHOUT
+  // resolving the cause, so their message is a disjunction where Thumb's is a decision. All three
+  // spellings name an address-taken local first, and the first two are published markers of
+  // `ac-decomp`, `marioparty4`, `pikmin` and two synthetic rows. Filed under `stack-frames`, whose
+  // label reads "other sp uses", they were 17 of that class's 27 rows.
+  test.each([
+    [
+      "lift: cannot lift 'step0_make_dl': stack pointer r1 used as data (address-taken local / frame " +
+        'arithmetic) — not supported',
+      'address-taken-local',
+    ],
+    [
+      "lift: cannot lift 'f': stack pointer used as data (address-taken local / frame arithmetic) — local " +
+        'stack frames not supported',
+      'address-taken-local',
+    ],
+    // thumb.ts's own fallback `why`, reached when the slot model is on and no blocker named itself.
+    [
+      "lift: cannot lift 'f': stack pointer used as data — not a modelled slot (address-taken local / frame " +
+        'arithmetic / above the local area)',
+      'address-taken-local',
+    ],
+  ])('%s -> %s', (marker, want) => {
+    expect(classOf(marker)).toBe(want);
+  });
+
+  // …and the negative half, which is the one that would go silently wrong: `unstored-slot`'s own
+  // message names "an address-taken/uninitialised local" with a SLASH, and `address-taken-local`
+  // sits above it. A pattern spelling the bare words `address-taken` and `local` would take it.
+  test('the slash-joined disjunction in the unstored-slot message is not an address-taken claim', () => {
+    expect(
+      classOf(
+        "lift: cannot lift 'f': load from stack slot sp@8 that was never stored (stack-passed argument beyond " +
+          'the 4 register args, or an address-taken/uninitialised local) — not modelled',
+      ),
+    ).toBe('unstored-slot');
+  });
+
+  // `frontend/thumb.ts` has ONE sp-as-data throw and appends ten different `why`s to it. Two name a
+  // capability of their own and are claimed above by first-match; these eight are what the class
+  // called "other sp uses" actually is, and all eight are verbatim from `slotModelBlocker`. Keyed
+  // on a single `why` — which is how `pool-word-shape` was first written — the first corpus row on
+  // any of them arrives unclassified.
+  test.each([
+    'a register-offset sp access can alias any slot',
+    'a sub-word sp access aliases the word-slot model',
+    'sp moves in a block that neither returns nor is the entry',
+    'a non-entry block establishes its own frame depth',
+    'sp unwinds mid-function and execution continues',
+    'the frame moves between two accesses that keyed slots against it',
+    'a pop reads the frame while the local area is still reserved',
+  ])('the slot-model blocker "%s" is a stack-frames gap', (why) => {
+    expect(classOf(`lift: cannot lift 'f': stack pointer used as data — ${why}`)).toBe('stack-frames');
+  });
 });
 
 describe('a relocation refuses over the NAME or over the HALF, and they are different things to build', () => {
@@ -358,7 +414,7 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   //                  printed 15 for the second of those; its mnemonic set began with the bare
   //                  alternative `b` under `re.match`, so `break` — a trap, not a branch — was
   //                  counted as one. Re-run with every mnemonic fullmatched, it is 0.
-  //   pic-globals    NOT REACHED, and reachable. 29 of the PPC rows read memory through a
+  //   pic-globals    NOT REACHED, and reachable. 29 of 301 PPC rows read memory through a
   //                  literal-0 base over 110 sites and one of them MATCHES, so the relocated form
   //                  is lifted post-#221 and the PPC arm guards a base no relocation fills. The
   //                  MIPS arm has no row because every corpus toolchain compiles with no
@@ -476,6 +532,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     ['float > opaque-ops', 56],
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 3],
+    ['outgoing-stack-args > stack-frames', 2],
+    ['address-taken-local > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {

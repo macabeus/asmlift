@@ -20,7 +20,7 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 301 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
@@ -64,9 +64,21 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   // was one "local stack frames" bucket splits into the capabilities actually missing. Specific
   // classes first — the classifier is first-match.
   {
+    // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts`
+    // decides the cause at the throw and spells it ("address-taken stack local", "the address of a
+    // stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
+    // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
+    // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
+    // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class.
+    //
+    // Those 17 rows used to land in `stack-frames`, whose label reads "other sp uses" — a class
+    // over-claiming, not a message mis-naming: the messages say address-taken and the pattern did
+    // not read them, because `address-taken stack local` requires a word only the Thumb frontend
+    // writes. The Pareto then told the next round to build a stack-frame model when the top of
+    // that pile was `&local`.
     key: 'address-taken-local',
-    label: 'Address-taken stack locals (&local escapes)',
-    pattern: /address-taken stack local|address of a stack local is (taken|computed)/,
+    label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
+    pattern: /address-taken stack local|address of a stack local is (taken|computed)|address-taken local \/ frame arithmetic/,
   },
   {
     key: 'outgoing-stack-args',
@@ -96,10 +108,21 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // opens with "was never stored", which `unstored-slot` above claims first, so no string core
     // emits could reach it. An alternative nothing can reach is inert, and this repo refuses inert
     // refusal declarations elsewhere (`pattern/engine.ts`).
+    //
+    // `stack pointer used as data` is keyed on the THROW, not on the `why` the corpus printed:
+    // `frontend/thumb.ts`'s one sp-as-data throw appends ten different `why`s and only two of them
+    // name a capability of their own (an address-taken local and an outgoing stack-argument block,
+    // both claimed above by first-match). The other eight ARE this class — a register-offset or
+    // sub-word sp access that can alias a word slot, a frame that moves between two accesses keyed
+    // against it, a pop that reads the frame while the local area is still reserved. Keyed on one
+    // `why`, the first corpus row on any of the eight would have arrived unclassified. The
+    // previous spelling, `stack pointer .* used as data`, read as ISA-neutral and was not: `.*`
+    // with a space on both sides requires a word between "pointer" and "used", so it matched the
+    // PPC `r1` form alone and no Thumb message at all.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer .* used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
+      /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
   },
   {
     key: 'cross-block-cr',
