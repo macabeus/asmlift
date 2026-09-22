@@ -2394,12 +2394,26 @@ function auditFrameObjects({
       }
     }
 
+    // TWO MODELS FOR ONE BYTE is a silent disagreement: the slot model keeps an SSA slot in a
+    // register, so a store through an object over the same bytes would never be seen there.
+    const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+    const failIfSlotKeysIt = (off: number, width: number): void => {
+      for (const slot of usedSlotOffsets) {
+        if (overlaps(off, width, slot, 4)) {
+          fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
+        }
+      }
+    };
+
     // The declared type of each object, and then that its bytes belong to nothing else.
     const extent = new Map<number, number>();
     for (const [off, acc] of accesses) {
       if (acc.length === 0) {
-        // nothing in-function pins the object's type, and a guessed declaration is the
-        // plausible-but-wrong class — decline until an inhabitant needs this
+        // An object with no access of its own has no declared type and no extent, and the two
+        // ways it gets there are two different gaps. Its bytes may already be keyed by the slot
+        // model, which one byte is enough to decide; otherwise nothing in-function pins it at
+        // all, and a guessed declaration is the plausible-but-wrong class.
+        failIfSlotKeysIt(off, 1);
         fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
       }
       const widths = new Set(acc.map((a) => a.width));
@@ -2416,21 +2430,14 @@ function auditFrameObjects({
       }
       extent.set(off, acc[0].width);
     }
-    // TWO MODELS FOR ONE BYTE is a silent disagreement, so each object must own its bytes
-    // outright: inside the reserved local area, clear of every SSA slot (which the slot model
-    // keeps in registers, so a store through the object would not be seen there), and clear of
-    // every other object.
-    const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+    // Each object must own its bytes outright: inside the reserved local area, clear of every SSA
+    // slot, and clear of every other object.
     const objs = [...extent].sort((x, y) => x[0] - y[0]);
     for (const [off, width] of objs) {
       if (off < 0 || off + width > localArea) {
         fail(`the object at [sp,#${off}) of width ${width} lies outside the reserved local area`);
       }
-      for (const slot of usedSlotOffsets) {
-        if (overlaps(off, width, slot, 4)) {
-          fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
-        }
-      }
+      failIfSlotKeysIt(off, width);
     }
     for (let i = 1; i < objs.length; i++) {
       const [off, width] = objs[i];

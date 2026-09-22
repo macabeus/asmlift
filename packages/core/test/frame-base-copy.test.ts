@@ -237,6 +237,25 @@ describe('the audit judges each frame object on its own bytes', () => {
     );
   });
 
+  // An object with NO access of its own has no declared type and no extent — but the two ways it
+  // gets there are two different gaps, and one refusal for both makes them look like one.
+  test('an unpinned object over a byte the slot model already keys names the double model', () => {
+    // the word-slot model keeps [sp,#0] in a register, and the capture publishes the same
+    // address. The storage is keyed twice, and that is decidable from the object's FIRST BYTE
+    // alone — an extent it does not have is not needed to see the disagreement.
+    expect(() => lift(DISJOINT)).not.toThrow();
+    expect(() => lift(frame('\tstr\tr0, [sp]\n\tldr\tr2, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r2\n'))).toThrow(
+      /overlaps the SSA slot at \[sp,#0\] — one byte, two models/,
+    );
+  });
+
+  test('an unpinned object with no slot beneath it is unpinned, and says only that', () => {
+    expect(() => lift(DISJOINT)).not.toThrow();
+    expect(() => lift(frame('\tmov\tr0, sp\n\tbl\tg\n'))).toThrow(
+      /the captured address is never dereferenced in this function/,
+    );
+  });
+
   test('two objects sharing a byte decline', () => {
     // a word at [sp,#0] and a halfword at [sp,#2] are two declared locals over the same storage
     expect(() => lift(DISJOINT)).not.toThrow();
