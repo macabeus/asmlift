@@ -102,7 +102,7 @@ describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
   // as work the branch-likely round left undone. The `bltzall` row holds the other half of the
-  // split: a transfer named by neither class stays in the `control-flow` catch-all.
+  // split: a transfer named by neither class stays in the `branch-form` residue.
   test.each([
     [
       "lift: cannot lift 'absi': branch-likely 'bltzl' at 0x4 — the delay slot is itself a control transfer",
@@ -115,7 +115,7 @@ describe('the two MIPS delay-slot gaps are told apart', () => {
     ],
     [
       "lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form",
-      'control-flow',
+      'branch-form',
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
@@ -123,10 +123,10 @@ describe('the two MIPS delay-slot gaps are told apart', () => {
 });
 
 describe('a control transfer is named by what it is, not by the catch-all', () => {
-  // `control-flow` matches `unmodelled control transfer` with no further filter, so every class
+  // `branch-form` matches `unmodelled control transfer` with no further filter, so every class
   // that names one of those transfers must sit above it — the same first-match hazard `opaque-ops`
-  // has with `float`. Three transfers in the corpus are separately buildable capabilities, so the
-  // catch-all reporting them together reads as one gap where there are three.
+  // has with `float`. Three transfers in the corpus are separately buildable capabilities, so one
+  // bucket reporting them together reads as one gap where there are three.
   test.each([
     [
       "lift: cannot lift 'aBALL_actor_move': unmodelled control transfer 'bctrl' at 0x9c (an indirect call — a " +
@@ -145,10 +145,52 @@ describe('a control transfer is named by what it is, not by the catch-all', () =
     ],
     [
       "lift: cannot lift 'f': unmodelled control transfer 'bltzall' at 0x0 — not a modelled branch form",
-      'control-flow',
+      'branch-form',
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
+  });
+});
+
+describe('a pattern keyed on an English word claims sentences that are not about it', () => {
+  // Both of these are the same defect and both were live: a class whose pattern is a bare word
+  // rather than a phrase its producer guarantees. They are pinned as NEGATIVE cases, because the
+  // failure is silent — the count moves to a class that names the wrong capability and nothing
+  // grows "other", so the anchor at the bottom of this file cannot see it. Every marker here is a
+  // core message copied from its throw site.
+  test.each([
+    // `switch-shapes` used to match the bare word `fall-through`. This is `frontend/ppc.ts`'s
+    // generic conditional-branch refusal; there is no switch anywhere in it.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' at 0x20 has a target/fall-through that is not a block " +
+        'boundary (tail branch or unrecovered control flow)',
+      'block-boundary',
+    ],
+    // …and its recovered-dispatch refusal says BOTH "jump-table" and "not a block boundary", so
+    // the two classes have to be told apart by phrase, not by which one is listed first.
+    ["lift: cannot lift 'f': jump-table target is not a block boundary", 'switch-shapes'],
+    // `branch-form` (then `control-flow`) used to match the bare words `indirect` and `computed`.
+    // This is an address-taken-local refusal and a published marker of `sa3:ProcessOamBuffers`.
+    [
+      "lift: cannot lift 'ProcessOamBuffers': stack pointer used as data — the address of a stack local is " +
+        'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',
+      'address-taken-local',
+    ],
+  ])('%s -> %s', (marker, want) => {
+    expect(classOf(marker)).toBe(want);
+  });
+
+  // These two are not misfiled any more; they are unnamed, which is the honest answer and the one
+  // the residue list at the top of `declines.ts` records. A backend has no place in a lifting-gap
+  // taxonomy at all, and a loop-naming refusal is not control flow.
+  test.each([
+    ['backend: pascal backend: switch fall-through has no faithful IDO Pascal case-of spelling'],
+    [
+      "structure: cannot structure 'f': a pre-update exit copy would rebuild a computed value inside a loop " +
+        "nested in another loop's post-loop naming",
+    ],
+  ])('%s is unclassified rather than misfiled', (marker) => {
+    expect(classOf(marker)).toBe('other');
   });
 });
 
@@ -349,7 +391,7 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
 
   test('PIC is matched as a word, so a symbol that merely contains it is not a small-data access', () => {
     expect(classOf("lift: cannot lift 'SetPICMode': unmodelled control transfer 'bltzall' at 0x0")).toBe(
-      'control-flow',
+      'branch-form',
     );
   });
 });
@@ -379,7 +421,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // because something shadowed them. If a fourth name appears here, a class has gone dark. If one
   // of these three disappears, a residue found an inhabitant or somebody wrote the `tax_gprel`
   // row — good news, and this list moves in the commit that earns it.
-  const NO_ROWS = ['branch-likely', 'control-flow', 'pic-globals'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'pic-globals'];
 
   test('every other class is inhabited, and exactly these three are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));

@@ -153,9 +153,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /post-loop read reaches a temp|do not reproduce on a zero-trip run/,
   },
   {
+    // Keyed on the three producers rather than on the bare words `fall-through` and `jump-table`,
+    // which are English before they are a switch: `fall-through` alone claimed `frontend/ppc.ts`'s
+    // generic tail-branch refusal ("a target/fall-through that is not a block boundary"), which has
+    // no switch in it, and the Pascal backend's own unrelated refusal — a BACKEND spelling inside a
+    // lifting-gap taxonomy. Tightening rather than reordering removes the overlap with
+    // `block-boundary` entirely, so neither class depends on where the other sits: `ppc.ts`'s
+    // recovered-dispatch refusal ("jump-table target is not a block boundary") matches only this
+    // one, and its conditional-branch refusal only that one.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
-    pattern: /fall-through|jump-table/,
+    pattern: /case arms do not linearize|jump-table target is not a block boundary|a case body reaches/,
   },
   {
     key: 'structs',
@@ -230,9 +238,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /not a block boundary/,
   },
   {
-    key: 'control-flow',
-    label: 'Other unmodelled control flow',
-    pattern: /unmodelled control transfer|indirect|computed/,
+    // NOT a catch-all, and it may not become one again. It used to read `indirect|computed` as bare
+    // lowercase words, which is a SECOND catch-all sitting ABOVE `other` — and `other` is the only
+    // bucket the anchor watches, so anything this absorbed went unnamed for ever. It was already
+    // absorbing outside control flow: `sa3:ProcessOamBuffers` declines because "the address of a
+    // stack local is computed", and a loop-naming refusal in `structure/structure.ts` says
+    // "rebuild a computed value inside a loop". What is left is one producer phrase — the MIPS and
+    // PPC frontends' denylist for a branch mnemonic no frontend models — so the label names that
+    // and nothing else. What used to hide under it and now falls to `other` is named in the
+    // residue list at the top of this file, where it can be read.
+    key: 'branch-form',
+    label: 'Unmodelled branch forms (a control transfer no frontend models)',
+    pattern: /unmodelled control transfer|not a modelled branch form/,
   },
 ];
 
