@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=102.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=134.9s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,13 +137,38 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**935 s over 189 real rows** and **505 s over 750 synthetic rows**; wall clock was 220.7 s and
-254.1 s, and **348.9 s end to end** because the tiers overlap — 254.1 + 220.7 is 474.8, which is
-not the wall time and never was. The dearest single row is **147 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **16% of the tier** on its own — which is the figure to reach
+**1,118 s over 190 real rows** and **595 s over 750 synthetic rows**; wall clock was 215.6 s and
+220.8 s, and **310.9 s end to end** because the tiers overlap — 215.6 + 220.8 is 436.4, which is
+not the wall time and never was. The dearest single row is **164 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to reach
 for when a scoped run looks cheap.
 
-THE SAME TREE, BENCHED TWICE, HALVED ONE TIER. This entry replaces a reading of the same branch
+BOTH SUMS WENT **UP** AGAINST THE ENTRY BELOW AND THE BRANCH ADDS ONE ROW'S WORTH OF CANDIDATES.
+`bench diff --base origin/main`, 2026-09-23, prices it **1,439.5 s → 1,712.9 s (1.19×) over 939 rows** and the
+fan beside it is **1.00×, zero records moved** — the one row this branch creates enumerates 8
+candidates and ranks in 0.6 s. Five rounds share this machine and a neighbour's whole-tier run was
+in the register while this one ran. **A cost ratio whose fan says 1.00× is a statement about the
+box**, and this file's own entries point both ways on that within one day, which is the argument
+the entry below makes at length.
+
+The whole-corpus fan is **67,751 → 67,759**, summed over every priced row — `bench diff` reports
+`1.00× over 939 comparable row(s) — 1 more counted here`, which is true of the rows both artifacts
+price and is not the corpus total. `report/diff.ts` routes a row whose base `fanSize` is
+`undefined` into `appeared`, excluded from both sides, so a branch that turns a decline into
+candidates always owes the second number by hand:
+
+```sh
+python3 -c "import json,sys; a=json.load(open(sys.argv[1]));
+print(sum(r['asmlift'].get('fanSize') or 0 for r in a['results']))" apps/benchmark/results/results.json
+```
+
+The artifact before this one, `origin/main` at `0e7b4f7b`, read **935 s over 189 real rows** and
+**505 s over 750 synthetic rows**; wall clock was 220.7 s and 254.1 s, and **348.9 s end to end**.
+Its dearest single row was **147 s** on `kleod:PauseMenuScreenHandler:agbcc`, **16% of the tier**.
+The three paragraphs that follow are that entry's own reading and its own comparisons, not this
+one's.
+
+THE SAME TREE, BENCHED TWICE, HALVED ONE TIER. That entry replaced a reading of the same branch
 taken earlier the same day — that artifact 2026-09-23 09:06Z, this one 2026-09-23 10:43Z: real **908 s → 842 s**
 (0.93×) and synthetic **1,054 s → 524 s**
 (0.50×). Between the two artifacts `bench diff --base 6bb69524` reports **0 field changes, 0 added,
