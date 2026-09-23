@@ -17,7 +17,7 @@
 // Callers choose their conservative direction: the emission guard treats `undefined` as "not
 // provably a pointer" (adds a cast — valid C either way); the deref contract treats `undefined`
 // as "not provably wrong" (no error).
-import { IrType, T, scalarTypeForAccess } from '../ir/types';
+import { IrType, T, memberOf, scalarTypeForAccess } from '../ir/types';
 import { type BinOp, type Expr, type SFn, exprChildren } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
@@ -400,13 +400,10 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       return scalarTypeForAccess(e.width, e.signed);
     }
     case 'field': {
-      // `base->name` (base: ptr-to-struct) or `base.name` (base: struct value, an array element).
+      // `base->name` (base: ptr-to-struct) or `base.name` (base: struct value, an array element,
+      // or a union member's view).
       const bt = rec(e.base);
-      const st = bt?.kind === 'ptr' ? bt.to : bt;
-      if (st?.kind !== 'struct') {
-        return undefined;
-      }
-      return st.fields.find((f) => f.name === e.name)?.type;
+      return memberOf(bt?.kind === 'ptr' ? bt.to : bt, e.name)?.type;
     }
     case 'marker':
       return undefined;

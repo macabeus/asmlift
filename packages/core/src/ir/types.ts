@@ -24,6 +24,10 @@ export type IrType =
   // (`u8 _pad[4]`), so the backend routes them through a declarator-aware `cDeclare`, not the
   // prefix `cType`.
   | { kind: 'array'; elem: IrType; count: number }
+  // Several VIEWS of one storage cell (raise/structs.ts): a base read or written at more than one
+  // width over the same bytes. Every member sits at offset 0. It carries no name because it is only
+  // ever declared INLINE, as the type of the struct member that holds it.
+  | { kind: 'union'; members: StructField[] }
   | { kind: 'void' }; // a function that returns nothing
 
 /** The scalar type of a memory access of `width` bytes: word ⇒ the s32 integer default;
@@ -59,8 +63,22 @@ export const T = {
   ptr: (to: IrType): IrType => ({ kind: 'ptr', to }),
   struct: (name: string, fields: StructField[], size?: number): IrType => ({ kind: 'struct', name, fields, size }),
   array: (elem: IrType, count: number): IrType => ({ kind: 'array', elem, count }),
+  union: (members: StructField[]): IrType => ({ kind: 'union', members }),
   void: (): IrType => ({ kind: 'void' }),
 };
+
+/** The member `name` of an aggregate — a struct's field or a union's view — or undefined when `t`
+ *  is not an aggregate or declares no such member. THE one lookup the typing walk and the deref
+ *  contract share, so the two cannot disagree on which member access is well-typed. */
+export function memberOf(t: IrType | undefined, name: string): StructField | undefined {
+  if (t?.kind === 'struct') {
+    return t.fields.find((f) => f.name === name);
+  }
+  if (t?.kind === 'union') {
+    return t.members.find((m) => m.name === name);
+  }
+  return undefined;
+}
 
 export function typeToString(t: IrType): string {
   switch (t.kind) {
@@ -74,6 +92,8 @@ export function typeToString(t: IrType): string {
       return t.name;
     case 'array':
       return `${typeToString(t.elem)}[${t.count}]`;
+    case 'union':
+      return `union{${t.members.map((m) => `${typeToString(m.type)} ${m.name}`).join(';')}}`;
     case 'void':
       return 'void';
   }
@@ -107,6 +127,12 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   }
   if (a.kind === 'array' && b.kind === 'array') {
     return a.count === b.count && typeEquals(a.elem, b.elem);
+  }
+  if (a.kind === 'union' && b.kind === 'union') {
+    return (
+      a.members.length === b.members.length &&
+      a.members.every((m, i) => m.name === b.members[i].name && typeEquals(m.type, b.members[i].type))
+    );
   }
   // Two structs are equal when their name + field layout match (recovered structs are named
   // by layout-discovery order, so equal name ⇒ equal layout in practice).
