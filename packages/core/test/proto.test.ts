@@ -18,6 +18,48 @@ const argRegs = (p: Parameters<typeof declaredArgWidths>[0]): number | undefined
   return widths === undefined ? undefined : wordsOf(widths);
 };
 
+// The RETURN side of the same vocabulary. What it buys that `returnsVoid` cannot is how many
+// registers the callee hands back: a value wider than a register comes home in a pair, so after a
+// `bl` the second register holds a returned high half rather than the callee's leftovers, and
+// nothing in the assembly separates those two readings.
+describe('declaredReturnWidth', () => {
+  test('a spelled return is read through the same widths a parameter is', () => {
+    expect(declaredReturnWidth({ returns: 'long long' })).toBe(64);
+    expect(declaredReturnWidth({ returns: 's64' })).toBe(64);
+    expect(declaredReturnWidth({ returns: 'int' })).toBe(32);
+    expect(declaredReturnWidth({ returns: 'void *' })).toBe(32);
+    expect(declaredReturnWidth({ returns: 'u8' })).toBe(8);
+  });
+
+  // SILENCE IS SILENCE, and the three ways to be silent must not be three answers. A frontend asks
+  // this to decide whether to name a second register, and every "no opinion" has to lift the call
+  // the way an undeclared callee is lifted.
+  test.each([
+    ['no proto at all', undefined],
+    ['a proto with no return', { params: 2 }],
+    ['a project typedef', { returns: 'Fixed64' }],
+    ['a struct', { returns: 'struct Vec' }],
+    ['void — an absence of a value, not a width of zero', { returns: 'void' }],
+  ])('%s answers undefined', (_label, proto) => {
+    expect(declaredReturnWidth(proto)).toBeUndefined();
+  });
+
+  // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different
+  // question; reading it here would have to invent a width for a function that returns no value.
+  test('returnsVoid is not a width', () => {
+    expect(declaredReturnWidth({ returnsVoid: true })).toBeUndefined();
+    expect(declaredReturnWidth({ returnsVoid: false })).toBeUndefined();
+  });
+
+  // THE SAME SAFE-READER CONTRACT `declaredArgWidths` HAS: a frontend indexes `prototypes` by a callee's
+  // name, so a callee named `toString` reads a `Function` off `Object.prototype`.
+  test('an entry that is not an FnProto answers as an undeclared callee does', () => {
+    const table: Record<string, unknown> = {};
+    expect(declaredReturnWidth(table['toString'] as never)).toBeUndefined();
+    expect(declaredReturnWidth(null as never)).toBeUndefined();
+  });
+});
+
 describe('declaredArgWidths', () => {
   test('normalizes the count form, the typed-list form, and absence', () => {
     expect(argRegs({ params: 2 })).toBe(2);

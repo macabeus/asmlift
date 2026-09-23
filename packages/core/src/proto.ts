@@ -48,6 +48,26 @@ export interface FnProto {
    *  Both readers see one field through two trust levels: caller-supplied on `--proto`, and
    *  machine-derived from DWARF through `prototypesFromSymbols`. Neither is distinguished here. */
   returnsVoid?: boolean;
+  /** The declared return type, as its C type text — the same vocabulary `params` is written in and
+   *  read through the same {@link declaredWidth}, because a return and a parameter spell a width
+   *  the same way and two spellings of one vocabulary is where they start to disagree.
+   *
+   *  WHAT IT BUYS THAT `returnsVoid` CANNOT: how many registers the callee hands BACK. A value
+   *  wider than a register comes home in a register PAIR, so after a `bl` the second register holds
+   *  the returned high half — a legitimate definition — where for every other callee it holds the
+   *  callee's leftovers and reading it is the wrong value `frontend/ssa.ts` refuses. Those two are
+   *  the same instructions, so nothing in the assembly tells them apart and the caller must be
+   *  TOLD, exactly as `returnsVoid` must be.
+   *
+   *  A SPELLING THIS CANNOT SIZE IS SILENCE, never a word: `declaredWidth` answers `undefined` for
+   *  a project typedef, and the frontend then lifts the call the way it lifts an undeclared one.
+   *  Under-declaring stays the safe direction here too — a return wrongly declared 64-bit names a
+   *  register the callee really did destroy, which is the defect the refusal exists for.
+   *
+   *  A HEADER STATES IT AND NOTHING DERIVES IT. `prototypesFromSymbols` does not fill this in:
+   *  `typeSpelling` sizes 1, 2 and 4 bytes, so a DWARF-derived entry could only ever spell a return
+   *  that already fits a register, where the field changes nothing. */
+  returns?: ParamType;
 }
 
 /** symbol → prototype. The function under decompilation and its callees share one table. */
@@ -187,14 +207,24 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
  *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
  *  through it — answers "nothing is declared" for such an entry, and so does this. */
 export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
-  if (Object.hasOwn(prototypes, callee) && prototypes[callee]?.returnsVoid === true) {
+  // Nothing at all, a value in registers, or a spelling nobody here can size — the last of which is
+  // the only one that leaves the hidden pointer open. A pair is `declaredWidth` 64 and still
+  // travels in registers, so a width wider than a word is an answer here and not an overflow.
+  const travelsInRegisters = (spelling: string): boolean => {
+    const t = spelling.trim();
+    return t === 'void' || declaredWidth(t) !== undefined;
+  };
+  const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+  if (own?.returnsVoid === true) {
     return true;
   }
-  if (!Object.hasOwn(STANDARD_SIGNATURES, callee)) {
-    return false;
+  // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
+  // and it ranks above the table for the same reason `declaredCall` ranks a re-declaration above
+  // one: a project that spells the return has told you about the function it is building.
+  if (own?.returns !== undefined) {
+    return travelsInRegisters(own.returns);
   }
-  const t = STANDARD_SIGNATURES[callee].returns.trim();
-  return t === 'void' || declaredWidth(t) !== undefined;
+  return Object.hasOwn(STANDARD_SIGNATURES, callee) && travelsInRegisters(STANDARD_SIGNATURES[callee].returns);
 }
 
 /** Bit width per C89 base type on every target asmlift lifts (all ILP32 with a 64-bit `long long`).
@@ -275,6 +305,20 @@ export function declaredWidth(t: ParamType): number | undefined {
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
 }
 
+/** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a
+ *  reader can size — `returns` omitted, or a spelling {@link declaredWidth} does not read.
+ *
+ *  `returnsVoid` is not consulted and must not be: a void return is not a width of zero, it is the
+ *  absence of a returned value, and the one consumer here asks how many registers come back with a
+ *  value in them. `validatePrototypes` is what keeps the two from contradicting each other.
+ *
+ *  A DESIGNATED SAFE READER, the way `protoArity` is one: a frontend indexes `prototypes` by a
+ *  callee's name, and a callee named `toString` reads a `Function` off `Object.prototype` — which
+ *  has no `returns`, so it answers here what an undeclared callee answers. */
+export function declaredReturnWidth(p: FnProto | undefined): number | undefined {
+  return p?.returns === undefined ? undefined : declaredWidth(p.returns);
+}
+
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
  *
  *  `declaredArgWidths` above falls back to the arg-register heuristic on a `params` it cannot
@@ -292,11 +336,15 @@ export function validatePrototypes(value: unknown): string[] {
       continue;
     }
     for (const key of Object.keys(proto)) {
-      if (key !== 'params' && key !== 'returnsVoid') {
-        problems.push(`${sym}: unknown key "${key}" (expected "params" or "returnsVoid")`);
+      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns') {
+        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid" or "returns")`);
       }
     }
-    const { params, returnsVoid } = proto as { params?: unknown; returnsVoid?: unknown };
+    const { params, returnsVoid, returns } = proto as {
+      params?: unknown;
+      returnsVoid?: unknown;
+      returns?: unknown;
+    };
     if (params !== undefined) {
       const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
       const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
@@ -306,6 +354,16 @@ export function validatePrototypes(value: unknown): string[] {
     }
     if (returnsVoid !== undefined && typeof returnsVoid !== 'boolean') {
       problems.push(`${sym}: "returnsVoid" must be a boolean`);
+    }
+    if (returns !== undefined && typeof returns !== 'string') {
+      problems.push(`${sym}: "returns" must be a type string, e.g. "long long"`);
+    }
+    // The two return keys are one fact spelled two ways, and a table that says both is a table
+    // whose author meant one of them. Neither reading is safe to pick: honouring `returnsVoid`
+    // would silently drop a pair the other key says comes back, and honouring `returns` would
+    // license an out-parameter frame the `void` was there to rule out.
+    if (returnsVoid === true && typeof returns === 'string' && returns.trim() !== 'void') {
+      problems.push(`${sym}: "returnsVoid" is true but "returns" says "${returns}"`);
     }
   }
   return problems;

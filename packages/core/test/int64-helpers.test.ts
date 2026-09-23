@@ -1,6 +1,10 @@
-// A 64-bit value coming out of a COMPILER RUNTIME HELPER, which is the only way one enters the IR
-// today: agbcc has no 64-bit instruction, so it calls `__muldi3` and the pair lives in registers on
-// either side of the call.
+// A 64-bit value coming out of a CALL, which is how one enters the IR on agbcc: it has no 64-bit
+// instruction, so a pair lives in registers on either side of a `bl`.
+//
+// TWO SOURCES SAY WHICH CALLS HAND ONE BACK, and they are the two kinds of thing a caller can be
+// told. The compiler's own runtime-helper table needs no header — `__muldi3`'s signature is its
+// compiler's — and is what the tests here are mostly about. A project's CALLEE needs one, and
+// `FnProto.returns` is where a header states it; that source has its own describe at the bottom.
 //
 // Three things have to hold together for that to become `a * b`, and each has its own test below:
 // the helper table states each C parameter's WIDTH so the frontend reads a register pair as one
@@ -12,7 +16,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { type FnProto, wordsOf } from '../src/proto';
+import { type FnProto, type Prototypes, wordsOf } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -257,5 +261,54 @@ describe('the table says what a helper takes, in widths and not in words', () =>
     // One multiply libfunc, both spellings — so there is no `__umuldi3` entry to disagree with.
     expect(AGBCC_RUNTIME_HELPERS.__muldi3.op).toBe('mul');
     expect(AGBCC_RUNTIME_HELPERS.__umuldi3).toBeUndefined();
+  });
+});
+
+// A PAIR A DECLARATION SAYS COMES BACK — the other source, and the acceptance arm of
+// `frontend/ssa.ts`'s stale-read refusal reached from a header rather than from the helper table.
+//
+// The refusal itself is right about the bytes: `mov r3,#0x2a ; bl callee ; add r4,r3,#0` must not
+// lift to `return 42`, because agbcc's `thumb.h:405` marks r0–r3 caller-clobbered and the callee
+// destroyed r3. What it could not tell apart is `thumb.h:655`/`:657`, which return a DImode value
+// in the register pair from r0 — so after a `bl` to a callee that returns 64 bits, r1 is the
+// returned HIGH half and reading it is not stale at all. Those two are the same instructions, so
+// nothing in the assembly separates them and the caller has to be told.
+describe('a pair a declaration says comes back', () => {
+  // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix, from:
+  //   long long llsrc(void);
+  //   int llfrom(void){ return (int)(llsrc() >> 32); }
+  const llfrom = ['\t.code\t16', '\t.globl\tllfrom', '\t.thumb_func', 'llfrom:', '\tpush\t{lr}']
+    .concat(['\tbl\tllsrc', '\tadd\tr0, r1, #0', '\tpop\t{r1}', '\tbx\tr1', ''])
+    .join('\n');
+  const liftWith = (prototypes: Prototypes) => decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes }).source;
+
+  test('a declared 64-bit return makes the high register the callee’s, not a stale read', () => {
+    expect(liftWith({ llsrc: { params: [], returns: 'long long' } })).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
+  });
+
+  // THE HALF THAT FAILS IF THE GUARD IS WIDENED INSTEAD OF INFORMED. Every one of these declares
+  // the callee as fully as the vocabulary allowed before `returns` existed, and every one must
+  // still refuse: the same bytes, and nothing in them says a pair came back.
+  test.each([
+    ['nothing declared', {}],
+    ['an arity and no return', { llsrc: { params: [] } }],
+    ['a return that fits one register', { llsrc: { params: [], returns: 'int' } }],
+    ['a return spelling nothing can size', { llsrc: { params: [], returns: 'Fixed64' } }],
+  ])('%s still declines on the stale read', (_label, prototypes: Prototypes) => {
+    expect(() => liftWith(prototypes)).toThrow(/r1 is read on a path where a call has destroyed it/);
+  });
+
+  // …AND THE REFUSAL STILL COVERS THE DEFECT IT WAS BUILT FOR. A declared pair names r0 and r1 and
+  // nothing else, so r3 is as destroyed as it ever was — a returned pair is an exception for two
+  // registers, not a hole in the rule.
+  test('a declared pair does not license a read of the rest of the caller-saved set', () => {
+    const stale = ['\t.code\t16', '\t.globl\tstale', '\t.thumb_func', 'stale:', '\tpush\t{lr}']
+      .concat(['\tmov\tr3, #0x2a', '\tbl\tllsrc', '\tadd\tr0, r3, #0', '\tpop\t{r1}', '\tbx\tr1', ''])
+      .join('\n');
+    expect(() =>
+      decompile('stale', stale, ARMV4T_AGBCC, { prototypes: { llsrc: { params: [], returns: 'long long' } } }),
+    ).toThrow(/r3 is read on a path where a call has destroyed it/);
   });
 });

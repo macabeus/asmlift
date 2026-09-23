@@ -12,6 +12,9 @@ describe('accepts every form the type allows', () => {
     ['zero parameters', { f: { params: 0 } }],
     ['returnsVoid alone', { f: { returnsVoid: true } }],
     ['both', { f: { params: ['u8'], returnsVoid: false } }],
+    ['a declared return width', { f: { params: [], returns: 'long long' } }],
+    ['a return spelling nothing can size — silence, which the frontend already handles', { f: { returns: 'Fixed64' } }],
+    ['the two return keys agreeing', { f: { returnsVoid: true, returns: 'void' } }],
     ['an empty proto — the frontend then guesses, which is a choice not a mistake', { f: {} }],
     ['an empty table', {}],
   ])('%s', (_label, table) => {
@@ -29,7 +32,7 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
-      'f: unknown key "returnVoid" (expected "params" or "returnsVoid")',
+      'f: unknown key "returnVoid" (expected "params", "returnsVoid" or "returns")',
     ]);
   });
 
@@ -38,10 +41,20 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
     ['a fractional arity', { f: { params: 1.5 } }],
     ['a list holding a non-string', { f: { params: ['u8', 4] } }],
     ['a non-boolean returnsVoid', { f: { returnsVoid: 'yes' } }],
+    ['a non-string returns', { f: { returns: 64 } }],
     ['a proto that is not an object', { f: 2 }],
     ['a proto that is an array', { f: [] }],
   ])('%s', (_label, table) => {
     expect(validatePrototypes(table).length).toBeGreaterThan(0);
+  });
+
+  // THE TWO RETURN KEYS ARE ONE FACT SPELLED TWICE, and a table that says both means one of them.
+  // Neither reading is safe to pick: honouring `returnsVoid` drops a pair the other key says comes
+  // back, and honouring `returns` licenses the out-parameter frame the `void` was ruling out.
+  test('the two return keys contradicting each other', () => {
+    expect(validatePrototypes({ f: { returnsVoid: true, returns: 'long long' } })).toEqual([
+      'f: "returnsVoid" is true but "returns" says "long long"',
+    ]);
   });
 
   test.each([

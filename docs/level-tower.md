@@ -593,10 +593,16 @@ and `hi32` read one back. No new `IrType` kind, because the width was already a 
 value: `call` has `results: 1`, and the structurer materialises an effectful call once per result,
 so a pair modelled as two results emits the call twice.
 
-**The frontend decides the width**, because only the asm can. `frontend/thumb.ts` reads a pair at a
-call from the target's runtime-helper table, and reads the RETURN width off the epilogue rather than
-off the value graph: `pop {r2}` cannot touch the return pair, `pop {r1}` fills its high register with
-the return address, and the two functions are otherwise identical.
+**The frontend decides THIS function's width, because only the asm can** — `frontend/thumb.ts`
+reads its RETURN width off the epilogue rather than off the value graph: `pop {r2}` cannot touch the
+return pair, `pop {r1}` fills its high register with the return address, and the two functions are
+otherwise identical.
+
+**A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
+a returned pair are the same instructions, so the frontend is given the fact rather than reading it:
+from the target's runtime-helper table, whose signatures are the COMPILER's and need no header, or
+from `FnProto.returns`, where a project's own header states it. That is the same standing as
+`returnsVoid` — a return fact no assembly carries, supplied by the headers and load-bearing.
 
 **Two seams, and they are per-target DATA, not a branch in a pass.** `TargetDescription.callerSaved`
 says which registers a call destroys; `TargetDescription.runtimeHelpers`
@@ -609,15 +615,15 @@ lifted from.
 
 **What refuses, and why each refusal is where it is.**
 
-| level             | refusal                                                           | because                                                                                                           |
-| ----------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| frontend, layer 0 | a caller-saved register read after a call                         | what it holds is the callee's; an `r1` read after a `bl` can never be the caller's pre-call value                 |
-| frontend          | a 64-bit value leaving as a word at an ordinary call boundary     | only the helper table states a callee's parameter widths                                                          |
-| raise             | a helper call whose operands did not ARRIVE at the table's widths | an operand count is not evidence of a pair; the pair construction is                                              |
-| raise             | a table name no recognizer folded                                 | see above — the pass-through matches for free                                                                     |
-| structure         | a `concat` that is not the machine's widen                        | a 64-bit value this pipeline has no C spelling for, and this gap is the whole safety story for the representation |
-| structure         | a `hi32` off a value with no integer type                         | the high half is `x >> 32`, which is undefined C unless the operand renders wider than 32 bits, and there is no 64-bit type to cast it to |
-| backend           | Pascal, on a 64-bit integer                                       | it throws rather than narrowing                                                                                   |
+| level             | refusal                                                            | because                                                                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| frontend, layer 0 | a caller-saved register read after a call, the returned pair aside | what it holds is the callee's, so an `r1` read after a `bl` is never the caller's pre-call value — it is the RETURNED high half where a width says a pair came back, and nothing otherwise |
+| frontend          | a 64-bit value leaving as a word at an ordinary call boundary      | nothing states an undeclared callee's parameter widths                                                                                                                                     |
+| raise             | a helper call whose operands did not ARRIVE at the table's widths  | an operand count is not evidence of a pair; the pair construction is                                                                                                                       |
+| raise             | a table name no recognizer folded                                  | see above — the pass-through matches for free                                                                                                                                              |
+| structure         | a `concat` that is not the machine's widen                         | a 64-bit value this pipeline has no C spelling for, and this gap is the whole safety story for the representation                                                                          |
+| structure         | a `hi32` off a value with no integer type                          | the high half is `x >> 32`, which is undefined C unless the operand renders wider than 32 bits, and there is no 64-bit type to cast it to                                                  |
+| backend           | Pascal, on a 64-bit integer                                        | it throws rather than narrowing                                                                                                                                                            |
 
 **What a decompiler may NOT infer**, each of which is a refusal rather than a guess: `bl __muldi3`
 does not pin signedness (this libgcc has no `__umuldi3`, so both spellings call it — the signedness
