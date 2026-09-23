@@ -624,8 +624,12 @@ describe('the remaining families each name what a round would build', () => {
   // same reasoning — the loop IS recovered and its exit values are what refuse.
   test.each([
     [
-      "lift: cannot lift 'UpdateShoalTideFlag': reads the sub-word data table 'tide.3' (.byte) — sub-word " +
-        'table data is not modelled',
+      "lift: cannot lift 'f': literal-pool load of the sub-word data table 'sTab' (.short), which holds no " +
+        'whole word to load — not modelled',
+      'sub-word-table',
+    ],
+    [
+      "lift: cannot lift 'f': the sub-word data table 'sTab' (.short) is used as a register — not modelled",
       'sub-word-table',
     ],
     ["lift: cannot lift 'f': sub-word stack-frame access ('2(r1)') — local stack frames not supported", 'stack-frames'],
@@ -813,20 +817,24 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
   //
-  // `pool-word-shape` joins it for the OPPOSITE reason, and the two sitting side by side is why
-  // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
-  // cannot reach, whose one inhabitant happened to be lifted. `pool-word-shape` is a SPELLING THE
-  // READER COULD NOT READ: `sa3:OamMalloc:agbcc` emptied it by being lifted, and the class now
-  // names a refusal asmlift makes ON PURPOSE, for operand shapes whose value it would have to
-  // guess. It is uninhabited because nothing in the corpus asks for a guess, not because nothing
-  // refuses.
+  // `sub-word-table` joins it for a THIRD reason, and the two sitting side by side is why this note
+  // exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still cannot
+  // reach, whose one inhabitant happened to be lifted. `sub-word-table` is uninhabited BY
+  // CONSTRUCTION: its two refusals fire on a whole-word pool load of a `.short` table and on such a
+  // table's label used as a register base, and no compiler emits either — agbcc's pools are `.word`
+  // and it reaches a halfword table through its ADDRESS, which lifts. That is a stronger claim than
+  // "no rows today", because only the weaker one can change without the ISA changing.
+  //
+  // `pool-word-shape` left this list in the same commit, inhabited by `pokeemerald:UpdateShoalTideFlag:agbcc` —
+  // which had been declining on the sub-word blanket and turns out to be blocked by a pool word
+  // spelled `tide.3`, a function-scope static the pool-word grammar cannot read.
   //
   // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
   // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'pool-word-shape', 'store-class'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class', 'sub-word-table'];
 
   test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
