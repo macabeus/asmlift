@@ -25,10 +25,11 @@ import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 // Run the raise tower (post-lift IR → recognizeStructs → recover → structure → C), mirroring the
 // pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C.
-function emit(ir: string, returnsVoid = false, symbols?: Map<string, SymbolInfo>): string {
+// `aggregateAlign` is agbcc's unless a test says otherwise (target.ts `compilerBehaviors`).
+function emit(ir: string, returnsVoid = false, symbols?: Map<string, SymbolInfo>, aggregateAlign = 4): string {
   const fn = parse(ir);
   verify(fn);
-  recognizeStructs(fn);
+  recognizeStructs(fn, aggregateAlign);
   recoverTypes(fn);
   verify(fn);
   const sfn = structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, returnsVoid), ...(symbols ? { symbols } : {}) });
@@ -218,7 +219,7 @@ describe('struct recovery — a base whose address is declared elsewhere', () =>
     expect(c).toContain('->field_4');
   });
 
-  // WRONG-ANSWER SIDE ②. What this rule does NOT extend to: an ANONYMOUS base — a parameter, a
+  // ② THE BASE THIS RULE DOES NOT COVER: an ANONYMOUS base — a parameter, a
   // loaded pointer — has no source of truth but its own access set, so the identical overlap is
   // evidence about ITS layout and is declared as a union rather than left as two casts.
   test('the identical overlap on an anonymous base is declared as a union', () => {
@@ -312,6 +313,64 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     ).toThrow(/field at offset 2 \(width 4\) is not naturally aligned — packed layout not modelled/);
   });
 
+  // A narrow width LOADED with both extensions (MIPS `lh`/`lhu`, PPC `lha`/`lhz`) is two views: one
+  // view would read one of the two with the other's extension. The store writes the unsigned one.
+  test('a width loaded with both extensions gets a view for each', () => {
+    const c = emit(`fn exts {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=2, signed=true}
+  store %0, %1 {off=0, width=4}
+  %3: unk32 = load %0 {off=0, width=2, signed=false}
+  store %0, %3 {off=2, width=2}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`);
+    expect(c).toContain('struct Struct0 { union { s32 word; u16 uhalf[2]; s16 shalf; } field_0; };');
+    expect(c).toContain('a0->field_0.shalf');
+    expect(c).toContain('a0->field_0.uhalf[1] = ');
+    expect(c).not.toMatch(/\(u16\)|\(s16\)/);
+  });
+
+  // agbcc aligns and rounds EVERY struct and union to 4 bytes: `union { u16 h; u8 b; }` is four
+  // bytes there and two on ido/kmc/mwcc (target.ts `aggregateAlign`, compiled). A field inside the
+  // rounded size would be mislaid by every compiler of that kind, so it declines there — and lifts
+  // where the compiler lays the union out naturally.
+  const NARROW_THEN_FIELD = `fn narrowthen {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=2}
+  %2: unk32 = load %0 {off=1, width=1, signed=false}
+  %3: unk32 = load %0 {off=2, width=2, signed=false}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`;
+  test('a narrow union with a field inside its rounded size declines on a 4-byte boundary', () => {
+    expect(() => emit(NARROW_THEN_FIELD)).toThrow(
+      /the union at offset 0 does not fit this compiler's 4-byte aggregate boundary/,
+    );
+  });
+
+  test('…and is laid out naturally where the compiler has no boundary', () => {
+    const c = emit(NARROW_THEN_FIELD, false, undefined, 1);
+    expect(c).toContain('struct Struct0 { union { u16 half; u8 byte[2]; } field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_0.byte[1] + a0->field_2');
+  });
+
+  test('a narrow union off the 4-byte boundary declines there too', () => {
+    expect(() =>
+      emit(`fn narrowoff {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  store %0, %1 {off=2, width=2}
+  %3: unk32 = load %0 {off=3, width=1, signed=false}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`),
+    ).toThrow(/the union at offset 2 does not fit this compiler's 4-byte aggregate boundary/);
+  });
+
   // A width no view is named for keeps the overlap decline.
   test('an overlap involving a width with no view declines', () => {
     expect(() =>
@@ -323,7 +382,7 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   ret %3
 }
 `),
-    ).toThrow(/no union view for a 8-byte access at offset 0 — unions not modelled/);
+    ).toThrow(/no union view for a 8-byte access at offset 0/);
   });
 });
 

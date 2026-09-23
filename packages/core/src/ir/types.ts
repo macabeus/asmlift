@@ -25,9 +25,10 @@ export type IrType =
   // prefix `cType`.
   | { kind: 'array'; elem: IrType; count: number }
   // Several VIEWS of one storage cell (raise/structs.ts): a base read or written at more than one
-  // width over the same bytes. Every member sits at offset 0. It carries no name because it is only
-  // ever declared INLINE, as the type of the struct member that holds it.
-  | { kind: 'union'; members: StructField[] }
+  // width or extension over the same bytes. Every member sits at offset 0. It carries no name
+  // because it is only ever declared INLINE, as the type of the struct member that holds it, and its
+  // `size` is the one the target's compiler gives it — which is not always its widest view.
+  | { kind: 'union'; members: StructField[]; size: number }
   | { kind: 'void' }; // a function that returns nothing
 
 /** The scalar type of a memory access of `width` bytes: word ⇒ the s32 integer default;
@@ -63,7 +64,7 @@ export const T = {
   ptr: (to: IrType): IrType => ({ kind: 'ptr', to }),
   struct: (name: string, fields: StructField[], size?: number): IrType => ({ kind: 'struct', name, fields, size }),
   array: (elem: IrType, count: number): IrType => ({ kind: 'array', elem, count }),
-  union: (members: StructField[]): IrType => ({ kind: 'union', members }),
+  union: (members: StructField[], size: number): IrType => ({ kind: 'union', members, size }),
   void: (): IrType => ({ kind: 'void' }),
 };
 
@@ -78,6 +79,34 @@ export function memberOf(t: IrType | undefined, name: string): StructField | und
     return t.members.find((m) => m.name === name);
   }
   return undefined;
+}
+
+/** The union member of a struct that holds byte `off`, and the view of it an access of `width`
+ *  bytes reads — the view of that width, and where a width has two views (a signed and an unsigned
+ *  one) the one of the load's own extension, or the unsigned one for a store, which carries none —
+ *  with the element index inside an ARRAY view (null for a scalar one). Undefined when no union
+ *  member holds `off`; `view` undefined when the member has no view that wide. */
+export function unionViewAt(
+  st: Extract<IrType, { kind: 'struct' }>,
+  off: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+): { member: StructField; view: StructField | undefined; index: number | null } | undefined {
+  const member = st.fields.find((f) => f.type.kind === 'union' && f.off <= off && off < f.off + f.type.size);
+  if (member === undefined || member.type.kind !== 'union') {
+    return undefined;
+  }
+  const elemOf = (t: IrType): IrType => (t.kind === 'array' ? t.elem : t);
+  const wide = member.type.members.filter((m) => intWidth(elemOf(m.type)) === width * 8);
+  const view =
+    wide.length > 1
+      ? wide.find((m) => {
+          const e = elemOf(m.type);
+          return e.kind === 'int' && e.signed === (isStore ? false : signed);
+        })
+      : wide[0];
+  return { member, view, index: view?.type.kind === 'array' ? (off - member.off) / width : null };
 }
 
 export function typeToString(t: IrType): string {
@@ -130,6 +159,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   }
   if (a.kind === 'union' && b.kind === 'union') {
     return (
+      a.size === b.size &&
       a.members.length === b.members.length &&
       a.members.every((m, i) => m.name === b.members[i].name && typeEquals(m.type, b.members[i].type))
     );

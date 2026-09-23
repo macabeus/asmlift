@@ -205,7 +205,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // sits there so the three struct synthesizers read in the order of their evidence. `narrowlocal`
   // reads the carrier's extension chain rather than any address, so nothing here orders against it.
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
-  { id: 'structs', run: recognizeStructs, dce: false },
+  {
+    id: 'structs',
+    run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateAlign),
+    dce: false,
+  },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
   // The control-flow sibling, value form FIRST.
   //

@@ -678,10 +678,13 @@ describe('byte offsets on a rendered pointer', () => {
 // Selecting a view is a dot-form member access on the member itself, and both the type walk and
 // the stage contract read it through the same lookup a struct field goes through.
 describe('a union member of a recovered struct', () => {
-  const cell = T.union([
-    { off: 0, type: T.s(32), name: 'word' },
-    { off: 0, type: T.array(T.u(16), 2), name: 'half' },
-  ]);
+  const cell = T.union(
+    [
+      { off: 0, type: T.s(32), name: 'word' },
+      { off: 0, type: T.array(T.u(16), 2), name: 'half' },
+    ],
+    4,
+  );
   const st = T.struct('Struct0', [{ off: 0, type: cell, name: 'field_0' }]);
   const member: Expr = { k: 'field', base: v('p'), name: 'field_0' };
   const view = (name: string): Expr => ({ k: 'field', base: member, name, dot: true });

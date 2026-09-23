@@ -43,7 +43,7 @@
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
-import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals } from '../ir/types';
+import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
   Expr,
@@ -64,7 +64,7 @@ import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
-import { collectStructs, unionViewAt } from '../raise/structs';
+import { collectStructs } from '../raise/structs';
 import {
   type DeclaredField,
   type SymbolInfo,
@@ -813,7 +813,7 @@ function memAccess(
     const structBase = ok ? baseExpr : { k: 'cast' as const, to: bt, e: baseExpr };
     // A byte range recovered as a UNION member (raise/structs.ts) is read through the view of the
     // access's own width: `p->field_0.word`, `p->field_0.half[1]`.
-    const u = unionViewAt(bt.to, off, width);
+    const u = unionViewAt(bt.to, off, width, signed, isStore);
     if (u === undefined) {
       return { k: 'field', base: structBase, name: `field_${off}` };
     }
