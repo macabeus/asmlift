@@ -238,7 +238,7 @@ describe('the high half shifts by 32, so its operand must render 64 bits wide', 
     ]);
     verify(fn);
     expect(() => cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toThrow(
-      /no high half to shift out/,
+      /no upper half to shift out/,
     );
   });
 });

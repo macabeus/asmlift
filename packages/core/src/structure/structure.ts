@@ -3882,8 +3882,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // is built beside a `concat` or a pair return whose recovery is an integer, and a recovery
       // that is not one stops at the `concat` gap below before a projection of it is rendered.
       if (wide === undefined) {
+        // "UPPER HALF", NOT "HIGH HALF", for the reason the split-pair refusal in thumb.ts gives at
+        // its own throw: `apps/web`'s `reloc-halves` decline class holds `/high half/`, its list is
+        // ORDERED, and a 64-bit gap published as a relocation gap because one entry comes first is
+        // a classification nothing states.
         return mkGap(
-          'a 64-bit value that neither renders 64 bits wide nor has an integer type has no high half to shift out',
+          'a 64-bit value that neither renders 64 bits wide nor has an integer type has no upper half to shift out',
           [src],
         );
       }
