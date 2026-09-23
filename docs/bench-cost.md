@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=110.4s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.7s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,15 +137,15 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**963 s over 188 real rows** and **517 s over 742 synthetic rows**; wall clock was 203.3 s and
-207.1 s, and **289.5 s end to end** because the tiers overlap. The dearest single row is **139 s**
+**937 s over 188 real rows** and **509 s over 742 synthetic rows**; wall clock was 196.2 s and
+216.1 s, and **297.8 s end to end** because the tiers overlap. The dearest single row is **131 s**
 on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on its own — which is the figure to
 reach for when a scoped run looks cheap. The gate over this paragraph DERIVES that row from the
 artifact rather than naming it, so the id moves when the dearest row moves; it used to name one,
 and a sentence calling the fourth-dearest row the dearest was green under it.
 
-Both tiers came in cheaper than the entry below, measured 2026-09-23 (real 1,371 → 963 s, 0.70×;
-synthetic 915 → 517 s, 0.57×) on a branch that adds no candidate to any row, and `bench diff`
+Both tiers came in cheaper than the entry below, measured 2026-09-23 (real 1,371 → 937 s, 0.68×;
+synthetic 915 → 509 s, 0.56×) on a branch that adds no candidate to any row, and `bench diff`
 agrees where it counts: `fan vs 87b49c74: 0 row(s) moved, total 67415 → 67415 (1.00×) over 928
 comparable row(s) — 2 more counted here and not at 87b49c74`.
 
@@ -158,8 +158,8 @@ second number by hand.
 
 It also priced the COST list entirely in the cheap direction, and the tool says how many rather
 than being hand-counted: five rows printed plus `…and 10 more row(s) over 10s and 1.5×`, so
-**fifteen** (`DoForcedMovement` 131.0 → 4.5 s, `WorldMapScreenCheckNewWorldUnlocked`
-255.7 → 110.4 s). The base artifact was taken with several rounds sharing the box and this one was
+**fifteen** (`DoForcedMovement` 131.0 → 3.1 s, `WorldMapScreenCheckNewWorldUnlocked`
+255.7 → 113.7 s). The base artifact was taken with several rounds sharing the box and this one was
 not. **A row whose seconds collapse like that deserves its `droppedCandidates` read before anything
 else** — `DoForcedMovement`'s base artifact carried one candidate lost to
 `'arm-none-eabi-cpp' timed out` and this run carries none, with its outcome, score, fan and winning
