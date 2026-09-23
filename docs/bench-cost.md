@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=91.3s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=255.7s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,11 +136,18 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-23, stamped `3888734f`**: the ranked pass alone
-is **854 s over 185 real rows** and **503 s over 741 synthetic rows**; wall clock was 182.2 s and
-189.4 s, and 262.1 s end to end (`4:22.07` under `time`) because the tiers overlap. The dearest
-single row is **124 s** on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own —
-which is the figure to reach for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
+**1,371 s over 186 real rows** and **915 s over 742 synthetic rows**; wall clock was 332.3 s and
+337.5 s, and **417.4 s end to end** (`real 417.39` under `/usr/bin/time -p`) because the tiers
+overlap — 337.5 + 332.3 is 669.8, which is not the wall time and never was. The dearest single row
+is **117 s** on `kleod:PauseMenuScreenHandler:agbcc`, **9% of the tier** on its own — which is the
+figure to reach for when a scoped run looks cheap.
+
+The ranked sums here are roughly 1.6× the entry above them on a corpus one row larger. That is
+MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
+for the box, but after a night of eight whole-tier runs, and the per-row rank seconds the artifact
+records are wall seconds. Read a sum here against its own wall-clock line, never against another
+entry's.
 
 THE CORPUS GREW AND THE RANKED PASS DID NOT. 1,218 → 1,257 rows, and the ranked sum went
 **1,457.0 s → 1,353.4 s (0.93×) over the 908 comparable rows**, because that comparison is a

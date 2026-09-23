@@ -776,10 +776,23 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
+  //
+  // `pool-word-shape` joins it for the OPPOSITE reason, and the two sitting side by side is why
+  // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
+  // cannot reach, whose one inhabitant happened to be lifted. `pool-word-shape` is a SPELLING THE
+  // READER COULD NOT READ: `sa3:OamMalloc:agbcc` emptied it by being lifted, and the class now
+  // names a refusal asmlift makes ON PURPOSE, for operand shapes whose value it would have to
+  // guess. It is uninhabited because nothing in the corpus asks for a guess, not because nothing
+  // refuses.
+  //
+  // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
+  // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
+  // green. Two branches edited this line from opposite directions in one night; do not write a
+  // number here again.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'pool-word-shape', 'store-class'];
 
-  test('every other class is inhabited, and exactly these four are not', () => {
+  test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
