@@ -1,22 +1,28 @@
-// A `.short`/`.byte`/`.2byte` data table, and the three things asm can do with the label that
-// heads it. The distinction this file pins is between the table's ADDRESS and the table's BYTES:
+// A label heading data this reader does not parse into `.word` values, and the three things asm
+// can do with that label. `decode()` records one such label in `nonWordData`; what the directives
+// share is NOT a width — `.short` and `.byte` are narrower than a word, `.quad` and `.ascii` are
+// wider or unsized, `.float` is exactly a word — but that the pass recorded no words for them.
 //
-//   (a) the address, taken through a `.word` literal-pool entry, then indexed at runtime — the
-//       shape agbcc emits for `sTable[i]` and the only one it emits. Nothing here needs the
-//       element width or the table's contents: the address is a `gaddr` and the indexed read is
-//       an ordinary sized load, both already modelled.
-//   (b) the label as a POOL WORD (`ldr rD, sHw`) — a whole-word read of a table that holds no
-//       whole word. `dataWords` never holds a sub-word label, so `poolRef` would answer "not a
-//       pool" and the load path would materialise the label as a phantom pointer parameter.
-//   (c) the label as a REGISTER BASE (`ldrh rD, [sHw]`) — the same hole one directive over, at
-//       `readData` rather than at `poolRef`.
+//   (a) the table's ADDRESS, taken through a `.word` literal-pool entry and indexed at runtime —
+//       the shape agbcc emits for `sTable[i]` and the only one it emits. Nothing here needs the
+//       element width or the table's contents: the address is a `gaddr` and the indexed read is an
+//       ordinary sized load, both already modelled.
+//   (b) the label as a POOL WORD (`ldr rD, sTab`) — a whole-word read of a label whose words this
+//       pass did not record, or recorded at offsets an unread directive shifted.
+//   (c) the label as a REGISTER BASE (`ldrh rD, [sTab]`, `adds rD, sTab+0x4, #1`) — the same hole
+//       at `readData` rather than at `poolRef`.
 //
 // (b) and (c) refuse. Their reach over the corpus is zero BY CONSTRUCTION, not by measurement:
-// agbcc reaches a halfword table through (a), pools are `.word`, and the synthetic benchmark tier
-// builds every row by compiling authored C, so no row can carry an instruction no compiler emits.
-// That is why the witnesses here are unit tests — and why each one is written against the `.word`
-// sibling of its own input, which LIFTS. The directive under the label is the only difference
-// between the two, so a guard that stopped looking at it would have to fail one of the pairs.
+// agbcc reaches a halfword table through (a), its pools are `.word`, and the synthetic benchmark
+// tier builds every row by compiling authored C, so no row can carry an instruction no compiler
+// emits. That is why the witnesses here are unit tests.
+//
+// WHAT EACH WITNESS FAILS ON is stated beside it, because a refusal asserted only to throw is
+// pinned on its message and not on its behaviour. Two of these tests carry that load, and they are
+// not the obvious ones: most spellings here are reachable by BOTH guards, so ablating either one
+// leaves them declining on the other's message. The two that are single-guarded — a label whose
+// recorded words the unread directive shifted, and the offset spellings at `readData` — LIFT under
+// their ablation, so `toThrow` fails outright rather than reporting a different string.
 //
 // Hand-written fixtures, NOT copied from any game.
 import { describe, expect, test } from 'vitest';
@@ -27,10 +33,14 @@ import { ARMV4T_AGBCC } from '../src/target';
 
 const d = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC);
 
-describe('(a) the ADDRESS of a sub-word table, reached through a word pool, is ordinary', () => {
+describe('(a) the ADDRESS of a table, reached through a word pool, is ordinary whatever the table holds', () => {
   // agbcc's `sTable[i]`: the table's address arrives as a `.word` pool entry, the index is scaled
   // into a register, and the element is read with a load sized to the element. The table's own
-  // bytes are never an input.
+  // bytes are never an input — which is the whole claim, and the reason the `.word` arm is here is
+  // that it shows the SAME C coming out of both. It is not a discriminator: the two inputs differ
+  // in the directive, the shift amount and the load mnemonic, and deleting the `.rodata` block
+  // outright gives byte-identical output for either. What (a) pins is the over-refusal that used to
+  // decline both — it fails at the commit before this file.
   const indexed = (directive: string, shift: string, load: string) => `	.section .rodata
 sTable:
 	.${directive} 0x0
@@ -57,67 +67,95 @@ _p: .4byte sTable
   });
 });
 
-describe('(b) a sub-word label used as a POOL WORD refuses, and says which directive decided it', () => {
-  const wholeWordLoad = (directive: string) => `	.section .rodata
+describe('(b) a non-word label used as a POOL WORD refuses, and names the directive that decided it', () => {
+  const poolLoad = (data: string, operand: string) => `	.section .rodata
 sTab:
-	.${directive} 0x1234
-
+${data}
 	.text
 	thumb_func_start f
 f:
-	ldr r0, sTab
+	ldr r0, ${operand}
 	bx lr
 	thumb_func_end f
 `;
 
-  // The wrong answer, measured by deleting the refusal: `s32 f(s32 *a0) { return *a0; }` — a
-  // pointer PARAMETER on a function that takes none, reading memory that does not exist. Both
-  // halves are asserted, because a guard that threw the right message while still having fabricated
-  // the parameter upstream would pass on the message alone.
-  test('`.short` refuses by name and fabricates no parameter', () => {
-    expect(() => d('f', wholeWordLoad('short'))).toThrow(FrontendUnsupportedError);
-    expect(() => d('f', wholeWordLoad('short'))).toThrow(
-      /the sub-word data table 'sTab' \(\.short\), which holds no whole word to load/,
+  test('`.short` refuses by name; the `.word` sibling one directive over loads its word', () => {
+    expect(() => d('f', poolLoad('	.short 0x1234', 'sTab'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('f', poolLoad('	.short 0x1234', 'sTab'))).toThrow(
+      /data label 'sTab', which carries a '\.short' directive this reader does not read as words/,
     );
-    expect(() => d('f', wholeWordLoad('short'))).not.toThrow(/a0/);
+    expect(d('f', poolLoad('	.word 0x1234', 'sTab')).source).toBe('s32 f(void) {\n    return 4660;\n}\n');
   });
 
-  test('`.byte` refuses the same way, naming ITS directive', () => {
-    expect(() => d('f', wholeWordLoad('byte'))).toThrow(
-      /the sub-word data table 'sTab' \(\.byte\), which holds no whole word to load/,
-    );
+  test('the message names the directive it saw, and claims no width for it', () => {
+    // `.quad` is WIDER than a word and `.byte` narrower; the refusal is the same because the
+    // reason is the same — this pass recorded no words for either. A message that called `.quad`
+    // sub-word, or said the label "holds no whole word", would be false about its own input.
+    expect(() => d('f', poolLoad('	.byte 0x12', 'sTab'))).toThrow(/carries a '\.byte' directive/);
+    expect(() => d('f', poolLoad('	.quad 0x1', 'sTab'))).toThrow(/carries a '\.quad' directive/);
+    expect(() => d('f', poolLoad('	.ascii "abcdefgh"', 'sTab'))).toThrow(/carries a '\.ascii' directive/);
   });
 
-  test('the `.word` sibling — the same instruction, one directive over — lifts to the word it reads', () => {
-    expect(d('f', wholeWordLoad('word')).source).toBe('s32 f(void) {\n    return 4660;\n}\n');
+  test('an OFFSET spelling refuses too, whichever guard gets there first', () => {
+    // A coverage pin, not a behaviour one, and the difference is measured: `poolRef`'s arm ablated,
+    // this input still declines — at `readData`, one guard over, on the other message. Both guards
+    // read the operand's leading NAME, which is the property being pinned; an exact-key reader on
+    // either side answers "not a label" here and hands the label to the load path.
+    expect(() => d('f', poolLoad('	.short 0x1234\n	.short 0x5678', 'sTab+0x4'))).toThrow(FrontendUnsupportedError);
+  });
+
+  test('a label that DOES hold a recorded word still refuses, because the offsets are not its own', () => {
+    // FAILS ON: letting the `dataWords` lookup have this operand — by ablating the arm, or by
+    // guarding it on `!dataWords.has(…)`. Both LIFT to `return 4660;`, measured. That is a wrong
+    // VALUE, which compiles and scores: `dataWords` records `0x1234`, but `.word` does not
+    // self-align, so the `.short` in front shifts it. Assembled with this project's `as` the
+    // label's bytes are `05 00 34 12 00 00`, and the word at `sTab+0` is `0x12340005`.
+    // This is the ONE shape `poolRef`'s arm alone decides.
+    expect(() => d('f', poolLoad('	.short 0x5\n	.word 0x1234', 'sTab'))).toThrow(
+      /data label 'sTab', which carries a '\.short' directive this reader does not read as words/,
+    );
   });
 });
 
-describe('(c) a sub-word label used as a REGISTER BASE refuses separately from a word label', () => {
-  const asBase = (directive: string) => `	.section .rodata
+describe('(c) a non-word label used as a REGISTER BASE refuses separately from a word label', () => {
+  const asBase = (directive: string, body: string) => `	.section .rodata
 sTab:
 	.${directive} 0x1234
+	.${directive} 0x5678
 
 	.text
 	thumb_func_start f
 f:
-	ldrh r0, [sTab]
+${body}
 	bx lr
 	thumb_func_end f
 `;
 
-  // Wrong answer here: `s32 f(u16 *a0) { return *a0; }` — again a parameter the function does not
-  // have.
-  test('`.short` refuses as a sub-word data table, fabricating no parameter', () => {
-    expect(() => d('f', asBase('short'))).toThrow(FrontendUnsupportedError);
-    expect(() => d('f', asBase('short'))).toThrow(/the sub-word data table 'sTab' \(\.short\) is used as a register/);
-    expect(() => d('f', asBase('short'))).not.toThrow(/a0/);
+  test('`.short` refuses as a data label, naming its directive', () => {
+    expect(() => d('f', asBase('short', '	ldrh r0, [sTab]'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('f', asBase('short', '	ldrh r0, [sTab]'))).toThrow(
+      /data label 'sTab', which carries a '\.short' directive this reader does not read as words, is used as a register/,
+    );
   });
 
-  test('the `.word` sibling still refuses under the OLD message — two gaps, two answers', () => {
-    // Widening `readData`'s existing data-label guard would have swallowed the sub-word case into
+  test('the OFFSET spellings refuse, bracketed and bare', () => {
+    // FAILS ON: `readData` keyed by an exact `Map.has(operand)` rather than by the operand's
+    // leading NAME. Measured with that keying, all FOUR of these lift: `[sTab+0x4]` to
+    // `s32 f(u16 *a0) { return *a0; }` and `sTab+0x4` in arithmetic to
+    // `s32 f(s32 a0) { return a0 + 1; }`, under both directives — a parameter fabricated out of a
+    // label, silently. The `.word` pair is here because the exact keying is wrong for the
+    // pre-existing word-label guard too, not only for the one beside it: `poolRef` has always read
+    // the lead, and one question answered by two readers is what this file exists to prevent.
+    expect(() => d('f', asBase('short', '	ldrh r0, [sTab+0x4]'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('f', asBase('short', '	adds r0, sTab+0x4, #1'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('f', asBase('word', '	ldrh r0, [sTab+0x4]'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('f', asBase('word', '	adds r0, sTab+0x4, #1'))).toThrow(FrontendUnsupportedError);
+  });
+
+  test('the `.word` sibling refuses under the OLD message — two gaps, two answers', () => {
+    // Widening `readData`'s existing data-label guard would have swallowed the non-word case into
     // this one message. They stay apart because answering either means changing a different line:
-    // this one wants a word label read as dataflow, the one above wants sub-word table data.
-    expect(() => d('f', asBase('word'))).toThrow(/data label 'sTab' used as a register/);
+    // this one wants a word label read as dataflow, the one above wants a directive read as bytes.
+    expect(() => d('f', asBase('word', '	ldrh r0, [sTab]'))).toThrow(/data label 'sTab' used as a register/);
   });
 });

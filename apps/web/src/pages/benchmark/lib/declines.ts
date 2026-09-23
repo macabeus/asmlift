@@ -393,15 +393,22 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // TWO refusals, in `frontend/thumb.ts`, and the class unions them because both are answered by
-    // the same capability — modelling sub-word table DATA. One is a whole-word pool load of a table
-    // that holds no whole word (`poolRef`); the other is such a table's label used as a register
-    // base (`readData`). Neither covers a table whose ADDRESS is taken through a `.word` pool and
-    // indexed at runtime: that is an ordinary global and lifts, which is why the class is
-    // uninhabited. Uninhabited BY CONSTRUCTION, not by measurement — agbcc pools are `.word` and it
-    // reaches a halfword table through the address, so no compiler emits either shape.
-    key: 'sub-word-table',
-    label: 'Sub-word data tables (.byte / .short / .space)',
-    pattern: /sub-word data table/,
+    // the same capability — reading a data directive's BYTES. One is a whole-word pool load of such
+    // a label (`poolRef`); the other is that label used as a register base (`readData`).
+    //
+    // THE SUBJECT IS NOT A WIDTH. The inhabitants would be `.short` and `.byte`, but equally
+    // `.quad`, `.ascii`, `.float` and `.space`: what they share is that `decode()`'s `.word` pass
+    // recorded no words for them, which blinds the pool's four-bytes-per-entry index both to their
+    // bytes and to the offsets they shift everything behind them by. A class named for sub-word
+    // widths would be false about most of its own inhabitants — `.quad` is two words.
+    //
+    // Neither refusal covers a table whose ADDRESS is taken through a `.word` pool and indexed at
+    // runtime: that is an ordinary global and lifts, which is why the class is uninhabited.
+    // Uninhabited BY CONSTRUCTION, not by measurement — agbcc's pools are `.word` and it reaches a
+    // halfword table through the address, so no compiler emits either shape.
+    key: 'unread-data-directive',
+    label: 'Data directives read as bytes, not words (.short / .quad / .ascii)',
+    pattern: /directive this reader does not read as words/,
   },
   // THE LINKER'S NAMESPACE IS LARGER THAN C'S, and these five are one producer with five different
   // things to build, so they are five classes rather than one. A relocation hands the lifter a name;

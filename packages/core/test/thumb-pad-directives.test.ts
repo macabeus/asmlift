@@ -130,11 +130,12 @@ _t:
     expect(() => d('bv', withVal('0xD001+2'))).toThrow(/raw halfword '0xD001\+2'.*not a decodable branch/);
   });
 
-  test('a pad halfword under a LABEL is still a sub-word data table, not code', () => {
+  test('a pad halfword under a LABEL is still data, not code', () => {
     // `inCode` means "no label since the last instruction". A labelled `.2byte` is a data table
     // and this pass must not swallow one into the instruction it encodes. The witness is a shape
-    // that refuses ONLY for a sub-word label and names the directive that decided it: swallow the
-    // `.2byte` as a pad instruction and `sTable` heads nothing, so the message changes.
+    // that refuses only for a label the `.word` pass recorded no words for, and names the directive
+    // that decided it: swallow the `.2byte` as a pad instruction and `sTable` heads nothing, so
+    // the message changes.
     const asm = `	thumb_func_start reads
 reads:
 	ldrh r0, [sTable]
@@ -144,7 +145,9 @@ reads:
 sTable:
 	.2byte 0x0000
 `;
-    expect(() => d('reads', asm)).toThrow(/the sub-word data table 'sTable' \(\.2byte\) is used as a register/);
+    expect(() => d('reads', asm)).toThrow(
+      /data label 'sTable', which carries a '\.2byte' directive this reader does not read as words, is used as a register/,
+    );
   });
 
   test('byte layout is unchanged: a pc-relative load across a pad resolves identically', () => {

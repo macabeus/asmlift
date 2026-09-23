@@ -38,6 +38,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
+import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams, clobberedByCall, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
 import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
@@ -914,7 +915,7 @@ function decode(
 ): {
   blocks: AsmBlock[];
   dataWords: Map<string, string[]>;
-  subwordLabels: Map<string, string>;
+  nonWordData: Map<string, string>;
   funcLabels: Set<string>;
 } {
   // Flatten to (label | instr | data) items, then split into blocks at labels / after branches.
@@ -925,7 +926,12 @@ function decode(
   const dataWords = new Map<string, string[]>();
   const funcLabels: string[] = []; // labels marked as function starts (.thumb_func / pret macros)
   const armLabels = new Set<string>(); // function starts declared ARM-mode (arm_func_start)
-  const subwordData = new Map<string, string>(); // label → sub-word data directive under it
+  // label → a data directive under it whose bytes this pass does NOT read into `.word` values.
+  // Not a width claim: `.short` and `.byte` are narrower than a word, `.quad` and `.ascii` are
+  // wider or unsized, and `.float` is exactly a word. What they share is the only property any
+  // caller needs — the pass recorded no words for them, so `dataWords`' index-by-four-bytes is
+  // blind to their bytes AND to the offsets they shift everything after them by.
+  const nonWordData = new Map<string, string>();
   // Directives this pass cannot read completely, recorded by allFlat POSITION so the layout check
   // is scoped to the SELECTED function's slice — a `.align` between two functions must not
   // poison a sibling that needs byte-accurate layout. That scoping is what the `>= sliceStart`
@@ -1031,7 +1037,7 @@ function decode(
             continue;
           }
         } else {
-          subwordData.set(dataLabel, hw[1]);
+          nonWordData.set(dataLabel, hw[1]);
         }
         flat.push({ data: { halfwords: true, values, inCode: dataLabel === null } });
         continue;
@@ -1046,7 +1052,7 @@ function decode(
               `it may encode an instruction the disassembler left undecoded (skipping it would silently delete its effect)`,
           );
         }
-        subwordData.set(dataLabel, raw[1]);
+        nonWordData.set(dataLabel, raw[1]);
         hazards.push({ at: flat.length - 1, what: `.${raw[1]}`, code: false }); // size unknown / non-word
         continue;
       }
@@ -1245,7 +1251,7 @@ function decode(
         }
       }
     }
-    const headsData = (l: string) => dataWords.has(l) || subwordData.has(l);
+    const headsData = (l: string) => dataWords.has(l) || nonWordData.has(l);
     // A LINEAR, PRE-LAYOUT APPROXIMATION of the CFG walk forty lines below — not a second opinion
     // about it. Ordering forces the approximation: the real walk needs blocks, blocks need the
     // item stream, and the item stream needs the fill sizes this predicate is being asked about.
@@ -1671,10 +1677,10 @@ function decode(
     }
     // Raw data INTERLEAVED with instructions under one label: the lifted block would silently
     // omit whatever the data encodes — decline instead.
-    const mixed = blocks.find((b) => b.instrs.length > 0 && subwordData.has(b.label));
+    const mixed = blocks.find((b) => b.instrs.length > 0 && nonWordData.has(b.label));
     if (mixed) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': block '${mixed.label}' interleaves raw data (.${subwordData.get(mixed.label)}) with instructions`,
+        `cannot lift '${name}': block '${mixed.label}' interleaves raw data (.${nonWordData.get(mixed.label)}) with instructions`,
       );
     }
     // Two labels on the same instruction (`.LCB80:` immediately followed by `.L7:`) make the first
@@ -1689,7 +1695,7 @@ function decode(
     // label on data, so that is the common case, not an exotic one. A data label therefore neither
     // aliases nor is aliased THROUGH: scanning past one for a later code block would silently jump
     // over the data.
-    const isDataLabel = (l: string) => dataWords.has(l) || subwordData.has(l);
+    const isDataLabel = (l: string) => dataWords.has(l) || nonWordData.has(l);
     const aliasOf = new Map<string, string>();
     for (let i = 0; i < blocks.length; i++) {
       if (blocks[i].instrs.length > 0 || isDataLabel(blocks[i].label)) {
@@ -1790,7 +1796,7 @@ function decode(
       boundaryIdx++;
       continue;
     }
-    return { blocks: live, dataWords, subwordLabels: subwordData, funcLabels: new Set(funcLabels) };
+    return { blocks: live, dataWords, nonWordData, funcLabels: new Set(funcLabels) };
   }
 }
 
@@ -1896,27 +1902,35 @@ type PoolRef =
  *  not select a whole word of the pool (misaligned, or past its end); a numeric word whose value is
  *  not a 32-bit one; a symbolic word whose ADDEND is not; a word whose magnitude carries a leading
  *  zero; a word that is neither a number nor `symbol±offset` — a `.L` code label is here, since
- *  the symbol pattern admits no leading dot; and an operand naming a SUB-WORD data table, which
- *  `dataWords` does not hold at all and which would therefore answer "not a pool". A `sym+N` word
- *  is NOT unmodelled: it is the gaddr-plus-addend path and lifts cleanly.
+ *  the symbol pattern admits no leading dot; and an operand naming a label that carries a
+ *  directive this pass does not read into words. A `sym+N` word is NOT unmodelled: it is the
+ *  gaddr-plus-addend path and lifts cleanly.
  *
- *  `subwordLabels` is REQUIRED, not optional, so a second caller that forgets it is a type error
+ *  `nonWordData` is REQUIRED, not optional, so a second caller that forgets it is a type error
  *  rather than a silently disabled refusal. */
-function poolRef(
-  operand: string,
-  dataWords: Map<string, string[]>,
-  subwordLabels: Map<string, string>,
-): PoolRef | null {
-  // A word load off a label whose data is `.short`/`.byte`/… selects no whole word: the pool
-  // readers below index `dataWords` in units of four bytes and `dataWords` never holds such a
-  // label, so without this arm the operand answers `null` = "not a pool" and the load path
-  // materialises the label as a phantom pointer parameter. Checked on the leading NAME, so the
-  // refusal covers every offset spelling the two paths below split on.
-  const subwordLead = operand.match(POOL_LABEL_LEAD);
-  if (subwordLead && subwordLabels.has(subwordLead[0])) {
+function poolRef(operand: string, dataWords: Map<string, string[]>, nonWordData: Map<string, string>): PoolRef | null {
+  // The pool readers below index `dataWords` in units of four bytes, and `dataWords` holds only
+  // what the `.word` pass recorded. A label carrying a directive that pass does not read breaks
+  // that index in BOTH directions, which is why this arm sits ahead of the `dataWords` lookup
+  // rather than behind it:
+  //   - nothing recorded — `sTab: .short 0x5` answers `null` = "not a pool". `readData` refuses
+  //     that one too, so what this arm decides there is the MESSAGE; it is here because
+  //     `poolRef`'s contract is that it never falls through for an operand naming a data label,
+  //     and a contract kept by a guard 1,400 lines downstream is the drift this file has already
+  //     paid for twice;
+  //   - something recorded, at the wrong offset — and here this arm is the only guard there is.
+  //     `sTab: .short 0x5 / .word 0x1234` DOES put `0x1234` into `dataWords`, so a `dataWords`
+  //     lookup answers, and answers wrong: assembled with this project's `as` that label's bytes
+  //     are `05 00 34 12 00 00`, so the word at `sTab+0` is `0x12340005`. `.word` does not
+  //     self-align, so one unread directive shifts every word behind it. Letting the lookup have
+  //     that operand returns 0x1234 — a wrong VALUE, which compiles and scores.
+  // Checked on the leading NAME, so the refusal covers every offset spelling the two paths below
+  // split on.
+  const nonWordLead = operand.match(POOL_LABEL_LEAD);
+  if (nonWordLead && nonWordData.has(nonWordLead[0])) {
     return {
       kind: 'unmodelled',
-      why: `the sub-word data table '${subwordLead[0]}' (.${subwordLabels.get(subwordLead[0])}), which holds no whole word to load`,
+      why: `data label '${nonWordLead[0]}', which carries a '.${nonWordData.get(nonWordLead[0])}' directive this reader does not read as words`,
     };
   }
   const m = operand.match(POOL_LABEL);
@@ -1989,6 +2003,17 @@ function poolRef(
       kind: 'unmodelled',
       why: `pool word '${w}' has a leading-zero magnitude, which is octal to the assembler`,
     };
+  }
+  // "Not a symbol" would be FALSE about a function-scope static. agbcc spells one `tide.3` —
+  // `POOL_WORD_SYMBOL` rejects it only because a C identifier carries no dot, not because nothing
+  // is named there, and the comment on POOL_WORD_LEAD above already names `zeroes.13` as this
+  // shape. It is a symbol, and an unspellable one, which is a different gap from a grammar this
+  // reader does not parse: one is answered by naming the static, the other by widening a pattern.
+  // The sentence comes from reloc-symbol.ts — the ONE place deciding whether a LINKER name can be
+  // written into a candidate — so the Thumb pool path and the PPC relocation path say the same
+  // thing about the same kind of name.
+  if (classifyRelocSymbol(w) === 'local-static') {
+    return { kind: 'unmodelled', why: `a pool word that ${unspellableReason(w)}` };
   }
   return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
@@ -3010,7 +3035,7 @@ export function lift(
   symbols?: SymbolMap,
 ): Fn {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, subwordLabels, funcLabels } = decode(name, asm);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
@@ -3308,20 +3333,29 @@ export function lift(
       // (`ldr [pc]` with no `#imm`, computed-pc arithmetic) — decline, never fabricate a param.
       throw new FrontendUnsupportedError(`cannot lift '${name}': program counter used as a data base — not modelled`);
     }
-    if (subwordLabels.has(r)) {
-      // Same hole, one directive over: a `.short`/`.byte` label used as a BASE (`ldrh rD, [sHw]`).
-      // It is absent from `dataWords` entirely, so the guard below cannot see it, and reading it as
-      // dataflow fabricates a pointer parameter the function does not have. Named separately
-      // because answering it means modelling sub-word table data, not widening a label check.
+    // DOES THIS OPERAND NAME A DATA LABEL? Read through POOL_LABEL_LEAD, the same reader `poolRef`
+    // uses, because an operand can carry an offset — `sTab+0x4`, `[sTab+0x4]` — and an exact
+    // `Map.has` answers "no" for it. That answer is not a decline, it is `readVar`, which
+    // materialises the label as a phantom pointer parameter the function does not have. One
+    // question, one reader: the two have drifted apart twice, and both times the drift was silent.
+    const lead = r.match(POOL_LABEL_LEAD)?.[0];
+    if (lead !== undefined && nonWordData.has(lead)) {
+      // The label heads data this pass did not read into words, used as a BASE (`ldrh rD, [sHw]`).
+      // It may be absent from `dataWords` entirely, or present at offsets the unread directive
+      // shifted; either way the guard below cannot answer it. Named separately because answering
+      // it means reading that directive's bytes, not widening a label check.
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': the sub-word data table '${r}' (.${subwordLabels.get(r)}) is used as a register — not modelled`,
+        `cannot lift '${name}': data label '${lead}', which carries a '.${nonWordData.get(lead)}' directive this reader does not read as words, is used as a register — not modelled`,
       );
     }
-    if (dataWords.has(r)) {
+    if (lead !== undefined && dataWords.has(lead)) {
       // The operand is a literal-pool / data LABEL, not a register — reading it as dataflow would
-      // fabricate a phantom parameter. Word-pool loads are resolved by poolRef upstream; anything
-      // else reaching here (a label used in arithmetic) declines.
-      throw new FrontendUnsupportedError(`cannot lift '${name}': data label '${r}' used as a register — not modelled`);
+      // fabricate a phantom parameter. `poolRef` resolves upstream exactly the whole-word load it
+      // models; everything else reaching here declines — a label used in arithmetic, a load
+      // narrower than the word the pool resolver reads, a base spelled at an offset.
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': data label '${lead}' used as a register — not modelled`,
+      );
     }
     return readVar(r, b);
   };
@@ -4576,7 +4610,7 @@ export function lift(
           // through it to `gSym`), anything else → loud decline. It must NEVER fall to the load
           // path below, which would materialise the pool label as a phantom pointer parameter.
           if (ins.mnemonic === 'ldr' && b !== undefined) {
-            const pr = poolRef(b, dataWords, subwordLabels);
+            const pr = poolRef(b, dataWords, nonWordData);
             if (pr?.kind === 'const') {
               // Numeric-pool PROMOTION (symbols.ts): a pool-loaded word whose value the
               // project's symbol map knows becomes the NAMED global's address — the same

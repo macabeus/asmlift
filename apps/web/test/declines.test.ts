@@ -619,18 +619,27 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
 });
 
 describe('the remaining families each name what a round would build', () => {
-  // `sub-word data table` and `sub-word stack-frame` share a prefix and nothing else: one is table
-  // data in `.rodata`, the other a frame slot. The loop pair is separated from `loop-shapes` on the
-  // same reasoning — the loop IS recovered and its exit values are what refuse.
+  // An unread data directive and a `sub-word stack-frame` access share nothing: one is table data
+  // in `.rodata`, the other a frame slot. Both directive spellings are pinned, and one of them is
+  // `.quad` on purpose — the class is about a directive whose bytes the reader did not parse into
+  // words, not about a width, and a pattern that had gone back to reading widths would still match
+  // the `.short` line alone. The loop pair is separated from `loop-shapes` on the same reasoning —
+  // the loop IS recovered and its exit values are what refuse.
   test.each([
     [
-      "lift: cannot lift 'f': literal-pool load of the sub-word data table 'sTab' (.short), which holds no " +
-        'whole word to load — not modelled',
-      'sub-word-table',
+      "lift: cannot lift 'f': literal-pool load of data label 'sTab', which carries a '.short' directive this " +
+        'reader does not read as words — not modelled',
+      'unread-data-directive',
     ],
     [
-      "lift: cannot lift 'f': the sub-word data table 'sTab' (.short) is used as a register — not modelled",
-      'sub-word-table',
+      "lift: cannot lift 'f': literal-pool load of data label 'sTab', which carries a '.quad' directive this " +
+        'reader does not read as words — not modelled',
+      'unread-data-directive',
+    ],
+    [
+      "lift: cannot lift 'f': data label 'sTab', which carries a '.short' directive this reader does not read " +
+        'as words, is used as a register — not modelled',
+      'unread-data-directive',
     ],
     ["lift: cannot lift 'f': sub-word stack-frame access ('2(r1)') — local stack frames not supported", 'stack-frames'],
     [
@@ -855,6 +864,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
   // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
   // are the three control-transfer capabilities sitting above `branch-form`.
+
   const OVERLAPS: [chain: string, markers: number][] = [
     ['float > opaque-ops', 56],
     ['float > store-class', 13],
@@ -972,7 +982,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
     ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
-    ['sub-word-table', 'sub-word data table', 'packages/core/src/frontend/thumb.ts'],
+    ['unread-data-directive', 'does not read as words', 'packages/core/src/frontend/thumb.ts'],
     ['pooled-literal', 'anonymous constant pool entry', 'packages/core/src/frontend/reloc-symbol.ts'],
     ['tu-scoped-name', 'function-scope static', 'packages/core/src/frontend/reloc-symbol.ts'],
     ['cxx-symbol', 'C++ class-scoped symbol', 'packages/core/src/frontend/reloc-symbol.ts'],

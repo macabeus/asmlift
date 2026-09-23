@@ -12,7 +12,8 @@
 // be wrong in a way that reads as right. So the decision is made here, once, by the shape of the
 // name, and every refusing kind gets its own sentence naming what was seen.
 //
-// Consumed by frontend/ppc.ts, which refuses before it recovers. A kind is listed only when it
+// Consumed by frontend/ppc.ts, which refuses before it recovers, and by frontend/thumb.ts for the
+// one kind a literal pool can carry (a function-scope static). Both refuse in the same words. A kind is listed only when it
 // behaves differently: the decomp projects' generated labels (`lbl_1_bss_2464`, `fn_1_458`) are
 // ordinary identifiers that the project's own headers declare and its own sources spell, so they
 // are `plain` and get no entry of their own.
@@ -45,8 +46,17 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   if (sym.startsWith('.')) {
     return 'section-local'; // `...bss.0`, `.rodata` — an offset into a section
   }
-  if (sym.includes('$')) {
-    return 'local-static'; // `sprHideTbl$797` — a function-scope static plus mwcc's TU-wide counter
+  // A function-scope static plus the counter its compiler assigned: `sprHideTbl$797` (mwcc),
+  // `tide.3` / `zeroes.13` (gcc, and so agbcc). Both counters are TRANSLATION-UNIT-wide rather
+  // than per-function, which is why neither is reconstructible from the source: three functions in
+  // one TU, compiled by this project's agbcc, give `pa.3`, `pb.7`, `pc.11` and `pc2.12` — the
+  // number counts declarations across the whole unit and skips.
+  //
+  // The gcc spelling cannot collide with the two rules above: a name that LEADS with a dot is
+  // section-local and was answered already, and a plain C identifier carries no dot at all, so
+  // `\.\d+$` can only fire on a name that would otherwise fall to `not-an-identifier`.
+  if (sym.includes('$') || /\.\d+$/.test(sym)) {
+    return 'local-static';
   }
   if (sym.startsWith('__vt__')) {
     return 'cpp-vtable'; // `__vt__6System` — a compiler-emitted virtual table
