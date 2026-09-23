@@ -38,7 +38,7 @@ own only the phases named below, and what the earlier ones found is handed to yo
   in EVERY shell before any harness command — shell state does not survive between tool calls.
 - The spec: ${SPEC} — read it by that absolute path, with \`$1\` = \`${target}\`, and every doc it
   links from the same tree.
-- The rules every round of a parallel run is held to are the list under "Each round is briefed to"
+- The rules every round of a parallel run is held to are the list under "Each round is held to"
   in ${PARALLEL_SPEC}. Read that list; it overrides the spec where they disagree.
 - **You never merge your own PR.** docs/measurement-discipline.md §8 says to merge on a green
   \`pr-wait\`; in this run a green verdict means: file a \`merge-slot\` message on the board and stop.
@@ -157,6 +157,7 @@ log(`${handle}: ${diagnosis.classification}${diagnosis.proceed ? '' : ' — noth
 
 let build = null
 const ledger = []
+let unreviewedRemediation = false
 if (diagnosis.proceed) {
   phase('Implement')
   build = await agent(
@@ -183,11 +184,13 @@ reproduced.${context}`,
         () => review('A', 'Hunt real inputs across every function that can reach the new path.'),
         () => review('B', 'Judge the mechanism against docs/level-tower.md and docs/asmlift-101.md.'),
       ])
+      // A lost reviewer is a stopped round, not a quiet one: its empty findings would read as a clean
+      // wave and ship the branch with half of Phase 5 never run.
+      if (!breaker || !architect) return died(`Adversarial ${wave} (${breaker ? 'B' : architect ? 'A' : 'A and B'})`)
       const findings = [
-        ...(breaker?.findings ?? []).map((f) => ({ ...f, id: `w${wave}A-${f.id}` })),
-        ...(architect?.findings ?? []).map((f) => ({ ...f, id: `w${wave}B-${f.id}` })),
+        ...breaker.findings.map((f) => ({ ...f, id: `w${wave}A-${f.id}` })),
+        ...architect.findings.map((f) => ({ ...f, id: `w${wave}B-${f.id}` })),
       ]
-      if (!breaker || !architect) log(`${handle}: wave ${wave} lost a reviewer (${breaker ? 'B' : 'A'}) — its findings are missing`)
       log(`${handle}: wave ${wave} — ${findings.length} finding(s)`)
       if (!findings.length) break
 
@@ -202,7 +205,10 @@ DECLINED or NOT-REPRODUCED.${handoff('Findings', findings)}${context}`,
       if (!triage) return died(`Remediate ${wave}`)
       ledger.push(...triage.ledger)
       if (!triage.changedCode) break
-      if (wave === MAX_WAVES && triage.changedCode) log(`${handle}: remediation after the last wave changed code — no wave reviewed it; the ship agent must say so in the PR`)
+      if (wave === MAX_WAVES) {
+        unreviewedRemediation = true
+        log(`${handle}: remediation after the last wave changed code — no wave reviewed it; the ship agent says so in the PR`)
+      }
     }
   }
 }
@@ -216,7 +222,9 @@ the artifact if \`scripts/check-artifact-provenance.sh\` says one is owed (last 
 push, open the PR, and run \`scripts/pr-wait.sh\` on it. On a green verdict, file the \`merge-slot\`
 message the board's README describes and stop. If the round built nothing, ship only what the spec
 says a completed round ships (a measured null, a docs or test-only change with lasting value) — or
-no PR, and say why.${handoff('Diagnosis', diagnosis)}${handoff('Build', build)}${handoff('Triage ledger', ledger)}`,
+no PR, and say why.${unreviewedRemediation ? `
+The remediation after the last adversarial wave (${MAX_WAVES}) changed code and no wave reviewed it:
+say so in the PR body, naming those commits.` : ''}${handoff('Diagnosis', diagnosis)}${handoff('Build', build)}${handoff('Triage ledger', ledger)}`,
   { label: `${handle}: ship`, phase: 'Ship', schema: SHIPPED, agentType: 'general-purpose' },
 )
 if (!shipped) return died('Ship')

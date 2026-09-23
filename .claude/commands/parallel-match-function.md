@@ -131,8 +131,9 @@ Workflow({ name: "match-round",
 
 `worktree` and `board` are absolute paths; `note` is optional and carries what you know about the
 target as hypotheses. This command's instructions are the opt-in the Workflow tool asks for, so do
-not ask the user a second time. Before the workflow is on `main`, launch it with
-`scriptPath: "<a worktree holding it>/.claude/workflows/match-round.js"` instead of `name`.
+not ask the user a second time. When the checkout this session runs in has no
+`.claude/workflows/match-round.js` — the user's checkout is routinely behind `main` — launch it with
+`scriptPath: "<a worktree on origin/main>/.claude/workflows/match-round.js"` instead of `name`.
 
 A workflow and not one agent per round, because a round run as one agent decides for itself
 whether Phase 5's two reviewers are separate agents, whether a second wave runs, and whether a
