@@ -34,6 +34,23 @@ export function scalarTypeForAccess(width: number, signed: boolean): IrType {
   return width === 4 ? T.s(32) : T.int(width * 8, signed);
 }
 
+/** The width in bits of the integer a type carries, or null where a type carries no integer. A
+ *  pointer's own width is the machine's and says nothing about what it addresses; an aggregate and
+ *  `void` have no single width at all. `unknown` DOES carry one, which is the point — before type
+ *  recovery every value is `unknown`, so a rule that skipped that kind would be vacuous exactly
+ *  where the frontends build these.
+ *
+ *  THE one copy, for the reason `scalarTypeForAccess` above is: its two consumers read the same
+ *  question under OPPOSITE policies, and a per-consumer copy is how they drift apart. `ir/verify.ts`
+ *  reads null as "this type does not take part in the width rule, so pass"; `runtime-helpers.ts`
+ *  reads null as "this operand carries no integer width, so refuse to fold a 64-bit operation over
+ *  it". Both want exactly this predicate — a pointer handed to `__muldi3` has no width either of
+ *  them may claim — so an `IrType` kind added here reaches the verifier and the recogniser together
+ *  or neither. */
+export function intWidth(t: IrType): number | null {
+  return t.kind === 'int' || t.kind === 'unknown' ? t.width : null;
+}
+
 export const T = {
   unk: (width = 32): IrType => ({ kind: 'unknown', width }),
   int: (width: number, signed: boolean): IrType => ({ kind: 'int', width, signed }),

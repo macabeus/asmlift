@@ -16,26 +16,21 @@
 // cannot express. It is naturally inert on hardware-divide targets (which emit `div`/`divu`,
 // never `bl __divsi3`).
 import { Fn, mkOp } from '../ir/core';
-import type { Opcode } from '../ir/opcodes';
-import type { Prototypes } from '../proto';
+import { type RuntimeHelper, isWideHelper, wordsOf } from '../runtime-helpers';
+import type { TargetDescription } from '../target';
 
-// runtime helper symbol → { the division op it computes, its argument count }.
-const SOFT_DIV: Record<string, { op: Opcode; params: number }> = {
-  __divsi3: { op: 'sdiv', params: 2 },
-  __udivsi3: { op: 'udiv', params: 2 },
-  __modsi3: { op: 'smod', params: 2 },
-  __umodsi3: { op: 'umod', params: 2 },
-};
-
-/** Signatures for the soft-division runtime helpers, so a `bl __divsi3` recovers both arguments.
- *  Consumed by the frontend's arity lookup BEHIND any caller-supplied prototype (headers win). */
-export const RUNTIME_HELPERS: Prototypes = Object.fromEntries(
-  Object.entries(SOFT_DIV).map(([sym, h]) => [sym, { params: h.params }]),
-);
+/** The 32-bit software divisions, off the target's own helper table. WHICH helpers a compiler emits
+ *  is a compiler fact and lives there (runtime-helpers.ts); which of them THIS pass answers for is
+ *  the question here, and it is the narrow one: a division the ISA has no instruction for. A helper
+ *  that computes on a value wider than a register is a different question — no hardware capability
+ *  can make one unnecessary — and `raise/widehelpers.ts` answers it, ungated. */
+const softDivisions = (target: TargetDescription): Record<string, RuntimeHelper> =>
+  Object.fromEntries(Object.entries(target.runtimeHelpers ?? {}).filter(([, h]) => h.op && !isWideHelper(h)));
 
 /** Rewrite each recognised soft-division helper call to its division op, in place. Returns whether
  *  anything changed. Runs BEFORE type recovery so the new op's operands get signed/unsigned typing. */
-export function recognizeSoftDiv(fn: Fn): boolean {
+export function recognizeSoftDiv(fn: Fn, target: TargetDescription): boolean {
+  const table = softDivisions(target);
   let changed = false;
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
@@ -43,13 +38,13 @@ export function recognizeSoftDiv(fn: Fn): boolean {
       if (op.opcode !== 'call') {
         continue;
       }
-      const helper = SOFT_DIV[op.attrs.target as string];
-      if (!helper) {
+      const helper = table[op.attrs.target as string];
+      if (!helper?.op) {
         continue;
       }
       // Fold only when BOTH arguments were recovered (the signature makes this the norm). A
       // mis-recovered arity leaves the call untouched rather than fabricating a wrong divide.
-      if (op.operands.length !== helper.params || op.results.length !== 1) {
+      if (op.operands.length !== wordsOf(helper.params) || op.results.length !== 1) {
         continue;
       }
       // Reuse the SAME result Value → every existing use already points at it (no RAUW needed).

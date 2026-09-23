@@ -29,7 +29,7 @@ import {
   protoArity,
   returnsWithoutHiddenPointer,
 } from '../proto';
-import { RUNTIME_HELPERS } from '../raise/softdiv';
+import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper, wordsOf } from '../runtime-helpers';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -38,7 +38,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
+import { abiSortEntryParams, clobberedByCall, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
 import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
@@ -421,6 +421,37 @@ function expandRegList(tokens: string[]): string[] {
     }
   }
   return out;
+}
+
+// Whether an instruction so much as NAMES a register, in every operand spelling this ISA's asm
+// uses for one. TWO SPELLINGS OF ONE INSTRUCTION MUST NOT GIVE TWO VERDICTS, which is the whole
+// reason this is one function and not a test written out per caller, and it takes both halves:
+//
+//   • RANGE-EXPANDED first, because a range spells none of the registers it touches. `pop {r0-r3}`
+//     writes r2 with the string `r2` nowhere in the instruction, so a bare `\bR\b` test let a dead
+//     capture survive the `pop` that destroyed it — the acceptance below fired on a frame that
+//     really did stage an outgoing argument, and the lift dropped all five of that call's
+//     arguments.
+//   • CASE-INSENSITIVE on both halves, because GNU as accepts `R1`. The `toLowerCase` is a belt to
+//     `upperCaseRegIn`'s braces: nothing upper-case should reach here, and an acceptance is the
+//     wrong place to depend on that.
+//
+// The word-boundary fallback covers the operand forms the token split does not reach.
+//
+// Its two callers are ACCEPTANCES — `frameBasePassedToCallee` and `wideReturn` — so they may never
+// over-approximate, and both want the same blunt answer for the same reason: over-killing costs a
+// decline, under-killing costs a wrong value. MENTION, not "writes": a `cmp` on the register ends
+// both walks, which is the direction that is safe to be wrong in.
+function mentionsReg(ins: { ops: string[] }, r: string): boolean {
+  const tokens = expandRegList(
+    ins.ops
+      .join(' ')
+      .toLowerCase()
+      .replace(/[[\]{}!#]/g, ' ')
+      .split(/[,\s]+/)
+      .filter(Boolean),
+  );
+  return tokens.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o));
 }
 
 // Expand a register list and vouch that every entry is a DEFINITE register, or return null.
@@ -3172,6 +3203,127 @@ export function lift(
   // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
   // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
   const slotKey = stackSlotKey; // shared spelling: frontend/ssa.ts
+  // What a `bl` leaves holding nothing this function can name — checked against `argRegs` there.
+  const callClobbers = clobberedByCall(target);
+  // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
+  // the low half is the return register (already excluded) and this frontend writes the high one
+  // itself from the callee's own result, right below. The two arms of one rule: where the callee
+  // hands a register back, the frontend names it; where it does not, nobody can.
+  //
+  // `argRegs[1]` IS THE PAIR'S HIGH REGISTER ONLY WHERE THE ABI ALIASES THE FIRST ARGUMENT ONTO
+  // THE RETURN REGISTER, which makes the returned pair occupy the first two argument registers.
+  // True here (r0:r1) and on PowerPC (r3:r4); FALSE on MIPS o32, which returns in v0:v1 and passes
+  // in a0:a1, so reading a high half out of `argRegs[1]` there would name an argument register.
+  // This is an ARM file and the spelling is ISA-local, but it is written through the generic
+  // `target.` surface, so the identity it depends on is stated rather than left to be generalised.
+  const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
+  // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
+  // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
+  // reports zero on a compiler whose runtime spells them `__ll_*`.
+  const helperProtos = helperPrototypes(target.runtimeHelpers);
+  const wideHelper = (callee: string): RuntimeHelper | null => {
+    // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
+    // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
+    // `isWideHelper` to read. The `prototypes` read below needs no such guard because `protoArity`
+    // is that table's designated safe reader — it answers "nothing is declared" for an entry that
+    // is not an `FnProto`, whatever it is.
+    const h = lookupHelper(target.runtimeHelpers, callee);
+    if (!h || !isWideHelper(h)) {
+      return null;
+    }
+    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it, and the comment
+    // that said the header "wins" oversold both arms. A runtime helper's signature is its
+    // COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
+    // not — so a header declaring `__muldi3` is not a better source for the same fact; it is a
+    // claim that the name is the project's own function. Neither reading can be honoured: as the
+    // table's helper it would contradict the header, and as an ordinary call it becomes the
+    // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
+    // call, at whichever arity was declared.
+    if (protoArity(prototypes[callee]) !== undefined) {
+      return null;
+    }
+    // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
+    // cannot lay out — agbcc splits it, low half in r3 and high half at [sp,#0] — so the pair is
+    // not read here. This is NOT the refusal: the call falls back to the declared-arity path,
+    // which reads the helper's WORD arity out of `helperProtos` and stops on whichever loud gate
+    // that path meets, the outgoing-stack-argument refusal or `raise/widehelpers.ts` declining to
+    // fold a call it did not build the pair for. What this bounds is the register read: without
+    // it the loop above walks `r${k}` past `argRegs`, so a fifth word is read out of r4, which is
+    // not an argument register on any target here.
+    //
+    // NOTHING REACHES IT. The widest entry in either shipped table is `[64, 64]`, four words,
+    // against four argument registers on Thumb and eight on PPC — so the bound is the table's, and
+    // this is the generalisation that keeps a future entry from being laid out by accident.
+    return wordsOf(h.params) <= target.argRegs.length ? h : null;
+  };
+  // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects, and the INSTRUCTION that put
+  // the pair in registers. A pair that goes straight back out as one — a helper's result becoming
+  // the next helper's argument — re-fuses to the value itself instead of rebuilding a `concat`
+  // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
+  // since the question it asks is about the machine rather than about the value graph.
+  const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi'; at: Instr }>();
+  const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
+    const v = mkValue(T.unk(32));
+    irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
+    halfOf.set(v, { whole, half, at });
+    return v;
+  };
+  const fuseHalves = (irb: Block, lo: Value, hi: Value): Value => {
+    const a = halfOf.get(lo);
+    const b = halfOf.get(hi);
+    if (a?.half === 'lo' && b?.half === 'hi' && a.whole === b.whole) {
+      return a.whole; // `concat(lo32(v), hi32(v))` IS v
+    }
+    const v = mkValue(T.unk(64));
+    irb.ops.push(mkOp('concat', { operands: [lo, hi], results: [v] }));
+    return v;
+  };
+  /** The 64-bit value a `ret` is really returning, or null. The return register has to hold the LOW
+   *  half of some `v`, and the pair's high register has to still hold that same `v`'s high half when
+   *  the function returns.
+   *
+   *  THE SECOND HALF IS READ OFF THE ASM, NOT OFF THE VALUE GRAPH, because the frame is transparent
+   *  to it. `push {lr}; bl __muldi3; pop {r1}; bx r1` pops the RETURN ADDRESS into r1 and this
+   *  frontend models no write for a `pop` at all, so a register read there still answers `hi32` —
+   *  and that is not a corner: it is how agbcc spells a 32-bit-returning function's interworking
+   *  epilogue. The 64-bit-returning twin pops into r2 instead, precisely because it may not touch
+   *  the pair. So the epilogue's choice of scratch register is what pins the width, and the only
+   *  place that fact exists is the instructions.
+   *
+   *  A CALL KILLS IT WITHOUT NAMING IT: the high register is caller-saved, so a `bl` between the
+   *  pair and the return destroys the high half while mentioning nothing. agbcc cannot build that
+   *  shape — a function that returns 64 bits keeps both halves across the call, and one that
+   *  returns 32 has the discriminating epilogue above — so the witness for this arm is hand-written
+   *  asm, which the playground lifts and no oracle referees.
+   *
+   *  BLOCK-LOCAL, like every other acceptance here. A pair produced in another block reaches this
+   *  return through phis that the frame ops are equally invisible to, so there is no answer to give
+   *  and `indexOf` refusing to find the site is the whole of that condition.
+   *
+   *  WHERE THE EPILOGUE DOES NOT DISCRIMINATE, THE WIDTH IS NOT PINNED, and this widens. Without
+   *  `-mthumb-interwork` both spellings compile to `push {lr}; bl __muldi3; pop {pc}`, byte for
+   *  byte: nothing in that function distinguishes them, so what is published recompiles to the
+   *  target either way and only a PROTOTYPE copied out of it can be wrong. Every agbcc row in the
+   *  corpus carries `-mthumb-interwork`. */
+  const wideReturn = (lo: Value, bi: number): Value | null => {
+    const a = halfOf.get(lo);
+    if (a?.half !== 'lo') {
+      return null;
+    }
+    const hi = target.argRegs[1];
+    const instrs = asmBlocks[bi].instrs;
+    const from = instrs.indexOf(a.at);
+    if (from < 0) {
+      return null;
+    }
+    for (const ins of instrs.slice(from + 1)) {
+      const call = ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
+      if ((call && callClobbers.includes(hi)) || mentionsReg(ins, hi)) {
+        return null;
+      }
+    }
+    return a.whole;
+  };
 
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
   // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
@@ -3213,24 +3365,13 @@ export function lift(
             ? reg(ins.ops[0] ?? '')
             : null;
         // The OPERAND TOKENS, not the mnemonic: `asWritten` carries only the normalised mnemonic,
-        // so the operands are the only place a written register can appear — and they are
-        // RANGE-EXPANDED first, because a range spells none of the registers it writes. `pop
-        // {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, so the bare `\bR\b`
-        // test let a dead capture survive the `pop` that destroyed it, the acceptance fired on a
-        // frame that really did stage an outgoing argument, and the lift dropped all five of that
-        // call's arguments. Two spellings of one instruction must not give two verdicts. The
-        // `toLowerCase` is the belt to `upperCaseRegIn`'s braces: nothing upper-case reaches this
-        // function, and an acceptance is the wrong place to depend on that.
-        const mentions = expandRegList(
-          ins.ops
-            .join(' ')
-            .toLowerCase()
-            .replace(/[[\]{}!#]/g, ' ')
-            .split(/[,\s]+/)
-            .filter(Boolean),
-        );
+        // so the operands are the only place a written register can appear. `mentionsReg` owns how
+        // one is spotted, including the range expansion — `pop {r0-r3}` writes r2 with the string
+        // `r2` nowhere in the instruction, and a dead capture surviving that `pop` made this
+        // acceptance fire on a frame that really did stage an outgoing argument, dropping all five
+        // of that call's arguments.
         for (const r of [...held]) {
-          if (mentions.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o))) {
+          if (mentionsReg(ins, r)) {
             held.delete(r);
           }
         }
@@ -3593,7 +3734,7 @@ export function lift(
     // `Object.hasOwn` on both tables: a callee named `toString` or `valueOf` would otherwise read
     // a `Function` off `Object.prototype` as its prototype entry.
     const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
-    const proto = protoArity(own) !== undefined ? own : (known(RUNTIME_HELPERS) ?? known(STANDARD_SIGNATURES));
+    const proto = protoArity(own) !== undefined ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
     const arity = protoArity(proto);
     if (arity === undefined) {
       return null;
@@ -4493,13 +4634,14 @@ export function lift(
         }
         case 'bl':
         case 'blx': {
-          // A call: read the argument registers (r0..), produce the return value in r0. The
-          // callee's caller-saved clobber (r1..r3, lr) needs no modelling — agbcc has already
-          // moved anything live across the call into a callee-saved register (a copy we alias).
+          // A call: read the argument registers (r0..), produce the return value in r0, and record
+          // that the callee destroyed the rest of the caller-saved set — a read of one past here
+          // names bytes the callee overwrote, and `finish()` refuses it (frontend/ssa.ts).
           const targetSym = a;
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
-          const declared = declaredCall(targetSym);
+          const wide = wideHelper(targetSym);
+          const declared = wide ? null : declaredCall(targetSym);
           const argc = declared?.arity ?? fallbackArgcHere(bi);
           // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
           // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
@@ -4509,9 +4651,26 @@ export function lift(
           // decline names it rather than reading `r4` as if it were argument 5.
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
-          for (let k = 0; k < argc; k++) {
+          // A 64-BIT PARAMETER IS TWO ARGUMENT REGISTERS AND ONE VALUE. The helper table states
+          // each C parameter's WIDTH, so the pair is read here rather than recovered from four
+          // 32-bit arguments later — `contracts.ts` would fire on the second reading anyway, since
+          // the structurer materialises an effectful call once per result.
+          if (wide) {
+            let k = 0;
+            for (const w of wide.params) {
+              args.push(
+                w > 32 ? fuseHalves(irb, readVar(`r${k}`, bi), readVar(`r${k + 1}`, bi)) : readVar(`r${k}`, bi),
+              );
+              k += w > 32 ? 2 : 1;
+            }
+          }
+          // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
+          // `finish()` answers by dropping the ones a call has been through; a DECLARED one asserts
+          // they exist, so a destroyed register read for it is a wrong value nothing retracts.
+          const readArg = declared === null && !wide ? ssa.readGuessedArg : readVar;
+          for (let k = 0; !wide && k < argc; k++) {
             if (k < target.argRegs.length) {
-              args.push(readVar(`r${k}`, bi));
+              args.push(readArg(`r${k}`, bi));
               continue;
             }
             const off = stackArgs?.[k - target.argRegs.length];
@@ -4521,17 +4680,48 @@ export function lift(
             usedSlotOffsets.add(off);
             args.push(readVar(slotKey(off), bi));
           }
-          const res = mkValue(T.unk(32));
+          // A 64-BIT VALUE MAY NOT LEAVE AS A WORD. A pair occupies two argument registers, and
+          // nothing here knows how many of them an ordinary callee's parameters take: `Prototypes`
+          // counts argument REGISTERS, so a header's `void sink(long long)` and `void sink(int)`
+          // arrive at this point as the same fact. Passing the low half alone invents a truncation
+          // the asm never wrote; passing both halves as two words contradicts a one-parameter
+          // declaration. Both recompile to the very `bl` being lifted, so the differ scores them
+          // exactly as it scores the right answer and nothing downstream can referee either.
+          //
+          // The helper table is the one place that does know (`wide`, above), so the pair crosses a
+          // call boundary there and declines everywhere else. What that costs is a function that
+          // computes a 64-bit value and hands a HALF of it to an undeclared callee — an honest
+          // narrowing, refused because it is spelled the same way as the wrong answer.
+          for (const [k, v] of args.entries()) {
+            const half = halfOf.get(v);
+            if (half) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': argument ${k + 1} of the call to '${targetSym}' is the ` +
+                  `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and no prototype ` +
+                  `says how many argument registers that callee's parameters occupy`,
+              );
+            }
+          }
+          const res = mkValue(T.unk(wide?.returns === 64 ? 64 : 32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
           // the argument registers this guess just read.
-          if (declared === null) {
+          if (declared === null && !wide) {
             ssa.recordGuessedCall(callOp, bi, target);
           }
+          if (wide?.returns === 64) {
+            // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
+            // named here and neither is in the clobber set — which is the acceptance arm of the
+            // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
+            writeData(target.returnReg, bi, projectHalf(irb, res, 'lo', ins));
+            writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi', ins));
+            ssa.noteCall(bi, pairReturnClobbers);
+            break;
+          }
           writeData('r0', bi, res); // the callee defines r0 …
-          ssa.noteCall(bi); // … and the clobber is recorded after it, so that def is the CALLEE's
+          ssa.noteCall(bi, callClobbers); // … and the clobber is recorded after it, so that def is the CALLEE's
           break;
         }
         default:
@@ -4581,7 +4771,12 @@ export function lift(
       // `bx lr` and `bx r1`/`bx r2` branch through a different one, and `pop {…,pc}` / `mov pc,lr`
       // load PC directly. Only the register actually branched through is disqualified.
       const viaReturnReg = last.mnemonic === 'bx' && last.ops[0] === target.returnReg;
-      irb.ops.push(mkOp('ret', { operands: viaReturnReg ? [] : [readVar(target.returnReg, bi)] }));
+      if (viaReturnReg) {
+        irb.ops.push(mkOp('ret'));
+      } else {
+        const lo = readVar(target.returnReg, bi);
+        irb.ops.push(mkOp('ret', { operands: [wideReturn(lo, bi) ?? lo] }));
+      }
     } else if (kind === 'uncond') {
       irb.ops.push(mkOp('br', { successors: [succ(last.ops[0])] }));
     } else if (kind === 'cond') {

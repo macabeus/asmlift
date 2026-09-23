@@ -749,10 +749,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // counts WITHOUT growing "other". That is the hazard this file exists for: reordering one entry
   // collapsed the largest MIPS family into the generic bucket and every class still existed.
   //
-  // These four have no rows for reasons that are measured and written down beside them, not
-  // because something shadowed them. If a fifth name appears here, a class has gone dark. If one
-  // of these four disappears, an unnamed gap found an inhabitant — good news, and this list moves
-  // in the commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
+  // These have no rows for reasons that are measured and written down beside them, not because
+  // something shadowed them. If a further name appears here, a class has gone dark. If one of
+  // these disappears, an unnamed gap found an inhabitant — good news, and this list moves in the
+  // commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
   //
   // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
@@ -839,7 +839,7 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 62 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -872,6 +872,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'carries a small-data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
+    ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -907,6 +909,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
+    ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
@@ -1000,6 +1003,10 @@ describe('the classifier is measured against the messages core can throw, not on
     // is shared with a different capability (flags written by arithmetic or a call). Both halves
     // are pinned above, and the shapes themselves are pinned in `thumb-frontend.test.ts`.
     'cross-block-flags-arm': 'thumb.ts interpolates the reason, and the class keys on the reason',
+    // Same shape, one layer down: `l3/ast.ts`'s `gapReasonFor` builds this one and `structure.ts`
+    // writes it into a marker, which `pipeline.ts` then interpolates into its throw. Pinned by hand
+    // in `SPELT_BY` against the file that spells it, as `opaque-ops`'s sibling phrase is.
+    'runtime-helper': "l3/ast.ts's gapReasonFor builds the reason; the throw interpolates it",
   };
 
   test('every class matches a message core can throw', () => {

@@ -177,9 +177,14 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
         "'flagsacrosscall', over the compare that reached it, and only a compare's are modelled",
     );
 
-    // The compare AFTER the call is the shape every compiler emits, and it must still fold.
+    // The compare AFTER the call is the shape every compiler emits, and it must still fold. Its
+    // second operand is saved into a callee-saved register BEFORE the call, which is what agbcc
+    // emits and what the caller has to do: r1 is caller-saved, so comparing it after the `bl`
+    // would be comparing whatever the callee left there. The frontend refuses that read outright —
+    // an earlier and more basic gate than the flags — so a fixture that did it would decline on
+    // the stale read and never reach the question this case is about.
     const after =
-      '\tpush\t{r4, lr}\n\tbl\tfoo\n\tcmp\tr0, r1\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+      '\tpush\t{r4, lr}\n\tmov\tr4, r1\n\tbl\tfoo\n\tcmp\tr0, r4\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
     expect(dc('flagsaftercall', after).source).toContain('if (');
   });
 
@@ -747,12 +752,31 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
     });
 
-    test('…across the HOLE a 64-bit return spans, where the later register is the only evidence', () => {
-      // agbcc's soft-64 shift: `__muldi3`'s product occupies r0 AND r1, so argument 1 cannot be
-      // filled from the register file at all — the pre-call `asr r1` it would read is the value the
-      // callee overwrote. The caller's own `add r2` still proves the call takes arguments, so the
-      // run keeps r0 and stops at the hole rather than reading the site as argument-less.
-      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('__ashrdi3(__muldi3())');
+    test('…and the HOLE a 64-bit return spans is not a hole once the helper table states its width', () => {
+      // agbcc's soft-64 shift. `__muldi3`'s product occupies r0 AND r1, which is what made
+      // argument 1 unfillable from the register file: the pre-call `asr r1` a guess would read is
+      // the value the callee overwrote. Nothing has to be guessed now — the helper table states
+      // each C parameter's WIDTH, so the frontend reads the pair as ONE value and the second call
+      // takes the first call's whole result. The guessed-arity machinery never sees the site.
+      //
+      // Both results are dropped here, and a recognised 64-bit helper is a PURE op, so the body is
+      // dead and nothing is emitted — the answer `__divsi3` gives for a dead soft-division. The
+      // signature is what shows the pair was read.
+      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('s64 a0, s64 a1, s32 a2');
+    });
+
+    test('…and the run STOPS at a hole, rather than resuming at a later register that is fresh', () => {
+      // An argument list has no holes, so evidence for argument 3 is not evidence for argument 2.
+      // TWO gates bound this and they stop the run for different reasons, which is why both shapes
+      // are here. `mov r1` gives r1 a reaching definition that `bl foo` then destroys, so the
+      // arity guess counts three and the CLOBBER TRIM cuts it back; without the `mov`, r1 has no
+      // reaching definition at all and the guess itself never gets past it.
+      expect(dc('\tmov\tr1, #7\n\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
+      expect(dc('\tbl\tfoo\n\tadd\tr2, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
+      // …and it is the hole that stops them, not the end of the run: fill r1 and the same shape
+      // carries both, and two fresh registers past the hole still do not reach the list.
+      expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), a0);');
+      expect(dc('\tbl\tfoo\n\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tbar\n')).toContain('bar(foo());');
     });
 
     test('a JOIN of that result with a caller-computed value stays an argument', () => {

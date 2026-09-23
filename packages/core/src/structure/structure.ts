@@ -61,7 +61,7 @@ import {
   walkExprs,
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
-import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -3435,10 +3435,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
       ) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
+        // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
+        // compare to its low half. `exprIntWidth` is total and answers 64 only where it proves it.
+        const pinUnsigned = (x: Expr): Expr => ({ k: 'cast', to: T.u(exprIntWidth(x, vtEnv)), e: x });
         if (!irUnsigned(d.operands[0]) && irUnsigned(d.operands[1])) {
-          r = { k: 'cast', to: T.u(32), e: r };
+          r = pinUnsigned(r);
         } else {
-          l = { k: 'cast', to: T.u(32), e: l };
+          l = pinUnsigned(l);
         }
       }
       // The SIGNED direction of the same hole, and a DEFAULT rather than an alternative of that variation —
@@ -3462,7 +3465,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // compare them signed.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
-          renderedIntSignedness(x, vtEnv) === true || ptrSide(x) ? x : { k: 'cast', to: T.s(32), e: x };
+          renderedIntSignedness(x, vtEnv) === true || ptrSide(x)
+            ? x
+            : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
       }
@@ -3754,6 +3759,53 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ? { k: 'cast', to: T.int(w, d.opcode === 'sext'), e: e(d.operands[0]) }
         : mkGap(`no C type for a ${w}-bit '${d.opcode}'`, [e(d.operands[0])]);
     }
+    // The recovered integer type of a value, where it has one. `lo32`/`hi32`/`concat` all cast to
+    // one, and a value recovery left as anything else has no cast to spell.
+    const asInt = (t: IrType) => (t.kind === 'int' ? t : undefined);
+    // THE TWO HALVES OF A 64-BIT VALUE, which C spells exactly: the low half is a truncating cast,
+    // the high half a shift and then the same cast. The RESULT's own recovered type is what the
+    // cast is to, and the shift's kind comes from the 64-bit operand's — `>>` over a signed value
+    // and `>>>` over an unsigned one is what the machine did, and what the C backend's operand pin
+    // is spelled in terms of.
+    if (d.opcode === 'lo32' || d.opcode === 'hi32') {
+      const src = e(d.operands[0]);
+      const half = asInt(d.results[0].type) ?? T.u(32);
+      const shifted: Expr =
+        d.opcode === 'lo32'
+          ? src
+          : { k: 'bin', op: asInt(d.operands[0].type)?.signed ? '>>' : '>>>', l: src, r: { k: 'const', value: 32 } };
+      return { k: 'cast', to: half, e: shifted };
+    }
+    // …AND THE WIDEN THAT BUILDS ONE, which the machine spells as a PAIR rather than as a cast —
+    // `asr rN,rM,#31` for the signed extension of a word, `mov rN,#0` for the unsigned one. So the
+    // shape is what says HOW the half was widened, and the cast this renders is to whatever 64-bit
+    // type recovery gave the value.
+    //
+    // THE WORD'S OWN SIGNEDNESS IS WHAT THE WIDEN MEANS, and it is pinned the way every other
+    // signedness-carrying operand in this function is: cast only where the operand does not
+    // already render that way. Leaving the signed arm to whatever `x` happens to render as reads
+    // the widen off the DECLARATION rather than off the `asr` — under `/unsigned` the parameter is
+    // declared `u32` and `(s64)x` then says zero-extend, against an instruction that says
+    // otherwise.
+    //
+    // A `concat` of anything else is a 64-bit value this pipeline has no C spelling for, and it
+    // falls through to the loud gap at the bottom — which is the whole safety story for the
+    // representation. A pair that tried to cross a join matches nothing here.
+    if (d.opcode === 'concat') {
+      const [lo, hi] = d.operands;
+      const hiDef = defs.get(hi);
+      const whole = asInt(d.results[0].type);
+      const signedWiden = hiDef?.opcode === 'shr_s' && hiDef.operands[0] === lo && hiDef.attrs.imm === 31;
+      const unsignedWiden = hiDef?.opcode === 'const' && hiDef.attrs.value === 0;
+      if (whole && (signedWiden || unsignedWiden)) {
+        const word = e(lo);
+        const half =
+          renderedIntSignedness(word, vtEnv) === signedWiden
+            ? word
+            : { k: 'cast' as const, to: T.int(32, signedWiden), e: word };
+        return { k: 'cast', to: whole, e: half };
+      }
+    }
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
@@ -3809,7 +3861,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       );
     }
     return d.opcode === 'opaque'
-      ? mkGap(gapReasonFor(d.attrs.mnemonic), d.operands.map(e))
+      ? mkGap(gapReasonFor(d.attrs), d.operands.map(e))
       : mkGap(`no lowering for op '${d.opcode}'`, d.operands.map(e));
   };
 

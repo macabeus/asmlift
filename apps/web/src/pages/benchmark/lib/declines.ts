@@ -10,7 +10,7 @@
 // A CLASS MUST BE DECIDABLE INSIDE THE FIRST 200 CHARACTERS OF THE REASON. The benchmark publishes
 // a marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in
 // `apps/benchmark/src/eval/asmlift.ts` is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the
-// tail of a long message tests a string the artifact does not carry. 17 markers in the published
+// tail of a long message tests a string the artifact does not carry. 18 markers in the published
 // artifact sit at that cap. The reload refusal in `packages/core/src/frontend/ppc.ts` is the shape
 // that pays for it: one throw with two arms, and on `pikmin:__ct__7ActFreeFP4Piki:mwcc_233_163n`
 // the second arm's "a local stack frame this frontend does not model" begins at character 197 —
@@ -20,7 +20,7 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 331 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
@@ -71,7 +71,7 @@
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 252 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 265 / 60 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
@@ -276,6 +276,30 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Unmodelled store-class instructions (a non-FPU store)',
     pattern: /unmodelled store-class/,
   },
+  {
+    // A 64-bit value reaching an ordinary callee's argument list. `Prototypes` counts argument
+    // REGISTERS, so a header's `void sink(long long)` and `void sink(int)` are the same fact by the
+    // time the frontend reads them, and both answers it could give — the low half alone, or the two
+    // halves as two words — recompile to the `bl` being lifted. What closes it is a parameter
+    // vocabulary that carries WIDTHS across that boundary, which today only the runtime-helper
+    // table has.
+    key: 'wide-call-arg',
+    label: 'A 64-bit value handed to a call (no width in the prototype)',
+    pattern: /half of a 64-bit value/,
+  },
+  {
+    // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody
+    // decoded, but a call into the compiler's own runtime that no recognizer folded into the
+    // operation it computes. It is a REFUSAL rather than a miss — re-emitting `__div2i(a, b)` as
+    // source recompiles to the `bl __div2i` it was lifted from, so the alternative is a row that
+    // scores the broken candidate exactly as it scores the right one.
+    //
+    // Its rows are the mwcc 64-bit family: the PPC frontend does not yet read a register PAIR at a
+    // call, so `raise/widehelpers.ts` declines on arity and this is what it declines to.
+    key: 'runtime-helper',
+    label: "Runtime-helper calls with no model (a compiler's own libcall)",
+    pattern: /no model for the runtime helper/,
+  },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
   // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an
   // `opaque` makes its block impure, so a shape recognizer refuses and the message names the SHAPE
@@ -398,6 +422,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'no-prototype-args',
     label: 'Call argument registers with no prototype',
     pattern: /has no prototype/,
+  },
+  {
+    // The ABI destroyed the value, and nothing about the register file says so: the read has a
+    // reaching definition, and it names bytes the callee overwrote. A capability rather than an
+    // input error — what closes it is a model for whatever the callee left there. Its row,
+    // `synthetic:llfrom`, is the case that model has to cover first: an ordinary callee returning
+    // a 64-bit value leaves it in a register PAIR, and only the runtime-helper table says which
+    // callees do that, so the high register reads as a destroyed one.
+    key: 'clobbered-value',
+    label: 'A value a call destroyed (caller-saved register read back)',
+    pattern: /is read on a path where a call has destroyed it/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.

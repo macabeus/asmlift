@@ -18,7 +18,7 @@
 // provably a pointer" (adds a cast — valid C either way); the deref contract treats `undefined`
 // as "not provably wrong" (no error).
 import { IrType, T, scalarTypeForAccess } from '../ir/types';
-import { type Expr, type SFn, exprChildren } from './ast';
+import { type BinOp, type Expr, type SFn, exprChildren } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
  *  THE one copy of the SFn→env derivation — printers, contracts and L3 respell variations alike: each
@@ -103,15 +103,65 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
   return false;
 }
 
-/** The USUAL ARITHMETIC CONVERSIONS over two rendered operands: at equal rank, unsigned wins.
- *  Either side unknown leaves the result unknown — EXCEPT when the known side is unsigned, which
- *  already decides it.
+/** The INTEGER RANK a rendered expression carries, as a width in bits: 64 only where it can be
+ *  PROVEN, 32 everywhere else. The complement of `renderedIntSignedness` — that one models the
+ *  signedness `exprCType` reports uniformly as `s32`, this one models the width it reports the same
+ *  way — and the two together are what the usual arithmetic conversions need.
  *
- *  That exception is the one place this returns a DEFINITE answer from an unknown operand, and it
- *  is sound only because every integer here is rank `int`: at UNEQUAL rank C converts to the wider
- *  type first, so `unsigned int & long long` is SIGNED. Core has no 64-bit integer type at all
- *  (the decomp typedef vocabulary stops at 32 — see contracts.ts SCALAR_WIDTHS), so the
- *  unequal-rank case cannot arise. Adding one would invalidate this.
+ *  ITS SOUNDNESS IS A CLOSED ENUMERATION, so here is the enumeration. A 64-bit value reaches a
+ *  rendered expression in exactly three ways:
+ *    1. a `var`/`postincr` whose DECLARED type is 64 bits wide — read off `varType`;
+ *    2. a `cast` to a 64-bit type — read off the node;
+ *    3. an arithmetic node over one of those — the recursion below.
+ *  It does NOT arrive through MEMORY, because `contracts.ts` `SCALAR_WIDTHS` is {1,2,4} and there
+ *  is no 64-bit global; through a `const`, because a 64-bit literal only folds inside C `int`
+ *  range, where 32 is the right answer for the literal's own type; or through a `call`, because a
+ *  call's return type comes from a prototype outside the emitted function, which is exactly why
+ *  `exprCType` answers `undefined` for one — so a 64-bit call RESULT is materialised into a named
+ *  local by the structurer and arrives here as case 1.
+ *
+ *  A SHIFT takes the rank of its left operand alone; every other ARITHMETIC node takes the wider of
+ *  the two. That is C, and it is also why this is not simply `exprCType(e).width`.
+ *
+ *  THE NODES THAT ARE NOT ARITHMETIC ONES are the same list `renderedIntSignedness` enumerates, and
+ *  they yield `int` however wide their operands: a comparison, a logical connective, and `!`. `-`
+ *  and `~` are not in it, because each carries the promoted type of its operand. */
+export function exprIntWidth(e: Expr, varType: VarTypes): 32 | 64 {
+  const wide = (t: IrType | undefined): boolean => t?.kind === 'int' && t.width === 64;
+  switch (e.k) {
+    case 'var':
+    case 'postincr':
+    case 'cast':
+    case 'index':
+    case 'field':
+      return wide(exprCType(e, varType)) ? 64 : 32;
+    case 'un':
+      return e.op === '!' ? 32 : exprIntWidth(e.e, varType);
+    case 'bin':
+      if (INT_RESULT_BINOPS.has(e.op)) {
+        return 32;
+      }
+      if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
+        return exprIntWidth(e.l, varType);
+      }
+      return exprIntWidth(e.l, varType) === 64 || exprIntWidth(e.r, varType) === 64 ? 64 : 32;
+    default:
+      return 32;
+  }
+}
+
+/** The binary operators whose RESULT is a C `int` whatever their operands are — read by both
+ *  halves of the conversion model, which is the point of naming them once. */
+const INT_RESULT_BINOPS = new Set<BinOp>(['<', '<=', '>', '>=', '==', '!=', '&&', '||']);
+
+/** The USUAL ARITHMETIC CONVERSIONS over two rendered operands.
+ *
+ *  AT EQUAL RANK, unsigned wins, and either side unknown leaves the result unknown — EXCEPT when
+ *  the known side is unsigned, which already decides it. AT UNEQUAL RANK C converts to the wider
+ *  type first, so the WIDER side's signedness decides outright: `unsigned int / long long` is
+ *  SIGNED, and taking the equal-rank shortcut there would spell an unsigned divide over a signed
+ *  one. `exprIntWidth` is what tells the two cases apart, and it is TOTAL, so the rank is always
+ *  known and only the signedness can be undetermined.
  *
  *  Exported because two consumers ask it about an operator whose own rendering they are deciding,
  *  so they cannot ask `renderedIntSignedness` about the node: the C-family backend's operand pin,
@@ -119,6 +169,11 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
 export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): boolean | undefined {
   const ls = renderedIntSignedness(l, varType);
   const rs = renderedIntSignedness(r, varType);
+  const lw = exprIntWidth(l, varType);
+  const rw = exprIntWidth(r, varType);
+  if (lw !== rw) {
+    return lw > rw ? ls : rs;
+  }
   if (ls === false || rs === false) {
     return false;
   }
@@ -158,8 +213,12 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
 export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | undefined {
   const rec = (x: Expr): boolean | undefined => renderedIntSignedness(x, varType);
   // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
+  // Anything narrower than `int` promotes and comes out SIGNED whatever it was declared. `int` and
+  // `long long` keep their own signedness, because no promotion applies to either. A width that is
+  // NEITHER is not a C type at all — an `index` node carries a struct STRIDE as its width — and
+  // stays undetermined, which is what every consumer already takes a cast on.
   const promoted = (t: IrType | undefined): boolean | undefined =>
-    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 ? t.signed : undefined;
+    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 || t.width === 64 ? t.signed : undefined;
   switch (e.k) {
     case 'var':
     // `v++` renders the value the local held, so it promotes exactly as the bare name does.
@@ -196,8 +255,8 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
       if (e.op === '<<') {
         return rec(e.l);
       }
-      // Comparisons and the logical connectives yield `int`.
-      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
+      // Comparisons and the logical connectives yield `int`, which is signed.
+      if (INT_RESULT_BINOPS.has(e.op)) {
         return true;
       }
       return arithConversionSignedness(e.l, e.r, varType);

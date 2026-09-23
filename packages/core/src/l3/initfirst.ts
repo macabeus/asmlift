@@ -48,7 +48,7 @@ import {
   stmtExprs,
   walkExprs,
 } from './ast';
-import { arithConversionSignedness, declaredTypes, provablyNonNegative } from './typing';
+import { arithConversionSignedness, declaredTypes, exprIntWidth, provablyNonNegative } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
   mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
@@ -120,6 +120,12 @@ const meaningPreserved = (
 ): boolean => {
   const vt = env(v);
   if (vt?.kind !== 'int' || vt.width !== 32) {
+    return false;
+  }
+  // …AND SO MUST X, which the premise above states and the check did not: `v = X` represents X
+  // exactly only while X fits in v, so a 64-bit X assigned to a 32-bit v truncates and every
+  // signedness argument below it is about a value the program does not have.
+  if (exprIntWidth(side === 'l' ? l : r, env) !== 32) {
     return false;
   }
   if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {

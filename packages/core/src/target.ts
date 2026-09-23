@@ -43,6 +43,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
+import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
 
 /** What a compiler's OBJECT shows for a narrow declared parameter — see
@@ -78,6 +79,41 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
+  /** Registers a CALL destroys: after one, they hold whatever the callee left there, and no value
+   *  this function computed. The frontends hand this to the SSA builder so a read of one past a
+   *  call refuses instead of resolving to the pre-call definition (frontend/ssa.ts).
+   *
+   *  REQUIRED, unlike its two neighbours above, and the asymmetry is the point. An absent
+   *  `nonArgRegs` claims no partition, which only makes classification stricter; an absent
+   *  `scratchRegs` under-states a set whose own comment says under-stating is safe. An absent
+   *  caller-saved list takes the UNSOUND direction — nothing refuses, so a destroyed register keeps
+   *  resolving to a value the callee overwrote, silently and with exit 0. A channel whose omission
+   *  is unsound is a required argument, so that forgetting it is a type error.
+   *
+   *  `argRegs` must be a SUBSET of it — a register the caller passes arguments in is by
+   *  construction one the callee may destroy — and `clobberedByCall` (frontend/ssa.ts) checks that
+   *  rather than trusting it, the way `checkedLiveInModel` checks the register partition. */
+  callerSaved: readonly string[];
+  /** The COMPILER RUNTIME HELPERS this compiler's codegen calls, and what each computes
+   *  (runtime-helpers.ts). A compiler fact, which is why it lives here and not in `proto.ts`: that
+   *  file holds signatures fixed by the C STANDARD, and a helper name is fixed by a runtime
+   *  library — agbcc calls `__muldi3`, CodeWarrior `__div2i`, IDO `__ll_mul`.
+   *
+   *  ABSENT ⇒ no helper is recognised AND none is refused, so every such call stays an ordinary
+   *  call with its arguments guessed and the backend spells it. That is the UNMEASURED direction,
+   *  not the safe one: re-emitting a compiler's own runtime call is the one failure that MATCHES,
+   *  because a compiler handed `__div2i(a, b)` emits the `bl __div2i` the row was lifted from
+   *  (`raise/widehelpers.ts` states this at the refusal it exists to make). Absence is still the
+   *  right default, because a name outside the table cannot be told from a project's own
+   *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
+   *  not been enumerated.
+   *
+   *  BOTH MIPS TARGETS SIT THERE TODAY, and IDO's runtime is a family of its own (`__ll_mul`,
+   *  `__ll_div`, `__ull_div`), so a scan for either of the other two spellings reports zero on it.
+   *  What that costs today is nothing, and the gate bounding it is not here: `frontend/mips.ts`
+   *  refuses on the `jal` before any call is modelled at all. The moment it does not, enumerating
+   *  those names is owed with it. */
+  runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -413,6 +449,12 @@ export const ARMV4T_AGBCC: TargetDescription = {
   // `mov ip, r1` in two switch arms, no save anywhere, and a `mov r0, ip` past a third arm that
   // writes nothing — an uninitialised local by construction.
   scratchRegs: ['r12', 'ip'],
+  // AAPCS: r0-r3 pass arguments and return, r12 (`ip`) is the intra-procedure-call scratch, and lr
+  // holds the return address the `bl` itself overwrites. agbcc's own machine description says the
+  // same (`thumb.h` CALL_USED_REGISTERS). Both spellings of r12 for the reason `nonArgRegs` carries
+  // both: the ATPCS aliases are what this ISA's asm writes.
+  callerSaved: ['r0', 'r1', 'r2', 'r3', 'r12', 'ip', 'lr'],
+  runtimeHelpers: AGBCC_RUNTIME_HELPERS,
   // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
   // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
   capabilities: {
@@ -483,6 +525,29 @@ export const MIPS_IDO: TargetDescription = {
   compiler: 'ido',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. DECLARED and not yet exercised —
+  // `frontend/mips.ts` refuses a call outright, so nothing on this target reaches the read past one.
+  // Stated anyway, because the field is what makes the refusal unforgettable rather than optional.
+  callerSaved: [
+    'at',
+    'v0',
+    'v1',
+    'a0',
+    'a1',
+    'a2',
+    'a3',
+    't0',
+    't1',
+    't2',
+    't3',
+    't4',
+    't5',
+    't6',
+    't7',
+    't8',
+    't9',
+    'ra',
+  ],
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
@@ -525,6 +590,28 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // The same O32 convention MIPS_IDO carries, and declared for the same reason: the frontend
+  // refuses a call, so it is the field's presence rather than its use that matters here.
+  callerSaved: [
+    'at',
+    'v0',
+    'v1',
+    'a0',
+    'a1',
+    'a2',
+    'a3',
+    't0',
+    't1',
+    't2',
+    't3',
+    't4',
+    't5',
+    't6',
+    't7',
+    't8',
+    't9',
+    'ra',
+  ],
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other
@@ -614,6 +701,11 @@ export const PPC_MWCC: TargetDescription = {
   // PPC EABI: r3–r10 pass integer/pointer arguments; r3 also returns.
   argRegs: ['r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'],
   returnReg: 'r3',
+  // PPC EABI: r0 and r3-r12 are volatile, and lr carries the return address `bl` overwrites. r11
+  // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
+  // callee-saved.
+  callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
+  runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring compiler behaviors are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
@@ -810,6 +902,12 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
   };
 }
 
+/** The scalar vocabulary every candidate's prelude declares. `s64`/`u64` are spelt `long long`
+ *  because every compiler this repo targets is a C89 one with the GNU/CW extension, which is what
+ *  the projects themselves use; the decomp checkouts all define the same two names, and the
+ *  harness keeps typedefs per NAME against the vendored ctx, so a unit that already has them gets
+ *  no redefinition. */
 export const C_TYPEDEFS =
   'typedef unsigned char u8;typedef unsigned short u16;typedef unsigned int u32;' +
-  'typedef signed char s8;typedef short s16;typedef int s32;\n';
+  'typedef signed char s8;typedef short s16;typedef int s32;' +
+  'typedef long long s64;typedef unsigned long long u64;\n';

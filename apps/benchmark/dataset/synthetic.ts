@@ -1796,17 +1796,171 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   { sym: 'i2ll', src: 'long long i2ll(int x){ return x; }', features: ['int64', 'sign-extend'], toolchains: ALL },
+  // THE LOW HALF AS A PROJECTION, and the mirror of `llhi` below — with the same rule applied to
+  // the same effect on a different toolchain, because the cell that goes null is the one whose
+  // machine already has the wanted half in the return register.
+  //
+  // NOT ON agbcc, where the low half IS r0, so the whole function is `bx lr`. Compiled at the
+  // row's own flags, three sources are one object — .text `70470000`, md5 496f2b6e:
+  //
+  //   int ll2i(long long x){ return (int)x; }        the row
+  //   u32 ll2i(u32 a0){ return a0; }                 what asmlift publishes, and it MATCHED
+  //   void ll2i(void){}                              no parameter, no return, no cast
+  //
+  // A cell that scores an empty function identically to the answer measures nothing about
+  // `int64`, the `cast` or the `narrow` it is tagged with, so it is not one of this row's cells.
+  // It fails differently from `llhi`'s mwcc cell, and the difference is worth keeping: `llhi:mwcc`
+  // could not distinguish the two PROJECTIONS, so an arithmetically wrong answer scored the same;
+  // this one does distinguish them — the high half is `add r0,r1,#0`, `081c7047` — and goes null
+  // on ARITY and TYPE instead. Both are null, for different reasons.
+  //
+  // The other three cells are gates: IDO alone answers `return a1`, the wrong half, and correctly
+  // nonmatches.
   {
     sym: 'll2i',
     src: 'int ll2i(long long x){ return (int)x; }',
     features: ['int64', 'cast', 'narrow'],
-    toolchains: ALL,
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
   },
   {
     sym: 'llcmp',
     src: 'int llcmp(long long a,long long b){ return a<b; }',
     features: ['int64', 'compare'],
     toolchains: ALL,
+  },
+  // The helper family, and what each row PINS. `llmul` is the plainest shape there is: a 64-bit
+  // value in a register pair going into a call and coming back out of one.
+  {
+    sym: 'llmul',
+    src: 'long long llmul(long long a,long long b){ return a*b; }',
+    features: ['int64', 'arithmetic'],
+    toolchains: ALL,
+  },
+  // THE PAIR THAT PROVES THE CALLEE NAME CANNOT DECIDE SIGNEDNESS. agbcc's libgcc has no
+  // `__umuldi3` at all — `optabs.c` initialises the only integer multiply libfunc from the MODE,
+  // and `expmed.c` routes every multiply through it — so these two compile to the SAME
+  // `bl __muldi3` and differ only in how each argument was widened: `asr rN,rM,#31` per half here,
+  // `mov rN,#0` in the twin below.
+  {
+    sym: 'llmulw',
+    src: 'long long llmulw(int a,int b){ return (long long)a*(long long)b; }',
+    features: ['int64', 'arithmetic', 'sign-extend'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'llmulwu',
+    src: 'unsigned long long llmulwu(unsigned a,unsigned b){ return (unsigned long long)a*(unsigned long long)b; }',
+    features: ['int64', 'arithmetic', 'unsigned'],
+    toolchains: ALL,
+  },
+  // …and the pair where the name DOES decide it. Division splits into `__divdi3`/`__udivdi3`, so
+  // these two are the reason a helper table carries an op per NAME rather than one per shape.
+  {
+    sym: 'lldivs',
+    src: 'long long lldivs(long long a,long long b){ return a/b; }',
+    features: ['int64', 'arithmetic', 'signed'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'lldivu',
+    src: 'unsigned long long lldivu(unsigned long long a,unsigned long long b){ return a/b; }',
+    features: ['int64', 'arithmetic', 'unsigned'],
+    toolchains: ALL,
+  },
+  // The unsigned widen, `i2ll`'s twin: `mov rN,#0` where that one has `asr rN,rM,#31`. The shape
+  // is what says which extension the machine performed, and it is the only thing that does.
+  {
+    sym: 'u2ull',
+    src: 'unsigned long long u2ull(unsigned x){ return x; }',
+    features: ['int64', 'zero-extend', 'unsigned'],
+    toolchains: ALL,
+  },
+  // THE HIGH HALF AS A PROJECTION, and a constant shift of 32 leaves no shift opcode to key on:
+  // agbcc emits `add r0,r1,#0` and nothing else, so the recovery is a fact about the register pair
+  // rather than about an instruction.
+  //
+  // NOT ON mwcc, and the omission is the row's own rule applied honestly. Each of the other three
+  // objects does SOMETHING with the shift — `add r0,r1,#0` on agbcc, a sign-extended pair and
+  // `move v0,a1` on kmc, a call to a shift helper with a count of 32 on IDO. Big-endian PPC puts
+  // the high half in r3 already, so the whole function is `blr`: four bytes, and not one of them
+  // responds to the source. A cell whose target scores the right answer and every wrong one alike
+  // is not a gate, so it is not one of this row's cells.
+  {
+    sym: 'llhi',
+    src: 'int llhi(long long x){ return (int)(x>>32); }',
+    features: ['int64', 'cast', 'narrow'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+  },
+  // THE ONE-WAY DOOR, and this row is here so a later round cannot quietly walk back through it.
+  // agbcc spells a 64-bit OR as two plain `orr`s — ordinary 32-bit instructions that ordinary
+  // 32-bit C reaches — so no 64-bit OPERATION is needed for the halves themselves, and the same
+  // goes for `&`, `^`, `~`, every constant shift and every compare. What the row scores is the
+  // RETURN: both `orr`s are there and the high one has nowhere to go, so it reads `1/3` with the
+  // high half deleted. The door it holds shut is a 64-bit `or` opcode nothing needs; the gap it
+  // measures is the pair coming back out.
+  {
+    sym: 'llorr',
+    src: 'long long llorr(long long a,long long b){ return a|b; }',
+    features: ['int64'],
+    toolchains: ALL,
+  },
+  // THE WIDTH TWIN OF `llmul`, and the two differ in one register. A 64-bit-returning function
+  // ends `bl __muldi3; pop {r2}; bx r2`; this one narrows, so agbcc is free to pop its scratch
+  // into r1 — which is the pair's HIGH register. The epilogue is therefore the only place the
+  // return width is written down, and a recovery that reads the register pair off the value graph
+  // answers 64 for both. (Without `-mthumb-interwork` the two really are the same object, and no
+  // row can pin what no function carries.)
+  {
+    sym: 'lomul',
+    src: 'int lomul(long long a,long long b){ return (int)(a*b); }',
+    features: ['int64', 'arithmetic', 'cast', 'narrow'],
+    toolchains: ALL,
+  },
+  // THE CALL BOUNDARY THE PAIR DOES NOT CROSS, and a refusal row rather than a match. A prototype
+  // states a callee's arity in argument REGISTERS, so `void llsink(long long)` and `void
+  // llsink(int)` reach the frontend as the same fact — and both of the answers it could give
+  // (hand over the low half; hand over the two halves as two words) recompile to the `bl` being
+  // lifted. The differ scores the wrong one exactly as it scores the right one, which is why this
+  // declines instead of matching.
+  {
+    sym: 'llpass',
+    src: 'int llpass(long long a,long long b){ llsink(a*b); return 0; }',
+    ctx: 'void llsink(long long);',
+    proto: { llsink: { params: ['long long'] } },
+    features: ['int64', 'arithmetic'],
+    toolchains: ALL,
+  },
+  // THE SAME BOUNDARY FROM THE OTHER SIDE, and a different refusal. A pair ARRIVES from an
+  // ordinary callee the way it arrives from a runtime helper — in the register pair the ABI names
+  // — but only the helper table says which callees return one, so the read of the high register
+  // has a reaching definition naming bytes the callee overwrote. The frontend declines rather
+  // than hand back the caller's stale value. What closes it is a return WIDTH in the prototype
+  // vocabulary, which today only the helper table carries: the mirror of `llpass`, where the
+  // width is missing on the way in.
+  //
+  // agbcc alone, by `llhi`'s rule and for both of its halves. On big-endian PPC the high half IS
+  // r3, so mwcc's whole body is `bl llsrc` and a frame: asmlift matches it with `return llsrc();`
+  // — the LOW half, the opposite projection — and the object is identical either way, so that
+  // cell scores the right answer and a wrong one alike. Both MIPS builds decline before they
+  // reach the boundary at all, on `function call 'jal' — MIPS calls not yet modelled`, so they
+  // referee a different capability. agbcc is the one that pays an instruction for the
+  // projection, `add r0,r1,#0`, and declines naming the register.
+  //
+  // TOLD, AND STILL REFUSING, which is the part that names the capability. `FnProto` carries a
+  // callee's arity and its void-ness and nothing about the WIDTH it returns, so `llsrc` is
+  // declared to both decompilers and asmlift still cannot know the pair is there. The refusal is
+  // the vocabulary's, not a missing declaration's.
+  //
+  // The declaration is in `src` because a synthetic row's TARGET is built from `src` alone — `ctx`
+  // reaches m2c and the candidate compile, not the reference. Without it `llsrc` is implicitly
+  // `int`, and the target becomes a 32-bit `asr` by 32 over a function returning a word.
+  {
+    sym: 'llfrom',
+    src: 'long long llsrc(void);\nint llfrom(void){ return (int)(llsrc() >> 32); }',
+    ctx: 'long long llsrc(void);',
+    proto: { llsrc: { params: [] } },
+    features: ['int64', 'cast', 'narrow'],
+    toolchains: ['agbcc'],
   },
 
   // ── division / modulo by constant (magic-number division) ───────────────────────────────────

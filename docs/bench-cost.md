@@ -12,17 +12,17 @@ one, move its date; if you cannot, delete the row rather than let it read as cur
 ## 1. The table
 
 Measured on this machine on **2026-09-12**, at `8599234d`, alone (no neighbour bench, no ranked
-run). Corpus: 1,062 rows — 810 synthetic + 252 real. The four `pnpm bench run` rows were re-measured on
-**2026-09-21** at `06021f09`, on a corpus of 1,200 rows — 822 synthetic + 378 real. That corpus is
+run). Corpus: 1,062 rows — 810 synthetic + 252 real. The three `pnpm bench run` rows were re-measured on
+**2026-09-23** at `3888734f`, on a corpus of 1,257 rows — 879 synthetic + 378 real. That corpus is
 bigger than the one the rest of the table prices, and its real tier is compiled differently: the
-stillborn stop hands a compiler 20,715 candidates where the 2026-09-19 artifact handed it 60,011.
+stillborn stop hands a compiler far fewer candidates than the 2026-09-19 artifact's 60,011.
 So the new wall is not a speed-up of the old figure, and the two must not be read as a ratio.
 
 | command                                  | cost                                                                                                                 | what produced it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pnpm bench run` (all tiers)             | **~708 s ≈ 12 min**, over 1,201 rows                                                                                 | the two tier lines of the 2026-09-21 ship run at `a13dbe60`: `✓ synthetic: 823 results in 382.2s`, `✓ real: 378 results in 325.5s`, 0 SKIPs. Docker up, candidate cache on and part-cold. An earlier run the same day, at `06021f09` over 1,200 rows, walled 295.1 s and 497.6 s — same machine, same command, and the two tiers land either side of each other, so treat ±100 s as noise rather than signal                                                                                                                                                                                                                                                                                                                                                 |
-| `pnpm bench run --tier synthetic`        | **~382 s** over 823 rows                                                                                             | same run, 2026-09-21; 295 s at `06021f09` earlier the same day                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `pnpm bench run --tier real`             | **~326 s** over 378 rows, with the stillborn stop                                                                    | same run, 2026-09-21; 498 s at `06021f09` earlier the same day. Every figure here before those two priced a tier that compiled every candidate of every fan — 2,170 s on 2026-09-13 over 252 rows, and 2,941–5,720 s cold or contended in this repo's run logs of 2026-09-05/07/08. That is a different amount of work, not a slower machine                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `pnpm bench run` (all tiers)             | **~262 s ≈ 4.5 min**, over 1,257 rows                                                                                | the two tier lines of the 2026-09-23 run at `3888734f`: `✓ synthetic: 879 results in 189.4s`, `✓ real: 378 results in 182.2s`, 0 SKIPs, `time` wall 4:22.07. Docker up, candidate cache WARM (`hit 620` on the last synthetic shard alone) — and warmth, not load, is what this figure is sensitive to: the 2026-09-21 ship run at `a13dbe60` walled 708 s part-cold over 1,201 rows, and a neighbour's whole-tier run beside a scoped probe came in FASTER than its own uncontended time. Budget the larger number when the cache is cold                                                                                                                                                                                                                   |
+| `pnpm bench run --tier synthetic`        | **~189 s** over 879 rows                                                                                             | same run, 2026-09-23; 382 s part-cold at `a13dbe60` on 2026-09-21 over 823 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `pnpm bench run --tier real`             | **~182 s** over 378 rows, with the stillborn stop                                                                    | same run, 2026-09-23; 326 s part-cold at `a13dbe60` on 2026-09-21. Every figure here before the stillborn stop priced a tier that compiled every candidate of every fan — 2,170 s on 2026-09-13 over 252 rows, and 2,941–5,720 s cold or contended in this repo's run logs of 2026-09-05/07/08. That is a different amount of work, not a slower machine                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `pnpm bench run --tier <t> --only <sym>` | **the row’s own price**: 3.1 s on the cheapest real row, 161 s on the dearest — see §3                               | `time pnpm bench run --tier real --only sub_0804B254` → 3.1 s, 2026-09-21. The dearest is `kleod:PauseMenuScreenHandler:agbcc`, 161.0 s of `rankSeconds` in the same day’s artifact. The symbol this cell used to name, `ReadUnalignedU32`, is no longer a row of the real tier                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `pnpm bench baseline <sym>`              | **~2.6 s**, no bench at all                                                                                          | `time pnpm bench baseline CountCollectedGems`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pnpm bench fan <row> --enumerate`       | **~115 candidates/s**                                                                                                | 9,192 candidates in 80.2 s on `kleod:CountCollectedGems:agbcc`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=91.8s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=91.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,26 +136,35 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-23, stamped `3c427cc2`**: the ranked pass alone
-is **850 s over 185 real rows** and **608 s over 726 synthetic rows**; wall clock was 194.1 s and
-231.6 s, and 304.1 s end to end (`real 304.09` under `/usr/bin/time -p`) because the tiers overlap.
-THIS TREE HAS NOW BEEN BENCHED FIVE TIMES, and the five readings are the cheapest evidence in this
-file that the seconds are not the measurement: **1,281 s + 630 s** (491.6 s wall, cold),
-**813 s + 477 s** (262.3 s wall, warm), **929 s + 563 s** (318.9 s wall), **1,009 s + 533 s**
-(299.8 s wall), and this one at **850 s + 608 s** (304.1 s wall) on a tree whose only change since
-the fourth is TWO COMMENT LINES. Same corpus, same 1,218 rows, same outcomes bar this branch's own
-row — and the real sum spans 1.58× across the five while the synthetic sum spans 1.27× IN THE
-OPPOSITE DIRECTION between the last two, which is what a shared machine looks like from inside one
-tier. `origin/main`'s artifact
-reads 1,281 s and 630 s over the same 1,218 rows: `bench diff --base 28b36aca` against it reports
-**8 field changes, 0 added, 0 removed** (exit 1), `bench regression --base 28b36aca` **0 lost, 0
-missing, 0 retired, 0 added, 0 gained, 1 other flip** (exit 0), and the fan **unmoved at 67,331
-(1.00×) over 910 comparable rows** with one more row priced here. All eight fields are ONE ROW —
-`kleod:LoadObjects_World2Select:agbcc`, `declined` → `nonmatch 212/554`, because a compare now
-reaches its branch across the block boundary agbcc's literal pool opened. Read the fan, not the
-seconds.
+Summed out of the committed artifact of **2026-09-23, stamped `3888734f`**: the ranked pass alone
+is **854 s over 185 real rows** and **503 s over 741 synthetic rows**; wall clock was 182.2 s and
+189.4 s, and 262.1 s end to end (`4:22.07` under `time`) because the tiers overlap. The dearest
+single row is **124 s** on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own —
+which is the figure to reach for when a scoped run looks cheap.
 
-The artifact before this one, taken 2026-09-22, read **813 s over 185 real rows** and **477 s over
+THE CORPUS GREW AND THE RANKED PASS DID NOT. 1,218 → 1,257 rows, and the ranked sum went
+**1,457.0 s → 1,353.4 s (0.93×) over the 908 comparable rows**, because that comparison is a
+measurement of the machine and the candidate cache, not of the branch: the 39 net new rows ranked
+in **3.5 s** between them. The fan is the reading that means something and it is **67,343 → 67,345
+(1.00×)**, two records moved — `llshl:agbcc` and `llshr:agbcc`, each 1 → 2, a 64-bit return
+spelling that now has a signedness twin. `bench diff --base origin/main` reports **37 field
+changes, 40 added, 1 removed** (exit 1) and `bench regression --base origin/main` **2 lost, 1
+missing, 0 retired, 40 added, 3 gained, 0 other flips** (exit 1). Every one of those five is
+argued: the 2 lost are `llshl`/`llshr` on mwcc, which matched by re-emitting `bl __shl2i` and now
+decline; the 1 missing is `ll2i:agbcc`, a cell deleted because `bx lr` scores every answer alike;
+the 3 gained are `llshl`/`llshr` on agbcc and the real row `sa3:sa2__sub_80855C0:agbcc`.
+
+The artifact before THIS branch's, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
+rows** and **608 s over 726 synthetic rows**; wall clock was 194.1 s and 231.6 s, 304.1 s end to
+end. THAT TREE WAS BENCHED FIVE TIMES, and the five readings are the cheapest evidence in this file
+that the seconds are not the measurement: **1,281 s + 630 s** (491.6 s wall, cold),
+**813 s + 477 s** (262.3 s wall, warm), **929 s + 563 s** (318.9 s wall), **1,009 s + 533 s**
+(299.8 s wall) and **850 s + 608 s** (304.1 s wall) on a tree whose only change since the fourth is
+TWO COMMENT LINES — same corpus, same 1,218 rows, same outcomes bar its own row, and the real sum
+spans 1.58× across the five while the synthetic sum spans 1.27× IN THE OPPOSITE DIRECTION between
+the last two. That is what a shared machine looks like from inside one tier.
+
+The one before THAT, taken 2026-09-22, read **813 s over 185 real rows** and **477 s over
 726 synthetic rows**; wall clock was 174.9 s and 195.6 s, and 262.3 s end to end. THAT TREE WAS BENCHED TWICE AND
 THE FIRST RUN IS WHY. It walled
 304.5 s and 351.3 s, 491.6 s end to end, and summed 1,281 s and 630 s — the same outcomes, the same

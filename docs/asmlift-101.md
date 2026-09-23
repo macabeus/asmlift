@@ -231,9 +231,18 @@ enormously for retro consoles:
   original compiler will re-lower to those exact bytes. asmlift's recognizer
   ([`raise/magicdiv.ts`](../packages/core/src/raise/magicdiv.ts)) _inverts_ the algorithm and
   verifies the inversion, rather than pattern-matching a few known constants.
-- **Soft arithmetic**: on CPUs without divide/float hardware, `a / b` becomes a call to a
-  helper like `__divsi3`. Recognizers rewrite those calls back to operators
-  ([`raise/softdiv.ts`](../packages/core/src/raise/softdiv.ts)).
+- **Soft arithmetic**: where the ISA cannot do the operation, the compiler calls into its own
+  runtime — `a / b` becomes `bl __divsi3` on a CPU with no divider. Recognizers rewrite those calls
+  back to operators ([`raise/softdiv.ts`](../packages/core/src/raise/softdiv.ts)).
+  **A HARDWARE CAPABILITY IS NOT ALWAYS THE GATE.** A soft division is soft only where the target
+  has no divider, so `softdiv` is gated on that; but **no ISA this repo targets has 64-bit integer
+  arithmetic at all**, so `bl __muldi3` is software on every one of them whatever the target's
+  `hwDivide` says, and its recognizer
+  ([`raise/widehelpers.ts`](../packages/core/src/raise/widehelpers.ts)) is gated on nothing of the
+  kind. **Which helpers a compiler calls is a COMPILER fact, not an ISA one**, and the names are
+  per-runtime, not per-standard: agbcc emits `__muldi3`, CodeWarrior `__div2i`, IDO `__ll_mul`. A
+  scan that assumes one family reports zero on the others, so the table hangs off the target
+  ([`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts)).
 
 Simpler idioms (the branchless power-of-two division in the `half` example in Part III — its
 BRANCHING sibling is a CFG diamond and lives in a raise pass instead — multiply
@@ -410,7 +419,9 @@ packages/core/            @asmlift/core — the pipeline
                           link-time placeholder standing for the symbol
   src/ir/                 the IR substrate: types, ops, printer/parser, verifier
   src/pattern/            rewrite-patterns-as-data + the greedy driver
-  src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, extscale, arrays,
+  src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, widehelpers — the
+                          64-bit sibling of softdiv, gated on the target's runtime-helper TABLE
+                          rather than on a hardware capability — pairparams, extscale, arrays,
                           struct-arrays, memberarrays, structs, shortcircuit, narrow, narrowlocal,
                           paramwidth, retsink, latch, gvn, globalshape — the one whose subject is a
                           DECLARATION rather than an instruction shape: it reads base-vs-index

@@ -71,9 +71,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
         (L1)     (patterns)      (L1→L2)         (L2→L3)     (in L3)      (backend → string)
 ```
 
-- **L1 — machine-shaped SSA.** What the frontend emits. Values are `unk32` (32 bits, type
-  unknown); operations mirror instructions (`shr_u`, `icmp_sge`); the control-flow graph is the
-  machine's. The verifier ([`ir/verify.ts`](../packages/core/src/ir/verify.ts)) enforces the
+- **L1 — machine-shaped SSA.** What the frontend emits. Values are `unk<width>` (type unknown) and
+  the width is the machine's — `unk32` for a register, `unk64` for the register PAIR a 64-bit ABI
+  value arrives in (see "A 64-bit value" below); operations mirror instructions (`shr_u`,
+  `icmp_sge`); the control-flow graph is the machine's. The verifier ([`ir/verify.ts`](../packages/core/src/ir/verify.ts)) enforces the
   structural SSA invariants here: one terminator per block, single definition per value,
   definitions dominate uses, correct opcode arity.
 - **L2 — typed SSA.** _The same `Fn` graph_, after **type recovery**
@@ -575,6 +576,54 @@ reads the variable before the update, so no other spelling is faithful) and a ba
 a node the structurer did not build. Pascal has no such operator and throws on one, the way it
 already does on `cast`.
 
+## A 64-bit value, across the whole tower
+
+The one case where a single value is wider than a register, and the clearest worked example of how
+a fact enters at the level that knows it. No ISA here has 64-bit integer arithmetic, so the machine
+never shows one directly — it shows a register PAIR and a call into the compiler's own runtime.
+
+**L1 — one value, not two.** A 64-bit integer is an ordinary `Value` whose type carries width 64,
+and three opcodes relate it to the machine: `concat` builds it from a low and a high half, `lo32`
+and `hi32` read one back. No new `IrType` kind, because the width was already a field; no 64-bit
+`add`, because every arithmetic op already carries its width in its operand types. It has to be ONE
+value: `call` has `results: 1`, and the structurer materialises an effectful call once per result,
+so a pair modelled as two results emits the call twice.
+
+**The frontend decides the width**, because only the asm can. `frontend/thumb.ts` reads a pair at a
+call from the target's runtime-helper table, and reads the RETURN width off the epilogue rather than
+off the value graph: `pop {r2}` cannot touch the return pair, `pop {r1}` fills its high register with
+the return address, and the two functions are otherwise identical.
+
+**Two seams, and they are per-target DATA, not a branch in a pass.** `TargetDescription.callerSaved`
+says which registers a call destroys; `TargetDescription.runtimeHelpers`
+([`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts)) says which helpers the COMPILER
+calls and what each computes. Nothing in `ir/` or in the raise passes branches on a compiler or an
+ISA. Both tables are also refusals: a name in the table that no recognizer folds becomes a gap
+rather than a call the backend spells, because re-emitting a compiler's own runtime call is the one
+failure that MATCHES — hand the compiler `__div2i(a, b)` and it emits the `bl __div2i` the row was
+lifted from.
+
+**What refuses, and why each refusal is where it is.**
+
+| level             | refusal                                                           | because                                                                                                           |
+| ----------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| frontend, layer 0 | a caller-saved register read after a call                         | what it holds is the callee's; an `r1` read after a `bl` can never be the caller's pre-call value                 |
+| frontend          | a 64-bit value leaving as a word at an ordinary call boundary     | only the helper table states a callee's parameter widths                                                          |
+| raise             | a helper call whose operands did not ARRIVE at the table's widths | an operand count is not evidence of a pair; the pair construction is                                              |
+| raise             | a table name no recognizer folded                                 | see above — the pass-through matches for free                                                                     |
+| structure         | a `concat` that is not the machine's widen                        | a 64-bit value this pipeline has no C spelling for, and this gap is the whole safety story for the representation |
+| backend           | Pascal, on a 64-bit integer                                       | it throws rather than narrowing                                                                                   |
+
+**What a decompiler may NOT infer**, each of which is a refusal rather than a guess: `bl __muldi3`
+does not pin signedness (this libgcc has no `__umuldi3`, so both spellings call it — the signedness
+is in the operand SET-UP, `asr rN,rM,#31` per half or `mov rN,#0`); `adc` does not mean the source
+wrote `+`; the absence of a division bias does not mean `>>`, because `u64 / 256` and `u64 >> 8` are
+byte-identical and the operator is simply not recoverable for an unsigned operand.
+
+**What is NOT built**, said here so the tables above are not read as more than they are: no
+frontend but Thumb pairs registers, so on PowerPC the helper table's effect is the refusal alone,
+and both MIPS targets have no table at all and refuse the `jal` before the question arises.
+
 ## The contracts are the point
 
 The reason the levels earn their keep is not that the graph changes shape between them — it is
@@ -594,8 +643,11 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
 - **`assertDerefsTyped`** (also after structuring): every memory access and operator in the tree
   is _spellable_ — a field base is a pointer-to-struct or a struct value, no operand sits under a
   C operator that rejects pointers, and every scalar access width is a real C scalar (1/2/4). A
-  regressing pass that produced, say, a width-8 access would otherwise print the nonexistent
-  `(s64 *)` typedef and fail at candidate-compile three stages downstream.
+  regressing pass that produced, say, a width-8 access would otherwise print `(s64 *)` — and since
+  `s64` IS in the typedef vocabulary, that COMPILES, which makes this rule more load-bearing rather
+  than less. The 8-byte ACCESS is what does not exist: nothing recognises a pair of word loads as
+  one 64-bit read, so a width-8 index is a claim no pass makes. `contracts.ts` says the same at the
+  rule itself.
 - **`assertLocalsWritten`** (also after structuring): every declared local is written somewhere
   before it is read, unless its declaration says why not — an `uninit` local stands on an `undef`,
   a `frame` local is the machine's own slot. It catches a materialized def whose assignment no

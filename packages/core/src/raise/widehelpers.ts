@@ -1,0 +1,106 @@
+// asmlift — 64-bit runtime-helper lowering (L1 recognition).
+//
+// The peer of `raise/softdiv.ts`, one width up, and NOT gated on a hardware capability. A soft
+// division is a division the ISA has no instruction for, so a target with a divider never emits
+// one; no ISA this repo targets has 64-bit integer arithmetic at all, so `bl __muldi3` is software
+// on every one of them whatever `hwDivide` says.
+//
+// By the time this runs the frontend has already read the call's arguments as 64-bit values and
+// split its result back into the register pair (`frontend/thumb.ts`, at the `bl`), so the rewrite
+// itself is the same one-line splice `softdiv` does: the helper's op over the same operands,
+// reusing the SAME result value so every existing use already points at it.
+//
+// The signedness of the OPERATION comes from the helper name where the name splits it
+// (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
+// both spellings, so nothing here may read a signedness off it. See the table's own note.
+import { Fn, mkOp } from '../ir/core';
+import { arrivesAsDeclared, isWideHelper, lookupHelper } from '../runtime-helpers';
+import type { TargetDescription } from '../target';
+
+/** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
+ *  anything changed. Runs BEFORE type recovery, so the operands get their signedness there. */
+export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean {
+  const table = target.runtimeHelpers ?? {};
+  let changed = false;
+  for (const b of fn.blocks) {
+    for (let i = 0; i < b.ops.length; i++) {
+      const op = b.ops[i];
+      if (op.opcode !== 'call') {
+        continue;
+      }
+      const helper = lookupHelper(table, String(op.attrs.target));
+      if (!helper?.op || !isWideHelper(helper)) {
+        continue;
+      }
+      // ITS C PARAMETERS AT THEIR STATED WIDTHS, not its argument registers and not their count:
+      // the frontend has paired the registers up, so a `__ashrdi3` that occupied three of them
+      // arrives here as a 64-bit value and a word. That pair construction is the evidence the fold
+      // rests on, and `arrivesAsDeclared` is the precondition for reading it — an operand count
+      // says nothing about what the operands hold, and a call carrying the right count of the
+      // wrong things folds into an operation over one half of each value.
+      //
+      // WHAT DECLINES HERE DOES NOT PASS THROUGH: `refuseUnmodelledHelpers` below gaps every
+      // surviving call to a name this table carries, so a shape this cannot fold gets the loud
+      // answer rather than a plausible one.
+      if (
+        !arrivesAsDeclared(
+          helper,
+          op.operands.map((o) => o.type),
+          op.results.map((r) => r.type),
+        )
+      ) {
+        continue;
+      }
+      b.ops.splice(i, 1, mkOp(helper.op, { operands: [...op.operands], results: [op.results[0]] }));
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Turn every surviving call to one of the target's runtime helpers into a gap. Returns whether
+ *  anything changed. Runs after the two recognisers, so what it sees is what they declined.
+ *
+ *  RE-EMITTING A COMPILER'S OWN RUNTIME CALL IS NOT A RECOVERY, and it is worse than a plain
+ *  miss: it MATCHES. Hand `mwcceppc` the source `return __div2i(a, b);` and it emits the `bl
+ *  __div2i` the row was lifted from, byte for byte — so the differ scores asmlift's failure to
+ *  model 64-bit division exactly as it would score modelling it. A row that cannot tell the two
+ *  apart is measuring nothing, and four cells of the synthetic 64-bit family were banking that.
+ *
+ *  ONLY THE NAMES THE TARGET CARRIES, and a name outside the table stays an ordinary callee —
+ *  which is right, because a project's own `__`-prefixed function is not this compiler's runtime
+ *  and asmlift cannot tell them apart by spelling. A target with NO table therefore refuses
+ *  nothing and spells every helper call it makes, which is the configuration this refusal exists
+ *  to remove; `target.ts` says at the field which targets are still in it and what bounds them.
+ *
+ *  An `opaque` rather than a throw, so the gap behaves like every other one: strict mode declines
+ *  naming it, annotate mode marks it and leaves the rest of the function standing. */
+export function refuseUnmodelledHelpers(fn: Fn, target: TargetDescription): boolean {
+  const table = target.runtimeHelpers;
+  if (!table) {
+    return false;
+  }
+  let changed = false;
+  for (const b of fn.blocks) {
+    for (let i = 0; i < b.ops.length; i++) {
+      const op = b.ops[i];
+      // Membership, through the table's one reader: `in` would also answer for `toString` and every
+      // other name on `Object.prototype`, and this is the refusal, so the fabricated reason would be
+      // the whole of what a caller saw.
+      if (op.opcode !== 'call' || lookupHelper(table, String(op.attrs.target)) === undefined) {
+        continue;
+      }
+      b.ops.splice(
+        i,
+        1,
+        mkOp('opaque', {
+          operands: [...op.operands],
+          results: [...op.results],
+          attrs: { helper: op.attrs.target },
+        }),
+      );
+      changed = true;
+    }
+  }
+  return changed;
+}

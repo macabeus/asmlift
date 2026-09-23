@@ -30,7 +30,7 @@ export function recoverTypes(fn: Fn): void {
   seedSignednessFromOpcodes(fn);
   typeDerefBases(fn);
   propagatePointers(fn);
-  defaultUnknownsToS32(fn);
+  defaultUnknowns(fn);
 }
 
 /** PHASE 1 — signedness from op semantics: the operands of a signed comparison are signed integers,
@@ -115,20 +115,24 @@ function typeDerefBases(fn: Fn): void {
 // incoming `a0`) and a `p = p + stride` walk, so those values stay `unknown` and phase 4 would
 // spell them `int` — an `int→int*` assignment mwcc/agbcc REJECT (gcc warns).
 
-/** PHASE 4 — default every still-unknown value to s32. This is a COMPILER default (agbcc/IDO/GCC
- *  all take plain `int` as the integer default), not a hardware fact — applied uniformly. */
-function defaultUnknownsToS32(fn: Fn): void {
+/** PHASE 4 — default every still-unknown value to SIGNED, at its own width. Signedness is a
+ *  COMPILER default (agbcc/IDO/GCC all take plain `int` as the integer default), not a hardware
+ *  fact, and it is applied uniformly. The WIDTH is not a default at all: it is what the value was
+ *  built at, and a 64-bit value retyped `s32` here would be silently truncated by the first pass
+ *  that believed the type. `setInt` above already defaults this way. */
+function defaultUnknowns(fn: Fn): void {
+  const settle = (v: { type: IrType }) => {
+    if (v.type.kind === 'unknown') {
+      v.type = T.int(v.type.width, true);
+    }
+  };
   for (const b of fn.blocks) {
     for (const p of b.params) {
-      if (p.type.kind === 'unknown') {
-        p.type = T.s(32);
-      }
+      settle(p);
     }
     for (const op of b.ops) {
       for (const r of op.results) {
-        if (r.type.kind === 'unknown') {
-          r.type = T.s(32);
-        }
+        settle(r);
       }
     }
   }

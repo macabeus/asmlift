@@ -354,20 +354,21 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
       throw e;
     }
     const seen = reachableBlocks(fn);
-    const names = new Set<string>();
+    // THE REASONS, not the mnemonics: an `opaque` a recogniser left behind for a runtime helper it
+    // could not fold carries no mnemonic at all, and asking for one would attribute the decline to
+    // an instruction named `?`.
+    const reasons = new Set<string>();
     for (const b of seen) {
       for (const op of b.ops) {
         if (op.opcode === 'opaque') {
-          names.add(typeof op.attrs.mnemonic === 'string' ? op.attrs.mnemonic : '?');
+          reasons.add(gapReasonFor(op.attrs));
         }
       }
     }
-    if (!names.size || /unmodelled instruction/.test(e.message)) {
+    if (!reasons.size || /unmodelled instruction|no model for the runtime helper/.test(e.message)) {
       throw e;
     }
-    // Through `gapReasonFor`, so the classifier sees its canonical text — a hand-written spelling
-    // misses the mnemonic-anchored classes and every attributed decline lands in the generic bucket.
-    const list = [...names].sort().map(gapReasonFor).join(', ');
+    const list = [...reasons].sort().join(', ');
     throw new StructureError(`${e.message} — and the function carries ${list}, which is the more likely cause`);
   }
 }

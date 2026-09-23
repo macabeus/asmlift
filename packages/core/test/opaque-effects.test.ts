@@ -103,13 +103,20 @@ describe('the boundary contract backstops annotate mode', () => {
   // now does. Pin that the two sides agree on the reason text — if they drift, the contract looks
   // enforced and never fires.
   test('the gap reason has ONE spelling, shared by the marker and the contract', () => {
-    expect(gapReasonFor('clz')).toBe("unmodelled instruction 'clz'");
+    expect(gapReasonFor({ mnemonic: 'clz' })).toBe("unmodelled instruction 'clz'");
     const { source } = dc('f', deadDest('clz\tr1, r0'), 'annotate');
-    expect(source).toContain(gapReasonFor('clz'));
+    expect(source).toContain(gapReasonFor({ mnemonic: 'clz' }));
   });
 
   test('a frontend that stamps no mnemonic still produces a matching reason', () => {
-    expect(gapReasonFor(undefined)).toBe("unmodelled instruction '?'");
+    expect(gapReasonFor({})).toBe("unmodelled instruction '?'");
+  });
+
+  // The second producer. An unfolded runtime helper is not an instruction nobody decoded, and the
+  // two sentences name different capabilities — so the attrs decide which, and a producer chooses
+  // by what it stamps.
+  test('an unfolded runtime helper gets its own sentence', () => {
+    expect(gapReasonFor({ helper: '__div2i' })).toBe("no model for the runtime helper '__div2i'");
   });
 });
 

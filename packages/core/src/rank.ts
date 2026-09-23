@@ -116,9 +116,13 @@ function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean 
     if (ptrIdx.has(i)) {
       return;
     }
-    if (p.type.kind === 'unknown' || (p.type.kind === 'int' && p.type.width === 32)) {
+    // AT THE PARAMETER'S OWN WIDTH. The pin answers a question the asm does not — whether the
+    // source declared this parameter signed — and a 64-bit parameter has that question too; what
+    // it does not have is a spare 32 bits to lose to a constant here. A width the machine already
+    // narrowed (a declared `u8`) is not a scalar this variation re-decides, so it is left alone.
+    if (p.type.kind === 'unknown' || (p.type.kind === 'int' && p.type.width >= 32)) {
       pinnable = true;
-      p.type = signed ? T.s(32) : T.u(32);
+      p.type = T.int(p.type.width, signed);
     }
   });
   return pinnable;

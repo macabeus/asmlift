@@ -192,7 +192,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         const t = op.attrs.target;
         irCalls.set(t, (irCalls.get(t) ?? 0) + 1);
       } else if (op.opcode === 'opaque') {
-        irOpaques.add(gapReasonFor(op.attrs.mnemonic));
+        irOpaques.add(gapReasonFor(op.attrs));
       }
     }
   }
@@ -508,9 +508,12 @@ export function assertDerefsTyped(sfn: SFn): void {
   const NO_PTR_OPS = new Set<BinOp>(['&', '|', '^', '<<', '>>', '>>>', '*', '/', '/u', '%', '%u']);
   // The comparison operators — where a bare `&SYM` operand is SIGN-ambiguous, not ill-formed.
   const CMP_OPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
-  // 1/2/4 only: the decomp typedef vocabulary (C_TYPEDEFS) has no 64-bit scalar, so a width-8
-  // access would print as the nonexistent `(s64 *)` — exactly the three-stages-later failure
-  // this rule pre-empts. (If f64 loads ever land they are floats, not a scalar width here.)
+  // 1/2/4 only. `s64` IS in the typedef vocabulary now (target.ts C_TYPEDEFS), and the 8-byte
+  // ACCESS still is not: nothing in this pipeline recognises a pair of word loads as one 64-bit
+  // read, so a width-8 index here would be a claim no pass makes. The rule pre-empts the
+  // three-stages-later failure either way. (If f64 loads ever land they are floats, not a scalar
+  // width here.) Adding 8 would also silently under-report in `l3/typing.ts` `exprIntWidth`, whose
+  // soundness rests on memory not being a way a 64-bit value enters a rendered expression.
   const SCALAR_WIDTHS = new Set([1, 2, 4]);
   // Dot-form field bases (struct-array elements) carry the struct STRIDE as their width — any
   // stride matching the element size is legal there (the tree-level struct cast governs the
