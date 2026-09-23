@@ -89,8 +89,8 @@
 // A NARROW STORE IS NOT A CANDIDATE AT ALL — the refusal is in the candidate builder below rather
 // than in the gate table, and this is the table's named residue. Widening a write clobbers the
 // bytes past it, and no cast spelling expresses a partial write: `(u8)p->f = v` is not C. A base
-// whose conflict is a narrow STORE therefore keeps both widths, and raise/structs.ts declares them
-// as two views of a union member.
+// whose conflict is a narrow STORE therefore keeps both widths — two views of a union member where
+// raise/structs.ts synthesizes the layout, two casts at a declared address.
 //
 // THE SECOND RESIDUE. A union read through members of three widths on three arms of a `switch`
 // (`synthetic:utag`) is refused by `covering-dominates`, and the overlap it leaves is declared as a
