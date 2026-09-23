@@ -2079,6 +2079,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     liveIn,
     materialize,
+    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,
@@ -5230,8 +5231,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // a stale value. Read under the un-rotation substitution (post-loop the params hold their
         // updated values), and structure the exit region under the same substitution so a post-loop
         // use of a loop value reads its name.
+        //
+        // Less the back-edge args the zero-trip path disagrees on. Only a value that dominates the
+        // guard is readable after the loop at all, and where the loop never ran its variable's name
+        // still holds the INIT — so such an arg renders as itself unless the init is the same value.
+        const regionSub = new Map(
+          [...sub].filter(([a]) => {
+            const i = li.backArgOfParam.indexOf(a);
+            return (
+              !liveIn.get(li.exit)!.has(a) || (initArgs[i] !== undefined && sameAtEntry(a, initArgs[i], new Map()))
+            );
+          }),
+        );
         out.push(
-          ...withSub(sub, () => [...argAssigns(li.header, li.exit, sub, keptSlot), ...structureRegion(li.exit, stop)]),
+          ...argAssigns(li.header, li.exit, sub, keptSlot),
+          ...withSub(regionSub, () => structureRegion(li.exit, stop)),
         );
         return out;
       }
@@ -5823,6 +5837,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
       : null;
     const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
+    // A PRE-UPDATE HOME does not unlock a rebinding loop either, for the reason the sink stands down
+    // above: without the name `escapesAheadOfUpdate` gave it, the value it names would be this
+    // hazard's escaped body value.
     if (
       loopUpdateHazard(
         lterm.operands[0],
@@ -5832,7 +5849,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         updateWrites,
         postLoop,
         condFold !== null,
-      )
+      ) ||
+      (rebindHazard && [...dw.body].some((bb) => bb.ops.some((o) => preUpdateHomes.has(o))))
     ) {
       // Three reasons share this refusal — the test, an exit slot, an escaped body value — and the
       // one that was asked in detail names the gate that answered.

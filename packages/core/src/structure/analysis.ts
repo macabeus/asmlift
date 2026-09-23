@@ -726,6 +726,9 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
+  /** the members of `materialize` named only because the code after a loop reads them one update
+   *  late (`escapesAheadOfUpdate`) */
+  preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
@@ -1398,46 +1401,52 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
   /** THE PRE-UPDATE ESCAPE. A value a bottom-tested loop computes and the code after it reads,
-   *  whose expression reads a loop variable: inlined at the post-loop read it re-reads that
-   *  variable's NAME, which by then holds the value the update wrote, one iteration past the one
-   *  the value was computed from. agbcc kept the computed value in its own register instead
-   *  (`add r3, r0, #4` inside the loop, `str r3, [r2]` after it), and naming the def at its own
-   *  position is that register. Without the name the structurer declines the loop
-   *  (`loopEscapeHazard`, hazards.ts); an exit-edge ARG carrying the same value is the sink's.
+   *  whose expression reads a loop variable — `do { s = &f->v; f = f->next; } while (--n); *out =
+   *  s;`. Inlined at the post-loop read it re-reads that variable's NAME, which by then holds the
+   *  value the update wrote, one iteration past the one the value was computed from. agbcc kept the
+   *  computed value in its own register instead (`add r3, r0, #4` inside the loop, `str r3, [r2]`
+   *  after it), and naming the def at its own position is that register. Without the name the
+   *  structurer declines the loop (`loopEscapeHazard`, hazards.ts); an exit-edge ARG carrying the
+   *  same value is the sink's.
    *
-   *  Refuses — the value then renders at its reader exactly as before:
+   *  Asked only once every other rule has settled (`escapePhase` below), so the walk sees each def
+   *  those rules name. No refusal here protects meaning — naming a def at its own position never
+   *  changes a value, and `loopEscapeHazard` stays the check — so each one keeps a spelling:
    *  - a reader not reached through the latch's exit edge: an early-return arm renders inside the
    *    body, ahead of the update, where the name still holds the value it read;
    *  - a header that leaves the loop too, unless it is the latch: the structurer may take that exit
    *    as a test at the top and render the latch's exit as an arm inside the body;
+   *  - a def in another loop's multi-block header, where a test-at-top `while` has no seat for it;
    *  - an expression that reads no updated loop variable — reading the BACK-EDGE ARG is reading the
-   *    post-update value, which is what the name holds.
-   *  The walk stops at a def that renders as a name anyway: a materialized one, and a call, which
-   *  the cross-block rule below names wherever it would render outside its block. */
+   *    post-update value, which is what the name holds, and a materialized def renders as its name. */
+  const escapeLoops = loopBodies.flatMap((L) => {
+    const term = L.latch.ops[L.latch.ops.length - 1];
+    const back = term.successors.find((sc) => sc.block === L.header);
+    if (!back || (L.header !== L.latch && successorsOf(L.header).some((x) => !L.body.has(x)))) {
+      return [];
+    }
+    const after = new Set<Block>();
+    for (const { block } of term.successors) {
+      if (!L.body.has(block)) {
+        after.add(block);
+        reachFrom(block).forEach((x) => after.add(x));
+      }
+    }
+    return [{ ...L, back, after }];
+  });
   const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
-    loopBodies.some((L) => {
-      const term = L.latch.ops[L.latch.ops.length - 1];
-      const back = term.successors.find((sc) => sc.block === L.header);
+    escapeLoops.some((L) => {
+      const b = opBlock.get(op)!;
       if (
-        !back ||
-        !L.body.has(opBlock.get(op)!) ||
-        (L.header !== L.latch && successorsOf(L.header).some((x) => !L.body.has(x)))
+        !L.body.has(b) ||
+        (b !== L.header && multiBlockHeaders.has(b)) ||
+        !consumers.some((c) => L.after.has(opBlock.get(c)!) && !L.body.has(opBlock.get(c)!))
       ) {
-        return false;
-      }
-      const after = new Set<Block>();
-      for (const { block } of term.successors) {
-        if (!L.body.has(block)) {
-          after.add(block);
-          reachFrom(block).forEach((x) => after.add(x));
-        }
-      }
-      if (!consumers.some((c) => after.has(opBlock.get(c)!) && !L.body.has(opBlock.get(c)!))) {
         return false;
       }
       const seen = new Set<Value>();
       const readsUpdated = (x: Value): boolean => {
-        if (seen.has(x) || back.args.includes(x)) {
+        if (seen.has(x) || L.back.args.includes(x)) {
           return false;
         }
         seen.add(x);
@@ -1445,13 +1454,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           return true;
         }
         const d = defOf.get(x);
-        if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && (materialize.has(d) || d.opcode === 'call'))) {
+        if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && materialize.has(d))) {
           return false;
         }
         return d.operands.some(readsUpdated);
       };
       return readsUpdated(r);
     });
+  const preUpdateHomes = new Set<Op>();
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -1666,7 +1676,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
   // materialize only GROWS, and growing it only moves render positions closer / adds barriers,
   // so the loop is monotone and converges.
-  for (let sizeBefore = -1; sizeBefore !== materialize.size;) {
+  //
+  // Then ONE MORE PASS with the pre-update escape rule on, repeated until that too settles: the rule
+  // reads `materialize` to stop its walk, so it must see every name the other rules give.
+  let escapePhase = false;
+  for (let sizeBefore = -1; ;) {
+    if (sizeBefore === materialize.size) {
+      if (escapePhase) {
+        break;
+      }
+      escapePhase = true;
+    }
     sizeBefore = materialize.size;
     emitPosCache.clear();
     emitPosSetCache.clear(); // both render-position caches read `materialize`, which just grew
@@ -1675,6 +1695,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       for (let oi = b.ops.length - 1; oi >= 0; oi--) {
         const op = b.ops[oi];
         if (materialize.has(op)) {
+          continue;
+        }
+        // A call needs no rule: read outside its block it is named by the cross-block rule below.
+        const er = op.results[0];
+        if (
+          escapePhase &&
+          op.opcode !== 'call' &&
+          er &&
+          useSitesOf.has(er) &&
+          escapesAheadOfUpdate(op, er, consumersOf(op))
+        ) {
+          materialize.add(op);
+          preUpdateHomes.add(op);
           continue;
         }
         if (op.opcode !== 'call' && op.opcode !== 'load' && op.opcode !== 'aload') {
@@ -1701,10 +1734,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
-          if (pr && useSitesOf.has(pr) && escapesAheadOfUpdate(op, pr, consumersOf(op))) {
-            materialize.add(op);
-            continue;
-          }
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
             if (cons.length > 1 && liveAcrossCall(op, cons)) {
@@ -1973,6 +2002,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     opBlock,
     liveIn,
     materialize,
+    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,

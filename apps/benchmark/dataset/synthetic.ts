@@ -1515,10 +1515,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // sink), and the CONDITION is respelled `n++` at the leaf that reads it with the update dropped
   // from the foot of the body (`PREUPDATE_COND_GATES`, structure/hazards.ts). So what
   // `preupdate_cond` measures is the distance to the bytes rather than a refusal. The ESCAPE has no
-  // exit arg at all — agbcc carries the value out of the loop in a register of its own — and it is
-  // named at the op that computed it (`escapesAheadOfUpdate`, structure/analysis.ts). A loop
-  // VARIABLE read after the loop, rather than a value computed from one, has no op to name and
-  // still declines.
+  // exit arg at all — agbcc carries the value out of the loop in a register of its own — and the
+  // op that computed it is named where it ran (`escapesAheadOfUpdate`, structure/analysis.ts, with
+  // its refusals). A loop VARIABLE read after the loop, rather than a value computed from one, has
+  // no op to name and still declines.
   //
   // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's

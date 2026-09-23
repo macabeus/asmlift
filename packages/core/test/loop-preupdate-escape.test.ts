@@ -143,8 +143,8 @@ test('a body op over the post-update counter renders at its reader, unnamed', ()
 
 // A CALL under the value is named by the cross-block call rule wherever it would render outside its
 // block, so what the post-loop read re-evaluates is the call's NAME — nothing reads the counter.
-// Measured on `synthetic:esccast:agbcc` (MATCH): walking through the call named its `(u16)` extension
-// by default and took the `/escape-home` candidate out of the row's fan, 4 → 2.
+// Walking through it instead names `synthetic:esccast:agbcc`'s `(u16)` extension by default and
+// takes that MATCH row's `/escape-home` candidate out of its fan.
 test('a body op over a call renders at its reader, the call named in the loop', () => {
   const out = emit(
     ESCAPED_OP.replace(
@@ -217,4 +217,123 @@ test('a latch op read past the latch exit of a loop its header also leaves rende
   const out = emit(LATCH_EXIT_AS_ARM);
   expect(out).toMatch(/while \((\w+) != a1\)/);
   expect(out).toMatch(/a0\[1\] = (\w+) \* 3;\s+return;/);
+});
+
+// A MEMORY READ is the same value home — `do { s = f->v; f = f->next; } while (--n); *out = s;` —
+// and naming a load at its own position keeps the asm's read order as well.
+const ESCAPED_LOAD = `fn escload {
+^bb0(%0: s32*, %1: s32, %20: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%9, %20)
+^bb1(%2: s32, %21: s32*):
+  %7: s32 = load %21 {off=4, signed=true, width=4}
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %22: s32* = load %21 {off=0, signed=false, width=4}
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4, %22), ^bb2()
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body load read after the loop is named where it read, ahead of the update', () => {
+  const out = emit(ESCAPED_LOAD);
+  const m = out.match(/(\w+) = (\w+)\[1\];[\s\S]*\2 = \(s32 \*\)\*\2;/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]};`);
+});
+
+// A value another rule has already NAMED renders as that name after the loop, whatever it read:
+// here a store between the load and its reader names the load, and the `+ 1` over it stays at the
+// reader. The rule is asked only after the other rules settle, so it sees that name.
+const OVER_A_NAMED_LOAD = `fn escnamed {
+^bb0(%0: s32*, %1: s32, %20: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%9, %20)
+^bb1(%2: s32, %21: s32*):
+  %7: s32 = load %21 {off=4, signed=true, width=4}
+  %40: s32 = const {value=0}
+  store %21, %40 {off=4, width=4}
+  %41: s32 = const {value=1}
+  %8: s32 = add %7, %41
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %22: s32* = load %21 {off=0, signed=false, width=4}
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4, %22), ^bb2()
+^bb2():
+  store %0, %8 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body op over a load another rule named renders at its reader', () => {
+  const out = emit(OVER_A_NAMED_LOAD);
+  const m = out.match(/(\w+) = \w+\[1\];/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]} + 1;`);
+});
+
+// A def in an INNER loop's multi-block header has no seat there — that loop is a test-at-top
+// `while` — so it is left unnamed and the outer loop declines on the pre-update read, which is the
+// gap it has, rather than on the inner loop's shape.
+const IN_AN_INNER_WHILE_HEADER = `fn escinner {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %30: s32 = const {value=0}
+  br ^bb5(%30)
+^bb5(%31: s32):
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  %32: u32 = icmp_slt %31, %7
+  cond_br %32, ^bb6(), ^bb7()
+^bb6():
+  %33: s32 = const {value=1}
+  %34: s32 = add %31, %33
+  br ^bb5(%34)
+^bb7():
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body op in an inner while header stays unnamed, and the loop declines on the pre-update read', () => {
+  expect(() => emit(IN_AN_INNER_WHILE_HEADER)).toThrow(/reads a pre-update loop variable/);
+});
+
+// A body block param that takes a LOOP VARIABLE's name writes it partway through the body, and the
+// loop's own reads after that write see the wrong value (the KNOWN GAP beside `rebindHazard`,
+// structure.ts). Such a loop declined on its escaped value before that value had a home, and a home
+// does not unlock it: here %10 takes %4's name ahead of `%11 = sub %3, %4`.
+const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = add %0, %1
+  %3: s32 = add %0, %2
+  br ^bb1(%0)
+^bb1(%4: s32):
+  %5: s32 = call %1 {target="h"}
+  br ^bb2(%2)
+^bb2(%10: s32):
+  %11: s32 = sub %3, %4
+  %12: s32 = call %11 {target="f1"}
+  %15: s32 = call %10 {target="g"}
+  %24: u32 = icmp_slt %12, %1
+  cond_br %24, ^bb7(), ^bb1(%2)
+^bb7():
+  %26: s32 = add %11, %15
+  ret %26
+}
+`;
+
+test('a pre-update home does not unlock a loop whose body rebinds a loop variable', () => {
+  expect(() => emit(REBINDS_A_LOOP_VARIABLE)).toThrow(/reads a pre-update loop variable/);
 });
