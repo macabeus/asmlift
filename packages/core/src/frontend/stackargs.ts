@@ -166,17 +166,18 @@ export function analyzeOutgoingArgs<C>({
   const say = (offs: readonly number[]) => offs.map((o) => `[sp,#${o}]`).join(', ');
   const arityOf = (offs: readonly number[]) => argRegs + offs.length;
 
-  // THE ONE-WORD CAPTURED FRAME. `capturedWholeFrame` says the whole frame is an
-  // object whose address a callee holds; a declared fifth argument says [sp,#0] is a DIFFERENT
-  // callee's argument slot. Two contradictory claims about the same word, and nothing here can
-  // decide which to believe, so the honest answer is the decline it has always been.
+  // THE ONE-WORD CAPTURED FRAME. `capturedWholeFrame` says the whole frame is an object whose
+  // address has ESCAPED this function — handed to a callee, or published to memory; the frontend
+  // that computes it owns which escapes qualify. A declared fifth argument says [sp,#0] is a
+  // DIFFERENT callee's argument slot. Two contradictory claims about the same word, and nothing
+  // here can decide which to believe, so the honest answer is the decline it has always been.
   if (capturedWholeFrame) {
     for (const ev of calls) {
       const offs = ev.declared;
       if (offs !== null) {
         return refuse(
           `callee \`${ev.callee}\` is declared with ${arityOf(offs)} arguments, so [sp,#0] is its outgoing stack argument — ` +
-            'but this one-word frame is an object whose address is passed to a callee, and the two name the same word',
+            'but this one-word frame is an object whose address escapes the function, and the two name the same word',
         );
       }
     }

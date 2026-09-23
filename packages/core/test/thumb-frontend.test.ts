@@ -1434,6 +1434,80 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
     });
 
+    // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =
+    // (u32)&tmp` gives a DEVICE the address; the function need not contain a `bl` at all, and
+    // `sa3:sa2__sub_80078D4` contains none. The licence is the same licence — something outside
+    // this function holds the address, so [sp,#0] is an object and not an outgoing argument slot —
+    // and the producer table that bounds it is the publish one, at `frameBasePublishedToMemory`.
+    describe('a one-word frame whose base is PUBLISHED to memory is the same object', () => {
+      // agbcc's shape for `vu32 x = v; *(vu32 *)0x040000D4 = (u32)&x;`, which is `sa2__sub_80078D4`
+      // minus its arithmetic: fill the word, capture sp, store the capture through a pool address.
+      const PUBLISH =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr2, .L4\n\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
+      // The refusal this capability lifts, kept in one place: without it the store at [sp,#0] is
+      // keyed as an SSA slot and the audit refuses the object that names the same byte.
+      const TWO_MODELS = /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#0\] — one byte, two models/;
+
+      test('the published frame base makes [sp,#0] the object', () => {
+        // `volatile` because the address was published: a device reads through it, so a store here
+        // is observable from outside and the qualifier is what reproduces the source.
+        expect(decompile('f', PUBLISH, ARMV4T_AGBCC).source).toBe(
+          's32 f(s32 a0) {\n    volatile u32 sp0;\n    sp0 = a0;\n    *(s32 *)67109076 = &sp0;\n    return a0;\n}\n',
+        );
+      });
+
+      // NOT A BLANKET. Each of these is the same function with ONE fact removed, and each must
+      // still decline on the byte the two models disagree about — otherwise the licence is not
+      // "the address escaped", it is "there is a capture".
+      test('with nothing consuming the capture the refusal stands', () => {
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC)).toThrow(TWO_MODELS);
+      });
+
+      test('a capture stored back into its OWN frame publishes nothing', () => {
+        // the address never leaves: `[sp]` is storage this function already owns, so the store
+        // proves nothing about who else can reach the word
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr1, [sp]'), ARMV4T_AGBCC)).toThrow(
+          TWO_MODELS,
+        );
+      });
+
+      test('a HALFWORD store hands over half an address, and is not a publish', () => {
+        // whatever the device reads from there, it is not this object's address
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstrh\tr1, [r2]'), ARMV4T_AGBCC)).toThrow(
+          TWO_MODELS,
+        );
+      });
+
+      // …and the evidence is an agbcc compile table, exactly as for the callee escape.
+      test('a second armv4t compiler does not inherit the publish proof', () => {
+        expect(() => decompile('f', PUBLISH, { ...ARMV4T_AGBCC, compiler: 'sdt' })).toThrow(TWO_MODELS);
+      });
+
+      // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
+      // CALLEE-SAVED register that survives the call in fact. That over-kill is deliberate and it
+      // only ever costs a decline — which is the verdict asserted here, so the over-approximation
+      // is pinned rather than discovered later as a regression.
+      test('a capture held across a call is dropped, and the function declines', () => {
+        const acrossCall =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr2, .L4\n\tmov\tr4, sp\n' +
+          '\tbl\tg\n\tstr\tr4, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+          '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
+        expect(() => decompile('f', acrossCall, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      });
+
+      // A bare register COPY carries the base forward, the same shape the callee scan carries: the
+      // capture and the register that is published need not be the same one.
+      test('the capture reaches the store through a register copy', () => {
+        const viaCopy = PUBLISH.replace('\tmov\tr1, sp\n', '\tmov\tr1, sp\n\tmov\tr3, r1\n').replace(
+          '\tstr\tr1, [r2]',
+          '\tstr\tr3, [r2]',
+        );
+        expect(decompile('f', viaCopy, ARMV4T_AGBCC).source).toContain('&sp0');
+      });
+    });
+
     // The arity refusal runs FIRST and still wins. A frame that both stages a fifth argument and
     // passes its own base is a frame no agbcc layout produces, so the two facts contradict — and
     // the honest answer to a contradiction is the decline, not a guess about which one to believe.
@@ -1685,7 +1759,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(() => decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
-        /no call in the lifted function takes it/,
+        /no call takes it and no store publishes it/,
       );
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
