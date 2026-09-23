@@ -210,9 +210,18 @@ function splitOperands(s: string): string[] {
   return out;
 }
 
+// A COPROCESSOR-1 REGISTER, which is the one place objdump KEEPS the `$` sigil: it writes a GPR
+// bare (`v0`) and an FPU register with the sigil (`$f12`, and this dialect's ABI names `$ft2`,
+// `$fv0`, `$fa0`, `$fs0`). So this is the one operand shape this reader must NOT strip, or the two
+// dialects hand the frontend two different spellings of the same register — and the bare form is
+// indistinguishable from an objdump branch target, which is also bare lower-case hex (`f4`,
+// `fa0`). `$fp` is the frame pointer and is stripped like any GPR: the digit is what decides.
+const FP_REG = /^\$f[vats]?\d+$/i;
+
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
-// `$` register sigil, fold a memory operand's displacement expression, evaluate a bare constant
-// expression, split a `%hi`/`%lo` reference into an immediate plus its record, decline a PIC one.
+// `$` register sigil (except on an FPU register, where objdump keeps it), fold a memory operand's
+// displacement expression, evaluate a bare constant expression, split a `%hi`/`%lo` reference into
+// an immediate plus its record, decline a PIC one.
 function normalizeOperand(name: string, op: string): { op: string; reloc?: DisasmReloc } {
   // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Becomes the relocation
   // record an object file would carry plus the immediate the instruction really encodes, so the
@@ -265,7 +274,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (OCTAL_MAGNITUDE.test(op)) {
     refuseOctal(name, op, op);
   }
-  return plain(op.replace(/^\$/, ''));
+  return plain(FP_REG.test(op) ? op : op.replace(/^\$/, ''));
 }
 
 /** A magnitude with a LEADING ZERO is octal to the assembler and decimal to every `parseInt(…, 10)`

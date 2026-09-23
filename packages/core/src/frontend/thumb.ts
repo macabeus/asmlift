@@ -4451,6 +4451,12 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isThumbReg,
         normalize: reg,
+        // ARMv4T HAS NO FPU, and that is a decision rather than an omission — the fields are
+        // required so it has to be written down. agbcc routes every `float` through the soft-float
+        // helpers (`__addsf3` and friends), which asmlift models as ordinary calls, so a GBA float
+        // never reaches this path as an instruction at all.
+        fpReg: null,
+        fpControl: null,
         storeClass: /^(str|stm)/i,
         skipSafe: /^(push|pop|nop)$/i,
         context: name,

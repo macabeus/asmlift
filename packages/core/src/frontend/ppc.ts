@@ -635,6 +635,12 @@ export function lift(
         // this arm ahead of `^st` deliberately — they are refused for the file they move, not for
         // the memory they move it to.
         fpReg: /^f\d+$/i,
+        // The FPSCR moves that name no `fN` operand at all: `mtfsfi 7,0` takes a field number,
+        // `mtfsb0`/`mtfsb1` a bit number, `mcrfs cr0,cr1` two condition registers. Without this
+        // they read as "no register destination to degrade", which is the message that hides a
+        // missing file behind the shape of the instruction. `mffs f0` and `mtfsf 0xff,f0` DO name
+        // one and are `fpReg`'s.
+        fpControl: /^(mtfsfi|mtfsb0|mtfsb1|mcrfs)$/i,
         storeClass: /^st/i,
         skipSafe: /^nop$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,

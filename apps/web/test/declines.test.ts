@@ -108,6 +108,9 @@ const classOf = (marker: string) => declineClassesOf(row(marker))[0];
 const fpMarker = (m: string, regs: string) =>
   `lift: cannot lift 'f @0x4': unmodelled floating-point instruction '${m}' — it uses the floating-point ` +
   `register file (${regs}), which this frontend does not model`;
+const fpControlMarker = (m: string) =>
+  `lift: cannot lift 'f @0x4': unmodelled floating-point instruction '${m}' — it uses the floating-point ` +
+  `control register, which this frontend does not model`;
 
 describe('specific instruction families beat the generic opaque bucket', () => {
   // `opaque-ops` is `unmodelled instruction` with NO mnemonic filter, so it subsumes every class
@@ -118,26 +121,26 @@ describe('specific instruction families beat the generic opaque bucket', () => {
   // spellings this block used to feed in — `structure: unmodelled instruction 'add.s'`,
   // `lift: … unmodelled store-class instruction 'swc1'` — are strings core cannot produce any more.
   // Asserting a classification of an unreachable input is a green test with no subject.
-  test.each(['mtc1', 'mfc1', 'cvt.s.w', 'add.s', 'lwc1', 'fmr', 'stfd'])(
-    "an FPU instruction classifies as float, not opaque-ops: '%s'",
-    (mnemonic) => {
-      expect(classOf(fpMarker(mnemonic, '$f4'))).toBe('float');
-    },
-  );
-
-  // THE POWERPC FAMILY, kept in full although one phrase now covers it. These eleven were each a
-  // way the old forty-mnemonic alternation could be wrong — single precision spells a trailing `s`
-  // and a record form a trailing `.`, so a list written against `fadd|fsub|fmul|fdiv` and a closing
-  // quote matched the double-precision spelling and nothing mwcc emits for a `float`; `fneg`,
-  // `fabs`, `fsel` and the paired singles were separate omissions. Seven are published markers of
-  // the committed artifact. They stay as a regression pin: if anyone reintroduces a mnemonic list
-  // here, these say what it has to cover.
-  test.each(['fadds', 'fsubs', 'fmuls', 'fdivs', 'fneg', 'fabs', 'fadd.', 'fmadds', 'fsel', 'psq_l', 'ps_madds0'])(
-    "the PPC FPU mnemonic '%s' is floating point",
-    (mnemonic) => {
-      expect(classOf(fpMarker(mnemonic, 'f1, f2'))).toBe('float');
-    },
-  );
+  //
+  // AND THE MNEMONIC IS NO LONGER A SUBJECT EITHER, which is the same defect one turn later. This
+  // was eighteen cases parameterised by mnemonic — `mtc1`, `fadds`, `psq_l`, the paired singles —
+  // over a pattern that is now the phrase `unmodelled floating-point instruction` and reads no
+  // mnemonic at all. `classOf(fpMarker('zzbogus', ''))` was `float` too, so all eighteen were one
+  // assertion wearing eighteen names, and the list they were said to defend ("if anyone
+  // reintroduces a mnemonic list here, these say what it has to cover") would not have failed for
+  // a list missing any of them.
+  //
+  // WHERE THAT COVERAGE ACTUALLY LIVES: `packages/core/test/fp-refusal.test.ts` runs the real
+  // mnemonics through `decompile` on both MIPS dialects and on PowerPC, so the input is a string
+  // core produces rather than one this file wrote; and `SPELT_BY` below pins this class's phrase to
+  // the file that emits it, with comments stripped. Both halves of the message are pinned here —
+  // the register-file spelling and the control-register one — because they are two throws.
+  test.each([
+    ['the register-file spelling', fpMarker('add.s', '$f4')],
+    ['the control-register spelling', fpControlMarker('cfc1')],
+  ])('an FPU instruction classifies as float, not opaque-ops: %s', (_label, marker) => {
+    expect(classOf(marker)).toBe('float');
+  });
 
   // The other half: `float` must not become "anything unmodelled". Every one of these is a real
   // opaque-ops inhabitant of the committed artifact, and each reaches the generic bucket through a
@@ -906,6 +909,25 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     expect(prose).toContain(`claims ${decided} of them`);
   });
 
+  // THE FIGURE THE `float` CLASS PUBLISHES, recomputed here for the same reason the paragraph
+  // above is: it is a number in a comment, it moves the moment a capability files an FP row under
+  // an earlier guard, and nothing else would say so. The class's OTHER figure — how many corpus
+  // rows contain an FPU instruction at all — is not here, because deriving it needs a list of FPU
+  // mnemonics and the whole point of the phrase is that this package no longer keeps one; it lives
+  // in `docs/floating-point.md` §1 beside the command that recomputes it, which the class comment
+  // names.
+  test('the float class names the number of rows it actually claims', () => {
+    const rows = artifact.results.filter((r) => declineClassesOf(r).includes('float')).length;
+    const prose = readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/lib/declines.ts'), 'utf8')
+      .replace(/^\s*\/\/ ?/gm, '')
+      .replace(/\s+/g, ' ');
+    expect(
+      prose,
+      `declines.ts's float class must say "it claims the ${rows} rows whose own message names an FPU ` +
+        `instruction" — that is what the committed artifact has`,
+    ).toContain(`it claims the ${rows} rows whose own message names an FPU instruction`);
+  });
+
   // The two tests above catch TOTAL shadowing — a class emptied, or a marker nobody claims. They
   // do not catch a PARTIAL swallow, where both classes keep rows and only the counts move, which
   // is the more likely regression and the one with no symptom. Every published marker matched by
@@ -1168,12 +1190,12 @@ describe('the classifier is measured against the messages core can throw, not on
   // about `float`. This is the mechanical version: a class earns its place by matching a message
   // core actually throws.
   //
-  // `float` cannot be checked this way and is the only one that cannot: every alternative in it is
-  // a MNEMONIC, which is an interpolation, and the harvest replaces an interpolation with a
-  // placeholder. Its alternatives are pinned by hand at the top of this file, one test per
-  // mnemonic family, which is what caught the four inert ones.
+  // `float` USED TO BE THE ONE CLASS THAT COULD NOT BE CHECKED THIS WAY, because every alternative
+  // in it was a MNEMONIC — an interpolation, which the harvest replaces with a placeholder — and it
+  // was exempted here on that ground. The pattern is one phrase with no mnemonic in it now, so the
+  // exemption is inert and it is gone: `float` is harvested like every other class, which is the
+  // only reason the list below can be read as a list of reasons.
   const NOT_IN_TEMPLATES: Record<string, string> = {
-    float: 'every alternative is a mnemonic, which the harvest replaces with a placeholder',
     // These five are BUILT by a helper and RETURNED, then interpolated into a throw elsewhere, so
     // the throw site carries a placeholder where the phrase is. `reloc-symbol.ts`'s
     // `unspellableReason` returns four of them and `thumb.ts`'s `analyzeOutgoingArgs` the fifth.

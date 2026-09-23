@@ -97,6 +97,19 @@ interface Probe {
    *  shapes) that must fail loud. Each is `[label, asm-body]`. Regression-locks silent miscompiles
    *  the operand-destination guard alone cannot see. May be empty. */
   mustFailLoud: [string, string][];
+  /** FPU instructions in this ISA — `[label, asm-body]` — each of which must decline naming the
+   *  floating-point unit rather than the shape it happened to have. `opaqueDest`'s `fpReg` and
+   *  `fpControl` are the policy fields that produce that message, and they are what this holds a
+   *  frontend to: an ISA with an FPU whose frontend passes `null` for both gets the generic
+   *  messages back — "no register destination to degrade" for the arithmetic, "unmodelled
+   *  store-class" for the stores, an unresolvable value for the moves — which is one missing file
+   *  reported as three gaps, the defect `packages/core/test/fp-refusal.test.ts` exists to prevent
+   *  and that suite covers for exactly the two ISAs it names.
+   *
+   *  EMPTY IS A CLAIM, not a default: it says this ISA has no floating-point unit, and it is
+   *  written down beside the frontend's own `fpReg: null`. `docs/floating-point.md` prices what a
+   *  float model would cost. */
+  fpu: [string, string][];
 }
 
 const PROBES: Record<string, Probe> = {
@@ -109,6 +122,11 @@ const PROBES: Record<string, Probe> = {
     deadWithoutOp: `\tadd\tr0, r0, #1\n\tbx\tlr\n`,
     deadWithoutOpSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
     negativeSpace: ['clz', 'rev', 'rev16', 'revsh', 'sxtb', 'sxth', 'uxtb', 'uxth', 'adc', 'sbc'],
+    // ARMv4T HAS NO FPU. agbcc routes every `float` through the soft-float helpers (`__addsf3` and
+    // friends), so a GBA float reaches this frontend as an ordinary CALL and never as an
+    // instruction — which is why `synthetic:fadd:agbcc` is the one cell of that row asmlift
+    // already matches. Nothing to refuse, and `thumb.ts` says so with `fpReg: null`.
+    fpu: [],
     // A modelled `rsb` with a non-#0 immediate must not silently leave rD unwritten.
     mustFailLoud: [
       ['rsb #5 (modelled case, unmodelled operand)', '\trsb\tr0, r0, #5\n\tbx\tlr\n'],
@@ -127,6 +145,15 @@ const PROBES: Record<string, Probe> = {
     deadWithoutOp: `0:\tjr\tra\n4:\taddiu\tv0,a0,1\n`,
     deadWithoutOpSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
     negativeSpace: ['clz', 'clo', 'seb', 'seh', 'rotr', 'wsbh'],
+    // One per arm of the refusal: arithmetic (the destination `isMipsReg` rejects), a move OUT of
+    // the file (a destination it accepts), a store (which `storeClass` would otherwise claim), and
+    // a control-register move (which names no FP register at all).
+    fpu: [
+      ['arithmetic', '0:\tadd.s\t$f0,$f12,$f14\n4:\tjr\tra\n8:\tnop\n'],
+      ['a move out of the file', '0:\tmfc1\tv0,$f12\n4:\tjr\tra\n8:\tnop\n'],
+      ['an FPU store', '0:\tswc1\t$f0,0(a1)\n4:\tjr\tra\n8:\tnop\n'],
+      ['the control register', '0:\tcfc1\tv0,$31\n4:\tjr\tra\n8:\tnop\n'],
+    ],
     // A call's return register is an IMPLICIT destination the operand guard cannot see; an
     // indirect `jr` is not a plain return. All must fail loud, not vanish.
     mustFailLoud: [
@@ -149,6 +176,14 @@ const PROBES: Record<string, Probe> = {
     deadWithoutOpSource: 's32 clzdead(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     // `divw`/`divwu` are MODELLED (→ sdiv/udiv), so they are not in this corpus.
     negativeSpace: ['mulhw', 'mulhwu', 'rlwnm'],
+    // Same four arms. `fcmpo`'s destination is a CONDITION register, which is the PowerPC shape
+    // that forces the predicate to read every operand rather than only `ops[0]`.
+    fpu: [
+      ['arithmetic', '0:\tfadds\tf1,f1,f2\n4:\tblr\n'],
+      ['a compare into a condition register', '0:\tfcmpo\tcr0,f1,f2\n4:\tblr\n'],
+      ['an FPU store', '0:\tstfs\tf1,0(r3)\n4:\tblr\n'],
+      ['the FPSCR', '0:\tmtfsfi\t7,0\n4:\tblr\n'],
+    ],
     // Shapes the operand guard cannot see: an indirect/CTR branch (no data dest) and an
     // SDA/global access (fabricated pointer param). Both fail loud — pin them so they stay so.
     mustFailLoud: [
@@ -220,6 +255,33 @@ describe('CONTRACT-AS-INVARIANT: real unmodelled opcodes with a live dest all fa
       });
     }
   }
+});
+
+// ── Layer 3b: the floating-point unit names itself ──────────────────────────────────────────────
+// A frontend for an ISA WITH an FPU must refuse its instructions by naming the FPU. This is layer
+// 3's shape one level up: layer 3 says an unmodelled opcode fails loud, and every arm of
+// `opaqueDest` already does that — so a frontend can pass layer 3 with `fpReg: null` while
+// reporting one missing register file as three unrelated gaps. The policy fields are REQUIRED in
+// `OpaquePolicy`, which makes forgetting them a type error; this is the other half, which makes
+// getting them WRONG a red test on the ISA that has them.
+describe('CONTRACT-AS-INVARIANT: an FPU instruction is refused by the FILE it needs', () => {
+  for (const [id, p] of Object.entries(PROBES)) {
+    for (const [label, body] of p.fpu) {
+      test(`${id}: ${label} names the floating-point unit`, () => {
+        expect(() => decodes(p, 'fpprobe', body)).toThrow(/unmodelled floating-point instruction/);
+      });
+    }
+  }
+
+  // Without this, emptying every `fpu` list would make the block above vacuously pass — the same
+  // null-result guard layer 1's harvest check is there for.
+  test('the FPU corpus is not empty, and an ISA without one says so by name', () => {
+    const withFpu = Object.entries(PROBES)
+      .filter(([, p]) => p.fpu.length > 0)
+      .map(([id]) => id)
+      .sort();
+    expect(withFpu).toEqual(['mips', 'ppc']);
+  });
 });
 
 // ── Layer 4: seeded garbage fuzz ─────────────────────────────────────────────────────────────────

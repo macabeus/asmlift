@@ -29,8 +29,16 @@ import { MIPS_IDO, PPC_MWCC } from '../src/target';
 
 /** MIPS input needs addresses; the trailing `jr ra` closes the block. */
 const mips = (insn: string) => `0:\t${insn}\n4:\tjr\tra\n8:\tnop\n`;
+/** THE SECOND MIPS DIALECT, and the one that reads a project's own `asm/` tree. `frontend/splat.ts`
+ *  normalises this into the same `DisasmInstr[]` the objdump parser yields, so every guard below it
+ *  must hold on both — and a guard written against one spelling of a register holds on neither more
+ *  than half the time. */
+const splat = (insn: string) =>
+  `glabel f\n/* 000000 80000000 460E6000 */  ${insn}\n/* 000004 80000004 03E00008 */  jr          $ra\n` +
+  `/* 000008 80000008 00000000 */   nop\nendlabel f\n`;
 const ppc = (insn: string) => `   0:\t${insn}\n   4:\tblr\n`;
 const liftMips = (insn: string) => () => decompile('f', mips(insn), MIPS_IDO);
+const liftSplat = (insn: string) => () => decompile('f', splat(insn), MIPS_IDO);
 const liftPpc = (insn: string) => () => decompile('f', ppc(insn), PPC_MWCC);
 
 describe('an instruction that touches the FPU is refused by the FILE it needs', () => {
@@ -41,13 +49,100 @@ describe('an instruction that touches the FPU is refused by the FILE it needs', 
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
     ['a MIPS FPU load', 'lwc1\t$f0,0(a1)', '\\$f0', liftMips],
-    ['PowerPC single-precision arithmetic', 'fadds   f1,f1,f2', 'f1, f1, f2', liftPpc],
+    // …AND THE REGISTER LIST IS A SET. `fadds f1,f1,f2` reads two registers and writes one of
+    // them; an undeduped filter published `(f1, f1, f2)` in five markers of the committed
+    // artifact, which reads as three registers in a file the reader is being told does not exist.
+    ['PowerPC single-precision arithmetic', 'fadds   f1,f1,f2', 'f1, f2', liftPpc],
     ['a PowerPC FPU load', 'lfs     f1,0(r4)', 'f1', liftPpc],
     ['a PowerPC float move', 'fmr     f0,f2', 'f0, f2', liftPpc],
   ])('%s', (_label, insn, regs, lift) => {
     const run = lift(insn);
     expect(run).toThrow(/unmodelled floating-point instruction/);
     expect(run).toThrow(new RegExp(`floating-point register file \\(${regs}\\)`));
+  });
+});
+
+describe('…on BOTH MIPS dialects, which spell the same register two ways', () => {
+  // The objdump cases above all carry the `$` sigil, and a predicate that REQUIRES it is green on
+  // every one of them while matching nothing in a Splat tree — where `isMipsReg` then ACCEPTS the
+  // bare `f12`, builds an opaque on a register in a file nothing models, and reports the whole gap
+  // one pass later as an unresolvable value. That is the exact defect this file is named after,
+  // surviving on the dialect that reads the 24,327 functions `docs/floating-point.md` prices.
+  //
+  // The fix is in the READER, not in the predicate: objdump writes a GPR bare and an FPU register
+  // with the sigil, so `frontend/splat.ts` keeps the sigil on an FPU register and strips it
+  // everywhere else — which is what its own header promises ("normalises that dialect into the SAME
+  // `DisasmInstr[]` the objdump parser yields"). Each case below is red if it strips it.
+  test.each([
+    ['numbered arithmetic', 'add.s       $f0, $f12, $f14', '\\$f0, \\$f12, \\$f14'],
+    // THE ABI SPELLING, which objdump never prints and the `af`/`marioparty3` trees use throughout.
+    ['ABI-named arithmetic', 'add.s       $ft2, $ft2, $ft3', '\\$ft2, \\$ft3'],
+    ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
+    ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
+    ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],
+  ])('%s', (_label, insn, regs) => {
+    const run = liftSplat(insn);
+    expect(run).toThrow(/unmodelled floating-point instruction/);
+    expect(run).toThrow(new RegExp(`floating-point register file \\(${regs}\\)`));
+  });
+
+  // THE OTHER HALF, and the reason the sigil is required rather than optional. Making it optional
+  // covers the Splat dialect too — and an objdump BRANCH TARGET is bare lower-case hex, so `f0`,
+  // `f4` and `fa0` are addresses that a sigil-less pattern reads as FP registers (4 such operands
+  // in the committed artifact). Every one of those sits on a control transfer that refuses a guard
+  // earlier, so the input below is the shape rather than a listing anyone has: an unmodelled
+  // non-branch instruction with a bare `f4` where the predicate can reach it.
+  test('a bare lower-case hex token is an ADDRESS, not a register', () => {
+    const run = liftMips('teqi\tv0,f4');
+    expect(run).toThrow(/unmodelled instruction 'teqi'/);
+    expect(run).not.toThrow(/floating-point/);
+  });
+
+  // `$fp` is the FRAME POINTER — the one GPR whose ABI name starts with `f`, and the whole reason
+  // the predicate requires a digit after the optional file letter.
+  test('the frame pointer is not a floating-point register', () => {
+    const run = liftSplat('swl         $fp, 0($a1)');
+    expect(run).toThrow(/unmodelled store-class instruction 'swl'/);
+    expect(run).not.toThrow(/floating-point/);
+  });
+});
+
+describe('an FPU instruction that names no FP register is refused by the file too', () => {
+  // A REGISTER-NAME PREDICATE CANNOT SEE THESE, and they are not a rounding error: the FPU control
+  // moves are MIPS I/II's float→int rounding-mode dance, 593 sites in 61 functions across the
+  // `marioparty3` and `af` trees (`grep -hoE '\*/[[:space:]]+(cfc1|ctc1)[[:space:]]'`). They spell
+  // the control register `$31`, which is a GPR-shaped token, so before `fpControl` they fell to the
+  // generic arms — and `docs/probes/fp-demand.awk` counted them as floating point while core did
+  // not, one measurement disagreeing with the predicate it was measuring.
+  //
+  // `ctc1`'s FIRST operand is the instruction's SOURCE (objdump spells it `ctc1 rt, fs`), so the
+  // generic path also fabricated an opaque destination on a register it only reads — the same
+  // mis-modelling this file already fixed one mnemonic over, for `mtc1`.
+  test.each([
+    ['a MIPS read of the FPU control register', 'cfc1\tv0,$31', liftMips],
+    ['a MIPS write to the FPU control register', 'ctc1\tv0,$31', liftMips],
+    ['a PowerPC FPSCR field write', 'mtfsfi  7,0', liftPpc],
+    ['a PowerPC FPSCR bit clear', 'mtfsb0  31', liftPpc],
+    ['a PowerPC FPSCR bit set', 'mtfsb1  31', liftPpc],
+    ['a PowerPC FPSCR move to cr', 'mcrfs   cr0,cr1', liftPpc],
+  ])('%s', (_label, insn, lift) => {
+    const run = lift(insn);
+    expect(run).toThrow(/unmodelled floating-point instruction/);
+    expect(run).toThrow(/floating-point control register, which this frontend does not model/);
+    // The three messages it must not fall back to — one per arm it used to reach.
+    expect(run).not.toThrow(/no register destination to degrade/);
+    expect(run).not.toThrow(/unresolvable value/);
+    expect(run).not.toThrow(/store-class/);
+  });
+
+  // The moves that DO name a data register stay `fpReg`'s, so a mnemonic list is not creeping back
+  // in: this pair would be red if `fpControl` claimed them, because the message would stop naming
+  // the registers.
+  test.each([
+    ['mfc1', 'mfc1\tv0,$f12', /register file \(\$f12\)/, liftMips],
+    ['mffs', 'mffs    f0', /register file \(f0\)/, liftPpc],
+  ])("'%s' names the file it reads, not the control register", (_label, insn, want, lift) => {
+    expect(lift(insn)).toThrow(want);
   });
 });
 

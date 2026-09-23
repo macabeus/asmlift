@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 128 distinct decline messages (the texts reached by
+// `packages/core/src` throws 129 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -257,24 +257,30 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Floating point (FPU arithmetic, FPU loads and stores, paired singles)',
     // ONE PHRASE, BECAUSE CORE NOW SAYS IT. `frontend/opaque.ts` takes a per-ISA `fpReg` and
     // consults it ahead of its store-class and effect arms, so everything that names a
-    // floating-point register — arithmetic, the conversions, the FPU loads and stores, the moves in
-    // and out of the file, the GameCube paired singles — declines as `unmodelled floating-point
-    // instruction`, and the message names the registers it found.
+    // floating-point register — arithmetic, the conversions, the FPU loads and stores, the moves
+    // that name a data register, the GameCube paired singles — declines as `unmodelled
+    // floating-point instruction`, and the message names the registers it found. Its sibling
+    // `fpControl` carries the rest of the file in the same phrase: the FPU CONTROL-register moves
+    // (MIPS `cfc1`/`ctc1`, PowerPC `mtfsfi`/`mtfsb0`/`mtfsb1`/`mcrfs`) name no FP register at all —
+    // they spell the control register in the ISA's other namespace — so core matches those on the
+    // mnemonic and says "the floating-point control register" instead.
     //
     // What this replaces is worth recording, because it is the reason the phrase exists: a
     // forty-mnemonic alternation, here, reconstructing "is this floating point?" from a list of
     // opcodes because no message said so. That is one mechanism living in two packages, and every
     // way it could be wrong was a way about the LIST rather than about the gap — a bare `add\.`
-    // that matched nothing against the closing quote, a PowerPC arm that had to spell the
-    // single-precision `s` and the record-form `.` itself or silently exclude `fadds`, and four
-    // store alternatives that were inert because `storeClass` was tested first. None of those
-    // failure modes survives a pattern with no list in it.
+    // that matched nothing against the closing quote, and a PowerPC arm that had to spell the
+    // single-precision `s` and the record-form `.` itself or silently exclude `fadds`. The four
+    // store alternatives were NOT a fifth: the old pattern admitted the `store-class ` prefix on
+    // purpose, and they carried thirteen rows. None of the failure modes that were real survives a
+    // pattern with no list in it.
     //
     // What it does NOT cover is still decided elsewhere, and correctly: `bc1t`/`bc1f` name no FP
     // register operand and refuse in `mips.ts` (`fp-cond-branch`, above), and an FPU instruction in
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
-    // relocation — is filed under that guard. 113 corpus rows contain an FPU instruction; this
-    // class claims the 69 whose own message names one.
+    // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
+    // populations with the command that recomputes them, and the share this class takes is gated
+    // in `declines.test.ts`: it claims the 69 rows whose own message names an FPU instruction.
     pattern: /unmodelled floating-point instruction/,
   },
   {
@@ -283,15 +289,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `stfs` 2) and this class read 0 only because `float` is listed above it — an exclusion the
     // ordering happened to produce and nothing stated. `opaque.ts` tests `fpReg` BEFORE
     // `storeClass`, so an FPU store is no longer spelt this way at all, and the 0 here is a fact
-    // about core rather than about this array.
+    // about core rather than about this array. `mips.ts` still LISTS `swc1|sdc1` in its
+    // store-class pattern and says in one line that they can no longer reach it — a backstop kept
+    // deliberately, so that narrowing the FP predicate keeps a memory write loud rather than
+    // quietly correct.
     //
-    // The class stays, because the ISA policies reach further than the FPU — `mips.ts` lists
-    // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr` beside the FPU pair, `thumb.ts` `^(str|stm)`, `ppc.ts`
-    // `^st`, so `stwbrx` or an unaligned `swl` reaches it — and because what it names is real: core
-    // throws here to say a MEMORY WRITE cannot degrade to a register opaque, which is a different
-    // refusal from an unresolvable value. But that is a property of the throw, not a capability to
-    // build; the capability is whatever instruction it is. So the class is uninhabited, and it is
-    // in `NO_ROWS` with that measurement beside it.
+    // The class stays, because the ISA policies reach further than the FPU — `mips.ts` also lists
+    // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr`, `thumb.ts` `^(str|stm)`, `ppc.ts` `^st`, so `stwbrx` or an
+    // unaligned `swl` reaches it — and because what it names is real: core throws here to say a
+    // MEMORY WRITE cannot degrade to a register opaque, which is a different refusal from an
+    // unresolvable value. But that is a property of the throw, not a capability to build; the
+    // capability is whatever instruction it is. So the class is uninhabited, and it is in
+    // `NO_ROWS` with that measurement beside it.
     key: 'store-class',
     label: 'Unmodelled store-class instructions (a non-FPU store)',
     pattern: /unmodelled store-class/,

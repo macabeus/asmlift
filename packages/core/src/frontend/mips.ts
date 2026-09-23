@@ -1108,9 +1108,12 @@ export function lift(
       if (ins.reloc) {
         relocPlaceholder(ins);
       }
-      // storeClass: unmodelled MIPS stores — incl. the unaligned pair swl/swr and the FPU stores,
-      // whose FIRST token is a register (a SOURCE, not a dest) that would otherwise fabricate an
-      // opaque write to it while dropping the real memory write.
+      // storeClass: unmodelled MIPS stores, whose FIRST token is a register (a SOURCE, not a dest)
+      // that would otherwise fabricate an opaque write to it while dropping the real memory write.
+      // `swc1`/`sdc1` are in the list and CANNOT REACH IT — an FPU store's `rt` is an FP register by
+      // ISA, so `fpReg` above claims it on both dialects — and they are kept deliberately, as the
+      // backstop that keeps a memory write loud if that predicate is ever narrowed. Everything else
+      // here is genuinely reachable: `swl`/`swr` are the unaligned pair, `sc`/`sd*` the rest.
       // skipSafe `break`: the compiler-emitted divide-by-zero guard trap inside the hw-divide
       // idiom (KMC GCC `break 0x7`); recompiling the recovered `/` regenerates it, so it is
       // transparent by the same modelling as the divide itself (byte-exactness proven by the
@@ -1123,7 +1126,18 @@ export function lift(
         // lesser reason, "no register destination", while `mfc1 v0,$f12` has a destination it
         // ACCEPTS and would build an opaque whose source list quietly omits the register the
         // instruction actually read. The file is what is missing; say so.
-        fpReg: /^\$f\d+$/i,
+        //
+        // BOTH DIALECTS, and the ABI names are this frontend's second spelling rather than a second
+        // dialect's: objdump numbers the file (`$f12`) and the Splat trees also name it (`$ft2`,
+        // `$fv0`, `$fa0`, `$fs0`). The sigil is REQUIRED on both, which is what `frontend/splat.ts`
+        // keeps it for — an objdump branch target is bare lower-case hex, so `blez v0,f4` and
+        // `bc1fl f0` would be read as floating point by a pattern that made the `$` optional (4
+        // sites in the committed artifact, none of them reaching this function today).
+        fpReg: /^\$f[vats]?\d+$/i,
+        // The FPU CONTROL register, which both moves spell `$31` — a GPR-shaped token no register
+        // predicate can tell from an integer one. `ctc1`'s first operand is its SOURCE, so this
+        // also stops an opaque being fabricated on a register the instruction only reads.
+        fpControl: /^(cfc1|ctc1)$/i,
         storeClass: /^(sb|sh|sw|swl|swr|sc|sd|sdl|sdr|swc1|sdc1)$/i,
         skipSafe: /^(nop|ssnop|break)$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,
