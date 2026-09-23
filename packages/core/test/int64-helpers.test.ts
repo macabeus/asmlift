@@ -296,8 +296,24 @@ describe('a pair a declaration says comes back', () => {
     ['an arity and no return', { llsrc: { params: [] } }],
     ['a return that fits one register', { llsrc: { params: [], returns: 'int' } }],
     ['a return spelling nothing can size', { llsrc: { params: [], returns: 'Fixed64' } }],
+    // A WIDTH THIS COULD READ AND COULD NOT GET DECLARED IS NOT A WIDTH IT MAY ACT ON. Both of
+    // these size to 64 and neither can be printed into the candidate's translation unit — a bare
+    // count names no C type for the parameters, and no candidate includes a header declaring
+    // `int64_t`. Reading the pair anyway lifts a program the candidate then compiles against an
+    // implicitly-`int` callee: `bl llsrc ; mov r1,#0x20 ; asr r0,r0,r1`, a different program.
+    ['a 64-bit return behind a bare argument count', { llsrc: { params: 1, returns: 'long long' } }],
+    ['a 64-bit return nothing declares', { llsrc: { params: [], returns: 'int64_t' } }],
   ])('%s still declines on the stale read', (_label, prototypes: Prototypes) => {
     expect(() => liftWith(prototypes)).toThrow(/r1 is read on a path where a call has destroyed it/);
+  });
+
+  // …AND THE ZERO-ARGUMENT COUNT IS THE ONE COUNT THAT CAN BE PRINTED, because `params: 0` and
+  // `params: []` are the same `(void)`. It is the pair to the refusal above: what divides them is
+  // whether the declaration can be spelled, not which form the author wrote it in.
+  test('a 64-bit return behind a zero-argument count lifts, because (void) is spellable', () => {
+    expect(liftWith({ llsrc: { params: 0, returns: 'long long' } })).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
   });
 
   // …AND THE REFUSAL STILL COVERS THE DEFECT IT WAS BUILT FOR. A declared pair names r0 and r1 and

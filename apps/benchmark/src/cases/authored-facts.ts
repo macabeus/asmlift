@@ -524,7 +524,7 @@ export function protoFactProblems(
     }
     // A CALLEE'S `returns` IS THE ONE AUTHORED FACT THAT REACHES THE CANDIDATE'S OWN SOURCE.
     // core re-spells it as the callee's declaration inside the compiled translation unit
-    // (`l3/symbol-refs.ts` `spellableProto`), so a wrong one does not merely mislead the frontend
+    // (`proto.ts` `spellableProto`), so a wrong one does not merely mislead the frontend
     // — it compiles the candidate against a function the row does not have. Checked against the
     // declaration the compiled text or the row's `ctx` shows, exactly as the arity is.
     const returnTypes = new Set(decls.map((d) => d.returnType));

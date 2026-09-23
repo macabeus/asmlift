@@ -305,8 +305,115 @@ export function declaredWidth(t: ParamType): number | undefined {
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
 }
 
+/** The typedef names the candidate's own prelude declares (target.ts `C_TYPEDEFS`). Listed rather
+ *  than derived because `proto.ts` sits BELOW `target.ts` — `target.ts` imports `runtime-helpers.ts`
+ *  which imports this file, so reading the prelude here would close a cycle. A copy that can
+ *  disagree with its original is a defect, so test/proto.test.ts asserts this set is
+ *  exactly the names `C_TYPEDEFS` declares, and a typedef added there without one added here is a
+ *  red test rather than a candidate that will not compile. */
+const PRELUDE_TYPEDEFS: ReadonlySet<string> = new Set(['u8', 'u16', 'u32', 's8', 's16', 's32', 's64', 'u64']);
+
+/** The C89 integer bases, which need no declaration anywhere. `signed`/`unsigned` is stripped
+ *  before the lookup, exactly as {@link declaredWidth} strips it. */
+const C89_INTEGER_BASES: ReadonlySet<string> = new Set([
+  'char',
+  'short',
+  'short int',
+  'int',
+  'long',
+  'long int',
+  'long long',
+  'long long int',
+]);
+
+/** Whether asmlift may PRINT this type text into a candidate's translation unit.
+ *
+ *  SIZING AND SPELLING ARE DIFFERENT QUESTIONS AND THE SPELLABLE SET IS THE SMALLER ONE, which is
+ *  the whole reason this exists beside {@link declaredWidth}. `int32_t` and `size_t` have widths the
+ *  C standard fixes, so they size — and a candidate includes no header, so printing either is a
+ *  parse error. `Fixed64` sizes to nothing and prints to nothing. Measured with the project agbcc:
+ *  `Fixed64 DoThing(void);` and `int (*)(void) DoThing(void);` both exit 1 on a syntax error, and
+ *  a candidate whose TU does not compile loses every variation with nothing naming the cause.
+ *
+ *  SO THE VOCABULARY IS CLOSED AND SMALL: `void`, the C89 integer bases with any signedness, the
+ *  prelude's own typedefs, and a pointer to any of those. Everything else is silence, and silence
+ *  here means the callee is left undeclared exactly as it was before a prototype could declare one.
+ *
+ *  A POINTER'S POINTEE STILL HAS TO BE SPELLABLE, and that is the one place this is deliberately
+ *  STRICTER than the compiler: `struct Sprite * DoThing(struct Sprite *);` does compile (the tag is
+ *  declared by the prototype itself), while `Fixed64 *` does not, and both size to 32 through the
+ *  `*` rule — so sizing cannot tell them apart. One unspellable pointee loses every candidate for
+ *  the row, so the pointer form asks the same question of what it points at and a tagged pointer
+ *  goes undeclared rather than half-checked. A round that wants struct pointers declared owns
+ *  proving the tag is safe to mint; `void *` is the spelling that always works. */
+export function spellableType(t: ParamType): boolean {
+  const s = t
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const bare = s.replace(/[\s*]*\*$/, '').trim();
+  if (bare === '') {
+    return false;
+  }
+  if (bare === 'void' || PRELUDE_TYPEDEFS.has(bare)) {
+    return true;
+  }
+  const base = bare
+    .replace(/\b(?:signed|unsigned)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  // `unsigned` alone is `unsigned int`. `unsigned Fixed64` is not a type, so a signedness keyword
+  // only ever qualifies a C89 base — a typedef that survived the set test above is rejected here.
+  return C89_INTEGER_BASES.has(base === '' && base !== bare ? 'int' : base);
+}
+
+/** The C prototype an `FnProto` states, or `undefined` where it does not state one this can print.
+ *
+ *  ONE ADMISSION RULE FOR BOTH READERS OF `returns`, and that is what this function is for. The
+ *  frontend reads the return WIDTH off a declaration to decide whether a callee hands back a
+ *  register pair; `declare.ts` prints the declaration into the candidate's own translation unit.
+ *  Those two have to admit the same table or the pipeline lifts a pair and then compiles it against
+ *  an implicitly-`int` callee — measured with the project agbcc, `bl llsrc ; add r0, r1, #0` with
+ *  the declaration and `bl llsrc ; mov r1,#0x20 ; asr r0,r0,r1` without it. A different program,
+ *  and the row simply nonmatches with nothing saying why. So {@link declaredReturnWidth} is defined
+ *  on top of this rather than beside it.
+ *
+ *  COMPLETE MEANS BOTH HALVES, IN TYPES THIS CAN SPELL. A `returns` is required — a proto without
+ *  one states no return type. A parameter LIST is required and every entry must be spellable; the
+ *  zero-argument COUNT form is admitted too, because `params: 0` and `params: []` are the same
+ *  `(void)`, but a count above zero names no C type and cannot be printed. None of those is a
+ *  defect in the proto — all are the common shape — and the answer for them is what it has always
+ *  been, which is to leave the callee undeclared.
+ *
+ *  `returnsVoid` IS NOT A SECOND SOURCE FOR THE RETURN, and that is a measured decision rather
+ *  than an oversight. `grep -rh '"returnsVoid": true' apps/benchmark/dataset/real/*.json | wc -l`
+ *  prints 175, across all 8 vendored manifests. It is documented UNCHECKED data whose wrong value
+ *  already turns a loud decline into a compiling wrong program, and reading it here would put that
+ *  field into 175 real candidates' own translation units at a price nothing has measured — a
+ *  different change, with a bench behind it, from the one this makes. `returns` states a return
+ *  TYPE, nothing carries it yet, and a project that wants the prototype emitted spells it. */
+export function spellableProto(
+  p: FnProto | undefined,
+): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
+  if (p?.returns === undefined || !spellableType(p.returns)) {
+    return undefined;
+  }
+  if (p.params === 0) {
+    return { params: [], returns: p.returns };
+  }
+  return Array.isArray(p.params) && p.params.every(spellableType)
+    ? { params: p.params, returns: p.returns }
+    : undefined;
+}
+
 /** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a
- *  reader can size — `returns` omitted, or a spelling {@link declaredWidth} does not read.
+ *  reader can act on — a proto {@link spellableProto} cannot print, or a return spelling
+ *  {@link declaredWidth} does not size (`void`, which is an absence of a value rather than a width).
+ *
+ *  IT IS GATED ON BEING SPELLABLE, not merely on being sizable, and that gate is the soundness of
+ *  the whole reading: a width read here makes the frontend name a second register, and that is only
+ *  the right lift if the candidate's own translation unit declares the callee the same way. The two
+ *  questions are asked through one function so they cannot answer differently.
  *
  *  `returnsVoid` is not consulted and must not be: a void return is not a width of zero, it is the
  *  absence of a returned value, and the one consumer here asks how many registers come back with a
@@ -316,7 +423,8 @@ export function declaredWidth(t: ParamType): number | undefined {
  *  callee's name, and a callee named `toString` reads a `Function` off `Object.prototype` — which
  *  has no `returns`, so it answers here what an undeclared callee answers. */
 export function declaredReturnWidth(p: FnProto | undefined): number | undefined {
-  return p?.returns === undefined ? undefined : declaredWidth(p.returns);
+  const spelled = spellableProto(p);
+  return spelled === undefined ? undefined : declaredWidth(spelled.returns);
 }
 
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.

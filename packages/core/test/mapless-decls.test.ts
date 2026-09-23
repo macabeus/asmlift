@@ -227,6 +227,14 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
   test.each([
     ['a bare argument-register count, which names no C type', { DoThing: { params: 1 } }],
     ['a typed list with no stated return', { DoThing: { params: ['u32'] } }],
+    // A SPELLING THIS CANNOT PRINT IS NOT A DECLARATION IT MAY ATTEMPT, and this arm is the one
+    // that is a silent row-killer rather than a missed opportunity: `Fixed64 DoThing(u32);` is a
+    // syntax error under the project agbcc, so every candidate for the row dies at compile with
+    // nothing naming the cause. The width is beside the point — `declaredWidth('int64_t')` reads
+    // 64 and no candidate includes a header that declares it.
+    ['a return spelling no candidate declares', { DoThing: { params: ['u32'], returns: 'Fixed64' } }],
+    ['a return the C standard sizes and no prelude spells', { DoThing: { params: ['u32'], returns: 'int64_t' } }],
+    ['a PARAMETER spelling no candidate declares', { DoThing: { params: ['Fixed64'], returns: 'long long' } }],
   ])('a call target the prototype table cannot spell is still refused: %s', (_label, prototypes) => {
     const { cands, refused } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC, false, prototypes);
     for (const c of cands) {

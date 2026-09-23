@@ -6,9 +6,17 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaredArgWidths, declaredReturnWidth, declaredWidth, prototypesFromSymbols, wordsOf } from '../src/proto';
+import {
+  declaredArgWidths,
+  declaredReturnWidth,
+  declaredWidth,
+  prototypesFromSymbols,
+  spellableProto,
+  spellableType,
+  wordsOf,
+} from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, C_TYPEDEFS } from '../src/target';
 
 /** the argument registers a declaration occupies, or `undefined` for "this states no layout" — the
  *  two answers a frontend acts on differently, collapsed into one expression so a test can name
@@ -18,37 +26,127 @@ const argRegs = (p: Parameters<typeof declaredArgWidths>[0]): number | undefined
   return widths === undefined ? undefined : wordsOf(widths);
 };
 
+// WHAT ASMLIFT MAY PRINT is a SMALLER set than what it can size, and the difference is a candidate
+// that does not compile. Measured with the project agbcc, prelude included: `Fixed64 DoThing(void);`
+// and `int (*)(void) DoThing(void);` both exit 1 on a syntax error, while `long long DoThing(void);`
+// and `struct Sprite * DoThing(struct Sprite *);` exit 0.
+describe('spellableType', () => {
+  test.each([
+    'void',
+    'int',
+    'unsigned',
+    'unsigned int',
+    'long long',
+    'unsigned long long',
+    'signed char',
+    'short int',
+    'u8',
+    's32',
+    'u64',
+    'void *',
+    'u16 *',
+    'const char *',
+  ])('%s is a spelling a candidate compiles', (t) => {
+    expect(spellableType(t)).toBe(true);
+  });
+
+  // THE SIZABLE-BUT-UNPRINTABLE SET IS THE POINT. Each of these has a width `declaredWidth` reads
+  // and a spelling nothing in the candidate's translation unit declares, so each assertion is
+  // paired with the width to show the two questions really do part.
+  test.each([
+    ['int32_t', 32],
+    ['uint64_t', 64],
+    ['size_t', 32],
+  ])('%s sizes and does NOT print — no candidate includes a header', (t, w) => {
+    expect(declaredWidth(t)).toBe(w);
+    expect(spellableType(t)).toBe(false);
+  });
+
+  test.each(['Fixed64', 'struct Vec', 'Fixed64 *', 'int (*)(void)', 'float', '', '*'])(
+    '%s is not a spelling this may print',
+    (t) => {
+      expect(spellableType(t)).toBe(false);
+    },
+  );
+
+  // A SIGNEDNESS KEYWORD QUALIFIES A C89 BASE AND NOTHING ELSE — `unsigned u32` is not a type,
+  // and stripping the keyword before the typedef lookup would have admitted it.
+  test('a signedness keyword on a typedef is not a type', () => {
+    expect(spellableType('unsigned u32')).toBe(false);
+  });
+
+  // THE PRELUDE'S TYPEDEF NAMES ARE LISTED IN `proto.ts` AND DECLARED IN `target.ts`, because
+  // `proto.ts` sits below `target.ts` in the import graph and reading them there would close a
+  // cycle. A copy that can disagree with its original is a defect, so the divergence is a red test
+  // rather than a candidate that does not compile: every name `C_TYPEDEFS` declares must be
+  // spellable, and every spelling that is NOT a C89 base must be one of those names.
+  test('the spellable typedefs are exactly the ones the candidate prelude declares', () => {
+    const declared = [...C_TYPEDEFS.matchAll(/(\w+)\s*;/g)].map((m) => m[1]);
+    expect(declared.length).toBeGreaterThan(0);
+    for (const name of declared) {
+      expect(spellableType(name)).toBe(true);
+    }
+    // …and the converse: a name the prelude stops declaring must stop being spellable.
+    for (const name of ['u128', 'f32', 'bool8']) {
+      expect(declared).not.toContain(name);
+      expect(spellableType(name)).toBe(false);
+    }
+  });
+});
+
 // The RETURN side of the same vocabulary. What it buys that `returnsVoid` cannot is how many
 // registers the callee hands back: a value wider than a register comes home in a pair, so after a
 // `bl` the second register holds a returned high half rather than the callee's leftovers, and
 // nothing in the assembly separates those two readings.
 describe('declaredReturnWidth', () => {
   test('a spelled return is read through the same widths a parameter is', () => {
-    expect(declaredReturnWidth({ returns: 'long long' })).toBe(64);
-    expect(declaredReturnWidth({ returns: 's64' })).toBe(64);
-    expect(declaredReturnWidth({ returns: 'int' })).toBe(32);
-    expect(declaredReturnWidth({ returns: 'void *' })).toBe(32);
-    expect(declaredReturnWidth({ returns: 'u8' })).toBe(8);
+    expect(declaredReturnWidth({ params: [], returns: 'long long' })).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 's64' })).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 'int' })).toBe(32);
+    expect(declaredReturnWidth({ params: [], returns: 'void *' })).toBe(32);
+    expect(declaredReturnWidth({ params: ['u8', 's32'], returns: 'u8' })).toBe(8);
   });
 
-  // SILENCE IS SILENCE, and the three ways to be silent must not be three answers. A frontend asks
+  // SILENCE IS SILENCE, and the ways to be silent must not be several answers. A frontend asks
   // this to decide whether to name a second register, and every "no opinion" has to lift the call
   // the way an undeclared callee is lifted.
   test.each([
     ['no proto at all', undefined],
     ['a proto with no return', { params: 2 }],
-    ['a project typedef', { returns: 'Fixed64' }],
-    ['a struct', { returns: 'struct Vec' }],
-    ['void — an absence of a value, not a width of zero', { returns: 'void' }],
+    ['a project typedef', { params: [], returns: 'Fixed64' }],
+    ['a struct', { params: [], returns: 'struct Vec' }],
+    ['void — an absence of a value, not a width of zero', { params: [], returns: 'void' }],
   ])('%s answers undefined', (_label, proto) => {
     expect(declaredReturnWidth(proto)).toBeUndefined();
+  });
+
+  // A WIDTH THIS READS AND CANNOT GET DECLARED IS NOT A WIDTH IT MAY REPORT, because the two are
+  // one decision: the frontend names a second register only if the candidate's own translation
+  // unit declares the callee the same way, and `spellableProto` is the single gate on both. A
+  // count above zero names no C type; a parameter spelling nothing can print poisons the list
+  // whatever the return says.
+  test.each([
+    ['a bare argument count', { params: 2, returns: 'long long' }],
+    ['a parameter this cannot print', { params: ['Fixed64'], returns: 'long long' }],
+    ['a POINTER to something this cannot print', { params: ['Fixed64 *'], returns: 'long long' }],
+    ['a return this can size but not print', { params: [], returns: 'int64_t' }],
+  ])('%s is silence even though the width is readable', (_label, proto) => {
+    expect(declaredWidth(String(proto.returns))).toBe(64);
+    expect(declaredReturnWidth(proto)).toBeUndefined();
+  });
+
+  // …and the zero-argument COUNT form is the one count that CAN be printed: `params: 0` and
+  // `params: []` are the same `(void)`.
+  test('a zero-argument count is the same declaration as an empty list', () => {
+    expect(declaredReturnWidth({ params: 0, returns: 'long long' })).toBe(64);
+    expect(spellableProto({ params: 0, returns: 'long long' })).toEqual({ params: [], returns: 'long long' });
   });
 
   // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different
   // question; reading it here would have to invent a width for a function that returns no value.
   test('returnsVoid is not a width', () => {
-    expect(declaredReturnWidth({ returnsVoid: true })).toBeUndefined();
-    expect(declaredReturnWidth({ returnsVoid: false })).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: true })).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: false })).toBeUndefined();
   });
 
   // THE SAME SAFE-READER CONTRACT `declaredArgWidths` HAS: a frontend indexes `prototypes` by a callee's
