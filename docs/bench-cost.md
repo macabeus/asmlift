@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=120.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,13 +137,26 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,059 s over 186 real rows** and **594 s over 743 synthetic rows**; wall clock was 223.1 s and
-241.6 s, and **324.1 s end to end** (`real 324.81` under `/usr/bin/time -p`) because the tiers
-overlap — 223.1 + 241.6 is 464.7, which is not the wall time and never was. The dearest single row
-is **161 s** on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the
-figure to reach for when a scoped run looks cheap.
+**1,044 s over 186 real rows** and **552 s over 743 synthetic rows**; wall clock was 216.9 s and
+234.3 s, and **317.1 s end to end** because the tiers overlap. The dearest single row is **161 s**
+on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to
+reach for when a scoped run looks cheap.
 
-THIS ENTRY IS THE CHEAPEST IN THE FILE AND ITS BRANCH DID NOTHING TO EARN THAT. It is the second
+THE INTERESTING READING HERE IS THE DIFF AND IT IS EMPTY. This run re-measures a wave of soundness
+and prose fixes across `packages/core/src`, and against the artifact before it `bench diff` reports
+**0 field changes, 0 added, 0 removed**, `bench regression` **0 flips of any kind**, and the fan
+**unmoved at 67,417 (1.00×)** over 929 comparable rows. It was taken because a commit to
+`packages/core/src` invalidates the artifact by provenance, not because a number was expected to
+move — the change's corpus reach is zero by construction, since every typed `params` in the dataset
+spells a type `declaredWidth` reads. **A run whose only job is to make the stamp true is still a
+run you have to take**, and at 317 s on a warm candidate cache it is the cheapest obligation in
+this file.
+
+The artifact before this one, taken 2026-09-23 at `52833c75`, read **1,059 s over 186 real rows**
+and **594 s over 743 synthetic rows**; wall clock was 223.1 s and 241.6 s, and 324.1 s end to end
+(`real 324.81` under `/usr/bin/time -p`).
+
+THAT ENTRY WAS THE CHEAPEST IN THE FILE AND ITS BRANCH DID NOTHING TO EARN THAT. It is the second
 run of a tree whose first run — 456.3 s, both tier lines `✓`, exit 0 — was thrown away for a
 one-sentence `docs/` edit made while it was in flight, which stamps the whole sample dirty and is
 a WIDER rule than `MEASURED_PATHS` (`apps/benchmark/src/provenance.ts` `codeDirtyPaths` counts
