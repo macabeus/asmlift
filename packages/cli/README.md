@@ -264,10 +264,19 @@ signature, state it and the declaration wins:
 asmlift fn.s --target agbcc --proto '{"fn": {"params": ["int", "void *"]}}'
 ```
 
-`"u8"`/`"s16"`/&c., the C89 base types and any pointer are read; a project typedef is not, and a
-spelling asmlift cannot read leaves the asm's own inference standing. The list never PINS a width
-the asm did not carry — a declaration that agrees with an elided extension would take the
-signedness variation off the table before the differ ever ranked it.
+`"u8"`/`"s16"`/&c., the C89 base types (`float` among them), `long long` and any pointer are read;
+a project typedef, a by-value struct and `double` are not. The list never PINS a width the asm did
+not carry — a declaration that agrees with an elided extension would take the signedness variation
+off the table before the differ ever ranked it.
+
+A spelling asmlift cannot read costs nothing on the function's OWN entry: that list is consulted
+per parameter, and an unreadable one leaves the asm's own inference standing for it alone. On a
+CALLEE's list it is a layout question instead, because a parameter wider than a register occupies
+two of them and moves every later argument's home. asmlift weighs the declaration against the
+argument registers the call actually sets up: where only the one-register-each reading fits that
+count, it lifts at it, and where both readings fit it refuses and says so rather than picking. A
+bare count (`{"g": {"params": 3}}`) states argument registers directly and is taken at its word,
+so it is the way past a header asmlift cannot size.
 
 ## Environment
 

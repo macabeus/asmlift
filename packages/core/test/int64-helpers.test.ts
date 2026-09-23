@@ -123,12 +123,28 @@ describe('what refuses', () => {
   // agbcc puts the low half in r3 and the high half at [sp,#0]. The declaration is readable and
   // the block is the right size, so nothing else would stop it — the walk would read `r4`, which
   // is an argument register on no target here.
-  test('a declared pair that does not fit in the argument registers refuses, naming the position', () => {
-    expect(() =>
+  //
+  // THE ORDINAL IS THE PARAMETER'S AND THE POSITION IS THE WORD'S, and the message has to keep
+  // them apart: with an EARLIER wide parameter they are different numbers, and printing the word
+  // index as a parameter number sends a reader to the wrong entry of their own header.
+  test('a declared pair that does not fit in the argument registers refuses, naming the parameter', () => {
+    const declared = (params: string[]) =>
       decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC, {
-        prototypes: { sink: { params: ['s32', 's32', 's32', 'long long'], returnsVoid: true } },
-      }),
-    ).toThrow(/parameter 4 of `sink` is 64 bits wide and starts at argument register 4 of 4/);
+        prototypes: { sink: { params, returnsVoid: true } },
+      });
+    expect(() => declared(['s32', 's32', 's32', 'long long'])).toThrow(
+      /parameter 4 of `sink` is 64 bits wide and takes argument words 4 and 5 of a call with 4 argument register\(s\), so its low half is in r3 and its high half in this frame's outgoing stack block/,
+    );
+    // PARAMETER 3, WORD 4 — the ordinal and the position part company at the first wide parameter,
+    // and an earlier version of this message printed `at + 1` for both.
+    expect(() => declared(['long long', 's32', 'long long'])).toThrow(/parameter 3 of `sink` is 64 bits wide/);
+    // WHOLLY IN THE FRAME is the other shape the comment above names and the message did not: at
+    // word 5 of 4 registers NOTHING is in a register, so "one half lands in the frame and the
+    // other in a register" was false about its own input, and it cited an argument register that
+    // does not exist.
+    expect(() => declared(['s32', 's32', 's32', 's32', 'long long'])).toThrow(
+      /parameter 5 of `sink` is 64 bits wide and takes argument words 5 and 6 .* so both of its halves are in this frame's outgoing stack block/,
+    );
   });
 });
 

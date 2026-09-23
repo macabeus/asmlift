@@ -9,7 +9,7 @@
 // So the CLI says which names it had to guess for. Purely textual: the asm the run was given, the
 // `--proto` table it parsed, and the project ELF's callee signatures — no pipeline stage involved,
 // and nothing here can change what is emitted.
-import { type Prototypes, declaredArgRegs } from '@asmlift/core/proto';
+import { type Prototypes, declaresParams } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 
 /** A label DEFINED in this asm — `foo:` at the start of a line. */
@@ -55,14 +55,20 @@ export function calleeNames(asm: string, self?: string): string[] {
   return out;
 }
 
-/** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry with a
- *  readable `params`, and no signature in the project's own DWARF either. `declaredArgRegs` is the
- *  same reader the frontend uses, so a mistyped `params: "2"` counts as guessed here exactly as
- *  it does there. */
+/** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry stating
+ *  `params` at all, and no signature in the project's own DWARF either.
+ *
+ *  `declaresParams` IS THE READER, AND IT IS THE ONE THE FRONTEND'S TIER DECISION USES. A
+ *  mistyped `params: "2"` states nothing and counts as guessed here exactly as it does there. A
+ *  list holding a spelling asmlift cannot size states plenty — it is weighed against the machine
+ *  (`proto.ts` `resolveArgLayout`) and either fixes the layout or refuses the lift — and in
+ *  neither case was anything guessed. Keying this on whether a layout came out READABLE instead
+ *  printed "no declared arity, guessed from the argument registers" in the same run that refused
+ *  BECAUSE of the user's declaration, naming a callee the user had declared. */
 export function guessedArityCallees(asm: string, self: string, prototypes?: Prototypes, symbols?: SymbolMap): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
   return calleeNames(asm, self).filter(
-    (n) => declaredArgRegs(prototypes?.[n]) === undefined && declared?.get(n)?.signature === undefined,
+    (n) => !declaresParams(prototypes?.[n]) && declared?.get(n)?.signature === undefined,
   );
 }
 

@@ -408,10 +408,14 @@ describe('the declaration witness', () => {
   });
 
   // A 64-BIT DECLARED PARAMETER IS ONE ENTRY IN THIS LIST AND TWO ARGUMENT REGISTERS, and the two
-  // vocabularies meet at `declared[entry.params.indexOf(p)]`. That index is a PARAMETER position,
-  // which is only true because `pairparams` has already fused the register pair into one entry
-  // parameter — `pre-recovery.ts` runs `pairparams` before `paramwidth`, and this fixture is the
-  // shape that arrives here as a result.
+  // vocabularies meet at `declared[entry.params.indexOf(p)]`. That index is a PARAMETER position
+  // ONLY WHERE `pairparams` HAS ALREADY FUSED THE PAIR, and nothing enforces that it did:
+  // `pre-recovery.ts` runs `pairparams` first, but `fuseParamPairs` declines whenever either half
+  // has another use, and `narrowEntryParams` never asks whether it fired. This fixture is the
+  // shape that arrives here fused; the unfused one reads the declaration one slot out for every
+  // parameter after the pair, which costs a narrowing rather than inventing one. That residue
+  // predates the 64-bit widths and is not closed here — it is named so the next reader does not
+  // take the invariant for established.
   //
   // THE WRONG ANSWER THIS FAILS ON is a `declared` list expanded to one entry per argument
   // REGISTER (`[64, 64, 16, 32]`). The `s16` then reads its neighbour's high half, the

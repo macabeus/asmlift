@@ -27,21 +27,21 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 123 distinct decline messages (the texts reached by
+// `packages/core/src` throws 126 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
 // replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts   27  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts   26  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
 //                           base in the list, control falling off the end, a register spelled in
-//                           upper case, a declared parameter type nothing can size (a project
-//                           typedef, a `double`, a by-value struct), and the reaching-compare
-//                           throw whose reason is interpolated (`cross-block-flags-arm` keys on
-//                           one of its reasons, so the template with a placeholder in it matches
-//                           nothing)
+//                           upper case, an outgoing stack-argument block whose size rests on a
+//                           declared type nothing can size (a project typedef, a by-value
+//                           struct), and the reaching-compare throw whose reason is interpolated
+//                           (`cross-block-flags-arm` keys on one of its reasons, so the template
+//                           with a placeholder in it matches nothing)
 //   structure.ts        16  eleven loop and post-loop naming refusals beside the two
 //                           `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
@@ -54,10 +54,15 @@
 //                           branch, an unparsable constant expression, and a magnitude with a
 //                           leading zero (octal to the assembler)
 //   frontend/disasm.ts   7  the objdump `...` elision family
-//   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
-//                           two-armed branch denylist, whose template is interpolation end to end
-//                           (its wide-parameter refusal is NOT here — it carries `wide-call-arg`'s
-//                           phrase because it is that capability gap seen from the other frontend)
+//   frontend/ppc.ts      4  `stwu` with update, a relocation on a stack-pointer adjust, the
+//                           two-armed branch denylist, whose template is interpolation end to end,
+//                           and the declaration-versus-machine refusal, whose sentence is built in
+//                           `proto.ts` so that both frontends refuse a user-supplied fact with the
+//                           same words — which puts the whole template out of the harvest's reach
+//                           and its gate in `packages/core/test/proto.test.ts`, where it is
+//                           produced (its wide-parameter refusal is NOT here — it carries
+//                           `wide-call-arg`'s phrase because it is that capability gap seen from
+//                           the other frontend)
 //   frontend/format.ts   1  the input/frontend mismatch — an input error
 //   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -282,12 +287,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /unmodelled store-class/,
   },
   {
-    // A 64-bit value reaching an ordinary callee's argument list. `Prototypes` counts argument
-    // REGISTERS, so a header's `void sink(long long)` and `void sink(int)` are the same fact by the
-    // time the frontend reads them, and both answers it could give — the low half alone, or the two
-    // halves as two words — recompile to the `bl` being lifted. What closes it is a parameter
-    // vocabulary that carries WIDTHS across that boundary, which today only the runtime-helper
-    // table has.
+    // A 64-bit value reaching an ordinary callee's argument list. Two shapes, one capability: a
+    // pair reaching a callee whose parameter widths nothing states, where both answers (the low
+    // half alone, or the two halves as two arguments) recompile to the `bl` being lifted so
+    // nothing downstream can referee either; and a pair the ABI splits across the register/stack
+    // boundary, which this frontend does not assemble. The PowerPC arm is the same gap seen from a
+    // frontend with no pair at all.
     key: 'wide-call-arg',
     label: 'A 64-bit value handed to a call (no width in the prototype)',
     pattern: /half of a 64-bit value/,

@@ -972,7 +972,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 123 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about 126 distinct messages across 11 files, which
   // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
@@ -987,12 +987,12 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 27],
+    ['frontend/thumb.ts', 26],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 3],
+    ['frontend/ppc.ts', 4],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];

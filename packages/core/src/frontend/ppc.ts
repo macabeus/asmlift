@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgRegs, declaredWidth } from '../proto';
+import { type Prototypes, declaredArgLayout, resolveArgLayout, unresolvedArgLayout } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -487,13 +487,24 @@ export function lift(
   // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
   // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`declaredArgRegs` is asked first).
-  const fallbackArgc = (bi: number, at: number): number => {
+  // and names the gap rather than guessing. A prototype answers it (`declaredArgLayout` is asked first).
+  //
+  // TWO READERS, because the gap refusal belongs to only one of them. `argRegsHeld` is the count
+  // alone and answers a question a DECLARED call also asks — `proto.ts` `resolveArgLayout` weighs
+  // it against a declaration holding a spelling it could not size. There the declaration is what
+  // bounds the answer, so a gap is not the end of the count and must not throw; here nothing else
+  // bounds it, so a gap is the whole problem.
+  const argRegsHeld = (bi: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
     let n = 0;
     while (n < ARG_REGS.length && holdsValue(n)) {
       n++;
     }
+    return n;
+  };
+  const fallbackArgc = (bi: number, at: number): number => {
+    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
+    const n = argRegsHeld(bi);
     for (let k = n + 1; k < ARG_REGS.length; k++) {
       if (holdsValue(k)) {
         throw new PpcUnsupportedError(
@@ -788,34 +799,48 @@ export function lift(
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
+          // ONE QUESTION, ONE ANSWER, AND THE OTHER FRONTEND ASKS IT THE SAME WAY. A declaration
+          // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts` converts
+          // between them, and `frontend/thumb.ts` resolves the same layout with the same function
+          // and refuses with the same sentence. A user-supplied fact that two frontends answer
+          // differently is a bug wherever it is read second.
+          //
+          // A SPELLING NOTHING CAN SIZE IS NOT SILENTLY DISCARDED AND NOT BLANKET-REFUSED. It is
+          // weighed against the argument registers the caller actually set up (`argRegsHeld`): a
+          // parameter this cannot size occupies one register or two, and where the machine's count
+          // only fits the first reading, that reading is the layout. Where it fits both, the
+          // declaration is not enough and this refuses — discarding it instead would lift
+          // `g(1, 3)` from a header that says `void g(Direction)`, which is a compiling, plausible,
+          // wrong program with no gap in it.
+          //
           // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR, and this frontend has no pair.
           // Every argument register it reads becomes its own value, so a declaration that spends
           // two registers on one parameter is honoured by handing the callee one HALF — the high
           // half here, since PowerPC is big-endian — and losing the other. That is a compiling,
-          // plausible, wrong program rather than a gap, so it refuses.
-          //
-          // THE DECLARATION IS THE ONLY WAY TO KNOW, which is why the check sits on it: a guessed
-          // arity counts argument registers, and a register cannot be half a parameter.
-          //
-          // A SPELLING `declaredWidth` CANNOT READ IS NOT REFUSED. It answers `undefined` for a
-          // project typedef as readily as for a `double`, and treating that as "might be wide"
-          // would refuse every call to a callee declared through a typedef. Only a width this
-          // KNOWS to exceed a register is a refusal; the unknown one keeps the reading it had.
+          // plausible, wrong program rather than a gap, so it refuses too.
           //
           // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
           // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
-          const declaredTypes = Object.hasOwn(prototypes, sym) ? prototypes[sym]?.params : undefined;
-          const wideAt = (Array.isArray(declaredTypes) ? declaredTypes : []).findIndex(
-            (t) => (declaredWidth(t) ?? 32) > 32,
-          );
-          if (wideAt >= 0) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': one half of a 64-bit value would be handed to '${sym}' — its parameter ` +
-                `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
-                'register as its own value rather than building the pair the ABI passes it in',
-            );
+          const layout = declaredArgLayout(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          let declared: number | undefined;
+          if (layout !== undefined) {
+            const setUp = argRegsHeld(bi);
+            const widths = resolveArgLayout(layout, setUp);
+            if (widths === null) {
+              throw new PpcUnsupportedError(`cannot lift '${name}': ${unresolvedArgLayout(sym, layout, setUp)}`);
+            }
+            const wideAt = widths.findIndex((w) => w > 32);
+            if (wideAt >= 0) {
+              throw new PpcUnsupportedError(
+                `cannot lift '${name}': one half of a 64-bit value would be handed to '${sym}' — its parameter ` +
+                  `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+                  'register as its own value rather than building the pair the ABI passes it in',
+              );
+            }
+            // Every width here is a single register — the refusal above is what makes that true —
+            // so the parameter count and the argument-register count are the same number.
+            declared = widths.length;
           }
-          const declared = declaredArgRegs(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
           // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by

@@ -1204,13 +1204,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         /stack pointer used as data/,
       );
     }
-    // A spelling nothing can size refuses too, and it refuses FIRST and more specifically: the
-    // staged words and the declaration are both unknowable next to a `double`, so naming the
-    // parameter is the fact a reader can act on, where the sp-as-data reason would send them
-    // hunting for a store.
+    // A declared pair that straddles the register/stack boundary refuses too, and it refuses FIRST
+    // and more specifically: naming the parameter is the fact a reader can act on, where the
+    // sp-as-data reason would send them hunting for a store. A `double` is two words on every
+    // target here, so this one's low half is in r3 and its high half in the block.
     expect(() =>
       decompile('f', twoStackArgs, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 's32', 's32', 'double'] } } }),
-    ).toThrow(/parameter type `double` is one asmlift cannot size/);
+    ).toThrow(/parameter 4 of `g` is 64 bits wide .* its low half is in r3/);
+    // A spelling nothing can size, PAST the argument registers, is the other eager refusal: the
+    // block's size is what is open there, and the machine's scan is capped too low to close it.
+    expect(() =>
+      decompile('f', twoStackArgs, ARMV4T_AGBCC, {
+        prototypes: { g: { params: ['s32', 's32', 's32', 's32', 'Direction'] } },
+      }),
+    ).toThrow(/`Direction` is one asmlift cannot size/);
   });
 
   test('an argument block is contiguous from [sp,#0] — a lone higher slot is a spill, not an argument', () => {
