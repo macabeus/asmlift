@@ -461,10 +461,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // The ABI destroyed the value, and nothing about the register file says so: the read has a
     // reaching definition, and it names bytes the callee overwrote. A capability rather than an
-    // input error — what closes it is a model for whatever the callee left there. Its row,
-    // `synthetic:llfrom`, is the case that model has to cover first: an ordinary callee returning
-    // a 64-bit value leaves it in a register PAIR, and only the runtime-helper table says which
-    // callees do that, so the high register reads as a destroyed one.
+    // input error — what closes it is being TOLD what the callee left there, since the assembly
+    // cannot say.
+    //
+    // UNINHABITED, AND THE REFUSAL IS INTACT. The one case the corpus held,
+    // `synthetic:llfrom:agbcc`, was a callee returning a 64-bit value in a register PAIR, which is
+    // the one thing an `r1` read after a `bl` can legitimately be; a prototype now states that
+    // return width and the row matches. Every other caller-saved register is refused exactly as
+    // before, and the class stays because the capability it names is still here — deleting it
+    // would assert that nothing refuses, when what happened is that one population left.
     key: 'clobbered-value',
     label: 'A value a call destroyed (caller-saved register read back)',
     pattern: /is read on a path where a call has destroyed it/,

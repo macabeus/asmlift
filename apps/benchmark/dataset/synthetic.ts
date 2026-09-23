@@ -2054,13 +2054,16 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['int64', 'arithmetic'],
     toolchains: ALL,
   },
-  // THE SAME BOUNDARY FROM THE OTHER SIDE, and a different refusal. A pair ARRIVES from an
-  // ordinary callee the way it arrives from a runtime helper — in the register pair the ABI names
-  // — but only the helper table says which callees return one, so the read of the high register
-  // has a reaching definition naming bytes the callee overwrote. The frontend declines rather
-  // than hand back the caller's stale value. What closes it is a return WIDTH in the prototype
-  // vocabulary, which today only the helper table carries: the mirror of `llpass`, where the
-  // width is missing on the way in.
+  // THE SAME BOUNDARY FROM THE OTHER SIDE. A pair ARRIVES from an ordinary callee the way it
+  // arrives from a runtime helper — in the register pair the ABI names — and the read of the high
+  // register is a read of what that callee returned. `FnProto.returns` is what says so: a declared
+  // 64-bit return makes the frontend name both registers, which is the ACCEPTANCE arm of the
+  // refusal below, and silence still makes the high register a destroyed one.
+  //
+  // WHAT THE ROW GUARDS IS THE REFUSAL, not the acceptance, and that is why it is worth keeping
+  // now that it matches. `frontend/ssa.ts` must go on refusing the read for every callee no width
+  // is stated for — `mov r3,#0x2a ; bl f ; add r4,r3,#0` and a returned pair are the same
+  // instructions — so deleting the `returns` from the entry below has to put the decline back.
   //
   // agbcc alone, by `llhi`'s rule and for both of its halves. On big-endian PPC the high half IS
   // r3, so mwcc's whole body is `bl llsrc` and a frame: asmlift matches it with `return llsrc();`
@@ -2068,21 +2071,22 @@ export const SYNTHETIC: SynthSpec[] = [
   // cell scores the right answer and a wrong one alike. Both MIPS builds decline before they
   // reach the boundary at all, on `function call 'jal' — MIPS calls not yet modelled`, so they
   // referee a different capability. agbcc is the one that pays an instruction for the
-  // projection, `add r0,r1,#0`, and declines naming the register.
+  // projection, `add r0,r1,#0`, so it is the only cell where naming the high register is the
+  // difference between the answer and a decline.
   //
-  // TOLD, AND STILL REFUSING, which is the part that names the capability. `FnProto` carries a
-  // callee's arity and its void-ness and nothing about the WIDTH it returns, so `llsrc` is
-  // declared to both decompilers and asmlift still cannot know the pair is there. The refusal is
-  // the vocabulary's, not a missing declaration's.
-  //
-  // The declaration is in `src` because a synthetic row's TARGET is built from `src` alone — `ctx`
-  // reaches m2c and the candidate compile, not the reference. Without it `llsrc` is implicitly
-  // `int`, and the target becomes a 32-bit `asr` by 32 over a function returning a word.
+  // THE DECLARATION IS IN ALL THREE CHANNELS, and each one is a different compiler's input. `src`
+  // builds the TARGET and must carry it: without it `llsrc` is implicitly `int` and the target
+  // becomes a 32-bit `asr` by 32 over a function returning a word. `ctx` is what m2c is told.
+  // `proto` is what asmlift is told, and a synthetic candidate's own translation unit is built
+  // from `proto` ALONE — `ctx` never reaches it — so `returns` is also what puts
+  // `long long llsrc(void);` above the candidate. Compiled in that configuration the difference is
+  // one instruction: with the declaration the candidate is byte-identical to the target,
+  // without it agbcc inserts `asr r1, r0, #0x1f` to widen the word it thinks came back.
   {
     sym: 'llfrom',
     src: 'long long llsrc(void);\nint llfrom(void){ return (int)(llsrc() >> 32); }',
     ctx: 'long long llsrc(void);',
-    proto: { llsrc: { params: [] } },
+    proto: { llsrc: { params: [], returns: 'long long' } },
     features: ['int64', 'cast', 'narrow'],
     toolchains: ['agbcc'],
   },
