@@ -4,10 +4,10 @@
 //
 // `&gTab[i - 1]` contains no subtract. agbcc folds the element bias into the literal pool, and
 // under `-fhex-asm` its hex printer emits the `+` OPERATOR followed by a constant that spells its
-// own sign: `.word gTab+-0x4`. `-fhex-asm` is in agbcc's canonical flags here and in every agbcc
-// GBA decomp, so that is the ONLY spelling of this shape the corpus can contain; the second case
-// below compiles the same source without the flag and pins the `gTab-4` spelling of the same
-// address, so a reader that handled one and not the other is visible here rather than in a decline.
+// own sign: `.word gTab+-0x4`. `-fhex-asm` is in agbcc's canonical flags here and in all three of
+// the corpus's GBA makefiles, so that is the ONLY spelling of this shape the corpus can contain;
+// the second case compiles the same source without the flag and pins `gTab-4` for the same address,
+// so a reader that handled one spelling and not the other is visible here rather than in a decline.
 //
 // WHY THIS SUITE AND NOT A UNIT TEST. Misreading a pool word yields a wrong ADDRESS, and a wrong
 // address compiles and scores: the whole instruction text is identical and only the pool word's

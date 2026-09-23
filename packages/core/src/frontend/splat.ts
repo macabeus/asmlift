@@ -218,8 +218,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   // record an object file would carry plus the immediate the instruction really encodes, so the
   // frontend folds this dialect through the same path as objdump; NOT declined like the PIC relocs.
   // The addend is a constant expression like any other here, so its RADIX is {@link evalConst}'s
-  // question rather than this pattern's — see {@link refuseOctal} for why that placement is the
-  // whole of the rule.
+  // question rather than this pattern's — {@link refuseOctal} says why the placement is the rule.
   const hilo = op.match(
     /^%(hi|lo)\(\s*([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
   );
@@ -259,11 +258,10 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (op.startsWith('(')) {
     return plain(String(evalConst(name, op)));
   }
-  // The one path that hands an operand on UNREAD — a register, a label, or a bare immediate whose
-  // reader is somewhere else. `addiu`/`addi`'s re-sign a few lines up is one such reader and the
-  // MIPS frontend's own `parseImm` another, and neither is told the radix, so a leading-zero
-  // immediate has to stop here: `addiu $v0, $a0, 020` lifted as `a0 + 20` against the assembler's
-  // 16.
+  // The one path that hands an operand on UNREAD, to a reader somewhere else: `addiu`/`addi`'s
+  // re-sign above is one, the MIPS frontend's `parseImm` another, and neither is told the radix, so
+  // a leading-zero immediate stops here — `addiu $v0, $a0, 020` lifted as `a0 + 20` against the
+  // assembler's 16.
   if (OCTAL_MAGNITUDE.test(op)) {
     refuseOctal(name, op, op);
   }
@@ -278,15 +276,16 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
  *  as `((s32 *)&gTab)[5]` where the assembler's addend gives `[4]`, and `%lo(gTab + 010)` as the
  *  fractional index `2.5`. A wrong address compiles and scores, so this is not something to guess.
  *
- *  This reader models hex and decimal, so the third radix REFUSES rather than being resolved.
- *  Refused rather than read because nothing produces the shape — 0 operand occurrences carrying a
- *  leading-zero integer over the 4,085,099 operands of the 23,740 splat-dialect `.s` files in the
+ *  This reader models hex and decimal, so the third radix REFUSES rather than being resolved:
+ *  nothing produces the shape — 0 operand occurrences carrying a leading-zero integer over the
+ *  4,200,524 operands of the 20,260 `.s` files that carry a `glabel` or a `.set noreorder` in the
  *  nine benchmark checkouts (counted with python; a recursive `grep` here skips `build/`) — so a
  *  reading for it would be a capability nothing could referee.
  *
  *  THE PLACEMENT IS THE POINT. The rule belongs to the readers that turn a digit string into a
  *  value, not to the patterns that feed them: a guard on one caller's regex leaves the next caller
- *  reading base 10, and there were three of them in one function. */
+ *  reading base 10, and the three readers that do — `evalConst`'s literal, {@link signExtend16} and
+ *  the shared `parseImm` — are not all in this file. */
 const OCTAL_MAGNITUDE = /^[-+]?0\d/;
 const refuseOctal = (name: string, tok: string, operand: string): never => {
   throw new FrontendUnsupportedError(

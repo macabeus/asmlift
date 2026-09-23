@@ -835,8 +835,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `arrback` — THE WITNESS FOR A NEGATIVE POOL ADDEND. `&gTab[i - 1]` contains no subtract: agbcc
   // folds the element bias into the literal pool, and under `-fhex-asm` its hex printer emits the
   // `+` OPERATOR followed by a constant that spells its own sign — `.word gTab+-0x4`. The
-  // benchmark's canonical agbcc flags already carry `-fhex-asm` (every agbcc GBA decomp builds with
-  // it), so this row sets no `cflags` of its own; what it pins is one line of compiler output.
+  // benchmark's canonical agbcc flags already carry `-fhex-asm`, as all three of the corpus's GBA
+  // makefiles do, so this row sets no `cflags` of its own; what it pins is one line of output.
   //
   // MEASURED AT THOSE FLAGS, because "the compiler emits this" is a claim about the compiler and
   // not about C: `&gTab[i-1]` gives `gTab+-0x4`, `&gElems[i-1]` over an 8-byte struct gives

@@ -1820,19 +1820,14 @@ function decode(
   }
 }
 
-// The magnitude every pool reader shares: hex, or decimal with NO leading zero. Excluding the
-// leading zero is not tidiness — `as` reads it as OCTAL and `Number()` reads it as decimal, so
-// `.word 010` is the value 8 to the assembler and 10 to this reader, and `gX+010` an addend of 8
-// against 10 (both read back out of `.data` after assembling them with this project's `as`). A
-// radix this reader does not model has to refuse, because the wrong answer is a wrong ADDRESS,
-// which compiles and scores. It costs nothing: 0 leading-zero operands over the 3,299,588 `.word`
-// operands of the nine benchmark checkouts, because agbcc's printers never emit one.
-//
-// The hex prefix is case-insensitive because gas is: `.word 0X8` assembles to 8, the same as
-// `.word 0x8`, read back out of `.data`. Excluding `0X` refused a spelling of the very radix this
-// reader models, under a message that said the word was "not a number" — which is the same untruth
-// the leading-zero branch below exists to avoid, and the one that invites a reader to widen the
-// magnitude until it takes octal too.
+// The magnitude every pool reader shares: hex — in either case, because gas reads `0X8` and `0x8`
+// alike — or decimal with NO leading zero. Excluding the leading zero is not tidiness: `as` reads
+// it as OCTAL and `Number()` as decimal, so `.word 010` is 8 to the assembler and 10 to this
+// reader, and `gX+010` an addend of 8 against 10 (read back out of `.data` after assembling each
+// with this project's `as`). A radix this reader does not model refuses, because the wrong answer
+// is a wrong ADDRESS, which compiles and scores. It costs nothing: 0 leading-zero operand
+// occurrences over the 3,311,169 `.word`/`.4byte`/`.long` operands of the 31,842 `.s` files in the
+// nine benchmark checkouts (counted with python — a recursive `grep` here skips `build/`).
 const POOL_MAGNITUDE = String.raw`0[xX][0-9a-fA-F]+|0|[1-9]\d*`;
 
 // The label-operand shape shared by BOTH pool paths: agbcc `.Lpool`, pret `_08012358`, with an
@@ -1860,18 +1855,16 @@ const POOL_WORD_SYMBOL = new RegExp(String.raw`^([A-Za-z_]\w*)\s*(?:([+-])((?:\s
 // symbolic reader cannot disagree about what a digit string means.
 const POOL_WORD_NUMBER = new RegExp(String.raw`^(-?)(${POOL_MAGNITUDE})$`);
 
-// The leading NAME of a pool word with whatever follows it left unread, for the same reason
-// POOL_LABEL_LEAD exists one level up in the operand: "does this word name a symbol?" has to be
-// answerable for a word POOL_WORD_SYMBOL rejects. That rejection carries two answers the caller
-// cannot tell apart — "nothing is named here" (a number, a `.L` code label) and "a symbol inside an
-// expression this reader does not read" (`gTab+010`, `gTab+gOther`, `gTab*0x8`) — and only the
-// first is an absent witness. The class admits no leading dot, so a `.L` code label still names
-// nothing, which is the property {@link poolNamesASymbol} leans on.
+// The leading NAME of a pool word, for the same reason POOL_LABEL_LEAD exists one level up in the
+// operand: "does this word name a symbol?" has to be answerable for a word POOL_WORD_SYMBOL
+// rejects, whose rejection carries two answers the caller cannot tell apart — "nothing is named
+// here" (a number, a `.L` code label) and "a symbol inside an expression this reader does not
+// read" (`gTab+010`, `gTab+gOther`, `gTab*0x8`). Only the first is an absent witness. No leading
+// dot, so a `.L` code label still names nothing, which {@link poolNamesASymbol} leans on.
 //
-// This one is INHABITED, unlike the refusals around it: 42 such operand occurrences over the
-// 198,831 `.word`/`.4byte`/`.long` operands of the 1,484 `.s` files in the three ARM/Thumb
-// checkouts (counted with python — a recursive `grep` here skips `build/`). `sa3/asm/code.s` has
-// `.word gMultiSioRecv+1*0x18` twenty times over three files, and agbcc's own libc has
+// The expression words are INHABITED, unlike the refusals around them: 42 operand occurrences over
+// the 198,831 `.word`/`.4byte`/`.long` operands of the 1,484 `.s` files in the three ARM/Thumb
+// checkouts. `gMultiSioRecv+{1,2,3}*0x18` is 20 of them over two files, and agbcc's own libc has
 // function-scope statics spelt `zeroes.13`. Each names a symbol as plainly as a bare `gSym` does,
 // and the grammar that reads EXPRESSIONS rejects every one.
 const POOL_WORD_LEAD = new RegExp(String.raw`^[A-Za-z_]\w*`);
@@ -1879,8 +1872,8 @@ const POOL_WORD_LEAD = new RegExp(String.raw`^[A-Za-z_]\w*`);
 /** The value of a pool magnitude, or null when this reader cannot decide it. A pool word is 32
  *  bits and `as` reduces the expression modulo 2^32 — `.word gX+0x100000000` assembles to an
  *  addend of 0, read back out of `.data` — so a magnitude that does not fit is not a large number,
- *  it is a number whose truncation this reader would be guessing. `Number()` alone answers
- *  4294967296 for that word, and a DOUBLE for a longer one: `gX+99999999999999999999999` reached
+ *  it is a number whose truncation this reader would be guessing. An unguarded `Number()` answers
+ *  4294967296 for that word and a DOUBLE for a longer one — `gX+99999999999999999999999` reached
  *  the emitted C as the addend `1e+23`, which is not an address. */
 function poolMagnitude(text: string): number | null {
   const v = Number(text);
@@ -1893,11 +1886,11 @@ function poolMagnitude(text: string): number | null {
  *  NOT a value: both callers treat it as "this word is not a symbol", and {@link poolRef} turns it
  *  into a loud decline rather than reading an address it cannot decide.
  *
- *  A null ADDEND beside a symbol is the third answer, and it is what keeps two different gaps from
- *  sharing one message. `gX+0x100000000` NAMES `gX` while its VALUE is one {@link poolMagnitude}
- *  refuses, so {@link poolRef} can say the addend does not fit rather than that the word is not a
- *  symbol — which would be false about it, and would send a reader looking for a grammar rather
- *  than for a truncation rule. The name resolves, the address declines. */
+ *  A null ADDEND beside a symbol is the third answer, and it keeps two gaps from sharing one
+ *  message: `gX+0x100000000` NAMES `gX` while its VALUE is one {@link poolMagnitude} refuses, so
+ *  {@link poolRef} says the addend does not fit rather than that the word is not a symbol — which
+ *  would be false about it, and would send a reader looking for a grammar rather than for a
+ *  truncation rule. */
 function poolWordSymbol(w: string): { sym: string; addend: number | null } | null {
   const m = w.match(POOL_WORD_SYMBOL);
   if (!m || m[1].startsWith('.L')) {
@@ -1923,33 +1916,31 @@ type PoolRef =
  *  the operand does NOT name a pool (a real register/memory base → the normal load path). When it
  *  DOES name a pool the outcome is const | gaddr | unmodelled — NEVER a fall-through to the load
  *  path, which would materialise the pool label as a phantom pointer parameter (a silent
- *  miscompile). `unmodelled` is the caller's cue to decline loud, and it has exactly six
- *  inhabitants, all of them below and each with its own message, because a catch-all makes several
- *  gaps read as one: an offset spelled something other than `+N`; an offset whose magnitude carries
- *  a leading zero; an offset that does not select a whole word of the pool (misaligned, or past its
- *  end); a numeric word whose value is not a 32-bit one; a symbolic word whose ADDEND is not; a
- *  word whose magnitude carries a leading zero; and a word that is neither a number nor
- *  `symbol±offset` — a `.L` code label is here, since the symbol pattern admits no leading dot. The
- *  two leading-zero refusals are one rule in two positions, and they are separate messages because
- *  a reader answering either of them has to change a different line. A `sym+N` word is NOT
- *  unmodelled: it is the gaddr-plus-addend path and lifts cleanly. */
+ *  miscompile). `unmodelled` is the caller's cue to decline loud, and every inhabitant of it
+ *  carries its own message, because a catch-all makes several gaps read as one: an offset spelled
+ *  something other than `+N`; an offset whose magnitude carries a leading zero; an offset that does
+ *  not select a whole word of the pool (misaligned, or past its end); a numeric word whose value is
+ *  not a 32-bit one; a symbolic word whose ADDEND is not; a word whose magnitude carries a leading
+ *  zero; and a word that is neither a number nor `symbol±offset` — a `.L` code label is here, since
+ *  the symbol pattern admits no leading dot. The two leading-zero refusals are one rule in two
+ *  positions, and they stay separate messages because a reader answering either has to change a
+ *  different line. A `sym+N` word is NOT unmodelled: it is the gaddr-plus-addend path and lifts
+ *  cleanly. */
 function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | null {
   const m = operand.match(POOL_LABEL);
   if (!m) {
     // The operand is not `LABEL[+N]`, but it may still name a pool at an offset spelled some other
     // way — `.L1-0x4`, `.L1+-0x4`. Falling through to `null` there says "not a pool", and the load
-    // path then materialises the label as a phantom pointer parameter: the same silent miscompile
-    // the readers of a pool's CONTENTS share one grammar to prevent, one level up in its OPERAND.
-    // Refusing rather than widening, because nothing produces the shape: over the nine benchmark
-    // checkouts (31,842 `.s` files) all 33,753 label-operand `ldr` occurrences are spelled `LABEL`
-    // or `LABEL+N`, so a grammar for the rest would be a capability nothing can check.
+    // path then materialises the label as a phantom pointer parameter. Refusing rather than
+    // widening, because nothing produces the shape: over the nine benchmark checkouts (31,842 `.s`
+    // files) all 33,753 label-operand `ldr` occurrences are spelled `LABEL` or `LABEL+N`, so a
+    // grammar for the rest would be a capability nothing can check.
     const lead = operand.match(POOL_LABEL_LEAD);
     if (lead && dataWords.has(lead[0])) {
       const off = operand.slice(lead[0].length).trim();
       // `+010` IS a `+N` byte offset, so saying it is not would be false about it in the one way
-      // that gets answered by widening the magnitude — and POOL_MAGNITUDE now stands behind three
-      // patterns, so that answer would take octal at three call sites at once. Named here for the
-      // same reason the word path names it below.
+      // that gets answered by widening POOL_MAGNITUDE — which stands behind three patterns, so
+      // that answer would take octal at three call sites at once.
       return /^\+\s*0\d/.test(off)
         ? {
             kind: 'unmodelled',
@@ -1980,30 +1971,27 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
   // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a`, `gOamMallocBuffer+-0x8` —
   // agbcc pre-computes a fixed element's address into the pool rather than emitting an add, and a
   // NEGATIVE bias is how `&arr[i - k]` reaches it). The addend stays in VALUE space: the consumer
-  // emits `gaddr` then an explicit `add`, and the renderer then spells that however it spells any
-  // other global-plus-offset. It DOES reach a typed-pointer index where the offset divides the
-  // access width — `.word gTab+-0x8` under an `ldr` renders `((s32 *)&gTab)[-2]` — and that is
-  // safe here not because the path avoids the scale but because it is the SAME renderer, on the
-  // same value, as the register-materialised `ldr rN,=gSym; add rN,#k` shape: measured, both
-  // spell `((s32 *)&gTab)[2]` at +8 and both fall back to `*(s32 *)((u32)&gTab + 6)` at +6, so a
-  // non-dividing offset can never become a fractional index.
+  // emits `gaddr` then an explicit `add`, which the renderer spells however it spells any other
+  // global-plus-offset. It DOES reach a typed-pointer index where the offset divides the access
+  // width — `.word gTab+-0x8` under an `ldr` renders `((s32 *)&gTab)[-2]` — and that is safe not
+  // because the path avoids the scale but because it is the SAME renderer, on the same value, as
+  // the register-materialised `ldr rN,=gSym; add rN,#k` shape: measured, both spell
+  // `((s32 *)&gTab)[2]` at +8 and both fall back to `*(s32 *)((u32)&gTab + 6)` at +6.
   //
   // A magnitude the 32-bit gate lets through is a magnitude, not the signed addend, and the two
-  // can differ: `gTab-0xffffffff` renders `(u32)&gTab + -4294967295` where `as` gives `+1`. That
-  // is the same ADDRESS rather than a lucky one, and it was checked on objects rather than by
-  // reading C89's typing rules — agbcc compiles that expression and `(u32)&gTab + 1` to
-  // byte-identical `.s` AND `.o`, `.word gTab+0x1` under `R_ARM_ABS32 gTab`, as it does
-  // `+ -2147483649` and `+ 2147483647`.
+  // can differ: `gTab-0xffffffff` renders `(u32)&gTab + -4294967295` where `as` gives `+1`. Same
+  // ADDRESS rather than a lucky one, and checked on objects rather than off C89's typing rules —
+  // agbcc compiles that expression and `(u32)&gTab + 1` to byte-identical `.s` AND `.o`,
+  // `.word gTab+0x1` under `R_ARM_ABS32 gTab`, as it does `+ -2147483649` and `+ 2147483647`.
   const sm = poolWordSymbol(w);
   if (sm) {
     return sm.addend === null
       ? { kind: 'unmodelled', why: `pool word '${w}' carries an addend that is not a 32-bit value` }
       : { kind: 'gaddr', sym: sm.sym, addend: sm.addend };
   }
-  // A leading-zero decimal is named here rather than left to the catch-all below, because "not a
-  // number" is FALSE about `010` — it is a number in a radix this reader does not model — and the
-  // obvious way to answer that message is to widen the magnitude back to `\d+`, which is the wrong
-  // address, silently.
+  // A leading-zero decimal gets its own message, because "not a number" is FALSE about `010` — it
+  // is a number in a radix this reader does not model — and the obvious way to answer that message
+  // is to widen the magnitude back to `\d+`, which is the wrong address, silently.
   if (/(?:^|[+-])\s*0\d/.test(w)) {
     return {
       kind: 'unmodelled',
@@ -2035,12 +2023,12 @@ function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<str
       const w = raw.trim();
       // The LEADING NAME, not the whole expression: this asks only whether something external is
       // named here, and every word that names one counts. `gSym+0x14a` counts as surely as `gSym`
-      // does — not hypothetically, `sa3:OamMalloc`'s last pool carries `gOamMallocBuffer+-0x8` and
-      // an asm whose pools hold only addend words would otherwise permit promotion. So does a word
-      // whose expression this reader cannot read at all: asking the expression grammar instead
-      // answers null for `gTab+010` and `gTab+gOther`, the witness is lost, and the numeric word
-      // beside them is spelt with a map name the source never used — silently, because the address
-      // stays right and only the spelling is invented.
+      // does — `sa3:OamMalloc`'s last pool carries `gOamMallocBuffer+-0x8`, and an asm whose pools
+      // hold only addend words would otherwise permit promotion. So does a word whose expression
+      // this reader cannot read at all: asking the expression grammar answers null for `gTab+010`
+      // and `gTab+gOther`, the witness is lost, and the numeric word beside them is spelt with a
+      // map name the source never used — silently, because the address stays right and only the
+      // spelling is invented.
       const sym = w.match(POOL_WORD_LEAD)?.[0];
       if (sym === undefined) {
         continue;

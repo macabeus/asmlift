@@ -48,17 +48,15 @@ describe('global-variable recovery', () => {
     expect(src).toContain('((u8 *)&gTable)[a0]');
   });
 
-  // A pool word's addend may be NEGATIVE, and agbcc spells it `+-`. `&arr[i - k]` folds the bias
-  // into the word rather than emitting a subtract, and under `-fhex-asm` — which every agbcc GBA
-  // decomp builds with — the hex printer emits the `+` operator and then a constant carrying its
-  // own sign. Compiled, not supposed: at the benchmark's canonical agbcc flags,
-  // `int *f(int i){ return &gTab[i-1]; }` emits `.word gTab+-0x4` and
-  // `struct E *f(int i){ return &gElems[i-1]; }` emits `.word gElems+-0x8`.
+  // A pool word's addend may be NEGATIVE, and agbcc spells it `+-`: `&arr[i - k]` folds the bias
+  // into the word rather than emitting a subtract, and under `-fhex-asm` the hex printer emits the
+  // `+` operator then a constant carrying its own sign. Compiled, not supposed — at the
+  // benchmark's canonical agbcc flags `&gTab[i-1]` emits `.word gTab+-0x4` and `&gElems[i-1]` over
+  // an 8-byte struct `.word gElems+-0x8`.
   //
   // The VALUES below are the assembler's, read back out of `.data` after assembling each spelling
-  // with this project's `as`: the sign is the PRODUCT of the whole run, so `gSym+-0x8` is -8 and
-  // `gSym--0x8` is +8. Reading one of these wrong yields a wrong ADDRESS, which compiles and
-  // scores — the object differ cannot referee it — so the spellings are pinned here.
+  // with this project's `as`: the sign is the PRODUCT of the whole run. Reading one wrong yields a
+  // wrong ADDRESS, which compiles and scores, so the spellings are pinned here.
   test('a NEGATIVE pool addend `gSym+-0xN` is the address minus N', () => {
     const src = thumb('back', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\tgTab+-0x8\n');
     expect(src).toContain('(u32)&gTab + -8');
@@ -74,18 +72,17 @@ describe('global-variable recovery', () => {
   });
 
   // The loose side. A widened addend parser must not start GUESSING a value: a word it cannot
-  // decide has to stay the loud decline it is today, because the wrong answer here is a wrong
-  // address that compiles and scores. None of these is a shape any compiler in the corpus emits —
-  // that is the point, a refusal with no inhabitant is a refusal nobody can check.
+  // decide stays the loud decline, because the wrong answer here is a wrong address that compiles
+  // and scores. None of these is a shape a compiler in the corpus emits, which is why they are
+  // pinned — a refusal with no inhabitant is a refusal nobody can check.
   //
-  // `.Ltab` is in the list for a different reason from the rest, and it is the one the symbol
-  // pattern's comment leans on. A `.L` word is a CODE label, not a global: naming one would spell
-  // `&.Ltab`, and the population is not hypothetical — 32,144 `.word .L…` operand occurrences
-  // across the nine benchmark checkouts, counted through this frontend's own line reader (peel a
-  // label sharing the line, then cut at `@`); a count that skips the peel misses one. Today the pattern's symbol class admits no leading dot,
-  // so the word is refused before the `.L` guard is reached and the guard is a proven no-op. The
-  // two fixtures are what make the guard's promise — that widening the class keeps the refusal —
-  // something a mutant can kill rather than a sentence.
+  // `.Ltab` is here for a different reason, and it is the one the symbol pattern's comment leans
+  // on. A `.L` word is a CODE label, not a global, so naming one would spell `&.Ltab`, and the
+  // population is not hypothetical: 32,144 `.word .L…` operand occurrences across the nine
+  // benchmark checkouts, counted through this frontend's own line reader (peel a label sharing the
+  // line, then cut at `@`) — a count that skips the peel misses one. The symbol class admits no
+  // leading dot, so the word is refused before the `.L` guard is reached and that guard is a proven
+  // no-op; these two fixtures are what a mutant widening the class would kill.
   test('a pool word the parser cannot decide still declines loudly', () => {
     const word = (w: string) => () => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
     for (const w of ['gTab+gOther', 'gTab+0x4+0x8', 'gTab*0x8', 'gTab+0x8y', 'gTab+', '.Ltab', '.Ltab+0x4']) {
@@ -95,12 +92,11 @@ describe('global-variable recovery', () => {
 
   // The magnitude, from the other direction. `Number()` answers for digit strings the assembler
   // reads differently or not at all, and its answer reached the emitted C: `gTab+010` came out as
-  // the addend 10 against the assembler's 8, because a leading zero is OCTAL to `as`, and
-  // `gTab+99999999999999999999999` came out as the DOUBLE `1e+23`, which is not an address at all.
-  // The values below are this project's `as` again, read back out of `.data`: `010` is 8, `-010`
-  // is -8, and every magnitude past 32 bits is 0, because a pool word is 32 bits and `as` reduces
-  // the expression modulo 2^32. A truncation is not something to reproduce from a guess, so both
-  // shapes refuse — and each says which one it is, since "not a number" is false about `010`.
+  // the addend 10 against the assembler's 8, and `gTab+99999999999999999999999` as the DOUBLE
+  // `1e+23`, which is not an address. This project's `as`, read back out of `.data`: `010` is 8,
+  // `-010` is -8, and every magnitude past 32 bits is 0, since a pool word is 32 bits and `as`
+  // reduces modulo 2^32. A truncation is not something to reproduce from a guess, so both shapes
+  // refuse — and each says which one it is, since "not a number" is false about `010`.
   test('a pool magnitude this reader cannot decide declines, and says which kind it is', () => {
     const word = (w: string) => () => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
     for (const w of ['gTab+0x100000000', 'gTab+4294967296', 'gTab+99999999999999999999999']) {
@@ -113,8 +109,7 @@ describe('global-variable recovery', () => {
     // The controls, on both sides of each refusal: the widest addend a 32-bit word can carry still
     // reads, a hex magnitude whose digits start with a zero is not an octal one, and the hex
     // PREFIX is case-insensitive because gas is — `.word 0X8` assembles to 8, the same as
-    // `.word 0x8`, read back out of `.data`. Refusing `0X` refused a spelling of the very radix
-    // this reader models, and said the word was not a number to explain it.
+    // `.word 0x8`, read back out of `.data`.
     expect(word('gTab+0xffffffff')()).toContain('(u32)&gTab + 4294967295');
     expect(word('gTab+0x08')()).toContain('(u32)&gTab + 8');
     expect(word('gTab+0X8')()).toContain('(u32)&gTab + 8');
@@ -125,10 +120,9 @@ describe('global-variable recovery', () => {
   // A POOL ADDEND AND A MATERIALISED ADD ARE THE SAME VALUE, and this is what says so. The addend
   // reaches a typed-pointer INDEX where it divides the access width, which is where a
   // rendered-vs-value confusion would show up as a fractional or multiplied element. It cannot,
-  // because the renderer is the same one the register-materialised `ldr rN,=gSym; add rN,#k` shape
-  // goes through: both spell the index at +8, and both fall back to the byte cast at +6. Pinning
-  // the PAIR rather than either spelling is the point — a change that moved one and not the other
-  // would be the drift, and each alone would still look right.
+  // because the renderer is the one the register-materialised `ldr rN,=gSym; add rN,#k` shape goes
+  // through too. Pinning the PAIR is the point: a change that moved one and not the other is the
+  // drift, and each alone would still look right.
   test('a pool addend and a materialised add render the same, including where neither scales', () => {
     const pool = (addend: string) =>
       thumb('back', `\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgTab+${addend}\n`);
@@ -148,8 +142,7 @@ describe('global-variable recovery', () => {
     // The refusal is about the VALUE, and the two readers ask different questions of the same
     // word: `poolNamesASymbol` asks only whether anything external is named here. A word whose
     // addend does not fit still names `gTab`, so the veto must still fire — answering "not a
-    // symbol" would lose the witness and spell `gPromoted`, which is the drift in its other
-    // direction. The bad word is never LOADED here; only the numeric one beside it is.
+    // symbol" would lose the witness and spell `gPromoted`. The bad word is never LOADED here.
     const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
     const asm =
       'mix:\n\tldr\tr1, .L1+0x4\n\tldrh\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgTab+0x100000000\n\t.word\t0x3000010\n';
@@ -158,14 +151,12 @@ describe('global-variable recovery', () => {
     expect(src).not.toContain('gPromoted');
   });
 
-  // …and the veto must fire for every word the expression grammar rejects, not only for the one
-  // shape it happens to match. `gTab+0x100000000` above is a word POOL_WORD_SYMBOL MATCHES and
-  // whose addend refuses; these are words it rejects outright, and each of them still names `gTab`
-  // as plainly. Asking the whole-word grammar a question that is only about the leading name
-  // answers null for all of them, the witness is lost, and the numeric word beside them is spelt
-  // `gPromoted` — a name the source never used. That failure is quieter than the addend one, not
-  // louder: the ADDRESS stays right and only the spelling is invented, so nothing downstream
-  // refuses it and the object differ cannot referee it either.
+  // …and for every word the expression grammar REJECTS, not only for the shapes it matches. Each
+  // of these names `gTab` as plainly as the word above does. Asking the whole-word grammar a
+  // question that is only about the leading name answers null for all of them, the witness is
+  // lost, and the numeric word beside them is spelt `gPromoted` — a name the source never used.
+  // That failure is quieter than a wrong addend, not louder: the ADDRESS stays right and only the
+  // spelling is invented, so nothing downstream refuses it and no object differ can see it.
   test('a word the expression grammar REJECTS still names its symbol, and still vetoes promotion', () => {
     const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
     const mix = (w: string) =>
@@ -179,20 +170,17 @@ describe('global-variable recovery', () => {
       expect(mix(w), w).toContain('*(u16 *)50331664');
       expect(mix(w), w).not.toContain('gPromoted');
     }
-    // The control, and it is the one that makes this a witness test rather than a no-promotion
-    // test: a pool naming nothing external is a disassembly whose relocations are gone, and there
-    // the map's name is all there is. `.Ltab` is a CODE label defined in this same asm, so it
-    // witnesses nothing — which is the property the leading-name reader must not widen away.
+    // The control, and it makes this a witness test rather than a no-promotion test: a pool naming
+    // nothing external is a disassembly whose relocations are gone, and there the map's name is
+    // all there is. `.Ltab` is a CODE label in this same asm, so it witnesses nothing.
     expect(mix('.Ltab'), '.Ltab').toContain('gPromoted');
   });
 
   // The same rule one level up, in the pool's OPERAND rather than in its words. `poolRef` has two
   // ways to say no and they are not interchangeable: `null` means "this operand is not a pool" and
   // hands the load to the ordinary memory path, where the label becomes a phantom pointer
-  // parameter. An operand that DOES name a pool, at an offset spelled something the reader cannot
-  // read, has to be the loud decline instead — the wrong answer here is a wrong address that
-  // compiles and scores, exactly as it is for the words. `+0x4` is the control: the offset shape
-  // that IS read keeps reading.
+  // parameter. An operand that DOES name a pool, at an offset the reader cannot read, has to be
+  // the loud decline instead. `+0x4` is the control: the offset shape that IS read keeps reading.
   test('a pool loaded at an offset the reader cannot read declines, never a phantom param', () => {
     const load = (op: string) => () => thumb('back', `\tldr\tr0, ${op}\n\tbx\tlr\n.L1:\n\t.word\tgA\n\t.word\tgB\n`);
     expect(load('.L1+0x4')()).toContain('return &gB;');
@@ -214,9 +202,8 @@ describe('global-variable recovery', () => {
     // The numeric-promotion veto (poolNamesASymbol) asks whether THIS asm's pool names anything
     // external: if it does, agbcc would have emitted the numeric word symbolically too had the
     // source named it, so promoting that word spells a name the source did not use. A `+-` word
-    // names `gTab` as surely as a bare word does. Read by a narrower grammar than the one
-    // poolRef uses, this pool would witness NOTHING and `gPromoted` would be spelled here — the
-    // exact drift between the two readers that POOL_WORD_SYMBOL exists to prevent.
+    // names `gTab` as surely as a bare one does; read by a narrower grammar this pool would
+    // witness NOTHING and `gPromoted` would be spelled here.
     const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
     const asm =
       'mix:\n\tldr\tr0, .L1\n\tldr\tr1, .L1+0x4\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L1:\n\t.word\tgTab+-0x8\n\t.word\t0x3000010\n';
