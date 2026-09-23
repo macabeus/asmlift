@@ -22,6 +22,7 @@
 // Each test below is written so that the WRONG answer fails it: the predicate being too narrow
 // (destination-only), too wide (catching an integer store), or consulted in the wrong order (after
 // `storeClass`) each turns one of these red. Toolchain-free.
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -80,10 +81,47 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
     ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
     ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
     ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],
+    // THE ODD HALF OF A DOUBLE-PRECISION PAIR, whose o32 ABI name takes a trailing `f` — so the
+    // DIGIT IS NOT LAST, and a predicate anchored `\d+$` matches none of these while matching every
+    // line above it. That is one spelling of one dialect, and missing it brings back all three of
+    // the messages this file exists to remove, one per shape: the arithmetic and the moves report
+    // an unresolvable value a pass later, the store reports the memory it writes.
+    //
+    // `mtc1 $at, $ft0f` is not a constructed input: it is the line at `af/asm/jp/boot/libc64/fp.s`
+    // 164 and 190, and `$ft2f`/`$ft4f`/`$fa1f` are four more in `af/asm/jp/code/speed_meter.s`.
+    // `grep -rnE '\$f[a-z]+[0-9]+f\b' apps/benchmark/checkouts/*/asm` finds all six and nothing
+    // else; the corpus has none, so only these tests referee it.
+    ['odd-half arithmetic', 'add.d       $ft0f, $ft0f, $ft2f', '\\$ft0f, \\$ft2f'],
+    ['an odd-half FPU store, ahead of the store-class arm', 'swc1        $ft0f, 0($a1)', '\\$ft0f'],
+    ['an odd-half move out of the file', 'mfc1        $v0, $fs0f', '\\$fs0f'],
   ])('%s', (_label, insn, regs) => {
     const run = liftSplat(insn);
     expect(run).toThrow(/unmodelled floating-point instruction/);
     expect(run).toThrow(new RegExp(`floating-point register file \\(${regs}\\)`));
+  });
+
+  // THE SHAPE THAT WRITES THE WRONG REGISTER, and the reason an odd-half miss is worse than a
+  // mis-named decline. `mtc1 rt, fs` writes `fs`: `ops[0]` is the instruction's SOURCE, so an
+  // unmodelled `mtc1` that slips past the FP arm fabricates an opaque destination on `$at` — a
+  // register it only reads — and the gap surfaces as an unresolvable value with no FPU in it.
+  test('a move INTO the file names the file, not the GPR it reads', () => {
+    const run = liftSplat('mtc1        $at, $ft0f');
+    expect(run).toThrow(/unmodelled floating-point instruction 'mtc1'/);
+    expect(run).toThrow(/floating-point register file \(\$ft0f\)/);
+    expect(run).not.toThrow(/unresolvable value/);
+  });
+
+  // ONE PREDICATE, NOT TWO THAT AGREE TODAY. The reader decides which tokens still carry a sigil
+  // when the frontend's policy sees them, so the two are SEQUENCED: widen `mips.ts` alone and
+  // nothing changes, because `splat.ts` has already stripped the token; widen `splat.ts` alone and
+  // the token arrives with a sigil the frontend's own predicate rejects. Each half is green on its
+  // own and the pair is the bug, which is why this counts copies in the source rather than
+  // comparing behaviour.
+  test('the reader and the frontend share one FP-register predicate', () => {
+    const dir = new URL('../src/frontend/', import.meta.url);
+    const withLiteral = readdirSync(dir).filter((f) => /\$f\[vats\]/.test(readFileSync(new URL(f, dir), 'utf8')));
+    expect(withLiteral).toEqual(['splat.ts']);
+    expect(readFileSync(new URL('mips.ts', dir), 'utf8')).toContain('fpReg: MIPS_FP_REG');
   });
 
   // THE OTHER HALF, and the reason the sigil is required rather than optional. Making it optional
@@ -104,6 +142,36 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
     const run = liftSplat('swl         $fp, 0($a1)');
     expect(run).toThrow(/unmodelled store-class instruction 'swl'/);
     expect(run).not.toThrow(/floating-point/);
+  });
+});
+
+describe('a PowerPC branch target is an ADDRESS, and the FP predicate has no sigil to tell it', () => {
+  // The MIPS half requires a `$` because objdump writes a branch target as bare lower-case hex.
+  // PowerPC prints an FPU register the same way (`fadds f1,f1,f2`), so `ppc.ts` cannot require one
+  // — and `b f8` is an address that `/^f\d+$/` matches. Nothing in the predicate stops it; what
+  // does is that no `b*` mnemonic reaches `opaqueDest` at all. Either it is an `isModeledBranch`
+  // form, decoded as a transfer or a call, or the whole-function control-transfer pre-pass refuses
+  // it before any block is filled. Each row below carries an operand the FP predicate matches and
+  // must still be refused for its control flow; they go red if the FPU check is ever hoisted into a
+  // pre-pass of its own ahead of that one.
+  test.each([
+    ['a conditional branch to a hex target', 'bge     f0'],
+    ['an absolute branch', 'bca     f4'],
+    ['a CTR-counted loop', 'bdnz    f8'],
+    ['a branch to the link register', 'bclr    4,f4'],
+  ])('%s', (_label, insn) => {
+    const run = liftPpc(insn);
+    expect(run).toThrow(/unmodelled control transfer/);
+    expect(run).not.toThrow(/floating-point/);
+  });
+
+  // THE OTHER SIDE, so the four above are not passing because every PPC input throws that message:
+  // a non-branch instruction with the same operand DOES reach the predicate and is named by the
+  // file. No disassembler prints this line — a PowerPC immediate is decimal or `0x`-prefixed, and
+  // bare hex is a branch target — which is exactly why the rows above are the argument and this one
+  // is only the control.
+  test('a non-branch instruction with an fN operand still names the file', () => {
+    expect(liftPpc('tw      4,r3,f4')).toThrow(/floating-point register file \(f4\)/);
   });
 });
 

@@ -38,7 +38,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
-import { isSplatMips, parseSplatMips } from './splat';
+import { MIPS_FP_REG, isSplatMips, parseSplatMips } from './splat';
 import { abiSortEntryParams, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
@@ -1110,10 +1110,14 @@ export function lift(
       }
       // storeClass: unmodelled MIPS stores, whose FIRST token is a register (a SOURCE, not a dest)
       // that would otherwise fabricate an opaque write to it while dropping the real memory write.
-      // `swc1`/`sdc1` are in the list and CANNOT REACH IT — an FPU store's `rt` is an FP register by
-      // ISA, so `fpReg` above claims it on both dialects — and they are kept deliberately, as the
-      // backstop that keeps a memory write loud if that predicate is ever narrowed. Everything else
-      // here is genuinely reachable: `swl`/`swr` are the unaligned pair, `sc`/`sd*` the rest.
+      // `swc1`/`sdc1` are in the list and are NOT reached by any spelling `fpReg` covers — an FPU
+      // store's `rt` is an FP register by ISA, so the arm above claims it first — but that is a
+      // claim about the PREDICATE, not about the ISA, and it is false for every register spelling
+      // the predicate misses: the store then arrives here and is named by the memory it writes
+      // instead of by the file it moves. So they are kept as a live backstop, and
+      // `test/fp-refusal.test.ts` asserts the FP arm wins on each spelling rather than assuming it.
+      // Everything else here is genuinely reachable: `swl`/`swr` are the unaligned pair, `sc`/`sd*`
+      // the rest.
       // skipSafe `break`: the compiler-emitted divide-by-zero guard trap inside the hw-divide
       // idiom (KMC GCC `break 0x7`); recompiling the recovered `/` regenerates it, so it is
       // transparent by the same modelling as the divide itself (byte-exactness proven by the
@@ -1127,13 +1131,12 @@ export function lift(
         // ACCEPTS and would build an opaque whose source list quietly omits the register the
         // instruction actually read. The file is what is missing; say so.
         //
-        // BOTH DIALECTS, and the ABI names are this frontend's second spelling rather than a second
-        // dialect's: objdump numbers the file (`$f12`) and the Splat trees also name it (`$ft2`,
-        // `$fv0`, `$fa0`, `$fs0`). The sigil is REQUIRED on both, which is what `frontend/splat.ts`
-        // keeps it for — an objdump branch target is bare lower-case hex, so `blez v0,f4` and
-        // `bc1fl f0` would be read as floating point by a pattern that made the `$` optional (4
-        // sites in the committed artifact, none of them reaching this function today).
-        fpReg: /^\$f[vats]?\d+$/i,
+        // BOTH DIALECTS AND EVERY SPELLING, which is why this is `frontend/splat.ts`'s exported
+        // constant and not a literal: the reader decides which tokens still carry a sigil when they
+        // get here, so a predicate written twice is a predicate that can disagree with itself, and
+        // each half of that disagreement is silent. Its docblock lists the spellings and says why
+        // the sigil is required.
+        fpReg: MIPS_FP_REG,
         // The FPU CONTROL register, which both moves spell `$31` — a GPR-shaped token no register
         // predicate can tell from an integer one. `ctc1`'s first operand is its SOURCE, so this
         // also stops an opaque being fabricated on a register the instruction only reads.

@@ -634,6 +634,17 @@ export function lift(
         // thing about a CONDITION register, when both are one missing file. `stfs`/`stfd` reach
         // this arm ahead of `^st` deliberately — they are refused for the file they move, not for
         // the memory they move it to.
+        //
+        // NO SIGIL, WHICH IS THE OPPOSITE OF THE MIPS CHOICE, and it needs its own argument because
+        // PowerPC objdump prints an FPU register bare (`f1`) and has no sigil to require. The
+        // collision the MIPS predicate pays a sigil to avoid is live here in principle — objdump
+        // writes a branch target as bare lower-case hex, so `f0`/`f4`/`f8` are addresses AND
+        // matches. What makes it unreachable is not this pattern but the branch handling above: a
+        // `b*` mnemonic in `isModeledBranch` is decoded as a transfer or a call and never falls to
+        // `emitOpaqueDest`, and every other `b*` is refused by the whole-function control-transfer
+        // pre-pass before a block is even filled. Those two are exhaustive over the mnemonics that
+        // can carry an address, so no operand reaching this policy is one. `test/fp-refusal.test.ts`
+        // pins it, and moving the FPU check into a pre-pass ahead of that one turns it red.
         fpReg: /^f\d+$/i,
         // The FPSCR moves that name no `fN` operand at all: `mtfsfi 7,0` takes a field number,
         // `mtfsb0`/`mtfsb1` a bit number, `mcrfs cr0,cr1` two condition registers. Without this
