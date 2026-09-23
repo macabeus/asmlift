@@ -1,6 +1,8 @@
 // Pin tests for the symmetric outcome classifier — the semantics the whole taxonomy rides on:
 // each marker family, the positional `?`-placeholder rules (a legal ternary must NEVER
 // false-positive), hard-failure detection, and the deterministic compiler-error extraction.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { compilerErrorLines, declineMarkersIn, isHardFailure } from '../src/eval/outcome';
@@ -76,5 +78,46 @@ describe('compilerErrorLines (pinned)', () => {
 
   test('falls back to the first line so the marker is never empty', () => {
     expect(compilerErrorLines('something opaque went wrong\nmore text')).toEqual(['something opaque went wrong']);
+  });
+});
+
+// THE CLASSIFIER AND THE ARTIFACT THAT SHIPS BESIDE IT MUST AGREE, and nothing checked that they
+// did. The rule is `outcome.ts`'s own: a source bearing a decline marker is `declined`, never
+// compiled and never scored. A published cell that carries a marker AND a score is one of two
+// things and both are defects — a marker added without its cache key (the `SECOND_REG` incident:
+// four rows flipped, `synthetic:llpass:agbcc` replayed a v20 entry and shipped as `nonmatch` with
+// `score: 8`), or a regex that stopped meaning what the artifact was built under.
+//
+// IT COSTS 12 ms AND NO BENCH, which is the whole argument for it: the incident it catches was
+// found by a reader of the pull request, after a 1,068 s run had already published the row.
+describe('the committed artifact obeys the committed classifier', () => {
+  const artifact = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
+    results: {
+      id: string;
+      m2c?: { source?: string; outcome: string };
+      asmlift?: { source?: string; outcome: string };
+    }[];
+  };
+
+  test('the harvest reads the artifact, so a null result here would be the probe failing', () => {
+    expect(artifact.results.length).toBeGreaterThan(1000);
+    expect(artifact.results.some((r) => declineMarkersIn(r.m2c?.source ?? '').length > 0)).toBe(true);
+  });
+
+  test('no published cell bears a decline marker and an outcome other than `declined`', () => {
+    const inconsistent: string[] = [];
+    for (const row of artifact.results) {
+      for (const tool of ['m2c', 'asmlift'] as const) {
+        const cell = row[tool];
+        if (typeof cell?.source !== 'string') {
+          continue;
+        }
+        const markers = declineMarkersIn(cell.source);
+        if (markers.length > 0 && cell.outcome !== 'declined') {
+          inconsistent.push(`${row.id} [${tool}] outcome=${cell.outcome} markers=${markers.join(',')}`);
+        }
+      }
+    }
+    expect(inconsistent).toEqual([]);
   });
 });

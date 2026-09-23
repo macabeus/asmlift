@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.0s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.2s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,20 +137,25 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,068 s over 186 real rows** and **1,167 s over 743 synthetic rows**; wall clock was 355.6 s and
-451.3 s, and **546.3 s end to end** because the tiers overlap — 355.6 + 451.3 is 806.9, which is
-not the wall time and never was. The dearest single row is **142 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — which is the figure to
-reach for when a scoped run looks cheap.
+**1,059 s over 186 real rows** and **594 s over 743 synthetic rows**; wall clock was 223.1 s and
+241.6 s, and **324.1 s end to end** (`real 324.81` under `/usr/bin/time -p`) because the tiers
+overlap — 223.1 + 241.6 is 464.7, which is not the wall time and never was. The dearest single row
+is **161 s** on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the
+figure to reach for when a scoped run looks cheap.
 
-THE TWO TIERS MOVED IN OPPOSITE DIRECTIONS against the entry below (real 1,371 → 1,068 s,
-synthetic 915 → 1,167 s), which is what a shared machine looks like rather than anything a branch
-did: `bench diff --base 87b49c74` reports the fan **unmoved at 67,415 (1.00×)** over 928
-comparable rows, and one asmlift outcome changed in the whole corpus. Read each sum against its
-own wall-clock line.
+THIS ENTRY IS THE CHEAPEST IN THE FILE AND ITS BRANCH DID NOTHING TO EARN THAT. It is the second
+run of a tree whose first run — 456.3 s, both tier lines `✓`, exit 0 — was thrown away for a
+one-sentence `docs/` edit made while it was in flight, which stamps the whole sample dirty and is
+a WIDER rule than `MEASURED_PATHS` (`apps/benchmark/src/provenance.ts` `codeDirtyPaths` counts
+every `git status --porcelain` line but the run's own artifacts). The discarded run warmed the
+candidate store and every m2c entry this branch re-keyed, so `bench diff --base 87b49c74` reads
+**ranked pass 2,286.1 s → 1,653.0 s (0.72×)** and **sixteen rows over 10 s and 1.5× cheaper**, none
+of them touched by the diff. **A wasted run is not a wasted cache, and the second run's seconds
+belong to the first.** The fan is the reading that means something and it is **unmoved at 67,415
+(1.00×)** over 928 comparable rows, with one asmlift outcome changed in the whole corpus.
 
 ONE COST ENTRY IN THAT DIFF IS NOT A COST AT ALL, and it is worth knowing before somebody reads it
-as a regression. `pokeemerald:DoForcedMovement:agbcc` went 131.0 s → 5.5 s (0.04×) and its
+as a regression. `pokeemerald:DoForcedMovement:agbcc` went 131.0 s → 3.9 s (0.03×) and its
 `droppedCandidates.length` went 1 → 0, which `bench diff` prints as a field change. The dropped
 entry at `87b49c74` carries the error `'arm-none-eabi-cpp' timed out`. A TIMEOUT is machine load,
 so that field is nondeterministic on a busy box in both directions — a clean tree can publish a
