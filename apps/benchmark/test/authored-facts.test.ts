@@ -379,6 +379,28 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     expect(problems).toEqual([]);
   });
 
+  // …AND THE GATE FIRES, which is what makes the list above a check rather than a formality. A
+  // callee's `returns` is the one authored fact that reaches the candidate's own SOURCE: core
+  // re-spells it as that callee's declaration inside the compiled TU, so a wrong one compiles the
+  // candidate against a function the row does not have. Both directions of the same lie.
+  test.each([
+    [
+      'a callee`s return, against the ctx that declares it',
+      { llsrc: { params: [], returns: 'int' } },
+      /`llsrc` returns `int`; it is declared `long long`/,
+    ],
+    [
+      'the row`s OWN return, against its own definition',
+      { llfrom: { returns: 'long long' } },
+      /`returns: long long` but the compiled function returns `int`/,
+    ],
+  ])('a proto that lies about %s is caught', (_label, proto, expected) => {
+    const spec = SYNTHETIC.find((x) => x.sym === 'llfrom')!;
+    const problems = protoFactProblems('synthetic:llfrom', 'llfrom', proto, spec.src, spec.ctx ?? '');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(expected);
+  });
+
   test('every synthetic src yields exactly one definition of its symbol', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);
