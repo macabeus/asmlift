@@ -64,11 +64,24 @@ export interface OpaquePolicy {
    *  destination to degrade" and lets the second fabricate an opaque whose sources silently drop
    *  the FP operand it actually read. Both are floating point and neither is about the destination.
    *
-   *  IT MUST COVER EVERY DIALECT THE FRONTEND READS, because a frontend can be fed more than one
-   *  spelling of the same register: MIPS objdump writes `$f12` and the Splat reader strips the `$`
-   *  (`frontend/splat.ts`), so a pattern requiring the sigil matches nothing on the dialect that
-   *  reads a project's own `asm/` tree — and `isMipsReg` ACCEPTS the stripped token, so the miss is
-   *  silent, ending in an opaque on a register in a file nothing models.
+   *  IT MUST COVER EVERY DIALECT THE FRONTEND READS AND EVERY SPELLING EACH OF THEM USES, because
+   *  a frontend can be fed more than one name for the same register: MIPS objdump numbers the file
+   *  (`$f12`), the Splat trees use o32 ABI names (`$ft2`), and those names take a trailing `f` for
+   *  the odd half of a double-precision pair (`$ft0f`) — so a pattern anchored on a final digit
+   *  covers two of the three. Every miss is SILENT in the same way: the reader strips the sigil
+   *  off a token it did not recognise, `isMipsReg` ACCEPTS the bare result, and the gap ends as an
+   *  opaque on a register in a file nothing models. MIPS answers this with ONE predicate — the
+   *  exported `MIPS_FP_REG` in `frontend/splat.ts`, which the reader and the frontend both use —
+   *  because which tokens keep their sigil and which tokens are the FPU's are two halves of one
+   *  decision, and two copies of it can disagree silently in either direction.
+   *
+   *  A CONTROL TRANSFER IS NOT THIS MODULE'S, even when the FPU is what it is missing. MIPS
+   *  `bc1t`/`bc1f` test an FP condition code, and PowerPC branch targets are bare lower-case hex
+   *  that PowerPC's own `fpReg` matches — but a branch has no destination to degrade, so nothing
+   *  here could answer one, and both frontends refuse unmodelled control flow in a whole-function
+   *  pre-pass before a block is filled. The report keeps them as their own class for the same
+   *  reason (`fp-cond-branch` in `apps/web/src/pages/benchmark/lib/declines.ts`): the missing file
+   *  is shared, the mechanism is not.
    *
    *  It is consulted FIRST, ahead of `storeClass`, so `swc1`/`stfs` are named by the file they move
    *  rather than by the fact that they move it to memory. That ordering is what the web report's

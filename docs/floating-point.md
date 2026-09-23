@@ -44,11 +44,32 @@ Re-derive it against the ref you actually rebased onto:
 git show 'origin/main:apps/benchmark/results/results.json' > /tmp/base.json
 ```
 
-The 113 are not one refusal. 69 of them decline with a message naming an FPU instruction — the
-population `frontend/opaque.ts`'s `fpReg` reaches — and the other 44 decline at some earlier guard
-(the `bc1t`/`bc1f` condition-code branches have their own, and several PowerPC rows refuse on a
-constant-pool name or a `bctr` first). **A capability that closed only the FPU gap would move at
-most those 69, and a round pricing it should say which.**
+The 113 are not one refusal, and the split is three ways:
+
+```sh
+node -e "const R=require('./apps/benchmark/results/results.json').results;
+const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)/;
+const FP=/^(l|s)(wc1|dc1)\$|^(mf|mt|ct|cf)c1\$|^bc1[tf]l?\$|^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[sdw]|^f[a-z]|^(lfs|lfd|stfs|stfd|psq_|ps_)/;
+const t=r=>(r.targetAsm||'').split('\n').some(l=>{const m=MN.exec(l);return m&&FP.test(m[1])});
+const has=(r,re)=>(r.asmlift.errorMarkers||[]).some(m=>re.test(m));
+const fp=R.filter(t);
+const named=fp.filter(r=>has(r,/unmodelled floating-point instruction/));
+const cc=fp.filter(r=>has(r,/floating-point condition-code branch/));
+console.log('FPU-touching:',fp.length,'| names an FPU instruction:',named.length,
+            '| fp-cond-branch:',cc.length,'| neither:',fp.length-named.length-cc.length)"
+```
+
+**69 / 14 / 30.** The 69 decline with a message naming an FPU instruction — the population
+`frontend/opaque.ts`'s `fpReg` and `fpControl` reach. The **14** are `bc1t`/`bc1f` condition-code
+branches, refused by their own guard in `frontend/mips.ts` and reported as their own class
+(`fp-cond-branch`): the same missing file, but a branch has no destination to degrade, so it is a
+different mechanism and `opaqueDest` could not answer it — the `float` class in
+`apps/web/src/pages/benchmark/lib/declines.ts` says so, and this is the figure it is saying it
+about. The remaining 30 refuse at some earlier guard entirely (a PowerPC constant-pool name, a
+`bctr`, an unpaired relocation).
+
+**A capability that closed only the FPU register file would move at most those 69, and a round
+pricing it should say which.** The condition code is a fifth thing to build, not part of layer 1.
 
 ### In the projects, which is the number that decides it
 
@@ -105,20 +126,44 @@ A `float fadd(float a, float b){ return a+b; }` compiles on MIPS to two instruct
    so preserving it is what the reader's own header promises, and the bare form is indistinguishable
    from an objdump branch target, which is also bare lower-case hex (`f4`, `fa0`).
 
+   WHICH TOKENS ARE FPU REGISTERS IS ITS OWN QUESTION, and it has three answers, not one: objdump
+   numbers the file (`$f12`), the Splat trees use o32 ABI names (`$ft2`, `$fv0`, `$fa0`, `$fs0`),
+   and those names take a trailing `f` for the ODD HALF of a double-precision pair. `mtc1 $at,
+$ft0f` is a line in this corpus' own denominator — six sites, all in `af`:
+
+   ```sh
+   grep -rnE '\$f[a-z]+[0-9]+f\b' apps/benchmark/checkouts/*/asm
+   ```
+
+   A predicate anchored on a final digit covers the first two and not the third, and the miss is
+   silent: the reader strips the sigil off what it did not recognise and `isMipsReg` takes the
+   result. The reader's decision and the frontend's are therefore ONE predicate — `MIPS_FP_REG`,
+   exported from `frontend/splat.ts` — because two copies can disagree in either direction and each
+   direction is green on its own. Across every `$`-token in the three MIPS `asm/` trees it matches
+   52 and all 52 are FPU registers; `$fp` is the frame pointer and the required digit is what
+   excludes it.
+
+   PowerPC cannot require a sigil, because objdump prints an FPU register bare (`f1`) — so `f8` is
+   both an address and a match there. What keeps that safe is not the predicate: no `b*` mnemonic
+   reaches `opaqueDest` at all, because a modelled branch is decoded as a transfer or a call and
+   every other one is refused by `ppc.ts`'s whole-function control-transfer pre-pass.
+
    THE FILE HAS A SECOND HALF THAT NAMES NO REGISTER. The FPU control moves — MIPS `cfc1`/`ctc1`,
    PowerPC `mtfsfi`/`mtfsb0`/`mtfsb1`/`mcrfs` — spell the control register in the ISA's other
    namespace (`$31`, a field number, a condition register), so no register-name predicate can see
    them. `opaqueDest` carries an `fpControl` mnemonic pattern beside `fpReg` for them, producing
    the same phrase. They are the MIPS I/II float→int rounding-mode dance and they are not rare:
    **593 sites in 61 functions** across the `marioparty3` and `af` trees, against **0** corpus rows,
-   which is why the corpus could not referee this at all.
+   which is why the corpus could not referee this at all. Both numbers come out of one command —
+   a site count is a `grep`, but a FUNCTION count needs the `glabel` delimiter, so it needs `awk`:
 
    ```sh
    C=apps/benchmark/checkouts
-   for p in marioparty3 af snowboardkids2-decomp; do
-     printf '%s ' $p
-     grep -rhoE '\*/[[:space:]]+(cfc1|ctc1)[[:space:]]' $C/$p/asm | wc -l
-   done
+   for p in marioparty3 af snowboardkids2-decomp; do find $C/$p/asm -name '*.s'; done \
+     | tr '\n' '\0' | xargs -0 cat \
+     | awk '/^[[:space:]]*glabel[[:space:]]/{g=$2}
+            /\*\/[[:space:]]+(cfc1|ctc1)[[:space:]]/{s++; f[g]=1}
+            END{printf "%d sites in %d functions\n", s, length(f)}'
    ```
 
 2. **Decode and an IR opcode.** 41 distinct FPU mnemonics over 2,286 sites in the corpus' targets
@@ -207,10 +252,15 @@ the decode (layer 2) is the cheapest and the only one that produces a wrong answ
 What this round shipped instead is layer 1's honesty: the refusal now names the register file rather
 than describing the shape of the instruction that ran into it, so the 69 rows read as one capability
 in the report instead of three, and `apps/web`'s decline table stops re-deriving "is this floating
-point?" from a list of mnemonics that core never told it. It says so on **both MIPS dialects** and
-for the **control register** as well as the data file — the corpus is objdump-only and has no
-control-register row, so neither of those two halves moves a benchmark figure and neither could
-have been found by a gate. Both are held by `packages/core/test/fp-refusal.test.ts` and by the FPU
-layer of `packages/core/test/contract-invariant.test.ts`, which is what an ISA with an FPU is
-measured against; `OpaquePolicy.fpReg` and `OpaquePolicy.fpControl` are required fields, so the next
-frontend with an FPU has to answer for them rather than inherit the generic messages by omission.
+point?" from a list of mnemonics that core never told it. It says so on **both MIPS dialects**, in
+**every spelling either of them uses** — the numbers, the o32 ABI names and their odd-half `f`
+suffix — and for the **control register** as well as the data file. None of those three halves moves
+a benchmark figure: the corpus is objdump-only, has no control-register row and no odd-half token,
+so **no gate in this repository could have found any of them** and the only evidence is the project
+trees and `packages/core/test/fp-refusal.test.ts`, which runs each spelling through `decompile` on
+both dialects. The FPU layer of `packages/core/test/contract-invariant.test.ts` is what an ISA with
+an FPU is measured against; `OpaquePolicy.fpReg` and `OpaquePolicy.fpControl` are required fields,
+so the next frontend with an FPU has to answer for them rather than inherit the generic messages by
+omission. The predicate itself has exactly one copy, and a test counts them: the reader decides
+which tokens still carry a sigil when the frontend's policy sees them, so a second copy is not a
+duplicate but a second half of one decision.

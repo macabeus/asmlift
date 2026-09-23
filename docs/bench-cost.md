@@ -138,7 +138,7 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
 **825 s over 190 real rows** and **502 s over 751 synthetic rows**; wall clock was 179.3 s and
-186.5 s on tiers that overlap, and 254.9 s end to end (`real 255.51` under `/usr/bin/time -p`) —
+186.5 s on tiers that overlap, and 255.5 s end to end (`real 255.51` under `/usr/bin/time -p`) —
 186.5 + 179.3 is 365.8, which is not the wall time and never was.
 The dearest single row is **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
 its own — which is the figure to reach for when a scoped run looks cheap.

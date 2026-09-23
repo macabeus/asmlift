@@ -11,8 +11,11 @@ open && /\*\// {
   if (m !~ /^[a-z]/) next            # a data directive (.word, .float) or a blank tail
   insn = 1
   if (m ~ /^(lwc1|swc1|ldc1|sdc1)$/) { fp = 1 }
-  else if (m ~ /^(mfc1|mtc1|cfc1|ctc1|bc1[tf]l?)$/ ||
-           m ~ /^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt|recip|rsqrt)\.[sdwl]/) { fp = 1; conv = 1 }
+  # A COMPARE IS SPELT `c.<cond>.<fmt>` — three components, not two — so it needs its own
+  # alternative. Folded into the list below as a bare `c`, it matches `c.lt.s` and `c.le.s` only
+  # because `l` happens to be one of the FORMAT letters, and misses `c.eq.s`/`c.eq.d` entirely.
+  else if (m ~ /^(mfc1|mtc1|cfc1|ctc1|bc1[tf]l?)$/ || m ~ /^c\.[a-z]+\.[sd]$/ ||
+           m ~ /^(add|sub|mul|div|mov|neg|abs|cvt|trunc|round|ceil|floor|sqrt|recip|rsqrt)\.[sdwl]/) { fp = 1; conv = 1 }
   if (m ~ /^(jal|jalr)$/) { call = 1 }
 }
 function flush() {

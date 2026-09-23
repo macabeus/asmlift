@@ -254,7 +254,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'float',
-    label: 'Floating point (FPU arithmetic, FPU loads and stores, paired singles)',
+    // THE LABEL NAMES THE FILE, NOT A LIST OF INSTRUCTION KINDS, because the pattern below has no
+    // list in it either and a label that enumerates goes stale against a class that does not. The
+    // 69 markers it claims today span arithmetic, the FPU loads and stores, the moves in both
+    // directions, the conversions and one compare — and NO paired single, which an earlier label
+    // advertised at zero inhabitants:
+    //   node -e 'const R=require("./apps/benchmark/results/results.json").results;const c={};
+    //   for(const r of R){if(r.asmlift.outcome!=="declined")continue;
+    //   for(const m of (r.asmlift.errorMarkers||[])){const g=
+    //   /unmodelled floating-point instruction .([\w.]+)./.exec(m);if(g)c[g[1]]=(c[g[1]]||0)+1;}}
+    //   console.log(Object.entries(c).sort((a,b)=>b[1]-a[1]))'
+    label: 'Floating point (the FPU register file and its control register)',
     // ONE PHRASE, BECAUSE CORE NOW SAYS IT. `frontend/opaque.ts` takes a per-ISA `fpReg` and
     // consults it ahead of its store-class and effect arms, so everything that names a
     // floating-point register — arithmetic, the conversions, the FPU loads and stores, the moves
