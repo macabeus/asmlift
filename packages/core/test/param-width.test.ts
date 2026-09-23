@@ -22,6 +22,7 @@ import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import type { FnProto } from '../src/proto';
+import { fuseParamPairs } from '../src/raise/pairparams';
 import { PARAM_WIDTH_GATES, narrowEntryParams } from '../src/raise/paramwidth';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
@@ -404,5 +405,44 @@ describe('the declaration witness', () => {
     verify(fn);
     fn.paramEvidence = new Map([[fn.blocks[0].params[0], { deadHome: true, selfRedefined: true }]]);
     expect(narrowEntryParams(fn, 'home-store-and-in-place')).toBe(0);
+  });
+
+  // A 64-BIT DECLARED PARAMETER IS ONE ENTRY IN THIS LIST AND TWO ARGUMENT REGISTERS, and the two
+  // vocabularies meet at `declared[entry.params.indexOf(p)]`. That index is a PARAMETER position,
+  // which is only true because `pairparams` has already fused the register pair into one entry
+  // parameter — `pre-recovery.ts` runs `pairparams` before `paramwidth`, and this fixture is the
+  // shape that arrives here as a result.
+  //
+  // THE WRONG ANSWER THIS FAILS ON is a `declared` list expanded to one entry per argument
+  // REGISTER (`[64, 64, 16, 32]`). The `s16` then reads its neighbour's high half, the
+  // `proto-width` gate sees 64 against a 16-bit extension, and the narrowing that must happen
+  // does not — `n` is 0 and the signature keeps a register-wide second parameter.
+  test('a `long long` ahead of a narrow parameter does not shift the narrow one’s declaration', () => {
+    const fn = parse(`fn f {
+^bb0(%0: unk32, %1: unk32, %2: unk32, %3: s32*):
+  %6: unk32 = sext %2 {width=16}
+  %4: unk64 = concat %0, %1
+  %5: unk32 = lo32 %4
+  %7: unk32 = add %5, %6
+  store %3, %7 {off=0, width=4}
+  ret
+}
+`);
+    verify(fn);
+    expect(fuseParamPairs(fn)).toBe(true);
+    expect(fn.blocks[0].params.length).toBe(3);
+    const self: FnProto = { params: ['long long', 's16', 's32 *'] };
+    expect(narrowEntryParams(fn, AGBCC_WITNESS, self)).toBe(1);
+    expect(fn.blocks[0].params[1].type).toEqual(T.int(16, true));
+  });
+
+  // …and the declaration still VETOES, which is the gate this width now reaches. A `long long`
+  // parameter extended from 16 bits is a contradiction the header wins: before this width was
+  // readable the entry was `undefined` and the gate abstained.
+  test('a `long long` declaration refuses a 16-bit narrowing of its own parameter', () => {
+    const fn = parse(PROLOGUE_S16);
+    verify(fn);
+    expect(narrowEntryParams(fn, AGBCC_WITNESS, { params: ['long long', 's32 *'] })).toBe(0);
+    expect(runWithout(PROLOGUE_S16, 'proto-width', { params: ['long long', 's32 *'] })).toBe(1);
   });
 });

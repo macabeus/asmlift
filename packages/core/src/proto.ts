@@ -100,6 +100,11 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
  *  because this is a fact a caller must be TOLD: the two frames are the same instructions in the
  *  same order, so there is nothing in the assembly to read it off.
  *
+ *  A RETURN WIDER THAN A REGISTER STILL TRAVELS IN REGISTERS — it travels in a PAIR, which is
+ *  still not a hidden pointer the caller supplied — so `declaredWidth` answering 64 is the right
+ *  answer here rather than a width that slipped through a test meant for words. Nothing reaches
+ *  it: `STANDARD_SIGNATURES` has one entry and it returns `void *`.
+ *
  *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
  *  disagree: `returnsVoid` from the project's own headers, and the `returns` of a signature the C
  *  standard fixes, which is as known as its parameters. That a project may re-declare a standard
@@ -124,8 +129,9 @@ export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototyp
   return t === 'void' || declaredWidth(t) !== undefined;
 }
 
-/** Bit width per C89 base type on every target asmlift lifts (all ILP32). `long` is 32 here and
- *  would not be on an LP64 host, so it is a target fact rather than a language one. */
+/** Bit width per C89 base type on every target asmlift lifts (all ILP32 with a 64-bit `long long`).
+ *  `long` is 32 here and would not be on an LP64 host, so it is a target fact rather than a
+ *  language one. */
 const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
   ['char', 8],
   ['short', 16],
@@ -133,14 +139,21 @@ const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
   ['int', 32],
   ['long', 32],
   ['long int', 32],
+  ['long long', 64],
+  ['long long int', 64],
 ]);
 
 /** The bit width one declared parameter type spells, or `undefined` for a spelling this does not
- *  read — a project typedef, a struct, a `float`. UNDEFINED IS "NO OPINION", never "wide": the one
+ *  read — a project typedef, a struct, a `float`. UNDEFINED IS "NO OPINION", never "wide": a
  *  consumer treats a width it can read as authority and a width it cannot as absence, so an
  *  unrecognized spelling leaves the asm's own inference standing.
  *
- *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries. */
+ *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries.
+ *
+ *  A WIDTH WIDER THAN A REGISTER IS A READABLE ANSWER, not an absence. `long long` and `s64`/`u64`
+ *  answer 64, and that is a different fact from silence even though both refuse a narrowing: an
+ *  unreadable spelling MIGHT be wide, where a `long long` IS — which is what a reader asking how
+ *  many argument registers a parameter occupies has to be able to tell apart. */
 export function declaredWidth(t: ParamType): number | undefined {
   const s = t
     .replace(/\b(?:const|volatile)\b/g, ' ')
@@ -149,7 +162,7 @@ export function declaredWidth(t: ParamType): number | undefined {
   if (s.endsWith('*')) {
     return 32;
   }
-  const own = /^([su])(8|16|32)$/.exec(s);
+  const own = /^([su])(8|16|32|64)$/.exec(s);
   if (own) {
     return Number(own[2]);
   }

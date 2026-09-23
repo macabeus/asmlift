@@ -37,11 +37,20 @@ describe('declaredWidth', () => {
     expect(declaredWidth('  short   int ')).toBe(16);
   });
 
+  test('the 64-bit spellings answer 64, which is a fact and not an absence', () => {
+    // A width WIDER than a register is the fact that says how many argument registers a parameter
+    // occupies. Read as `undefined` it is indistinguishable from a project typedef, and the only
+    // thing a caller can do with that is refuse.
+    expect(['long long', 'long long int', 'unsigned long long', 'signed long long'].map(declaredWidth)).toEqual([
+      64, 64, 64, 64,
+    ]);
+    expect(['s64', 'u64', 'const long long', 'unsigned long long int'].map(declaredWidth)).toEqual([64, 64, 64, 64]);
+  });
+
   test('a spelling it cannot read is NO OPINION, never a width', () => {
     // The narrowing consumer treats undefined as "the header said nothing", so guessing here would
     // veto a sound inference on a project typedef.
-    expect(['Direction', 'struct Entity', 'float', 'double', 'u64', 's24', ''].map(declaredWidth)).toEqual([
-      undefined,
+    expect(['Direction', 'struct Entity', 'float', 'double', 's24', ''].map(declaredWidth)).toEqual([
       undefined,
       undefined,
       undefined,
