@@ -110,9 +110,15 @@ describe('global-variable recovery', () => {
       expect(word(w), w).toThrow('leading-zero magnitude, which is octal to the assembler');
     }
     // The controls, on both sides of each refusal: the widest addend a 32-bit word can carry still
-    // reads, and a hex magnitude whose digits start with a zero is not an octal one.
+    // reads, a hex magnitude whose digits start with a zero is not an octal one, and the hex
+    // PREFIX is case-insensitive because gas is — `.word 0X8` assembles to 8, the same as
+    // `.word 0x8`, read back out of `.data`. Refusing `0X` refused a spelling of the very radix
+    // this reader models, and said the word was not a number to explain it.
     expect(word('gTab+0xffffffff')()).toContain('(u32)&gTab + 4294967295');
     expect(word('gTab+0x08')()).toContain('(u32)&gTab + 8');
+    expect(word('gTab+0X8')()).toContain('(u32)&gTab + 8');
+    expect(word('gTab-0X8')()).toContain('(u32)&gTab + -8');
+    expect(word('0X8')()).toContain('return 8;');
   });
 
   test('a pool word whose ADDEND refuses still names its symbol, and still vetoes promotion', () => {
@@ -167,8 +173,17 @@ describe('global-variable recovery', () => {
   test('a pool loaded at an offset the reader cannot read declines, never a phantom param', () => {
     const load = (op: string) => () => thumb('back', `\tldr\tr0, ${op}\n\tbx\tlr\n.L1:\n\t.word\tgA\n\t.word\tgB\n`);
     expect(load('.L1+0x4')()).toContain('return &gB;');
+    // The hex prefix's case is the assembler's, not a spelling: `ldr r0, .L1+0X4` assembles to the
+    // same load as `+0x4`, measured.
+    expect(load('.L1+0X4')()).toContain('return &gB;');
     for (const op of ['.L1+-0x4', '.L1-0x4', '.L1++0x4']) {
       expect(load(op), op).toThrow("into pool '.L1' is not a '+N' byte offset");
+    }
+    // …and the radix gets its own message here too, because `+010` IS a `+N` byte offset and
+    // saying otherwise invites the one answer that would take octal — widening the magnitude,
+    // which now stands behind three patterns at once.
+    for (const op of ['.L1+010', '.L1+04']) {
+      expect(load(op), op).toThrow('has a leading-zero magnitude, which is octal to the assembler');
     }
   });
 

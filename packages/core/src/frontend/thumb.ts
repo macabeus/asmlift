@@ -1827,7 +1827,13 @@ function decode(
 // radix this reader does not model has to refuse, because the wrong answer is a wrong ADDRESS,
 // which compiles and scores. It costs nothing: 0 leading-zero operands over the 3,299,588 `.word`
 // operands of the nine benchmark checkouts, because agbcc's printers never emit one.
-const POOL_MAGNITUDE = String.raw`0x[0-9a-fA-F]+|0|[1-9]\d*`;
+//
+// The hex prefix is case-insensitive because gas is: `.word 0X8` assembles to 8, the same as
+// `.word 0x8`, read back out of `.data`. Excluding `0X` refused a spelling of the very radix this
+// reader models, under a message that said the word was "not a number" — which is the same untruth
+// the leading-zero branch below exists to avoid, and the one that invites a reader to widen the
+// magnitude until it takes octal too.
+const POOL_MAGNITUDE = String.raw`0[xX][0-9a-fA-F]+|0|[1-9]\d*`;
 
 // The label-operand shape shared by BOTH pool paths: agbcc `.Lpool`, pret `_08012358`, with an
 // optional `+N` byte offset. Kept in one place so the const and symbol resolvers cannot drift
@@ -1919,26 +1925,37 @@ type PoolRef =
  *  path, which would materialise the pool label as a phantom pointer parameter (a silent
  *  miscompile). `unmodelled` is the caller's cue to decline loud, and it has exactly six
  *  inhabitants, all of them below and each with its own message, because a catch-all makes several
- *  gaps read as one: an offset spelled something other than `+N`; an offset that does not select a
- *  whole word of the pool (misaligned, or past its end); a numeric word whose value is not a
- *  32-bit one; a symbolic word whose ADDEND is not; a word whose magnitude carries a leading zero,
- *  which is a radix this reader does not model; and a word that is neither a number nor
- *  `symbol±offset` — a `.L` code label is here, since the symbol pattern admits no leading dot. A
- *  `sym+N` word is NOT unmodelled: it is the gaddr-plus-addend path and lifts cleanly. */
+ *  gaps read as one: an offset spelled something other than `+N`; an offset whose magnitude carries
+ *  a leading zero; an offset that does not select a whole word of the pool (misaligned, or past its
+ *  end); a numeric word whose value is not a 32-bit one; a symbolic word whose ADDEND is not; a
+ *  word whose magnitude carries a leading zero; and a word that is neither a number nor
+ *  `symbol±offset` — a `.L` code label is here, since the symbol pattern admits no leading dot. The
+ *  two leading-zero refusals are one rule in two positions, and they are separate messages because
+ *  a reader answering either of them has to change a different line. A `sym+N` word is NOT
+ *  unmodelled: it is the gaddr-plus-addend path and lifts cleanly. */
 function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | null {
   const m = operand.match(POOL_LABEL);
   if (!m) {
     // The operand is not `LABEL[+N]`, but it may still name a pool at an offset spelled some other
     // way — `.L1-0x4`, `.L1+-0x4`. Falling through to `null` there says "not a pool", and the load
     // path then materialises the label as a phantom pointer parameter: the same silent miscompile
-    // the readers of a pool's CONTENTS were unified to prevent, one level up in its OPERAND.
+    // the readers of a pool's CONTENTS share one grammar to prevent, one level up in its OPERAND.
     // Refusing rather than widening, because nothing produces the shape: over the nine benchmark
     // checkouts (31,842 `.s` files) all 33,753 label-operand `ldr` occurrences are spelled `LABEL`
     // or `LABEL+N`, so a grammar for the rest would be a capability nothing can check.
     const lead = operand.match(POOL_LABEL_LEAD);
     if (lead && dataWords.has(lead[0])) {
       const off = operand.slice(lead[0].length).trim();
-      return { kind: 'unmodelled', why: `offset '${off}' into pool '${lead[0]}' is not a '+N' byte offset` };
+      // `+010` IS a `+N` byte offset, so saying it is not would be false about it in the one way
+      // that gets answered by widening the magnitude — and POOL_MAGNITUDE now stands behind three
+      // patterns, so that answer would take octal at three call sites at once. Named here for the
+      // same reason the word path names it below.
+      return /^\+\s*0\d/.test(off)
+        ? {
+            kind: 'unmodelled',
+            why: `offset '${off}' into pool '${lead[0]}' has a leading-zero magnitude, which is octal to the assembler`,
+          }
+        : { kind: 'unmodelled', why: `offset '${off}' into pool '${lead[0]}' is not a '+N' byte offset` };
     }
     return null;
   }

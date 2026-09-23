@@ -485,7 +485,7 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
   });
 
   test.each([
-    // All six `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
+    // All seven `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
     // the corpus happened to print, only the ones saying `pool word` classified, and the rest —
     // the same capability at the same site — would have arrived as unclassified.
     [
@@ -505,6 +505,11 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     [
       "lift: cannot lift 'f': literal-pool load of pool word '010' has a leading-zero magnitude, which is " +
         'octal to the assembler — not modelled',
+    ],
+    // The same rule one position out, in the pool's OPERAND rather than in one of its words.
+    [
+      "lift: cannot lift 'f': literal-pool load of offset '+010' into pool '_pool_1' has a leading-zero " +
+        'magnitude, which is octal to the assembler — not modelled',
     ],
   ])('%s -> pool-word-shape', (marker) => {
     expect(classOf(marker)).toBe('pool-word-shape');
