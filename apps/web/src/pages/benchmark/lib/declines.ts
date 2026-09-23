@@ -392,6 +392,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /cannot recover struct|naturally aligned|overlapping fields/,
   },
   {
+    // TWO refusals, in `frontend/thumb.ts`, and the class unions them because both are answered by
+    // the same capability — modelling sub-word table DATA. One is a whole-word pool load of a table
+    // that holds no whole word (`poolRef`); the other is such a table's label used as a register
+    // base (`readData`). Neither covers a table whose ADDRESS is taken through a `.word` pool and
+    // indexed at runtime: that is an ordinary global and lifts, which is why the class is
+    // uninhabited. Uninhabited BY CONSTRUCTION, not by measurement — agbcc pools are `.word` and it
+    // reaches a halfword table through the address, so no compiler emits either shape.
     key: 'sub-word-table',
     label: 'Sub-word data tables (.byte / .short / .space)',
     pattern: /sub-word data table/,

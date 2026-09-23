@@ -911,7 +911,12 @@ const sayFact = (f: LayoutFact): string => {
 function decode(
   name: string,
   asm: string,
-): { blocks: AsmBlock[]; dataWords: Map<string, string[]>; funcLabels: Set<string> } {
+): {
+  blocks: AsmBlock[];
+  dataWords: Map<string, string[]>;
+  subwordLabels: Map<string, string>;
+  funcLabels: Set<string>;
+} {
   // Flatten to (label | instr | data) items, then split into blocks at labels / after branches.
   // `.word LABEL` directives are captured into dataWords keyed by the most recent label (the
   // jump table); ALL word/halfword data also stays in-stream as items, so the raw-halfword and
@@ -1202,37 +1207,6 @@ function decode(
   // eslint-disable-next-line no-constant-condition
   while (true) {
     flat = allFlat.slice(sliceStart, boundaries[boundaryIdx]);
-
-    // Sub-word data tables are unmodelled: lifting a load through one fabricates values (the old
-    // silent-skip emitted wrong-but-compiling code). Decline iff the SELECTED code reaches such a
-    // table — via a direct label operand, or via a literal-pool word naming the table's symbol.
-    if (subwordData.size > 0) {
-      const reachable = new Set<string>();
-      const labelShape = /^([A-Za-z_.$][\w.$]*)/;
-      for (const f of flat) {
-        if (f.label && dataWords.has(f.label)) {
-          for (const w of dataWords.get(f.label)!) {
-            const wm = w.match(labelShape);
-            if (wm) {
-              reachable.add(wm[1]);
-            }
-          }
-        }
-        for (const op of f.instr?.ops ?? []) {
-          const om = op.match(labelShape);
-          if (om) {
-            reachable.add(om[1]);
-          }
-        }
-      }
-      for (const [lab, directive] of subwordData) {
-        if (reachable.has(lab)) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': reads the sub-word data table '${lab}' (.${directive}) — sub-word table data is not modelled`,
-          );
-        }
-      }
-    }
 
     // ── luvdis raw-encoding mode ─────────────────────────────────────────────────────────────
     // Disassembler-extracted splits carry two things only byte-accurate LAYOUT can resolve:
@@ -1816,7 +1790,7 @@ function decode(
       boundaryIdx++;
       continue;
     }
-    return { blocks: live, dataWords, funcLabels: new Set(funcLabels) };
+    return { blocks: live, dataWords, subwordLabels: subwordData, funcLabels: new Set(funcLabels) };
   }
 }
 
@@ -1921,12 +1895,30 @@ type PoolRef =
  *  something other than `+N`; an offset whose magnitude carries a leading zero; an offset that does
  *  not select a whole word of the pool (misaligned, or past its end); a numeric word whose value is
  *  not a 32-bit one; a symbolic word whose ADDEND is not; a word whose magnitude carries a leading
- *  zero; and a word that is neither a number nor `symbol±offset` — a `.L` code label is here, since
- *  the symbol pattern admits no leading dot. The two leading-zero refusals are one rule in two
- *  positions, and they stay separate messages because a reader answering either has to change a
- *  different line. A `sym+N` word is NOT unmodelled: it is the gaddr-plus-addend path and lifts
- *  cleanly. */
-function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | null {
+ *  zero; a word that is neither a number nor `symbol±offset` — a `.L` code label is here, since
+ *  the symbol pattern admits no leading dot; and an operand naming a SUB-WORD data table, which
+ *  `dataWords` does not hold at all and which would therefore answer "not a pool". A `sym+N` word
+ *  is NOT unmodelled: it is the gaddr-plus-addend path and lifts cleanly.
+ *
+ *  `subwordLabels` is REQUIRED, not optional, so a second caller that forgets it is a type error
+ *  rather than a silently disabled refusal. */
+function poolRef(
+  operand: string,
+  dataWords: Map<string, string[]>,
+  subwordLabels: Map<string, string>,
+): PoolRef | null {
+  // A word load off a label whose data is `.short`/`.byte`/… selects no whole word: the pool
+  // readers below index `dataWords` in units of four bytes and `dataWords` never holds such a
+  // label, so without this arm the operand answers `null` = "not a pool" and the load path
+  // materialises the label as a phantom pointer parameter. Checked on the leading NAME, so the
+  // refusal covers every offset spelling the two paths below split on.
+  const subwordLead = operand.match(POOL_LABEL_LEAD);
+  if (subwordLead && subwordLabels.has(subwordLead[0])) {
+    return {
+      kind: 'unmodelled',
+      why: `the sub-word data table '${subwordLead[0]}' (.${subwordLabels.get(subwordLead[0])}), which holds no whole word to load`,
+    };
+  }
   const m = operand.match(POOL_LABEL);
   if (!m) {
     // The operand is not `LABEL[+N]`, but it may still name a pool at an offset spelled some other
@@ -3018,7 +3010,7 @@ export function lift(
   symbols?: SymbolMap,
 ): Fn {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, funcLabels } = decode(name, asm);
+  const { blocks: rawBlocks, dataWords, subwordLabels, funcLabels } = decode(name, asm);
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
@@ -3316,10 +3308,19 @@ export function lift(
       // (`ldr [pc]` with no `#imm`, computed-pc arithmetic) — decline, never fabricate a param.
       throw new FrontendUnsupportedError(`cannot lift '${name}': program counter used as a data base — not modelled`);
     }
+    if (subwordLabels.has(r)) {
+      // Same hole, one directive over: a `.short`/`.byte` label used as a BASE (`ldrh rD, [sHw]`).
+      // It is absent from `dataWords` entirely, so the guard below cannot see it, and reading it as
+      // dataflow fabricates a pointer parameter the function does not have. Named separately
+      // because answering it means modelling sub-word table data, not widening a label check.
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the sub-word data table '${r}' (.${subwordLabels.get(r)}) is used as a register — not modelled`,
+      );
+    }
     if (dataWords.has(r)) {
       // The operand is a literal-pool / data LABEL, not a register — reading it as dataflow would
       // fabricate a phantom parameter. Word-pool loads are resolved by poolRef upstream; anything
-      // else reaching here (a sub-word load off a pool label, a label used in arithmetic) declines.
+      // else reaching here (a label used in arithmetic) declines.
       throw new FrontendUnsupportedError(`cannot lift '${name}': data label '${r}' used as a register — not modelled`);
     }
     return readVar(r, b);
@@ -4575,7 +4576,7 @@ export function lift(
           // through it to `gSym`), anything else → loud decline. It must NEVER fall to the load
           // path below, which would materialise the pool label as a phantom pointer parameter.
           if (ins.mnemonic === 'ldr' && b !== undefined) {
-            const pr = poolRef(b, dataWords);
+            const pr = poolRef(b, dataWords, subwordLabels);
             if (pr?.kind === 'const') {
               // Numeric-pool PROMOTION (symbols.ts): a pool-loaded word whose value the
               // project's symbol map knows becomes the NAMED global's address — the same

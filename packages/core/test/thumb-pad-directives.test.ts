@@ -132,18 +132,19 @@ _t:
 
   test('a pad halfword under a LABEL is still a sub-word data table, not code', () => {
     // `inCode` means "no label since the last instruction". A labelled `.2byte` is a data table
-    // and keeps declining for the function that reads it — this pass must not swallow one.
-    const asm = `	thumb_func_start uses
-uses:
-	ldr r0, _p
+    // and this pass must not swallow one into the instruction it encodes. The witness is a shape
+    // that refuses ONLY for a sub-word label and names the directive that decided it: swallow the
+    // `.2byte` as a pad instruction and `sTable` heads nothing, so the message changes.
+    const asm = `	thumb_func_start reads
+reads:
+	ldrh r0, [sTable]
 	bx lr
-_p: .4byte sTable
-	thumb_func_end uses
+	thumb_func_end reads
 
 sTable:
 	.2byte 0x0000
 `;
-    expect(() => d('uses', asm)).toThrow(/sub-word data table 'sTable'/);
+    expect(() => d('reads', asm)).toThrow(/the sub-word data table 'sTable' \(\.2byte\) is used as a register/);
   });
 
   test('byte layout is unchanged: a pc-relative load across a pad resolves identically', () => {
