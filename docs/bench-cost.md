@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=255.7s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.0s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,11 +137,25 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,371 s over 186 real rows** and **915 s over 742 synthetic rows**; wall clock was 332.3 s and
-337.5 s, and **417.4 s end to end** (`real 417.39` under `/usr/bin/time -p`) because the tiers
-overlap — 337.5 + 332.3 is 669.8, which is not the wall time and never was. The dearest single row
-is **117 s** on `kleod:PauseMenuScreenHandler:agbcc`, **9% of the tier** on its own — which is the
-figure to reach for when a scoped run looks cheap.
+**1,068 s over 186 real rows** and **1,167 s over 743 synthetic rows**; wall clock was 355.6 s and
+451.3 s, and **546.3 s end to end** because the tiers overlap — 355.6 + 451.3 is 806.9, which is
+not the wall time and never was. The dearest single row is **142 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — which is the figure to
+reach for when a scoped run looks cheap.
+
+THE TWO TIERS MOVED IN OPPOSITE DIRECTIONS against the entry below (real 1,371 → 1,068 s,
+synthetic 915 → 1,167 s), which is what a shared machine looks like rather than anything a branch
+did: `bench diff --base 87b49c74` reports the fan **unmoved at 67,415 (1.00×)** over 928
+comparable rows, and one asmlift outcome changed in the whole corpus. Read each sum against its
+own wall-clock line.
+
+ONE COST ENTRY IN THAT DIFF IS NOT A COST AT ALL, and it is worth knowing before somebody reads it
+as a regression. `pokeemerald:DoForcedMovement:agbcc` went 131.0 s → 5.5 s (0.04×) and its
+`droppedCandidates.length` went 1 → 0, which `bench diff` prints as a field change. The dropped
+entry at `87b49c74` carries the error `'arm-none-eabi-cpp' timed out`. A TIMEOUT is machine load,
+so that field is nondeterministic on a busy box in both directions — a clean tree can publish a
+dropped sibling it did not cause, and a later tree can publish its disappearance as if it had
+fixed something.
 
 The ranked sums here are roughly 1.6× the entry above them on a corpus one row larger. That is
 MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
@@ -161,7 +175,10 @@ argued: the 2 lost are `llshl`/`llshr` on mwcc, which matched by re-emitting `bl
 decline; the 1 missing is `ll2i:agbcc`, a cell deleted because `bx lr` scores every answer alike;
 the 3 gained are `llshl`/`llshr` on agbcc and the real row `sa3:sa2__sub_80855C0:agbcc`.
 
-The artifact before THIS branch's, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
+The artifact before this one, taken 2026-09-23 at `87b49c74`, read **1,371 s over 186 real rows**
+and **915 s over 742 synthetic rows**; wall clock was 332.3 s and 337.5 s, 417.4 s end to end.
+
+The artifact before THAT, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
 rows** and **608 s over 726 synthetic rows**; wall clock was 194.1 s and 231.6 s, 304.1 s end to
 end. THAT TREE WAS BENCHED FIVE TIMES, and the five readings are the cheapest evidence in this file
 that the seconds are not the measurement: **1,281 s + 630 s** (491.6 s wall, cold),
