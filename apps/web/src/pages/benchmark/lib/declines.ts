@@ -10,7 +10,7 @@
 // A CLASS MUST BE DECIDABLE INSIDE THE FIRST 200 CHARACTERS OF THE REASON. The benchmark publishes
 // a marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in
 // `apps/benchmark/src/eval/asmlift.ts` is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the
-// tail of a long message tests a string the artifact does not carry. 17 markers in the published
+// tail of a long message tests a string the artifact does not carry. 18 markers in the published
 // artifact sit at that cap. The reload refusal in `packages/core/src/frontend/ppc.ts` is the shape
 // that pays for it: one throw with two arms, and on `pikmin:__ct__7ActFreeFP4Piki:mwcc_233_163n`
 // the second arm's "a local stack frame this frontend does not model" begins at character 197 —
@@ -20,7 +20,7 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 307 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 331 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
@@ -71,7 +71,7 @@
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 252 / 49 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 265 / 60 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed

@@ -758,24 +758,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
 
-  // `clobbered-value`, `runtime-helper` and `wide-call-arg` each name a refusal whose intended
-  // inhabitant is in the dataset — `synthetic:llfrom`, the mwcc 64-bit family, `synthetic:llpass`
-  // — and is not yet in the committed artifact. WHICH OF THEM A REGENERATION INHABITS IS THE
-  // ARTIFACT'S ANSWER, NOT THE ROW AUTHOR'S: a row written to reach a class may reach a different
-  // one, or decline earlier. So this list is re-derived from the artifact it is asserted against,
-  // in the commit that changes it; a name that stays here after its row lands is a finding about
-  // that row.
-  const NO_ROWS = [
-    'branch-form',
-    'branch-likely',
-    'clobbered-value',
-    'cross-block-flags-arm',
-    'runtime-helper',
-    'store-class',
-    'wide-call-arg',
-  ];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
 
-  test('every other class is inhabited, and exactly these seven are not', () => {
+  test('every other class is inhabited, and exactly these four are not', () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
