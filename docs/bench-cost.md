@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=120.4s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=87.7s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,20 +137,36 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,044 s over 186 real rows** and **552 s over 743 synthetic rows**; wall clock was 216.9 s and
-234.3 s, and **317.1 s end to end** because the tiers overlap. The dearest single row is **161 s**
-on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to
-reach for when a scoped run looks cheap.
+**819 s over 186 real rows** and **497 s over 743 synthetic rows**; wall clock was 179.2 s and
+207.1 s on tiers that overlap (this run was not separately timed end to end). The dearest single
+row is **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on its own — which is
+the figure to reach for when a scoped run looks cheap.
 
-THE INTERESTING READING HERE IS THE DIFF AND IT IS EMPTY. This run re-measures a wave of soundness
-and prose fixes across `packages/core/src`, and against the artifact before it `bench diff` reports
-**0 field changes, 0 added, 0 removed**, `bench regression` **0 flips of any kind**, and the fan
-**unmoved at 67,417 (1.00×)** over 929 comparable rows. It was taken because a commit to
-`packages/core/src` invalidates the artifact by provenance, not because a number was expected to
-move — the change's corpus reach is zero by construction, since every typed `params` in the dataset
-spells a type `declaredWidth` reads. **A run whose only job is to make the stamp true is still a
-run you have to take**, and at 317 s on a warm candidate cache it is the cheapest obligation in
-this file.
+THE DIFF IS EMPTY AND THE COST IS NOT, AND ONLY ONE OF THOSE IS ABOUT THE BRANCH. This run was owed
+for a **comment-only** edit to `apps/benchmark/dataset/synthetic.ts`, a SCORING_PATH — the row
+comment on `synthetic:llpass` claimed the agbcc cell referees a narrowing it does not. Against the
+artifact before it, `bench diff` reports **0 field changes, 0 added, 0 removed**, `bench regression`
+**0 flips of any kind**, and the fan **unmoved at 67,417 (1.00×)** over 929 comparable rows — which
+is what a comment-only diff has to report and is the reason it was safe to predict.
+
+The seconds, though, moved a third: the same corpus that summed 1,044 s + 552 s one run earlier
+sums 819 s + 497 s here, with **nothing between the two runs but a comment**. That is the whole
+argument for reading the fan and not the clock. THE RANKED-PASS COST IS MACHINE LOAD AND A CACHE
+STATE, NEVER A PROPERTY OF THE BRANCH; five rounds shared this box, and `bench diff --base
+origin/main` prints `ranked pass 2,286.1 s → 1,315.7 s (0.58×)` with **sixteen rows over 10 s and
+1.5× cheaper**, none of them reachable by the diff. Quote a cost only beside the run that produced
+it and the date, and never as a before/after for a change.
+
+THE READING FROM THE RUN BEFORE THIS ONE, kept because it is the same lesson from the other side.
+Taken 2026-09-23 at `bfae690e`, it read **1,044 s over 186 real rows** and **552 s over 743
+synthetic rows**, wall clock 216.9 s and 234.3 s, 317.1 s end to end. It re-measured a wave of
+soundness and prose fixes across `packages/core/src` and reported the same empty diff — **0 field
+changes, 0 added, 0 removed**, **0 flips of any kind**, fan **unmoved at 67,417 (1.00×)**. It too
+was taken because a commit to a SCORING_PATH invalidates the artifact by provenance, not because a
+number was expected to move: the change's corpus reach is zero by construction, since every typed
+`params` in the dataset spells a type `declaredWidth` reads. **A run whose only job is to make the
+stamp true is still a run you have to take** — and this branch has now taken that run three times,
+which is the real price of touching a measured path late.
 
 The artifact before this one, taken 2026-09-23 at `52833c75`, read **1,059 s over 186 real rows**
 and **594 s over 743 synthetic rows**; wall clock was 223.1 s and 241.6 s, and 324.1 s end to end
