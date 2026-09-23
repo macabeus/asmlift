@@ -105,36 +105,43 @@ const row = (...errorMarkers: string[]) =>
 
 const classOf = (marker: string) => declineClassesOf(row(marker))[0];
 
+const fpMarker = (m: string, regs: string) =>
+  `lift: cannot lift 'f @0x4': unmodelled floating-point instruction '${m}' — it uses the floating-point ` +
+  `register file (${regs}), which this frontend does not model`;
+
 describe('specific instruction families beat the generic opaque bucket', () => {
   // `opaque-ops` is `unmodelled instruction` with NO mnemonic filter, so it subsumes every class
   // that matches a named instruction. It must sit below all of them.
-  test.each([
-    ['mtc1', 'float'],
-    ['mfc1', 'float'],
-    ['cvt.s.w', 'float'],
-    ['add.s', 'float'],
-    ['lwc1', 'float'],
-    ['fmr', 'float'],
-    ['stfd', 'float'],
-  ])("unmodelled instruction '%s' classifies as %s, not opaque-ops", (mnemonic, want) => {
-    expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe(want);
-  });
-
-  // PPC spells single precision with a trailing `s` and a record form with a trailing `.`, so a
-  // list written against `fadd|fsub|fmul|fdiv` and a closing quote matches the double-precision
-  // spelling and nothing mwcc emits for a `float`. Seven of these eleven are published markers of
-  // the committed artifact — `fadds`, `fsubs`, `fmuls` (twice), `fdivs` on five synthetic rows,
-  // `fneg` and `fabs` on two real ac-decomp functions — so that alternation reports a
-  // floating-point gap as "we do not know what blocks these".
-  test.each(['fadds', 'fsubs', 'fmuls', 'fdivs', 'fneg', 'fabs', 'fadd.', 'fmadds', 'fsel', 'psq_l', 'ps_madds0'])(
-    "the PPC FPU mnemonic '%s' is floating point",
+  //
+  // WHAT THESE NO LONGER TEST, and why the inputs changed: an FPU instruction is refused by
+  // `frontend/opaque.ts`'s `fpReg` arm, ahead of both the store-class and the effect arms, so the
+  // spellings this block used to feed in — `structure: unmodelled instruction 'add.s'`,
+  // `lift: … unmodelled store-class instruction 'swc1'` — are strings core cannot produce any more.
+  // Asserting a classification of an unreachable input is a green test with no subject.
+  test.each(['mtc1', 'mfc1', 'cvt.s.w', 'add.s', 'lwc1', 'fmr', 'stfd'])(
+    "an FPU instruction classifies as float, not opaque-ops: '%s'",
     (mnemonic) => {
-      expect(classOf(`structure: unmodelled instruction '${mnemonic}'`)).toBe('float');
+      expect(classOf(fpMarker(mnemonic, '$f4'))).toBe('float');
     },
   );
 
-  // The other half: the PPC arm must not become "anything mwcc emits". Every one of these is a
-  // real opaque-ops inhabitant of the committed artifact.
+  // THE POWERPC FAMILY, kept in full although one phrase now covers it. These eleven were each a
+  // way the old forty-mnemonic alternation could be wrong — single precision spells a trailing `s`
+  // and a record form a trailing `.`, so a list written against `fadd|fsub|fmul|fdiv` and a closing
+  // quote matched the double-precision spelling and nothing mwcc emits for a `float`; `fneg`,
+  // `fabs`, `fsel` and the paired singles were separate omissions. Seven are published markers of
+  // the committed artifact. They stay as a regression pin: if anyone reintroduces a mnemonic list
+  // here, these say what it has to cover.
+  test.each(['fadds', 'fsubs', 'fmuls', 'fdivs', 'fneg', 'fabs', 'fadd.', 'fmadds', 'fsel', 'psq_l', 'ps_madds0'])(
+    "the PPC FPU mnemonic '%s' is floating point",
+    (mnemonic) => {
+      expect(classOf(fpMarker(mnemonic, 'f1, f2'))).toBe('float');
+    },
+  );
+
+  // The other half: `float` must not become "anything unmodelled". Every one of these is a real
+  // opaque-ops inhabitant of the committed artifact, and each reaches the generic bucket through a
+  // spelling core still emits.
   test.each(['clz', 'rlwimi', 'rlwinm', 'xoris', 'subfe', 'addc', 'adde'])(
     "a mnemonic in no family still lands in opaque-ops: '%s'",
     (mnemonic) => {
@@ -142,23 +149,9 @@ describe('specific instruction families beat the generic opaque bucket', () => {
     },
   );
 
-  // A STORE IS SPELT AT A DIFFERENT SITE, and for four mnemonics it is the ONLY site. `opaque.ts`
-  // tests `policy.storeClass` before anything becomes an opaque, so nothing can ever print
-  // "unmodelled instruction 'swc1'": without the store-class prefix these four alternatives of
-  // `float` are inert, and all 13 markers core spells that way are floating-point stores.
-  test.each(['swc1', 'sdc1', 'stfs', 'stfd'])("the store-class spelling of '%s' is floating point", (mnemonic) => {
-    expect(
-      classOf(
-        `lift: cannot lift 'f @0x4': unmodelled store-class instruction '${mnemonic}' — a memory write cannot ` +
-          'be skipped or degraded to a register opaque',
-      ),
-    ).toBe('float');
-  });
-
-  // …and the half that stops the widened prefix becoming the next catch-all. The ISA store
-  // policies are `sb|sh|sw|swl|swr|sc|sd|sdl|sdr` (mips.ts), `^(str|stm)` (thumb.ts) and `^st`
-  // (ppc.ts), so `store-class` is uninhabited today rather than dead, and these are what would
-  // inhabit it.
+  // …and the store half of it. The ISA store policies are `sb|sh|sw|swl|swr|sc|sd|sdl|sdr`
+  // (mips.ts), `^(str|stm)` (thumb.ts) and `^st` (ppc.ts) — wider than the FPU, which is why
+  // `store-class` is uninhabited rather than dead, and these are what would inhabit it.
   test.each(['stwbrx', 'swl', 'sb', 'stmia'])("a non-FPU store stays in store-class: '%s'", (mnemonic) => {
     expect(
       classOf(
@@ -183,14 +176,11 @@ describe('the instruction cause beats the shape symptom', () => {
     ).toBe('opaque-ops');
   });
 
-  test('…and the FLOAT family still wins over both', () => {
-    expect(
-      classOf(
-        "structure: cannot structure 'f': unrecovered back-edge into block #1 (loop-recovery declined " +
-          "this shape) — and the function carries unmodelled instruction 'mtc1', which is the more likely cause",
-      ),
-    ).toBe('float');
-  });
+  // THE FLOAT ARM OF THIS PAIR IS GONE, and its absence is the point. `attributeOpaques` appends a
+  // mnemonic that BECAME an `opaque`; an FPU instruction never does, because `opaqueDest` refuses it
+  // before a destination is fabricated. So the marker this arm used to assert — a shape refusal
+  // carrying `unmodelled instruction 'mtc1'` — is a string core cannot produce, and a test on it
+  // would pass forever while testing nothing. The integer half above still exercises the route.
 
   test('a loop-shape decline with NO unmodelled instruction is still loop-shapes', () => {
     // Without this, "always classify as opaque-ops" would pass the two tests above.
@@ -198,13 +188,15 @@ describe('the instruction cause beats the shape symptom', () => {
   });
 });
 
-describe('all three "unmodelled …" message spellings are classified', () => {
+describe('all four "unmodelled …" message spellings are classified', () => {
   // The frontend and the structurer word this differently, and a spelling no class reads falls into
-  // "other" — which reads as "we do not know what blocks these" when in fact we do.
+  // "other" — which reads as "we do not know what blocks these" when in fact we do. There are four
+  // spellings since `fpReg`: the structurer's, and `opaqueDest`'s three arms in the order it tests
+  // them (floating-point, store-class, effect). Each row below is one of them, paired with a case
+  // that must NOT take it.
   test.each([
-    ["structure: unmodelled instruction 'mtc1'", 'float'],
-    ["lift: unmodelled effect instruction 'mtc1' — no register destination to degrade", 'float'],
-    ["lift: unmodelled store-class instruction 'swc1' — a memory write cannot be skipped", 'float'],
+    [fpMarker('mtc1', '$f4'), 'float'],
+    [fpMarker('swc1', '$f0'), 'float'],
     ["lift: unmodelled store-class instruction 'stwbrx' — a memory write cannot be skipped", 'store-class'],
     ["structure: unmodelled instruction 'clz'", 'opaque-ops'],
     ["lift: unmodelled effect instruction 'teq' — no register destination to degrade", 'opaque-ops'],
@@ -785,7 +777,8 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   test.each([
     ["lift: cannot lift 'SetPICMode': unmodelled control transfer 'bltzall' at 0x0", 'branch-form'],
     [
-      "lift: cannot lift 'draw__3SDAFv': unmodelled effect instruction 'stfd' — no register destination to degrade",
+      "lift: cannot lift 'draw__3SDAFv @0x4': unmodelled floating-point instruction 'stfd' — it uses the " +
+        'floating-point register file (f31), which this frontend does not model',
       'float',
     ],
   ])('%s is classified by its refusal, not by its symbol', (marker, want) => {
@@ -920,17 +913,17 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // question rather than a silent re-attribution. Read `a > b` as "a is listed above b, and a is
   // the answer".
   //
-  // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
-  // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
-  // are the three control-transfer capabilities sitting above `branch-form`.
+  // `float` USED TO BE THE BIG ONE HERE — 56 markers over `opaque-ops` and 13 over `store-class`,
+  // 69 rows whose attribution rested on this file's line order. It is absent now, and that is the
+  // measurable half of core naming the register file: `unmodelled floating-point instruction` is
+  // matched by no other class, so the ordering is no longer load-bearing for any of them. The two
+  // transfer pairs are the control-transfer capabilities sitting above `branch-form`.
   //
   // `tu-scoped-name > pool-word-shape` is the same shape one level down: `pool-word-shape` is the
   // pool reader's catch-all and its pattern is that reader's own SENTENCE PREFIX, so every named
   // pool gap overlaps it by construction and is answered by sitting above it. Splitting a message
   // out of that catch-all therefore always adds a line here, and that is the intended signal.
   const OVERLAPS: [chain: string, markers: number][] = [
-    ['float > opaque-ops', 56],
-    ['float > store-class', 13],
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 2],
@@ -1021,7 +1014,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'SDA/global-relative access not supported', 'packages/core/src/frontend/ppc.ts'],
     ['pic-globals', 'carries a small-data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
-    ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
+    ['float', 'unmodelled floating-point instruction', 'packages/core/src/frontend/opaque.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],

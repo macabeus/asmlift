@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 127 distinct decline messages (the texts reached by
+// `packages/core/src` throws 128 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -255,31 +255,35 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     key: 'float',
     label: 'Floating point (FPU arithmetic, FPU loads and stores, paired singles)',
-    // The alternation is anchored by the closing quote, so a bare `add\.` would require the literal
-    // `add.'` and match nothing. `[\w.]+` after the dot covers the one-part (`add.s`) and two-part
-    // (`c.lt.s`, `cvt.s.w`) MIPS FPU formats alike.
+    // ONE PHRASE, BECAUSE CORE NOW SAYS IT. `frontend/opaque.ts` takes a per-ISA `fpReg` and
+    // consults it ahead of its store-class and effect arms, so everything that names a
+    // floating-point register — arithmetic, the conversions, the FPU loads and stores, the moves in
+    // and out of the file, the GameCube paired singles — declines as `unmodelled floating-point
+    // instruction`, and the message names the registers it found.
     //
-    // THE PPC ARM IS WRITTEN AS THE ISA SPELLS THE FAMILY, NOT AS THE CORPUS HAPPENED TO PRINT IT.
-    // Listing `fadd|fsub|fmul|fdiv` against a closing quote silently excludes every single-precision
-    // form — `fadds`, `fsubs`, `fmuls`, `fdivs` are the ones mwcc emits for `float` arithmetic —
-    // and leaves out `fneg`/`fabs` outright. PPC spells a single-precision op with a trailing `s`
-    // and a record form with a trailing `.`, so both are optional suffixes here rather than
-    // separate alternatives; `psq_*`/`ps_*` are the GameCube paired singles, which are floating
-    // point on the same FPU.
+    // What this replaces is worth recording, because it is the reason the phrase exists: a
+    // forty-mnemonic alternation, here, reconstructing "is this floating point?" from a list of
+    // opcodes because no message said so. That is one mechanism living in two packages, and every
+    // way it could be wrong was a way about the LIST rather than about the gap — a bare `add\.`
+    // that matched nothing against the closing quote, a PowerPC arm that had to spell the
+    // single-precision `s` and the record-form `.` itself or silently exclude `fadds`, and four
+    // store alternatives that were inert because `storeClass` was tested first. None of those
+    // failure modes survives a pattern with no list in it.
     //
-    // AND IT ADMITS THE STORE-CLASS PREFIX, or four of its alternatives are inert. `opaque.ts`
-    // tests `policy.storeClass` FIRST, before anything can become an opaque, and `mips.ts` has
-    // `swc1|sdc1` in that policy while `ppc.ts`'s `^st` covers `stfs`/`stfd` — so those four can
-    // only ever arrive spelt "unmodelled store-class instruction", which the bare `unmodelled
-    // (?:effect )?instruction '` prefix cannot reach.
-    pattern:
-      /unmodelled (?:effect |store-class )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|f(?:add|sub|mul|div|madd|msub|nmadd|nmsub|sqrt|res|rsqrte|sel|abs|nabs|neg|mr|rsp)s?\.?|fcmp\w*|fct\w*|lfd\w*|lfs\w*|stfd\w*|stfs\w*|psq_\w+|ps_[\w.]+)'/,
+    // What it does NOT cover is still decided elsewhere, and correctly: `bc1t`/`bc1f` name no FP
+    // register operand and refuse in `mips.ts` (`fp-cond-branch`, above), and an FPU instruction in
+    // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
+    // relocation — is filed under that guard. 113 corpus rows contain an FPU instruction; this
+    // class claims the 69 whose own message names one.
+    pattern: /unmodelled floating-point instruction/,
   },
   {
-    // WHAT IS LEFT AFTER `float` TAKES ITS OWN, which in this corpus is nothing: every one of the
-    // 13 markers core spells this way is a floating-point store (`stfd` 7, `swc1` 2, `sdc1` 2,
-    // `stfs` 2), and `float` is listed first, so the honest floating-point number is 69 and this
-    // class reads 0.
+    // UNINHABITED AT THE SOURCE NOW, RATHER THAN BY ARRAY ORDER. Until `fpReg` landed, all 13
+    // markers core spelled this way were floating-point stores (`stfd` 7, `swc1` 2, `sdc1` 2,
+    // `stfs` 2) and this class read 0 only because `float` is listed above it — an exclusion the
+    // ordering happened to produce and nothing stated. `opaque.ts` tests `fpReg` BEFORE
+    // `storeClass`, so an FPU store is no longer spelt this way at all, and the 0 here is a fact
+    // about core rather than about this array.
     //
     // The class stays, because the ISA policies reach further than the FPU — `mips.ts` lists
     // `sb|sh|sw|swl|swr|sc|sd|sdl|sdr` beside the FPU pair, `thumb.ts` `^(str|stm)`, `ppc.ts`
@@ -336,7 +340,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /no model for the runtime helper/,
   },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
-  // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an
+  // filter, so it subsumes every instruction `float` claims and would swallow the largest MIPS
+  // family — which is now a statement about ONE phrase rather than about forty opcodes, and the
+  // ordering is still what keeps the two apart. And an
   // `opaque` makes its block impure, so a shape recognizer refuses and the message names the SHAPE
   // (pipeline.ts `attributeOpaques` appends the instruction) — the missing instruction model is the
   // cause, the loop shape the symptom. First-match; `declines.test.ts` pins it.
