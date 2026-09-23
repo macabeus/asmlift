@@ -72,6 +72,23 @@ test('splat: a %hi/%lo half with no symbol refuses instead of lifting a null bas
   );
 });
 
+test('splat: a %hi/%lo addend with a leading zero refuses rather than picking a radix', () => {
+  // `020` is 16 to an assembler and 20 to `parseInt(t, 10)`, and the difference reaches the
+  // emitted C as a different ELEMENT: this lifted as `((s32 *)&gTab)[5]` where the assembler's
+  // addend gives `[4]`, and `%lo(gTab + 010)` as the index `2.5`. A wrong address compiles and
+  // scores, so the half refuses. The control below it is the same addend without the zero.
+  const mk = (addend: string) => `glabel f
+    /* 200 80000200 3C02800A */  lui        $v0, %hi(gTab + ${addend})
+    /* 204 80000204 03E00008 */  jr         $ra
+    /* 208 80000208 8C422884 */   lw        $v0, %lo(gTab + ${addend})($v0)
+endlabel f
+`;
+  for (const addend of ['020', '010', '0100']) {
+    expect(() => decompile('f', mk(addend), MIPS_IDO), addend).toThrow(/only against a symbol/s);
+  }
+  expect(decompile('f', mk('16'), MIPS_IDO).source).toContain('[4]');
+});
+
 test('splat: a non-numeric immediate refuses rather than becoming the literal 0', () => {
   // An assembler-macro name in an immediate slot reaches the frontend as operand text, where bare
   // `parseImm` answers NaN and `constVal` would render that as 0 — the relocation fold's own

@@ -217,8 +217,15 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Becomes the relocation
   // record an object file would carry plus the immediate the instruction really encodes, so the
   // frontend folds this dialect through the same path as objdump; NOT declined like the PIC relocs.
+  // The addend's magnitude admits no LEADING ZERO: `%lo(gTab + 020)` resolved through `parseInt`
+  // base 10 to a byte offset of 20 and lifted as `((s32 *)&gTab)[5]`, where a leading zero is a
+  // radix marker to `as` (`.word 020` assembles to 8, read back out of `.data` with this project's
+  // arm `as` — no MIPS assembler is installed here to measure the same lexer on this target, which
+  // is the point: a reader that cannot establish the radix must not pick one). Refused here rather
+  // than resolved: 0 of the 21,716 `%hi`/`%lo` addend occurrences across the nine benchmark
+  // checkouts carry one, so nothing is lost and what falls through is the loud refusal below.
   const hilo = op.match(
-    /^%(hi|lo)\(\s*([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
+    /^%(hi|lo)\(\s*([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|0|[1-9]\d*))?\s*\)(?:\((\$?[A-Za-z]\w*)\))?$/,
   );
   if (hilo) {
     const addend = hilo[4] ? evalConst(name, hilo[4]) * (hilo[3] === '-' ? -1 : 1) : 0;
@@ -235,8 +242,8 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (HILO_OP.test(op)) {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': relocation operand '${op}' — this reader resolves a '%hi'/'%lo' half ` +
-        `only against a symbol ('SYM' or 'SYM ± <integer>'), and will not treat one it cannot resolve ` +
-        `as arithmetic`,
+        `only against a symbol ('SYM' or 'SYM ± <integer>', and a leading zero is not one here: it ` +
+        `is a radix marker to the assembler), and will not treat one it cannot resolve as arithmetic`,
     );
   }
   if (RELOC_OP.test(op)) {
