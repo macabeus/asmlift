@@ -163,8 +163,14 @@ than being hand-counted: five rows printed plus `…and 10 more row(s) over 10s 
 not. **A row whose seconds collapse like that deserves its `droppedCandidates` read before anything
 else** — `DoForcedMovement`'s base artifact carried one candidate lost to
 `'arm-none-eabi-cpp' timed out` and this run carries none, with its outcome, score, fan and winning
-variations all identical. Across the whole corpus 11 rows carry a dropped candidate here and every
-one of them is a compiler REJECTING a candidate, which is a decompiler output; none is a timeout.
+variations all identical. Across the whole corpus 11 rows carry a dropped candidate here and none
+of them records a timeout, which is the reading that matters — a timeout is machine load and moves
+in both directions on a shared box. Only **4** of the 11 say WHY in a way the artifact can be read
+for (`agbcc failed: … too many arguments to function …`). The other **7** — the six bitfield rows
+of the synthetic tier and `synthetic:ptrelem:agbcc` — carry a bare `compile command failed (exit 1)` naming the whole
+`cpp | agbcc | as` pipeline, and that command sends `cpp`'s stderr to `/dev/null`, so those entries
+cannot distinguish a compiler rejecting a candidate from the preprocessor failing. Recompute by
+grouping `asmlift.droppedCandidates[].error` over `apps/benchmark/results/results.json`.
 
 The artifact before this one, `87b49c74`, read **1,371 s over 186 real rows** and **915 s over 742
 synthetic rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to end** (`real 417.39`
@@ -174,11 +180,14 @@ time and never was. Its dearest single row was **255.7 s** on
 `DoForcedMovement` second at 131.0 s and `WorldMapScreenIsValidPath` third at 130.4 s.
 
 ONLY THE CURRENT ARTIFACT IS GATED, so a paragraph about an earlier one is prose and has to be
-measured by hand: `git show <sha>:apps/benchmark/results/results.json`, then sum
-`asmlift.rankSeconds` by tier and take the max. This paragraph said **117 s on
-`kleod:PauseMenuScreenHandler:agbcc`, 9%** until a reviewer recomputed it — that row is the
-**third** dearest and was never the first. The figure was inherited from the paragraph above it
-rather than re-derived, and a figure already in the file reads as one somebody checked.
+measured by hand: `git show <sha>:apps/benchmark/results/results.json`, then sort the real rows by
+`asmlift.rankSeconds` descending — the sentence above names the top three, and that sort is what
+recomputes them. This paragraph said **117 s on `kleod:PauseMenuScreenHandler:agbcc`, 9%** until a
+reviewer recomputed it: that row is the **fourth** dearest, at 8.5% of the tier, and was never the
+first. The figure was inherited from the paragraph above it rather than re-derived, and a figure
+already in the file reads as one somebody checked. The correction was itself wrong once — it said
+**third**, which the sentence four lines above contradicts by name — so re-derive the rank, do not
+adjust the word.
 
 The ranked sums two entries above are cheaper than this one on a corpus one row larger. That is
 MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
