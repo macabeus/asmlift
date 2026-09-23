@@ -969,13 +969,13 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/thumb.ts', 26],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
+    ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/splat.ts', 7],
     ['frontend/ppc.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 70;
+  const RESIDUE_TOTAL = 71;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

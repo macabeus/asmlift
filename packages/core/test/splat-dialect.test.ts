@@ -3,7 +3,7 @@
 // `glabel`/`endlabel` slicing, `/* rom vram bytes */` prefixes, `$`-register stripping, `.L`-label
 // branch targets, constant-expression immediates, and `%hi`/`%lo` global recovery (the pair folds
 // to a `gaddr`) — plus the loud declines (unpaired `%lo`, PIC relocs, in-code data, tail calls).
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { classifyAsmText } from '../src/frontend/format';
@@ -72,21 +72,50 @@ test('splat: a %hi/%lo half with no symbol refuses instead of lifting a null bas
   );
 });
 
-test('splat: a %hi/%lo addend with a leading zero refuses rather than picking a radix', () => {
-  // `020` is 16 to an assembler and 20 to `parseInt(t, 10)`, and the difference reaches the
-  // emitted C as a different ELEMENT: this lifted as `((s32 *)&gTab)[5]` where the assembler's
-  // addend gives `[4]`, and `%lo(gTab + 010)` as the index `2.5`. A wrong address compiles and
-  // scores, so the half refuses. The control below it is the same addend without the zero.
-  const mk = (addend: string) => `glabel f
-    /* 200 80000200 3C02800A */  lui        $v0, %hi(gTab + ${addend})
+// `020` is 16 to the assembler and 20 to `parseInt(t, 10)`, and the difference reaches the emitted
+// C as a different ELEMENT: the `%lo` addend lifted as `((s32 *)&gTab)[5]` where the assembler's
+// addend gives `[4]`, and `%lo(gTab + 010)` as the index `2.5`. A wrong address compiles and
+// scores, so every reader that turns a digit string into a value here refuses the radix it does
+// not model — and there are three of them, which is why this is a table rather than one case. The
+// assembler's own readings, measured with `mips-linux-gnu-as` 2.45: `.word 020` is 0x10, `.word
+// 010` is 8, `lw $v0, 020($a0)` encodes the displacement 16 and `addiu $v0,$a0,020` the immediate
+// 16. Each row's control is the same operand written without the leading zero.
+describe('splat: a leading-zero magnitude is a radix this reader does not model', () => {
+  const mk = (mid: string) => `glabel f
+    /* 200 80000200 3C02800A */  ${mid}
     /* 204 80000204 03E00008 */  jr         $ra
-    /* 208 80000208 8C422884 */   lw        $v0, %lo(gTab + ${addend})($v0)
+    /* 208 80000208 00000000 */   nop
 endlabel f
 `;
-  for (const addend of ['020', '010', '0100']) {
-    expect(() => decompile('f', mk(addend), MIPS_IDO), addend).toThrow(/only against a symbol/s);
-  }
-  expect(decompile('f', mk('16'), MIPS_IDO).source).toContain('[4]');
+  test.each([
+    // the relocation addend — the pattern that feeds `evalConst`. Its halves travel in a pair, so
+    // this row carries both: a lone `%hi` declines on the missing `%lo` whatever its radix.
+    [
+      'lui        $v0, %hi(gTab + 020)\n    /* 204 80000204 8C422884 */  lw         $v0, %lo(gTab + 020)($v0)',
+      'lui        $v0, %hi(gTab + 16)\n    /* 204 80000204 8C422884 */  lw         $v0, %lo(gTab + 16)($v0)',
+    ],
+    // the memory displacement — `evalConst` again, one caller over
+    ['lw         $v0, 020($a0)', 'lw         $v0, 16($a0)'],
+    // a bare constant expression, where the zero is buried in an operand that parses
+    ['lw         $v0, (0x8+010)($a0)', 'lw         $v0, (0x8+8)($a0)'],
+    // and the operand that passes through UNREAD, whose reader is `addiu`'s re-sign
+    ['addiu      $v0, $a0, 020', 'addiu      $v0, $a0, 16'],
+  ])('%s refuses, and %s still reads', (bad, control) => {
+    expect(() => decompile('f', mk(bad), MIPS_IDO)).toThrow(
+      /has a leading-zero magnitude \('0\d+'\), which is octal to the assembler/,
+    );
+    expect(() => decompile('f', mk(control), MIPS_IDO)).not.toThrow();
+  });
+
+  // A lone `0` is not an octal marker and `0($sp)` is the commonest displacement there is, so the
+  // rule must not reach it. `0x0` and `0x08` are the radix this reader DOES model, spelt with a
+  // zero where the eye expects the trap.
+  test.each(['lw         $v0, 0($a0)', 'lw         $v0, 0x08($a0)', 'addiu      $v0, $a0, 0'])(
+    '%s is not a leading-zero magnitude',
+    (good) => {
+      expect(() => decompile('f', mk(good), MIPS_IDO)).not.toThrow();
+    },
+  );
 });
 
 test('splat: a non-numeric immediate refuses rather than becoming the literal 0', () => {

@@ -27,10 +27,10 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 118 distinct decline messages (the texts reached by
+// `packages/core/src` throws 119 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 70 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 71 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -48,8 +48,9 @@
 //   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, an indirect
 //                           `jr`, a non-numeric immediate, and five refusals about a disassembly
 //                           the reader cannot account for
-//   frontend/splat.ts    7  a data directive in the code stream, a tail call / cross-function
-//                           branch, an unparsable constant expression
+//   frontend/splat.ts    8  a data directive in the code stream, a tail call / cross-function
+//                           branch, an unparsable constant expression, and a magnitude with a
+//                           leading zero (octal to the assembler)
 //   frontend/disasm.ts   7  the objdump `...` elision family
 //   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
 //                           two-armed branch denylist, whose template is interpolation end to end
