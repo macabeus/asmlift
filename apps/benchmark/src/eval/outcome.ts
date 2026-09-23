@@ -28,20 +28,16 @@ import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
 
 import { pickDiagnostics } from '../compile/util';
 
-// THE RESIDUE: `SECOND_REG`, m2c's spelling for a call's second return register, is a
-// cannot-express marker of the same family as `M2C_CARRY` and `(bitwise ` below and is NOT in this
-// table. Three rows' m2c output carries it; one of them declines on `M2C_CARRY` anyway, so the two
-// left are SCORED on a cannot-express pseudo-call, with no marker and no compile error. Neither
-// defines the macro, so it compiles as a K&R implicit declaration. Listing it is a correctness fix
-// and it MOVES PUBLISHED m2c NUMBERS on those two, so it owes a full bench and a labelled commit
-// of its own rather than a quiet addition here.
-// `grep -n "C has no spelling for the second return register" docs/int64-representation.md`
-// measures it.
 const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   { name: 'ASMLIFT_ERROR', re: /ASMLIFT_ERROR/ }, // asmlift annotate-mode gap marker
   { name: 'M2C_ERROR', re: /M2C_ERROR/ }, // m2c undecodable instruction / unhandled construct
   { name: 'M2C_UNK', re: /M2C_UNK/ }, // m2c unknown value
   { name: 'M2C_CARRY', re: /M2C_CARRY/ }, // m2c carry flag it cannot model in C
+  // m2c's second-return-register pseudo-call — a 64-bit value comes back in a register PAIR and C
+  // has no spelling for the half that is not the return value, so m2c writes `SECOND_REG(x)`. The
+  // same cannot-express signal as M2C_CARRY, and it compiles the same way if it is not listed:
+  // nothing defines the macro, so it is a K&R implicit declaration rather than an error.
+  { name: 'SECOND_REG', re: /SECOND_REG/ },
   // m2c's `(bitwise T)` pseudo-cast — deliberately-invalid syntax for a reinterpret it cannot
   // express in C (soft-float helper returns); the same cannot-express signal as M2C_CARRY
   { name: 'M2C bitwise cast', re: /\(bitwise / },
