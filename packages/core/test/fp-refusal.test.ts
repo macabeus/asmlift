@@ -126,10 +126,21 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
 
   // THE OTHER HALF, and the reason the sigil is required rather than optional. Making it optional
   // covers the Splat dialect too — and an objdump BRANCH TARGET is bare lower-case hex, so `f0`,
-  // `f4` and `fa0` are addresses that a sigil-less pattern reads as FP registers (4 such operands
-  // in the committed artifact). Every one of those sits on a control transfer that refuses a guard
-  // earlier, so the input below is the shape rather than a listing anyone has: an unmodelled
-  // non-branch instruction with a bare `f4` where the predicate can reach it.
+  // `f4` and `fa0` are addresses a sigil-less pattern reads as FP registers. The committed
+  // artifact carries three, on `bc1fl`, `bgez` and `beqzl`; the count moves with the corpus and
+  // nothing gates it, so it is the SHAPE that is the argument and the command is here rather than
+  // a figure to be trusted:
+  //
+  //   node -e "const R=require('./apps/benchmark/results/results.json').results;
+  //   const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)\s+(.*)$/; const ex=new Set();
+  //   for(const r of R){if(!/:(gcc2\.7\.2kmc|ido7\.1)$/.test(r.id))continue;
+  //   for(const l of (r.targetAsm||'').split('\n')){const m=MN.exec(l); if(!m)continue;
+  //   for(const o of m[2].split(/[,()\s]+/)) if(/^f[vats]?[0-9]+f?$/i.test(o)) ex.add(m[1]+' '+o);}}
+  //   console.log(ex.size,[...ex])"
+  //
+  // Every one sits on a control transfer that refuses a guard earlier, so the input below is the
+  // shape rather than a listing anyone has: an unmodelled non-branch instruction with a bare `f4`
+  // where the predicate can reach it.
   test('a bare lower-case hex token is an ADDRESS, not a register', () => {
     const run = liftMips('teqi\tv0,f4');
     expect(run).toThrow(/unmodelled instruction 'teqi'/);
