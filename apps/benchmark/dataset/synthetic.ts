@@ -1943,12 +1943,22 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['int64', 'arithmetic', 'cast', 'narrow'],
     toolchains: ALL,
   },
-  // THE CALL BOUNDARY THE PAIR DOES NOT CROSS, and a refusal row rather than a match. A prototype
-  // states a callee's arity in argument REGISTERS, so `void llsink(long long)` and `void
-  // llsink(int)` reach the frontend as the same fact — and both of the answers it could give
-  // (hand over the low half; hand over the two halves as two words) recompile to the `bl` being
-  // lifted. The differ scores the wrong one exactly as it scores the right one, which is why this
-  // declines instead of matching.
+  // THE CALL BOUNDARY THE PAIR CROSSES, and the declaration is the whole of what carries it: the
+  // body is `llsink(a*b)` and nothing else, so what this scores is the shape of one argument.
+  //
+  // AND IT REFEREES ITS OWN ANSWER, which is the reason it is a match row rather than a refusal
+  // one. Compiled through this benchmark's agbcc at `-mthumb-interwork -O2 -fhex-asm`, the two
+  // wrong spellings a frontend without a width could give are both a DIFFERENT object:
+  //   `llsink(a*b)`               push/bl __muldi3/bl llsink/mov r0,#0        — the target
+  //   `llsink((int)(a*b))`        four more instructions, because `llsink`'s own declaration
+  //                               promotes the `int` straight back: add r3,r1,#0 / add r2,r0,#0 /
+  //                               add r0,r2,#0 / asr r1,r2,#0x1f
+  //   the two halves as two words needs a two-parameter callee and emits `add r2,r1,#0`
+  // A row that scored the right answer and a wrong one alike would not be a gate; this one is.
+  //
+  // `ctx` is what makes that true and is not decoration: it declares `llsink` to the candidate
+  // compile, so a candidate that hands over a word is compiled against the same header asmlift was
+  // told about, and the promotion the header demands is what shows up in the bytes.
   {
     sym: 'llpass',
     src: 'int llpass(long long a,long long b){ llsink(a*b); return 0; }',
