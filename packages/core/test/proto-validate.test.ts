@@ -1,9 +1,9 @@
 // validatePrototypes — the guard on a hand-written prototype table (the CLI's `--proto` JSON).
-// What each refusal is FOR: `protoArity` reads a malformed `params` as an omitted one and falls
+// What each refusal is FOR: `declaredArgRegs` reads a malformed `params` as an omitted one and falls
 // back to the arg-register heuristic, so anything accepted here decompiles at a guessed arity.
 import { describe, expect, test } from 'vitest';
 
-import { protoArity, validatePrototypes } from '../src/proto';
+import { declaredArgRegs, validatePrototypes } from '../src/proto';
 
 describe('accepts every form the type allows', () => {
   test.each([
@@ -20,8 +20,8 @@ describe('accepts every form the type allows', () => {
 });
 
 describe('refuses what would otherwise decompile at a guessed arity', () => {
-  test('a stringly-typed count — the case protoArity silently drops', () => {
-    expect(protoArity({ params: '2' } as never)).toBeUndefined();
+  test('a stringly-typed count — the case declaredArgRegs silently drops', () => {
+    expect(declaredArgRegs({ params: '2' } as never)).toBeUndefined();
     expect(validatePrototypes({ f: { params: '2' } })).toEqual([
       'f: "params" must be a non-negative integer or a list of type strings',
     ]);

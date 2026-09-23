@@ -23,13 +23,16 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import {
   type FnProto,
+  type ParamType,
   type Prototypes,
   STANDARD_SIGNATURES,
+  declaredArgRegs,
   declaredWidth,
-  protoArity,
+  declaresParams,
   returnsWithoutHiddenPointer,
+  wordsOf,
 } from '../proto';
-import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper, wordsOf } from '../runtime-helpers';
+import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -3356,7 +3359,7 @@ export function lift(
   const wideHelper = (callee: string): RuntimeHelper | null => {
     // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
     // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
-    // `isWideHelper` to read. The `prototypes` read below needs no such guard because `protoArity`
+    // `isWideHelper` to read. The `prototypes` read below needs no such guard because `declaredArgRegs`
     // is that table's designated safe reader — it answers "nothing is declared" for an entry that
     // is not an `FnProto`, whatever it is.
     const h = lookupHelper(target.runtimeHelpers, callee);
@@ -3371,7 +3374,7 @@ export function lift(
     // table's helper it would contradict the header, and as an ordinary call it becomes the
     // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
     // call, at whichever arity was declared.
-    if (protoArity(prototypes[callee]) !== undefined) {
+    if (declaredArgRegs(prototypes[callee]) !== undefined) {
       return null;
     }
     // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
@@ -3829,60 +3832,75 @@ export function lift(
   // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
   // call keeps the refusal it had before the licence existed.
   //
-  // THE BLOCK IS WORDS AND THE ARITY IS PARAMETERS, which are the same number only while every
-  // parameter occupies exactly one word: AAPCS lays arguments 5..n at [sp,#0] upward, one word
-  // each, and the lowering maps parameter k to word k - |argRegs|. A `double`, a `long long` or a
-  // by-value struct breaks both halves at once — it adds words AND moves every later argument's
-  // home — so the premise is checked here rather than assumed from a distant module.
+  // THE BLOCK IS WORDS AND SO IS `declaredArgRegs`, which is why it is the number asked for here:
+  // the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and the lowering maps
+  // word k to slot k - |argRegs|. A C PARAMETER COUNT would be the wrong number the moment one
+  // parameter is wider than a word — a `long long` adds a word AND moves every later argument's
+  // home, in the block and in the registers alike — so `proto.ts` converts the declaration into
+  // words once and both readers of it take the same answer.
   //
-  // WHAT THE CHECK CAN SEE. Only the TYPED form of `params` carries spellings, and `declaredWidth`
-  // answers for every type asmlift can spell; a width it cannot read is the only evidence that a
-  // parameter may be wider than a word, so such a declaration sizes no block and refuses
-  // (`unsizableDeclaration`). That is not merely a message: with a wide parameter the two witnesses
-  // can AGREE by coincidence — `void fd(s32, s32, s32, s32, double)` staged as two words matches a
+  // WHAT THE CONVERSION CANNOT DO. `declaredWidth` answers for every type asmlift can spell, and
+  // `undefined` for a project typedef, a `double` or a by-value struct — and that is the only
+  // evidence there is that a parameter MAY be wider than a word. `declaredParamWidths` refuses a
+  // whole list over one such entry rather than call it a word, and this refuses for the function.
+  // The refusal is not merely a message: with a wide parameter the two witnesses can AGREE by
+  // coincidence — `void fd(s32, s32, s32, s32, double)` staged as two words matches a
   // six-parameter list whose fifth entry is `double`, and consuming it would hand the callee six
-  // arguments. The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word
-  // for how many WORDS the call takes, and a count that lies is garbage in — `validatePrototypes`
-  // can no more check it than it can check `returnsVoid`.
+  // arguments.
   //
-  // The machine-derived side upholds the premise at its source: `prototypesFromSymbols` drops a
-  // whole entry rather than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
-  const wideParam = (p: FnProto | undefined): string | null =>
-    (Array.isArray(p?.params) ? p.params : []).find((t) => {
-      const w = declaredWidth(t);
-      return w === undefined || w > 32;
-    }) ?? null;
-  // `block` is null for the two cases that license nothing: an arity that fits in registers (there
-  // IS no outgoing block) and one this frontend cannot lay out (`wide` names the parameter, and
-  // `unsizableDeclaration` below turns it into the refusal). The analysis is told null for both —
-  // it may license neither — and only the second is an error to report.
-  const declaredCall = (
-    callee: string,
-  ): { arity: number; block: readonly number[] | null; wide: string | null } | null => {
+  // AND IT IS NOT CONDITIONAL ON A STAGED BLOCK, because the register homes move too: one
+  // unreadable entry displaces every later argument whether the call needs the frame or fits
+  // entirely in r0..r3. A refusal that fired only for the frame would lift the register case at a
+  // layout nothing could know was right, with nothing said about it.
+  //
+  // The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word for how
+  // many argument REGISTERS the call takes, and a count that lies is garbage in —
+  // `validatePrototypes` can no more check it than it can check `returnsVoid`. The machine-derived
+  // side upholds the premise at its source: `prototypesFromSymbols` drops a whole entry rather
+  // than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
+  const unsizableParam = (p: FnProto | undefined): { spelling: ParamType; params: number } | null => {
+    const params = Array.isArray(p?.params) ? p.params : [];
+    const spelling = params.find((t) => declaredWidth(t) === undefined);
+    return spelling === undefined ? null : { spelling, params: params.length };
+  };
+  // `block` is null for the case that licenses nothing: an arity that fits in registers, where
+  // there IS no outgoing block. A declaration nothing can size licenses nothing either, and it
+  // REFUSES here rather than answering — this runs over every `bl` while the outgoing-argument
+  // analysis is being built, so the refusal reaches the caller ahead of every other slot-model
+  // refusal, which is right because it is the most specific thing that was seen.
+  const declaredCall = (callee: string): { arity: number; block: readonly number[] | null } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
-    const own = prototypes[callee];
-    // `Object.hasOwn` on both tables: a callee named `toString` or `valueOf` would otherwise read
-    // a `Function` off `Object.prototype` as its prototype entry.
+    //
+    // THE TIER QUESTION IS WHETHER THE PROJECT DECLARED THE CALLEE, not whether the declaration
+    // could be sized. A header that spells `memcpy`'s third parameter through a project typedef
+    // has still re-declared `memcpy`, and reading the standard's signature past it would answer
+    // for a different function — which is the one reading this tier order exists to prevent.
+    //
+    // `Object.hasOwn` on all three tables: a callee named `toString` or `valueOf` would otherwise
+    // read a `Function` off `Object.prototype` as its prototype entry.
     const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
-    const proto = protoArity(own) !== undefined ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const arity = protoArity(proto);
+    const own = known(prototypes);
+    const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
+    const unsizable = unsizableParam(proto);
+    if (unsizable !== null) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': callee \`${callee}\` is declared with ${unsizable.params} parameter(s) ` +
+          `and its parameter type \`${unsizable.spelling}\` is one asmlift cannot size — a parameter ` +
+          'wider than one word occupies two argument registers, so an unsizable one displaces every ' +
+          'later argument and the call cannot be laid out',
+      );
+    }
+    const arity = declaredArgRegs(proto);
     if (arity === undefined) {
       return null;
     }
     const words = arity - target.argRegs.length;
-    if (words <= 0 || target.compilerBehaviors.stagesOutgoingArgsInFrame !== true) {
-      // No outgoing block exists to lay out: it all fits in registers, or this compiler does not
-      // claim to stage arguments inside the caller's own frame at all.
-      return { arity, block: null, wide: null };
-    }
-    const wide = wideParam(proto);
-    return {
-      arity,
-      block: wide === null ? Array.from({ length: words }, (_, i) => 4 * i) : null,
-      wide,
-    };
+    // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
+    // not claim to stage arguments inside the caller's own frame at all.
+    const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
+    return { arity, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
@@ -3905,31 +3923,7 @@ export function lift(
     capturedWholeFrame: capturedObjectIsTheWholeFrame,
   });
 
-  // A DECLARATION THIS FRONTEND CANNOT LAY OUT refuses for the whole function, ahead of every other
-  // slot-model refusal, because it is the most specific thing that was seen. The analysis is never
-  // told a block for such a call, so it can license nothing either way; what this adds is the
-  // message, which names the parameter rather than a staged word that happened to disagree.
-  const unsizableDeclaration = ((): string | null => {
-    for (const ab of asmBlocks) {
-      for (const ins of ab.instrs) {
-        if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
-          continue;
-        }
-        const callee = ins.ops[0] ?? '?';
-        const declared = declaredCall(callee);
-        if (declared !== null && declared.wide !== null) {
-          return (
-            `callee \`${callee}\` is declared with ${declared.arity} arguments and its parameter type \`${declared.wide}\` ` +
-            'is one asmlift cannot size — a parameter wider than one word moves every later argument home, ' +
-            "so this frame's outgoing stack-argument block cannot be laid out"
-          );
-        }
-      }
-    }
-    return null;
-  })();
-
-  const slotsOffReason = unsizableDeclaration ?? slotModelBlocker(outgoingArgs);
+  const slotsOffReason = slotModelBlocker(outgoingArgs);
   const slotsOk = slotsOffReason === null;
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).

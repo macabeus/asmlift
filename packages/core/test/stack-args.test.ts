@@ -150,11 +150,12 @@ describe('an argument slot is owned storage that this function does not DECLARE'
 });
 
 describe('the declaration must say how many WORDS, and a parameter list is parameters', () => {
-  // The block is words; the arity is parameters; the lowering maps parameter k to word
-  // k - |argRegs|. All three are the same counting only while every parameter occupies one word,
-  // and a `double`, a `long long` or a by-value struct breaks it. asmlift cannot SPELL such a
-  // parameter — `prototypesFromSymbols` drops a whole entry rather than try — so a spelling whose
-  // width cannot be read is the only evidence the premise is at risk, and it sizes no block.
+  // The block is words, `declaredArgRegs` is words, and the lowering maps word k to slot
+  // k - |argRegs|. A C PARAMETER COUNT is a fourth number and is the same as the other three only
+  // while every parameter occupies one word — a `double`, a `long long` or a by-value struct
+  // breaks it. `long long` is now READ as two words; `double` and a by-value struct asmlift cannot
+  // spell at all — `prototypesFromSymbols` drops a whole entry rather than try — so a spelling
+  // whose width cannot be read is the only evidence the premise is at risk, and it refuses.
   const TWO = HEAD + '\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tfd\n' + TAIL('0x8');
 
   test('an unreadable parameter width refuses even where the WORDS agree', () => {

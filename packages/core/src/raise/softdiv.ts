@@ -16,7 +16,8 @@
 // cannot express. It is naturally inert on hardware-divide targets (which emit `div`/`divu`,
 // never `bl __divsi3`).
 import { Fn, mkOp } from '../ir/core';
-import { type RuntimeHelper, isWideHelper, wordsOf } from '../runtime-helpers';
+import { wordsOf } from '../proto';
+import { type RuntimeHelper, isWideHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** The 32-bit software divisions, off the target's own helper table. WHICH helpers a compiler emits

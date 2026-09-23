@@ -1,27 +1,54 @@
-// Prototype arity: a callee `params` given as a bare COUNT or as the typed parameter list a
-// header extraction produces (`["u8"]`) must BOTH drive call-argument recovery. The typed-list
-// form silently dropped every argument before protoArity normalized it (argc was the array, so
-// `k < argc` was NaN → zero args) — a caller of such a callee lost its arguments.
+// The declared call shape: a callee `params` given as a bare COUNT or as the typed parameter list
+// a header extraction produces (`["u8"]`) must BOTH drive call-argument recovery, and they are two
+// different vocabularies — the count already speaks argument REGISTERS, the typed list speaks C
+// PARAMETERS and has to be converted. `declaredArgRegs` is that conversion and it is the number
+// every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaredWidth, protoArity, prototypesFromSymbols } from '../src/proto';
+import { declaredArgRegs, declaredParamWidths, declaredWidth, prototypesFromSymbols } from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
-describe('protoArity', () => {
+describe('declaredArgRegs', () => {
   test('normalizes the count form, the typed-list form, and absence', () => {
-    expect(protoArity({ params: 2 })).toBe(2);
-    expect(protoArity({ params: ['u8'] })).toBe(1);
-    expect(protoArity({ params: ['u8', 's32', 'void *'] })).toBe(3);
+    expect(declaredArgRegs({ params: 2 })).toBe(2);
+    expect(declaredArgRegs({ params: ['u8'] })).toBe(1);
+    expect(declaredArgRegs({ params: ['u8', 's32', 'void *'] })).toBe(3);
     // both zero-arity forms must survive the `??` chain as 0 (a void callee gets NO args, never
     // the arg-register fallback), so they are distinct from omitted.
-    expect(protoArity({ params: 0 })).toBe(0);
-    expect(protoArity({ params: [] })).toBe(0);
-    expect(protoArity({ returnsVoid: true })).toBeUndefined(); // no params → frontend heuristic
-    expect(protoArity(undefined)).toBeUndefined();
+    expect(declaredArgRegs({ params: 0 })).toBe(0);
+    expect(declaredArgRegs({ params: [] })).toBe(0);
+    expect(declaredArgRegs({ returnsVoid: true })).toBeUndefined(); // no params → frontend heuristic
+    expect(declaredArgRegs(undefined)).toBeUndefined();
     // malformed (a bare string, not a list) → undefined (fall back), NOT "u8".length === 3.
-    expect(protoArity({ params: 'u8' as unknown as string[] })).toBeUndefined();
+    expect(declaredArgRegs({ params: 'u8' as unknown as string[] })).toBeUndefined();
+  });
+
+  // THE ONE WITNESS THAT SEPARATES TWO PLAUSIBLE ABIs. A 64-bit parameter occupies two argument
+  // registers, and where the second one starts is a per-compiler fact, not a derivation: agbcc's
+  // `thumb.h` computes the register from a plain byte counter with NO rounding, so
+  // `void f(s32, long long)` passes the pair in r1:r2 and the call occupies THREE registers.
+  // AAPCS pads to an even register and would answer FOUR. Both are ABIs a reader could assume;
+  // only one is the one asmlift lifts.
+  test('a 64-bit parameter is TWO argument registers, packed — three, not four', () => {
+    expect(declaredArgRegs({ params: ['s32', 'long long'] })).toBe(3);
+    expect(declaredArgRegs({ params: ['long long'] })).toBe(2);
+    expect(declaredArgRegs({ params: ['long long', 'unsigned long long'] })).toBe(4);
+    expect(declaredParamWidths({ params: ['s32', 'long long'] })).toEqual([32, 64]);
+  });
+
+  // A READING THAT FAILED SAYS SO. `declaredWidth` answers `undefined` for a project typedef
+  // exactly as it does for a `double`, and calling that one word is the only answer that lays a
+  // call out wrongly with nothing said about it — at two registers per wide parameter, one
+  // unreadable entry displaces every later argument. The caller then falls back to reading the
+  // machine, or refuses; `frontend/thumb.ts` refuses.
+  test('one spelling nothing can size refuses the whole list, rather than defaulting to a word', () => {
+    expect(declaredParamWidths({ params: ['s32', 'Direction'] })).toBeUndefined();
+    expect(declaredArgRegs({ params: ['s32', 'Direction'] })).toBeUndefined();
+    expect(declaredArgRegs({ params: ['double'] })).toBeUndefined();
+    // …and the COUNT form cannot fail this way: it already speaks argument registers.
+    expect(declaredParamWidths({ params: 3 })).toEqual([32, 32, 32]);
   });
 });
 

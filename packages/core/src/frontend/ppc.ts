@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredWidth, protoArity } from '../proto';
+import { type Prototypes, declaredArgRegs, declaredWidth } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -487,7 +487,7 @@ export function lift(
   // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
   // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`protoArity` is asked first).
+  // and names the gap rather than guessing. A prototype answers it (`declaredArgRegs` is asked first).
   const fallbackArgc = (bi: number, at: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
     let n = 0;
@@ -815,7 +815,7 @@ export function lift(
                 'register as its own value rather than building the pair the ABI passes it in',
             );
           }
-          const declared = protoArity(prototypes[sym]);
+          const declared = declaredArgRegs(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
           // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by

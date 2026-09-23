@@ -9,7 +9,7 @@
 // So the CLI says which names it had to guess for. Purely textual: the asm the run was given, the
 // `--proto` table it parsed, and the project ELF's callee signatures — no pipeline stage involved,
 // and nothing here can change what is emitted.
-import { type Prototypes, protoArity } from '@asmlift/core/proto';
+import { type Prototypes, declaredArgRegs } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 
 /** A label DEFINED in this asm — `foo:` at the start of a line. */
@@ -56,13 +56,13 @@ export function calleeNames(asm: string, self?: string): string[] {
 }
 
 /** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry with a
- *  readable `params`, and no signature in the project's own DWARF either. `protoArity` is the
+ *  readable `params`, and no signature in the project's own DWARF either. `declaredArgRegs` is the
  *  same reader the frontend uses, so a mistyped `params: "2"` counts as guessed here exactly as
  *  it does there. */
 export function guessedArityCallees(asm: string, self: string, prototypes?: Prototypes, symbols?: SymbolMap): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
   return calleeNames(asm, self).filter(
-    (n) => protoArity(prototypes?.[n]) === undefined && declared?.get(n)?.signature === undefined,
+    (n) => declaredArgRegs(prototypes?.[n]) === undefined && declared?.get(n)?.signature === undefined,
   );
 }
 

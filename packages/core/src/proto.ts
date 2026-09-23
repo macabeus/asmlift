@@ -3,13 +3,14 @@ import type { SymbolMap, SymbolTypeFacts } from './symbols';
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
 // matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
 // `Prototypes` map, keyed by symbol, is threaded through every entry point and resolved at the
-// point of use — a callee's `params` gives its call-site arity, a function's own entry gives its
+// point of use — a callee's `params` gives the registers its call occupies, a function's own entry gives its
 // `returnsVoid` and the widths raise/paramwidth.ts checks against. It also keeps the frontend seam
 // honest: a frontend receives prototypes, not a grab-bag of ISA-specific options.
 
-/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). Two facts
- *  are read off it: the list's LENGTH is the call-site arity (`protoArity`), and one entry's WIDTH
- *  (`declaredWidth`) is what raise/paramwidth.ts checks its inference against.
+/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). ONE fact is
+ *  read off it and everything else is derived from that fact: the WIDTH it spells
+ *  (`declaredWidth`). raise/paramwidth.ts checks its inference against that width, and
+ *  `declaredArgRegs` sums the list's widths into the argument registers the call occupies.
  *
  *  A DECLARED WIDTH ONLY VETOES, never pins. Where the asm carries a prologue extension the
  *  declaration contradicts, the declaration wins — it is a fact from the project's headers, where
@@ -22,10 +23,11 @@ export type ParamType = string;
 /** What the headers know about one function. All fields optional: a partial table (only
  *  callee arities, or only the current function's void-ness) is the common case. */
 export interface FnProto {
-  /** declared parameters — either a bare arity COUNT or the typed parameter list a header
-   *  extraction produces (`["u8", "s32"]`). BOTH forms yield the call-site arity via
-   *  `protoArity`; only the typed form carries a width. Omit to let the frontend fall back to its
-   *  contiguous-arg-register heuristic. */
+  /** declared parameters — either the typed parameter list a header extraction produces
+   *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
+   *  for how many argument REGISTERS the call occupies. The two are the same number only while
+   *  every parameter fits in a register, and `declaredArgRegs` is what converts the first into the
+   *  second. Omit to let the frontend fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
@@ -50,20 +52,69 @@ export interface FnProto {
 /** symbol → prototype. The function under decompilation and its callees share one table. */
 export type Prototypes = Record<string, FnProto>;
 
-/** The call-site arity a proto declares, normalizing the count form (`2`) and the typed-list
- *  form (`["u8", "s32"]`) to one number. `undefined` when `params` is omitted — the caller then
- *  falls back to its arg-register heuristic. Reading a typed list as its length is what lets a
- *  header-derived proto (`params: ["u8"]`) recover its argument instead of silently dropping it. */
-export function protoArity(p: FnProto | undefined): number | undefined {
+/** How many argument REGISTERS a list of parameter WIDTHS occupies: a parameter wider than a
+ *  machine word travels in a register pair, every other one in a single register.
+ *
+ *  The rule lives here rather than beside either caller because it has two, and they are the two
+ *  vocabularies a declaration is written in. `runtime-helpers.ts` states a compiler's own helper
+ *  signatures as widths (`__ashrdi3` is `[64, 32]` — two C parameters, three registers), and
+ *  `declaredParamWidths` below reads the same widths off a project's C types. One ABI fact, one
+ *  copy of it; a second copy is a rule that can disagree with itself.
+ *
+ *  NO EVEN-REGISTER ALIGNMENT, and that is a measured agbcc fact rather than an omission: its
+ *  `thumb.h` computes an argument's register from a plain byte counter with no rounding, so
+ *  `void f(s32, long long)` passes the pair in r1:r2 where AAPCS would pad to r2:r3. A target
+ *  whose ABI does align would need its own rule, and would have to say so here. */
+export function wordsOf(params: readonly number[]): number {
+  return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
+}
+
+/** Whether a proto states a parameter list at all — readably or not. The tier question, asked
+ *  before the layout question: a project that declares a callee has re-declared it, and falling
+ *  through to a compiler's runtime table or to the C standard's signatures behind a declaration
+ *  nobody could SIZE would answer with a different function's shape. */
+export function declaresParams(p: FnProto | undefined): boolean {
+  return typeof p?.params === 'number' || Array.isArray(p?.params);
+}
+
+/** The width each declared parameter occupies, in argument order.
+ *
+ *  `undefined` FOR EVERY READING THAT FAILED, and there are two of them: `params` omitted or
+ *  malformed (a bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits), and a typed
+ *  list holding one spelling `declaredWidth` cannot read.
+ *
+ *  THE SECOND ONE IS WHY THIS DOES NOT DEFAULT. A project typedef — `int64_t`, `Fixed64`, `QWORD`
+ *  — reads as `undefined` exactly as `double` does, and answering "one word" for it is a layout
+ *  this cannot know to be right: at two registers per wide parameter, one unreadable entry moves
+ *  every later argument's home AND the size of the outgoing block. A default of 32 is the only
+ *  answer that produces a wrong layout with nothing said about it, so there is none. A caller
+ *  that gets `undefined` here either falls back to reading the machine or refuses loudly, and
+ *  `frontend/thumb.ts` does the second.
+ *
+ *  The COUNT form already speaks argument registers and says so at its declaration, so it expands
+ *  to that many words and can never fail this way. */
+export function declaredParamWidths(p: FnProto | undefined): readonly number[] | undefined {
   if (typeof p?.params === 'number') {
-    return p.params;
+    return Array.from({ length: p.params }, () => 32);
   }
-  if (Array.isArray(p?.params)) {
-    return p.params.length;
+  if (!Array.isArray(p?.params)) {
+    return undefined;
   }
-  // Omitted OR malformed (e.g. a bare `"u8"` string reaching the untyped CLI `--proto` JSON):
-  // fall back to the frontend's arg-register heuristic rather than misread a string's `.length`.
-  return undefined;
+  const widths = p.params.map(declaredWidth);
+  return widths.every((w) => w !== undefined) ? (widths as number[]) : undefined;
+}
+
+/** How many ARGUMENT REGISTERS the call a proto describes occupies. `undefined` when the
+ *  declaration was not read — nothing declared, or a spelling `declaredParamWidths` refused.
+ *
+ *  THIS IS NOT THE PARAMETER COUNT, and the name says so because the two are the same number only
+ *  while every parameter fits in a register — they agree by arithmetic accident, and the accident
+ *  ends at the first `long long`. A caller that wants the C parameter count reads `params`
+ *  itself; every caller here wants registers, because what it is about to do is walk r0, r1, r2,
+ *  r3 and then the outgoing stack block. */
+export function declaredArgRegs(p: FnProto | undefined): number | undefined {
+  const widths = declaredParamWidths(p);
+  return widths === undefined ? undefined : wordsOf(widths);
 }
 
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
@@ -116,7 +167,7 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
  *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
  *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
  *  here, and a raw TypeError would leave through neither the decline channel nor anything a
- *  caller can act on. Every other reader of this table — `protoArity`, and `declaredCall`
+ *  caller can act on. Every other reader of this table — `declaredArgRegs`, and `declaredCall`
  *  through it — answers "nothing is declared" for such an entry, and so does this. */
 export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
   if (Object.hasOwn(prototypes, callee) && prototypes[callee]?.returnsVoid === true) {
@@ -176,7 +227,7 @@ export function declaredWidth(t: ParamType): number | undefined {
 
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
  *
- *  `protoArity` above falls back to the arg-register heuristic on a `params` it cannot read, which
+ *  `declaredArgRegs` above falls back to the arg-register heuristic on a `params` it cannot read, which
  *  is right when `params` is omitted and silent when it is mistyped: `params: "2"` then decompiles
  *  at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is visible in
  *  the output, so a table that came from outside is checked before it reaches either. */
@@ -214,7 +265,7 @@ export function validatePrototypes(value: unknown): string[] {
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
  *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
- *  are read for the list's length alone (test/param-pointee-variation.test.ts). */
+ *  are read for the register widths they sum to alone (test/param-pointee-variation.test.ts). */
 function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   if (t.pointer) {
     return 'void *';

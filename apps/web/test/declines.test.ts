@@ -878,7 +878,7 @@ describe('a class may not outlive the message it classifies', () => {
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
-    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/thumb.ts'],
+    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
@@ -987,7 +987,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 26],
+    ['frontend/thumb.ts', 27],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
@@ -996,7 +996,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 71;
+  const RESIDUE_TOTAL = 72;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

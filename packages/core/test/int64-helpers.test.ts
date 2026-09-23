@@ -12,9 +12,9 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import type { FnProto } from '../src/proto';
+import { type FnProto, wordsOf } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
-import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper, wordsOf } from '../src/runtime-helpers';
+import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper } from '../src/runtime-helpers';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');

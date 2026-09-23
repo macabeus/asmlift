@@ -1199,11 +1199,18 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const twoStackArgs =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
-    for (const proto of [undefined, { g: { params: 2 } }, { g: { params: ['s32', 's32', 's32', 'double'] } }]) {
+    for (const proto of [undefined, { g: { params: 2 } }]) {
       expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC, proto ? { prototypes: proto } : {})).toThrow(
         /stack pointer used as data/,
       );
     }
+    // A spelling nothing can size refuses too, and it refuses FIRST and more specifically: the
+    // staged words and the declaration are both unknowable next to a `double`, so naming the
+    // parameter is the fact a reader can act on, where the sp-as-data reason would send them
+    // hunting for a store.
+    expect(() =>
+      decompile('f', twoStackArgs, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 's32', 's32', 'double'] } } }),
+    ).toThrow(/parameter type `double` is one asmlift cannot size/);
   });
 
   test('an argument block is contiguous from [sp,#0] — a lone higher slot is a spill, not an argument', () => {

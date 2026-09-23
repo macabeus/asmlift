@@ -30,16 +30,18 @@
 // `packages/core/src` throws 123 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 71 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts   26  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts   27  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
 //                           base in the list, control falling off the end, a register spelled in
-//                           upper case, and the reaching-compare throw whose reason is
-//                           interpolated (`cross-block-flags-arm` keys on one of its reasons, so
-//                           the template with a placeholder in it matches nothing)
+//                           upper case, a declared parameter type nothing can size (a project
+//                           typedef, a `double`, a by-value struct), and the reaching-compare
+//                           throw whose reason is interpolated (`cross-block-flags-arm` keys on
+//                           one of its reasons, so the template with a placeholder in it matches
+//                           nothing)
 //   structure.ts        16  eleven loop and post-loop naming refusals beside the two
 //                           `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
