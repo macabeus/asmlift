@@ -303,14 +303,6 @@ const IMM_LITERAL = new RegExp(`^#\\s*${IMM_DIGITS}$`);
 const immEq = (op: string | undefined, want: number): boolean =>
   op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
 
-// IS THIS OPERAND A CONSTANT AT ALL — a different question from `immEq`'s, asked where a refusal
-// has to say WHICH of two gaps it is looking at rather than what a literal equals. The sign is the
-// whole difference: `immEq` leaves it out on purpose (above), and a caller that only wants "is it
-// a constant" inherits that exclusion as a wrong ANSWER — `add rD, sp, #-0x4` reads as a runtime
-// index into the frame, and `#-0x…` is a spelling agbcc writes in its own output. ONE shape for
-// the digits, two questions over it, because the tokenizing is where the drift starts.
-const IMM_CONSTANT = new RegExp(`^#\\s*-?${IMM_DIGITS}$`);
-
 // Expand fused register-range tokens (`r4-r7` → r4,r5,r6,r7) in a register list. Ranges are
 // numeric-endpoint only (`rN-rM`); a range whose endpoint is an ALIAS (`r4-pc`/`-lr`/`-sp`) is
 // ambiguous and left UNEXPANDED — but its endpoints ARE surfaced as separate tokens so pc/lr
@@ -2698,6 +2690,12 @@ function auditFrameObjects({
     // object's own bytes, both of which the licence refuses by name — so a frame the pre-lift
     // scan would never have licensed passes the check that exists to re-prove the licence.
     //
+    // THE CONTAINMENT IS STRICT AND THE SLACK IS ON THIS SIDE. `taint` is whole-function where the
+    // pre-lift walk is block-local, so a base captured in an earlier block is refused HERE and
+    // accepted THERE. That is the only direction the two can differ in without a wrong answer
+    // reaching a caller, and it is structural rather than lucky: this set is built from a superset
+    // of the facts the walk has. `packages/core/test/thumb-frontend.test.ts` carries the input.
+    //
     // NOT A STRUCT-RETURN TEMP. A one-word frame rules out agbcc's block-copy bases (each needs
     // two words) but NOT the hidden return pointer of a <=4-byte non-integer-like struct, which is
     // exactly one word: `struct S4 { char a,b,c,d; }; struct S4 s = mk(x);` compiles to `add
@@ -3739,6 +3737,18 @@ export function lift(
   // frame address written back INTO its own frame is a different question and keeps its refusal.
   // Both of those exclusions are conditions of the licence, so the post-lift audit re-proves them
   // rather than the weaker "reached memory somehow" (`publishedOutward`, in `auditFrameObjects`).
+  //
+  // EACH OF THE THREE CLAUSES HAS ITS OWN ROW, including the one a reader skips: a word store
+  // through a pool address, in a function that holds a capture, whose stored VALUE is an ordinary
+  // argument publishes nothing, and dropping that clause leaves the whole battery green while the
+  // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
+  // clause without a row is decoration until an input says otherwise.
+  //
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, and the one place they part is worth
+  // knowing: this walk is BLOCK-LOCAL while `taint` is whole-function, so a base captured in an
+  // earlier block is excluded there and not here. The containment still holds — whole-function
+  // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
+  // and more — and the difference therefore lands on the refusing side. Pinned as a row.
   const frameBasePublishedToMemory = heldFrameBaseWalk((ins, held) => {
     if (ins.mnemonic !== 'str' || !held.has(reg(ins.ops[0] ?? ''))) {
       return false;
@@ -3780,15 +3790,33 @@ export function lift(
         // there is no extent, no object and nothing for the audit to prove. Whichever of them is
         // ever lifted, the other must keep refusing, and it can only be seen to if it says so.
         //
-        // BOTH MESSAGES ARE KEPT UNDER THE PUBLISHED MARKER'S LENGTH. The benchmark truncates a
-        // marker to its first 200 characters (`apps/benchmark/src/eval/asmlift.ts`), and the class
-        // pattern that reads them (`apps/web/.../declines.ts`) matches on a phrase early in the
-        // sentence — so a long tail is lost in silence rather than misclassified. Spelled at its
-        // published width, the constant arm on `ProcessOamBuffers` is 186 characters.
+        // THE ARM-DECIDING WORD SURVIVES TRUNCATION; THE TAIL NEED NOT. The benchmark slices a
+        // diagnostic's REASON to 200 characters and prepends the stage afterwards
+        // (`apps/benchmark/src/eval/asmlift.ts`), so a published marker runs to 206 and what is
+        // lost is the end of the sentence. Both readers of it look early: the class pattern
+        // (`apps/web/.../declines.ts`) matches the opening phrase, and CONSTANT/RUNTIME is the
+        // next word after the instruction. On the longest agbcc symbol in the dataset the REASON
+        // does overrun and its tail is cut, while the arm word ends well inside the slice — so the
+        // sentence is shortened and the decision is not. Both arms are measured at that symbol by
+        // `packages/core/test/thumb-frontend.test.ts`, which holds the bound; no length is pinned
+        // here, because a number in a comment goes stale on any rewording and nothing looks.
+        //
+        // THE SPLIT ASKS FOR A SIGN-LESS LITERAL AND THE SIGN IS NOT AN OVERSIGHT. Thumb-1 ADD(6)
+        // (`add rD, sp, #imm`) encodes an unsigned word-scaled immediate: there is no negative
+        // form. The only negative spelling agbcc writes is the prologue's `add sp, sp, #-N`, whose
+        // DESTINATION is sp — excluded by this guard's first clause, one line below. So a signed
+        // constant cannot arrive here, and reading one as a RUNTIME index costs nothing that can
+        // occur. Recompute both halves:
+        //   printf '\t.thumb\nf:\n\tadd r4, sp, #-0x4\n' > /tmp/t.s
+        //   "$ASMLIFT_ARM_AS" -mthumb /tmp/t.s -o /tmp/t.o
+        //   # Error: invalid immediate for address calculation (value = 0xFFFFFFFFFFFFFFFC)
+        //   find "$(git rev-parse --show-toplevel)/apps/benchmark/checkouts" -name '*.s' -print0 |
+        //     xargs -0 grep -hE 'add[ \t]+r[0-9]+,[ \t]*sp,[ \t]*#-' | wc -l        # 0
+        //     (the same scan for `add sp, [sp,] #-N` finds 102, and `add rD, sp, #k` 264)
         if (ins.mnemonic === 'add' && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o))) {
           const srcs = ins.ops.slice(1).filter((o) => !isSpReg(o));
           const written = `\`${ins.mnemonic} ${ins.ops.join(', ')}\``;
-          return srcs.length === 1 && IMM_CONSTANT.test(srcs[0])
+          return srcs.length === 1 && IMM_LITERAL.test(srcs[0])
             ? `the address of a stack local is computed (${written}) — a CONSTANT frame offset; only \`mov rD, sp\` is modelled`
             : `the address of a stack local is computed (${written}) — a RUNTIME index into the frame, which has no extent to model`;
         }
@@ -4050,9 +4078,12 @@ export function lift(
   // RESIDUE: the producer table is agbcc's, so hand-written asm that reserves one word, stages it
   // as a call's fifth argument and ALSO puts sp in an argument register defeats this — the same
   // producer assumption the contiguity filter below makes. The producer is named in the gate
-  // rather than left to the prose: `armv4t` has one compiler entry today, and a second one free to
-  // overlay a dead one-word local with a one-word outgoing area would inherit an acceptance whose
-  // only evidence is an agbcc compile table.
+  // rather than left to the prose, and it is named as DATA — `compilerBehaviors
+  // .oneWordFrameIsTheCapturedObject`, declared in `target.ts` beside the layout facts it belongs
+  // with, because a compiler fact is one field and not a `compiler ==` branch
+  // (`docs/level-tower.md`). `armv4t` has one compiler entry today, and a second one free to
+  // overlay a dead one-word local with a one-word outgoing area has to state this itself rather
+  // than inherit an acceptance whose only evidence is an agbcc compile table.
   //
   // WHICH CONJUNCT REFUSES WHAT, for a reader arriving with a wide frame in hand. klonoa's
   // `LoadBGTilemapData` (a checkout function, not a benchmark row) reserves 0x3C and fails on the
@@ -4063,7 +4094,9 @@ export function lift(
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   const capturedObjectIsTheWholeFrame =
-    target.compiler === 'agbcc' && (frameBasePassedToCallee || frameBasePublishedToMemory) && localArea === 4;
+    target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
+    (frameBasePassedToCallee || frameBasePublishedToMemory) &&
+    localArea === 4;
 
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame

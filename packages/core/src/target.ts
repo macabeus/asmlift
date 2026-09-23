@@ -305,6 +305,25 @@ export interface TargetDescription {
     // nothing. No other frontend calls the analysis today, so the field claims a premise rather
     // than changing a verdict — which is the point: a second armv4t compiler must state it.
     stagesOutgoingArgsInFrame?: boolean;
+    // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
+    // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
+    // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
+    // frame offset 0, and the question this answers is whether the rest of that reservation could
+    // be somebody else's — an outgoing argument staged at [sp,#0], a by-value struct argument's
+    // block-copy destination, or a struct return's hidden pointer.
+    //
+    // Absent ⇒ no such claim, and every `[sp,#k]` store reaching a call unread keeps the refusal
+    // it had before the capability existed. It is a layout fact about ONE compiler and it is not
+    // derivable from the architecture, which is why it is a field and not an `arch ==` branch
+    // (`docs/level-tower.md`).
+    //
+    // Set on agbcc, where it is two compiled producer tables rather than a reading — one per
+    // escape, both written out at the predicate: at one word agbcc stages no outgoing argument
+    // under a captured local (it moves the local above the area and spells its address `add rD,
+    // sp, #4`), and it names a block-copy base with a register only from two words up. The one
+    // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
+    // which the post-lift audit settles per call rather than by size.
+    oneWordFrameIsTheCapturedObject?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -512,6 +531,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
     stagesOutgoingArgsInFrame: true,
+    // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
+    // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
+    oneWordFrameIsTheCapturedObject: true,
   },
 };
 
