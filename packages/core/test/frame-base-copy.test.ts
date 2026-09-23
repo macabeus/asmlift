@@ -431,7 +431,7 @@ describe('the audit judges each frame object on its own bytes', () => {
       // `off` can only be 0 for an untyped object because this is what happens to any other
       // spelling — the clause guarding a nonzero offset is precaution, not a live rule
       expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
-        /only a plain `mov rD, sp` capture is modelled/,
+        /a CONSTANT frame offset; only `mov rD, sp` is modelled/,
       );
     });
 

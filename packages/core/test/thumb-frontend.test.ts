@@ -1310,6 +1310,102 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  // A COMPUTED CAPTURE IS TWO GAPS. `add rD, sp, #k` names a fixed frame offset — an object the
+  // `laddr`/audit model could already represent, missing only its lowering — and `add rD, sp, rX`
+  // names no offset at all, so there is no extent and nothing for the audit to prove. One refusal
+  // covering both is how several gaps come to look like one, and whichever is lifted first the
+  // other has to keep refusing where a reader can see it do so.
+  test('the computed capture names WHICH computed form it refuses', () => {
+    const frame = (capture: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr0, [r4]\n` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    // the constant form says it is constant, and says what IS modelled
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(
+      /computed \(`add r4, sp, #0x4`\) — a CONSTANT frame offset; only `mov rD, sp` is modelled/,
+    );
+    // There is no SIGNED row here and the reason is at the predicate: Thumb-1 ADD(6) has no
+    // negative form, the assembler refuses `add r4, sp, #-0x4`, and the one negative spelling
+    // agbcc does write has sp as its destination and never reaches this guard. A row for it would
+    // be a row for an input no assembler accepts.
+    // the runtime form says the thing that makes it a DIFFERENT gap: no offset, so no extent
+    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(
+      /computed \(`add r4, sp, r1`\) — a RUNTIME index into the frame, which has no extent to model/,
+    );
+    // …and so does the two-operand high-register form, which adds the frame base to whatever rD
+    // already held. It has no immediate operand at all, so a split keyed on "is there a `#`"
+    // would put it on the constant arm and claim an offset nothing names.
+    expect(() => decompile('f', frame('\tadd\tr4, sp\n'), ARMV4T_AGBCC)).toThrow(/a RUNTIME index into the frame/);
+    // both keep the class prefix, so the published marker still classifies as address-taken-local
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  // WHAT THE BENCHMARK ACTUALLY SLICES is the diagnostic's REASON, and the stage word is prepended
+  // AFTERWARDS: `errorMarkers: dec.diagnostics.map((d) => `${d.stage}: ${firstLine(d.reason)}`)`,
+  // where `firstLine` is `s.split('\n')[0].slice(0, 200)`. So a published marker runs to 206 for a
+  // `lift:` diagnostic, and the budget a message has is 200 for the message alone. `packages/core`
+  // cannot import from `apps/`, so both facts are copied here with the command that re-reads them:
+  //   command grep -n 'slice(0, ' -B8 apps/benchmark/src/eval/asmlift.ts
+  const REASON_CHARS = 200;
+
+  // AND THE BUDGET IS NOT MET BY EVERY SYMBOL, which is the thing worth pinning rather than one
+  // instance that happens to fit. The message carries the function's NAME and the instruction's
+  // text, so its length is the caller's as much as this file's. Measured across the agbcc rows in
+  // the artifact, the longest symbol is 37 characters:
+  //   python3 -c "import json;a=json.load(open('apps/benchmark/results/results.json'));\
+  //     print(max((r['id'].split(':')[1] for r in a['results'] if r['id'].endswith(':agbcc')),key=len))"
+  // and at that name, with the widest immediate ADD(6) can encode, the constant arm's reason is
+  // 202 characters and the runtime arm's 204 — each loses its last few in the artifact. That is
+  // acceptable and it is why the assertion below is about CONTENT and not length: both readers of
+  // a marker look at the front of it. The class pattern (`apps/web/.../declines.ts`) matches the
+  // opening phrase, and the word saying which of the two gaps this is ends at 158 and 153. What
+  // must never be true is a marker whose ARM word is cut off, because two different capabilities
+  // then publish the same string — so the bound is on where that word ENDS, with 20 characters of
+  // margin, rather than on a total length no caller controls.
+  const LONGEST_AGBCC_SYMBOL = 'AnimTask_FlashHealthboxOnLevelUp_Step';
+  // the widest `add rD, sp, #k` Thumb-1 can encode: ADD(6)'s immediate is 8 bits, word-scaled
+  const WIDEST_OFFSET = '#0x3fc';
+
+  test.each([
+    ['CONSTANT', `\tadd\tr0, sp, ${WIDEST_OFFSET}\n`],
+    ['RUNTIME', '\tadd\tr0, sp, r1\n'],
+  ])('the computed-capture refusal survives the slice the artifact applies: %s', (arm, capture) => {
+    const sym = LONGEST_AGBCC_SYMBOL;
+    const worst =
+      `${sym}:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr1, [r0]\n` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    let reason = '';
+    try {
+      decompile(sym, worst, ARMV4T_AGBCC);
+    } catch (e) {
+      reason = (e as Error).message.split('\n')[0];
+    }
+    const sliced = reason.slice(0, REASON_CHARS);
+    // the class phrase and the arm word both survive, with the margin stated so a rewording that
+    // eats it is a red test rather than a silently truncated marker
+    expect(sliced).toContain('the address of a stack local is computed');
+    expect(sliced).toContain(arm);
+    expect(sliced.indexOf(arm) + arm.length).toBeLessThanOrEqual(REASON_CHARS - 20);
+  });
+
+  // …and on the one row the corpus actually publishes this from, nothing is lost at all. The
+  // assertion is the BOUND, not today's length: pinned to an exact number, the one way to make
+  // this green after lengthening the message is to update the number — the failure it exists to
+  // prevent — and an improvement that SHORTENS the message fails it for nothing.
+  test('the corpus instance loses nothing to the slice', () => {
+    const real =
+      'ProcessOamBuffers:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, sp, #0x4\n\tstr\tr1, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    let reason = '';
+    try {
+      decompile('ProcessOamBuffers', real, ARMV4T_AGBCC);
+    } catch (e) {
+      reason = (e as Error).message.split('\n')[0];
+    }
+    expect(reason).toMatch(/a CONSTANT frame offset; only `mov rD, sp` is modelled$/);
+    expect(reason.length).toBeLessThanOrEqual(REASON_CHARS);
+  });
+
   test('a refused function names the capability actually missing', () => {
     // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
     // a false attribution that sent the loop to build a thing that already works. Each blocker now
@@ -1361,12 +1457,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(out.source).toContain('use(&sp0)');
     });
 
-    // …and the evidence for all of it is an agbcc compile table, so the gate names agbcc. `armv4t`
-    // has one compiler entry today; a second one free to overlay a dead one-word local with a
-    // one-word outgoing area would otherwise inherit a proof nobody ran for it.
-    test('a second armv4t compiler does not inherit the proof', () => {
-      const notAgbcc = { ...ARMV4T_AGBCC, compiler: 'sdt' };
-      expect(() => decompile('f', addrTaken, notAgbcc, { prototypes: { use: { params: 1 } } })).toThrow(
+    // …and the evidence for all of it is an agbcc compile table, so the gate asks for the layout
+    // to be DECLARED — `compilerBehaviors.oneWordFrameIsTheCapturedObject`, a field and not a
+    // `compiler ==` branch. `armv4t` has one compiler entry today; a second one free to overlay a
+    // dead one-word local with a one-word outgoing area has to run the tables and say so.
+    const { oneWordFrameIsTheCapturedObject: _unprobed, ...unprobedBehaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: unprobedBehaviors };
+
+    test('an armv4t compiler that has not declared the layout does not get the proof', () => {
+      expect(() => decompile('f', addrTaken, undeclared, { prototypes: { use: { params: 1 } } })).toThrow(
         /never reloaded/,
       );
     });
@@ -1387,6 +1486,117 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
       // and the message stays TRUE for what it refuses: the local really is at a computed address
       expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+    });
+
+    // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =
+    // (u32)&tmp` gives a DEVICE the address; the function need not contain a `bl` at all, and
+    // `sa3:sa2__sub_80078D4` contains none. The licence is the same licence — something outside
+    // this function holds the address, so [sp,#0] is an object and not an outgoing argument slot —
+    // and the producer table that bounds it is the publish one, at `frameBasePublishedToMemory`.
+    describe('a one-word frame whose base is PUBLISHED to memory is the same object', () => {
+      // agbcc's shape for `vu32 x = v; *(vu32 *)0x040000D4 = (u32)&x;`, which is `sa2__sub_80078D4`
+      // minus its arithmetic: fill the word, capture sp, store the capture through a pool address.
+      const PUBLISH =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr2, .L4\n\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
+      // The refusal this capability lifts, kept in one place: without it the store at [sp,#0] is
+      // keyed as an SSA slot and the audit refuses the object that names the same byte.
+      const TWO_MODELS = /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#0\] — one byte, two models/;
+
+      test('the published frame base makes [sp,#0] the object', () => {
+        // `volatile` because the address was published: a device reads through it, so a store here
+        // is observable from outside and the qualifier is what reproduces the source.
+        expect(decompile('f', PUBLISH, ARMV4T_AGBCC).source).toBe(
+          's32 f(s32 a0) {\n    volatile u32 sp0;\n    sp0 = a0;\n    *(s32 *)67109076 = &sp0;\n    return a0;\n}\n',
+        );
+      });
+
+      // NOT A BLANKET. Each of these is the same function with ONE fact removed, and each must
+      // still decline on the byte the two models disagree about — otherwise the licence is not
+      // "the address escaped", it is "there is a capture".
+      test('with nothing consuming the capture the refusal stands', () => {
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC)).toThrow(TWO_MODELS);
+      });
+
+      // BOTH HALVES OF ONE RULE — "through a base that is neither sp nor another held capture" —
+      // because each half is its own clause in the predicate and a clause without a witness is
+      // decoration until an input proves otherwise. Dropping the second clause leaves the first
+      // row green, which is exactly how a load-bearing guard comes to read as one.
+      test('a capture stored back into its OWN frame publishes nothing', () => {
+        // the address never leaves: `[sp]` is storage this function already owns, so the store
+        // proves nothing about who else can reach the word
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr1, [sp]'), ARMV4T_AGBCC)).toThrow(
+          TWO_MODELS,
+        );
+        // …and the SAME frame reached through a second capture of it: `mov r2, sp` makes r2 the
+        // frame base too, so `str r1, [r2]` writes the address into the very word it names
+        expect(() =>
+          decompile('f', PUBLISH.replace('\tmov\tr1, sp\n', '\tmov\tr1, sp\n\tmov\tr2, sp\n'), ARMV4T_AGBCC),
+        ).toThrow(TWO_MODELS);
+      });
+
+      test('a HALFWORD store hands over half an address, and is not a publish', () => {
+        // whatever the device reads from there, it is not this object's address
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstrh\tr1, [r2]'), ARMV4T_AGBCC)).toThrow(
+          TWO_MODELS,
+        );
+      });
+
+      // THE STORED VALUE, which is the clause a reader skips because the shape looks like a
+      // publish: a word store through a pool address, in a function that holds a capture. What it
+      // hands the device is `r0` — the incoming argument, not the frame base — so nothing outside
+      // this function learns where the object is.
+      test('a word store through a pool address publishes nothing when the VALUE is not the capture', () => {
+        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr0, [r2]'), ARMV4T_AGBCC)).toThrow(
+          TWO_MODELS,
+        );
+      });
+
+      // THE TWO PREDICATES ARE NOT THE SAME PREDICATE, and this pins the direction their
+      // difference falls in. The pre-lift walk is BLOCK-LOCAL, so a capture taken in the entry
+      // block is not held when a later block stores through it; the audit's `taint` is
+      // whole-function, so it knows. Here the licence's publish arm ACCEPTS (`r2` is neither sp
+      // nor held in `.L2`) and the audit REFUSES (`r2` carries a frame address) — a decline, which
+      // is the only direction a containment can fail in without producing a wrong answer, and it
+      // is not luck: whole-function taint is a superset of block-local held-ness, so the audit
+      // excludes every base the licence excludes and more.
+      test('a base captured in an earlier block is refused by the audit, not the licence', () => {
+        const crossBlock =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
+          '.L2:\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+        expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(
+          /no call takes it and no word store publishes it outside this frame/,
+        );
+      });
+
+      // …and the evidence is an agbcc compile table, exactly as for the callee escape: a second
+      // table, its own shapes, and the same declared layout gating both.
+      test('an armv4t compiler that has not declared the layout does not get the publish proof', () => {
+        expect(() => decompile('f', PUBLISH, undeclared)).toThrow(TWO_MODELS);
+      });
+
+      // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
+      // CALLEE-SAVED register that survives the call in fact. That over-kill is deliberate and it
+      // only ever costs a decline — which is the verdict asserted here, so the over-approximation
+      // is pinned rather than discovered later as a regression.
+      test('a capture held across a call is dropped, and the function declines', () => {
+        const acrossCall =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr2, .L4\n\tmov\tr4, sp\n' +
+          '\tbl\tg\n\tstr\tr4, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+          '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
+        expect(() => decompile('f', acrossCall, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      });
+
+      // A bare register COPY carries the base forward, the same shape the callee scan carries: the
+      // capture and the register that is published need not be the same one.
+      test('the capture reaches the store through a register copy', () => {
+        const viaCopy = PUBLISH.replace('\tmov\tr1, sp\n', '\tmov\tr1, sp\n\tmov\tr3, r1\n').replace(
+          '\tstr\tr1, [r2]',
+          '\tstr\tr3, [r2]',
+        );
+        expect(decompile('f', viaCopy, ARMV4T_AGBCC).source).toContain('&sp0');
+      });
     });
 
     // The arity refusal runs FIRST and still wins. A frame that both stages a fifth argument and
@@ -1632,21 +1842,59 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // register holding sp reaches a `bl` as an argument"; the audit knows exactly what the finished
     // function passes. Where they disagree the licence is the wrong one, and an acceptance whose
     // premise nothing re-checks is the cheapest place for a wrong answer to hide.
+    // A FIVE-ARGUMENT CALL WHOSE CALLEE IS UNDECLARED BELONGS ONLY IN A REFUSING INPUT. Nothing
+    // tells this frontend that `five` takes five arguments, so the `str r4, [sp]` that stages the
+    // fifth is indistinguishable from a store to a local — that is the residual this branch
+    // states as open, and an ACCEPTING assertion over the shape would freeze the accepting answer
+    // as expected output and hand whoever closes the hole a red suite reading as a regression. A
+    // DECLINE is safe under either reading, so the tail stays where the verdict is a decline and
+    // is absent from every control below.
+    const FIVE_ARG_CALL = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n';
+    const PROLOGUE = 'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n';
+    const EPILOGUE = '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const POOL = '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
+
     test('the acceptance is refused when the lifted function does not pass the address to a call', () => {
       // a declared arity DROPS the address: the licence claimed `use` receives the frame base and
       // the emitted call takes nothing — which also loses `five`'s fifth outgoing argument
-      const droppedByArity =
-        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
-        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
-        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
-        /no call in the lifted function takes it/,
-      );
+      const captureAndCall = `${PROLOGUE}\tmov\tr0, sp\n\tbl\tuse\n`;
+      expect(() =>
+        decompile('f', captureAndCall + FIVE_ARG_CALL + EPILOGUE, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
+      ).toThrow(/no call takes it and no word store publishes it outside this frame/);
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
-      expect(decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
-        'use(&sp0)',
-      );
+      expect(
+        decompile('f', captureAndCall + EPILOGUE, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source,
+      ).toContain('use(&sp0)');
+    });
+
+    // THE RE-CHECK IS A CONTAINMENT, and a re-proof weaker than the licence it re-proves is a
+    // second, wider door into the same acceptance. Each input below is `droppedByArity` — the
+    // licence granted by the callee scan, the address then dropped by the declared arity — with
+    // ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
+    // `published` set the audit accepted all three, and `five`'s fifth outgoing argument, really
+    // staged at [sp,#0], was dropped from a compiling, plausible, wrong program.
+    test.each([
+      ['a HALFWORD of the address is not the address', '\tldr\tr2, .L4\n\tstrh\tr1, [r2]\n'],
+      ['a store back into the object’s own bytes publishes to nobody', '\tstr\tr1, [sp]\n'],
+      ['a store through ANOTHER held capture is the same frame', '\tmov\tr2, sp\n\tstr\tr1, [r2]\n'],
+    ])('the premise re-check refuses what the licence refuses: %s', (_why, publish) => {
+      const build = (store: string, fiveArgCall: string) =>
+        `${PROLOGUE}\tmov\tr1, sp\n${store}\tmov\tr0, sp\n\tbl\tuse\n${fiveArgCall}${EPILOGUE}` +
+        (store.includes('.L4') ? POOL : '');
+      expect(() =>
+        decompile('f', build(publish, FIVE_ARG_CALL), ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
+      ).toThrow(/no call takes it and no word store publishes it outside this frame/);
+      // CONTROL, and it is what makes each row a witness rather than a blanket: the same function
+      // with the store widened to a word through a pool address — the one shape the licence does
+      // admit — lifts, so the refusal is about the store and not about the surrounding frame. The
+      // five-argument call is dropped from it for the reason stated above the fixture: a control
+      // is an ACCEPTING assertion, and that tail has no declared callee to referee it.
+      expect(
+        decompile('f', build('\tldr\tr2, .L4\n\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC, {
+          prototypes: { use: { params: 0 } },
+        }).source,
+      ).toContain('&sp0');
     });
 
     // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an

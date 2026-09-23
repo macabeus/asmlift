@@ -89,7 +89,7 @@ describe('the two witnesses must agree, and a disagreement declines naming what 
   test('a one-word frame cannot be both a callee’s argument slot and an addressable local', () => {
     const both = HEAD + '\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tbl\tfive\n\tmov\tr0, sp\n\tbl\tuse\n' + TAIL('0x4');
     expect(() => src(both, { ...P5, use: { params: 1, returnsVoid: true } })).toThrow(
-      /one-word frame is an object whose address is passed to a callee, and the two name the same word/,
+      /one-word frame is an object whose address escapes the function, and the two name the same word/,
     );
   });
 

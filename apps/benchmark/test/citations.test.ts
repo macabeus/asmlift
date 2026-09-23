@@ -137,6 +137,33 @@ describe('every cited benchmark row exists', () => {
   });
 });
 
+// A SYMBOL COPIED ACROSS THE PACKAGE BOUNDARY IS A CITATION TOO, and it goes stale the same way.
+// `packages/core` may not import from `apps/`, so a core test that needs a fact about the DATASET
+// copies it in with the command that re-reads it — which is the honest thing to do and is checked
+// by nothing until the dataset moves. `thumb-frontend.test.ts` pins the worst case for a decline
+// message's length at the longest agbcc symbol the corpus holds, and every figure in that test's
+// reasoning is that symbol's length. A longer row arriving would leave the test measuring the
+// wrong worst case, silently, while staying green.
+describe('a dataset fact a core test copied in', () => {
+  const SOURCE = 'packages/core/test/thumb-frontend.test.ts';
+  const longestAgbccSymbol = rows
+    .filter((r) => r.id.endsWith(':agbcc'))
+    .map((r) => r.id.split(':')[1])
+    .reduce((a, b) => (b.length > a.length ? b : a), '');
+
+  it('names the longest agbcc symbol the committed artifact carries', () => {
+    const src = readFileSync(join(ROOT, SOURCE), 'utf8');
+    const m = /LONGEST_AGBCC_SYMBOL = '([^']+)'/.exec(src);
+    expect(m, `${SOURCE} no longer declares LONGEST_AGBCC_SYMBOL — re-point this gate or drop it`).not.toBeNull();
+    expect(
+      m![1],
+      `${SOURCE} pins its marker-length worst case at '${m?.[1]}', and the longest agbcc symbol in ` +
+        `results.json is '${longestAgbccSymbol}' (${longestAgbccSymbol.length} chars). The test is ` +
+        `measuring a shorter name than the corpus has, so its margin is not the corpus's margin.`,
+    ).toBe(longestAgbccSymbol);
+  });
+});
+
 describe('the retired-row register', () => {
   it('names no row the committed artifact still carries — by identity under its repository, not by id', () => {
     // A retired entry that is really a live row would excuse that row's disappearance from the

@@ -160,7 +160,7 @@ describe('the contiguity filter, and the frames that refuse outright', () => {
 
   test('a one-word frame that is an addressable object cannot also be a callee’s argument slot', () => {
     const r = run(line([st(0), call('five', 1)]), chain(1), 4, true);
-    expect(r.blocker).toMatch(/one-word frame is an object whose address is passed to a callee/);
+    expect(r.blocker).toMatch(/one-word frame is an object whose address escapes the function/);
   });
 
   test('a captured one-word frame with no declared 5th argument still lifts', () => {
