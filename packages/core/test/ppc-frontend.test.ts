@@ -138,6 +138,28 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('control: no gap, so the contiguous count stands', () => {
     expect(dis('nogap', '0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n')).toContain('func(1, 3)');
   });
+  // A DECLARATION THIS FRONTEND CANNOT HONOUR IS A REFUSAL, NOT AN ARITY. `void llsink(long long)`
+  // spends two argument registers on one parameter, and this frontend turns every argument
+  // register it reads into its own value — so obeying the declaration hands `llsink` r3 alone,
+  // which on big-endian PowerPC is the HIGH half, and drops the low one. That is a compiling,
+  // plausible, wrong program with no gap in it, which is the one output this frontend may not
+  // produce. Measured before it was fixed: the call below lifted to `return llsink(1);`.
+  test('a parameter declared wider than a register refuses, rather than passing one half of it', () => {
+    const asm =
+      '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tllsink\nc:\tblr\n';
+    expect(() => decompile('c', asm, PPC_MWCC, { prototypes: { llsink: { params: ['long long'] } } })).toThrow(
+      /one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register/,
+    );
+  });
+
+  // The other side of the same rule, and the reason it keys on a width it KNOWS: a spelling
+  // `declaredWidth` cannot read answers `undefined` for a project typedef exactly as it does for a
+  // `double`, so refusing on it would refuse every callee declared through one.
+  test('a spelling the width reader cannot size is still one word, not a refusal', () => {
+    const asm = '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tg\nc:\tblr\n';
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } }).source).toContain('g(1)');
+  });
+
   test('and a prototype answers the question the gap cannot', () => {
     // `protoArity` is consulted before the guess, so a declared callee is unaffected by the gap.
     const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';

@@ -871,7 +871,7 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 69 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -906,6 +906,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -971,7 +972,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 118 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about 123 distinct messages across 11 files, which
   // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {

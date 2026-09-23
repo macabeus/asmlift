@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 119 distinct decline messages (the texts reached by
+// `packages/core/src` throws 123 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
 // replacing every interpolation with a placeholder). 71 of them classify as "other". Some belong
@@ -54,6 +54,8 @@
 //   frontend/disasm.ts   7  the objdump `...` elision family
 //   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
 //                           two-armed branch denylist, whose template is interpolation end to end
+//                           (its wide-parameter refusal is NOT here — it carries `wide-call-arg`'s
+//                           phrase because it is that capability gap seen from the other frontend)
 //   frontend/format.ts   1  the input/frontend mismatch — an input error
 //   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
 //

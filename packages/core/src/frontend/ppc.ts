@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, protoArity } from '../proto';
+import { type Prototypes, declaredWidth, protoArity } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -788,6 +788,33 @@ export function lift(
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
+          // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR, and this frontend has no pair.
+          // Every argument register it reads becomes its own value, so a declaration that spends
+          // two registers on one parameter is honoured by handing the callee one HALF — the high
+          // half here, since PowerPC is big-endian — and losing the other. That is a compiling,
+          // plausible, wrong program rather than a gap, so it refuses.
+          //
+          // THE DECLARATION IS THE ONLY WAY TO KNOW, which is why the check sits on it: a guessed
+          // arity counts argument registers, and a register cannot be half a parameter.
+          //
+          // A SPELLING `declaredWidth` CANNOT READ IS NOT REFUSED. It answers `undefined` for a
+          // project typedef as readily as for a `double`, and treating that as "might be wide"
+          // would refuse every call to a callee declared through a typedef. Only a width this
+          // KNOWS to exceed a register is a refusal; the unknown one keeps the reading it had.
+          //
+          // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
+          // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
+          const declaredTypes = Object.hasOwn(prototypes, sym) ? prototypes[sym]?.params : undefined;
+          const wideAt = (Array.isArray(declaredTypes) ? declaredTypes : []).findIndex(
+            (t) => (declaredWidth(t) ?? 32) > 32,
+          );
+          if (wideAt >= 0) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': one half of a 64-bit value would be handed to '${sym}' — its parameter ` +
+                `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+                'register as its own value rather than building the pair the ABI passes it in',
+            );
+          }
           const declared = protoArity(prototypes[sym]);
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
