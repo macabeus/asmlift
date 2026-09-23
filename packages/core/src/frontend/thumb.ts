@@ -1979,11 +1979,21 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
   // A C identifier that is NOT a `.L` code label → the address of a named global, optionally with
   // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a`, `gOamMallocBuffer+-0x8` —
   // agbcc pre-computes a fixed element's address into the pool rather than emitting an add, and a
-  // NEGATIVE bias is how `&arr[i - k]` reaches it). The addend stays in VALUE space:
-  // the consumer emits `gaddr` then an explicit `add`, the exact spelling the register-materialised
-  // `ldr rN,=gSym; add rN,#k` shape already lowers to — so it renders through the same audited
-  // cast-based path (`((u8 *)&gSym) + k`), never through a typed-pointer scale that a
-  // rendered-vs-value addend could silently multiply (the DEREF-TYPING class).
+  // NEGATIVE bias is how `&arr[i - k]` reaches it). The addend stays in VALUE space: the consumer
+  // emits `gaddr` then an explicit `add`, and the renderer then spells that however it spells any
+  // other global-plus-offset. It DOES reach a typed-pointer index where the offset divides the
+  // access width — `.word gTab+-0x8` under an `ldr` renders `((s32 *)&gTab)[-2]` — and that is
+  // safe here not because the path avoids the scale but because it is the SAME renderer, on the
+  // same value, as the register-materialised `ldr rN,=gSym; add rN,#k` shape: measured, both
+  // spell `((s32 *)&gTab)[2]` at +8 and both fall back to `*(s32 *)((u32)&gTab + 6)` at +6, so a
+  // non-dividing offset can never become a fractional index.
+  //
+  // A magnitude the 32-bit gate lets through is a magnitude, not the signed addend, and the two
+  // can differ: `gTab-0xffffffff` renders `(u32)&gTab + -4294967295` where `as` gives `+1`. That
+  // is the same ADDRESS rather than a lucky one, and it was checked on objects rather than by
+  // reading C89's typing rules — agbcc compiles that expression and `(u32)&gTab + 1` to
+  // byte-identical `.s` AND `.o`, `.word gTab+0x1` under `R_ARM_ABS32 gTab`, as it does
+  // `+ -2147483649` and `+ 2147483647`.
   const sm = poolWordSymbol(w);
   if (sm) {
     return sm.addend === null

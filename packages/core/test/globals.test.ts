@@ -121,6 +121,28 @@ describe('global-variable recovery', () => {
     expect(word('0X8')()).toContain('return 8;');
   });
 
+  // A POOL ADDEND AND A MATERIALISED ADD ARE THE SAME VALUE, and this is what says so. The addend
+  // reaches a typed-pointer INDEX where it divides the access width, which is where a
+  // rendered-vs-value confusion would show up as a fractional or multiplied element. It cannot,
+  // because the renderer is the same one the register-materialised `ldr rN,=gSym; add rN,#k` shape
+  // goes through: both spell the index at +8, and both fall back to the byte cast at +6. Pinning
+  // the PAIR rather than either spelling is the point — a change that moved one and not the other
+  // would be the drift, and each alone would still look right.
+  test('a pool addend and a materialised add render the same, including where neither scales', () => {
+    const pool = (addend: string) =>
+      thumb('back', `\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgTab+${addend}\n`);
+    const reg = (k: string) =>
+      thumb('back', `\tldr\tr1, .L1\n\tadd\tr1, r1, #${k}\n\tldr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgTab\n`);
+    expect(pool('0x8')).toContain('((s32 *)&gTab)[2]');
+    expect(reg('8')).toContain('((s32 *)&gTab)[2]');
+    expect(pool('0x6')).toContain('*(s32 *)((u32)&gTab + 6)');
+    expect(reg('6')).toContain('*(s32 *)((u32)&gTab + 6)');
+    // The negative side scales too, and exactly: `-8` over a 4-byte access is `[-2]`, never a
+    // fraction, and `-6` falls back the same way the positive one does.
+    expect(pool('-0x8')).toContain('((s32 *)&gTab)[-2]');
+    expect(pool('-0x6')).toContain('*(s32 *)((u32)&gTab + -6)');
+  });
+
   test('a pool word whose ADDEND refuses still names its symbol, and still vetoes promotion', () => {
     // The refusal is about the VALUE, and the two readers ask different questions of the same
     // word: `poolNamesASymbol` asks only whether anything external is named here. A word whose
