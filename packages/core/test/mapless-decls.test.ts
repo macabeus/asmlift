@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations, selfDeclaredContextFor } from '../src/declare';
+import type { Prototypes } from '../src/proto';
 import { type RefusedDeclarationReason, enumerateCandidates } from '../src/rank';
 import { type SymbolMap, symbolsByName } from '../src/symbols';
 import { ARMV4T_AGBCC, C_TYPEDEFS, MIPS_IDO } from '../src/target';
@@ -140,9 +141,22 @@ describe('the width authority is the candidate\u2019s own IR, map or no map', ()
 });
 
 describe('the refusals — a name a declaration cannot claim is left undeclared, and REPORTED', () => {
-  const refusalsFor = (name: string, asm: string, target = MIPS_IDO, expectThrow = false) => {
+  // One function that both CALLS `DoThing` and takes its address, and takes its own — so the
+  // call-target and self-name exclusions are exercised on one body rather than simulated.
+  const callsAndAddresses =
+    '\tpush\t{lr}\n\tldr\tr0, .L1\n\tbl\tDoThing\n\tldr\tr0, .L1+0x4\n\tpop\t{r1}\n\tbx\tr1\n' +
+    '.L1:\n\t.word\tDoThing\n\t.word\tf\n';
+
+  const refusalsFor = (
+    name: string,
+    asm: string,
+    target = MIPS_IDO,
+    expectThrow = false,
+    prototypes: Prototypes = {},
+  ) => {
     const refused: { name: string; reason: RefusedDeclarationReason }[] = [];
     const opts = {
+      prototypes,
       onRefusedDeclaration: (n: string, reason: RefusedDeclarationReason) => refused.push({ name: n, reason }),
     };
     if (expectThrow) {
@@ -188,10 +202,7 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     // function's own name conflicts with its definition. Both exclusions live in
     // collectSymbolRefs; the report is what makes them the same kind of fact as the other three,
     // instead of two silent ones the UI's refusal list could never be complete without.
-    const body =
-      '\tpush\t{lr}\n\tldr\tr0, .L1\n\tbl\tDoThing\n\tldr\tr0, .L1+0x4\n\tpop\t{r1}\n\tbx\tr1\n' +
-      '.L1:\n\t.word\tDoThing\n\t.word\tf\n';
-    const { cands, refused } = refusalsFor('f', `f:\n${body}`, ARMV4T_AGBCC);
+    const { cands, refused } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC);
     expect(cands.length).toBeGreaterThan(0);
     expect(cands[0].source).toContain('DoThing(&DoThing)'); // both names really are spelled
     for (const c of cands) {
@@ -201,6 +212,51 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
       { name: 'DoThing', reason: 'call-target' },
       { name: 'f', reason: 'self-name' },
     ]);
+  });
+
+  // …AND THE REFUSAL LIFTS EXACTLY WHERE THE PROJECT SUPPLIED WHAT IT SAID IT LACKED. The reason
+  // the blanket existed is in its own doc comment — `void F(void);` hard-errors over a call that
+  // passes arguments, and with no arity knowledge leaving the name undeclared is the one honest
+  // option. A prototype IS that knowledge, so where one spells a complete C signature the callee
+  // is declared from the project's own text, and where it does not the blanket still covers it.
+  //
+  // The same asm and the same name throughout, so what moves is the DECLARATION and nothing else.
+  // It is load-bearing and not cosmetic: an implicit declaration is `int`, which is why the return
+  // type is what the row `synthetic:llfrom` is scored on. The case for an EMPTY table is the test
+  // above — a name no entry mentions is held by `Object.hasOwn`, not by the gate these two probe.
+  test.each([
+    ['a bare argument-register count, which names no C type', { DoThing: { params: 1 } }],
+    ['a typed list with no stated return', { DoThing: { params: ['u32'] } }],
+  ])('a call target the prototype table cannot spell is still refused: %s', (_label, prototypes) => {
+    const { cands, refused } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC, false, prototypes);
+    for (const c of cands) {
+      expect((c.symbolRefs ?? []).map((r) => r.name)).toEqual([]);
+    }
+    expect(refused).toEqual([
+      { name: 'DoThing', reason: 'call-target' },
+      { name: 'f', reason: 'self-name' },
+    ]);
+  });
+
+  test('a call target the project declared completely is declared, and no longer refused', () => {
+    const { cands, refused } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC, false, {
+      DoThing: { params: ['u32'], returns: 'long long' },
+    });
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      expect(renderDeclarations(c.symbolRefs ?? [])).toBe('long long DoThing(u32);\n');
+    }
+    // the call target is gone from the report; the function's own name is not
+    expect(refused).toEqual([{ name: 'f', reason: 'self-name' }]);
+  });
+
+  // A PARAMETERLESS LIST IS `(void)`, NEVER `()`. An empty C89 parameter list declares nothing
+  // about the arguments, so gcc-2.9 keeps promoting them and the declaration buys nothing.
+  test('a callee declared with no parameters is spelled (void)', () => {
+    const { cands } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC, false, {
+      DoThing: { params: [], returns: 'long long' },
+    });
+    expect(renderDeclarations(cands[0].symbolRefs ?? [])).toBe('long long DoThing(void);\n');
   });
 
   test('a global named like the emitter\u2019s own storage kills the SPELLING, not the line', () => {

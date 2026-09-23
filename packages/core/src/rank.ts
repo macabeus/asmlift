@@ -879,6 +879,9 @@ export function enumerateCandidates(
     accessFacts,
     mapSymbols,
     targetNames: new Set(targetSymbols.keys()),
+    // The MERGED table, the same one the frontend was handed above, so the declaration a candidate
+    // carries and the lift that produced it cannot state different things about a callee.
+    prototypes,
     refuse,
   });
   // THE RESPELL SET, as a function whose PARAMETER LIST is the invariant the tree skip below

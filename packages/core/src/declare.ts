@@ -19,8 +19,10 @@
 //     ldrb+lsl+asr where u8 is ldrb alone, so a guessed signedness is a wrong-bytes decl;
 //   • `volatile` is load-bearing (a non-volatile MMIO decl lets the compiler fold/reorder
 //     accesses), `const` is the ROM-table spelling;
-//   • code symbols get `void Name(void);` ONLY when value-referenced — call targets are never
-//     in `symbolRefs` (core excludes them: prototyping a called symbol is C89 poison);
+//   • code symbols get `void Name(void);` when value-referenced, and a CALL TARGET gets its own
+//     prototype re-spelled from the project's `FnProto` — only where that states both a typed
+//     parameter list and a `returns`, because `void Name(void);` over a call that passes
+//     arguments is C89 poison (core decides it: `spellableProto`);
 //   • nothing guesses, with TWO documented exceptions: a SHAPED symbol without the facts to
 //     declare faithfully is SKIPPED — the candidate then fails to compile LOUDLY and is
 //     dropped by rankBy. Exception one is the 4-byte signless-non-pointer cell (see
@@ -144,7 +146,7 @@ function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: 
 export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
-  for (const { name, info, access } of refs) {
+  for (const { name, info, access, proto } of refs) {
     // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
     // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
     // where the macro emits the numeric one the target shows).
@@ -152,10 +154,20 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       lines.push(`#define ${name} ${info.macroBody}`);
       continue;
     }
+    // A CALL TARGET the project declared completely — its own prototype, re-spelled from the
+    // parameter and return type texts the project wrote. This is the one declaration here that
+    // is load-bearing for the CALL and not only for the name: an implicit declaration is `int`,
+    // which narrows a 64-bit return and adds the sign-extension the target does not have. A
+    // parameterless list is spelled `(void)`, never `()`, because `()` declares nothing about
+    // the arguments and gcc-2.9 then promotes them.
+    if (proto !== undefined) {
+      lines.push(`${proto.returns} ${name}(${proto.params.length > 0 ? proto.params.join(', ') : 'void'});`);
+      continue;
+    }
     if (info.kind === 'code') {
       // value-referenced code symbol ((u32)Func): any prototype makes the name visible, and
-      // the address is arity-independent. Call targets never reach this module (core excludes
-      // them from symbolRefs — see collectSymbolRefs).
+      // the address is arity-independent. A call target reaches this module only with a complete
+      // prototype, which the branch above already printed — see collectSymbolRefs.
       lines.push(`void ${name}(void);`);
       continue;
     }
