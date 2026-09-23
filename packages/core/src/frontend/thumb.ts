@@ -1823,7 +1823,13 @@ function decode(
 // The label-operand shape shared by BOTH pool paths: agbcc `.Lpool`, pret `_08012358`, with an
 // optional `+N` byte offset. Kept in one place so the const and symbol resolvers cannot drift
 // (they did — the drift fabricated phantom pointer params on symbol-pool loads).
-const POOL_LABEL = /^([A-Za-z_.$][\w.$]*)(?:\s*\+\s*(0x[0-9a-fA-F]+|\d+))?$/;
+const POOL_LABEL_NAME = String.raw`[A-Za-z_.$][\w.$]*`;
+const POOL_LABEL = new RegExp(String.raw`^(${POOL_LABEL_NAME})(?:\s*\+\s*(0x[0-9a-fA-F]+|\d+))?$`);
+// The same name with whatever follows it left unread. "Does this operand NAME a pool?" has to be
+// answerable for an operand POOL_LABEL rejects, because the two answers POOL_LABEL can give are
+// not the two the caller needs: a rejection there means BOTH "an ordinary memory base" and "a pool
+// at an offset I cannot read", and the caller can only treat one of them as a decline.
+const POOL_LABEL_LEAD = new RegExp(String.raw`^${POOL_LABEL_NAME}`);
 
 // The pool WORD shape, shared by both readers of a pool's CONTENTS for the same reason POOL_LABEL
 // is shared by both readers of its operand: one symbol, optionally plus or minus one literal
@@ -1865,15 +1871,27 @@ type PoolRef =
  *  the operand does NOT name a pool (a real register/memory base → the normal load path). When it
  *  DOES name a pool the outcome is const | gaddr | unmodelled — NEVER a fall-through to the load
  *  path, which would materialise the pool label as a phantom pointer parameter (a silent
- *  miscompile). `unmodelled` is the caller's cue to decline loud, and it has exactly three
- *  inhabitants, all of them below: an offset that does not select a whole word of the pool
- *  (misaligned, or past its end); a word that matched the numeric shape but does not parse to a
- *  finite value; and a word that is neither a number nor `symbol±offset` — a `.L` code label is
- *  here, since the symbol pattern admits no leading dot. A `sym+N` word is NOT unmodelled: it is
- *  the gaddr-plus-addend path and lifts cleanly. */
+ *  miscompile). `unmodelled` is the caller's cue to decline loud, and it has exactly four
+ *  inhabitants, all of them below: an offset spelled something other than `+N`; an offset that
+ *  does not select a whole word of the pool (misaligned, or past its end); a word that matched the
+ *  numeric shape but does not parse to a finite value; and a word that is neither a number nor
+ *  `symbol±offset` — a `.L` code label is here, since the symbol pattern admits no leading dot. A
+ *  `sym+N` word is NOT unmodelled: it is the gaddr-plus-addend path and lifts cleanly. */
 function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | null {
   const m = operand.match(POOL_LABEL);
   if (!m) {
+    // The operand is not `LABEL[+N]`, but it may still name a pool at an offset spelled some other
+    // way — `.L1-0x4`, `.L1+-0x4`. Falling through to `null` there says "not a pool", and the load
+    // path then materialises the label as a phantom pointer parameter: the same silent miscompile
+    // the readers of a pool's CONTENTS were unified to prevent, one level up in its OPERAND.
+    // Refusing rather than widening, because nothing produces the shape: over the nine benchmark
+    // checkouts (31,842 `.s` files) all 33,753 label-operand `ldr` occurrences are spelled `LABEL`
+    // or `LABEL+N`, so a grammar for the rest would be a capability nothing can check.
+    const lead = operand.match(POOL_LABEL_LEAD);
+    if (lead && dataWords.has(lead[0])) {
+      const off = operand.slice(lead[0].length).trim();
+      return { kind: 'unmodelled', why: `offset '${off}' into pool '${lead[0]}' is not a '+N' byte offset` };
+    }
     return null;
   }
   const words = dataWords.get(m[1]);

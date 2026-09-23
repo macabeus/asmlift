@@ -84,6 +84,21 @@ describe('global-variable recovery', () => {
     }
   });
 
+  // The same rule one level up, in the pool's OPERAND rather than in its words. `poolRef` has two
+  // ways to say no and they are not interchangeable: `null` means "this operand is not a pool" and
+  // hands the load to the ordinary memory path, where the label becomes a phantom pointer
+  // parameter. An operand that DOES name a pool, at an offset spelled something the reader cannot
+  // read, has to be the loud decline instead — the wrong answer here is a wrong address that
+  // compiles and scores, exactly as it is for the words. `+0x4` is the control: the offset shape
+  // that IS read keeps reading.
+  test('a pool loaded at an offset the reader cannot read declines, never a phantom param', () => {
+    const load = (op: string) => () => thumb('back', `\tldr\tr0, ${op}\n\tbx\tlr\n.L1:\n\t.word\tgA\n\t.word\tgB\n`);
+    expect(load('.L1+0x4')()).toContain('return &gB;');
+    for (const op of ['.L1+-0x4', '.L1-0x4', '.L1++0x4']) {
+      expect(load(op), op).toThrow("into pool '.L1' is not a '+N' byte offset");
+    }
+  });
+
   test('a pool whose only symbolic word carries a negative addend still VETOES numeric promotion', () => {
     // The numeric-promotion veto (poolNamesASymbol) asks whether THIS asm's pool names anything
     // external: if it does, agbcc would have emitted the numeric word symbolically too had the
