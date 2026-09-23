@@ -89,12 +89,12 @@ describe('what refuses', () => {
     expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
   });
 
-  // A CALL DESTROYS THE HIGH HALF WITHOUT NAMING IT — r1 is caller-saved. agbcc cannot build this
-  // shape (a 64-bit return keeps both halves across the call; a 32-bit one carries the epilogue
-  // above), so the inhabitant is hand-written asm, which is what the playground lifts. `sink` is
-  // declared void-of-nothing so that the call reads no argument register: with an arity to guess
-  // it would read the low half and hit the refusal below instead, and then this would be testing
-  // that one.
+  // A CALL DESTROYS THE HIGH HALF WITHOUT NAMING IT — r1 is caller-saved — and the value graph
+  // goes on answering the pre-call value. agbcc's own shape copies the pair back out of r4:r5 after
+  // the call (`llkeep`); the ones where r1 stays the callee's are hand-written, which is what the
+  // playground lifts. `sink` is declared void-of-nothing so that the call reads no argument
+  // register: with an arity to guess it would read the low half and hit the refusal below instead,
+  // and then this would be testing that one.
   const handWritten = (mid: string[]) =>
     ['\t.code\t16', '\t.globl\tlokeep', '\t.thumb_func', 'lokeep:', '\tpush\t{r4, lr}', '\tbl\t__muldi3', ...mid]
       .concat(['\tadd\tr0, r4, #0', '\tpop\t{r4}', '\tpop\t{pc}', ''])
@@ -112,6 +112,25 @@ describe('what refuses', () => {
       prototypes: { sink: { params: 0 } },
     }).source;
     expect(src).toMatch(/^s64 lokeep\(/);
+  });
+
+  test('a pair held across a call and copied back is returned', () => {
+    const src = decompile('llkeep', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 0 } } }).source;
+    expect(src).toBe('s64 llkeep(s64 a0, s64 a1) {\n    g();\n    return a0 * a1;\n}\n');
+  });
+
+  // r3 is caller-saved too, so what it holds after the call is the callee's, whatever the value
+  // graph still answers for it.
+  test('…and a copy back out of a register the call destroyed is not', () => {
+    const mid = ['\tadd\tr4, r0, #0', '\tadd\tr3, r1, #0', '\tbl\tsink', '\tadd\tr1, r3, #0'];
+    const src = decompile('lokeep', handWritten(mid), ARMV4T_AGBCC, { prototypes: { sink: { params: 0 } } }).source;
+    expect(src).toMatch(/^s32 lokeep\(/);
+  });
+
+  // THE WIDTH IS READ OFF WHAT r1 HOLDS, so an r1 the function overwrote is not the pair's.
+  test('a high register overwritten after the pair is not a 64-bit return', () => {
+    const src = decompile('lokeep', handWritten(['\tadd\tr4, r0, #0', '\tmov\tr1, #0x0']), ARMV4T_AGBCC).source;
+    expect(src).not.toMatch(/^s64 lokeep\(/);
   });
 
   // A HALF THE FUNCTION ALSO USES ON ITS OWN IS A WORD. `add r4,r0,#0` copies out r0, which is

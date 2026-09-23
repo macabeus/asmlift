@@ -3569,19 +3569,24 @@ export function lift(
    *  half of some `v`, and the pair's high register has to still hold that same `v`'s high half when
    *  the function returns.
    *
-   *  THE SECOND HALF IS READ OFF THE ASM, NOT OFF THE VALUE GRAPH, because the frame is transparent
-   *  to it. `push {lr}; bl __muldi3; pop {r1}; bx r1` pops the RETURN ADDRESS into r1 and this
-   *  frontend models no write for a `pop` at all, so a register read there still answers `hi32` —
-   *  and that is not a corner: it is how agbcc spells a 32-bit-returning function's interworking
-   *  epilogue. The 64-bit-returning twin pops into r2 instead, precisely because it may not touch
-   *  the pair. So the epilogue's choice of scratch register is what pins the width, and the only
-   *  place that fact exists is the instructions.
+   *  THE SECOND HALF IS READ OFF THE VALUE GRAPH AND THE ASM TOGETHER, because each is blind to
+   *  what the other sees. The value graph follows the high half through register copies — agbcc
+   *  returns `s64 f(s64 a, s32 b){ return a + b; }` through `add r1,r3,#0`, which writes r1 with the
+   *  very value `hi32` named — and the asm sees the writes the value graph cannot: `push {lr}; bl
+   *  __muldi3; pop {r1}; bx r1` pops the RETURN ADDRESS into r1, and this frontend models no write
+   *  for a `pop` at all, so a register read there still answers `hi32`. That is not a corner: it is
+   *  how agbcc spells a 32-bit-returning function's interworking epilogue. The 64-bit-returning twin
+   *  pops into r2 instead, precisely because it may not touch the pair. So the epilogue's choice of
+   *  scratch register is what pins the width, and the only place that fact exists is the
+   *  instructions: a `pop` or a control transfer that names the high register after the pair is
+   *  refused, and so is a `bx` through it, which is a return address by definition.
    *
-   *  A CALL KILLS IT WITHOUT NAMING IT: the high register is caller-saved, so a `bl` between the
-   *  pair and the return destroys the high half while mentioning nothing. agbcc cannot build that
-   *  shape — a function that returns 64 bits keeps both halves across the call, and one that
-   *  returns 32 has the discriminating epilogue above — so the witness for this arm is hand-written
-   *  asm, which the playground lifts and no oracle referees.
+   *  A CALL KILLS IT WITHOUT NAMING IT, and the value graph cannot see that: the high register is
+   *  caller-saved, so a `bl` destroys it while mentioning nothing, and `ssa.ts` goes on answering
+   *  the pre-call value. What brings it back is a COPY into it, after the call, out of a register
+   *  the call preserves — how agbcc returns a pair it held across a call, `s64 x = a*b; g(); return
+   *  x;` parking the halves in r4:r5 and copying them back — and the value graph then says what
+   *  the copy carried.
    *
    *  BLOCK-LOCAL, like every other acceptance here. A pair produced in another block reaches this
    *  return through phis that the frame ops are equally invisible to, so there is no answer to give
@@ -3598,18 +3603,31 @@ export function lift(
       return null;
     }
     const hi = target.argRegs[1];
+    const held = halfOf.get(readVar(hi, bi));
+    if (held?.half !== 'hi' || held.whole !== a.whole) {
+      return null;
+    }
     const instrs = asmBlocks[bi].instrs;
     const from = instrs.indexOf(a.at);
     if (from < 0) {
       return null;
     }
+    let clobbered = false;
     for (const ins of instrs.slice(from + 1)) {
-      const call = ins.mnemonic === 'bl' || ins.mnemonic === 'blx';
-      if ((call && callClobbers.includes(hi)) || mentionsReg(ins, hi)) {
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        clobbered ||= callClobbers.includes(hi);
+        continue;
+      }
+      if ((ins.mnemonic === 'pop' || classifyXfer(ins) !== null) && mentionsReg(ins, hi)) {
         return null;
       }
+      const [d, src, k] = ins.ops.map(reg);
+      const copy = /^movs?$/.test(ins.mnemonic) ? k === undefined : /^adds?$/.test(ins.mnemonic) && immEq(k, 0);
+      if (copy && d === hi && isThumbReg(src) && !callClobbers.includes(src)) {
+        clobbered = false;
+      }
     }
-    return a.whole;
+    return clobbered ? null : a.whole;
   };
 
   // IS A BARE `mov rD, sp` STILL HELD, UNMODIFIED, WHEN `consumes` FIRES? Both ways an agbcc frame

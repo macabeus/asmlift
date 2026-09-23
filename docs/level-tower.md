@@ -601,9 +601,9 @@ two divides and both signedness pins then agree. An unstamped call stays 32, whi
 of a callee nobody declared.
 
 **The frontend decides THIS function's width, because only the asm can** — `frontend/thumb.ts`
-reads its RETURN width off the epilogue rather than off the value graph: `pop {r2}` cannot touch the
-return pair, `pop {r1}` fills its high register with the return address, and the two functions are
-otherwise identical.
+reads its RETURN width off the value graph AND the epilogue: r1 has to hold the same value's high
+half, through any register copies, and `pop {r2}` cannot touch the return pair where `pop {r1}` fills
+its high register with the return address — two functions otherwise identical.
 
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:

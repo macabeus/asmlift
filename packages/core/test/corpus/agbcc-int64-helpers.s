@@ -5,6 +5,7 @@
 @   s32 lomul(s64 a, s64 b){ return (s32)(a*b); }
 @   s32 halfshare(s64 a, s64 b){ return (s32)(a*b) + (s32)a; }
 @   s32 himul(s64 a, s64 b){ return (s32)((a*b)>>32); }
+@   void g(void); s64 llkeep(s64 a, s64 b){ s64 x = a*b; g(); return x; }
 @
 @ The third one is a parameter this function uses as a WORD: `b` is both the shift count and an
 @ addend, and it arrives in r2 — a third argument register that is no part of the pair in r0:r1.
@@ -19,6 +20,9 @@
 @ only projection whose C spelling needs its operand to RENDER 64 bits wide, and here it already
 @ does — `a*b` is a multiply over two 64-bit parameters. So it is the row that fails when the
 @ high half is cast to 64 bits unconditionally rather than only where the rank is missing.
+@
+@ `llkeep` holds the pair across a call in r4:r5 and copies it back into r0:r1: the call destroys r1
+@ without naming it, and the copy out of a register the call preserves is what returns the pair.
 @
 @ `llmul` AND `lomul` ARE THE WIDTH PAIR, and they differ in one register. `llmul` returns the
 @ pair and pops its scratch into r2; `lomul` returns a word and pops into r1, which is the pair's high
@@ -109,3 +113,20 @@ himul:
 	bx	r1
 .Lfe6:
 	.size	 himul,.Lfe6-himul
+	.align	2, 0
+	.globl	llkeep
+	.type	 llkeep,function
+	.thumb_func
+llkeep:
+	push	{r4, r5, lr}
+	bl	__muldi3
+	add	r5, r1, #0
+	add	r4, r0, #0
+	bl	g
+	add	r1, r5, #0
+	add	r0, r4, #0
+	pop	{r4, r5}
+	pop	{r2}
+	bx	r2
+.Lfe7:
+	.size	 llkeep,.Lfe7-llkeep
