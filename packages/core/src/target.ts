@@ -43,6 +43,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
+import { PRELUDE_TYPEDEFS } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
 
@@ -924,12 +925,11 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
   };
 }
 
-/** The scalar vocabulary every candidate's prelude declares. `s64`/`u64` are spelt `long long`
- *  because every compiler this repo targets is a C89 one with the GNU/CW extension, which is what
- *  the projects themselves use; the decomp checkouts all define the same two names, and the
- *  harness keeps typedefs per NAME against the vendored ctx, so a unit that already has them gets
- *  no redefinition. */
-export const C_TYPEDEFS =
-  'typedef unsigned char u8;typedef unsigned short u16;typedef unsigned int u32;' +
-  'typedef signed char s8;typedef short s16;typedef int s32;' +
-  'typedef long long s64;typedef unsigned long long u64;\n';
+/** The candidate prelude: a `typedef` for every name in the scalar vocabulary. PRINTED from
+ *  `proto.ts`'s `PRELUDE_TYPEDEFS` rather than spelled out, because the other reader of that
+ *  vocabulary decides which type texts asmlift may PRINT into a candidate, and a second copy of
+ *  the list is a copy that can disagree — in the direction no test over two lists catches.
+ *
+ *  The decomp checkouts all define the same names, and the harness keeps typedefs per NAME against
+ *  the vendored ctx, so a unit that already has them gets no redefinition. */
+export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typedef ${base} ${name};`).join('')}\n`;

@@ -1,6 +1,10 @@
-// A 64-bit value coming out of a COMPILER RUNTIME HELPER, which is the only way one enters the IR
-// today: agbcc has no 64-bit instruction, so it calls `__muldi3` and the pair lives in registers on
-// either side of the call.
+// A 64-bit value coming out of a CALL, which is how one enters the IR on agbcc: it has no 64-bit
+// instruction, so a pair lives in registers on either side of a `bl`.
+//
+// TWO SOURCES SAY WHICH CALLS HAND ONE BACK, and they are the two kinds of thing a caller can be
+// told. The compiler's own runtime-helper table needs no header — `__muldi3`'s signature is its
+// compiler's — and is what the tests here are mostly about. A project's CALLEE needs one, and
+// `FnProto.returns` is where a header states it; that source has its own describe at the bottom.
 //
 // Three things have to hold together for that to become `a * b`, and each has its own test below:
 // the helper table states each C parameter's WIDTH so the frontend reads a register pair as one
@@ -12,9 +16,10 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { type FnProto, wordsOf } from '../src/proto';
+import { type FnProto, type Prototypes, wordsOf } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper } from '../src/runtime-helpers';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');
@@ -52,6 +57,15 @@ describe('a register pair read as one value', () => {
     );
     expect(spelt.get('signed')).toContain('(s64)a0 * (s64)a1');
     expect(spelt.get('unsigned')).toContain('(s64)(s32)a0 * (s64)(s32)a1');
+  });
+
+  // THE HIGH HALF OF THE RESULT, which is the projection whose C spelling constrains its operand:
+  // `x >> 32` is undefined unless `x` renders wider than 32 bits. Here the fold has already put a
+  // multiply over two 64-bit parameters there, so the rank is present and no cast is written —
+  // the end-to-end half of the rule `test/int64-repr.test.ts` states over hand-built IR, on real
+  // agbcc output, and the half that fails if the shift's operand is cast unconditionally.
+  test('the high half of a pair the helper returned shifts without a cast', () => {
+    expect(lift('himul')).toBe('s32 himul(s64 a0, s64 a1) {\n    return (s32)(a0 * a1 >> 32);\n}\n');
   });
 });
 
@@ -209,6 +223,32 @@ describe('a 64-bit fold needs the widths, not the arity', () => {
     }
   });
 
+  // …AND THE SAME TABLE WITH A `returns` BESIDE IT, which is the SECOND source for the pair and
+  // was the way back in. `wideHelper` refuses a re-declared helper, which stops the ARGUMENT pair;
+  // the RESULT pair is built from `FnProto.returns`, and `raise/widehelpers.ts` folds on the
+  // result alone — so `{"params":["s64","s64"],"returns":"s64"}` printed `return a0 * a1;` at exit
+  // 0 for a call the row above declines, re-emitting the compiler's own multiply as the project's
+  // arithmetic with no gap. Each spelling of `params` is paired with a `returns` here because the
+  // decision is about the CONJUNCTION: the guard that fires is the one on `params`, and what this
+  // pins is that adding the other key does not switch it off.
+  test('…and a `returns` beside it does not put the pair back', () => {
+    for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
+      expect(() =>
+        decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params, returns: 's64' } } }),
+      ).toThrow(/no model for the runtime helper '__muldi3'/);
+    }
+  });
+
+  // THE CONTROL, and it is what keeps the rule from being "a `returns` anywhere near a helper
+  // disables it": with no `params` the project has re-declared nothing, the table is still the
+  // authority for its own name, and the fold is the one an empty prototype table gets. DECLARING
+  // MORE TRUTHFULLY MUST NOT DO LESS.
+  test('a `returns` alone leaves the helper table in charge', () => {
+    expect(decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { returns: 's64' } } }).source).toBe(
+      's64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n',
+    );
+  });
+
   test('…and with no prototype the same function recovers the 64-bit multiply', () => {
     expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
   });
@@ -248,5 +288,94 @@ describe('the table says what a helper takes, in widths and not in words', () =>
     // One multiply libfunc, both spellings — so there is no `__umuldi3` entry to disagree with.
     expect(AGBCC_RUNTIME_HELPERS.__muldi3.op).toBe('mul');
     expect(AGBCC_RUNTIME_HELPERS.__umuldi3).toBeUndefined();
+  });
+});
+
+// A PAIR A DECLARATION SAYS COMES BACK — the other source, and the acceptance arm of
+// `frontend/ssa.ts`'s stale-read refusal reached from a header rather than from the helper table.
+//
+// The refusal itself is right about the bytes: `mov r3,#0x2a ; bl callee ; add r4,r3,#0` must not
+// lift to `return 42`, because agbcc's `thumb.h:405` marks r0–r3 caller-clobbered and the callee
+// destroyed r3. What it could not tell apart is `thumb.h:655`/`:657`, which return a DImode value
+// in the register pair from r0 — so after a `bl` to a callee that returns 64 bits, r1 is the
+// returned HIGH half and reading it is not stale at all. Those two are the same instructions, so
+// nothing in the assembly separates them and the caller has to be told.
+describe('a pair a declaration says comes back', () => {
+  // agbcc -O2 -mthumb-interwork -fhex-asm -fprologue-bugfix, from:
+  //   long long llsrc(void);
+  //   int llfrom(void){ return (int)(llsrc() >> 32); }
+  const llfrom = ['\t.code\t16', '\t.globl\tllfrom', '\t.thumb_func', 'llfrom:', '\tpush\t{lr}']
+    .concat(['\tbl\tllsrc', '\tadd\tr0, r1, #0', '\tpop\t{r1}', '\tbx\tr1', ''])
+    .join('\n');
+  const liftWith = (prototypes: Prototypes) => decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes }).source;
+
+  test('a declared 64-bit return makes the high register the callee’s, not a stale read', () => {
+    expect(liftWith({ llsrc: { params: [], returns: 'long long' } })).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
+  });
+
+  // THE HALF THAT FAILS IF THE GUARD IS WIDENED INSTEAD OF INFORMED. Every one of these declares
+  // the callee as fully as the vocabulary allowed before `returns` existed, and every one must
+  // still refuse: the same bytes, and nothing in them says a pair came back.
+  test.each([
+    ['nothing declared', {}],
+    ['an arity and no return', { llsrc: { params: [] } }],
+    ['a return that fits one register', { llsrc: { params: [], returns: 'int' } }],
+    ['a return spelling nothing can size', { llsrc: { params: [], returns: 'Fixed64' } }],
+    // A WIDTH THIS COULD READ AND COULD NOT GET DECLARED IS NOT A WIDTH IT MAY ACT ON. Both of
+    // these size to 64 and neither can be printed into the candidate's translation unit — a bare
+    // count names no C type for the parameters, and no candidate includes a header declaring
+    // `int64_t`. Reading the pair anyway lifts a program the candidate then compiles against an
+    // implicitly-`int` callee: `bl llsrc ; mov r1,#0x20 ; asr r0,r0,r1`, a different program.
+    ['a 64-bit return behind a bare argument count', { llsrc: { params: 1, returns: 'long long' } }],
+    ['a 64-bit return nothing declares', { llsrc: { params: [], returns: 'int64_t' } }],
+  ])('%s still declines on the stale read', (_label, prototypes: Prototypes) => {
+    expect(() => liftWith(prototypes)).toThrow(/r1 is read on a path where a call has destroyed it/);
+  });
+
+  // …AND THE ZERO-ARGUMENT COUNT IS THE ONE COUNT THAT CAN BE PRINTED, because `params: 0` and
+  // `params: []` are the same `(void)`. It is the pair to the refusal above: what divides them is
+  // whether the declaration can be spelled, not which form the author wrote it in.
+  test('a 64-bit return behind a zero-argument count lifts, because (void) is spellable', () => {
+    expect(liftWith({ llsrc: { params: 0, returns: 'long long' } })).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
+  });
+
+  // …AND THE REFUSAL STILL COVERS THE DEFECT IT WAS BUILT FOR. A declared pair names r0 and r1 and
+  // nothing else, so r3 is as destroyed as it ever was — a returned pair is an exception for two
+  // registers, not a hole in the rule.
+  test('a declared pair does not license a read of the rest of the caller-saved set', () => {
+    const stale = ['\t.code\t16', '\t.globl\tstale', '\t.thumb_func', 'stale:', '\tpush\t{lr}']
+      .concat(['\tmov\tr3, #0x2a', '\tbl\tllsrc', '\tadd\tr0, r3, #0', '\tpop\t{r1}', '\tbx\tr1', ''])
+      .join('\n');
+    expect(() =>
+      decompile('stale', stale, ARMV4T_AGBCC, { prototypes: { llsrc: { params: [], returns: 'long long' } } }),
+    ).toThrow(/r3 is read on a path where a call has destroyed it/);
+  });
+
+  // THE SYMBOL MAP AND THE PROTOTYPE DISAGREEING, which is the input that had the frontend acting
+  // on a width whose declaration the collector then withheld. A map entry that calls `llsrc` a
+  // shaped data object contradicts a prototype that calls it a `long long` function; `declare.ts`
+  // refused to print the prototype and the frontend read the pair anyway, so the candidate lifted
+  // `(s64)llsrc()` and was compiled against an implicitly-`int` `llsrc` — `bl llsrc ; mov r1,#0x20
+  // ; asr r0,r0,r1`, which is not this function. Adding map knowledge made the tool strictly
+  // worse, and the reconciliation now happens at the TABLE (`proto.ts` `prototypesFromSymbols`),
+  // so both readers lose the same fact: no pair, and the pre-`returns` refusal.
+  test('a symbol map that calls the callee DATA takes the width off both readers', () => {
+    const symbols: SymbolMap = new Map([
+      [0x08000100, [{ name: 'llsrc', kind: 'data', shape: 'scalar', size: 1, signed: false }]],
+    ]);
+    const prototypes: Prototypes = { llsrc: { params: [], returns: 'long long' } };
+    expect(() => decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes, symbols })).toThrow(
+      /r1 is read on a path where a call has destroyed it/,
+    );
+    // …and a map entry that states no shape is NOT the disagreement: that is what a map-less lift
+    // mints for every name the IR mentions, so it must leave the declaration standing.
+    const nameOnly: SymbolMap = new Map([[0x08000100, [{ name: 'llsrc', kind: 'data' }]]]);
+    expect(decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes, symbols: nameOnly }).source).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
   });
 });

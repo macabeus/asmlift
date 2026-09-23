@@ -12,7 +12,7 @@ import { Block, Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T, intWidth, parseType, typeToString } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
-import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, exprEquals } from '../src/l3/ast';
 import { initFirstGuards } from '../src/l3/initfirst';
 import { arithConversionSignedness, exprIntWidth } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
@@ -147,6 +147,102 @@ describe('the three opcodes have a shape, and it is checked', () => {
   });
 });
 
+// THE HIGH HALF IS THE ONE PROJECTION WHOSE C SPELLING CONSTRAINS ITS OPERAND. `(u32)x` truncates
+// whatever `x` renders as, but `x >> 32` is undefined in C unless the promoted left operand is
+// wider than 32 bits — and the 64-bit VALUE being projected and the rendered EXPRESSION's rank are
+// two different questions that can part company.
+describe('the high half shifts by 32, so its operand must render 64 bits wide', () => {
+  // A CALL CARRIES ITS RANK ON THE NODE, and the cast here is the SIGNEDNESS pin rather than a
+  // rank one: `renderedIntSignedness` cannot prove what a call renders as, so backend/cfamily.ts
+  // pins the shift's left operand at the operand's own rank — 64, because the structurer stamped
+  // `wide64`. The width in the cast is the assertion: `(s32)` there would be the truncation.
+  test('a 64-bit call result inlined at its use is pinned at 64, never at 32', () => {
+    const fn = parse('fn f {\n^bb0():\n  %0: s64 = call {target = "llsrc"}\n  %1: s32 = hi32 %0\n  ret %1\n}\n');
+    verify(fn);
+    recoverTypes(fn);
+    expect(cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toContain('(s64)llsrc() >> 32');
+  });
+
+  // THE THREE SIBLING READERS OF THE SAME RANK, which is what makes the stamp a model rather than
+  // a patch at one consumer: a variable shift, an unsigned 64-bit divide and a signed one all read
+  // `exprIntWidth` through `pinnedOperands`, and a call answering 32 truncates the value in each.
+  // Each assertion fails on the wrong answer by NAMING the 32-bit cast the un-stamped node emits.
+  test.each([
+    [
+      'a variable-count logical shift',
+      'fn f {\n^bb0(%0: u32):\n  %1: u64 = call {target = "llsrc"}\n' +
+        '  %2: u64 = shr_u %1, %0\n  %3: u32 = lo32 %2\n  ret %3\n}\n',
+      '(u64)llsrc() >>',
+      '(u32)llsrc()',
+    ],
+    [
+      'an unsigned 64-bit divide',
+      'fn f {\n^bb0():\n  %0: u64 = call {target = "llsrc"}\n  %1: u64 = call {target = "llb"}\n' +
+        '  %2: u64 = udiv %0, %1\n  %3: u32 = lo32 %2\n  ret %3\n}\n',
+      '(u64)llsrc() / llb()',
+      '(u32)llsrc()',
+    ],
+    [
+      'a signed 64-bit divide',
+      'fn f {\n^bb0():\n  %0: s64 = call {target = "llsrc"}\n  %1: s64 = call {target = "llb"}\n' +
+        '  %2: s64 = sdiv %0, %1\n  %3: s32 = lo32 %2\n  ret %3\n}\n',
+      '(s64)llsrc() / (s64)llb()',
+      '(s32)llsrc()',
+    ],
+  ])('%s over a call keeps the call at 64 bits', (_label, ir, wanted, truncated) => {
+    const fn = parse(ir);
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+    expect(src).toContain(wanted);
+    expect(src).not.toContain(truncated);
+  });
+
+  // …AND THE CAST GOES ON ONLY WHERE THE RANK IS MISSING, which is the half that fails if the
+  // shift's operand is cast unconditionally. A 64-bit PARAMETER renders as a declared `s64` local,
+  // so it already carries the rank and `(s64)a0 >> 32` would be a cast the source never wrote.
+  test('a half off an operand that already renders 64 bits wide takes no cast', () => {
+    const fn = parse('fn f {\n^bb0(%0: s64):\n  %1: s32 = hi32 %0\n  ret %1\n}\n');
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+    expect(src).toContain('a0 >> 32');
+    expect(src).not.toContain('(s64)a0');
+  });
+
+  // THE SHIFT'S KIND IS READ OFF THE 64-BIT OPERAND'S OWN SIGNEDNESS, and C spells both kinds
+  // `>>`, so what the two arms differ in is the PIN the backend then takes. An unsigned whole must
+  // shift logically: read as signed it would emit `(s64)a0 >> 32`, which is an arithmetic shift
+  // over a value the machine shifted logically. Both arms are asserted because only one of them
+  // had a witness.
+  test.each([
+    ['signed', 's64', '(u64)a0'],
+    ['unsigned', 'u64', '(s64)a0'],
+  ])('a %s whole shifts its own way, and takes no cast to the other', (_label, ty, wrongPin) => {
+    const fn = parse(`fn f {\n^bb0(%0: ${ty}):\n  %1: u32 = hi32 %0\n  ret %1\n}\n`);
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+    expect(src).toContain('a0 >> 32');
+    expect(src).not.toContain(wrongPin);
+  });
+
+  // A 64-BIT VALUE RECOVERY LEFT UNTYPED has no 64-bit C type to cast to, so there is no legal
+  // shift to spell and it GAPS rather than printing the undefined C. Reach is zero by
+  // construction rather than by measurement: every `hi32` a frontend builds sits beside a `concat`
+  // or a pair return whose result recovery types as an integer.
+  test('a high half off a value with no integer type is a gap, not undefined C', () => {
+    const [v, hi] = [mkValue(T.unk(64)), mkValue(T.unk(32))];
+    const fn = fnOf([
+      { params: [v], ops: [mkOp('hi32', { operands: [v], results: [hi] }), mkOp('ret', { operands: [hi] })] },
+    ]);
+    verify(fn);
+    expect(() => cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toThrow(
+      /no upper half to shift out/,
+    );
+  });
+});
+
 describe('64 does not mix', () => {
   test('an add over one 64-bit and one 32-bit operand is rejected', () => {
     const [a, b, r] = [mkValue(T.s(64)), mkValue(T.s(32)), mkValue(T.s(64))];
@@ -250,12 +346,21 @@ describe('the rank a rendered expression carries', () => {
     expect(exprIntWidth({ k: 'un', op: '~', e: v('w') }, env)).toBe(64);
   });
 
-  // The closure this soundness rests on, asserted rather than argued: memory and calls do not
-  // carry a 64-bit integer here, so nothing else can make this answer 64.
-  test('memory and a call are NOT ways a 64-bit value enters a rendered expression', () => {
+  // MEMORY IS NOT A WAY IN, and that one IS a closure: `contracts.ts` `SCALAR_WIDTHS` is {1,2,4}
+  // and there is no 64-bit global, so no access node can carry the width.
+  test('memory is not a way a 64-bit value enters a rendered expression', () => {
     const idx: Expr = { k: 'index', base: v('p'), idx: { k: 'const', value: 0 }, width: 4, signed: true };
     expect(exprIntWidth(idx, env)).toBe(32);
+  });
+
+  // A CALL IS A WAY IN, AND IT IS THE ONE THE NODE HAS TO BE TOLD. A callee's return type comes
+  // from a prototype outside the emitted function, so the rank is not derivable here — the
+  // structurer stamps it and an unstamped call stays 32, which is what C makes of a callee nobody
+  // declared. Both directions are asserted, because reading the stamp as "always 64" and reading
+  // it as "never 64" are the two wrong answers and each is silent at one of these two calls.
+  test('a call answers the rank the structurer stamped on it, in both directions', () => {
     expect(exprIntWidth({ k: 'call', fn: 'f', args: [] }, env)).toBe(32);
+    expect(exprIntWidth({ k: 'call', fn: 'f', args: [], wide64: true }, env)).toBe(64);
   });
 
   test('at UNEQUAL rank the wider side decides, where at equal rank unsigned would have', () => {
@@ -364,5 +469,24 @@ describe('the gates that read a 64-bit rank', () => {
     expect(initFirstGuards(guard(v('w')))).toBeNull();
     // …and the same shape one rank down still rewrites, so it is the WIDTH that refused.
     expect(initFirstGuards(guard(v('n')))).not.toBeNull();
+  });
+
+  // THE STAMP IS PART OF THE NODE'S IDENTITY, and that is a claim about `exprEquals` rather than
+  // about a path through the pipeline, so it is pinned as one. No pipeline input reaches it: the
+  // stamp is a pure function of the callee (`structure.ts` reads the call result's IR width, which
+  // the frontend set from that callee's declared return), so two `call` nodes sharing `fn` and
+  // `args` always share it and deleting the term leaves the whole core suite green. A green mutant
+  // over a contract is still a gap in the contract — every other spelling-bearing field of this
+  // node is compared, and a dedup that called these two equal would keep one and take the other's
+  // arithmetic rank with it.
+  test('two calls differing only in the 64-bit stamp are not the same expression', () => {
+    const plain: Expr = { k: 'call', fn: 'g', args: [] };
+    const wide: Expr = { k: 'call', fn: 'g', args: [], wide64: true };
+    expect(exprEquals(plain, wide)).toBe(false);
+    expect(exprEquals(wide, plain)).toBe(false);
+    // …and the control, so the assertion above is about the stamp and not about the comparison
+    // refusing everything.
+    expect(exprEquals(wide, { k: 'call', fn: 'g', args: [], wide64: true })).toBe(true);
+    expect(exprEquals(plain, { k: 'call', fn: 'g', args: [] })).toBe(true);
   });
 });

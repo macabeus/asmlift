@@ -11,6 +11,7 @@
 import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import type { Prototypes } from './proto';
 import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS } from './target';
 
@@ -202,15 +203,17 @@ export function makeRefCollector(ctx: {
   /** the globals the TARGET names — the pool/reloc names and the shapes the asm evidences, before
    *  the map is unioned in */
   targetNames: ReadonlySet<string>;
+  /** the project's prototype table — what lets a CALL TARGET be declared rather than refused */
+  prototypes: Prototypes;
   /** reports a refusal at most once per (name, reason); the caller owns the dedup */
   refuse: (name: string, reason: RefusedDeclarationReason) => void;
 }): (tree: SFn) => { symbolRefs?: SymbolRef[] } {
-  const { declSymbols, accessFacts, mapSymbols, targetNames, refuse } = ctx;
+  const { declSymbols, accessFacts, mapSymbols, targetNames, prototypes, refuse } = ctx;
   return (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
     const bound = new Set<string>([...tree.params.map((p) => p.name), ...tree.locals.map((l) => l.name)]);
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, refuse).flatMap((r) => {
+    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, refuse).flatMap((r) => {
       // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage
       // kills the SPELLING, because no declaration makes that candidate right and no declaration
       // makes it fail either. Two shapes, and the second is why the test is the emitter's whole

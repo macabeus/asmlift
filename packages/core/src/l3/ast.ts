@@ -39,7 +39,23 @@ export type Expr =
   // cv-qualifier, deliberately: volatility is a SPELLING, carried at the declaration or the
   // cast, the same split SFn.locals makes for `volatile`/`pointeeVolatile`.
   | { k: 'cast'; to: IrType; e: Expr; volatile?: true }
-  | { k: 'call'; fn: string; args: Expr[] }
+  // A call. `wide64` is the INTEGER RANK the callee's return renders with, and it is carried on the
+  // node because nothing downstream can derive it: a callee's return type comes from a prototype
+  // outside the emitted function, so `exprCType` answers `undefined` for a call and every reader of
+  // the rendered rank would otherwise read C's implicit `int`.
+  //
+  // IT IS TRUE OF THE C THAT IS COMPILED BECAUSE THE SOURCES AGREE, and that agreement is a
+  // property of one lookup rather than of two modules happening to match. The width is set where
+  // the frontend was TOLD it — a compiler's own runtime-helper signature, whose callee the
+  // candidate never declares because the helper table IS the declaration, or a project's
+  // `FnProto.returns`, which `proto.ts` `spellableProto` admits only when the same entry can be
+  // PRINTED as the callee's own prototype. `prototypesFromSymbols` resolves that table once, so
+  // the frontend that stamps this and the collector that prints the declaration read one answer.
+  // The filters in `rank-declare.ts` can still withhold a printed declaration (a name the emitted
+  // C uses for its own storage, a non-identifier, a reserved name) — every one of them kills the
+  // SPELLING or the whole row rather than leaving this stamp standing over an implicitly-`int`
+  // callee.
+  | { k: 'call'; fn: string; args: Expr[]; wide64?: true }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`
   // and `(&gSym)[i]` as `gSym[i]` (a global name decays to a pointer). Only a genuinely
@@ -473,7 +489,24 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'call': {
       const bb = b as typeof a;
-      return a.fn === bb.fn && a.args.length === bb.args.length && a.args.every((x, i) => exprEquals(x, bb.args[i]));
+      // `wide64` is part of the node's IDENTITY, compared for the same reason `volatile` is one
+      // cast up: it decides the rank every operand pin is taken at, so two calls that differ in it
+      // are two different expressions and a dedup that kept one would respell the other's
+      // arithmetic.
+      //
+      // NO PIPELINE INPUT REACHES THIS TERM TODAY, and saying so is cheaper than a witness that
+      // cannot exist: the stamp is a pure function of the callee name (`structure.ts` reads the
+      // call result's IR width, which the frontend set from the callee's declared return), so two
+      // `call` nodes sharing `fn` and `args` always share `wide64` and deleting the term leaves
+      // the whole core suite green. What pins it is a direct test of THIS function's contract in
+      // test/int64-repr.test.ts, over two nodes built by hand — which is the honest bar, because
+      // the claim being made is about `exprEquals` and not about a path through the pipeline.
+      return (
+        a.fn === bb.fn &&
+        (a.wide64 ?? false) === (bb.wide64 ?? false) &&
+        a.args.length === bb.args.length &&
+        a.args.every((x, i) => exprEquals(x, bb.args[i]))
+      );
     }
     case 'index': {
       const bb = b as typeof a;

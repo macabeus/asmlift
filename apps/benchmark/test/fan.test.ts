@@ -188,15 +188,19 @@ describe('the [ranked] line', () => {
     );
   });
 
-  // A `(match)` fitted to the target's own asm by declarations asmlift invented is publishable by
-  // pasting this line, unless the line says so.
-  it('carries the synthesized count and names the declarations it counted', () => {
+  // A `(match)` resting on declarations no symbol map supplied is publishable by pasting this
+  // line, unless the line says so. It does NOT say asmlift invented them: most are fitted to the
+  // target's own asm, and a call target the user gave a `--proto` for is declared in the PROJECT's
+  // words — so the block names the predicate the list is filtered on rather than a provenance only
+  // some of it has.
+  it('carries the count and names the declarations it counted', () => {
     const refs = [{ name: 'gFoo', synthesized: true, info: { kind: 'scalar', width: 4, signed: false } }];
     const out = renderFan(ranked(), {
       synthesized: refs as unknown as Parameters<typeof renderFan>[1]['synthesized'],
       stamp: 'asmlift source deadbee+dirty',
     });
-    expect(out).toContain('asmlift: [declared] 1 declaration(s) synthesized from the target asm');
+    expect(out).toContain('asmlift: [declared] 1 declaration(s) no symbol map supplied');
+    expect(out).not.toContain('asmlift invented');
     expect(out).toContain('gFoo');
     expect(out.split('\n').at(-1)).toContain('1 synthesized');
     // …and the tree, on the same line, because a stamp anywhere else is a stamp nobody pastes.

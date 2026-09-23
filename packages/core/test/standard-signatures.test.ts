@@ -29,11 +29,9 @@ test('the project`s own header still wins over the standard table', () => {
   expect(lift('memcpy', { memcpy: { params: 2 } })).toContain('memcpy(a0, a1)');
 });
 
-// THE RETURN IS PART OF WHAT THE STANDARD FIXES, and it is the half no project header ever
-// carried: `FnProto` has `returnsVoid` and nothing else about a return, so before an entry spelled
-// one there was no way to say "this callee returns in a register". The frame-object audit is the
-// consumer — a captured frame address handed over at argument 0 is an out-parameter or a hidden
-// struct-return pointer, and only a statement about the return tells them apart.
+// THE RETURN IS PART OF WHAT THE STANDARD FIXES, and the frame-object audit is the consumer — a
+// captured frame address handed over at argument 0 is an out-parameter or a hidden struct-return
+// pointer, and only a statement about the return tells them apart.
 test('the standard fixes `memcpy`s return, so nothing needs to declare it', () => {
   expect(returnsWithoutHiddenPointer('memcpy', {})).toBe(true);
 });
@@ -42,6 +40,23 @@ test('a callee nobody has described returns nothing known, and the answer is no'
   expect(returnsWithoutHiddenPointer('g', {})).toBe(false);
   expect(returnsWithoutHiddenPointer('g', { g: { params: 3 } })).toBe(false);
   expect(returnsWithoutHiddenPointer('g', { g: { params: 3, returnsVoid: true } })).toBe(true);
+});
+
+// A PROJECT'S OWN `returns` ANSWERS THE SAME QUESTION, through the same width reading, and it
+// ranks above the standard table for the same reason a re-declared ARITY does: a project that
+// spells a return has told you about the function it is building. A 64-bit return is `true` here
+// and not an overflow of a test meant for words — a pair travels in registers, and a pair is still
+// not a pointer the caller supplied.
+test('a project that spells its callee`s return answers the audit too', () => {
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'long long' } })).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void *' } })).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void' } })).toBe(true);
+  // …and a spelling nothing can size leaves the hidden pointer open, which is the whole point of
+  // the field answering `false` for silence.
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'struct Vec' } })).toBe(false);
+  // The project's word beats the standard table's, in the direction that REFUSES: a `memcpy`
+  // re-declared to return a struct is not `memcpy`, and the audit must not keep answering for it.
+  expect(returnsWithoutHiddenPointer('memcpy', { memcpy: { params: 3, returns: 'struct Vec' } })).toBe(false);
 });
 
 test('a callee named after an `Object.prototype` member is not described by that', () => {

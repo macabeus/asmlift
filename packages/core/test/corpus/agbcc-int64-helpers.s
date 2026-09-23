@@ -4,18 +4,24 @@
 @   s32 llhalfuse(s64 a, s32 b){ return (s32)(a>>b) + b; }
 @   s32 lomul(s64 a, s64 b){ return (s32)(a*b); }
 @   s32 halfshare(s64 a, s64 b){ return (s32)(a*b) + (s32)a; }
+@   s32 himul(s64 a, s64 b){ return (s32)((a*b)>>32); }
 @
 @ The third one is a parameter this function uses as a WORD: `b` is both the shift count and an
 @ addend, and it arrives in r2 — a third argument register that is no part of the pair in r0:r1.
 @ So what it pins is the fusion declining to take a lone word INTO a pair.
 @
-@ THE LAST ONE is the other side, and it is the one the fusion's use-count condition is really
+@ THE FIFTH ONE is the other side, and it is the one the fusion's use-count condition is really
 @ about: `add r4,r0,#0` copies out r0, which is ALSO the low half of the pair the `concat` names.
 @ A half the function separately uses on its own is a word, so fusing that pair would delete the
 @ copy's operand — the parameter it reads stops existing.
 @
-@ THE LAST TWO ARE THE WIDTH PAIR, and they differ in one register. `llmul` returns the pair and
-@ pops its scratch into r2; `lomul` returns a word and pops into r1, which is the pair's high
+@ THE LAST ONE is the HIGH half of a pair, where `lomul` is the low one: the shift by 32 is the
+@ only projection whose C spelling needs its operand to RENDER 64 bits wide, and here it already
+@ does — `a*b` is a multiply over two 64-bit parameters. So it is the row that fails when the
+@ high half is cast to 64 bits unconditionally rather than only where the rank is missing.
+@
+@ `llmul` AND `lomul` ARE THE WIDTH PAIR, and they differ in one register. `llmul` returns the
+@ pair and pops its scratch into r2; `lomul` returns a word and pops into r1, which is the pair's high
 @ register — so the epilogue is where the return width is written down, and the two are otherwise
 @ the same four instructions.
 	.code	16
@@ -91,3 +97,15 @@ halfshare:
 	bx	r1
 .Lfe5:
 	.size	 halfshare,.Lfe5-halfshare
+	.align	2, 0
+	.globl	himul
+	.type	 himul,function
+	.thumb_func
+himul:
+	push	{lr}
+	bl	__muldi3
+	add	r0, r1, #0
+	pop	{r1}
+	bx	r1
+.Lfe6:
+	.size	 himul,.Lfe6-himul

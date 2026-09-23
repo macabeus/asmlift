@@ -25,6 +25,7 @@ import {
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredArgWidths,
+  declaredReturnWidth,
   declaresParams,
   returnsWithoutHiddenPointer,
   wordsOf,
@@ -3525,6 +3526,23 @@ export function lift(
     // this is the generalisation that keeps a future entry from being laid out by accident.
     return wordsOf(h.params) <= target.argRegs.length ? h : null;
   };
+  /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
+   *  `wideHelper` made of it.
+   *
+   *  A PROJECT'S `returns` NEVER BUILDS A PAIR FOR A RUNTIME HELPER'S NAME, and that is the #244
+   *  decision above holding for both sources rather than for the one it was written against.
+   *  `wideHelper` answers null for a re-declared helper, which stops the ARGUMENT pair; the
+   *  RESULT pair is built from a separate source, and `raise/widehelpers.ts` folds on the result
+   *  alone (`arrivesAsDeclared` needs `results[0]` 64 bits wide). Measured before this line:
+   *  `--proto '{"__muldi3":{"params":["s64","s64"]}}'` throws `no model for the runtime helper
+   *  '__muldi3'`, and adding `"returns":"s64"` printed `return a0 * a1;` — the compiler's own
+   *  multiply re-emitted as the project's arithmetic, at exit 0, for a name the project says is
+   *  its own function.
+   *
+   *  A NON-WIDE ENTRY IS COVERED TOO, and deliberately: a `returns` on `__divsi3` states a width
+   *  about a function whose signature is its compiler's, and `refuseUnmodelledHelpers` is going to
+   *  gap the call whatever this answers. The table is the authority for every name in it. */
+  const isRuntimeHelperName = (callee: string): boolean => lookupHelper(target.runtimeHelpers, callee) !== undefined;
   // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects, and the INSTRUCTION that put
   // the pair in registers. A pair that goes straight back out as one — a helper's result becoming
   // the next helper's argument — re-fuses to the value itself instead of rebuilding a `concat`
@@ -5091,6 +5109,23 @@ export function lift(
           // the same answer the callee would get with no prototype at all.
           const widths = wide?.params ?? declared?.widths ?? null;
           const argc = widths === null ? fallbackArgcHere(bi) : wordsOf(widths);
+          // WHETHER THE CALLEE HANDS BACK A PAIR — two sources for one ABI fact, and they answer
+          // the same question about the same two registers. A runtime helper's signature is its
+          // compiler's and needs no header; a project's callee needs one, and `returns` is where a
+          // header states it. Silence means a word, which is what every call was read as before a
+          // width could be stated — the callee then defines the return register alone and
+          // `frontend/ssa.ts` refuses a read of the other, because in that reading it is right to.
+          //
+          // AND THEY ARE ASKED IN THAT ORDER, never unioned: a name the runtime table carries is
+          // answered by the table or by nothing (`isRuntimeHelperName`), so a header that
+          // re-declares a helper disables the capability rather than restoring it through the
+          // other key.
+          const returnsPair =
+            (wide
+              ? wide.returns
+              : isRuntimeHelperName(targetSym)
+                ? undefined
+                : declaredReturnWidth(prototypes[targetSym])) === 64;
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
           // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
@@ -5159,7 +5194,7 @@ export function lift(
               }
             }
           }
-          const res = mkValue(T.unk(wide?.returns === 64 ? 64 : 32));
+          const res = mkValue(T.unk(returnsPair ? 64 : 32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
@@ -5168,7 +5203,7 @@ export function lift(
           if (widths === null) {
             ssa.recordGuessedCall(callOp, bi, target);
           }
-          if (wide?.returns === 64) {
+          if (returnsPair) {
             // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
             // named here and neither is in the clobber set — which is the acceptance arm of the
             // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.

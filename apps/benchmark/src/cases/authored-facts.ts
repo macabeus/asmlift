@@ -449,6 +449,12 @@ export function protoFactProblems(
         `\`${oracle.returnType}\` — asmlift obeys the declaration, so this row scores it for a lie`,
     );
   }
+  if (own?.returns !== undefined && !declaredTypeMatches(own.returns, oracle.returnType)) {
+    problems.push(
+      `${where}: proto says \`returns: ${normParam(own.returns)}\` but the compiled function returns ` +
+        `\`${normParam(oracle.returnType)}\``,
+    );
+  }
   for (const [name, entry] of Object.entries(table)) {
     for (const p of Array.isArray(entry.params) ? entry.params : []) {
       const declarator = declaratorNameIn(p);
@@ -514,6 +520,22 @@ export function protoFactProblems(
       problems.push(
         `${where}: proto says \`${callee}\` returnsVoid: ${entry.returnsVoid}; it is declared ` +
           `\`${decls[0].returnType}\``,
+      );
+    }
+    // A CALLEE'S `returns` IS THE ONE AUTHORED FACT THAT REACHES THE CANDIDATE'S OWN SOURCE.
+    // core re-spells it as the callee's declaration inside the compiled translation unit
+    // (`proto.ts` `spellableProto`), so a wrong one does not merely mislead the frontend
+    // — it compiles the candidate against a function the row does not have. Checked against the
+    // declaration the compiled text or the row's `ctx` shows, exactly as the arity is.
+    const returnTypes = new Set(decls.map((d) => d.returnType));
+    if (
+      entry.returns !== undefined &&
+      returnTypes.size === 1 &&
+      !declaredTypeMatches(entry.returns, decls[0].returnType)
+    ) {
+      problems.push(
+        `${where}: proto says \`${callee}\` returns \`${normParam(entry.returns)}\`; it is declared ` +
+          `\`${normParam(decls[0].returnType)}\``,
       );
     }
   }
