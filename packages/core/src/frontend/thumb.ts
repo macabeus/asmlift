@@ -26,7 +26,7 @@ import {
   type ParamType,
   type Prototypes,
   STANDARD_SIGNATURES,
-  declaredArgRegs,
+  declaredParamWidths,
   declaredWidth,
   declaresParams,
   returnsWithoutHiddenPointer,
@@ -3359,9 +3359,9 @@ export function lift(
   const wideHelper = (callee: string): RuntimeHelper | null => {
     // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
     // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
-    // `isWideHelper` to read. The `prototypes` read below needs no such guard because `declaredArgRegs`
-    // is that table's designated safe reader — it answers "nothing is declared" for an entry that
-    // is not an `FnProto`, whatever it is.
+    // `isWideHelper` to read. The `prototypes` read below needs no such guard because
+    // `declaresParams` is that table's designated safe reader — it answers "nothing is declared"
+    // for an entry that is not an `FnProto`, whatever it is.
     const h = lookupHelper(target.runtimeHelpers, callee);
     if (!h || !isWideHelper(h)) {
       return null;
@@ -3374,7 +3374,7 @@ export function lift(
     // table's helper it would contradict the header, and as an ordinary call it becomes the
     // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
     // call, at whichever arity was declared.
-    if (declaredArgRegs(prototypes[callee]) !== undefined) {
+    if (declaresParams(prototypes[callee])) {
       return null;
     }
     // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
@@ -3832,7 +3832,7 @@ export function lift(
   // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
   // call keeps the refusal it had before the licence existed.
   //
-  // THE BLOCK IS WORDS AND SO IS `declaredArgRegs`, which is why it is the number asked for here:
+  // THE BLOCK IS WORDS AND SO ARE THE WIDTHS SUMMED HERE, which is why they are what is asked for:
   // the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and the lowering maps
   // word k to slot k - |argRegs|. A C PARAMETER COUNT would be the wrong number the moment one
   // parameter is wider than a word — a `long long` adds a word AND moves every later argument's
@@ -3868,7 +3868,7 @@ export function lift(
   // REFUSES here rather than answering — this runs over every `bl` while the outgoing-argument
   // analysis is being built, so the refusal reaches the caller ahead of every other slot-model
   // refusal, which is right because it is the most specific thing that was seen.
-  const declaredCall = (callee: string): { arity: number; block: readonly number[] | null } | null => {
+  const declaredCall = (callee: string): { widths: readonly number[]; block: readonly number[] | null } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3892,15 +3892,33 @@ export function lift(
           'later argument and the call cannot be laid out',
       );
     }
-    const arity = declaredArgRegs(proto);
-    if (arity === undefined) {
+    const widths = declaredParamWidths(proto);
+    if (widths === undefined) {
       return null;
     }
-    const words = arity - target.argRegs.length;
+    // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
+    // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
+    // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
+    // refusal is what keeps the walk below from reading `r4`, which is an argument register on no
+    // target here. (`wideHelper` bounds the same placement for the helper table, where it can fall
+    // back to the declared path instead; a declaration has nothing to fall back to.)
+    let at = 0;
+    for (const w of widths) {
+      if (w > 32 && at + 2 > target.argRegs.length) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': parameter ${at + 1} of \`${callee}\` is 64 bits wide and starts at ` +
+            `argument register ${at + 1} of ${target.argRegs.length}, so one half of a 64-bit value ` +
+            'lands in the frame and the other in a register — this frontend does not assemble a pair a ' +
+            'call leaves split across that boundary',
+        );
+      }
+      at += w > 32 ? 2 : 1;
+    }
+    const words = at - target.argRegs.length;
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-    return { arity, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
+    return { widths, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
@@ -4768,63 +4786,67 @@ export function lift(
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const wide = wideHelper(targetSym);
           const declared = wide ? null : declaredCall(targetSym);
-          const argc = declared?.arity ?? fallbackArgcHere(bi);
-          // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
-          // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
-          // `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack argument can
-          // only come from a declaration, and the analysis has already refused that function;
-          // reaching here with no block means the slot model is off for another reason, and the
-          // decline names it rather than reading `r4` as if it were argument 5.
+          // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
+          // runtime table or the project's headers. Both answer the same question, so the walk that
+          // reads argument registers off the answer is written once; two walks would be two chances
+          // for the pairing rule and the arity rule to disagree.
+          const widths = wide?.params ?? declared?.widths ?? null;
+          const argc = widths === null ? fallbackArgcHere(bi) : wordsOf(widths);
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
-          // A 64-BIT PARAMETER IS TWO ARGUMENT REGISTERS AND ONE VALUE. The helper table states
-          // each C parameter's WIDTH, so the pair is read here rather than recovered from four
-          // 32-bit arguments later — `contracts.ts` would fire on the second reading anyway, since
-          // the structurer materialises an effectful call once per result.
-          if (wide) {
-            let k = 0;
-            for (const w of wide.params) {
-              args.push(
-                w > 32 ? fuseHalves(irb, readVar(`r${k}`, bi), readVar(`r${k + 1}`, bi)) : readVar(`r${k}`, bi),
-              );
-              k += w > 32 ? 2 : 1;
-            }
-          }
           // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
-          // `finish()` answers by dropping the ones a call has been through; a DECLARED one asserts
-          // they exist, so a destroyed register read for it is a wrong value nothing retracts.
-          const readArg = declared === null && !wide ? ssa.readGuessedArg : readVar;
-          for (let k = 0; !wide && k < argc; k++) {
-            if (k < target.argRegs.length) {
+          // `finish()` answers by dropping the ones a call has been through; a STATED width asserts
+          // they exist, so a destroyed register read for it is a wrong value nothing retracts. A
+          // guess is a list of single words by construction — `fallbackArgcHere` counts registers.
+          const readArg = widths === null ? ssa.readGuessedArg : readVar;
+          let k = 0;
+          for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
+            if (k >= target.argRegs.length) {
+              // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
+              // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that
+              // block. `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack
+              // argument can only come from a stated width, and `declaredCall` has already refused
+              // the one stated width that could put a PAIR here; reaching this with no block means
+              // the slot model is off for another reason, and the decline names it rather than
+              // reading `r4` as if it were argument 5.
+              const off = stackArgs?.[k - target.argRegs.length];
+              if (off === undefined) {
+                throw spAsDataError();
+              }
+              usedSlotOffsets.add(off);
+              args.push(readVar(slotKey(off), bi));
+            } else if (w > 32) {
+              // A 64-BIT PARAMETER IS TWO ARGUMENT REGISTERS AND ONE VALUE, so the pair is built
+              // here rather than recovered from two 32-bit arguments later — `contracts.ts` would
+              // fire on the second reading anyway, since the structurer materialises an effectful
+              // call once per result.
+              args.push(fuseHalves(irb, readVar(`r${k}`, bi), readVar(`r${k + 1}`, bi)));
+            } else {
               args.push(readArg(`r${k}`, bi));
-              continue;
             }
-            const off = stackArgs?.[k - target.argRegs.length];
-            if (off === undefined) {
-              throw spAsDataError();
-            }
-            usedSlotOffsets.add(off);
-            args.push(readVar(slotKey(off), bi));
+            k += w > 32 ? 2 : 1;
           }
-          // A 64-BIT VALUE MAY NOT LEAVE AS A WORD. A pair occupies two argument registers, and
-          // nothing here knows how many of them an ordinary callee's parameters take: `Prototypes`
-          // counts argument REGISTERS, so a header's `void sink(long long)` and `void sink(int)`
-          // arrive at this point as the same fact. Passing the low half alone invents a truncation
-          // the asm never wrote; passing both halves as two words contradicts a one-parameter
-          // declaration. Both recompile to the very `bl` being lifted, so the differ scores them
-          // exactly as it scores the right answer and nothing downstream can referee either.
+          // A 64-BIT VALUE MAY NOT LEAVE AS A WORD, and where no width is stated nothing here can
+          // tell that it is one. A guessed arity counts argument registers, so a caller that
+          // computes a pair and a caller that computes two words set up the same two registers:
+          // passing the low half alone invents a truncation the asm never wrote, passing both
+          // halves as two words invents an argument. Both recompile to the very `bl` being lifted,
+          // so the differ scores them exactly as it scores the right answer and nothing downstream
+          // can referee either.
           //
-          // The helper table is the one place that does know (`wide`, above), so the pair crosses a
-          // call boundary there and declines everywhere else. What that costs is a function that
-          // computes a 64-bit value and hands a HALF of it to an undeclared callee — an honest
-          // narrowing, refused because it is spelled the same way as the wrong answer.
-          for (const [k, v] of args.entries()) {
+          // A STATED WIDTH is what decides it, from the compiler's helper table or the project's
+          // headers, and the walk above has already built the pair wherever one was stated. What
+          // reaches here is a call nothing declares, and what it costs is a function that hands a
+          // HALF of a 64-bit value to such a callee — an honest narrowing, refused because it is
+          // spelled the same way as the wrong answer.
+          for (const [j, v] of args.entries()) {
             const half = halfOf.get(v);
             if (half) {
               throw new FrontendUnsupportedError(
-                `cannot lift '${name}': argument ${k + 1} of the call to '${targetSym}' is the ` +
-                  `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and no prototype ` +
-                  `says how many argument registers that callee's parameters occupy`,
+                `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
+                  `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
+                  `the width of '${targetSym}'s parameters — a prototype would, and without one a ` +
+                  'pair cannot be told from two ordinary arguments',
               );
             }
           }
@@ -4834,7 +4856,7 @@ export function lift(
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
           // the argument registers this guess just read.
-          if (declared === null && !wide) {
+          if (widths === null) {
             ssa.recordGuessedCall(callOp, bi, target);
           }
           if (wide?.returns === 64) {

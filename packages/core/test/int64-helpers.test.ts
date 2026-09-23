@@ -111,12 +111,67 @@ describe('what refuses', () => {
     expect(() => decompile('halfshare', asm, ARMV4T_AGBCC)).toThrow(/no lowering for op 'concat'/);
   });
 
-  // THE CALL BOUNDARY IS WHERE THE PAIR STOPS. Handing a half to a callee whose parameter widths
-  // nothing states is the wrong answer that recompiles to the right bytes, so it declines.
+  // THE CALL BOUNDARY IS WHERE THE PAIR STOPS WHEN NOTHING STATES A WIDTH. Handing a half to such
+  // a callee is the wrong answer that recompiles to the right bytes, so it declines.
   test('a half handed to an ordinary callee declines, and names the half', () => {
     expect(() => decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC)).toThrow(
       /argument 1 of the call to 'sink' is the low half of a 64-bit value/,
     );
+  });
+
+  // A PAIR SPLIT ACROSS THE REGISTER/STACK BOUNDARY is a placement this frontend does not build:
+  // agbcc puts the low half in r3 and the high half at [sp,#0]. The declaration is readable and
+  // the block is the right size, so nothing else would stop it — the walk would read `r4`, which
+  // is an argument register on no target here.
+  test('a declared pair that does not fit in the argument registers refuses, naming the position', () => {
+    expect(() =>
+      decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC, {
+        prototypes: { sink: { params: ['s32', 's32', 's32', 'long long'], returnsVoid: true } },
+      }),
+    ).toThrow(/parameter 4 of `sink` is 64 bits wide and starts at argument register 4 of 4/);
+  });
+});
+
+// THE OUTGOING HALF OF THE SAME ABI FACT. A helper table states its parameters' widths, and so
+// does a project's header — the frontend reads ONE list of widths, from whichever source has it,
+// and builds the pair the same way for both.
+describe('a declared 64-bit parameter crosses a call as one value', () => {
+  const src = (asmText: string, prototypes: Record<string, FnProto>) =>
+    decompile('f', asmText, ARMV4T_AGBCC, { prototypes }).source;
+  // `void f(…) { sink(…); }` — the body is the `bl` alone, so what the arguments are is entirely
+  // the declaration's doing and nothing else can be scoring.
+  const call = 'f:\n\tpush\t{lr}\n\tbl\tsink\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a pair arriving in r0:r1 leaves in r0:r1, as one argument', () => {
+    expect(
+      src(call, {
+        f: { params: ['long long'], returnsVoid: true },
+        sink: { params: ['long long'], returnsVoid: true },
+      }),
+    ).toBe('void f(s64 a0) {\n    sink(a0);\n}\n');
+  });
+
+  // THE WITNESS THAT SEPARATES TWO PLAUSIBLE ABIs, and nothing else in this tree could: every
+  // shipped helper entry is [64,64], [64,32] or [64], all of which land identically whether or not
+  // the ABI aligns. agbcc does NOT align — `thumb.h` computes the register from a plain byte
+  // counter with no rounding — so `void sink(s32, long long)` takes r0 and the pair r1:r2. An
+  // AAPCS-aligned model pads to r2:r3, reads r3 (which this function never writes) as the high
+  // half, and spells a different call.
+  test('a mixed signature packs: the pair is r1:r2, not r2:r3', () => {
+    const packed =
+      'f:\n\tpush\t{lr}\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x0\n\tbl\tsink\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(
+      src(packed, { f: { returnsVoid: true }, sink: { params: ['s32', 'long long'], returnsVoid: true } }),
+    ).toContain('sink(1, (s64)(u32)2)');
+  });
+
+  test('…and the same signature carries its parameters through unchanged', () => {
+    expect(
+      src(call, {
+        f: { params: ['s32', 'long long'], returnsVoid: true },
+        sink: { params: ['s32', 'long long'], returnsVoid: true },
+      }),
+    ).toBe('void f(s32 a0, s64 a1) {\n    sink(a0, a1);\n}\n');
   });
 });
 
