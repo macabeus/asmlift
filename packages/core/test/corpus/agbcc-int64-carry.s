@@ -9,6 +9,9 @@
 @   void g(void);
 @   s64 llkeepadd(s64 a, s64 b){ s64 x = a+b; g(); return x; }
 @   s64 lljoin(s64 a, s64 b, s32 c){ if (c) return a+b; return 0; }
+@   s64 llmuldiv(s32 x, s32 y){ s64 r = x; r *= y; r /= 256; return r; }
+@
+@ Each function was compiled on its own; its local labels carry a suffix so that one file holds them all.
 @
 @ Every 64-bit add and subtract agbcc emits is ONE insn (`adddi3`/`subdi3` in thumb.md): the low
 @ words' `add`/`sub` and the high words' `adc`/`sbc` side by side, nothing between.
@@ -24,6 +27,9 @@
 @ carry-pair twin of `llkeep` in agbcc-int64-helpers.s.
 @
 @ `lljoin` builds its sum in one arm and returns from the join, where r0 and r1 are phis.
+@
+@ `llmuldiv` builds its high word from shifts of a join, so no pair reaches r0:r1 — and its epilogue
+@ pops into r2, which agbcc does only for an 8-byte return.
 	.code	16
 .gcc2_compiled.:
 .text
@@ -166,3 +172,39 @@ lljoin:
 	bx	r2
 .Lfe9:
 	.size	 lljoin,.Lfe9-lljoin
+	.align	2, 0
+	.globl	llmuldiv
+	.type	 llmuldiv,function
+	.thumb_func
+llmuldiv:
+	push	{r4, r5, r6, r7, lr}
+	add	r2, r1, #0
+	add	r4, r0, #0
+	asr	r5, r0, #0x1f
+	asr	r3, r2, #0x1f
+	add	r1, r5, #0
+	add	r0, r4, #0
+	bl	__muldi3
+	add	r5, r1, #0
+	add	r4, r0, #0
+	add	r7, r5, #0
+	add	r6, r4, #0
+	cmp	r5, #0
+	bge	.L3ll	@cond_branch
+	mov	r6, #0xff
+	mov	r7, #0
+	add	r6, r6, r4
+	adc	r7, r7, r5
+.L3ll:
+	lsl	r3, r7, #0x18
+	lsr	r2, r6, #0x8
+	add	r0, r3, #0
+	orr	r0, r0, r2
+	asr	r1, r7, #0x8
+	add	r5, r1, #0
+	add	r4, r0, #0
+	pop	{r4, r5, r6, r7}
+	pop	{r2}
+	bx	r2
+.Lfe10:
+	.size	 llmuldiv,.Lfe10-llmuldiv

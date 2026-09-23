@@ -609,7 +609,9 @@ its high register with the return address — two functions otherwise identical.
 (`sub`) on the low words and an `adc` (`sbc`) on the high words that takes its carry — ONE insn on
 agbcc (`adddi3`/`subdi3`), so the two are adjacent. Read together they are `concat ± concat`, with
 `lo32`/`hi32` written back, which is the same shape a helper call's pair already has, so the
-parameter fusion and the pair return need nothing new.
+parameter fusion reads it unchanged, and `wideReturn` reads the return off the projections — through
+register copies, which agbcc makes of a sum it computed outside r0:r1. A pair that reaches the return
+from another block is refused rather than joined: a 64-bit phi is the capability not built.
 
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:
@@ -632,6 +634,7 @@ lifted from.
 | ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | frontend, layer 0 | a caller-saved register read after a call, the returned pair aside (Thumb)  | what it holds is the callee's, so an `r1` read after a `bl` is never the caller's pre-call value — it is the RETURNED high half where a width says a pair came back, and nothing otherwise; the PowerPC frontend builds no pair and refuses a declared wide return outright |
 | frontend          | an `adc`/`sbc` that does not directly follow its low-register `add`/`sub`   | only adjacency proves which carry it reads (every Thumb-1 ALU op writes the flags); it decodes as the unmodelled opaque it always was, and so does one whose high half is that add's own destination, which is no half of either operand                                    |
+| frontend          | a word return under an epilogue that pops the return address into r2        | agbcc's `thumb_exit` picks that register from the size of the returned value — r1 up to 4 bytes, r2 up to 8 — so r1 carries a high half the word would drop                                                                                                                 |
 | frontend          | a 64-bit pair that reaches the return from another block                    | `wideReturn` is block-local, and its null is otherwise a WORD return that drops the high half of a function that computed it                                                                                                                                                |
 | frontend          | a 64-bit value leaving as a word at an ordinary call boundary               | nothing states an undeclared callee's parameter widths                                                                                                                                                                                                                      |
 | raise             | a helper call whose operands did not ARRIVE at the table's widths           | an operand count is not evidence of a pair; the pair construction is                                                                                                                                                                                                        |

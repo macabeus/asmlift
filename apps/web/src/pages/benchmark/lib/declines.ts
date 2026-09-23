@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 130 distinct decline messages (the texts reached by
+// `packages/core/src` throws 131 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -329,8 +329,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // throw: `reloc-halves` holds `/high half/`, this list is ordered, and a classification that
     // depends on which entry comes first is a classification nothing states.
     //
-    //   the RETURN — a pair that reaches the return from another block, where `wideReturn`
-    //   (thumb.ts) cannot decide whether the function hands back both halves or one.
+    //   the RETURN — a pair another block built reaching the return (`refuseCrossBlockPairReturns`,
+    //   thumb.ts), and an epilogue that pops into r2, which agbcc does only for an 8-byte return,
+    //   over an r0:r1 that is no pair this lift built. Both are a width asmlift cannot spell there.
     //
     //   the VALUE — a `concat` of two words that are not the two halves of a value this lift
     //   already built (two ordinary loads of a struct's halves, say). It reaches structure.ts as
@@ -346,7 +347,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // marker occurrences a grep counts — the blocker Pareto is per row.
     key: 'wide-call-arg',
     label: 'A 64-bit value the lift could not carry as one',
-    pattern: /(?:half|halves) of a 64-bit value|no lowering for op 'concat'|no upper half to shift out/,
+    pattern:
+      /(?:half|halves) of a 64-bit (?:value|pair)|8-byte return value|no lowering for op 'concat'|no upper half to shift out/,
   },
   {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody

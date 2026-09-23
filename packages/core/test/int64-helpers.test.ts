@@ -25,12 +25,13 @@ import { ARMV4T_AGBCC } from '../src/target';
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC).source;
 
-/** Callers of callees whose names are members of `Object.prototype`, which a C symbol may be. */
+/** Callers of callees whose names are members of `Object.prototype`, which a C symbol may be — each
+ *  a word-returning function, so its interworking epilogue pops into r1. */
 const objectProtoCallers = (...names: string[]) =>
   names
     .map((sym) =>
       ['\t.code\t16', `\t.globl\tcalls_${sym}`, '\t.thumb_func', `calls_${sym}:`, '\tpush\t{lr}']
-        .concat([`\tbl\t${sym}`, '\tpop\t{r2}', '\tbx\tr2'])
+        .concat([`\tbl\t${sym}`, '\tpop\t{r1}', '\tbx\tr1'])
         .join('\n'),
     )
     .join('\n');
@@ -130,7 +131,34 @@ describe('what refuses', () => {
   // A PAIR THAT REACHES THE RETURN THROUGH A JOIN declines: the width is decided only in the
   // block that builds the pair, and returning r0 alone would drop the high half of `a * b`.
   test('a pair returned from a join declines rather than returning a word', () => {
-    expect(() => lift('llmuljoin')).toThrow(/two halves of a 64-bit value that another block built/);
+    expect(() => lift('llmuljoin')).toThrow(/pops the return address into r2, which agbcc does only for an 8-byte/);
+  });
+
+  // …and where the epilogue does not say the width (a leaf, or no `-mthumb-interwork`), the pair
+  // reaching the return from another block is what refuses.
+  test('…as it does where the epilogue does not pin the width', () => {
+    const noInterwork = asm.replace('\tpop\t{r4, r5}\n\tpop\t{r2}\n\tbx\tr2\n.Lfe8:', '\tpop\t{r4, r5, pc}\n.Lfe8:');
+    expect(noInterwork).not.toBe(asm);
+    expect(() => decompile('llmuljoin', noInterwork, ARMV4T_AGBCC)).toThrow(
+      /halves of a 64-bit pair another block built/,
+    );
+  });
+
+  // agbcc's `thumb_exit` pops the return address into r2 only for an 8-byte return value, so a
+  // word return there drops a high half, however it was computed.
+  test('an epilogue popping into r2 with no pair in r0:r1 declines', () => {
+    const src = ['\t.code\t16', '\t.globl\tf', '\t.thumb_func', 'f:', '\tpush\t{lr}', '\tbl\tg', '\tasr\tr1, r0, #0x8'];
+    expect(() =>
+      decompile('f', [...src, '\tpop\t{r2}', '\tbx\tr2', ''].join('\n'), ARMV4T_AGBCC, {
+        prototypes: { g: { params: 0 } },
+      }),
+    ).toThrow(/8-byte return value/);
+  });
+
+  // ASKING WHAT r1 HOLDS MUST NOT READ IT: one path to this join never defines r1, and a read there
+  // mints a live-in, which is a parameter the function does not have.
+  test('a word return from a join with a pair on one side gains no parameter', () => {
+    expect(lift('llmintarm')).toMatch(/^s32 llmintarm\(s32 a0\) \{/);
   });
 
   // THE WIDTH IS READ OFF WHAT r1 HOLDS, so an r1 the function overwrote is not the pair's.
@@ -241,8 +269,9 @@ describe('a 64-bit fold needs the widths, not the arity', () => {
     // Two C parameters is the header spelling and the one a user reaches for after reading
     // `no model for the runtime helper '__muldi3'`; four is the word arity. `validatePrototypes`
     // accepts all three, and all three must decline.
+    // `lomul`, whose word return keeps the 8-byte epilogue refusal out of the way of this one.
     for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
-      expect(() => decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params } } })).toThrow(
+      expect(() => decompile('lomul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params } } })).toThrow(
         /no model for the runtime helper '__muldi3'/,
       );
     }
@@ -259,7 +288,7 @@ describe('a 64-bit fold needs the widths, not the arity', () => {
   test('…and a `returns` beside it does not put the pair back', () => {
     for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
       expect(() =>
-        decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params, returns: 's64' } } }),
+        decompile('lomul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params, returns: 's64' } } }),
       ).toThrow(/no model for the runtime helper '__muldi3'/);
     }
   });

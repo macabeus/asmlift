@@ -412,7 +412,7 @@ export function forwardingTarget(b: Block): Block {
  *  a CFG fact a parameter for one caller's extra edges — so it stays where it is, and what this
  *  paragraph buys is that the next reader looking for a fourth copy knows which of the two the
  *  third one is. */
-export function mergeClasses(fn: Fn): Map<Value, readonly Value[]> {
+export function mergeClasses(fn: Pick<Fn, 'blocks'>): Map<Value, readonly Value[]> {
   const parent = new Map<Value, Value>();
   const find = (v: Value): Value => {
     let r = v;

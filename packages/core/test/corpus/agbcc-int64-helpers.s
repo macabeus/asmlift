@@ -7,6 +7,9 @@
 @   s32 himul(s64 a, s64 b){ return (s32)((a*b)>>32); }
 @   void g(void); s64 llkeep(s64 a, s64 b){ s64 x = a*b; g(); return x; }
 @   s64 llmuljoin(s64 a, s64 b, s32 c){ if (c) return a*b; return 0; }
+@   s32 llmintarm(s32 x){ if (x) x = (s32)((s64)x * x / 3); return x; }
+@
+@ Each function was compiled on its own; its local labels carry a suffix so that one file holds them all.
 @
 @ The third one is a parameter this function uses as a WORD: `b` is both the shift count and an
 @ addend, and it arrives in r2 — a third argument register that is no part of the pair in r0:r1.
@@ -31,6 +34,9 @@
 @ the same four instructions.
 @
 @ `llmuljoin` calls the helper in one arm and returns from the join, where r0 and r1 are phis.
+@
+@ `llmintarm` returns a word from a join one arm of which holds a helper's pair, and r1 has no
+@ definition on the other path, so asking what r1 holds must not READ it: a read there mints a parameter.
 	.code	16
 .gcc2_compiled.:
 .text
@@ -157,3 +163,24 @@ llmuljoin:
 	bx	r2
 .Lfe8:
 	.size	 llmuljoin,.Lfe8-llmuljoin
+	.align	2, 0
+	.globl	llmintarm
+	.type	 llmintarm,function
+	.thumb_func
+llmintarm:
+	push	{lr}
+	cmp	r0, #0
+	beq	.L3ll	@cond_branch
+	add	r2, r0, #0
+	asr	r3, r0, #0x1f
+	add	r1, r3, #0
+	add	r0, r2, #0
+	bl	__muldi3
+	mov	r2, #0x3
+	mov	r3, #0
+	bl	__divdi3
+.L3ll:
+	pop	{r1}
+	bx	r1
+.Lfe9:
+	.size	 llmintarm,.Lfe9-llmintarm

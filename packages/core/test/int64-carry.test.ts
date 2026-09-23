@@ -68,7 +68,44 @@ describe('the return width', () => {
   });
 
   test('a pair returned from a join declines rather than returning a word', () => {
-    expect(() => lift('lljoin')).toThrow(/two halves of a 64-bit value that another block built/);
+    expect(() => lift('lljoin')).toThrow(/pops the return address into r2, which agbcc does only for an 8-byte/);
+    const noInterwork = asm.replace('\tpop\t{r4, r5}\n\tpop\t{r2}\n\tbx\tr2\n.Lfe9:', '\tpop\t{r4, r5, pc}\n.Lfe9:');
+    expect(noInterwork).not.toBe(asm);
+    expect(() => decompile('lljoin', noInterwork, ARMV4T_AGBCC)).toThrow(/halves of a 64-bit pair another block built/);
+  });
+
+  // r1 IS ASKED ABOUT, NEVER READ: this pair lands in r0:r3 and nothing defines r1, so a read of it
+  // would mint a live-in — a second parameter the function does not have.
+  const widenInR3 = ['\tasr\tr3, r0, #0x1f', '\tmov\tr2, #0x0', '\tadd\tr0, r0, r0', '\tadc\tr3, r2'];
+  test('a pair whose high half is not in r1 gains no parameter', () => {
+    expect(liftLeaf(widenInR3)).toMatch(/^s32 f\(s32 a0\) \{/);
+  });
+
+  test('…and neither does one that reaches the return through a join', () => {
+    const body = ['\tcmp\tr0, #0x0', '\tbeq\t.L1', ...widenInR3, '.L1:'];
+    expect(liftLeaf(body)).toMatch(/^s32 f\(s32 a0\) \{/);
+  });
+
+  // THE HIGH HALF BUILT FROM SHIFTS, not projected from a pair: nothing this lift built reaches
+  // r0:r1, and the r2 epilogue says the function returns eight bytes.
+  test('an 8-byte epilogue with no pair in r0:r1 declines', () => {
+    expect(() => lift('llmuldiv')).toThrow(/8-byte return value/);
+  });
+
+  // STALENESS TRAVELS THROUGH COPIES: a call destroys r1 and a pop reloads r4, and a copy out of
+  // either is no more the pair's high half than the register it copies.
+  const g0 = { prototypes: { g: { params: 0 } } };
+  test('a copy of a register the call destroyed does not bring the high half back', () => {
+    const body = ['\tpush\t{r4, r5, lr}', '\tadd\tr0, r0, r2', '\tadc\tr1, r1, r3', '\tadd\tr4, r0, #0', '\tbl\tg'];
+    const tail = ['\tadd\tr5, r1, #0', '\tadd\tr1, r5, #0', '\tadd\tr0, r4, #0'];
+    const src = decompile('f', leaf([...body, ...tail], ['\tpop\t{r4, r5, pc}']), ARMV4T_AGBCC, g0).source;
+    expect(src).not.toMatch(/^s64 f\(/);
+  });
+
+  test('…nor does a copy of a register a pop reloaded', () => {
+    const body = ['\tpush\t{r4, lr}', '\tadd\tr0, r0, r2', '\tadc\tr1, r1, r3', '\tadd\tr4, r1, #0', '\tpop\t{r4}'];
+    const src = liftLeaf([...body, '\tadd\tr1, r4, #0'], ['\tpop\t{pc}']);
+    expect(src).not.toMatch(/^s64 f\(/);
   });
 
   // agbcc holds the sum in r4:r5 across `g()` and copies it back; the call rules are pinned beside
