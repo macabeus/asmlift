@@ -184,6 +184,15 @@ describe('the instruction cause beats the shape symptom', () => {
   // before a destination is fabricated. So the marker this arm used to assert — a shape refusal
   // carrying `unmodelled instruction 'mtc1'` — is a string core cannot produce, and a test on it
   // would pass forever while testing nothing. The integer half above still exercises the route.
+  //
+  // THAT PREMISE IS A CLAIM ABOUT CORE, AND IT WAS ONCE ONLY HALF TRUE, which is why it is named
+  // here rather than assumed. When this arm was deleted, `mips.ts`'s FP predicate required the `$`
+  // sigil and `frontend/splat.ts` stripped it, so on the Splat dialect an `mfc1` DID become an
+  // opaque and the deleted assertion had a subject after all. What makes it true on both dialects
+  // now is `splat.ts` keeping the sigil on an FPU register, and what keeps it true is
+  // `packages/core/test/fp-refusal.test.ts` (which runs both dialects through `decompile`) plus the
+  // FPU layer of `packages/core/test/contract-invariant.test.ts`. Delete an arm on a premise about
+  // another package and the premise is part of the deletion.
 
   test('a loop-shape decline with NO unmodelled instruction is still loop-shapes', () => {
     // Without this, "always classify as opaque-ops" would pass the two tests above.

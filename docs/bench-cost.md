@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.8s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,26 +137,38 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**823 s over 190 real rows** and **501 s over 751 synthetic rows**; wall clock was 179.0 s and
-186.2 s on tiers that overlap, and 253.5 s end to end — 186.2 + 179.0 is 365.2, which is not the
-wall time and never was.
+**825 s over 190 real rows** and **502 s over 751 synthetic rows**; wall clock was 179.3 s and
+186.5 s on tiers that overlap, and 254.9 s end to end (`real 255.51` under `/usr/bin/time -p`) —
+186.5 + 179.3 is 365.8, which is not the wall time and never was.
 The dearest single row is **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
 its own — which is the figure to reach for when a scoped run looks cheap.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
 rows, 0 added, 0 removed, and `bench regression` **0 lost, 0 missing, 0 retired, 0 added, 0 gained,
-0 other flips** against both bases it has been measured against. `pnpm bench diff --base 43534788`
-prints **1,336.4 s → 1,323.8 s (0.99×)** against the committed artifact. Its FIRST run, on
+0 other flips** against every base it has been measured against. `pnpm bench diff --base 43534788`
+prints **1,336.4 s → 1,326.7 s (0.99×)** against the committed artifact. The FIRST run, on
 2026-09-23 against `0e7b4f7b`, printed **1,439.5 s → 2,027.6 s (1.41×)** — **a reading, not a
 figure this repo can recompute**: that run's artifact was dropped when the branch rebased, because
 an artifact commit has to be the branch's last, so no sha in this history carries it and
-`bench diff` against either base answers about the second run. It is recorded here on the strength
-of the run that printed it and nothing else. The fan line is **67,760 → 67,760 (1.00×), zero
-records moved** and was **67,751 → 67,751 (1.00×), zero records moved** the first time — identical
-to the digit on both, and that half is recomputable from either artifact. **A multiplier that
-travels from 1.41× to 0.99× across a rebase, over a diff that cannot change an outcome by
-construction, is measuring the box and the cache.** Five rounds shared this machine during the first run and two during the
+`bench diff` against either base answers about a later run. It is recorded here on the strength of
+the run that printed it and nothing else. The fan line is **67,760 → 67,760 (1.00×), zero records
+moved** and was **67,751 → 67,751 (1.00×), zero records moved** the first time — identical to the
+digit on all three, and that half is recomputable from every artifact that survives. **A multiplier
+that travels from 1.41× to 0.99× across a rebase, over a diff that cannot change an outcome by
+construction, is measuring the box and the cache.**
+
+THE THIRD RUN IS THE CONTROL THAT MAKES THAT READABLE, because this time the prediction was
+written down before the run. A remediation wave touched five frontend files, and the notice filed
+with the bench slot predicted the movement: 0 rows, and marker changes on exactly five rows
+(`synthetic:{fadd,fsub,fmul,fdiv,dadd}:mwcc_242_81`, a deduped register list).
+`pnpm bench diff --base 5d9ce855` — this branch's own previous artifact, which isolates the wave
+from the branch — prints **10 field change(s), 0 added, 0 removed**, over exactly those five rows,
+**fan 67,760 → 67,760 (1.00×), 0 rows moved**, and **cost 1,323.8 s → 1,326.7 s (1.00×)**. Two
+rounds shared the machine for this one. So the same tree, benched three times in six hours, priced
+its own ranked pass at 2,027.6 s, 1,323.8 s and 1,326.7 s while its fan did not move by one record
+in any pair. **Diff against your own previous artifact, not only against the base: it is the only
+comparison in which your prediction and the machine's noise are separable.** Five rounds shared this machine during the first run and two during the
 second. This is the entry below's own lesson arriving a second time, on a branch that could not
 possibly have caused it.
 
