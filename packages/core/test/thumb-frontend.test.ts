@@ -1323,6 +1323,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(
       /computed \(`add r4, sp, #0x4`\) — a CONSTANT frame offset; only `mov rD, sp` is modelled/,
     );
+    // …including a SIGNED one, which is a spelling the corpus has 722 of (`#-0x4` ×287) and which
+    // agbcc writes in its own output. The split asks "is this a constant", not "is this an
+    // unsigned constant" — read with the sign-less literal `immEq` compares values with, this fell
+    // to the runtime arm and produced a refusal false about the instruction it quotes.
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #-0x4\n'), ARMV4T_AGBCC)).toThrow(
+      /computed \(`add r4, sp, #-0x4`\) — a CONSTANT frame offset/,
+    );
     // the runtime form says the thing that makes it a DIFFERENT gap: no offset, so no extent
     expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(
       /computed \(`add r4, sp, r1`\) — a RUNTIME index into the frame, which has no extent to model/,
@@ -1336,7 +1343,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  // THE PUBLISHED MARKER IS 200 CHARACTERS (`apps/benchmark/src/eval/asmlift.ts` slices it), and
+  // The width a published marker is sliced to. `packages/core` cannot import from `apps/`, so the
+  // number is copied here with the command that re-reads its source:
+  //   command grep -n 'slice(0, ' apps/benchmark/src/eval/asmlift.ts
+  const MARKER_CHARS = 200;
+
+  // THE PUBLISHED MARKER IS `MARKER_CHARS` CHARACTERS (`apps/benchmark/src/eval/asmlift.ts` slices it), and
   // the artifact is the only place most readers meet a refusal. A message that overruns loses its
   // tail there and nowhere else — every unit test above passes on the untruncated string. So the
   // length is checked on the ACTUAL corpus instance: `sa3:ProcessOamBuffers:agbcc`, whose name and
@@ -1351,8 +1363,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     } catch (e) {
       published = `lift: ${(e as Error).message}`.split('\n')[0];
     }
+    // The assertion is the BOUND, not today's length. Pinned to an exact number, the one way to
+    // make this test green after lengthening the message past 200 is to update the number — which
+    // is the failure it exists to prevent, and an improvement that SHORTENS the message fails it
+    // for nothing.
     expect(published).toMatch(/a CONSTANT frame offset; only `mov rD, sp` is modelled$/);
-    expect(published.length).toBe(186);
+    expect(published.length).toBeLessThanOrEqual(MARKER_CHARS);
   });
 
   test('a refused function names the capability actually missing', () => {
@@ -1465,12 +1481,21 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC)).toThrow(TWO_MODELS);
       });
 
+      // BOTH HALVES OF ONE RULE — "through a base that is neither sp nor another held capture" —
+      // because each half is its own clause in the predicate and a clause without a witness is
+      // decoration until an input proves otherwise. Dropping the second clause leaves the first
+      // row green, which is exactly how a load-bearing guard comes to read as one.
       test('a capture stored back into its OWN frame publishes nothing', () => {
         // the address never leaves: `[sp]` is storage this function already owns, so the store
         // proves nothing about who else can reach the word
         expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr1, [sp]'), ARMV4T_AGBCC)).toThrow(
           TWO_MODELS,
         );
+        // …and the SAME frame reached through a second capture of it: `mov r2, sp` makes r2 the
+        // frame base too, so `str r1, [r2]` writes the address into the very word it names
+        expect(() =>
+          decompile('f', PUBLISH.replace('\tmov\tr1, sp\n', '\tmov\tr1, sp\n\tmov\tr2, sp\n'), ARMV4T_AGBCC),
+        ).toThrow(TWO_MODELS);
       });
 
       test('a HALFWORD store hands over half an address, and is not a publish', () => {
@@ -1759,13 +1784,48 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(() => decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
-        /no call takes it and no store publishes it/,
+        /no call takes it and no word store publishes it outside this frame/,
       );
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
       expect(decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
         'use(&sp0)',
       );
+    });
+
+    // THE RE-CHECK IS A CONTAINMENT, and a re-proof weaker than the licence it re-proves is a
+    // second, wider door into the same acceptance. Each input below is `droppedByArity` — the
+    // licence granted by the callee scan, the address then dropped by the declared arity — with
+    // ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
+    // `published` set the audit accepted all three, and `five`'s fifth outgoing argument, really
+    // staged at [sp,#0], was dropped from a compiling, plausible, wrong program.
+    test.each([
+      ['a HALFWORD of the address is not the address', '\tldr\tr2, .L4\n\tstrh\tr1, [r2]\n', true],
+      ['a store back into the object\u2019s own bytes publishes to nobody', '\tstr\tr1, [sp]\n', false],
+      ['a store through ANOTHER held capture is the same frame', '\tmov\tr2, sp\n\tstr\tr1, [r2]\n', false],
+    ])('the premise re-check refuses what the licence refuses: %s', (_why, publish, needsPool) => {
+      const src =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr1, sp\n' +
+        publish +
+        '\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+        (needsPool ? '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n' : '');
+      expect(() => decompile('f', src, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
+        /no call takes it and no word store publishes it outside this frame/,
+      );
+      // CONTROL, and it is what makes each row a witness rather than a blanket: the SAME function
+      // with the store widened to a word through a pool address — the one shape the licence does
+      // admit — lifts, so the refusal is about the store and not about the surrounding frame.
+      const outward = src
+        .replace('\tstrh\tr1, [r2]\n', '\tstr\tr1, [r2]\n')
+        .replace('\tstr\tr1, [sp]\n', '\tldr\tr2, .L4\n\tstr\tr1, [r2]\n')
+        .replace('\tmov\tr2, sp\n\tstr\tr1, [r2]\n', '\tldr\tr2, .L4\n\tstr\tr1, [r2]\n')
+        .replace('\tbx\tr0\n$', '\tbx\tr0\n');
+      const withPool = outward.includes('.L4:')
+        ? outward
+        : `${outward}.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n`;
+      expect(decompile('f', withPool, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }).source).toContain('&sp0');
     });
 
     // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an

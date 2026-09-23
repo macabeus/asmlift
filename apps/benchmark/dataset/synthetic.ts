@@ -3182,8 +3182,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base a
   // bare `mov rD, sp` lets ESCAPE — handed to a callee, or PUBLISHED by a word store through a
-  // base that is not sp, which is the `*(vu32 *)REG_DMA3SAD = (u32)&tmp` idiom and needs no call
-  // in the function at all — and which the caller either WRITES itself, passes at an
+  // base that is neither sp nor another capture of this same frame, which is the
+  // `*(vu32 *)REG_DMA3SAD = (u32)&tmp` idiom and needs no call in the function at all (a store
+  // back into the frame's own bytes hands the address to nobody, and half an address is not the
+  // address) — and which the caller either WRITES itself, passes at an
   // argument above r0, or hands only to callees the project declares `void` — any one of the
   // three, since a struct-return temp has none of them. NOT via callee arity, which cannot
   // license an acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
