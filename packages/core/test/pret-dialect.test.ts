@@ -139,8 +139,10 @@ jo:
     expect(() => d('fd', asm)).toThrow(/falls through into data bytes/);
   });
 
-  test('a sub-word data table declines only the function that references it', () => {
-    // `uses` loads the table address from its literal pool; `clean` never touches it.
+  test("a sub-word data table's ADDRESS is a pool symbol like any other", () => {
+    // `uses` loads the table address from its literal pool; `clean` never touches it. Neither
+    // needs the table's bytes, and the `.short` under the label decides nothing for either —
+    // the element width matters only where an element is READ (thumb-subword-data.test.ts).
     const tu = `	.section .rodata
 sTable:
 	.short 0x0
@@ -160,7 +162,7 @@ clean:
 	bx lr
 	thumb_func_end clean
 `;
-    expect(() => d('uses', tu)).toThrow(/sub-word data table 'sTable' \(\.short\)/);
+    expect(d('uses', tu).source).toBe('s32 uses(void) {\n    return &sTable;\n}\n');
     expect(d('clean', tu).source).toBe('s32 clean(void) {\n    return 2;\n}\n');
   });
 

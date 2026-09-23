@@ -208,23 +208,6 @@ describe('all three "unmodelled …" message spellings are classified', () => {
   });
 });
 
-// A `concat` WITH NO LOWERING IS A 64-BIT GAP, and it arrives spelled as an unmodelled OP — the
-// same words `mulh` arrives in. Read as `opaque-ops` it attributes a pair this pipeline could not
-// carry to a decoder that decoded everything. The `mulh` half is the both-sided arm: it is a
-// multiply whose high word nothing folded, it inhabits 12 rows of the committed artifact, and
-// claiming it here would be a claim about those rows. `d.opcode` is interpolated at the throw, so
-// no phrase gate can pin either — this pair is the gate.
-describe('an unlowerable op is attributed by WHICH op it is', () => {
-  const unresolvable = (op: string) => `structure: 1 unresolvable value(s) in 'f' — no lowering for op '${op}'`;
-  test.each([
-    ['concat', 'wide-call-arg'],
-    ['mulh', 'opaque-ops'],
-    ['mulhu', 'opaque-ops'],
-  ])('%s -> %s', (op, want) => {
-    expect(classOf(unresolvable(op))).toBe(want);
-  });
-});
-
 describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
@@ -619,14 +602,27 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
 });
 
 describe('the remaining families each name what a round would build', () => {
-  // `sub-word data table` and `sub-word stack-frame` share a prefix and nothing else: one is table
-  // data in `.rodata`, the other a frame slot. The loop pair is separated from `loop-shapes` on the
-  // same reasoning — the loop IS recovered and its exit values are what refuse.
+  // An unread data directive and a `sub-word stack-frame` access share nothing: one is table data
+  // in `.rodata`, the other a frame slot. Both directive spellings are pinned, and one of them is
+  // `.quad` on purpose — the class is about a directive whose bytes the reader did not parse into
+  // words, not about a width, and a pattern that had gone back to reading widths would still match
+  // the `.short` line alone. The loop pair is separated from `loop-shapes` on the same reasoning —
+  // the loop IS recovered and its exit values are what refuse.
   test.each([
     [
-      "lift: cannot lift 'UpdateShoalTideFlag': reads the sub-word data table 'tide.3' (.byte) — sub-word " +
-        'table data is not modelled',
-      'sub-word-table',
+      "lift: cannot lift 'f': literal-pool load of data label 'sTab', which carries a '.short' directive this " +
+        'reader does not read as words — not modelled',
+      'unread-data-directive',
+    ],
+    [
+      "lift: cannot lift 'f': literal-pool load of data label 'sTab', which carries a '.quad' directive this " +
+        'reader does not read as words — not modelled',
+      'unread-data-directive',
+    ],
+    [
+      "lift: cannot lift 'f': data label 'sTab', which carries a '.short' directive this reader does not read " +
+        'as words, is used as a register — not modelled',
+      'unread-data-directive',
     ],
     ["lift: cannot lift 'f': sub-word stack-frame access ('2(r1)') — local stack frames not supported", 'stack-frames'],
     [
@@ -729,25 +725,6 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(classOf(marker)).toBe(want);
   });
 
-  // THE 64-BIT SENTENCES, AND THEY ARE CHECKED FOR EXACTLY ONE MATCH RATHER THAN FOR THE FIRST.
-  // `DECLINE_CLASSES` is ordered and `classOf` takes the first pattern that matches, so a sentence
-  // two classes both claim is classified by an array index — and `reloc-halves`, whose subject is
-  // a `%hi`/`@ha` relocation, holds `/high half/`. The split-pair refusal said "high half" and
-  // landed in `reloc-halves` on any ordering that put it first, publishing a 64-bit argument gap
-  // as a relocation gap. `thumb.ts` says "upper half" for that reason, and this is what holds it.
-  //
-  // THE STRINGS ARE PUBLISHED MARKERS, not the full reason: `apps/benchmark/src/eval/asmlift.ts`
-  // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
-  // carry. All three reach their class inside the first 80.
-  test.each([
-    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
-    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
-    "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
-    "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
-  ])('%s is wide-call-arg, and no other class claims it', (marker) => {
-    expect(DECLINE_CLASSES.filter((c) => c.pattern.test(marker)).map((c) => c.key)).toEqual(['wide-call-arg']);
-  });
-
   test('branch-likely says in its LABEL that it is leftover, because 0 rows reads as "cannot"', () => {
     // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
     // markers it saw, so `GapAnalysis.tsx`, the panel that calls itself the roadmap view, does not
@@ -813,20 +790,39 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
   //
-  // `pool-word-shape` joins it for the OPPOSITE reason, and the two sitting side by side is why
+  // `unread-data-directive` joins it for a THIRD reason, and the two sitting side by side is why
   // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
-  // cannot reach, whose one inhabitant happened to be lifted. `pool-word-shape` is a SPELLING THE
-  // READER COULD NOT READ: `sa3:OamMalloc:agbcc` emptied it by being lifted, and the class now
-  // names a refusal asmlift makes ON PURPOSE, for operand shapes whose value it would have to
-  // guess. It is uninhabited because nothing in the corpus asks for a guess, not because nothing
-  // refuses.
+  // cannot reach, whose one inhabitant happened to be lifted. `unread-data-directive` is empty
+  // because of what the benchmark SELECTS: its two refusals fire on a whole-word pool load of a
+  // label the `.word` pass recorded no words for, and on that label used as a register base, and
+  // no COMPILER emits either — agbcc's pools are `.word` and it reaches a halfword table through
+  // its ADDRESS, which lifts. Hand-written asm does emit it, four times over two `.ascii` labels
+  // in `pokeemerald/src/libgcnmultiboot.s`, and every benchmark row is a compiled function. So
+  // this class can be inhabited without the ISA changing, and saying otherwise would invite the
+  // refusals to be treated as dead code.
+  //
+  // `pool-word-shape` is a FOURTH reason and the only one of the four that is an achievement. It
+  // is the catch-all tail of the pool-word reader, it held exactly one row —
+  // `pokeemerald:UpdateShoalTideFlag:agbcc`, on a pool word spelled `tide.3` — and the message it
+  // held that row with was false about its own input: `tide.3` IS a symbol, a function-scope
+  // static, rejected only because a C identifier carries no dot. Naming that shape sent the row to
+  // `tu-scoped-name`, where the five mwcc rows spelling the same thing `sprHideTbl$797` already
+  // live, and emptied the catch-all. Its emptiness is the weak kind: an agbcc pool word that is a
+  // `.L` code label or an unreadable expression would inhabit it tomorrow.
   //
   // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
   // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'pool-word-shape', 'store-class'];
+  const NO_ROWS = [
+    'branch-form',
+    'branch-likely',
+    'cross-block-flags-arm',
+    'pool-word-shape',
+    'store-class',
+    'unread-data-directive',
+  ];
 
   test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
@@ -847,12 +843,18 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
   // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
   // are the three control-transfer capabilities sitting above `branch-form`.
+  //
+  // `tu-scoped-name > pool-word-shape` is the same shape one level down: `pool-word-shape` is the
+  // pool reader's catch-all and its pattern is that reader's own SENTENCE PREFIX, so every named
+  // pool gap overlaps it by construction and is answered by sitting above it. Splitting a message
+  // out of that catch-all therefore always adds a line here, and that is the intended signal.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['float > opaque-ops', 56],
     ['float > store-class', 13],
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 3],
     ['outgoing-stack-args > stack-frames', 2],
+    ['tu-scoped-name > pool-word-shape', 1],
     ['address-taken-local > stack-frames', 1],
   ];
 
@@ -907,7 +909,7 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 69 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -942,7 +944,6 @@ describe('a class may not outlive the message it classifies', () => {
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
-    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -964,7 +965,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
     ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
-    ['sub-word-table', 'sub-word data table', 'packages/core/src/frontend/thumb.ts'],
+    ['unread-data-directive', 'does not read as words', 'packages/core/src/frontend/thumb.ts'],
     ['pooled-literal', 'anonymous constant pool entry', 'packages/core/src/frontend/reloc-symbol.ts'],
     ['tu-scoped-name', 'function-scope static', 'packages/core/src/frontend/reloc-symbol.ts'],
     ['cxx-symbol', 'C++ class-scoped symbol', 'packages/core/src/frontend/reloc-symbol.ts'],
@@ -1008,7 +1009,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 124 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about 123 distinct messages across 11 files, which
   // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
@@ -1023,7 +1024,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 26],
+    ['frontend/thumb.ts', 27],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
@@ -1032,7 +1033,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 71;
+  const RESIDUE_TOTAL = 72;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');
