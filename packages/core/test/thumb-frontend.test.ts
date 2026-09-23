@@ -177,9 +177,14 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
         "'flagsacrosscall', over the compare that reached it, and only a compare's are modelled",
     );
 
-    // The compare AFTER the call is the shape every compiler emits, and it must still fold.
+    // The compare AFTER the call is the shape every compiler emits, and it must still fold. Its
+    // second operand is saved into a callee-saved register BEFORE the call, which is what agbcc
+    // emits and what the caller has to do: r1 is caller-saved, so comparing it after the `bl`
+    // would be comparing whatever the callee left there. The frontend refuses that read outright —
+    // an earlier and more basic gate than the flags — so a fixture that did it would decline on
+    // the stale read and never reach the question this case is about.
     const after =
-      '\tpush\t{r4, lr}\n\tbl\tfoo\n\tcmp\tr0, r1\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+      '\tpush\t{r4, lr}\n\tmov\tr4, r1\n\tbl\tfoo\n\tcmp\tr0, r4\n\tbge\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
     expect(dc('flagsaftercall', after).source).toContain('if (');
   });
 
