@@ -38,7 +38,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
-import { isSplatMips, parseSplatMips } from './splat';
+import { MIPS_FP_REG, isSplatMips, parseSplatMips } from './splat';
 import { abiSortEntryParams, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
@@ -1108,9 +1108,16 @@ export function lift(
       if (ins.reloc) {
         relocPlaceholder(ins);
       }
-      // storeClass: unmodelled MIPS stores — incl. the unaligned pair swl/swr and the FPU stores,
-      // whose FIRST token is a register (a SOURCE, not a dest) that would otherwise fabricate an
-      // opaque write to it while dropping the real memory write.
+      // storeClass: unmodelled MIPS stores, whose FIRST token is a register (a SOURCE, not a dest)
+      // that would otherwise fabricate an opaque write to it while dropping the real memory write.
+      // `swc1`/`sdc1` are in the list and are NOT reached by any spelling `fpReg` covers — an FPU
+      // store's `rt` is an FP register by ISA, so the arm above claims it first — but that is a
+      // claim about the PREDICATE, not about the ISA, and it is false for every register spelling
+      // the predicate misses: the store then arrives here and is named by the memory it writes
+      // instead of by the file it moves. So they are kept as a live backstop, and
+      // `test/fp-refusal.test.ts` asserts the FP arm wins on each spelling rather than assuming it.
+      // Everything else here is genuinely reachable: `swl`/`swr` are the unaligned pair, `sc`/`sd*`
+      // the rest.
       // skipSafe `break`: the compiler-emitted divide-by-zero guard trap inside the hw-divide
       // idiom (KMC GCC `break 0x7`); recompiling the recovered `/` regenerates it, so it is
       // transparent by the same modelling as the divide itself (byte-exactness proven by the
@@ -1118,6 +1125,22 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isMipsReg,
         isZero,
+        // The coprocessor-1 register file. `isMipsReg` rejects `$f12` — the `$`-prefixed forms it
+        // takes are the numeric GPRs (`$4`) — so without this arm an `add.s` is refused for the
+        // lesser reason, "no register destination", while `mfc1 v0,$f12` has a destination it
+        // ACCEPTS and would build an opaque whose source list quietly omits the register the
+        // instruction actually read. The file is what is missing; say so.
+        //
+        // BOTH DIALECTS AND EVERY SPELLING, which is why this is `frontend/splat.ts`'s exported
+        // constant and not a literal: the reader decides which tokens still carry a sigil when they
+        // get here, so a predicate written twice is a predicate that can disagree with itself, and
+        // each half of that disagreement is silent. Its docblock lists the spellings and says why
+        // the sigil is required.
+        fpReg: MIPS_FP_REG,
+        // The FPU CONTROL register, which both moves spell `$31` — a GPR-shaped token no register
+        // predicate can tell from an integer one. `ctc1`'s first operand is its SOURCE, so this
+        // also stops an opaque being fabricated on a register the instruction only reads.
+        fpControl: /^(cfc1|ctc1)$/i,
         storeClass: /^(sb|sh|sw|swl|swr|sc|sd|sdl|sdr|swc1|sdc1)$/i,
         skipSafe: /^(nop|ssnop|break)$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,

@@ -210,9 +210,36 @@ function splitOperands(s: string): string[] {
   return out;
 }
 
+/** A COPROCESSOR-1 REGISTER, in every spelling either MIPS dialect writes. THE ONE COPY: this
+ *  reader decides which tokens keep the `$` sigil and `frontend/mips.ts` passes the same object as
+ *  `OpaquePolicy.fpReg`, so the two questions — "does this survive normalisation with its sigil?"
+ *  and "is this the FPU's file?" — are answered by one predicate. Two copies are sequenced rather
+ *  than merely duplicated: widening the frontend's alone changes nothing, because this one has
+ *  already stripped the token, and widening this one alone hands the frontend a sigil its own
+ *  predicate rejects. Each half is silent on its own and the result is an opaque on a register in
+ *  a file nothing models.
+ *
+ *  Why the sigil: objdump writes a GPR bare (`v0`) and an FPU register with the sigil (`$f12`), so
+ *  an FPU register is the one operand shape this reader must NOT strip, or the two dialects hand
+ *  the frontend two different spellings of the same register. It is REQUIRED rather than optional
+ *  because the bare form is indistinguishable from an objdump branch target, which is also bare
+ *  lower-case hex (`f4`, `fa0`).
+ *
+ *  The spellings, and all three are live in the trees: objdump's numbers (`$f12`), this dialect's
+ *  o32 ABI names (`$ft2`, `$fv0`, `$fa0`, `$fs0`), and the trailing `f` those names take for the
+ *  ODD HALF of a double-precision pair (`$ft0f`, `$fa1f`). `$fp` is the frame pointer and is
+ *  stripped like any GPR: the digit is what decides, and it is what excludes it.
+ *
+ *  Across every `$`-token in the three MIPS `asm/` trees this matches 52 tokens and every one is an
+ *  FPU register:
+ *  `grep -rhoE '\$[A-Za-z0-9_]+' apps/benchmark/checkouts/{af,marioparty3,snowboardkids2-decomp}/asm
+ *   | sort -u | grep -icE '^\$f[vats]?[0-9]+f?$'` */
+export const MIPS_FP_REG = /^\$f[vats]?\d+f?$/i;
+
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
-// `$` register sigil, fold a memory operand's displacement expression, evaluate a bare constant
-// expression, split a `%hi`/`%lo` reference into an immediate plus its record, decline a PIC one.
+// `$` register sigil (except on an FPU register, where objdump keeps it), fold a memory operand's
+// displacement expression, evaluate a bare constant expression, split a `%hi`/`%lo` reference into
+// an immediate plus its record, decline a PIC one.
 function normalizeOperand(name: string, op: string): { op: string; reloc?: DisasmReloc } {
   // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Becomes the relocation
   // record an object file would carry plus the immediate the instruction really encodes, so the
@@ -265,7 +292,7 @@ function normalizeOperand(name: string, op: string): { op: string; reloc?: Disas
   if (OCTAL_MAGNITUDE.test(op)) {
     refuseOctal(name, op, op);
   }
-  return plain(op.replace(/^\$/, ''));
+  return plain(MIPS_FP_REG.test(op) ? op : op.replace(/^\$/, ''));
 }
 
 /** A magnitude with a LEADING ZERO is octal to the assembler and decimal to every `parseInt(…, 10)`

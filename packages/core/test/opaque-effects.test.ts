@@ -72,7 +72,6 @@ describe('a HARDWIRED-ZERO destination is not evidence either', () => {
   test.each([
     ['a CP0 write', 'mtc0\tzero,$12'],
     ['a conditional TRAP', 'teq\tzero,zero'],
-    ['an FPU move', 'mtc1\tzero,$f4'],
     ['garbage', 'zzz\tzero,a0'],
   ])('%s to $zero is loud in BOTH modes', (_label, insn) => {
     const body = withZeroDest(insn);
@@ -82,6 +81,20 @@ describe('a HARDWIRED-ZERO destination is not evidence either', () => {
     // inline marker — the existing design for a frontend throw. Loud in the artifact either way,
     // which is what matters; asserting the diagnostic rather than the source shape keeps this test
     // from pinning which of the two annotate surfaces is used.
+    const res = mips(body);
+    expect(res.diagnostics).toHaveLength(1);
+    expect(res.source).toContain('ASMLIFT_ERROR');
+  });
+
+  // `mtc1 zero,$f4` used to sit in the list above and it did not belong there: objdump spells the
+  // instruction `mtc1 rt,fs`, so the `zero` this test read as an inert DESTINATION is the SOURCE,
+  // and the destination is `$f4`. It was refused for a true-by-accident reason. `fpReg` now takes
+  // it first and names the file, which is the capability; the point the list exists to make — loud
+  // in BOTH modes — is unchanged and asserted here too.
+  test('an FPU move is loud in BOTH modes, named by the file rather than by $zero', () => {
+    const body = withZeroDest('mtc1\tzero,$f4');
+    expect(() => decompile('f', body, MIPS_IDO)).toThrow(/unmodelled floating-point instruction 'mtc1'/);
+    expect(() => decompile('f', body, MIPS_IDO)).toThrow(/floating-point register file \(\$f4\)/);
     const res = mips(body);
     expect(res.diagnostics).toHaveLength(1);
     expect(res.source).toContain('ASMLIFT_ERROR');

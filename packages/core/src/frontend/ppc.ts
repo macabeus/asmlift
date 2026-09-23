@@ -629,6 +629,29 @@ export function lift(
       // must throw, never skip (its first token is the SOURCE register).
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg,
+        // The floating-point register file. `isReg` is `r\d+`, so an `fN` operand is invisible to
+        // it: `fadds f1,f1,f2` reads as "no register destination" and `fcmpo cr0,f1,f2` as the same
+        // thing about a CONDITION register, when both are one missing file. `stfs`/`stfd` reach
+        // this arm ahead of `^st` deliberately — they are refused for the file they move, not for
+        // the memory they move it to.
+        //
+        // NO SIGIL, WHICH IS THE OPPOSITE OF THE MIPS CHOICE, and it needs its own argument because
+        // PowerPC objdump prints an FPU register bare (`f1`) and has no sigil to require. The
+        // collision the MIPS predicate pays a sigil to avoid is live here in principle — objdump
+        // writes a branch target as bare lower-case hex, so `f0`/`f4`/`f8` are addresses AND
+        // matches. What makes it unreachable is not this pattern but the branch handling above: a
+        // `b*` mnemonic in `isModeledBranch` is decoded as a transfer or a call and never falls to
+        // `emitOpaqueDest`, and every other `b*` is refused by the whole-function control-transfer
+        // pre-pass before a block is even filled. Those two are exhaustive over the mnemonics that
+        // can carry an address, so no operand reaching this policy is one. `test/fp-refusal.test.ts`
+        // pins it, and moving the FPU check into a pre-pass ahead of that one turns it red.
+        fpReg: /^f\d+$/i,
+        // The FPSCR moves that name no `fN` operand at all: `mtfsfi 7,0` takes a field number,
+        // `mtfsb0`/`mtfsb1` a bit number, `mcrfs cr0,cr1` two condition registers. Without this
+        // they read as "no register destination to degrade", which is the message that hides a
+        // missing file behind the shape of the instruction. `mffs f0` and `mtfsf 0xff,f0` DO name
+        // one and are `fpReg`'s.
+        fpControl: /^(mtfsfi|mtfsb0|mtfsb1|mcrfs)$/i,
         storeClass: /^st/i,
         skipSafe: /^nop$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,
