@@ -3181,7 +3181,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // alarm, and three of these rows carried the decline.
   //
   // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base a
-  // bare `mov rD, sp` hands to a callee, and which the caller either WRITES itself, passes at an
+  // bare `mov rD, sp` lets ESCAPE — handed to a callee, or PUBLISHED by a word store through a
+  // base that is not sp, which is the `*(vu32 *)REG_DMA3SAD = (u32)&tmp` idiom and needs no call
+  // in the function at all — and which the caller either WRITES itself, passes at an
   // argument above r0, or hands only to callees the project declares `void` — any one of the
   // three, since a struct-return temp has none of them. NOT via callee arity, which cannot
   // license an acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
@@ -3204,7 +3206,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // Coverage: 0 of the corpus's rows carried this decline. Two real rows do decline with
   // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
-  // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
+  // `sa3:ProcessOamBuffers:agbcc` (the address is computed at a constant frame offset).
   //
   // 2026-09-17 — EVERYTHING ABOVE IS THE STATE BEFORE OUTGOING STACK ARGUMENTS WERE CONSUMED, and
   // three of its claims the artifact now contradicts. Each measured, not read:
@@ -3214,7 +3216,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //     (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a
   //     conditional continue, or an unsafe break)`. The other half of that sentence holds:
   //     `sa3:ProcessOamBuffers:agbcc` still declines on `the address of a stack local is computed
-  //     (\`add r0, sp, #0x4\`)`.
+  //     (\`add r0, sp, #0x4\`)`. Measured with the refusal REMOVED and the constant form lowered to
+  //     an `laddr`, seven agbcc shapes that name a local at a nonzero frame offset all still
+  //     decline — on the multi-object frame, on an object-vs-SSA-slot overlap, or on the
+  //     outgoing-argument dataflow. The spelling is a symptom of frame occupancy, not a missing
+  //     lowering, and a row selected for it pins three capabilities rather than one.
   //   * `stkarg` is a MATCH, so it is no longer the control that keeps a refusal honest. The
   //     declared-arity refusal it controlled is gone: a call whose callee's declaration and whose
   //     staging stores agree word for word is consumed, and every disagreement declines naming what
