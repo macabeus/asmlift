@@ -1310,6 +1310,51 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  // A COMPUTED CAPTURE IS TWO GAPS. `add rD, sp, #k` names a fixed frame offset — an object the
+  // `laddr`/audit model could already represent, missing only its lowering — and `add rD, sp, rX`
+  // names no offset at all, so there is no extent and nothing for the audit to prove. One refusal
+  // covering both is how several gaps come to look like one, and whichever is lifted first the
+  // other has to keep refusing where a reader can see it do so.
+  test('the computed capture names WHICH computed form it refuses', () => {
+    const frame = (capture: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr0, [r4]\n` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    // the constant form says it is constant, and says what IS modelled
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(
+      /computed \(`add r4, sp, #0x4`\) — a CONSTANT frame offset; only `mov rD, sp` is modelled/,
+    );
+    // the runtime form says the thing that makes it a DIFFERENT gap: no offset, so no extent
+    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(
+      /computed \(`add r4, sp, r1`\) — a RUNTIME index into the frame, which has no extent to model/,
+    );
+    // …and so does the two-operand high-register form, which adds the frame base to whatever rD
+    // already held. It has no immediate operand at all, so a split keyed on "is there a `#`"
+    // would put it on the constant arm and claim an offset nothing names.
+    expect(() => decompile('f', frame('\tadd\tr4, sp\n'), ARMV4T_AGBCC)).toThrow(/a RUNTIME index into the frame/);
+    // both keep the class prefix, so the published marker still classifies as address-taken-local
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  // THE PUBLISHED MARKER IS 200 CHARACTERS (`apps/benchmark/src/eval/asmlift.ts` slices it), and
+  // the artifact is the only place most readers meet a refusal. A message that overruns loses its
+  // tail there and nowhere else — every unit test above passes on the untruncated string. So the
+  // length is checked on the ACTUAL corpus instance: `sa3:ProcessOamBuffers:agbcc`, whose name and
+  // whose `add r0, sp, #0x4` are what the published marker is built from.
+  test('the computed-capture refusal fits the published marker', () => {
+    const real =
+      'ProcessOamBuffers:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, sp, #0x4\n\tstr\tr1, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    let published = '';
+    try {
+      decompile('ProcessOamBuffers', real, ARMV4T_AGBCC);
+    } catch (e) {
+      published = `lift: ${(e as Error).message}`.split('\n')[0];
+    }
+    expect(published).toMatch(/a CONSTANT frame offset; only `mov rD, sp` is modelled$/);
+    expect(published.length).toBe(186);
+  });
+
   test('a refused function names the capability actually missing', () => {
     // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
     // a false attribution that sent the loop to build a thing that already works. Each blocker now

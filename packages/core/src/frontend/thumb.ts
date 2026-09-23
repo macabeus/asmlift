@@ -3631,13 +3631,31 @@ export function lift(
             ? 'a register-offset sp access can alias any slot'
             : 'a sub-word sp access aliases the word-slot model';
         }
-        // sp escaping into a register: a computed form (`add rD, sp, #k`) is still a refusal, but a
-        // plain COPY (`mov rD, sp`) is now the address-taken-local capability — the mov arm emits a
-        // `laddr` for it and the post-lift frame-object audit proves every use, so the model's
-        // remaining precondition is that the frame has a reserved local area for the object to
-        // live in. A frameless function taking sp's address has nothing to model and refuses.
+        // sp escaping into a register: a computed form is still a refusal, but a plain COPY
+        // (`mov rD, sp`) is now the address-taken-local capability — the mov arm emits a `laddr`
+        // for it and the post-lift frame-object audit proves every use, so the model's remaining
+        // precondition is that the frame has a reserved local area for the object to live in. A
+        // frameless function taking sp's address has nothing to model and refuses.
+        //
+        // TWO GAPS, NOT ONE, and one sentence covering both is how they come to look like one. A
+        // CONSTANT frame offset (`add rD, sp, #k`) names a fixed object the model could already
+        // represent — `laddr` carries an `off` attr and the audit keys objects per offset — so what
+        // is missing is only the lowering that spells it. A RUNTIME one (`add rD, sp, rX`, and the
+        // two-operand `add rD, sp` that adds the base to whatever rD held) names no offset at all:
+        // there is no extent, no object and nothing for the audit to prove. Whichever of them is
+        // ever lifted, the other must keep refusing, and it can only be seen to if it says so.
+        //
+        // BOTH MESSAGES ARE KEPT UNDER THE PUBLISHED MARKER'S LENGTH. The benchmark truncates a
+        // marker to its first 200 characters (`apps/benchmark/src/eval/asmlift.ts`), and the class
+        // pattern that reads them (`apps/web/.../declines.ts`) matches on a phrase early in the
+        // sentence — so a long tail is lost in silence rather than misclassified. Spelled at its
+        // published width, the constant arm on `ProcessOamBuffers` is 186 characters.
         if (ins.mnemonic === 'add' && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o))) {
-          return `the address of a stack local is computed (\`${ins.mnemonic} ${ins.ops.join(', ')}\`) — only a plain \`mov rD, sp\` capture is modelled`;
+          const srcs = ins.ops.slice(1).filter((o) => !isSpReg(o));
+          const written = `\`${ins.mnemonic} ${ins.ops.join(', ')}\``;
+          return srcs.length === 1 && IMM_LITERAL.test(srcs[0])
+            ? `the address of a stack local is computed (${written}) — a CONSTANT frame offset; only \`mov rD, sp\` is modelled`
+            : `the address of a stack local is computed (${written}) — a RUNTIME index into the frame, which has no extent to model`;
         }
       }
     }
