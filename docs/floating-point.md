@@ -30,9 +30,19 @@ console.log('rows whose target contains an FPU instruction:',fp.length,
 console.log('m2c matches and asmlift does not:',gap.length,'| of those, FPU-touching:',gap.filter(t).length)"
 ```
 
-At `7a9c4e7e` that prints 1,258 rows, asmlift 672 / m2c 446; **113 rows contain an FPU instruction
-and asmlift declines every one of them, while m2c matches 37**; and of the **90** rows m2c matches
-and asmlift does not, **37 are FPU-touching — 41%**.
+Against this branch's artifact, and identically against `origin/main`'s at `43534788`, that prints
+1,262 rows, asmlift 678 / m2c 446; **113 rows contain an FPU instruction and asmlift declines every
+one of them, while m2c matches 37**; and of the **90** rows m2c matches and asmlift does not, **37
+are FPU-touching — 41%**.
+
+BOTH REFS ON PURPOSE. Every figure here names m2c, which this branch does not touch, so it is a
+claim that can expire on `main` while a branch's own gates stay green — `bench regression` compares
+a head against the base it was rebased onto, and an outcome that moved on BOTH sides is not a flip.
+Re-derive it against the ref you actually rebased onto:
+
+```sh
+git show 'origin/main:apps/benchmark/results/results.json' > /tmp/base.json
+```
 
 The 113 are not one refusal. 69 of them decline with a message naming an FPU instruction — the
 population `frontend/opaque.ts`'s `fpReg` reaches — and the other 44 decline at some earlier guard
