@@ -1825,6 +1825,37 @@ function decode(
 // (they did — the drift fabricated phantom pointer params on symbol-pool loads).
 const POOL_LABEL = /^([A-Za-z_.$][\w.$]*)(?:\s*\+\s*(0x[0-9a-fA-F]+|\d+))?$/;
 
+// The pool WORD shape, shared by both readers of a pool's CONTENTS for the same reason POOL_LABEL
+// is shared by both readers of its operand: one symbol, optionally plus or minus one literal
+// magnitude. The magnitude may carry unary signs of its own after the operator, because that is
+// what agbcc prints under `-fhex-asm`: `&gElems[i - 1]` folds the element bias into the pool word
+// and comes out as `.word gElems+-0x8` — the `+` operator, then a constant that spells its own
+// sign. The whole sign RUN multiplies, which is the assembler's rule and not an inference: built
+// with this project's `as` and the addends read back out of `.data`, `gX+-0x8`, `gX+-8`,
+// `gX+ -0x8` and `gX-+0x8` are all -8, while `gX--0x8`, `gX++0x8` and `gX+--0x8` are all +8.
+const POOL_WORD_SYMBOL = /^([A-Za-z_]\w*)\s*(?:([+-])((?:\s*[+-])*)\s*(0x[0-9a-fA-F]+|\d+))?$/;
+
+/** The address a pool word names, or null when the word does not name one — a number, two symbols
+ *  added together, a magnitude that is not a single literal, a `.L` code label (the pattern admits
+ *  no leading dot, and the explicit test keeps that true if the class is ever widened). Null is
+ *  NOT a value: both callers treat it as "this word is not a symbol", and {@link poolRef} turns it
+ *  into a loud decline rather than reading an address it cannot decide. */
+function poolWordSymbol(w: string): { sym: string; addend: number } | null {
+  const m = w.match(POOL_WORD_SYMBOL);
+  if (!m || m[1].startsWith('.L')) {
+    return null;
+  }
+  if (m[4] === undefined) {
+    return { sym: m[1], addend: 0 };
+  }
+  const mag = Number(m[4]);
+  if (!Number.isFinite(mag)) {
+    return null;
+  }
+  const negations = (m[2] + m[3]).match(/-/g)?.length ?? 0;
+  return { sym: m[1], addend: negations % 2 === 1 ? -mag : mag };
+}
+
 type PoolRef =
   | { kind: 'const'; value: number }
   | { kind: 'gaddr'; sym: string; addend: number }
@@ -1859,18 +1890,16 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
     return Number.isFinite(val) ? { kind: 'const', value: val } : { kind: 'unmodelled', why: `unparsable word '${w}'` };
   }
   // A C identifier that is NOT a `.L` code label → the address of a named global, optionally with
-  // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a` — agbcc pre-computes a fixed
-  // element's address into the pool rather than emitting an add). The addend stays in VALUE space:
+  // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a`, `gOamMallocBuffer+-0x8` —
+  // agbcc pre-computes a fixed element's address into the pool rather than emitting an add, and a
+  // NEGATIVE bias is how `&arr[i - k]` reaches it). The addend stays in VALUE space:
   // the consumer emits `gaddr` then an explicit `add`, the exact spelling the register-materialised
   // `ldr rN,=gSym; add rN,#k` shape already lowers to — so it renders through the same audited
   // cast-based path (`((u8 *)&gSym) + k`), never through a typed-pointer scale that a
   // rendered-vs-value addend could silently multiply (the DEREF-TYPING class).
-  const sm = w.match(/^([A-Za-z_]\w*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?$/);
-  if (sm && !sm[1].startsWith('.L')) {
-    const mag = sm[3] ? Number(sm[3]) : 0;
-    if (Number.isFinite(mag)) {
-      return { kind: 'gaddr', sym: sm[1], addend: sm[2] === '-' ? -mag : mag };
-    }
+  const sm = poolWordSymbol(w);
+  if (sm) {
+    return { kind: 'gaddr', sym: sm.sym, addend: sm.addend };
   }
   return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
@@ -1896,9 +1925,11 @@ function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<str
     for (const raw of words) {
       const w = raw.trim();
       // `gSym+0x14a` names a symbol as surely as `gSym` does — the witness must count both, or an
-      // asm whose pools carry only addend words would wrongly permit numeric promotion.
-      const sym = w.match(/^([A-Za-z_]\w*)\s*(?:[+-]\s*(?:0x[0-9a-fA-F]+|\d+))?$/)?.[1];
-      if (sym === undefined || sym.startsWith('.L')) {
+      // asm whose pools carry only addend words would wrongly permit numeric promotion. That is
+      // not hypothetical: `sa3:OamMalloc`'s last pool carries `gOamMallocBuffer+-0x8`, and the two
+      // readers reading addends differently is exactly the drift POOL_WORD_SYMBOL exists to stop.
+      const sym = poolWordSymbol(w)?.sym;
+      if (sym === undefined) {
         continue;
       }
       if (!dataWords.has(sym) && !blockLabels.has(sym)) {

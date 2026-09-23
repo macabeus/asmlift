@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { type SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const thumb = (sym: string, body: string) => decompile(sym, `${sym}:\n${body}`, ARMV4T_AGBCC).source;
@@ -45,6 +46,58 @@ describe('global-variable recovery', () => {
     // compiles to the identical byte load. We cannot tell array from struct at this layer, so the
     // universally-valid `&` form is emitted. See scalarGlobals in structure.ts.
     expect(src).toContain('((u8 *)&gTable)[a0]');
+  });
+
+  // A pool word's addend may be NEGATIVE, and agbcc spells it `+-`. `&arr[i - k]` folds the bias
+  // into the word rather than emitting a subtract, and under `-fhex-asm` — which every agbcc GBA
+  // decomp builds with — the hex printer emits the `+` operator and then a constant carrying its
+  // own sign. Compiled, not supposed: at the benchmark's canonical agbcc flags,
+  // `int *f(int i){ return &gTab[i-1]; }` emits `.word gTab+-0x4` and
+  // `struct E *f(int i){ return &gElems[i-1]; }` emits `.word gElems+-0x8`.
+  //
+  // The VALUES below are the assembler's, read back out of `.data` after assembling each spelling
+  // with this project's `as`: the sign is the PRODUCT of the whole run, so `gSym+-0x8` is -8 and
+  // `gSym--0x8` is +8. Reading one of these wrong yields a wrong ADDRESS, which compiles and
+  // scores — the object differ cannot referee it — so the spellings are pinned here.
+  test('a NEGATIVE pool addend `gSym+-0xN` is the address minus N', () => {
+    const src = thumb('back', '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\tgTab+-0x8\n');
+    expect(src).toContain('(u32)&gTab + -8');
+  });
+
+  test('a pool addend reads the sign of its whole run, as the assembler does', () => {
+    const word = (w: string) => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
+    expect(word('gTab+-8')).toContain('(u32)&gTab + -8');
+    expect(word('gTab-+0x8')).toContain('(u32)&gTab + -8');
+    expect(word('gTab--0x8')).toContain('(u32)&gTab + 8');
+    expect(word('gTab++0x8')).toContain('(u32)&gTab + 8');
+    expect(word('gTab-0x8')).toContain('(u32)&gTab + -8');
+  });
+
+  // The loose side. A widened addend parser must not start GUESSING a value: a word it cannot
+  // decide has to stay the loud decline it is today, because the wrong answer here is a wrong
+  // address that compiles and scores. None of these is a shape any compiler in the corpus emits —
+  // that is the point, a refusal with no inhabitant is a refusal nobody can check.
+  test('a pool word the parser cannot decide still declines loudly', () => {
+    const word = (w: string) => () => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
+    for (const w of ['gTab+gOther', 'gTab+0x4+0x8', 'gTab*0x8', 'gTab+0x8y', 'gTab+']) {
+      expect(word(w), w).toThrow(`pool word '${w}' is not a symbol, symbol±offset, or number`);
+    }
+  });
+
+  test('a pool whose only symbolic word carries a negative addend still VETOES numeric promotion', () => {
+    // The numeric-promotion veto (poolNamesASymbol) asks whether THIS asm's pool names anything
+    // external: if it does, agbcc would have emitted the numeric word symbolically too had the
+    // source named it, so promoting that word spells a name the source did not use. A `+-` word
+    // names `gTab` as surely as a bare word does. Read by a narrower grammar than the one
+    // poolRef uses, this pool would witness NOTHING and `gPromoted` would be spelled here — the
+    // exact drift between the two readers that POOL_WORD_SYMBOL exists to prevent.
+    const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
+    const asm =
+      'mix:\n\tldr\tr0, .L1\n\tldr\tr1, .L1+0x4\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L1:\n\t.word\tgTab+-0x8\n\t.word\t0x3000010\n';
+    const src = decompile('mix', asm, ARMV4T_AGBCC, { symbols }).source;
+    expect(src).toContain('(u32)&gTab + -8');
+    expect(src).toContain('*(u16 *)50331664'); // the numeric word stays the constant the target shows
+    expect(src).not.toContain('gPromoted');
   });
 
   test('a NUMERIC pool word stays a constant (MMIO address), not a global', () => {
