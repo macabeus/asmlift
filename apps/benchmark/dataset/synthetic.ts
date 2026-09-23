@@ -832,6 +832,33 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['ido7.1'],
   },
 
+  // `arrback` — THE WITNESS FOR A NEGATIVE POOL ADDEND. `&gTab[i - 1]` contains no subtract: agbcc
+  // folds the element bias into the literal pool, and under `-fhex-asm` its hex printer emits the
+  // `+` OPERATOR followed by a constant that spells its own sign — `.word gTab+-0x4`. The
+  // benchmark's canonical agbcc flags already carry `-fhex-asm`, as all three of the corpus's GBA
+  // makefiles do, so this row sets no `cflags` of its own; what it pins is one line of output.
+  //
+  // MEASURED AT THOSE FLAGS, because "the compiler emits this" is a claim about the compiler and
+  // not about C: `&gTab[i-1]` gives `gTab+-0x4`, `&gElems[i-1]` over an 8-byte struct gives
+  // `gElems+-0x8`, `&gBytes[i-2]` gives `gBytes+-0x2`. Drop `-fhex-asm` and the same source emits
+  // `gTab-4` instead, which is why the `sym-N` branch of the pool reader had no inhabitant to find
+  // this by: agbcc never writes it.
+  //
+  // `sa3:OamMalloc:agbcc` is the real row this came off, and it is not a substitute for this one.
+  // It is 27 lines over three gaps, so it cannot MATCH on the pool addend alone and a regression
+  // in the addend would move it from one nonmatch score to another. This body has nothing else in
+  // it, so it is the row that goes from MATCH to not.
+  //
+  // agbcc only. `+-` is agbcc's hex printer; the other three toolchains reach the same address
+  // through their own relocations and would measure something else under the same source.
+  {
+    sym: 'arrback',
+    src: 'extern u32 gTab[];\nu32 *arrback(u32 i){ return &gTab[i - 1]; }',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 *arrback(u32 i);',
+  },
+
   // ── structs (layout NOT in context — must be recovered) ─────────────────────────────────
   {
     sym: 'sfield',

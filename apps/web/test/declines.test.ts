@@ -475,25 +475,44 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
         "and is read as a value — only its matching '%lo' half may consume it",
       'reloc-halves',
     ],
-    [
-      "lift: cannot lift 'OamMalloc': literal-pool load of pool word 'gOamMallocBuffer+-0x8' is not a symbol, " +
-        'symbol±offset, or number — not modelled',
-      'pool-word-shape',
-    ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
 
+  // `pool-word-shape` used to have its published marker here, `sa3:OamMalloc`'s
+  // `pool word 'gOamMallocBuffer+-0x8' is not a symbol, symbol±offset, or number`. It is gone
+  // rather than reworded: `gOamMallocBuffer+-0x8` LIFTS now, so no input produces that sentence
+  // and a fixture holding it would pass forever while testing a string the tool cannot say. The
+  // class is covered instead by the seven `why`s below, every one of them a shape that still
+  // refuses.
+
   test.each([
-    // All three `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
-    // the corpus happened to print, only the first classified, and the other two — the same
-    // capability at the same site — would have arrived as unclassified.
+    // All seven `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
+    // the corpus happened to print, only the ones saying `pool word` classified, and the rest —
+    // the same capability at the same site — would have arrived as unclassified.
     [
-      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+-0x8' is not a symbol, symbol±offset, " +
+      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+gBar' is not a symbol, symbol±offset, " +
         'or number — not modelled',
     ],
     ["lift: cannot lift 'f': literal-pool load of offset 3 is not a whole word in pool '_pool_1' — not modelled"],
-    ["lift: cannot lift 'f': literal-pool load of unparsable word '.word gFoo+' — not modelled"],
+    [
+      "lift: cannot lift 'f': literal-pool load of offset '+-0x4' into pool '_pool_1' is not a '+N' byte " +
+        'offset — not modelled',
+    ],
+    ["lift: cannot lift 'f': literal-pool load of word '0x100000000' is not a 32-bit value — not modelled"],
+    [
+      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+0x100000000' carries an addend that is " +
+        'not a 32-bit value — not modelled',
+    ],
+    [
+      "lift: cannot lift 'f': literal-pool load of pool word '010' has a leading-zero magnitude, which is " +
+        'octal to the assembler — not modelled',
+    ],
+    // The same rule one position out, in the pool's OPERAND rather than in one of its words.
+    [
+      "lift: cannot lift 'f': literal-pool load of offset '+010' into pool '_pool_1' has a leading-zero " +
+        'magnitude, which is octal to the assembler — not modelled',
+    ],
   ])('%s -> pool-word-shape', (marker) => {
     expect(classOf(marker)).toBe('pool-word-shape');
   });
@@ -757,10 +776,23 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
+  //
+  // `pool-word-shape` joins it for the OPPOSITE reason, and the two sitting side by side is why
+  // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
+  // cannot reach, whose one inhabitant happened to be lifted. `pool-word-shape` is a SPELLING THE
+  // READER COULD NOT READ: `sa3:OamMalloc:agbcc` emptied it by being lifted, and the class now
+  // names a refusal asmlift makes ON PURPOSE, for operand shapes whose value it would have to
+  // guess. It is uninhabited because nothing in the corpus asks for a guess, not because nothing
+  // refuses.
+  //
+  // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
+  // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
+  // green. Two branches edited this line from opposite directions in one night; do not write a
+  // number here again.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class'];
+  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'pool-word-shape', 'store-class'];
 
-  test('every other class is inhabited, and exactly these four are not', () => {
+  test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
     expect(
       DECLINE_CLASSES.map((c) => c.key)
@@ -957,13 +989,13 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/thumb.ts', 26],
     ['structure/structure.ts', 16],
     ['frontend/mips.ts', 9],
+    ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/splat.ts', 7],
     ['frontend/ppc.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 70;
+  const RESIDUE_TOTAL = 71;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

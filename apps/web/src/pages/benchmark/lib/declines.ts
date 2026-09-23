@@ -20,17 +20,17 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 331 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 330 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 118 distinct decline messages (the texts reached by
+// `packages/core/src` throws 119 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 70 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 71 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -48,8 +48,9 @@
 //   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, an indirect
 //                           `jr`, a non-numeric immediate, and five refusals about a disassembly
 //                           the reader cannot account for
-//   frontend/splat.ts    7  a data directive in the code stream, a tail call / cross-function
-//                           branch, an unparsable constant expression
+//   frontend/splat.ts    8  a data directive in the code stream, a tail call / cross-function
+//                           branch, an unparsable constant expression, and a magnitude with a
+//                           leading zero (octal to the assembler)
 //   frontend/disasm.ts   7  the objdump `...` elision family
 //   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
 //                           two-armed branch denylist, whose template is interpolation end to end
@@ -71,7 +72,7 @@
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 265 / 60 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 264 / 60 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
@@ -398,10 +399,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // Keyed on the throw (`frontend/thumb.ts`, "literal-pool load of ${why} — not modelled") rather
-    // than on the one `why` the corpus printed. Three `why`s reach it: a word that is not a symbol
-    // ± offset, an offset that is not a whole word in the pool, and a word the reader cannot parse.
-    // Keying on `pool word` matched only the first, so the other two — the same capability at the
-    // same site — would arrive as unclassified.
+    // than on the one `why` the corpus printed. Seven `why`s reach it: an offset that is not
+    // spelled `+N`, an offset that is not a whole word in the pool, a numeric word that is not a
+    // 32-bit value, a symbolic word whose addend is not, a word that is not `symbol±offset` at
+    // all, and a magnitude with a leading zero (octal to the assembler) — which is TWO of the
+    // seven, once for a pool word and once for the offset its operand carries. Keying on
+    // `pool word` matched three of them, so the rest — the same capability at the same site —
+    // would arrive as unclassified.
     key: 'pool-word-shape',
     label: 'Literal-pool words the reader cannot resolve',
     pattern: /literal-pool load of/,
