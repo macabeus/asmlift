@@ -80,8 +80,9 @@ describe('global-variable recovery', () => {
   //
   // `.Ltab` is in the list for a different reason from the rest, and it is the one the symbol
   // pattern's comment leans on. A `.L` word is a CODE label, not a global: naming one would spell
-  // `&.Ltab`, and the population is not hypothetical — 32,143 `.word .L…` operand occurrences
-  // across the nine benchmark checkouts. Today the pattern's symbol class admits no leading dot,
+  // `&.Ltab`, and the population is not hypothetical — 32,144 `.word .L…` operand occurrences
+  // across the nine benchmark checkouts, counted through this frontend's own line reader (peel a
+  // label sharing the line, then cut at `@`); a count that skips the peel misses one. Today the pattern's symbol class admits no leading dot,
   // so the word is refused before the `.L` guard is reached and the guard is a proven no-op. The
   // two fixtures are what make the guard's promise — that widening the class keeps the refusal —
   // something a mutant can kill rather than a sentence.
