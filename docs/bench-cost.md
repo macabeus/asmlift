@@ -146,13 +146,17 @@ its own — which is the figure to reach for when a scoped run looks cheap.
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
 rows, 0 added, 0 removed, and `bench regression` **0 lost, 0 missing, 0 retired, 0 added, 0 gained,
-0 other flips** against both bases it has been measured against. Its first run, on 2026-09-23
-against `0e7b4f7b`, made `bench diff` print **1,439.5 s → 2,027.6 s (1.41×)**; this one, after a
-rebase onto `43534788`, prints **1,336.4 s → 1,323.8 s (0.99×)** the same day. The fan line is
-**67,760 → 67,760 (1.00×), zero records moved** and was **67,751 → 67,751 (1.00×), zero records
-moved** the first time — identical to the digit on both. **A multiplier that travels from 1.41× to
-0.99× across a rebase, over a diff that cannot change an outcome by construction, is measuring the
-box and the cache.** Five rounds shared this machine during the first run and two during the
+0 other flips** against both bases it has been measured against. `pnpm bench diff --base 43534788`
+prints **1,336.4 s → 1,323.8 s (0.99×)** against the committed artifact. Its FIRST run, on
+2026-09-23 against `0e7b4f7b`, printed **1,439.5 s → 2,027.6 s (1.41×)** — **a reading, not a
+figure this repo can recompute**: that run's artifact was dropped when the branch rebased, because
+an artifact commit has to be the branch's last, so no sha in this history carries it and
+`bench diff` against either base answers about the second run. It is recorded here on the strength
+of the run that printed it and nothing else. The fan line is **67,760 → 67,760 (1.00×), zero
+records moved** and was **67,751 → 67,751 (1.00×), zero records moved** the first time — identical
+to the digit on both, and that half is recomputable from either artifact. **A multiplier that
+travels from 1.41× to 0.99× across a rebase, over a diff that cannot change an outcome by
+construction, is measuring the box and the cache.** Five rounds shared this machine during the first run and two during the
 second. This is the entry below's own lesson arriving a second time, on a branch that could not
 possibly have caused it.
 

@@ -94,10 +94,33 @@ not 303/1,000.
 A `float fadd(float a, float b){ return a+b; }` compiles on MIPS to two instructions
 (`jr ra` / `add.s $f0,$f12,$f14`). Matching it needs all four of:
 
-1. **A register file.** `isMipsReg` is `/^(\$\d+|[a-z][a-z0-9]*)$/i` and PowerPC's `isReg` is
-   `/^r\d+$/`: an `$f12` or an `f1` is not a register to either frontend. This is the layer the
+1. **A register file.** Neither frontend has one. PowerPC's `isReg` is `/^r\d+$/`, so an `f1` is
+   not a register to it at all. MIPS is the worse half and in the other direction: `isMipsReg` is
+   `/^(\$\d+|[a-z][a-z0-9]*)$/i`, which REJECTS the objdump spelling `$f12` and ACCEPTS a bare
+   `f12` — so on the Splat dialect, which strips the `$` sigil, an FPU register passes for a GPR
+   and an `add.s` becomes an opaque on a register in a file nothing models. This is the layer the
    decline now names (`unmodelled floating-point instruction … the floating-point register file`),
-   and it is the only layer that exists today.
+   and it is the only layer that exists today. `frontend/splat.ts` keeps the sigil on an FPU
+   register for exactly this reason — objdump writes a GPR bare and an FPU register with the sigil,
+   so preserving it is what the reader's own header promises, and the bare form is indistinguishable
+   from an objdump branch target, which is also bare lower-case hex (`f4`, `fa0`).
+
+   THE FILE HAS A SECOND HALF THAT NAMES NO REGISTER. The FPU control moves — MIPS `cfc1`/`ctc1`,
+   PowerPC `mtfsfi`/`mtfsb0`/`mtfsb1`/`mcrfs` — spell the control register in the ISA's other
+   namespace (`$31`, a field number, a condition register), so no register-name predicate can see
+   them. `opaqueDest` carries an `fpControl` mnemonic pattern beside `fpReg` for them, producing
+   the same phrase. They are the MIPS I/II float→int rounding-mode dance and they are not rare:
+   **593 sites in 61 functions** across the `marioparty3` and `af` trees, against **0** corpus rows,
+   which is why the corpus could not referee this at all.
+
+   ```sh
+   C=apps/benchmark/checkouts
+   for p in marioparty3 af snowboardkids2-decomp; do
+     printf '%s ' $p
+     grep -rhoE '\*/[[:space:]]+(cfc1|ctc1)[[:space:]]' $C/$p/asm | wc -l
+   done
+   ```
+
 2. **Decode and an IR opcode.** 41 distinct FPU mnemonics over 2,286 sites in the corpus' targets
    (the `FP` regex above, counted per line rather than per row), and arithmetic needs
    `fadd`/`fsub`/`fmul`/`fdiv` plus the conversions as ops the verifier and the pattern engine
@@ -184,4 +207,10 @@ the decode (layer 2) is the cheapest and the only one that produces a wrong answ
 What this round shipped instead is layer 1's honesty: the refusal now names the register file rather
 than describing the shape of the instruction that ran into it, so the 69 rows read as one capability
 in the report instead of three, and `apps/web`'s decline table stops re-deriving "is this floating
-point?" from a list of mnemonics that core never told it.
+point?" from a list of mnemonics that core never told it. It says so on **both MIPS dialects** and
+for the **control register** as well as the data file — the corpus is objdump-only and has no
+control-register row, so neither of those two halves moves a benchmark figure and neither could
+have been found by a gate. Both are held by `packages/core/test/fp-refusal.test.ts` and by the FPU
+layer of `packages/core/test/contract-invariant.test.ts`, which is what an ISA with an FPU is
+measured against; `OpaquePolicy.fpReg` and `OpaquePolicy.fpControl` are required fields, so the next
+frontend with an FPU has to answer for them rather than inherit the generic messages by omission.
