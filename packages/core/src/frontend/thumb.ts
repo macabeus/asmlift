@@ -1854,6 +1854,22 @@ const POOL_WORD_SYMBOL = new RegExp(String.raw`^([A-Za-z_]\w*)\s*(?:([+-])((?:\s
 // symbolic reader cannot disagree about what a digit string means.
 const POOL_WORD_NUMBER = new RegExp(String.raw`^(-?)(${POOL_MAGNITUDE})$`);
 
+// The leading NAME of a pool word with whatever follows it left unread, for the same reason
+// POOL_LABEL_LEAD exists one level up in the operand: "does this word name a symbol?" has to be
+// answerable for a word POOL_WORD_SYMBOL rejects. That rejection carries two answers the caller
+// cannot tell apart — "nothing is named here" (a number, a `.L` code label) and "a symbol inside an
+// expression this reader does not read" (`gTab+010`, `gTab+gOther`, `gTab*0x8`) — and only the
+// first is an absent witness. The class admits no leading dot, so a `.L` code label still names
+// nothing, which is the property {@link poolNamesASymbol} leans on.
+//
+// This one is INHABITED, unlike the refusals around it: 42 such operand occurrences over the
+// 198,831 `.word`/`.4byte`/`.long` operands of the 1,484 `.s` files in the three ARM/Thumb
+// checkouts (counted with python — a recursive `grep` here skips `build/`). `sa3/asm/code.s` has
+// `.word gMultiSioRecv+1*0x18` twenty times over three files, and agbcc's own libc has
+// function-scope statics spelt `zeroes.13`. Each names a symbol as plainly as a bare `gSym` does,
+// and the grammar that reads EXPRESSIONS rejects every one.
+const POOL_WORD_LEAD = new RegExp(String.raw`^[A-Za-z_]\w*`);
+
 /** The value of a pool magnitude, or null when this reader cannot decide it. A pool word is 32
  *  bits and `as` reduces the expression modulo 2^32 — `.word gX+0x100000000` assembles to an
  *  addend of 0, read back out of `.data` — so a magnitude that does not fit is not a large number,
@@ -1871,11 +1887,11 @@ function poolMagnitude(text: string): number | null {
  *  NOT a value: both callers treat it as "this word is not a symbol", and {@link poolRef} turns it
  *  into a loud decline rather than reading an address it cannot decide.
  *
- *  A null ADDEND beside a symbol is the third answer, and it exists because the two callers ask
- *  different questions of the same word. `gX+0x100000000` NAMES `gX` — which is the whole of what
- *  {@link poolNamesASymbol} asks, and answering null there would lose a witness and let a numeric
- *  word beside it be promoted to a name the source never used — while its VALUE is one
- *  {@link poolMagnitude} refuses. The name resolves, the address declines. */
+ *  A null ADDEND beside a symbol is the third answer, and it is what keeps two different gaps from
+ *  sharing one message. `gX+0x100000000` NAMES `gX` while its VALUE is one {@link poolMagnitude}
+ *  refuses, so {@link poolRef} can say the addend does not fit rather than that the word is not a
+ *  symbol — which would be false about it, and would send a reader looking for a grammar rather
+ *  than for a truncation rule. The name resolves, the address declines. */
 function poolWordSymbol(w: string): { sym: string; addend: number | null } | null {
   const m = w.match(POOL_WORD_SYMBOL);
   if (!m || m[1].startsWith('.L')) {
@@ -1990,11 +2006,15 @@ function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<str
   for (const [, words] of dataWords) {
     for (const raw of words) {
       const w = raw.trim();
-      // `gSym+0x14a` names a symbol as surely as `gSym` does — the witness must count both, or an
-      // asm whose pools carry only addend words would wrongly permit numeric promotion. That is
-      // not hypothetical: `sa3:OamMalloc`'s last pool carries `gOamMallocBuffer+-0x8`, and the two
-      // readers reading addends differently is exactly the drift POOL_WORD_SYMBOL exists to stop.
-      const sym = poolWordSymbol(w)?.sym;
+      // The LEADING NAME, not the whole expression: this asks only whether something external is
+      // named here, and every word that names one counts. `gSym+0x14a` counts as surely as `gSym`
+      // does — not hypothetically, `sa3:OamMalloc`'s last pool carries `gOamMallocBuffer+-0x8` and
+      // an asm whose pools hold only addend words would otherwise permit promotion. So does a word
+      // whose expression this reader cannot read at all: asking the expression grammar instead
+      // answers null for `gTab+010` and `gTab+gOther`, the witness is lost, and the numeric word
+      // beside them is spelt with a map name the source never used — silently, because the address
+      // stays right and only the spelling is invented.
+      const sym = w.match(POOL_WORD_LEAD)?.[0];
       if (sym === undefined) {
         continue;
       }

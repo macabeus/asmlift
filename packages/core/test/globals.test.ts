@@ -129,6 +129,34 @@ describe('global-variable recovery', () => {
     expect(src).not.toContain('gPromoted');
   });
 
+  // …and the veto must fire for every word the expression grammar rejects, not only for the one
+  // shape it happens to match. `gTab+0x100000000` above is a word POOL_WORD_SYMBOL MATCHES and
+  // whose addend refuses; these are words it rejects outright, and each of them still names `gTab`
+  // as plainly. Asking the whole-word grammar a question that is only about the leading name
+  // answers null for all of them, the witness is lost, and the numeric word beside them is spelt
+  // `gPromoted` — a name the source never used. That failure is quieter than the addend one, not
+  // louder: the ADDRESS stays right and only the spelling is invented, so nothing downstream
+  // refuses it and the object differ cannot referee it either.
+  test('a word the expression grammar REJECTS still names its symbol, and still vetoes promotion', () => {
+    const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
+    const mix = (w: string) =>
+      decompile(
+        'mix',
+        `mix:\n\tldr\tr1, .L1+0x4\n\tldrh\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t${w}\n\t.word\t0x3000010\n`,
+        ARMV4T_AGBCC,
+        { symbols },
+      ).source;
+    for (const w of ['gTab+010', 'gTab+0777', 'gTab+gOther', 'gTab*0x8', 'gTab+', 'gTab+0x4+0x8']) {
+      expect(mix(w), w).toContain('*(u16 *)50331664');
+      expect(mix(w), w).not.toContain('gPromoted');
+    }
+    // The control, and it is the one that makes this a witness test rather than a no-promotion
+    // test: a pool naming nothing external is a disassembly whose relocations are gone, and there
+    // the map's name is all there is. `.Ltab` is a CODE label defined in this same asm, so it
+    // witnesses nothing — which is the property the leading-name reader must not widen away.
+    expect(mix('.Ltab'), '.Ltab').toContain('gPromoted');
+  });
+
   // The same rule one level up, in the pool's OPERAND rather than in its words. `poolRef` has two
   // ways to say no and they are not interchangeable: `null` means "this operand is not a pool" and
   // hands the load to the ordinary memory path, where the label becomes a phantom pointer
