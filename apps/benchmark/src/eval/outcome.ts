@@ -54,6 +54,19 @@ const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   { name: '? placeholder', re: /[({,] *\? [A-Za-z_*]/ },
 ];
 
+/** The marker table as one string — the VOCABULARY, not a result. It is a key input to every
+ *  cached m2c result: the classifier runs inside that cached computation (`cache.ts`), so a marker
+ *  added here changes the OUTCOME of entries already on disk, and an entry written before the
+ *  addition replays the old label forever. Adding `SECOND_REG` without this moved four rows and
+ *  left a fifth — `synthetic:llpass:agbcc` — published as `nonmatch` with a score, over source the
+ *  same commit's rule declines.
+ *
+ *  KEYED RATHER THAN HAND-BUMPED, because `cache.ts`'s `v` is a register a human has to remember
+ *  and this one input can remember itself. It is the regex SOURCE and not only the names: widening
+ *  a pattern reclassifies rows exactly as adding one does. The rest of the classifier — the
+ *  decline-before-compile precedence, `isHardFailure` — is still `v`'s to carry. */
+export const DECLINE_VOCABULARY: string = DECLINE_MARKERS.map(({ name, re }) => `${name}=${re.source}`).join('\n');
+
 /** Names of the decline markers present in `source` (deduped), or [] when marker-free. */
 export function declineMarkersIn(source: string): string[] {
   const names: string[] = [];
