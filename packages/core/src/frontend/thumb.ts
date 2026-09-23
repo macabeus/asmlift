@@ -3839,10 +3839,12 @@ export function lift(
   // home, in the block and in the registers alike — so `proto.ts` converts the declaration into
   // words once and both readers of it take the same answer.
   //
-  // WHAT THE CONVERSION CANNOT DO. `declaredWidth` answers for every type asmlift can spell, and
-  // `undefined` for a project typedef, a `double` or a by-value struct — and that is the only
-  // evidence there is that a parameter MAY be wider than a word. `declaredParamWidths` refuses a
-  // whole list over one such entry rather than call it a word, and this refuses for the function.
+  // WHAT THE CONVERSION CANNOT DO. `declaredWidth` answers for every type asmlift can spell —
+  // including `long long`, which is why a pair no longer needs guessing at — and `undefined` for a
+  // project typedef, a `double` or a by-value struct. A KNOWN width is laid out; `undefined` is
+  // the only thing left that says a parameter MAY be wider than a word without saying by how much,
+  // and a layout cannot be built on it. `declaredParamWidths` refuses a whole list over one such
+  // entry rather than call it a word, and this refuses for the function.
   // The refusal is not merely a message: with a wide parameter the two witnesses can AGREE by
   // coincidence — `void fd(s32, s32, s32, s32, double)` staged as two words matches a
   // six-parameter list whose fifth entry is `double`, and consuming it would hand the callee six

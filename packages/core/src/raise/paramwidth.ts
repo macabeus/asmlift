@@ -259,6 +259,12 @@ export function narrowEntryParams(
   // function nobody measured (parsed IR, a hand-built fn) is never narrowed on evidence never taken.
   const evidence = fn.paramEvidence;
   const entry = fn.blocks[0];
+  // PER PARAMETER, AND NOT `declaredParamWidths`, WHICH ASKS A DIFFERENT QUESTION. That reader
+  // refuses a whole list over one spelling it cannot size, because its caller is laying out
+  // argument registers and one unknown width displaces every later argument. Here every entry
+  // stands alone: `undefined` at position k is the `proto-width` gate ABSTAINING for parameter k,
+  // which is the right answer for a project typedef, and it says nothing about parameter k+1. A
+  // shared reader would make one unreadable spelling veto the narrowing of every other parameter.
   const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
   const params = new Set(entry.params);
