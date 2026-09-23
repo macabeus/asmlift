@@ -1,7 +1,9 @@
-// A label heading data this reader does not parse into `.word` values, and the three things asm
-// can do with that label. `decode()` records one such label in `nonWordData`; what the directives
-// share is NOT a width — `.short` and `.byte` are narrower than a word, `.quad` and `.ascii` are
-// wider or unsized, `.float` is exactly a word — but that the pass recorded no words for them.
+// A label heading data, and everything the asm around it can do with that label. `decode()` records
+// each one under `dataWords` (the `.word` values it read) or `nonWordData` (a directive it did
+// not); what the latter's directives share is NOT a width — `.short` and `.byte` are narrower than
+// a word, `.quad` and `.ascii` are wider or unsized, `.float` is exactly a word — but that the pass
+// recorded no words for them, which blinds the four-bytes-per-entry index to their bytes AND to the
+// offsets they shift everything behind them by.
 //
 //   (a) the table's ADDRESS, taken through a `.word` literal-pool entry and indexed at runtime —
 //       the shape agbcc emits for `sTable[i]` and the only one it emits. Nothing here needs the
@@ -11,24 +13,33 @@
 //       pass did not record, or recorded at offsets an unread directive shifted.
 //   (c) the label as a REGISTER BASE (`ldrh rD, [sTab]`, `adds rD, sTab+0x4, #1`) — the same hole
 //       at `readData` rather than at `poolRef`.
+//   (d) the label under a JUMP TABLE's pool, or under the case table itself — the same index, in
+//       the one reader whose wrong answer is a wrong BLOCK rather than a wrong value.
+//   (e) the label as a POOL WORD IN ANOTHER FUNCTION'S SENSE: it is defined HERE, so it is not the
+//       external symbol the numeric-pool naming veto is looking for.
+//   (f) the label as a BRANCH TARGET (`bl sTab`) — data, not a callee.
+//   (g) the label ALIASED, two names on one block, which is a question about decode's KEY rather
+//       than about any reader.
 //
-// (b) and (c) refuse. Their reach over the corpus is zero BY CONSTRUCTION, not by measurement:
-// agbcc reaches a halfword table through (a), its pools are `.word`, and the synthetic benchmark
-// tier builds every row by compiling authored C, so no row can carry an instruction no compiler
-// emits. That is why the witnesses here are unit tests.
+// Everything but (a) refuses, and (e) is the one that must NOT. Their reach over the corpus is zero
+// because every benchmark row is a COMPILED function: agbcc reaches a halfword table through (a),
+// its pools are `.word`, and the synthetic tier builds each row by compiling authored C. That is a
+// fact about the corpus, not about the shapes — hand-written asm emits (b), four times over two
+// `.ascii` labels in `pokeemerald/src/libgcnmultiboot.s`. So the witnesses here are unit tests, and
+// they are not pinning dead code.
 //
 // WHAT EACH WITNESS FAILS ON is stated beside it, because a refusal asserted only to throw is
-// pinned on its message and not on its behaviour. Two of these tests carry that load, and they are
-// not the obvious ones: most spellings here are reachable by BOTH guards, so ablating either one
-// leaves them declining on the other's message. The two that are single-guarded — a label whose
-// recorded words the unread directive shifted, and the offset spellings at `readData` — LIFT under
-// their ablation, so `toThrow` fails outright rather than reporting a different string.
+// pinned on its message and not on its behaviour. Most spellings in (b) and (c) are reachable by
+// BOTH guards, so ablating either one leaves them declining on the other's message; the ones that
+// carry the load are called out. Everything in (d) through (g) is single-guarded and LIFTS under
+// its ablation, so `toThrow` fails outright rather than reporting a different string.
 //
 // Hand-written fixtures, NOT copied from any game.
 import { describe, expect, test } from 'vitest';
 
 import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { decompile } from '../src/pipeline';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const d = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC);
@@ -157,5 +168,190 @@ ${body}
     // this one message. They stay apart because answering either means changing a different line:
     // this one wants a word label read as dataflow, the one above wants a directive read as bytes.
     expect(() => d('f', asBase('word', '	ldrh r0, [sTab]'))).toThrow(/data label 'sTab' used as a register/);
+  });
+});
+
+describe('(d) a JUMP TABLE reached through such a label declines instead of dispatching', () => {
+  // The dispatch reader indexes the same four-byte `dataWords` index `poolRef` does, over two
+  // hops: the literal pool holding the table's address, and the table of case labels itself. An
+  // unread directive under either shifts what those indices select.
+  //
+  // FAILS ON: the reader taking `dataWords` without going through `recordedWords`. Measured with
+  // that lookup, every input here LIFTS — to output byte-identical to the control below. That is
+  // the worst answer this file can produce: not a wrong expression but a wrong BLOCK, a `switch`
+  // that looks entirely ordinary and runs code nothing dispatches to (thumb-switch.test.ts).
+  //
+  // The `as` layout, for the `.short`-before-the-pointer case: assembling
+  // `.Lp: .short 0x5 / .word .Ltab / .Ltab: .word … / .word …` gives `.rodata` bytes
+  // `05 00 06 00 00 00 …`, so the word at `.Lp+0` is `0x00060005` — not the table's address — and
+  // `.Ltab` lands at offset 6, which a hardware `ldr` cannot even address.
+  const table = (poolData: string, tableData: string) => `	.section .rodata
+.Lp:
+${poolData}	.word .Ltab
+.Ltab:
+${tableData}	.word .Lc0
+	.word .Lc1
+
+	.text
+	thumb_func_start f
+f:
+	cmp r1, #0x1
+	bhi .Ldef
+	lsl r0, r1, #0x2
+	ldr r1, .Lp
+	add r0, r0, r1
+	ldr r0, [r0]
+	mov pc, r0
+.Lc0:
+	mov r0, #0xa
+	bx lr
+.Lc1:
+	mov r0, #0xb
+	bx lr
+.Ldef:
+	mov r0, #0x63
+	bx lr
+	thumb_func_end f
+`;
+
+  const dispatches =
+    's32 f(s32 a0) {\n    switch (a0) {\n        case 0:\n            return 10;\n' +
+    '        case 1:\n            return 11;\n        default:\n            return 99;\n    }\n}\n';
+
+  test('the control — no unread directive anywhere — recovers the table', () => {
+    expect(d('f', table('', '')).source).toBe(dispatches);
+  });
+
+  test('an unread directive in the POOL declines, reaching the existing loud refusal', () => {
+    for (const dir of ['	.short 0x5\n', '	.byte 0x5\n', '	.ascii "ab"\n']) {
+      expect(() => d('f', table(dir, ''))).toThrow(
+        /indirect\/computed jump 'mov pc, r0' — jump tables \/ computed gotos \/ register tail calls not supported/,
+      );
+    }
+  });
+
+  test('an unread directive in the CASE TABLE declines on the second hop', () => {
+    // The pool is clean here, so the first lookup succeeds and the table's own label is what
+    // `recordedWords` refuses — the hop a guard placed only at the pool would miss.
+    expect(() => d('f', table('', '	.short 0x5\n'))).toThrow(/indirect\/computed jump 'mov pc, r0'/);
+  });
+});
+
+describe('(e) such a label is DEFINED HERE, so it is not the external symbol a naming veto looks for', () => {
+  // `poolNamesASymbol` asks whether this asm's pools name anything EXTERNAL, and a yes vetoes
+  // spelling a numeric pool word with the symbol map's name for that address. The three label sets
+  // `decode` builds are all "defined here"; leaving one out makes a purely local label answer yes.
+  //
+  // FAILS ON: dropping `nonWordData` from that predicate. Measured, the `.short` row then lifts to
+  // `return *(u16 *)67109168;` while the `.word` row keeps `REG_KEYINPUT` — the same function, the
+  // same map, a different directive on a table whose CONTENTS nothing here reads.
+  const symbols: SymbolMap = new Map([[0x4000130, [{ name: 'REG_KEYINPUT', kind: 'data', size: 2 }]]]);
+
+  const addressTaken = (directive: string) => `	.section .rodata
+sTab:
+	.${directive} 0x1234
+
+	.text
+	thumb_func_start f
+f:
+	ldr r0, _q
+	ldr r1, _p
+	ldrh r0, [r1]
+	bx lr
+	.align 2, 0
+_p: .4byte 0x4000130
+_q: .4byte sTab
+	thumb_func_end f
+`;
+
+  test('a directive on an unrelated local table does not cost the row its map name', () => {
+    const named = 's32 f(void) {\n    return REG_KEYINPUT;\n}\n';
+    expect(decompile('f', addressTaken('short'), ARMV4T_AGBCC, { symbols }).source).toBe(named);
+    expect(decompile('f', addressTaken('word'), ARMV4T_AGBCC, { symbols }).source).toBe(named);
+  });
+});
+
+describe('(f) a BRANCH to a label this asm defines as data is not a call, under either directive', () => {
+  // FAILS ON: removing the guard. The input then lifts to `return sTab();` — a call to a `.rodata`
+  // object, which compiles wherever the name is declared as anything callable and is wrong in a
+  // way that reads as right. The `.word` row is not a sibling here but half the finding: it lifted
+  // that way before this file existed, and the blanket the rest of the file replaced was what kept
+  // the `.short` half quiet.
+  const call = (directive: string) => `	.section .rodata
+sTab:
+	.${directive} 0x1234
+	.${directive} 0x5678
+
+	.text
+	thumb_func_start f
+f:
+	push {lr}
+	bl sTab
+	pop {r1}
+	bx r1
+	thumb_func_end f
+`;
+
+  test('both directives refuse, naming the label and what the asm defines it as', () => {
+    for (const directive of ['short', 'word']) {
+      expect(() => d('f', call(directive))).toThrow(FrontendUnsupportedError);
+      expect(() => d('f', call(directive))).toThrow(
+        /'bl sTab' branches to 'sTab', which this asm defines as a data label/,
+      );
+    }
+  });
+});
+
+describe('(g) two labels on one data block are two names for the same bytes', () => {
+  // `decode` keys both label maps by the labels naming the CURRENT run's base, so an aliased block
+  // is recorded under every one of its names.
+  //
+  // FAILS ON: keying by the most recent label alone. The earlier name is then a label this pass
+  // recorded nothing under, no guard recognises it, and the load path materialises it as a
+  // parameter — `s32 f(u16 *a0) { return *a0; }` under BOTH directives, measured. A fabricated
+  // pointer parameter is the exact miscompile the rest of this file exists to prevent, reached
+  // through the KEY rather than through a reader.
+  const aliased = (directive: string) => `	.section .rodata
+sAlias:
+sTab:
+	.${directive} 0x1234
+	.${directive} 0x5678
+
+	.text
+	thumb_func_start f
+f:
+	ldrh r0, [sAlias]
+	bx lr
+	thumb_func_end f
+`;
+
+  test('a load through the FIRST name refuses exactly as one through the second does', () => {
+    expect(() => d('f', aliased('short'))).toThrow(
+      /data label 'sAlias', which carries a '\.short' directive this reader does not read as words, is used as a register/,
+    );
+    expect(() => d('f', aliased('word'))).toThrow(/data label 'sAlias' used as a register/);
+  });
+
+  test('a label after DATA opens a new run, so a per-word pool keeps one word each', () => {
+    // The other side of the same rule, and the reason it is "since the last data item" rather than
+    // "since the last instruction": pret-style pools label every word. If `_p0` collected `_p1`'s
+    // word too, `_p0` would resolve as a two-word pool and `_p0+0x4` would read an address the
+    // pool does not hold there.
+    const perWord = `	.text
+	thumb_func_start f
+f:
+	ldr r0, _p0
+	ldr r1, _p1
+	add r0, r0, r1
+	bx lr
+	.align 2, 0
+_p0: .4byte 0x1
+_p1: .4byte 0x2
+	thumb_func_end f
+`;
+    expect(d('f', perWord).source).toBe('s32 f(void) {\n    return 3;\n}\n');
+    expect(() => d('f', perWord.replace('ldr r0, _p0', 'ldr r0, _p0+0x4'))).toThrow(
+      /offset 0x4 is not a whole word in pool '_p0'/,
+    );
   });
 });
