@@ -3854,11 +3854,36 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (d.opcode === 'lo32' || d.opcode === 'hi32') {
       const src = e(d.operands[0]);
       const half = asInt(d.results[0].type) ?? T.u(32);
-      const shifted: Expr =
-        d.opcode === 'lo32'
-          ? src
-          : { k: 'bin', op: asInt(d.operands[0].type)?.signed ? '>>' : '>>>', l: src, r: { k: 'const', value: 32 } };
-      return { k: 'cast', to: half, e: shifted };
+      // The LOW half is a truncating cast and needs nothing of its operand's rank: `(u32)x` and
+      // `(u32)(s64)x` are the same value whatever `x` renders as.
+      if (d.opcode === 'lo32') {
+        return { k: 'cast', to: half, e: src };
+      }
+      // THE HIGH HALF SHIFTS BY 32, AND `x >> 32` IS UNDEFINED IN C WHERE `x` RENDERS 32 BITS
+      // WIDE — the shift count must be below the promoted left operand's width. The 64-bit VALUE
+      // is what this op projects, but the rendered EXPRESSION is a separate question and the two
+      // can part: a 64-bit call result inlined at its single use renders as a call, and
+      // `exprIntWidth` answers 32 for one because a callee's return type comes from a prototype
+      // outside the emitted function. So the operand is made to carry the rank the shift reads,
+      // by a cast to the value's own recovered 64-bit type — which is also the type the choice
+      // between `>>` and `>>>` is already read off, so the two now agree by construction.
+      const whole = asInt(d.operands[0].type);
+      const wide: Expr | undefined =
+        exprIntWidth(src, vtEnv) === 64 ? src : whole === undefined ? undefined : { k: 'cast', to: whole, e: src };
+      // A 64-BIT VALUE WHOSE RECOVERY IS NOT AN INTEGER has no 64-bit type to cast to and no legal
+      // shift to spell, so it is a GAP rather than the undefined C it would otherwise print — the
+      // same loud floor the un-nameable `sext` width gets two arms above. Nothing in the corpus
+      // reaches it: every `hi32` is built beside a `concat` or a pair return whose recovery is an
+      // integer, and a recovery that is not one stops at the `concat` gap below before a
+      // projection of it is rendered.
+      if (wide === undefined) {
+        return mkGap('a 64-bit value with no integer type has no high half to shift out', [src]);
+      }
+      return {
+        k: 'cast',
+        to: half,
+        e: { k: 'bin', op: whole?.signed ? '>>' : '>>>', l: wide, r: { k: 'const', value: 32 } },
+      };
     }
     // …AND THE WIDEN THAT BUILDS ONE, which the machine spells as a PAIR rather than as a cast —
     // `asr rN,rM,#31` for the signed extension of a word, `mov rN,#0` for the unsigned one. So the

@@ -616,6 +616,7 @@ lifted from.
 | raise             | a helper call whose operands did not ARRIVE at the table's widths | an operand count is not evidence of a pair; the pair construction is                                              |
 | raise             | a table name no recognizer folded                                 | see above — the pass-through matches for free                                                                     |
 | structure         | a `concat` that is not the machine's widen                        | a 64-bit value this pipeline has no C spelling for, and this gap is the whole safety story for the representation |
+| structure         | a `hi32` off a value with no integer type                         | the high half is `x >> 32`, which is undefined C unless the operand renders wider than 32 bits, and there is no 64-bit type to cast it to |
 | backend           | Pascal, on a 64-bit integer                                       | it throws rather than narrowing                                                                                   |
 
 **What a decompiler may NOT infer**, each of which is a refusal rather than a guess: `bl __muldi3`

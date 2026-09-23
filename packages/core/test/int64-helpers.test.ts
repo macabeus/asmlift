@@ -53,6 +53,15 @@ describe('a register pair read as one value', () => {
     expect(spelt.get('signed')).toContain('(s64)a0 * (s64)a1');
     expect(spelt.get('unsigned')).toContain('(s64)(s32)a0 * (s64)(s32)a1');
   });
+
+  // THE HIGH HALF OF THE RESULT, which is the projection whose C spelling constrains its operand:
+  // `x >> 32` is undefined unless `x` renders wider than 32 bits. Here the fold has already put a
+  // multiply over two 64-bit parameters there, so the rank is present and no cast is written —
+  // the end-to-end half of the rule `test/int64-repr.test.ts` states over hand-built IR, on real
+  // agbcc output, and the half that fails if the shift's operand is cast unconditionally.
+  test('the high half of a pair the helper returned shifts without a cast', () => {
+    expect(lift('himul')).toBe('s32 himul(s64 a0, s64 a1) {\n    return (s32)(a0 * a1 >> 32);\n}\n');
+  });
 });
 
 describe('what refuses', () => {

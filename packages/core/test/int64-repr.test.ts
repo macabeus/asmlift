@@ -147,6 +147,50 @@ describe('the three opcodes have a shape, and it is checked', () => {
   });
 });
 
+// THE HIGH HALF IS THE ONE PROJECTION WHOSE C SPELLING CONSTRAINS ITS OPERAND. `(u32)x` truncates
+// whatever `x` renders as, but `x >> 32` is undefined in C unless the promoted left operand is
+// wider than 32 bits — and the 64-bit VALUE being projected and the rendered EXPRESSION's rank are
+// two different questions that can part company.
+describe('the high half shifts by 32, so its operand must render 64 bits wide', () => {
+  // A CALL IS WHERE THEY PART. `exprIntWidth` answers 32 for a call because a callee's return type
+  // comes from a prototype outside the emitted function — so a 64-bit call result inlined at its
+  // one use renders as a 32-bit-rank expression, and `... >> 32` over it is undefined. The cast
+  // this asserts is what gives the shift the rank it reads.
+  test('a 64-bit call result inlined at its use is cast before the shift', () => {
+    const fn = parse('fn f {\n^bb0():\n  %0: s64 = call {target = "llsrc"}\n  %1: s32 = hi32 %0\n  ret %1\n}\n');
+    verify(fn);
+    recoverTypes(fn);
+    expect(cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toContain('(s64)llsrc() >> 32');
+  });
+
+  // …AND THE CAST GOES ON ONLY WHERE THE RANK IS MISSING, which is the half that fails if the
+  // shift's operand is cast unconditionally. A 64-bit PARAMETER renders as a declared `s64` local,
+  // so it already carries the rank and `(s64)a0 >> 32` would be a cast the source never wrote.
+  test('a half off an operand that already renders 64 bits wide takes no cast', () => {
+    const fn = parse('fn f {\n^bb0(%0: s64):\n  %1: s32 = hi32 %0\n  ret %1\n}\n');
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+    expect(src).toContain('a0 >> 32');
+    expect(src).not.toContain('(s64)a0');
+  });
+
+  // A 64-BIT VALUE RECOVERY LEFT UNTYPED has no 64-bit C type to cast to, so there is no legal
+  // shift to spell and it GAPS rather than printing the undefined C. Reach is zero by
+  // construction rather than by measurement: every `hi32` a frontend builds sits beside a `concat`
+  // or a pair return whose result recovery types as an integer.
+  test('a high half off a value with no integer type is a gap, not undefined C', () => {
+    const [v, hi] = [mkValue(T.unk(64)), mkValue(T.unk(32))];
+    const fn = fnOf([
+      { params: [v], ops: [mkOp('hi32', { operands: [v], results: [hi] }), mkOp('ret', { operands: [hi] })] },
+    ]);
+    verify(fn);
+    expect(() => cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toThrow(
+      /no high half to shift out/,
+    );
+  });
+});
+
 describe('64 does not mix', () => {
   test('an add over one 64-bit and one 32-bit operand is rejected', () => {
     const [a, b, r] = [mkValue(T.s(64)), mkValue(T.s(32)), mkValue(T.s(64))];
