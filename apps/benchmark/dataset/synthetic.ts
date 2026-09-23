@@ -1796,11 +1796,31 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   { sym: 'i2ll', src: 'long long i2ll(int x){ return x; }', features: ['int64', 'sign-extend'], toolchains: ALL },
+  // THE LOW HALF AS A PROJECTION, and the mirror of `llhi` below — with the same rule applied to
+  // the same effect on a different toolchain, because the cell that goes null is the one whose
+  // machine already has the wanted half in the return register.
+  //
+  // NOT ON agbcc, where the low half IS r0, so the whole function is `bx lr`. Compiled at the
+  // row's own flags, three sources are one object — .text `70470000`, md5 496f2b6e:
+  //
+  //   int ll2i(long long x){ return (int)x; }        the row
+  //   u32 ll2i(u32 a0){ return a0; }                 what asmlift publishes, and it MATCHED
+  //   void ll2i(void){}                              no parameter, no return, no cast
+  //
+  // A cell that scores an empty function identically to the answer measures nothing about
+  // `int64`, the `cast` or the `narrow` it is tagged with, so it is not one of this row's cells.
+  // It fails differently from `llhi`'s mwcc cell, and the difference is worth keeping: `llhi:mwcc`
+  // could not distinguish the two PROJECTIONS, so an arithmetically wrong answer scored the same;
+  // this one does distinguish them — the high half is `add r0,r1,#0`, `081c7047` — and goes null
+  // on ARITY and TYPE instead. Both are null, for different reasons.
+  //
+  // The other three cells are gates: IDO alone answers `return a1`, the wrong half, and correctly
+  // nonmatches.
   {
     sym: 'll2i',
     src: 'int ll2i(long long x){ return (int)x; }',
     features: ['int64', 'cast', 'narrow'],
-    toolchains: ALL,
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
   },
   {
     sym: 'llcmp',
