@@ -157,6 +157,10 @@ so that field is nondeterministic on a busy box in both directions — a clean t
 dropped sibling it did not cause, and a later tree can publish its disappearance as if it had
 fixed something.
 
+The artifact before this one, taken 2026-09-23 at `87b49c74`, read **1,371 s over 186 real rows**
+and **915 s over 742 synthetic rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to
+end** (`real 417.39` under `/usr/bin/time -p`).
+
 The ranked sums here are roughly 1.6× the entry above them on a corpus one row larger. That is
 MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
 for the box, but after a night of eight whole-tier runs, and the per-row rank seconds the artifact
@@ -174,9 +178,6 @@ missing, 0 retired, 40 added, 3 gained, 0 other flips** (exit 1). Every one of t
 argued: the 2 lost are `llshl`/`llshr` on mwcc, which matched by re-emitting `bl __shl2i` and now
 decline; the 1 missing is `ll2i:agbcc`, a cell deleted because `bx lr` scores every answer alike;
 the 3 gained are `llshl`/`llshr` on agbcc and the real row `sa3:sa2__sub_80855C0:agbcc`.
-
-The artifact before this one, taken 2026-09-23 at `87b49c74`, read **1,371 s over 186 real rows**
-and **915 s over 742 synthetic rows**; wall clock was 332.3 s and 337.5 s, 417.4 s end to end.
 
 The artifact before THAT, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
 rows** and **608 s over 726 synthetic rows**; wall clock was 194.1 s and 231.6 s, 304.1 s end to
