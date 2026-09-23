@@ -13,6 +13,11 @@ describe('declineMarkersIn (pinned)', () => {
     expect(declineMarkersIn('s32 f(void) { return M2C_ERROR(/* rotlw */); }')).toEqual(['M2C_ERROR']);
     expect(declineMarkersIn('x = a + M2C_CARRY(b); y = M2C_UNK;')).toEqual(['M2C_UNK', 'M2C_CARRY']);
     expect(declineMarkersIn('return (bitwise f32) __addsf3();')).toEqual(['M2C bitwise cast']);
+    // `SECOND_REG` is the half of a 64-bit return C has no spelling for. It needs its own line
+    // here because it is the one family the artifact gate below cannot pin: that gate asks whether
+    // a PUBLISHED cell bearing a marker escaped `declined`, so deleting a marker takes the finding
+    // with it and leaves the gate green over the same artifact. Deleting this line goes red.
+    expect(declineMarkersIn('s64 f(void) {\n    return SECOND_REG(func());\n}')).toEqual(['SECOND_REG']);
   });
 
   test('`?` placeholders in declaration positions are declines', () => {

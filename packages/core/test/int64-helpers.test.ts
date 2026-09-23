@@ -133,7 +133,7 @@ describe('what refuses', () => {
         prototypes: { sink: { params, returnsVoid: true } },
       });
     expect(() => declared(['s32', 's32', 's32', 'long long'])).toThrow(
-      /one half of a 64-bit value would be handed to `sink` outside the argument registers — its parameter 4 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argument register\(s\), so the low half is in r3 and the high half in this frame's outgoing stack block/,
+      /one half of a 64-bit value would be handed to `sink` outside the argument registers — its parameter 4 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argument register\(s\), so the low half is in r3 and the upper half in this frame's outgoing stack block/,
     );
     // PARAMETER 3, WORD 4 — the ordinal and the position part company at the first wide parameter,
     // and an earlier version of this message printed `at + 1` for both.

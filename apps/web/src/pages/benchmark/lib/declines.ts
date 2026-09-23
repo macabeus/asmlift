@@ -20,28 +20,26 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 330 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 329 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 126 distinct decline messages (the texts reached by
+// `packages/core/src` throws 124 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
 // harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
+// replacing every interpolation with a placeholder). 71 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
 //   frontend/thumb.ts   26  ARM-mode function, raw data in the code stream, a base alignment the
 //                           input does not determine, pc used as a data base, `stm` with its own
 //                           base in the list, control falling off the end, a register spelled in
-//                           upper case, an outgoing stack-argument block whose size rests on a
-//                           declared type nothing can size (a project typedef, a by-value
-//                           struct), and the reaching-compare throw whose reason is interpolated
-//                           (`cross-block-flags-arm` keys on one of its reasons, so the template
-//                           with a placeholder in it matches nothing)
+//                           upper case, and the reaching-compare throw whose reason is
+//                           interpolated (`cross-block-flags-arm` keys on one of its reasons, so
+//                           the template with a placeholder in it matches nothing)
 //   structure.ts        16  eleven loop and post-loop naming refusals beside the two
 //                           `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
@@ -54,15 +52,11 @@
 //                           branch, an unparsable constant expression, and a magnitude with a
 //                           leading zero (octal to the assembler)
 //   frontend/disasm.ts   7  the objdump `...` elision family
-//   frontend/ppc.ts      4  `stwu` with update, a relocation on a stack-pointer adjust, the
-//                           two-armed branch denylist, whose template is interpolation end to end,
-//                           and the declaration-versus-machine refusal, whose sentence is built in
-//                           `proto.ts` so that both frontends refuse a user-supplied fact with the
-//                           same words — which puts the whole template out of the harvest's reach
-//                           and its gate in `packages/core/test/proto.test.ts`, where it is
-//                           produced (its wide-parameter refusal is NOT here — it carries
-//                           `wide-call-arg`'s phrase because it is that capability gap seen from
-//                           the other frontend)
+//   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
+//                           two-armed branch denylist, whose template is interpolation end to end
+//                           (its wide-parameter refusal is NOT here — it carries `wide-call-arg`'s
+//                           phrase, because it is that capability gap seen from the other
+//                           frontend)
 //   frontend/format.ts   1  the input/frontend mismatch — an input error
 //   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -293,7 +287,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //   both answers (the low half alone, or the two halves as two arguments) recompile to the
     //   `bl` being lifted, so nothing downstream can referee either; and a pair the ABI splits
     //   across the register/stack boundary, which this frontend does not assemble. The PowerPC
-    //   arm is the same gap seen from a frontend with no pair at all.
+    //   arm is the same gap seen from a frontend with no pair at all, and it is the class's one
+    //   inhabitant today (`synthetic:llpass:mwcc_242_81`).
+    //
+    // THE SPLIT-PAIR ARM SAYS "upper half" AND NOT "high half", and thumb.ts says why at the
+    // throw: `reloc-halves` holds `/high half/`, this list is ordered, and a classification that
+    // depends on which entry comes first is a classification nothing states.
     //
     //   the VALUE — a `concat` of two words that are not the two halves of a value this lift
     //   already built (two ordinary loads of a struct's halves, say). It reaches structure.ts as
@@ -301,8 +300,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //   an unmodelled INSTRUCTION would attribute a 64-bit gap to a decoder that is working.
     //
     // `mulh`/`mulhu` carry the same message shape and are NOT claimed here: they are a multiply
-    // whose high half nothing folded, they inhabit 12 rows of the artifact, and moving them would
-    // be a claim about those rows rather than about this capability.
+    // whose high half nothing folded, they inhabit 8 rows of the artifact, and moving them would
+    // be a claim about those rows rather than about this capability. Eight ROWS, not the twelve
+    // marker occurrences a grep counts — the blocker Pareto is per row.
     key: 'wide-call-arg',
     label: 'A 64-bit value the lift could not carry as one',
     pattern: /half of a 64-bit value|no lowering for op 'concat'/,
@@ -331,7 +331,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // Two spellings mean this same gap: `unmodelled instruction` (the structurer's) and `unmodelled
     // effect instruction` (opaqueDest refusing one with no degradable destination — a `$zero` write,
     // a `swi`, a trap). `unmodelled store-class instruction` keeps its own class above.
-    pattern: /unmodelled (?:effect )?instruction|no lowering for op/,
+    //
+    // `concat` IS EXCLUDED BY NAME rather than by position. It is `wide-call-arg`'s — a 64-bit
+    // value this pipeline built and could not spell, not an instruction nobody modelled — and that
+    // class sits earlier in this array, so first-match already sent it there. An exclusion the
+    // array order happens to produce is an exclusion nothing states: move either entry and the
+    // 64-bit gap is published as an unmodelled instruction, with every gate here green.
+    pattern: /unmodelled (?:effect )?instruction|no lowering for op (?!'concat')/,
   },
   {
     key: 'loop-shapes',

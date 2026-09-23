@@ -729,6 +729,25 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(classOf(marker)).toBe(want);
   });
 
+  // THE 64-BIT SENTENCES, AND THEY ARE CHECKED FOR EXACTLY ONE MATCH RATHER THAN FOR THE FIRST.
+  // `DECLINE_CLASSES` is ordered and `classOf` takes the first pattern that matches, so a sentence
+  // two classes both claim is classified by an array index — and `reloc-halves`, whose subject is
+  // a `%hi`/`@ha` relocation, holds `/high half/`. The split-pair refusal said "high half" and
+  // landed in `reloc-halves` on any ordering that put it first, publishing a 64-bit argument gap
+  // as a relocation gap. `thumb.ts` says "upper half" for that reason, and this is what holds it.
+  //
+  // THE STRINGS ARE PUBLISHED MARKERS, not the full reason: `apps/benchmark/src/eval/asmlift.ts`
+  // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
+  // carry. All three reach their class inside the first 80.
+  test.each([
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
+    "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
+    "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
+  ])('%s is wide-call-arg, and no other class claims it', (marker) => {
+    expect(DECLINE_CLASSES.filter((c) => c.pattern.test(marker)).map((c) => c.key)).toEqual(['wide-call-arg']);
+  });
+
   test('branch-likely says in its LABEL that it is leftover, because 0 rows reads as "cannot"', () => {
     // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
     // markers it saw, so `GapAnalysis.tsx`, the panel that calls itself the roadmap view, does not
@@ -989,7 +1008,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 126 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about 124 distinct messages across 11 files, which
   // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
@@ -1009,11 +1028,11 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 4],
+    ['frontend/ppc.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 72;
+  const RESIDUE_TOTAL = 71;
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

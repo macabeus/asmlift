@@ -3882,6 +3882,13 @@ export function lift(
     // target here. (`wideHelper` bounds the same placement for the helper table, where it can fall
     // back to the declared path instead; a declaration has nothing to fall back to.)
     //
+    // THE UPPER HALF IS NOT SPELT "high half" ON PURPOSE. `DECLINE_CLASSES` is an ordered list and
+    // the first pattern that matches wins, so `reloc-halves` — whose subject is a `%hi`/`@ha`
+    // relocation and whose pattern holds `/high half/` — claims this sentence on any ordering that
+    // puts it first, and a 64-bit argument gap is then published as a relocation gap on the
+    // blocker Pareto. A classification that rests on the order of a list is a classification
+    // nothing states.
+    //
     // THE ORDINAL IS THE PARAMETER'S AND THE POSITION IS THE WORD'S, and they are different
     // numbers the moment an earlier parameter is wide — which is the only way to get here past the
     // first parameter, so printing one for the other would be wrong in exactly the population this
@@ -3894,7 +3901,7 @@ export function lift(
             `the argument registers — its parameter ${i + 1} is 64 bits wide and takes argument words ` +
             `${at + 1} and ${at + 2} of a call with ${target.argRegs.length} argument register(s), so ` +
             (at < target.argRegs.length
-              ? `the low half is in ${target.argRegs[at]} and the high half in this frame's outgoing ` + 'stack block'
+              ? `the low half is in ${target.argRegs[at]} and the upper half in this frame's outgoing ` + 'stack block'
               : "both halves are in this frame's outgoing stack block") +
             ' — this frontend assembles a pair out of two argument registers and out of nothing else',
         );
