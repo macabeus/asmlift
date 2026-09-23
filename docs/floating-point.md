@@ -137,7 +137,7 @@ cp out.c a.c && sed 's/s32 \*)(((/f32 *)(((/g; s/s32 \*a1/f32 *a1/' a.c > b.c
 
 Against the target, the `f32` object differs in **two instructions of twenty**, and neither is
 floating point: the `lui`/`lw` pair that loads `gCameraList` sits at the top instead of at 0x1c,
-which is the global-access placement axis asmlift already has levers for.
+which is the global-access placement question asmlift already enumerates variations over.
 
 So the carrier subset is not a way to get FP rows without a float type. **The type IS the FP part of
 the gap here** — `sw` against `swc1` is decided by nothing else — and a carrier decode with no type
