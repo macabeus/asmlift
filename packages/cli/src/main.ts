@@ -163,10 +163,14 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
   --proto          function prototypes, inline JSON or a path to it:
-                   {"sym":{"params":2|["u8","s32"],"returnsVoid":true}} — a
+                   {"sym":{"params":2|["u8","s32"],"returns":"long long"}} — a
                    callee's count gives its call-site arity, a typed list also
-                   gives its widths, and the decompiled function's OWN entry
-                   gives its void-ness
+                   gives its widths, and "returns" gives the type it hands
+                   back (a 64-bit one comes home in a register pair) and gets
+                   the callee declared in the candidate's own source.
+                   "returnsVoid":true is the same fact as "returns":"void";
+                   on the decompiled function's OWN entry either spells its
+                   void-ness
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged

@@ -14,7 +14,7 @@ import { verify } from './ir/verify';
 import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
-import { type Prototypes, prototypesFromSymbols } from './proto';
+import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
@@ -186,7 +186,7 @@ function traceTower(
   // did not state. A trace that lifted from a different table would explain a run that never
   // happened.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
-  const returnsVoid = prototypes[name]?.returnsVoid ?? false;
+  const returnsVoid = declaresVoidReturn(prototypes[name]);
   const trace: StageTrace[] = [];
   const patternEvents: PatternEvent[] = [];
 

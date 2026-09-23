@@ -6,11 +6,13 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import type { FnProto } from '../src/proto';
 import {
   declaredArgWidths,
   declaredReturnWidth,
   declaredWidth,
   prototypesFromSymbols,
+  returnsWithoutHiddenPointer,
   spellableProto,
   spellableType,
   wordsOf,
@@ -91,6 +93,39 @@ describe('spellableType', () => {
       expect(declared).not.toContain(name);
       expect(spellableType(name)).toBe(false);
     }
+  });
+});
+
+// THE TWO RETURN KEYS ARE READ AS ONE FACT, which is what the validator's own message claims and
+// what `declaresVoidReturn` makes true. `returns: "void"` used to validate, read as interchangeable
+// with `returnsVoid`, and do nothing at all — so a void function whose asm leaves garbage in the
+// return register got `return <garbage>;`, a candidate that compiles and scores, which is the exact
+// defect `returnsVoid` exists to prevent.
+describe('a void return, whichever key states it', () => {
+  // `f: mov r0,#1 ; bx lr` — the asm of a void function that happens to leave 1 in r0.
+  const asm = ['\t.code\t16', '\t.globl\tf', '\t.thumb_func', 'f:', '\tmov\tr0, #1', '\tbx\tlr', ''].join('\n');
+  const lift = (prototypes: Record<string, FnProto>) => decompile('f', asm, ARMV4T_AGBCC, { prototypes }).source;
+
+  test.each([
+    ['returnsVoid', { f: { returnsVoid: true } }],
+    ['returns', { f: { returns: 'void' } }],
+  ])('%s suppresses the phantom return value', (_key, prototypes) => {
+    expect(lift(prototypes)).toBe('void f(void) {\n    return;\n}\n');
+  });
+
+  // …and the fact is a POSITIVE claim only: saying nothing, and saying the return is a word, both
+  // leave the machine's own reading standing.
+  test.each([
+    ['nothing declared', {}],
+    ['a non-void return', { f: { params: [], returns: 'int' } }],
+  ])('%s leaves the return value alone', (_label, prototypes) => {
+    expect(lift(prototypes)).toBe('s32 f(void) {\n    return 1;\n}\n');
+  });
+
+  test('a CALLEE stating a void return is one no hidden struct pointer is handed', () => {
+    expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } })).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } })).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { params: [] } })).toBe(false);
   });
 });
 

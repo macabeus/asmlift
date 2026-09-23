@@ -59,10 +59,17 @@ export interface FnProto {
    *  the same instructions, so nothing in the assembly tells them apart and the caller must be
    *  TOLD, exactly as `returnsVoid` must be.
    *
-   *  A SPELLING THIS CANNOT SIZE IS SILENCE, never a word: `declaredWidth` answers `undefined` for
-   *  a project typedef, and the frontend then lifts the call the way it lifts an undeclared one.
-   *  Under-declaring stays the safe direction here too — a return wrongly declared 64-bit names a
-   *  register the callee really did destroy, which is the defect the refusal exists for.
+   *  A SPELLING THIS CANNOT SIZE — OR CANNOT PRINT — IS SILENCE, never a word. {@link spellableProto}
+   *  is the one gate and {@link declaredReturnWidth} is defined on top of it, so a `returns` whose
+   *  width the frontend acts on is always one the candidate's own translation unit can declare;
+   *  anything else lifts the call the way an undeclared callee is lifted. Under-declaring stays the
+   *  safe direction here too — a return wrongly declared 64-bit names a register the callee really
+   *  did destroy, which is the defect the refusal exists for.
+   *
+   *  `"void"` HERE IS `returnsVoid`, not a width. The two keys are one fact and
+   *  {@link declaresVoidReturn} reads both, so either spelling suppresses the phantom return value
+   *  on the function's own entry and rules out a hidden struct-return pointer at a callee.
+   *  `validatePrototypes` refuses a table that states them differently, in either direction.
    *
    *  A HEADER STATES IT AND NOTHING DERIVES IT. `prototypesFromSymbols` does not fill this in:
    *  `typeSpelling` sizes 1, 2 and 4 bytes, so a DWARF-derived entry could only ever spell a return
@@ -182,6 +189,23 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
   memcpy: { params: ['void *', 'const void *', 'u32'], returns: 'void *' },
 };
 
+/** Whether a declaration says the function returns NO VALUE — the one question `returnsVoid` was
+ *  added for, asked through both keys that can answer it.
+ *
+ *  THE VALIDATOR'S MESSAGE CALLS THE TWO KEYS "one fact spelled two ways", and this is what makes
+ *  that true rather than a description of an intention. Before it, `returns: "void"` validated,
+ *  read as interchangeable, and did nothing at all on the function under decompilation: a void
+ *  function whose asm leaves garbage in r0 got `return <garbage>;` — a candidate that compiles and
+ *  scores, which is the exact defect `returnsVoid` exists to prevent. Every reader of the fact
+ *  calls this, so a key that validates is a key that acts.
+ *
+ *  ONE DIRECTION ONLY, and that asymmetry is the field's: `returnsVoid: false` states nothing that
+ *  any reader acts on (silence and "not void" take the same path), so this answers the positive
+ *  claim and leaves the rest to the machine. */
+export function declaresVoidReturn(p: FnProto | undefined): boolean {
+  return p?.returnsVoid === true || p?.returns?.trim() === 'void';
+}
+
 /** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
  *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
  *  whose return travels in a register. Every other answer — including silence — is `false`,
@@ -215,7 +239,7 @@ export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototyp
     return t === 'void' || declaredWidth(t) !== undefined;
   };
   const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
-  if (own?.returnsVoid === true) {
+  if (declaresVoidReturn(own)) {
     return true;
   }
   // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
@@ -466,12 +490,20 @@ export function validatePrototypes(value: unknown): string[] {
     if (returns !== undefined && typeof returns !== 'string') {
       problems.push(`${sym}: "returns" must be a type string, e.g. "long long"`);
     }
-    // The two return keys are one fact spelled two ways, and a table that says both is a table
-    // whose author meant one of them. Neither reading is safe to pick: honouring `returnsVoid`
-    // would silently drop a pair the other key says comes back, and honouring `returns` would
-    // license an out-parameter frame the `void` was there to rule out.
-    if (returnsVoid === true && typeof returns === 'string' && returns.trim() !== 'void') {
-      problems.push(`${sym}: "returnsVoid" is true but "returns" says "${returns}"`);
+    // The two return keys are one fact spelled two ways (`declaresVoidReturn` is where both are
+    // read), and a table that says both DIFFERENTLY is a table whose author meant one of them.
+    // Neither reading is safe to pick: honouring `returnsVoid` would silently drop a pair the other
+    // key says comes back, and honouring `returns` would license an out-parameter frame the `void`
+    // was there to rule out. BOTH directions are a contradiction, because both are now read — an
+    // explicit `returnsVoid: false` beside `returns: "void"` is the same disagreement written the
+    // other way round, and checking one direction while claiming to check the fact is a completeness
+    // the code would not have.
+    if (
+      typeof returnsVoid === 'boolean' &&
+      typeof returns === 'string' &&
+      returnsVoid !== (returns.trim() === 'void')
+    ) {
+      problems.push(`${sym}: "returnsVoid" is ${returnsVoid} but "returns" says "${returns}"`);
     }
   }
   return problems;

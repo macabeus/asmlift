@@ -50,7 +50,18 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   // THE TWO RETURN KEYS ARE ONE FACT SPELLED TWICE, and a table that says both means one of them.
   // Neither reading is safe to pick: honouring `returnsVoid` drops a pair the other key says comes
-  // back, and honouring `returns` licenses the out-parameter frame the `void` was ruling out.
+  // back, and honouring `returns` licenses the out-parameter frame the `void` was ruling out. BOTH
+  // directions, because both keys are now READ — an explicit `returnsVoid: false` beside
+  // `returns: "void"` is the same disagreement written the other way round.
+  test('the two return keys contradicting each other, the other way round', () => {
+    expect(validatePrototypes({ f: { returnsVoid: false, returns: 'void' } })).toEqual([
+      'f: "returnsVoid" is false but "returns" says "void"',
+    ]);
+    // …and an omitted `returnsVoid` is not a contradiction with anything.
+    expect(validatePrototypes({ f: { returns: 'void' } })).toEqual([]);
+    expect(validatePrototypes({ f: { returnsVoid: false, returns: 'long long' } })).toEqual([]);
+  });
+
   test('the two return keys contradicting each other', () => {
     expect(validatePrototypes({ f: { returnsVoid: true, returns: 'long long' } })).toEqual([
       'f: "returnsVoid" is true but "returns" says "long long"',

@@ -24,7 +24,7 @@ import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
@@ -194,7 +194,7 @@ function runTower(
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
-    ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name])),
     // What the EMITTED LANGUAGE can say is a structuring input wherever two recoveries of one
     // shape are behaviourally identical and only one of them is printable (switch fall-through
     // vs plain if-nesting): recovery must not mint a tree this backend would refuse.

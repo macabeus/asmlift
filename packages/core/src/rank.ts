@@ -60,7 +60,7 @@ import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
-import { type Prototypes, prototypesFromSymbols } from './proto';
+import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
@@ -433,7 +433,7 @@ export function enumerateCandidates(
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   const frontend = frontendFor(target);
   const baseOpts = {
-    ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name])),
     // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
     // be handed a tree carrying one, because its refusal costs the whole candidate (and, when
     // every candidate carries it, the whole row).
