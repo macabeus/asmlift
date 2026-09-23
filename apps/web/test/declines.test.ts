@@ -760,9 +760,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
 
   // `clobbered-value`, `runtime-helper` and `wide-call-arg` each name a refusal whose intended
   // inhabitant is in the dataset — `synthetic:llfrom`, the mwcc 64-bit family, `synthetic:llpass`
-  // — and is not yet in the committed artifact. Which of them a regeneration inhabits is the
-  // artifact's answer and not the row author's, so this list is re-derived from the artifact it is
-  // asserted against, in the commit that changes it.
+  // — and is not yet in the committed artifact. WHICH OF THEM A REGENERATION INHABITS IS THE
+  // ARTIFACT'S ANSWER, NOT THE ROW AUTHOR'S: a row written to reach a class may reach a different
+  // one, or decline earlier. So this list is re-derived from the artifact it is asserted against,
+  // in the commit that changes it; a name that stays here after its row lands is a finding about
+  // that row.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',

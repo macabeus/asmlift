@@ -99,8 +99,20 @@ export interface TargetDescription {
    *  file holds signatures fixed by the C STANDARD, and a helper name is fixed by a runtime
    *  library — agbcc calls `__muldi3`, CodeWarrior `__div2i`, IDO `__ll_mul`.
    *
-   *  ABSENT ⇒ no helper is recognised, so every such call stays an opaque call with its arguments
-   *  guessed. That is the direction a target that has not been measured should take. */
+   *  ABSENT ⇒ no helper is recognised AND none is refused, so every such call stays an ordinary
+   *  call with its arguments guessed and the backend spells it. That is the UNMEASURED direction,
+   *  not the safe one: re-emitting a compiler's own runtime call is the one failure that MATCHES,
+   *  because a compiler handed `__div2i(a, b)` emits the `bl __div2i` the row was lifted from
+   *  (`raise/widehelpers.ts` states this at the refusal it exists to make). Absence is still the
+   *  right default, because a name outside the table cannot be told from a project's own
+   *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
+   *  not been enumerated.
+   *
+   *  BOTH MIPS TARGETS SIT THERE TODAY, and IDO's runtime is a family of its own (`__ll_mul`,
+   *  `__ll_div`, `__ull_div`), so a scan for either of the other two spellings reports zero on it.
+   *  What that costs today is nothing, and the gate bounding it is not here: `frontend/mips.ts`
+   *  refuses on the `jal` before any call is modelled at all. The moment it does not, enumerating
+   *  those names is owed with it. */
   runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {

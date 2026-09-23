@@ -67,10 +67,11 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
  *  model 64-bit division exactly as it would score modelling it. A row that cannot tell the two
  *  apart is measuring nothing, and four cells of the synthetic 64-bit family were banking that.
  *
- *  ONLY THE NAMES THE TARGET CARRIES. A helper table is a measured claim about one compiler's
- *  runtime, so a target without one keeps the old pass-through and a name outside the table is an
- *  ordinary callee — which is right, because a project's own `__`-prefixed function is not this
- *  compiler's runtime and asmlift cannot tell them apart by spelling.
+ *  ONLY THE NAMES THE TARGET CARRIES, and a name outside the table stays an ordinary callee —
+ *  which is right, because a project's own `__`-prefixed function is not this compiler's runtime
+ *  and asmlift cannot tell them apart by spelling. A target with NO table therefore refuses
+ *  nothing and spells every helper call it makes, which is the configuration this refusal exists
+ *  to remove; `target.ts` says at the field which targets are still in it and what bounds them.
  *
  *  An `opaque` rather than a throw, so the gap behaves like every other one: strict mode declines
  *  naming it, annotate mode marks it and leaves the rest of the function standing. */

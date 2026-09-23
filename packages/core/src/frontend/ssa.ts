@@ -778,8 +778,9 @@ export function makeSsaBuilder(
       // dead phi is not junk downstream: its edge args become post-loop copies in the emitted C and
       // block gates keyed on "this exit carries nothing".
       //
-      // IT RUNS FIRST NOW, and `refuseStaleCallerSavedReads` is why. That check asks whether a
-      // destroyed value still reaches a use, and a dead phi's edge arg is not one. The trivial-phi
+      // DEAD-PHI PRUNING RUNS FIRST, and `refuseStaleCallerSavedReads` is why. That check asks
+      // whether a destroyed value still reaches a use, and a dead phi's edge arg is not one. The
+      // trivial-phi
       // pass must not run before it for the opposite reason: that one REPLACES the phi's uses with
       // the arg and splices the arg away, which takes the last visible use of a destroyed value out
       // of sight. Running it twice is what keeps both true — trivial-phi removal can orphan a phi's
