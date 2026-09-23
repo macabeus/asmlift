@@ -69,8 +69,8 @@ describe('guessedArityCallees', () => {
   });
 
   it('does NOT count a params the frontend cannot read — the same reader decides both', () => {
-    // `params: "1"` decompiles at a GUESSED arity (protoArity returns undefined), so a note that
-    // called it declared would be the exact false reassurance this line exists to prevent.
+    // `params: "1"` decompiles at a GUESSED arity (`declaredArgWidths` returns undefined), so a
+    // note that called it declared would be the exact false reassurance this line exists to prevent.
     expect(guessedArityCallees(LBG, 'LoadBGTilemapData', { thunk_HeapFree: { params: '1' } as never })).toEqual([
       'DecompressAlloc',
       'thunk_HeapFree',

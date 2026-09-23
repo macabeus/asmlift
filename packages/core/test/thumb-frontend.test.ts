@@ -1199,11 +1199,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const twoStackArgs =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
-    for (const proto of [undefined, { g: { params: 2 } }, { g: { params: ['s32', 's32', 's32', 'double'] } }]) {
+    for (const proto of [undefined, { g: { params: 2 } }]) {
       expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC, proto ? { prototypes: proto } : {})).toThrow(
         /stack pointer used as data/,
       );
     }
+    // A declared pair that straddles the register/stack boundary refuses too, and it refuses FIRST
+    // and more specifically: naming the parameter is the fact a reader can act on, where the
+    // sp-as-data reason would send them hunting for a store. A `long long` is two words on every
+    // target here, so this one's low half is in r3 and its high half in the block.
+    expect(() =>
+      decompile('f', twoStackArgs, ARMV4T_AGBCC, {
+        prototypes: { g: { params: ['s32', 's32', 's32', 'long long'] } },
+      }),
+    ).toThrow(/its parameter 4 is 64 bits wide .* the low half is in r3/);
+    // A spelling nothing can size states no layout at all, so the declaration licenses nothing and
+    // the verdict is the one this shape gets when nothing is declared — the sp-as-data decline
+    // above. DECLARING MORE MAY NOT DO LESS, and it may not do more either.
+    expect(() =>
+      decompile('f', twoStackArgs, ARMV4T_AGBCC, {
+        prototypes: { g: { params: ['s32', 's32', 's32', 's32', 'Direction'] } },
+      }),
+    ).toThrow(/stack pointer used as data/);
   });
 
   test('an argument block is contiguous from [sp,#0] — a lone higher slot is a spill, not an argument', () => {

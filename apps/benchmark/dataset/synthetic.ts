@@ -1943,12 +1943,40 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['int64', 'arithmetic', 'cast', 'narrow'],
     toolchains: ALL,
   },
-  // THE CALL BOUNDARY THE PAIR DOES NOT CROSS, and a refusal row rather than a match. A prototype
-  // states a callee's arity in argument REGISTERS, so `void llsink(long long)` and `void
-  // llsink(int)` reach the frontend as the same fact — and both of the answers it could give
-  // (hand over the low half; hand over the two halves as two words) recompile to the `bl` being
-  // lifted. The differ scores the wrong one exactly as it scores the right one, which is why this
-  // declines instead of matching.
+  // THE CALL BOUNDARY THE PAIR CROSSES, and the declaration is the whole of what carries it: the
+  // body is `llsink(a*b)` and nothing else, so what this scores is the shape of one argument.
+  //
+  // WHAT THIS CELL REFEREES, AND WHAT IT DOES NOT. It separates a DECLINE from a lift, and it
+  // separates the correct argument from an over-count — the two halves as two words needs a
+  // two-parameter callee and emits `add r2,r1,#0`, a different object. It does NOT separate the
+  // correct argument from the LOW-HALF NARROWING, which is the likelier wrong answer of the two:
+  //
+  //   `llsink(a*b)` and `llsink((s32)(a*b))` compile to the SAME 16 bytes here.
+  //
+  // Recompute: build both bodies over `C_TYPEDEFS` alone — no declaration of `llsink` — and run
+  // them through the command `pnpm bench target synthetic:llpass:agbcc --out <dir>` writes into
+  // `decomp.yaml`; `arm-none-eabi-objdump -d` each. They are byte-identical, and the narrowing
+  // costs its four instructions (`add r3,r1,#0` / `add r2,r0,#0` / `add r0,r2,#0` / `asr r1,r2,#0x1f`)
+  // ONLY when `void llsink(long long);` is in scope to promote the `int` back.
+  //
+  // `ctx` IS NOT IN SCOPE FOR THAT COMPILE, and an earlier revision of this comment claimed it
+  // was. On the REAL tier the candidate is compiled in the project context; on the SYNTHETIC tier
+  // `rankOptionsFor` falls back to `benchCompilerFor`, whose translation unit is `C_TYPEDEFS` plus
+  // declarations for the bare GLOBALS the candidate names — and `collectSymbolRefs` refuses every
+  // name that is a call's target, so a synthetic candidate's callees are all implicitly `int`.
+  // `ctx` reaches m2c and `bench target`, and nothing else. Any synthetic row whose two spellings
+  // differ only in something a callee's DECLARATION decides is scoring both of them alike.
+  //
+  // THE GATE FOR THE NARROWING IS A UNIT TEST, `int64-helpers.test.ts`: "a pair arriving in r0:r1
+  // leaves in r0:r1, as one argument" asserts the whole source exactly, so a low-half reading
+  // fails it, and "a mixed signature packs: the pair is r1:r2, not r2:r3" fails on the AAPCS
+  // answer. Keeping this row is a judgement that a decline-to-lift differential and the mwcc
+  // cell's refusal are worth their cost; it is not a claim that the agbcc cell is a width gate.
+  //
+  // AND THAT IS A PROPERTY OF ONE REFUSAL, NOT OF THE TIER. If `collectSymbolRefs` ever declares a
+  // call target it has a typed prototype for, this cell starts refereeing the narrowing and this
+  // paragraph is stale. Re-check it the way it was measured rather than assuming either answer:
+  // compile the two spellings through `bench target`'s own command and compare the objects.
   {
     sym: 'llpass',
     src: 'int llpass(long long a,long long b){ llsink(a*b); return 0; }',

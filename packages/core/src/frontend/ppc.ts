@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, protoArity } from '../proto';
+import { type Prototypes, declaredArgWidths } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -487,7 +487,9 @@ export function lift(
   // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
   // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`protoArity` is asked first).
+  // and names the gap rather than guessing. A prototype answers it (`declaredArgWidths` is asked
+  // first), and this scan is never weighed against one: it is a guess, and a guess that cannot
+  // fail cannot witness a width a declaration left open.
   const fallbackArgc = (bi: number, at: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
     let n = 0;
@@ -788,7 +790,41 @@ export function lift(
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
-          const declared = protoArity(prototypes[sym]);
+          // ONE QUESTION, ONE ANSWER, AND THE OTHER FRONTEND ASKS IT THE SAME WAY. A declaration
+          // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts`
+          // `declaredArgWidths` converts between them and `frontend/thumb.ts` reads the same
+          // answer out of the same function. A user-supplied fact that two frontends convert
+          // differently is a bug wherever it is read second.
+          //
+          // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `declaredArgWidths` abstains for the
+          // whole list and this falls to `fallbackArgc` — the guess a callee with no prototype gets,
+          // which reads each argument register through `readGuessedArg` so `finish()` can retract
+          // the ones a call destroyed. A declaration is not an excuse to ASSERT registers whose
+          // count came out of the same guess.
+          //
+          // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR, and this frontend has no pair.
+          // Every argument register it reads becomes its own value, so a declaration that spends
+          // two registers on one parameter is honoured by handing the callee one HALF — the high
+          // half here, since PowerPC is big-endian — and losing the other. That is a compiling,
+          // plausible, wrong program rather than a gap, so it refuses too.
+          //
+          // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
+          // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
+          const widths = declaredArgWidths(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          let declared: number | undefined;
+          if (widths !== undefined) {
+            const wideAt = widths.findIndex((w) => w > 32);
+            if (wideAt >= 0) {
+              throw new PpcUnsupportedError(
+                `cannot lift '${name}': one half of a 64-bit value would be handed to '${sym}' — its parameter ` +
+                  `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+                  'register as its own value rather than building the pair the ABI passes it in',
+              );
+            }
+            // Every width here is a single register — the refusal above is what makes that true —
+            // so the parameter count and the argument-register count are the same number.
+            declared = widths.length;
+          }
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
           // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by

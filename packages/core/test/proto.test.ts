@@ -1,27 +1,77 @@
-// Prototype arity: a callee `params` given as a bare COUNT or as the typed parameter list a
-// header extraction produces (`["u8"]`) must BOTH drive call-argument recovery. The typed-list
-// form silently dropped every argument before protoArity normalized it (argc was the array, so
-// `k < argc` was NaN → zero args) — a caller of such a callee lost its arguments.
+// The declared call shape: a callee `params` given as a bare COUNT or as the typed parameter list
+// a header extraction produces (`["u8"]`) must BOTH drive call-argument recovery, and they are two
+// different vocabularies — the count already speaks argument REGISTERS, the typed list speaks C
+// PARAMETERS and has to be converted. `declaredArgWidths` is that conversion, and it produces the
+// number every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaredWidth, protoArity, prototypesFromSymbols } from '../src/proto';
+import { declaredArgWidths, declaredWidth, prototypesFromSymbols, wordsOf } from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
-describe('protoArity', () => {
+/** the argument registers a declaration occupies, or `undefined` for "this states no layout" — the
+ *  two answers a frontend acts on differently, collapsed into one expression so a test can name
+ *  which one it means. */
+const argRegs = (p: Parameters<typeof declaredArgWidths>[0]): number | undefined => {
+  const widths = declaredArgWidths(p);
+  return widths === undefined ? undefined : wordsOf(widths);
+};
+
+describe('declaredArgWidths', () => {
   test('normalizes the count form, the typed-list form, and absence', () => {
-    expect(protoArity({ params: 2 })).toBe(2);
-    expect(protoArity({ params: ['u8'] })).toBe(1);
-    expect(protoArity({ params: ['u8', 's32', 'void *'] })).toBe(3);
-    // both zero-arity forms must survive the `??` chain as 0 (a void callee gets NO args, never
-    // the arg-register fallback), so they are distinct from omitted.
-    expect(protoArity({ params: 0 })).toBe(0);
-    expect(protoArity({ params: [] })).toBe(0);
-    expect(protoArity({ returnsVoid: true })).toBeUndefined(); // no params → frontend heuristic
-    expect(protoArity(undefined)).toBeUndefined();
+    expect(argRegs({ params: 2 })).toBe(2);
+    expect(argRegs({ params: ['u8'] })).toBe(1);
+    expect(argRegs({ params: ['u8', 's32', 'void *'] })).toBe(3);
+    // both zero-arity forms must survive as 0 (a void callee gets NO args, never the arg-register
+    // fallback), so they are distinct from omitted.
+    expect(argRegs({ params: 0 })).toBe(0);
+    expect(argRegs({ params: [] })).toBe(0);
+    expect(argRegs({ returnsVoid: true })).toBeUndefined(); // no params → frontend heuristic
+    expect(argRegs(undefined)).toBeUndefined();
     // malformed (a bare string, not a list) → undefined (fall back), NOT "u8".length === 3.
-    expect(protoArity({ params: 'u8' as unknown as string[] })).toBeUndefined();
+    expect(argRegs({ params: 'u8' as unknown as string[] })).toBeUndefined();
+  });
+
+  // THE ONE WITNESS THAT SEPARATES TWO PLAUSIBLE ABIs. A 64-bit parameter occupies two argument
+  // registers, and where the second one starts is a per-compiler fact, not a derivation: agbcc's
+  // `thumb.h` computes the register from a plain byte counter with NO rounding, so
+  // `void f(s32, long long)` passes the pair in r1:r2 and the call occupies THREE registers.
+  // AAPCS pads to an even register and would answer FOUR. Both are ABIs a reader could assume;
+  // only one is the one asmlift lifts.
+  test('a 64-bit parameter is TWO argument registers, packed — three, not four', () => {
+    expect(argRegs({ params: ['s32', 'long long'] })).toBe(3);
+    expect(argRegs({ params: ['long long'] })).toBe(2);
+    expect(argRegs({ params: ['long long', 'unsigned long long'] })).toBe(4);
+    expect(declaredArgWidths({ params: ['s32', 'long long'] })).toEqual([32, 64]);
+  });
+
+  // ONE SPELLING NOTHING CAN SIZE AND THE WHOLE LIST STATES NO LAYOUT. A parameter of unknown
+  // width occupies one argument register or two, and the choice moves every later argument's home
+  // — so there is no partial answer to hand a caller that is laying out registers. Abstaining puts
+  // the callee back where an undeclared one already is, at the frontend's own guess, which is the
+  // one behaviour that can never be worse than saying nothing.
+  //
+  // THE ALTERNATIVE WAS MEASURED AND IT WAS WRONG IN BOTH DIRECTIONS. Spending the freedom against
+  // the machine's contiguous scan accepted a narrow reading for a real pair (agbcc passes a
+  // pass-through high half in r1 with no definition in the function, and the scan answers 1), and
+  // refused a correct narrow declaration whenever an earlier call had left a dead value in the
+  // next argument register. Neither error is visible from here, which is why the witness is gone
+  // rather than repaired.
+  test('a spelling it cannot size makes the whole list state nothing', () => {
+    expect(declaredArgWidths({ params: ['s32', 'Direction'] })).toBeUndefined();
+    expect(declaredArgWidths({ params: ['TaskFunc'] })).toBeUndefined();
+    expect(declaredArgWidths({ params: ['void *', 'struct Foo'] })).toBeUndefined();
+    // …and the COUNT form can never abstain: it already speaks argument registers, so it is the
+    // way past a header asmlift cannot size.
+    expect(declaredArgWidths({ params: 3 })).toEqual([32, 32, 32]);
+  });
+
+  // A READABLE LIST IS AUTHORITY AND NOTHING ELSE IS CONSULTED FOR IT: this takes no witness, no
+  // target and no SSA, so there is nothing an inference could override it with.
+  test('a readable list is a pure reading of the declaration', () => {
+    expect(declaredArgWidths({ params: ['s32', 'long long'] })).toEqual([32, 64]);
+    expect(declaredArgWidths({ params: ['void *', 'const void *', 'size_t'] })).toEqual([32, 32, 32]);
   });
 });
 
@@ -37,17 +87,51 @@ describe('declaredWidth', () => {
     expect(declaredWidth('  short   int ')).toBe(16);
   });
 
+  test('the 64-bit spellings answer 64, which is a fact and not an absence', () => {
+    // A width WIDER than a register is the fact that says how many argument registers a parameter
+    // occupies. Read as `undefined` it is indistinguishable from a project typedef, and the only
+    // thing a caller can do with that is refuse.
+    expect(['long long', 'long long int', 'unsigned long long', 'signed long long'].map(declaredWidth)).toEqual([
+      64, 64, 64, 64,
+    ]);
+    expect(['s64', 'u64', 'const long long', 'unsigned long long int'].map(declaredWidth)).toEqual([64, 64, 64, 64]);
+  });
+
   test('a spelling it cannot read is NO OPINION, never a width', () => {
     // The narrowing consumer treats undefined as "the header said nothing", so guessing here would
     // veto a sound inference on a project typedef.
-    expect(['Direction', 'struct Entity', 'float', 'double', 'u64', 's24', ''].map(declaredWidth)).toEqual([
+    expect(['Direction', 'struct Entity', 's24', ''].map(declaredWidth)).toEqual([
       undefined,
       undefined,
       undefined,
       undefined,
+    ]);
+  });
+
+  // THE FLOATING TYPES ARE NOT WIDTHS HERE, and the reason is the reader rather than the type. How
+  // many argument registers one occupies is a TARGET fact: `target.ts` sets `hwFloat` on three of
+  // its four descriptions, and on a PowerPC EABI with an FPU a `double` argument travels in f1..f8
+  // and occupies no general argument register at all. "One register" and "a pair" are both wrong
+  // there, and `declaredArgWidths` has only those two readings to give.
+  test('the floating types are absences, `long double` among them', () => {
+    expect(['float', 'const float', 'double', 'long double'].map(declaredWidth)).toEqual([
       undefined,
       undefined,
       undefined,
+      undefined,
+    ]);
+    // …and the absence spreads to the layout, so nothing downstream reads a GPR count off one.
+    expect(declaredArgWidths({ params: ['int', 'double'] })).toBeUndefined();
+  });
+
+  // FIXED BY THE STANDARD, NOT BY A PROJECT — the same reason `STANDARD_SIGNATURES` exists. These
+  // are the spellings a header extraction produces most, and reading them as project typedefs put
+  // `size_t` and `int64_t` into the population that cannot be sized at all.
+  test('the fixed-width and pointer-sized standard names', () => {
+    expect(['int8_t', 'uint8_t', 'int16_t', 'uint16_t'].map(declaredWidth)).toEqual([8, 8, 16, 16]);
+    expect(['int32_t', 'uint32_t', 'int64_t', 'uint64_t'].map(declaredWidth)).toEqual([32, 32, 64, 64]);
+    expect(['size_t', 'ssize_t', 'ptrdiff_t', 'intptr_t', 'uintptr_t'].map(declaredWidth)).toEqual([
+      32, 32, 32, 32, 32,
     ]);
   });
 });

@@ -138,8 +138,42 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('control: no gap, so the contiguous count stands', () => {
     expect(dis('nogap', '0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n')).toContain('func(1, 3)');
   });
+  // A DECLARATION THIS FRONTEND CANNOT HONOUR IS A REFUSAL, NOT AN ARITY. `void llsink(long long)`
+  // spends two argument registers on one parameter, and this frontend turns every argument
+  // register it reads into its own value — so obeying the declaration hands `llsink` r3 alone,
+  // which on big-endian PowerPC is the HIGH half, and drops the low one. That is a compiling,
+  // plausible, wrong program with no gap in it, which is the one output this frontend may not
+  // produce. Measured before it was fixed: the call below lifted to `return llsink(1);`.
+  test('a parameter declared wider than a register refuses, rather than passing one half of it', () => {
+    const asm =
+      '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tllsink\nc:\tblr\n';
+    expect(() => decompile('c', asm, PPC_MWCC, { prototypes: { llsink: { params: ['long long'] } } })).toThrow(
+      /one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register/,
+    );
+  });
+
+  // The other side of the same rule, and BOTH FRONTENDS CONVERT IT WITH THE SAME FUNCTION
+  // (`proto.ts` `declaredArgWidths`). A spelling `declaredWidth` cannot read is a parameter that
+  // occupies one argument register or two, and nothing a declaration holds says which — so the
+  // list states no layout, and this call is lifted at the arg-register guess, exactly as a callee
+  // the project never declared is. DECLARING MORE MAY NOT DO LESS.
+  //
+  // THE MACHINE IS NOT A WITNESS FOR THE MISSING WIDTH, which is what the equality below pins.
+  // Weighing the declaration against the contiguous scan refused this very shape — `void
+  // g(Direction)` against two registers held — while the same frontend lifted it when told
+  // nothing, and it accepted the narrow reading wherever the scan happened to miscount a pair.
+  test('a spelling the width reader cannot size leaves the guess standing', () => {
+    const asm = '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tg\nc:\tblr\n';
+    const guessed = decompile('c', asm, PPC_MWCC).source;
+    expect(guessed).toContain('g(1, 3)');
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } }).source).toBe(guessed);
+    // …and the assertion is not vacuous, because a declaration that DOES state a layout moves the
+    // answer: a COUNT speaks argument registers directly and is taken at its word.
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(1)');
+  });
+
   test('and a prototype answers the question the gap cannot', () => {
-    // `protoArity` is consulted before the guess, so a declared callee is unaffected by the gap.
+    // `declaredArgWidths` is consulted before the guess, so a declared callee is unaffected by the gap.
     const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
     expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source).toContain(
       'g(a0, a1, 3)',

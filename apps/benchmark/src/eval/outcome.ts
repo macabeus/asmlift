@@ -33,6 +33,11 @@ const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   { name: 'M2C_ERROR', re: /M2C_ERROR/ }, // m2c undecodable instruction / unhandled construct
   { name: 'M2C_UNK', re: /M2C_UNK/ }, // m2c unknown value
   { name: 'M2C_CARRY', re: /M2C_CARRY/ }, // m2c carry flag it cannot model in C
+  // m2c's second-return-register pseudo-call — a 64-bit value comes back in a register PAIR and C
+  // has no spelling for the half that is not the return value, so m2c writes `SECOND_REG(x)`. The
+  // same cannot-express signal as M2C_CARRY, and it compiles the same way if it is not listed:
+  // nothing defines the macro, so it is a K&R implicit declaration rather than an error.
+  { name: 'SECOND_REG', re: /SECOND_REG/ },
   // m2c's `(bitwise T)` pseudo-cast — deliberately-invalid syntax for a reinterpret it cannot
   // express in C (soft-float helper returns); the same cannot-express signal as M2C_CARRY
   { name: 'M2C bitwise cast', re: /\(bitwise / },
@@ -48,6 +53,19 @@ const DECLINE_MARKERS: { name: string; re: RegExp }[] = [
   { name: '? placeholder', re: /\(\? *\*/ },
   { name: '? placeholder', re: /[({,] *\? [A-Za-z_*]/ },
 ];
+
+/** The marker table as one string — the VOCABULARY, not a result. It is a key input to every
+ *  cached m2c result: the classifier runs inside that cached computation (`cache.ts`), so a marker
+ *  added here changes the OUTCOME of entries already on disk, and an entry written before the
+ *  addition replays the old label forever. Adding `SECOND_REG` without this moved four rows and
+ *  left a fifth — `synthetic:llpass:agbcc` — published as `nonmatch` with a score, over source the
+ *  same commit's rule declines.
+ *
+ *  KEYED RATHER THAN HAND-BUMPED, because `cache.ts`'s `v` is a register a human has to remember
+ *  and this one input can remember itself. It is the regex SOURCE and not only the names: widening
+ *  a pattern reclassifies rows exactly as adding one does. The rest of the classifier — the
+ *  decline-before-compile precedence, `isHardFailure` — is still `v`'s to carry. */
+export const DECLINE_VOCABULARY: string = DECLINE_MARKERS.map(({ name, re }) => `${name}=${re.source}`).join('\n');
 
 /** Names of the decline markers present in `source` (deduped), or [] when marker-free. */
 export function declineMarkersIn(source: string): string[] {

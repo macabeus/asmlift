@@ -208,6 +208,23 @@ describe('all three "unmodelled …" message spellings are classified', () => {
   });
 });
 
+// A `concat` WITH NO LOWERING IS A 64-BIT GAP, and it arrives spelled as an unmodelled OP — the
+// same words `mulh` arrives in. Read as `opaque-ops` it attributes a pair this pipeline could not
+// carry to a decoder that decoded everything. The `mulh` half is the both-sided arm: it is a
+// multiply whose high word nothing folded, it inhabits 12 rows of the committed artifact, and
+// claiming it here would be a claim about those rows. `d.opcode` is interpolated at the throw, so
+// no phrase gate can pin either — this pair is the gate.
+describe('an unlowerable op is attributed by WHICH op it is', () => {
+  const unresolvable = (op: string) => `structure: 1 unresolvable value(s) in 'f' — no lowering for op '${op}'`;
+  test.each([
+    ['concat', 'wide-call-arg'],
+    ['mulh', 'opaque-ops'],
+    ['mulhu', 'opaque-ops'],
+  ])('%s -> %s', (op, want) => {
+    expect(classOf(unresolvable(op))).toBe(want);
+  });
+});
+
 describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows
@@ -712,6 +729,25 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(classOf(marker)).toBe(want);
   });
 
+  // THE 64-BIT SENTENCES, AND THEY ARE CHECKED FOR EXACTLY ONE MATCH RATHER THAN FOR THE FIRST.
+  // `DECLINE_CLASSES` is ordered and `classOf` takes the first pattern that matches, so a sentence
+  // two classes both claim is classified by an array index — and `reloc-halves`, whose subject is
+  // a `%hi`/`@ha` relocation, holds `/high half/`. The split-pair refusal said "high half" and
+  // landed in `reloc-halves` on any ordering that put it first, publishing a 64-bit argument gap
+  // as a relocation gap. `thumb.ts` says "upper half" for that reason, and this is what holds it.
+  //
+  // THE STRINGS ARE PUBLISHED MARKERS, not the full reason: `apps/benchmark/src/eval/asmlift.ts`
+  // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
+  // carry. All three reach their class inside the first 80.
+  test.each([
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
+    "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
+    "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
+  ])('%s is wide-call-arg, and no other class claims it', (marker) => {
+    expect(DECLINE_CLASSES.filter((c) => c.pattern.test(marker)).map((c) => c.key)).toEqual(['wide-call-arg']);
+  });
+
   test('branch-likely says in its LABEL that it is leftover, because 0 rows reads as "cannot"', () => {
     // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
     // markers it saw, so `GapAnalysis.tsx`, the panel that calls itself the roadmap view, does not
@@ -871,14 +907,14 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 69 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
-    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/thumb.ts'],
+    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
@@ -906,6 +942,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -971,7 +1008,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 118 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about 124 distinct messages across 11 files, which
   // nothing but this can hold to them.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {

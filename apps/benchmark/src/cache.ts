@@ -38,6 +38,7 @@ import { join } from 'node:path';
 import { CACHE_DIR, M2C_DIR } from './config';
 import { functionScopedDump } from './eval/function-scope';
 import { functionStart } from './eval/m2c-normalizer';
+import { DECLINE_VOCABULARY } from './eval/outcome';
 import { type BuiltTarget, type Toolchain, type ToolchainId, checkedTarget } from './toolchains';
 
 const enabled = () => process.env.ASMLIFT_BENCH_CACHE !== '0';
@@ -238,6 +239,14 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // quality heuristic all run INSIDE this cached computation but are not part of the key — any
   // change to them MUST bump `v`, or fixed rows keep serving stale results. `lang` enters the
   // key only for c++ so every existing C entry keeps its identity.
+  //
+  // ONE OF THOSE FOUR NOW REMEMBERS ITSELF. The classifier's marker table is a DATA input and
+  // `markers` carries it (eval/outcome.ts `DECLINE_VOCABULARY`), so a marker added or widened
+  // misses naturally the way every other data change does. `v` is a register a human has to
+  // remember, and the one time it mattered a human did not: `SECOND_REG` was added to the table
+  // with no bump, four rows re-ran for unrelated reasons and a fifth replayed a v20 entry —
+  // `synthetic:llpass:agbcc` shipped as `nonmatch` with a score, over source the same commit's
+  // rule declines. The remaining three still belong to `v`.
   // v13: assessQuality exempts project-idiom address casts from the casts count.
   // v14: the objdump→GNU-as normalizer carries MIPS REL addends into %hi/%lo (m2c-normalizer.ts)
   //      — the KEY holds the raw disassembly, so a normalizer change is invisible to it.
@@ -310,6 +319,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
     JSON.stringify({
       v: 20,
       kind: 'm2c',
+      markers: DECLINE_VOCABULARY,
       commit,
       objdiff: objdiffVersion(),
       tc: tcId,

@@ -150,31 +150,48 @@ describe('an argument slot is owned storage that this function does not DECLARE'
 });
 
 describe('the declaration must say how many WORDS, and a parameter list is parameters', () => {
-  // The block is words; the arity is parameters; the lowering maps parameter k to word
-  // k - |argRegs|. All three are the same counting only while every parameter occupies one word,
-  // and a `double`, a `long long` or a by-value struct breaks it. asmlift cannot SPELL such a
-  // parameter — `prototypesFromSymbols` drops a whole entry rather than try — so a spelling whose
-  // width cannot be read is the only evidence the premise is at risk, and it sizes no block.
+  // The block is words, `declaredArgWidths` is words, and the lowering maps word k to slot
+  // k - |argRegs|. A C PARAMETER COUNT is a fourth number and is the same as the other three only
+  // while every parameter occupies one word — a `long long` or a by-value struct breaks it. A
+  // `long long` is READ as two words; a by-value struct, a project typedef and a floating type
+  // asmlift cannot size at all — `prototypesFromSymbols` drops a whole entry rather than try —
+  // and a list holding one states no layout, so the block is laid out from the machine instead.
   const TWO = HEAD + '\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tfd\n' + TAIL('0x8');
 
-  test('an unreadable parameter width refuses even where the WORDS agree', () => {
-    // The dangerous case, because the two witnesses agree by coincidence: six declared parameters
-    // size a two-word block and the code stages two words, so the equality holds — and consuming
-    // it hands `fd` six arguments where the fifth `double` spans both staged words. Read for its
-    // LENGTH alone this lifts to `fd(a0, a1, a0, a1, a2, a3)`.
-    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double', 's32'] } })).toThrow(
-      /parameter type `double` is one asmlift cannot size/,
-    );
+  test('a declared pair the block would split refuses, naming the parameter', () => {
+    // The dangerous case, because the two witnesses agree by coincidence: read for its LENGTH
+    // alone, six declared parameters size a two-word block and the code stages two words, so the
+    // equality holds — and consuming it hands `fd` six arguments where the fifth `long long` spans
+    // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). The fifth parameter's halves are both in
+    // the block and the refusal names it.
+    for (const params of [
+      ['s32', 's32', 's32', 's32', 'long long', 's32'],
+      // Same assembly, the declaration `void fd(s32, s32, s32, s32, long long)` that really
+      // produced it. The word counts disagree here, so the may-set check would refuse anyway — but
+      // on `[sp,#4] also reaches the call unread`, which sends a reader hunting for a store when
+      // the fact to know is the parameter.
+      ['s32', 's32', 's32', 's32', 'long long'],
+    ]) {
+      expect(() => src(TWO, { fd: { params } })).toThrow(
+        /handed to `fd` outside the argument registers — its parameter 5 is 64 bits wide .* both halves are in this frame's outgoing stack block/,
+      );
+    }
   });
 
-  test('…and the truthful five-parameter form refuses naming the parameter, not a staged word', () => {
-    // Same assembly, the declaration `void fd(s32, s32, s32, s32, double)` that really produced it.
-    // The word counts disagree here, so the may-set check would refuse anyway — but on `[sp,#4]
-    // also reaches the call unread`, which sends a reader hunting for a store when the fact to
-    // know is the parameter.
-    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
-      /parameter type `double` is one asmlift cannot size/,
+  // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so it licenses no block and the verdict is
+  // whatever this shape gets with nothing declared. DECLARING MORE MAY NOT DO LESS, and the
+  // refusing direction is where that is easiest to get wrong: an earlier cut refused eagerly here
+  // with a sentence naming the parameter, which read well and was a function that declined a shape
+  // it lifts when told nothing — and it was off by one at the only arity where its own reason
+  // applied, so the sp-as-data message it existed to pre-empt surfaced anyway.
+  test('an unsizable spelling past the argument registers leaves the undeclared verdict standing', () => {
+    const undeclared = () => src(TWO, {});
+    expect(undeclared).toThrow(/stack pointer used as data/);
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'TaskFunc', 's32'] } })).toThrow(
+      /stack pointer used as data/,
     );
+    // …and a COUNT, which states argument registers directly, is what gets past it.
+    expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');
   });
 
   test('every spelling asmlift can width is one word, and those are consumed', () => {

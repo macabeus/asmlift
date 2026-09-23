@@ -25,11 +25,12 @@
 // `params` is a list of C parameter WIDTHS in bits, not a word count, and the difference is the
 // whole point of the field: `__ashrdi3` takes a 64-bit value and a 32-bit count — two C parameters
 // occupying THREE argument registers. A stated width is read two ways and both conversions live
-// here: `wordsOf` counts the argument REGISTERS the list occupies, and `irWidthOf` gives the IR
-// width one parameter ARRIVES at once a frontend has paired those registers up.
+// here: `wordsOf` (proto.ts, because a C declaration asks the same question) counts the argument
+// REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
+// frontend has paired those registers up.
 import { type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
-import type { Prototypes } from './proto';
+import { type Prototypes, wordsOf } from './proto';
 
 export interface RuntimeHelper {
   /** the op this helper computes, where asmlift has one. Absent for a helper it can only SIGN. */
@@ -38,12 +39,6 @@ export interface RuntimeHelper {
   params: readonly number[];
   /** the returned width: 0 (void), 32, or 64 (a register PAIR). */
   returns: 0 | 32 | 64;
-}
-
-/** How many argument REGISTERS a parameter list occupies. `protoArity` counts words and a C
- *  parameter list does not, so the two vocabularies meet here and nowhere else. */
-export function wordsOf(params: readonly number[]): number {
-  return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
 }
 
 /** The entry a target's table holds for `callee`, or undefined. THE ONE READER, because the table

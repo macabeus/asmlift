@@ -84,8 +84,8 @@ const CALLS_G =
 describe('a CALLEE signature is read for its LENGTH only — the transferable half is the arity', () => {
   test('every pointee spelling for g produces the same candidates as no proto for g at all', () => {
     // This is the population the round would have served: `asIfUndecompiled` correctly redacts the
-    // row's OWN signature, so a callee's is the only one a real user has. `protoArity` reads the
-    // list's length; nothing reads its entries.
+    // row's OWN signature, so a callee's is the only one a real user has. `declaredArgWidths` reads
+    // each entry for the WIDTH it spells and nothing else about it.
     const none = sources(CALLS_G, {});
     for (const spelling of POINTEE_SPELLINGS) {
       const params: number | ParamType[] = spelling === null ? 2 : [spelling, 's32'];
