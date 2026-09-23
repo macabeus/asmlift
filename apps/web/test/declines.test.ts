@@ -821,9 +821,22 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
+  // `clobbered-value` joins on the `pool-word-shape` reading: its one inhabitant,
+  // `synthetic:llfrom:agbcc`, was a callee returning a 64-bit value in a register PAIR — the one
+  // thing an `r1` read after a `bl` can legitimately be — and a prototype now states that return
+  // width, so the row matches. The refusal itself is untouched and still covers every other
+  // caller-saved register; what left is a population, not a capability.
+  //
+  // THE ASSERTION BELOW COMPARES THE SORTED SET, so a membership SWAP that kept the length would
+  // fail here — but the count in the test's NAME is derived from the length alone and would not.
+  // Read both when this list moves. TWO BRANCHES EMPTIED A DIFFERENT CLASS ON THE SAME NIGHT and
+  // this list is their union: `unread-data-directive` is #247's and `clobbered-value` is #250's,
+  // and a merge that took either side alone would have silently dropped the other's entry while
+  // the derived count in the name moved by one and looked right.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
+    'clobbered-value',
     'cross-block-flags-arm',
     'pool-word-shape',
     'store-class',

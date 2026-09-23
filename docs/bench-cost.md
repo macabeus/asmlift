@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=134.9s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=102.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,38 +137,54 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,118 s over 190 real rows** and **595 s over 750 synthetic rows**; wall clock was 215.6 s and
-220.8 s, and **310.9 s end to end** because the tiers overlap — 215.6 + 220.8 is 436.4, which is
-not the wall time and never was. The dearest single row is **164 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to reach
-for when a scoped run looks cheap.
+**1,014 s over 186 real rows** and **619 s over 744 synthetic rows**; wall clock was 368.4 s and
+335.6 s on tiers that overlap, and 491.3 s end to end (`Done in 491.3s`, the run's own last line).
+The dearest single row is **144 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
+its own — which is the figure to reach for when a scoped run looks cheap.
 
-BOTH SUMS WENT **UP** AGAINST THE ENTRY BELOW AND THE BRANCH ADDS ONE ROW'S WORTH OF CANDIDATES.
-`bench diff --base origin/main`, 2026-09-23, prices it **1,439.5 s → 1,712.9 s (1.19×) over 939 rows** and the
-fan beside it is **1.00×, zero records moved** — the one row this branch creates enumerates 8
-candidates and ranks in 0.6 s. Five rounds share this machine and a neighbour's whole-tier run was
-in the register while this one ran. **A cost ratio whose fan says 1.00× is a statement about the
-box**, and this file's own entries point both ways on that within one day, which is the argument
-the entry below makes at length.
+THE ROW IN THAT SENTENCE IS DERIVED, NOT NAMED, and the gate that derives it was built TWICE —
+once here and once on #247, independently, from the same board-032 finding, in the same night. The
+landed one is #247's and this branch's copy is dropped: two gates over one sentence is one gate and
+one unreachable branch. The defect both were built for: `command-files.test.ts` used to recompute
+the seconds and the percentage while reading the row's NAME off the doc, so a sentence calling a
+row the dearest stayed green while three rows cost more — at `87b49c74` it said
+`kleod:PauseMenuScreenHandler` where the dearest was `kleod:WorldMapScreenCheckNewWorldUnlocked` at
+255.7 s. Requiring the id merely to APPEAR is not enough either, because the right row is named
+elsewhere in this section; the three figures are checked as ONE contiguous phrase.
 
-The whole-corpus fan is **67,751 → 67,759**, summed over every priced row — `bench diff` reports
-`1.00× over 939 comparable row(s) — 1 more counted here`, which is true of the rows both artifacts
-price and is not the corpus total. `report/diff.ts` routes a row whose base `fanSize` is
-`undefined` into `appeared`, excluded from both sides, so a branch that turns a decline into
-candidates always owes the second number by hand:
+THE ROWS MOVED BY ONE AND THE SECONDS BY A QUARTER, AND ONLY THE FIRST IS ABOUT THE BRANCH. This
+run was owed for the 64-bit-return capability: `bench regression --base de938349` reports **1
+gained** (`synthetic:llfrom:agbcc` declined → match) and 0 lost, 0 missing, 0 retired, 0 added, 0
+other flips over 1,258 rows, and `bench diff` **8 field changes on that one row, 0 added, 0
+removed**, with the fan **unmoved at 67,417 (1.00×)** over 929 comparable rows and **0 rows moved**.
+That is the whole of what changed.
 
-```sh
-python3 -c "import json,sys; a=json.load(open(sys.argv[1]));
-print(sum(r['asmlift'].get('fanSize') or 0 for r in a['results']))" apps/benchmark/results/results.json
-```
+The same `bench diff`, run 2026-09-23, prints `ranked pass 1,315.7 s → 1,633.5 s (1.24×)`, which is
+not a cost this branch imposed: the base figure was taken on a box running one bench and this one on a box that had
+been running five rounds all day, and the fan above — the count of candidates actually enumerated —
+is identical to the digit. THE RANKED-PASS COST IS MACHINE LOAD AND A CACHE STATE, NEVER A PROPERTY
+OF THE BRANCH. Quote a cost only beside the run that produced it and the date, and never as a
+before/after for a change.
 
-The artifact before this one, `origin/main` at `0e7b4f7b`, read **935 s over 189 real rows** and
-**505 s over 750 synthetic rows**; wall clock was 220.7 s and 254.1 s, and **348.9 s end to end**.
-Its dearest single row was **147 s** on `kleod:PauseMenuScreenHandler:agbcc`, **16% of the tier**.
-The three paragraphs that follow are that entry's own reading and its own comparisons, not this
-one's.
+THE READING FROM THE RUN BEFORE THIS ONE, taken 2026-09-23 at `3888734f`: **819 s over 186 real
+rows** and **497 s over 743 synthetic rows**, wall clock 179.2 s and 207.1 s. It was owed for a
+**comment-only** edit to `apps/benchmark/dataset/synthetic.ts`, a SCORING_PATH, and reported what a
+comment-only diff has to — **0 field changes, 0 added, 0 removed**, **0 flips of any kind**, fan
+**unmoved at 67,417 (1.00×)**. The seconds moved a third against the run before IT, with nothing
+between the two but a comment, which is the whole argument for reading the fan and not the clock.
 
-THE SAME TREE, BENCHED TWICE, HALVED ONE TIER. That entry replaced a reading of the same branch
+AND THE READING BEFORE THAT, kept because it is the same lesson from the other side.
+Taken 2026-09-23 at `bfae690e`, it read **1,044 s over 186 real rows** and **552 s over 743
+synthetic rows**, wall clock 216.9 s and 234.3 s, 317.1 s end to end. It re-measured a wave of
+soundness and prose fixes across `packages/core/src` and reported the same empty diff — **0 field
+changes, 0 added, 0 removed**, **0 flips of any kind**, fan **unmoved at 67,417 (1.00×)**. It too
+was taken because a commit to a SCORING_PATH invalidates the artifact by provenance, not because a
+number was expected to move: the change's corpus reach is zero by construction, since every typed
+`params` in the dataset spells a type `declaredWidth` reads. **A run whose only job is to make the
+stamp true is still a run you have to take** — and this branch has now taken that run three times,
+which is the real price of touching a measured path late.
+
+THE SAME TREE, BENCHED TWICE, HALVED ONE TIER. This entry replaces a reading of the same branch
 taken earlier the same day — that artifact 2026-09-23 09:06Z, this one 2026-09-23 10:43Z: real **908 s → 842 s**
 (0.93×) and synthetic **1,054 s → 524 s**
 (0.50×). Between the two artifacts `bench diff --base 6bb69524` reports **0 field changes, 0 added,
