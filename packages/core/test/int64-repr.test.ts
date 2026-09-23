@@ -109,6 +109,32 @@ describe('the three opcodes have a shape, and it is checked', () => {
     );
   });
 
+  // THE WHOLE SAFETY STORY FOR THE REPRESENTATION, which `structure/structure.ts` names as such
+  // and nothing asserted. The structurer spells exactly one `concat`: the pair the machine builds
+  // to WIDEN a word, `asr rN,rM,#31` or `mov rN,#0` in its high half. A `concat` of anything else
+  // is a 64-bit value with no C spelling, and what it gets is the loud gap at the bottom — which
+  // is why a pair that tried to cross a join, or that came from two unrelated words, cannot
+  // quietly become a plausible expression.
+  test('a concat that is not a widen has no C spelling, and gaps', () => {
+    const fn = parse('fn f {\n^bb0(%0: s32, %1: s32):\n  %2: s64 = concat %0, %1\n  ret %2\n}\n');
+    verify(fn);
+    recoverTypes(fn);
+    expect(() => cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toThrow(
+      /no lowering for op 'concat'/,
+    );
+  });
+
+  // …and the widen itself, the one shape it DOES spell, so what the case above pins is the
+  // absence of a spelling rather than the structurer failing on every `concat`.
+  test('…while the widen the machine builds does have one', () => {
+    const fn = parse(
+      'fn f {\n^bb0(%0: s32):\n  %1: s32 = shr_s %0 {imm = 31}\n  %2: s64 = concat %0, %1\n  ret %2\n}\n',
+    );
+    verify(fn);
+    recoverTypes(fn);
+    expect(cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)))).toContain('(s64)a0');
+  });
+
   // At L1 every value is `unknown`, so a rule that skipped that kind would be vacuous exactly where
   // the frontend builds these.
   test('the shape rules quantify over `unknown`, not only over recovered integers', () => {
