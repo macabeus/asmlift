@@ -226,7 +226,7 @@ test('an `@ha` whose `@l` never arrives refuses — the `lis` is not silently dr
 test('the `@l` consumers this frontend does not model still refuse — none of them completes quietly', () => {
   // Only `addi` is modelled, because only `addi` has an inhabitant. The other two shapes that can
   // carry `R_PPC_ADDR16_LO` each refuse at their OWN guard, reached before the dangling-`@ha` one:
-  // a float load has no register destination to degrade, and an `ori` over a PENDING half is
+  // a float load names the floating-point register file, and an `ori` over a PENDING half is
   // refused by the read itself, which names the half and the `lis` that made it. A lone `@l` on an
   // `ori`, with no pending half to read, reaches the choke point instead. What matters is that no
   // route silently completes the address.
@@ -234,7 +234,7 @@ test('the `@l` consumers this frontend does not model still refuse — none of t
     '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgFloat\n' +
     '   4:\tlfs     f1,0(r4)\n\t\t\t6: R_PPC_ADDR16_LO\tgFloat\n' +
     '   8:\tblr\n';
-  expect(() => dis('flt', flt)).toThrow(/unmodelled effect instruction 'lfs'/);
+  expect(() => dis('flt', flt)).toThrow(/unmodelled floating-point instruction 'lfs'/);
   const ori =
     '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgVal\n' +
     '   4:\tori     r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgVal\n' +
@@ -280,7 +280,7 @@ test('…and an UNMODELLED one still refuses earlier, for its own better reason'
   // The float gap is the next guard after this capability, and `lfs`/`lfd` name it. Asking the
   // relocation question first would have re-labelled 105 float sites as relocation gaps.
   const sda = '   0:\tlfs     f1,0(0)\n\t\t\t2: R_PPC_EMB_SDA21\tgF\n   4:\tblr\n';
-  expect(() => dis('flt', sda)).toThrow(/unmodelled effect instruction 'lfs'/);
+  expect(() => dis('flt', sda)).toThrow(/unmodelled floating-point instruction 'lfs'/);
 });
 
 // The residual the fold's proof leaves behind, pinned so the refusal keeps naming it. `readVar`

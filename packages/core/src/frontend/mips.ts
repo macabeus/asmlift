@@ -1118,6 +1118,12 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isMipsReg,
         isZero,
+        // The coprocessor-1 register file. `isMipsReg` rejects `$f12` — the `$`-prefixed forms it
+        // takes are the numeric GPRs (`$4`) — so without this arm an `add.s` is refused for the
+        // lesser reason, "no register destination", while `mfc1 v0,$f12` has a destination it
+        // ACCEPTS and would build an opaque whose source list quietly omits the register the
+        // instruction actually read. The file is what is missing; say so.
+        fpReg: /^\$f\d+$/i,
         storeClass: /^(sb|sh|sw|swl|swr|sc|sd|sdl|sdr|swc1|sdc1)$/i,
         skipSafe: /^(nop|ssnop|break)$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,

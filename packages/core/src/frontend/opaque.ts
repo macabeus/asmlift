@@ -50,6 +50,22 @@ export interface OpaquePolicy {
    *  destination — so there is nothing to degrade and the instruction is REFUSED, not skipped
    *  (`teq zero, zero` is a trap). Default: nothing is zero. */
   isZero?: (r: string) => boolean;
+  /** Registers this ISA HAS and asmlift models no file for — today the FPU's alone (MIPS `$f0`,
+   *  PowerPC `f1`). An unmodelled instruction touching one is refused with a message naming that
+   *  file, because the missing capability is the FILE, not the instruction: there is no value kind
+   *  to hold what it computes, no ABI home to receive it, and no C spelling to print it.
+   *
+   *  Tested against EVERY operand, not just `ops[0]`, and the two shapes that force it are on
+   *  opposite sides: `fcmpo cr0,f1,f2` has a destination `isReg` REJECTS (a condition register) and
+   *  `mfc1 v0,$f12` one it ACCEPTS. A destination-only test files the first under "no register
+   *  destination to degrade" and lets the second fabricate an opaque whose sources silently drop
+   *  the FP operand it actually read. Both are floating point and neither is about the destination.
+   *
+   *  It is consulted FIRST, ahead of `storeClass`, so `swc1`/`stfs` are named by the file they move
+   *  rather than by the fact that they move it to memory. That ordering is what the web report's
+   *  decline table already assumes, and it could only assume it by re-deriving "is this floating
+   *  point?" from a list of mnemonics this module never told it. Default: none. */
+  fpReg?: RegExp;
   /** Mnemonics that WRITE MEMORY in this ISA: the "no register destination ⇒ safe to fall
    *  through" premise is FALSE for stores — skipping one silently deletes the write (Thumb
    *  `stmia r0!, {…}`), and a store whose FIRST token is a register (MIPS `swl rt, off(base)`)
@@ -80,10 +96,13 @@ export interface OpaqueDest {
 
 /** Decide the opaque destination + register source operands for an unmodelled instruction
  *  `mnemonic` with operand list `ops` (operands in objdump order — destination first). Returns
- *  `null` only for a policy.skipSafe mnemonic. An unmodelled STORE-CLASS instruction
- *  (policy.storeClass) throws loud (a skipped memory write is a silent miscompile), and so does any
- *  instruction with no degradable destination: with no register to carry the live-`?` sentinel,
- *  skipping would silently delete a side effect (swi/syscall/sync/cache).
+ *  `null` only for a policy.skipSafe mnemonic. Three arms throw instead, in this order: an
+ *  instruction naming a register from an UNMODELLED FILE (policy.fpReg) is refused first, because
+ *  the file is the capability and the instruction is only where it surfaced; an unmodelled
+ *  STORE-CLASS instruction (policy.storeClass) throws next (a skipped memory write is a silent
+ *  miscompile); and so does any instruction with no degradable destination: with no register to
+ *  carry the live-`?` sentinel, skipping would silently delete a side effect (swi/syscall/sync/
+ *  cache).
  *
  *  When non-null, the caller MUST emit an `opaque` op that writes `dst` and consumes `srcRegs`
  *  (read through the frontend's own SSA). It reaches structuring as the sentinel `?` and trips
@@ -97,13 +116,27 @@ export interface OpaqueDest {
  *  So `skipSafe`, a short per-ISA list of provably transparent mnemonics, is the only way an
  *  unmodelled instruction leaves no trace.
  *
- *  `storeClass` is not load-bearing for soundness — a missed store degrades loudly like anything
+ *  Neither `fpReg` nor `storeClass` is load-bearing for SOUNDNESS — every instruction that reaches
+ *  this function declines whatever arm takes it, because an `opaque` carries `effects: true` and
+ *  reaches `assertResolved` whether or not anything reads it. What they buy is WHICH capability the
+ *  decline names, and that is the whole content of a decline. `storeClass` is not load-bearing for
+ *  soundness — a missed store degrades loudly like anything
  *  else — but it throws naming the memory write instead of an unresolvable value, and it catches
  *  the shape where `ops[0]` is a SOURCE (MIPS `swl rt, off(base)`) before a `dst` is fabricated
  *  from it. It and `skipSafe` match case-INSENSITIVELY: mnemonic case is a property of the
  *  disassembler, not of the instruction. */
 export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy): OpaqueDest | null {
   const shown = policy.display ?? mnemonic;
+  const norm = policy.normalize ?? ((s) => s);
+  const fpReg = policy.fpReg;
+  const fp = fpReg ? ops.map(norm).filter((o) => fpReg.test(o)) : [];
+  if (fp.length > 0) {
+    const where = policy.context ? `cannot lift '${policy.context}': ` : '';
+    throw new FrontendUnsupportedError(
+      `${where}unmodelled floating-point instruction '${shown}' — it uses the floating-point ` +
+        `register file (${fp.join(', ')}), which this frontend does not model`,
+    );
+  }
   if (policy.storeClass?.test(mnemonic)) {
     // `context` names the function (and, where the ISA has addresses, the site) — this message
     // lands verbatim in annotate-mode stub headers, where an un-attributed decline is
@@ -113,7 +146,6 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
       `${where}unmodelled store-class instruction '${shown}' — a memory write cannot be skipped or degraded to a register opaque`,
     );
   }
-  const norm = policy.normalize ?? ((s) => s);
   const dst = norm(ops[0] ?? '');
   // No DEGRADABLE destination: `ops[0]` is not a register, or it is the hardwired zero. Same answer
   // for both — a zero write is a genuine no-op only for a MODELLED instruction, and by construction

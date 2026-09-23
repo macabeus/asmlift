@@ -629,6 +629,12 @@ export function lift(
       // must throw, never skip (its first token is the SOURCE register).
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg,
+        // The floating-point register file. `isReg` is `r\d+`, so an `fN` operand is invisible to
+        // it: `fadds f1,f1,f2` reads as "no register destination" and `fcmpo cr0,f1,f2` as the same
+        // thing about a CONDITION register, when both are one missing file. `stfs`/`stfd` reach
+        // this arm ahead of `^st` deliberately — they are refused for the file they move, not for
+        // the memory they move it to.
+        fpReg: /^f\d+$/i,
         storeClass: /^st/i,
         skipSafe: /^nop$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,
