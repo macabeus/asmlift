@@ -64,7 +64,7 @@ import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
-import { collectStructs } from '../raise/structs';
+import { collectStructs, unionViewAt } from '../raise/structs';
 import {
   type DeclaredField,
   type SymbolInfo,
@@ -810,7 +810,23 @@ function memAccess(
     // the array-element form — wrong for a pointer). Anything else is cast to the recovered
     // struct pointer type; the cast node prints with `->`.
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === bt.to.name && baseExpr.k !== 'index';
-    return { k: 'field', base: ok ? baseExpr : { k: 'cast', to: bt, e: baseExpr }, name: `field_${off}` };
+    const structBase = ok ? baseExpr : { k: 'cast' as const, to: bt, e: baseExpr };
+    // A byte range recovered as a UNION member (raise/structs.ts) is read through the view of the
+    // access's own width: `p->field_0.word`, `p->field_0.half[1]`.
+    const u = unionViewAt(bt.to, off, width);
+    if (u === undefined) {
+      return { k: 'field', base: structBase, name: `field_${off}` };
+    }
+    // An internal invariant: the builder made a view for every width a union's own base accessed,
+    // and a value that inherits the type through recoverTypes carries a pointee of its own instead.
+    if (u.view === undefined) {
+      throw new StructureError(
+        `a ${width}-byte access at byte ${off} has no view in the union member '${u.member.name}'`,
+      );
+    }
+    const cell: Expr = { k: 'field', base: structBase, name: u.member.name };
+    const view: Expr = { k: 'field', base: cell, name: u.view.name, dot: true };
+    return u.index === null ? view : { k: 'index', base: view, idx: { k: 'const', value: u.index }, width, signed };
   }
   return {
     k: 'index',

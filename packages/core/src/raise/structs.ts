@@ -18,6 +18,8 @@
 //                                gap fields the compiler had but this function never touched)
 //   base @ {off2 w4}           -> LOUD decline (a 4-byte field at offset 2 is not 4-aligned —
 //                                natural C alignment cannot place it there)
+//   base @ {off0 w4, off2 w2}  -> struct { union { s32 word; s16 half[2]; } field_0; }  (the same
+//                                bytes at two widths — `buildUnionStruct`)
 //   base @ {off0 w4, off4 w4}  -> array  (uniform stride — untouched)
 //   base @ {off8 w4}           -> array  (single aligned access — no struct evidence)
 //   base @ aload(index)        -> array  (variable index — untouched)
@@ -42,8 +44,9 @@
 // struct reproduces the observed offsets byte-for-byte and is self-describing (the same
 // discipline raise/struct-arrays.ts withPadding uses). Each accessed field must still be
 // naturally aligned to ITS OWN width (`off % width === 0`) — a genuinely packed layout (a field
-// at an offset natural C alignment could not place it at) is rejected LOUD, as is an
-// overlap/union.
+// at an offset natural C alignment could not place it at) is rejected LOUD. An overlap is a union
+// member on a base whose layout only this function's accesses describe, and no struct at all on
+// one whose address is declared elsewhere (`recognizeStructs`).
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { nextStructIndex } from '../ir/struct-names';
@@ -156,16 +159,15 @@ function isArray(accesses: Access[]): boolean {
 
 /** Build the struct type for a base whose accesses are NOT array-shaped. Unaccessed leading/
  *  interior gaps are FILLED with `u8[N]` pads so the declared struct reproduces the observed
- *  offsets. Throws LOUD only on a layout natural C alignment cannot reproduce: two accesses
- *  overlapping in bytes (a union — same offset with differing widths, OR distinct offsets whose
- *  ranges collide), or a field at an offset its own natural alignment could not place it at (a
- *  PACKED layout).
+ *  offsets. Throws LOUD only on a layout no plain struct reproduces: two accesses overlapping in
+ *  bytes (same offset with differing widths, OR distinct offsets whose ranges collide), or a field
+ *  at an offset its own natural alignment could not place it at (a PACKED layout).
  *
  *  ONE CLASS OF OVERLAP NEVER REACHES HERE: a narrow LOAD covering the low-order end of a wider
  *  access that ran before it on every path is a cast of that access rather than a second field, and
  *  raise/truncload.ts folds it into one before this pass runs. What is left is what the asm does
  *  not settle — a narrow STORE, a read above the low-order end, a cell at a constant address, and a
- *  cover on a path the narrow read does not run — and every one of them refuses here.
+ *  cover on a path the narrow read does not run — and every one of them throws here.
  *
  *  A THROW IS NOT THE FUNCTION'S VERDICT, AND WHICH THROW IT IS DECIDES THAT. Three throw sites
  *  below reject a layout and they fall into two CLASSES, which is the split a caller reads:
@@ -176,7 +178,7 @@ function isArray(accesses: Access[]): boolean {
  *      Each access alone is spellable at its own offset and width, so a base whose ADDRESS is
  *      declared outside this function's access set can keep its untyped spelling and lift
  *      (`recognizeStructs` below). There is no struct to synthesize, and nothing is lost by not
- *      synthesizing one.
+ *      synthesizing one. Any other base is declared with a union member (`buildUnionStruct`).
  *    • `RaiseUnsupportedError` — a field at an offset its own natural alignment could not place it
  *      at. This one has NO per-access spelling downstream: an access at `off` under a wider access's
  *      width folds to the element index `off / width` (structure/structure.ts), which for a
@@ -207,29 +209,36 @@ function buildStruct(name: string, accesses: Access[]): IrType {
   // cannot reproduce, so it is rejected LOUD (never a silently-wrong struct). The GAP before a
   // field (an unaccessed leading/interior member) is legal: it is filled with a `u8[N]` pad below.
   for (const f of dataFields) {
-    const sz = accessWidth(f);
-    if (f.off % sizeAlign(sz) !== 0) {
-      throw new RaiseUnsupportedError(
-        `cannot recover struct '${name}': field at offset ${f.off} (width ${sz}) is not naturally aligned — packed layout not modelled`,
-      );
-    }
+    refusePacked(name, f.off, fieldSize(f.type));
   }
-  // Place fields under natural C alignment, inserting an explicit `u8[N]` PAD only for a gap the
-  // alignment itself does NOT already cover (the same self-describing discipline as
-  // raise/struct-arrays.ts withPadding). For each field, `aligned` = where natural C alignment
-  // would put it after the running cursor:
-  //   • aligned === off  — natural padding lands it exactly (`{s8@0, s32@4}`): no explicit pad,
-  //     C's own inter-field alignment reproduces the layout.
-  //   • aligned  <  off  — a leading/interior gap alignment can't fill (`{s16@2, s32@4}`, byte 0–1
-  //     never read): insert a `u8[off - cursor]` pad so the field lands exactly.
-  //   • aligned  >  off  — the field's offset precedes where alignment would force it: it OVERLAPS
-  //     the prior field (`{s32@0, s16@2}` — a union view the same-offset byOff check cannot see):
-  //     reject LOUD, never a silently-mislaid field.
+  return placeFields(name, dataFields);
+}
+
+function refusePacked(name: string, off: number, size: number): void {
+  if (off % sizeAlign(size) !== 0) {
+    throw new RaiseUnsupportedError(
+      `cannot recover struct '${name}': field at offset ${off} (width ${size}) is not naturally aligned — packed layout not modelled`,
+    );
+  }
+}
+
+/** Seat `dataFields` (sorted by offset) under natural C alignment, inserting an explicit `u8[N]`
+ *  PAD only for a gap the alignment itself does NOT already cover (the same self-describing
+ *  discipline as raise/struct-arrays.ts withPadding). For each field, `aligned` = where natural C
+ *  alignment would put it after the running cursor:
+ *    • aligned === off  — natural padding lands it exactly (`{s8@0, s32@4}`): no explicit pad,
+ *      C's own inter-field alignment reproduces the layout.
+ *    • aligned  <  off  — a leading/interior gap alignment can't fill (`{s16@2, s32@4}`, byte 0–1
+ *      never read): insert a `u8[off - cursor]` pad so the field lands exactly.
+ *    • aligned  >  off  — the field's offset precedes where alignment would force it: it OVERLAPS
+ *      the prior field (`{s32@0, s16@2}` — a union view the same-offset byOff check cannot see):
+ *      reject LOUD, never a silently-mislaid field. */
+function placeFields(name: string, dataFields: StructField[]): IrType {
   const fields: StructField[] = [];
   let cursor = 0;
   let pad = 0;
   for (const f of dataFields) {
-    const aligned = roundUp(cursor, sizeAlign(accessWidth(f)));
+    const aligned = roundUp(cursor, sizeAlign(fieldSize(f.type)));
     if (aligned > f.off) {
       throw new StructOverlapError(
         `cannot recover struct '${name}': field at offset ${f.off} overlaps the prior field (aligned to ${aligned}) — unions not modelled`,
@@ -239,14 +248,106 @@ function buildStruct(name: string, accesses: Access[]): IrType {
       fields.push({ off: cursor, type: T.array(T.u(8), f.off - cursor), name: `_pad${pad++}` });
     }
     fields.push(f);
-    cursor = f.off + accessWidth(f);
+    cursor = f.off + fieldSize(f.type);
   }
   return T.struct(name, fields);
 }
 
-// Width in bytes of a recovered field's type (int width/8; pointer is word-sized 4).
-function accessWidth(f: StructField): number {
-  return f.type.kind === 'int' ? f.type.width / 8 : 4;
+/** The member name of each view a union holds, by access width. A width with no entry has no view
+ *  (the deref contract admits no other scalar width either), and its overlap still declines. */
+const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 'word' };
+
+/** The struct for a base whose accesses OVERLAP — `buildStruct` refused it with
+ *  `StructOverlapError` — with each overlap declared as a UNION member: the same bytes read or
+ *  written at more than one width are views of one cell, and a union is the C that says so.
+ *
+ *  NOT A CAST, and the compiler is why. `((u16 *)p)[k]` beside `*p` spells the same two accesses,
+ *  but a cast-punned access is outside C's aliasing rules and agbcc (-O2) applies them: a narrow
+ *  read, a word store and the same narrow read again through casts compiles to ONE `ldrh` whose
+ *  value is reused, where the union spelling reloads after the `str` — as the asm the union was
+ *  compiled from does. gcc2.7.2kmc, ido7.1 and mwcc_242_81 reload for both.
+ *
+ *  THE LAYOUT. Every access must be naturally aligned (a packed one declines, as in
+ *  `buildStruct`), and access widths are powers of two, so an aligned access never straddles the
+ *  boundary of a wider aligned one: two accesses overlap only when the wider CONTAINS the narrower.
+ *  A cluster is therefore one widest access and every access inside it, and it becomes one member
+ *  `field_<off>` holding a union with one view per width — `word`, `half`, `byte`. A view that
+ *  holds one element at the cell's start is a scalar; any other is an array reaching the
+ *  furthest element accessed (`u16 half[2]` for the halfword at +2). An overlap involving a width
+ *  no view is named for declines with the overlap error `buildStruct` raised — and that is also
+ *  what keeps the containment reading honest, since only a width that is not a power of two could
+ *  straddle. */
+function buildUnionStruct(structName: string, accesses: Access[]): IrType {
+  for (const a of accesses) {
+    refusePacked(structName, a.off, a.width);
+  }
+  const clusters: Access[][] = [];
+  for (const a of [...accesses].sort((x, y) => x.off - y.off || y.width - x.width)) {
+    const cur = clusters.at(-1);
+    if (cur !== undefined && a.off < cur[0].off + cur[0].width) {
+      cur.push(a);
+    } else {
+      clusters.push([a]);
+    }
+  }
+  // A load's signedness wins over a store's, as in `buildStruct`.
+  const scalarOf = (group: Access[]): IrType =>
+    scalarTypeForAccess(
+      group[0].width,
+      group.some((a) => a.signed),
+    );
+  const dataFields = clusters.map((c): StructField => {
+    const start = c[0].off;
+    if (c.every((a) => a.width === c[0].width)) {
+      return { off: start, type: scalarOf(c), name: `field_${start}` };
+    }
+    const members = [...new Set(c.map((a) => a.width))].map((width): StructField => {
+      const group = c.filter((a) => a.width === width);
+      const name = VIEW_NAMES[width];
+      if (name === undefined) {
+        throw new StructOverlapError(
+          `cannot recover struct '${structName}': no union view for a ${width}-byte access at offset ${group[0].off} — unions not modelled`,
+        );
+      }
+      const count = Math.max(...group.map((a) => a.off - start)) / width + 1;
+      return { off: 0, type: count === 1 ? scalarOf(group) : T.array(scalarOf(group), count), name };
+    });
+    return { off: start, type: T.union(members), name: `field_${start}` };
+  });
+  return placeFields(structName, dataFields);
+}
+
+/** The union member of a recovered struct that holds byte `off`, and the view of it an access of
+ *  `width` bytes reads (undefined when the member has no view that wide) with the element index
+ *  inside an ARRAY view (null for a scalar one) — or undefined when no union member holds `off`.
+ *  The reader of `buildUnionStruct`'s layout, kept beside it: a view is found by WIDTH alone
+ *  because the builder made one view per width. */
+export function unionViewAt(
+  st: Extract<IrType, { kind: 'struct' }>,
+  off: number,
+  width: number,
+): { member: StructField; view: StructField | undefined; index: number | null } | undefined {
+  const member = st.fields.find((f) => f.type.kind === 'union' && f.off <= off && off < f.off + fieldSize(f.type));
+  if (member === undefined || member.type.kind !== 'union') {
+    return undefined;
+  }
+  const view = member.type.members.find((m) => fieldSize(m.type.kind === 'array' ? m.type.elem : m.type) === width);
+  return { member, view, index: view?.type.kind === 'array' ? (off - member.off) / width : null };
+}
+
+/** Size in bytes of a recovered field's type (int width/8; pointer is word-sized 4; a union is its
+ *  widest view). */
+function fieldSize(t: IrType): number {
+  switch (t.kind) {
+    case 'int':
+      return t.width / 8;
+    case 'array':
+      return t.count * fieldSize(t.elem);
+    case 'union':
+      return Math.max(...t.members.map((m) => fieldSize(m.type)));
+    default:
+      return 4;
+  }
 }
 
 /** Recover struct-pointer types from access-pattern evidence. Runs after array legalization and
@@ -313,12 +414,16 @@ export function recognizeStructs(fn: Fn): number {
       // would be computed, for the bases that never reach this pass at all (already typed, or a
       // forgiven overlap); that message can only describe the access, not the layout.
       //
-      // An ANONYMOUS base (a loaded pointer, a parameter) has no other source of truth, so for it
-      // the decline stands exactly as before.
-      if (e instanceof StructOverlapError && addressDeclaredElsewhere(base)) {
+      // An ANONYMOUS base (a loaded pointer, a parameter) has no other source of truth: its layout
+      // is what this function's accesses say, and an overlap there says UNION. It is declared as
+      // one (`buildUnionStruct`), which declines in turn on what it cannot lay out.
+      if (!(e instanceof StructOverlapError)) {
+        throw e;
+      }
+      if (addressDeclaredElsewhere(base)) {
         continue;
       }
-      throw e;
+      base.type = T.ptr(buildUnionStruct(`Struct${name}`, accesses));
     }
     name++;
     count++;

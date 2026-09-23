@@ -11,12 +11,14 @@
 // rules, while the question of whether the covering access runs at all is a question about EDGES.
 // A single-block envelope pins the fold and none of its refusals.
 //
-// The byte evidence is on the benchmark's own rows: `synthetic:unitrunc` and `synthetic:utag` are
-// the shapes that lift, and `synthetic:uhalf`, `synthetic:uniwrite` and `synthetic:unidev` are the
-// controls that must keep declining.
+// The byte evidence is on the benchmark's own rows: `synthetic:unitrunc` is the shape the fold
+// takes, and `synthetic:uhalf`, `synthetic:uniwrite`, `synthetic:utag` and `synthetic:unidev` are
+// the ones it must leave at two widths — the first three as a union member (raise/structs.ts), the
+// last as two accesses at a literal address.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { firstRejection, without } from '../src/l3/gates';
@@ -36,6 +38,17 @@ function emit(ir: string, littleEndian = true, gates = TRUNC_LOAD_GATES): string
   recoverTypes(fn);
   verify(fn);
   return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, true)));
+}
+
+/** After struct recovery, does the first parameter still carry two widths at `off`? Unfolded, an
+ *  overlap on a parameter is declared as a UNION member (raise/structs.ts), so that member is the
+ *  witness that the fold left the narrow access alone. */
+function keepsBothWidths(fn: Fn, off: number): boolean {
+  recognizeStructs(fn);
+  const t = fn.blocks[0].params[0].type;
+  return (
+    t.kind === 'ptr' && t.to.kind === 'struct' && t.to.fields.some((f) => f.off === off && f.type.kind === 'union')
+  );
 }
 
 /** The gate that refuses each candidate, in program order — `null` for one the table admits. */
@@ -70,10 +83,10 @@ describe('truncated-load recovery — the rewrite', () => {
     expect(c).not.toContain('(u8 *)');
   });
 
-  test('without the fold the same function declines on the overlap', () => {
+  test('without the fold the same function keeps both widths, as a union', () => {
     const fn = parse(NARROWED_CALL);
     verify(fn);
-    expect(() => recognizeStructs(fn)).toThrow(/overlapping fields at offset 12/);
+    expect(keepsBothWidths(fn, 12)).toBe(true);
   });
 
   test('the fold keeps the narrow value identity, so every existing use reads it', () => {
@@ -338,7 +351,7 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
     const fn = parse(OTHER_ARM);
     verify(fn);
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
-    expect(() => recognizeStructs(fn)).toThrow(/overlapping fields at offset 0/);
+    expect(keepsBothWidths(fn, 0)).toBe(true);
     const ablated = parse(OTHER_ARM);
     verify(ablated);
     expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'covering-dominates'))).toBe(1);
@@ -424,8 +437,8 @@ describe('truncated-load recovery — a dead read keeps the width the machine us
 describe('truncated-load recovery — what is not a candidate at all', () => {
   // THE TABLE'S NAMED RESIDUE. A narrow STORE is refused in the candidate builder, because widening
   // a write clobbers the bytes past it and no cast spells a partial write. There is nothing to
-  // ablate: the base keeps both widths and declines exactly as it did.
-  test('a narrow store is never a candidate, and its base still declines', () => {
+  // ablate: the base keeps both widths.
+  test('a narrow store is never a candidate, and its base keeps both widths', () => {
     const ir = `fn t {
 ^bb0(%0: unk32, %1: unk32):
   %2: unk32 = load %0 {off=4, width=2, signed=false}
@@ -438,7 +451,7 @@ describe('truncated-load recovery — what is not a candidate at all', () => {
     const fn = parse(ir);
     verify(fn);
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
-    expect(() => recognizeStructs(fn)).toThrow(/overlapping fields at offset 4/);
+    expect(keepsBothWidths(fn, 4)).toBe(true);
   });
 
   test('a base with no wider access is left alone', () => {

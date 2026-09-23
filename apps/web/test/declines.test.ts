@@ -1140,7 +1140,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 27],
-    ['structure/structure.ts', 17],
+    ['structure/structure.ts', 18],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1148,7 +1148,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 73;
+  const RESIDUE_TOTAL = 74;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
