@@ -466,3 +466,42 @@ test('the sunk `ret` carries the edge it replaced, and a forwarded path carries 
   expect(retOf(forwarded).opcode).toBe('ret');
   expect(retOf(forwarded).attrs.fallthrough).toBeUndefined();
 });
+
+/** THE PREDICATE IS `if`-SHAPED; THE WALK UNDER IT IS NOT. `sharedRetsOf` asks a question about a
+ *  BRANCH — "the successors all return, so where does this construct end?" — and a jump table asks
+ *  it too (structure.ts's `switch_br` arm reads the same follow). `hasDivergentSharedRet` is not
+ *  that question: it is the enumeration gate of the shared-tail TWINS, and those twins are
+ *  `if`-shaped variations with no jump-table counterpart. So the `cond_br` restriction lives here,
+ *  in the caller, and a table with a shared `ret` must answer FALSE — otherwise every such row
+ *  spends fan on a duplicate candidate.
+ *
+ *  The shape is `sa3:Sio32MultiLoadMain`'s: three arms reach a common tail, one of them can also
+ *  take an early `return` of its own, so no block post-dominates the dispatch and the follow is a
+ *  real question. */
+const TABLE_WITH_SHARED_RET = `fn f {
+^bb0(%0: s32, %1: s32):
+  switch_br %0, ^bb1(), ^bb2(), ^bb3() {cases=[0;1]}
+^bb1():
+  %2: s32 = call %1 {target="armA"}
+  br ^bb4()
+^bb2():
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %1, %3
+  cond_br %4, ^bb4(), ^bb5()
+^bb3():
+  br ^bb4()
+^bb4():
+  %5: s32 = call %1 {target="tail"}
+  ret
+^bb5():
+  ret
+}
+`;
+
+test('a jump table with a shared `ret` is not a divergent `if`', () => {
+  const fn = parse(TABLE_WITH_SHARED_RET);
+  verify(fn);
+  // The dispatch block DOES have a shared `ret` and no post-dominator — that is what makes it a
+  // live case for the follow — and it is still not what this predicate asks about.
+  expect(hasDivergentSharedRet(fn)).toBe(false);
+});

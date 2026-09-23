@@ -648,6 +648,23 @@ function globalConstByte(baseExpr: Expr, off: number): { name: string; byte: num
   return null;
 }
 
+/** The whole-element subscript a constant byte displacement denotes at a given element width — the
+ *  `idxVal + off / width` fold every indexed spelling below shares, with the rule
+ *  structure/globalaccess.ts `elementIndex` applies to a VARIABLE residual applied to the constant
+ *  one. A displacement that is not a whole number of elements has no subscript spelling at all
+ *  (`[0.5]` is not C, and agbcc answers `array subscript is not an integer`), so it declines LOUD
+ *  here, where the fraction would be computed, rather than leaving the layer above to have refused
+ *  every base that can reach it. */
+function displacementIndex(off: number, width: number): number {
+  if (off % width !== 0) {
+    throw new StructureError(
+      `a ${width}-byte access at byte ${off} of its base is not a whole number of elements from it — ` +
+        `no subscript spells it`,
+    );
+  }
+  return off / width;
+}
+
 function memAccess(
   base: Value,
   baseExpr: Expr,
@@ -754,7 +771,7 @@ function memAccess(
     return {
       k: 'index',
       base: { k: 'var', name: gbb!.name },
-      idx: addOffset(multi.idx, off / width),
+      idx: addOffset(multi.idx, displacementIndex(off, width)),
       width,
       signed,
       lead: multi.lead,
@@ -773,7 +790,7 @@ function memAccess(
     if (off === 0 && idxVal.k === 'const' && idxVal.value === 0 && scalarGlobals.has(g.name)) {
       return { k: 'var', name: g.name };
     }
-    const idx = addOffset(idxVal, off / width);
+    const idx = addOffset(idxVal, displacementIndex(off, width));
     // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
@@ -795,7 +812,14 @@ function memAccess(
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === bt.to.name && baseExpr.k !== 'index';
     return { k: 'field', base: ok ? baseExpr : { k: 'cast', to: bt, e: baseExpr }, name: `field_${off}` };
   }
-  return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed, ...addressEvidence };
+  return {
+    k: 'index',
+    base: baseExpr,
+    idx: { k: 'const', value: displacementIndex(off, width) },
+    width,
+    signed,
+    ...addressEvidence,
+  };
 }
 
 // A variable-index array access `base[index]`; `base[index].field_K` when a `fieldOff` marks an
@@ -1729,7 +1753,10 @@ export interface StructureHooks {
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
    *  has decided both arms are real, so it cannot be computed ahead of the pass. */
   onBranchSenseSite?: (site: { block: number; ordinal: number; joined: boolean; negated: boolean }) => void;
-  /** Every divergent `if` `followEarlyReturns` gave a follow: the `if`'s block and the follow's. */
+  /** Every branch `followOverReturns` gave a follow: the branch's block and the follow's. Both
+   *  callers fire it — a divergent `if` under `followEarlyReturns`, and EVERY jump table whose arms
+   *  all return, unconditionally — so the sites it reports are not the enumeration domain of the
+   *  shared-tail twins (that domain is `hasDivergentSharedRet`, which asks for a `cond_br`). */
   onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
 }
 
@@ -1776,22 +1803,37 @@ interface EarlyReturnArmDeps {
 function isRet(blk: Block): boolean {
   return blk.ops[blk.ops.length - 1]?.opcode === 'ret';
 }
-/** The `ret`s reachable from BOTH successors of `b` — the region `followEarlyReturns` keeps. Empty
- *  when there is none, and when `b` does not branch two ways. `reachFrom` is forward reachability,
- *  the start block excluded. */
+/** The `ret`s reachable from EVERY successor of `b` — the region `followOverReturns` keeps. Empty
+ *  when there is none, and when `b` does not branch at all. `reachFrom` is forward reachability,
+ *  the start block excluded.
+ *
+ *  THE QUESTION IS ABOUT A BRANCH, not about an `if`: "the arms all return, so post-dominance gives
+ *  this block no join — where does the construct end?" is asked by a jump table exactly as by a
+ *  two-way branch, and the answer is derived the same way. The `if`-shaped reading belongs to the
+ *  CALLER that wants it (`hasDivergentSharedRet`), not here.
+ *
+ *  THE DEDUP IS DEFENSIVE AND NO CALLER CAN REACH IT TODAY. It is what makes "two successors that
+ *  are the same block" answer `[]` rather than "a branch with a shared `ret`". Both callers ask
+ *  only when `ipdom.get(b)` is null, and a branch whose successors are all ONE block has that block
+ *  as its post-dominator, so they never ask it of that shape. It stays because the answer belongs
+ *  to this function rather than to its callers' guards, and dropping it is a no-op on the corpus:
+ *  the reader over every row of the committed artifact (`decompile` per row, no compiling) emits
+ *  byte-identical source with and without it. */
 function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>): Block[] {
-  const [s1, s2] = b.ops[b.ops.length - 1]?.opcode === 'cond_br' ? successorsOf(b) : [];
-  if (s1 === undefined || s2 === undefined || s1 === s2) {
+  const succs = [...new Set(successorsOf(b))];
+  if (succs.length < 2) {
     return [];
   }
   const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
-  const fromS2 = new Set(retsFrom(s2));
-  return retsFrom(s1).filter((r) => fromS2.has(r));
+  return succs.map(retsFrom).reduce((shared, rets) => {
+    const here = new Set(rets);
+    return shared.filter((r) => here.has(r));
+  });
 }
 /** Is there an `if` whose arms reach no common block before EXIT but share a `ret` — the only shape
  *  `followEarlyReturns` changes? The enumeration gate of both shared-tail twins (rank.ts), asked of
  *  the fn as raised and again of the sunk fn; a superset, since it asks `sharedRetsOf` and none of
- *  the follow's three later refusals. */
+ *  the follow's three later refusals. An `if`, specifically: see the restriction at the `some`. */
 export function hasDivergentSharedRet(fn: Fn): boolean {
   const ipdom = postDominators(fn);
   const reach = new Map<Block, Set<Block>>();
@@ -1810,7 +1852,13 @@ export function hasDivergentSharedRet(fn: Fn): boolean {
     }
     return out;
   };
-  return fn.blocks.some((b) => ipdom.get(b) === null && sharedRetsOf(b, reachFrom).length > 0);
+  // `cond_br` HERE, not in `sharedRetsOf`: this is the enumeration gate of the shared-tail twins,
+  // and those twins are `if`-shaped variations. A jump table with a shared `ret` has the same
+  // no-join shape and no such twin, so asking for it would spend fan on a duplicate candidate.
+  return fn.blocks.some(
+    (b) =>
+      b.ops[b.ops.length - 1]?.opcode === 'cond_br' && ipdom.get(b) === null && sharedRetsOf(b, reachFrom).length > 0,
+  );
 }
 /** does a path from `from` reach `to` without passing through `avoid`? */
 function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
@@ -1963,8 +2011,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // IS this target's compiler behaviors, so resetting one would probe a spelling asmlift never emits
   // here.
   //
-  // FOUR OF THE ELEVEN `STRUCTURE_VARIATIONS` ENTRIES (rank-variations.ts) ARE DELIBERATE NON-MEMBERS,
-  // each for its own reason, and the list here is the half of the split this side owns:
+  // THE STRUCTURE VARIATIONS `assertDefaultAccepts` DOES NOT RESET (rank-variations.ts) ARE
+  // DELIBERATE NON-MEMBERS, each for its own reason, and this is the whole of that list — the one
+  // place it is stated, derived from the guard's own reset list and held to it by
+  // test/variation-offers.test.ts. Every variation NOT named here is one the guard resets, so the
+  // invariant it protects — a candidate spelling never unlocks a function the default declines —
+  // rests on the guard for those and on the argument beside each name for these:
   //   - `/site-sense` (senseFromFoldEvidence) decides which way each folded branch is written. It
   //     negates a branch sense per site and touches no copy, like the per-function sense booleans;
   //   - `/reread-globals` (rereadGlobals) is an ANALYSIS option, and it only ever RELAXES: it
@@ -2071,21 +2123,36 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // rank.ts's `/shared-ret` twin, and as its `/shared-tail` twin after the store-tail sink: as a
   // default it costs rows, measured there.
   //
-  // WHICH REGION: the `ret`s reachable from BOTH successors. Every block that cannot reach one of
+  // WHICH REGION: the `ret`s reachable from EVERY successor. Every block that cannot reach one of
   // them is an early-return region and is deleted; the follow is `b`'s post-dominator over what is
   // left. Sound for the same reason an ordinary follow is: every kept path from `b` passes it, and a
   // deleted block reaches no kept `ret` and so never the follow, so each arm structures up to the
-  // follow or into a `return`. And no deleted region is reachable from both arms — its `ret` would
-  // then be one of the shared ones — so the rule duplicates nothing across the arms.
+  // follow or into a `return`.
+  //
+  // IT CAN DUPLICATE ACROSS THE ARMS, AND ABOVE TWO SUCCESSORS IT DOES. With two, it cannot: a
+  // deleted region both arms reach would have its `ret` in the intersection, and so would not have
+  // been deleted. With three or more that argument does not carry — a `ret` reachable from two of
+  // three arms is NOT in the intersection, so its region is deleted from `keep` and re-emitted in
+  // each arm that reaches it. The copies sit on mutually exclusive paths, so the program stays
+  // correct; the cost is bytes, which is the only currency here. The `switch_br` caller pays it
+  // knowingly: its alternative is not a shorter spelling but a decline (see that caller).
   //
   // PER `if`, never function-wide: the deletion set is a function of that `if`'s own shared `ret`s
   // (memoized on them), because a nested `if` shares a different set, or none.
   //
-  // REFUSES (keeping the divergent arms) when no `ret` is reachable from both successors, when the
+  // REFUSES (keeping the divergent arms) when no `ret` is reachable from every successor, when the
   // kept graph gives `b` no post-dominator but EXIT, and when the enclosing region's `stop` is
   // reachable from `b` without passing the follow — that path must reach `stop`, and structuring
-  // the arms towards a different follow would emit `stop`'s region inside an arm. The caller asks
-  // only outside a loop body.
+  // the arms towards a different follow would emit `stop`'s region inside an arm.
+  //
+  // THE TWO CALLERS DIFFER ON LOOPS AND ONLY ONE OF THEM GUARDS IT. The `if` caller asks outside a
+  // loop body only (`followEarlyReturns && loopCtx === null`, with `clampToLoop` as its second
+  // net), for the reason written there. The `switch_br` caller does not consult `loopCtx` at all,
+  // and no input has been found that reaches this from inside a loop body: every `ret` the arms of
+  // an in-loop branch reach is reachable from the latch too, so the intersection keeps the whole
+  // graph, `pd` is `ipdom` itself — and the caller only asks when `ipdom.get(b)` is already null,
+  // so the answer comes back null and the `?? stop` fallback stands. That is an observation about
+  // the shape rather than a check, which is why it is written down here.
   const followsByShared = new Map<string, Map<Block, Block | null>>();
   const followOverReturns = (b: Block, stop: Block | null): Block | null => {
     const shared = sharedRetsOf(b, reachFrom);
@@ -2116,10 +2183,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // `((T *)&gSym)[i]` address-cast form (a struct value does not decay, so casting the bare name is
   // invalid C; casting the address is valid and byte-exact). Computed once here.
   //
-  // Only the offset set is tracked, not width: a single symbol read at off-0 with two DIFFERENT
-  // widths is a union/type-pun, which the downstream struct-layout recovery rejects LOUD
-  // ("overlapping fields ... unions not modelled") before this classification is consumed — so a
-  // width collision at off-0 declines honestly rather than reaching a wrong bare-`gSym` emission.
+  // THE ACCESS SPELLING IS PART OF THE QUESTION, not only the offset set. The bare name is ONE
+  // declaration, so it spells one width and one signedness; a symbol read at off-0 two different
+  // ways has no bare spelling at all, and emitting one loses the second access entirely
+  // (`gState + gState` for a halfword plus a byte). Such a symbol is an AGGREGATE here, so every
+  // access takes the address-cast form at its OWN width — `*(u16 *)&gState + *(u8 *)&gState`,
+  // which is what the source wrote and what raise/structs.ts's constant-address sibling emits for
+  // the same shape at a literal address.
+  //
+  // TWO QUESTIONS, AND THEY ARE ASKED OF DIFFERENT ACCESSES. WIDTH is asked of every load and store: a
+  // `u16` declaration cannot carry a word store either. SIGNEDNESS is asked of LOADS ONLY — a store
+  // writes the same bytes through either declaration (`*(s16 *)&g = x` and `*(u16 *)&g = x` are one
+  // instruction), while a load does not: `lh` and `lhu` on one cell are two declarations, and
+  // spelling both `g` would lose the zero-extension. Unreachable in Thumb, where `ldrsh`/`ldrsb`
+  // need a register offset and the `add` that forms it already marks the symbol aggregate; live on
+  // MIPS, where `%hi/%lo` addressing carries no such `add`.
   // FRAME-LOCAL OBJECT NAMES (laddr). Minted HERE, not in the frontend, because identifiers live
   // in this layer's namespace: params, locals, every gaddr symbol, and the project's symbol map —
   // none of which the frontend can see. A frontend-chosen `sp0` silently shadowed a project global
@@ -2180,6 +2258,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const scalarGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
+    const widths = new Map<string, Set<number>>();
+    const loadSigns = new Map<string, Set<boolean>>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -2198,6 +2278,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           const s = gaddrSym(op.operands[0]);
           if (s) {
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
+            (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
+            if (op.opcode === 'load') {
+              (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
+            }
           }
         } else if (op.opcode === 'add' || op.opcode === 'sub') {
           // ANY arithmetic on the symbol's address is interior addressing ⇒ aggregate — even when
@@ -2220,7 +2304,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
     for (const [sym, offs] of offsets) {
-      if (offs.size === 1 && offs.has(0)) {
+      if (offs.size === 1 && offs.has(0) && widths.get(sym)?.size === 1 && (loadSigns.get(sym)?.size ?? 1) === 1) {
         scalarGlobals.add(sym);
       }
     }
@@ -4645,7 +4729,34 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // region flows into the NEXT arm is C fall-through (no `break`). Any other shape needs a `goto` and
     // fails LOUD rather than being duplicated or silently closed.
     if (term.opcode === 'switch_br') {
-      const merge = ipdom.get(b) ?? stop;
+      // WHERE THE SWITCH ENDS. Post-dominance answers it whenever the arms reconverge. When they
+      // do not — some arm `return`s, so EXIT is the only block on every path — the answer is the
+      // one `followOverReturns` derives for a divergent `if`: keep the blocks that reach a `ret`
+      // EVERY successor reaches, and post-dominate on what is left.
+      //
+      // UNCONDITIONAL, where the `if` asks it behind `followEarlyReturns` — and NOT because a jump
+      // table has only one reading. It has the same two an `if` has, and `ipdom.get(b) ?? stop` is
+      // the other one: for a table whose arms reach a shared `ret` and also a shared tail, that
+      // reading structures each arm to its own end and emits legal, complete C with the tail
+      // duplicated into the arms. Both are legal C for one CFG, so the asm underdetermines the
+      // source — which is the definition of a ranked variation (docs/level-tower.md).
+      //
+      // WHAT MAKES THIS ONE THE DEFAULT is which of the two can decline. With a null merge the
+      // default edge's target joins `siblings`, so an arm's plain `break` classifies as a
+      // fall-through into it, and Regime B has no fallback recovery — `synthetic:sw_jtret` is that
+      // shape and declines outright. A variation could not rescue it, and the reason is an
+      // authoring rule rather than a blanket one: `assertDefaultAccepts` re-runs the default
+      // structuring, and lets its refusal stand, for the options it RESETS — which is every
+      // structure variation but the four named as non-members beside it. `followEarlyReturns`, the
+      // `if`-side twin of this very mechanism, is one it resets, because moving a merge point
+      // changes which edge copies elide as identities; a switch-side twin moves the same merge
+      // point and would be reset for the same reason. So the divergent reading cannot come back as
+      // a candidate that rescues `sw_jtret`. The reading that lifts strictly
+      // more functions therefore has to BE the default, and it is the DIVERGENT reading that a
+      // variation would have to offer back — a candidate nothing mints today, and the one thing
+      // this line costs. `?? stop` keeps the shape where no `ret` is reachable from every
+      // successor.
+      const merge = ipdom.get(b) ?? followOverReturns(b, stop) ?? stop;
       const succ = term.successors;
       const caseVals = term.attrs.cases as number[];
       // Switch edges CARRY phi args (frontend/ssa.ts appends them terminator-generically) — each

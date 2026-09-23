@@ -213,6 +213,34 @@ describe('global-variable recovery', () => {
     expect(src).not.toContain('gPromoted');
   });
 
+  // THE BARE NAME IS ONE DECLARATION, so it spells one width AND one signedness. The signedness
+  // half is unreachable in Thumb and is witnessed on MIPS instead (mips-reloc-globals.test.ts);
+  // this is the width half. A symbol the asm reads at two widths
+  // at offset 0 — `ldrh` then `ldrb` on the same cell, a type-pun — has no bare spelling: emitting
+  // one collapses both accesses to the same expression and the narrow read disappears. Such a
+  // symbol classifies AGGREGATE, so each access takes the address-cast form at its own width.
+  test('a symbol read at TWO widths at offset 0 has no bare spelling', () => {
+    const src = thumb(
+      'pun',
+      '\tldr\tr0, .L1\n\tldrh\tr1, [r0]\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L1:\n\t.word\tgState\n',
+    );
+    expect(src).toContain('(u16 *)&gState');
+    expect(src).toContain('(u8 *)&gState');
+    // the WRONG answer this pins: one bare name standing for both widths, the narrow read lost.
+    expect(src).not.toContain('gState + gState');
+  });
+
+  // …and ONE width at offset 0 is still the bare name. Without this the rule above would read as
+  // "a symbol touched twice is an aggregate", which would respell every scalar global in the tree.
+  test('a symbol read and written at ONE width at offset 0 keeps the bare name', () => {
+    const src = thumb(
+      'one',
+      '\tldr\tr2, .L1\n\tldrh\tr1, [r2]\n\tadd\tr1, r1, #0x1\n\tstrh\tr1, [r2]\n\tbx\tlr\n.L1:\n\t.word\tgTick\n',
+    );
+    expect(src).toContain('gTick = gTick + 1;');
+    expect(src).not.toContain('&gTick');
+  });
+
   test('a NUMERIC pool word stays a constant (MMIO address), not a global', () => {
     // ldr r0, .L(0x4000130); ldrh r0,[r0]  →  *(u16 *)0x4000130 (REG_KEYINPUT), NOT a symbol
     const src = thumb('mmio', '\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x4000130\n');

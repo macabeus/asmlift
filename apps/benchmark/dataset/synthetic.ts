@@ -889,11 +889,22 @@ export const SYNTHETIC: SynthSpec[] = [
   // OVERLAPPING WIDTHS ARE NOT A UNION QUESTION, which is the second thing this family measures.
   // `unitrunc` declares no union at all — it reads one word member and its low byte — and produces
   // exactly the instructions `utag` does. raise/truncload.ts folds the narrow read into a cast of
-  // the wider one where the bytes are the field's LOW-ORDER end, so the rows here split three ways
-  // and every one of the three is pinned: `unitrunc` and `utag` lift on a little-endian target,
-  // `uhalf` and `uniwrite` and `unidev` decline whatever the target (a read above the low-order
-  // end, a narrow STORE, and a literal device address), and `utag` declines on the big-endian
-  // toolchains for the first of those reasons.
+  // the wider one where the bytes are the field's LOW-ORDER end. WHICH ROWS THAT LIFTS IS A
+  // MEASUREMENT, and the committed artifact is where it is read — `node -e` over
+  // apps/benchmark/results/results.json filtering `^synthetic:(unitrunc|utag|uhalf|uniwrite|unidev):`
+  // prints the outcome and the decline of every cell. As it stands:
+  //   • `unitrunc` LIFTS on all four toolchains — one word member and its low byte, which is the
+  //     fold's own shape.
+  //   • `utag` DECLINES on all four. On the three that lift it at all the refusal is an overlap at
+  //     offset 4, so the fold answers some of that row's overlapping pairs and not the one that
+  //     decides it; on mwcc_242_81 the row never reaches this pass (a `bge` with no reaching
+  //     compare). THE ROW IS NOT A LITTLE-ENDIAN/BIG-ENDIAN SPLIT, which is what it was described
+  //     as before this was read off the artifact.
+  //   • `uhalf` and `uniwrite` decline whatever the target — a read above the low-order end, and a
+  //     narrow STORE, neither of which any cast spells.
+  //   • `unidev` is not a case of that sentence at all: its base is a LITERAL ADDRESS, so the
+  //     accesses are not evidence about a layout nobody declared, and raise/structs.ts forgives the
+  //     failed synthesis. It LIFTS, at each access's own width, and what it measures is below.
   //
   // The aliasing probes take the union through a POINTER on purpose. As a local it lands in a stack
   // slot on the register-poor targets, and asmlift declines on the stack-frame gap BEFORE it ever
@@ -955,7 +966,47 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A HARDWARE REGISTER read at two widths, where the ACCESS WIDTH is itself the observable event:
   // the device answers a halfword read and a byte read differently, so the two reads are not one
-  // datum and the narrower is not a cast of the wider. Must keep declining on every toolchain.
+  // datum and the narrower is not a cast of the wider.
+  //
+  // THAT IS A CLAIM ABOUT THE FOLD, NOT ABOUT THE FUNCTION. raise/truncload.ts's `fixed-cell` gate
+  // must keep refusing to make one read out of the two — widening a device read is unsound — and
+  // it does. Declining the whole function was never required by it: the row lifts, with the two
+  // reads intact at their own widths, and WITHOUT the `volatile` qualifier the reference carries.
+  //
+  // WHICH CELLS STILL WITNESS THE REFUSAL, AND IT IS NOT ALL FOUR. #240 added this row to decline
+  // everywhere, so that widening a fixed-address read would be noticed. It no longer declines
+  // anywhere, and the guard survives only where the cell MATCHES: **`gcc2.7.2kmc` and
+  // `mwcc_242_81`**. There an unsound widening changes the bus events, the bytes stop matching, the
+  // cell flips match -> nonmatch, and `bench regression` reports a LOST row — the loudest signal
+  // the harness has. **`agbcc` and `ido7.1` witness nothing**: they sit at nonmatch for the two
+  // unrelated per-toolchain reasons spelled out below, and the same regression would move them
+  // nonmatch -> nonmatch at some other score, which `bench regression` does not report at all and
+  // `bench diff` shows only as a score field nobody reads for soundness.
+  //
+  // A ROW'S VERDICT CHANGING IS NOT THE SAME AS ITS GUARD SURVIVING. A row that starts declining
+  // and ends matching has silently swapped which direction it discriminates in, and which cells
+  // still discriminate is not readable from the verdict column.
+  //
+  // WHAT THE FOUR CELLS DO, read off the artifact rather than predicted: two MATCH (`gcc2.7.2kmc`
+  // from the same spelling asmlift wins on agbcc, `mwcc_242_81` from the indexed
+  // `((u16 *)K)[2] + ((u8 *)K)[4]`) and two nonmatch at 3 (`agbcc`, `ido7.1`). So the missing
+  // `volatile` bounds what can be SPELLED and not what can match — and THE TWO NONMATCHES DO NOT
+  // SHARE A CAUSE. Both were compiled, `.text` only, at each row's own flags out of
+  // `pnpm bench target synthetic:unidev:<toolchain> --out <dir>` (its decomp.yaml carries the
+  // command; the candidate needs core's typedef prelude, `C_TYPEDEFS` in target.ts):
+  //   • agbcc — `volatile` IS the whole diff. The qualified spelling's `.text` is 16 bytes,
+  //     sha256 `59d1be4e7bc52fa1`, byte-identical to `target.o`; drop the two qualifiers and it is
+  //     `d1f4ab83fb563391`. The return type does not enter it: `u32` and `s32` hash the same on
+  //     both sides of that pair, so the qualifier is the only byte-bearing difference from the
+  //     reference. This cell is the witness for `/vol-load`, the load-side respell nothing
+  //     enumerates (`/vol-store` qualifies stores, `/volatile` needs a pointer local holding the
+  //     address, and neither fits a bare literal).
+  //   • ido7.1 — `volatile` costs NOTHING and the cause is OPERAND ORDER.
+  //     `s32 unidev(void){ return *(u16 *)K + *(u8 *)K; }` — no qualifier — compiles to
+  //     `dfd1972548b6b208`, 32 bytes, byte-identical to `target.o`, while asmlift's winner reads
+  //     the BYTE first (`ff74d3d9c04eff77`). IDO emits the second operand's load first (`lbu`
+  //     then `lhu` for a `u16 + u8` source), so a reader taking def order for source order gets
+  //     this pair backwards. A `volatile` respell would not move this cell.
   {
     sym: 'unidev',
     src: 'u32 unidev(void){ return *(volatile u16*)0x4000004 + *(volatile u8*)0x4000004; }',
@@ -1175,6 +1226,24 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }',
     features: ['dense'],
     toolchains: ALL,
+  },
+  // A DENSE TABLE ONE OF WHOSE ARMS RETURNS. `case 1` can leave without reaching the tail, so EXIT
+  // is the only block on every path out of the dispatch and post-dominance gives it no join. With
+  // no merge the default edge's target joins the arms' sibling set and every plain `break` reads as
+  // a fall-through into it, which does not linearize — the whole function declined, naming a
+  // fall-through the source does not contain. `sa3:Sio32MultiLoadMain` is the real inhabitant.
+  //
+  // THE ROW REFEREES, which is the thing that has to be shown before writing one: the wrong answer
+  // here is the tail duplicated into each arm (`case 0: *p=1; return 1;` …), and at this row's own
+  // flags agbcc compiles the two spellings to DIFFERENT instructions — different register
+  // allocation at entry and an extra instruction at the fall-out — so the differ can tell them
+  // apart. The right spelling keeps `*p=r; return r;` once, after the switch.
+  {
+    sym: 'sw_jtret',
+    src: 'int sw_jtret(int x,int *p){ int r=0; switch(x){case 0:r=1;break;case 1:if(*p)return -1;r=2;break;case 2:r=3;break;case 3:r=4;break;case 4:r=5;break;case 5:r=6;break;case 6:r=7;break;case 7:r=8;break;} *p=r; return r; }',
+    features: ['dense', 'switch-arms'],
+    toolchains: ALL,
+    ctx: 'int sw_jtret(int,int*);',
   },
 
   // ── merged value chains (several values decided by several arms, joined at one point) ───────
