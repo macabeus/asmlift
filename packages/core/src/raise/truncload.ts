@@ -54,11 +54,20 @@
 // the benchmark's `unitrunc` row carries both.
 //
 // WHICH GATE BOUNDS THE CORPUS PATH — `pnpm bench gates --pass truncload`, and the answer is the
-// SOUND ones, per population. Over the synthetic tier on agbcc (322 rows) the census reads
-// `covering-store 2, covering-dominates 2, fixed-cell 1`; on ido7.1 (166 rows) and gcc2.7.2kmc
-// (171) `covering-store 2, high-order-read 2, fixed-cell 1`, the big-endian rows reaching the
-// skew rule because `utag`'s union members are read at the field's TOP; on mwcc_242_81 (178)
-// `covering-store 2, fixed-cell 1`. `high-order-read` is STARVED on agbcc — not because nothing
+// SOUND ones, per population. Over the synthetic tier on agbcc (336 rows) the census reads
+// `fixed-cell 2, covering-store 2, covering-dominates 2`; on ido7.1 (178 rows) and gcc2.7.2kmc
+// (182) `fixed-cell 2, covering-store 2, high-order-read 2`, the big-endian rows reaching the
+// skew rule because `utag`'s union members are read at the field's TOP; on mwcc_242_81 (188)
+// `fixed-cell 2, covering-store 2`.
+//
+// READ THE `did not lift` LINE WITH THE COUNTS, because the census runs the whole RANKED
+// enumeration per row and a row that THROWS part-way through it contributes a TRUNCATED count
+// rather than none. `synthetic:unidev` is the worked example: while `raise/structs.ts` declined it
+// the agbcc census read `fixed-cell 1` with 13 rows unlifted, and once that pass stopped declining
+// a literal-address base it read `fixed-cell 2` with 12 — the same refusals, all of them now
+// reached. `--only synthetic:unidev:agbcc` shows the whole delta on that one row.
+//
+// `high-order-read` is STARVED on agbcc — not because nothing
 // skews there, but because `synthetic:uhalf`'s skewed read sits on a base whose widest access is
 // the `u->w = v` STORE, so the earlier rule answers first. Real rows show two of them alone:
 // `--only sa3:sub_804DC38:agbcc` reads `high-order-read 4`, an `ldrb` at byte 5 of a word at 4,

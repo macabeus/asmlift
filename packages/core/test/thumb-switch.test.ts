@@ -8,6 +8,7 @@ import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
+import { count } from './helpers';
 
 // The dispatch idiom, shared by every case below: bounds guard → `lsl #2` → pool load of the table
 // pointer → indexed load → `mov pc`. `ptr` is the operand of the pointer load, `bounds` the guard.
@@ -346,4 +347,59 @@ test('the relaxation covers the two dispatch ops only — `movs pc` still declin
     `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
     `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
   expect(() => decompile('f', movs, ARMV4T_AGBCC)).toThrow(jump);
+});
+
+// A JUMP TABLE WHOSE ARMS RETURN still has an end. Post-dominance gives the dispatch no join when
+// one arm can `return` on its own — EXIT is then the only block on every path — and with a null
+// merge the default edge's target joins the arms' sibling set, so every arm's plain `break` reads
+// as a fall-through INTO it. Three arms "falling into" one default do not linearize, and Regime B
+// has no second recovery, so the whole function declined. `sa3:Sio32MultiLoadMain` is that shape
+// and its source contains no fall-through and no `default:` label at all.
+//
+// `ret` is the shared exit: arms leave by `b .Lend`, and `.Lend` is also the default target, so
+// "the default" is just where the switch ends. `early` is the arm body that also returns on its own.
+const returningArms = (early: string) =>
+  'f:\n\tcmp\tr1, #0x2\n\tbhi\t.Lend\n' +
+  '\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+  '.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n\t.word\t.Lc2\n' +
+  '.Lc0:\n\tbl\tsideA\n\tb\t.Lend\n' +
+  `.Lc1:\n${early}` +
+  '.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n' +
+  '.Lend:\n\tbl\tsideEnd\n\tbx\tlr\n';
+
+// the arm that kills post-dominance: it returns without reaching the shared tail
+const EARLY_RETURN = '\tcmp\tr2, #0\n\tbeq\t.Lend\t@cond_branch\n\tbl\tsideB\n\tbx\tlr\n';
+
+test('a jump table whose arms return still has an end', () => {
+  const out = decompile('f', returningArms(EARLY_RETURN), ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  // one `break;` per arm — the arms end, they do not run on into anything
+  expect(count(out, 'break;')).toBe(3);
+  // …and no arm is read as running into the next, which is what the null merge made them
+  expect(out).not.toContain('fall');
+  // THE TAIL IS EMITTED ONCE, AFTER THE SWITCH. Duplicating it into each arm is the other
+  // plausible wrong answer here, and it is a different program only by size — so it is asserted
+  // by count, not by absence.
+  expect(count(out, 'sideEnd(')).toBe(1);
+  expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.lastIndexOf('break;'));
+  // the arm's own early `return` survives as one
+  expect(count(out, 'sideB();')).toBe(1);
+});
+
+test('a table with no shared `ret` at all still falls back to the enclosing stop', () => {
+  // EVERY arm returns by itself, so no `ret` is reachable from every successor and the follow is
+  // null. That is the `?? stop` tail, and it must keep the shape it always had: the arms are
+  // structured to their own ends. Without the fallback this commit would change four corpus sites.
+  const out = decompile(
+    'f',
+    returningArms(EARLY_RETURN)
+      .replace('.Lc0:\n\tbl\tsideA\n\tb\t.Lend\n', '.Lc0:\n\tbl\tsideA\n\tbx\tlr\n')
+      .replace('.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n', '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n'),
+    ARMV4T_AGBCC,
+  ).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  expect(count(out, 'sideA();')).toBe(1);
+  expect(count(out, 'sideC();')).toBe(1);
 });

@@ -273,3 +273,25 @@ test('two globals pair ACROSS BLOCKS, one through a delay slot, into the arm eac
   const src = decompile('cb2', asm, MIPS_GCC, { asmData: rs }).source;
   expect(src).toMatch(/if \(a0 != 0\) \{\s*return gA;\s*\} else \{\s*return gB;\s*\}/);
 });
+
+// THE BARE NAME SPELLS ONE SIGNEDNESS AS WELL AS ONE WIDTH. `lh` and `lhu` on one cell are a
+// type-pun: two declarations, not one, and a source that wrote the bare `gPun` for both would have
+// zero-extended twice. The width half of this rule has a Thumb witness (globals.test.ts); the
+// signedness half CANNOT have one — Thumb's `ldrsh`/`ldrsb` take a register offset, and the `add`
+// that forms it already marks the symbol an aggregate — so it is witnessed here, where `%hi/%lo`
+// addressing needs no such add. Without the signedness term this emits `return gPun + gPun;` and
+// the zero-extended read is gone.
+test('a symbol read SIGNED and UNSIGNED at offset 0 has no bare spelling', () => {
+  const asm =
+    '00000000 <pun>:\n   0:\tlui\tv0,0x0\n   4:\tlui\tv1,0x0\n   8:\tlh\tv0,0(v0)\n   c:\tlhu\tv1,0(v1)\n  10:\tjr\tra\n  14:\taddu\tv0,v0,v1\n';
+  const rs = relocs([
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gPun' },
+    { off: 8, type: 'R_MIPS_LO16', sym: 'gPun' },
+    { off: 4, type: 'R_MIPS_HI16', sym: 'gPun' },
+    { off: 12, type: 'R_MIPS_LO16', sym: 'gPun' },
+  ]);
+  const src = decompile('pun', asm, MIPS_GCC, { asmData: rs }).source;
+  expect(src).toContain('*(s16 *)&gPun');
+  expect(src).toContain('*(u16 *)&gPun');
+  expect(src).not.toContain('gPun + gPun');
+});

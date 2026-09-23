@@ -497,9 +497,16 @@ describe('assigning &gSym to a pointer local', () => {
 `;
 
   /** Same shape but width 4, so the destination local is `s32 *` — the pointee the
-   *  declaration-side rule has to match exactly. */
+   *  declaration-side rule has to match exactly. THE INTERIOR STORE MOVES TO BYTE 4 WITH THE WIDTH:
+   *  an access is naturally aligned to its own width, and `{off=2, width=4}` has no subscript
+   *  spelling at all — structure.ts's `displacementIndex` declines it, and before that guard
+   *  existed these four cases emitted `((s32 *)&gArr)[0.5] = 7;` under the assertion they make. */
   const emitS32 = (info: Record<string, unknown>): string => {
-    const fn = parse(PHI_OF_GADDR.replace(/u16\*/g, 's32*').replace(/width=2/g, 'width=4'));
+    const fn = parse(
+      PHI_OF_GADDR.replace(/u16\*/g, 's32*')
+        .replace(/width=2/g, 'width=4')
+        .replace(/off=2/g, 'off=4'),
+    );
     verify(fn);
     recoverTypes(fn);
     const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', ...info }]]);

@@ -20,17 +20,18 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
+import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 // Run the raise tower (post-lift IR → recognizeStructs → recover → structure → C), mirroring the
 // pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C.
-function emit(ir: string, returnsVoid = false): string {
+function emit(ir: string, returnsVoid = false, symbols?: Map<string, SymbolInfo>): string {
   const fn = parse(ir);
   verify(fn);
   recognizeStructs(fn);
   recoverTypes(fn);
   verify(fn);
-  const sfn = structure(fn, structureOptionsFor(ARMV4T_AGBCC, returnsVoid));
+  const sfn = structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, returnsVoid), ...(symbols ? { symbols } : {}) });
   return cBackend.emit(sfn);
 }
 
@@ -141,4 +142,226 @@ describe('struct recovery — access-pattern evidence discriminator', () => {
 `),
     ).toThrow(/not naturally aligned/);
   });
+});
+
+// AN ADDRESS THE FUNCTION DID NOT INVENT. The recovery above reads a base's access set as
+// EVIDENCE for a layout, and declines LOUD when no plain C struct reproduces it. That reading only
+// makes sense for a base whose layout this function's accesses are the only account of. Two bases
+// are not like that: a NAMED global (`gaddr`), declared in the project's own headers, and a
+// LITERAL ADDRESS, which is a cell the hardware placed. For those the accesses are not evidence
+// about a layout — they are just accesses, each spelled at its own width — so a synthesis failure
+// is forgiven and the base keeps its untyped spelling.
+//
+// This is the DUAL of raise/truncload.ts's `fixed-cell` gate, which refuses to FOLD two widths at a
+// fixed cell into one cast of a wider load. Both readings agree the two accesses stay two; this one
+// adds that two accesses at one device address are not a contradiction to decline over.
+describe('struct recovery — a base whose address is declared elsewhere', () => {
+  // The inhabitant: a memory-mapped I/O register the source writes as a halfword and as a word
+  // (`sa3:Sio32MultiLoadMain` writes REG_SIOCNT at 0x4000128 both ways). BEFORE this rule the
+  // whole function declined with "overlapping fields at offset 0 (widths 2 and 4)".
+  test('two widths at one literal address lift, at their own widths, with no struct', () => {
+    const c = emit(
+      `fn dev {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=67109160}
+  store %1, %0 {off=0, width=2}
+  store %1, %0 {off=0, width=4}
+  ret
+}
+`,
+      true,
+    );
+    expect(c).not.toContain('struct');
+    expect(c).toContain('*(u16 *)67109160 = a0;');
+    expect(c).toContain('*(s32 *)67109160 = a0;');
+  });
+
+  // The same forgiveness on the OTHER kind of declared address — a named global, whose two widths
+  // at one offset are agbcc fusing two adjacent byte compares into one `ldrh`. `not.toContain
+  // ('struct')` alone would pass on the WRONG answer here (the bare `gState + gState`, which loses
+  // the narrow read), so the spelling is asserted too — structure.ts's width-aware classification
+  // is what makes it the right one, and this is that rule's reader-side witness.
+  test('two widths at one named global lift with no struct', () => {
+    const c = emit(`fn sym {
+^bb0():
+  %0: unk32 = gaddr {sym="gState"}
+  %1: unk32 = load %0 {off=0, width=2, signed=false}
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  %3: unk32 = add %1, %2
+  ret %3
+}
+`);
+    expect(c).not.toContain('struct');
+    expect(c).toContain('(u16 *)&gState');
+    expect(c).toContain('(u8 *)&gState');
+    expect(c).not.toContain('gState + gState');
+  });
+
+  // WRONG-ANSWER SIDE ①. This rule forgives a FAILED synthesis; it does not stop synthesizing at a
+  // constant address. A literal-address base whose accesses DO reconcile still gets its struct —
+  // `((struct S *)K)->field_4` and `((u32 *)K)[1]` are byte-visibly different spellings (the
+  // COMPONENT_REF keeps the offset in the load displacement), so losing the struct here would
+  // silently respell every device-struct row, rather than widen anything.
+  test('a reconcilable layout at a literal address still recovers its struct', () => {
+    const c = emit(`fn devstruct {
+^bb0():
+  %0: unk32 = const {value=67109160}
+  %1: unk32 = load %0 {off=0, width=1, signed=false}
+  %2: unk32 = load %0 {off=4, width=4, signed=true}
+  %3: unk32 = add %1, %2
+  ret %3
+}
+`);
+    expect(c).toContain('struct Struct0 {');
+    expect(c).toContain('->field_0');
+    expect(c).toContain('->field_4');
+  });
+
+  // WRONG-ANSWER SIDE ②. The gate this rule does NOT relax: an ANONYMOUS base — a parameter, a
+  // loaded pointer — has no source of truth but its own access set, so the identical overlap still
+  // declines. `synthetic:uhalf` and `synthetic:uniwrite` are that shape, and they keep declining.
+  test('the identical overlap on an anonymous base still fails loud', () => {
+    expect(() =>
+      emit(
+        `fn anon {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=2}
+  store %0, %1 {off=0, width=4}
+  ret
+}
+`,
+        true,
+      ),
+    ).toThrow(/overlapping fields at offset 0 \(widths 2 and 4\)/);
+  });
+});
+
+// WRONG-ANSWER SIDE ③. THE FORGIVENESS IS KEYED ON THE REFUSAL, NOT ON THE BASE. `buildStruct`
+// throws at three sites in TWO classes, and only one class has a per-access residue. `overlap`
+// does, and it is two of the three sites — a second access at the same offset with a different
+// width, and one whose range straddles the field before it (`{s32@0, s16@2}`, which reaches the
+// `aligned > f.off` arm and carries the SAME "unions not modelled" text at a different offset).
+// Either way the accesses are each spellable at their own offset and width, which is what the four
+// tests above assert. `packed` does not: a misaligned access renders through the element index `off / width`,
+// and for `{off 2, width 4}` that is `0.5`. Forgiving it would emit `((s32 *)K)[0.5]`, which agbcc
+// answers with `array subscript is not an integer` — an uncompilable candidate where the tree had
+// an honest decline. Both kinds of declared address are asserted, because the catch that forgave
+// them keyed on the base and so had the same hole twice.
+describe('struct recovery — a packed layout is refused whatever the base', () => {
+  test('a misaligned access at a literal address declines rather than emitting a fraction', () => {
+    expect(() =>
+      emit(
+        `fn packedlit {
+^bb0():
+  %0: unk32 = const {value=67109160}
+  %1: unk32 = load %0 {off=2, width=4, signed=true}
+  ret %1
+}
+`,
+      ),
+    ).toThrow(/not naturally aligned — packed layout not modelled/);
+  });
+
+  test('a misaligned access at a named global declines too', () => {
+    expect(() =>
+      emit(`fn packedsym {
+^bb0():
+  %0: unk32 = gaddr {sym="gState"}
+  %1: unk32 = load %0 {off=2, width=4, signed=true}
+  ret %1
+}
+`),
+    ).toThrow(/not naturally aligned — packed layout not modelled/);
+  });
+
+  // …and the fraction is refused again where it would be COMPUTED, so a base that never reaches
+  // `recognizeStructs` at all cannot produce one either. `displacementIndex` is called from three
+  // places in `memAccess` and EACH needs its own witness: the call cannot be hoisted to the top of
+  // `memAccess`, because the declared-struct-member path and the bare-scalar path legitimately
+  // arrive with `off % width !== 0` and must not be refused, so the refusal is per-path — and a
+  // per-path refusal is per-path forgettable. Replacing any one call below with the bare
+  // `off / width` emits the subscript named in that test's own assertion; replacing the other two
+  // leaves the whole of `packages/core/test` green, which is what the three tests here answer.
+  test('an interior-offset store below the access width has no subscript at all', () => {
+    expect(() =>
+      emit(
+        `fn frac {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gArr"}
+  store %1, %0 {off=2, width=4}
+  ret
+}
+`,
+        true,
+      ),
+    ).toThrow(/a 4-byte access at byte 2 of its base is not a whole number of elements/);
+  });
+
+  // THE MOST GENERAL PATH IN `memAccess`, and the one `recognizeStructs` can never have refused
+  // first: a base that is ALREADY TYPED is skipped by the struct pass (`base.type.kind !==
+  // 'unknown'`), so a parameter declared `s32 *` and read at byte 2 arrives at the anonymous-base
+  // fallback with nothing between it and `((s32 *)a0)[0.5]` but this guard. Four lines of IR reach
+  // it, which is the whole argument for the guard being installed at each call rather than once.
+  test('a typed base read below its own width has no subscript either', () => {
+    expect(() =>
+      emit(`fn anon {
+^bb0(%0: s32*):
+  %1: unk32 = load %0 {off=2, width=4, signed=true}
+  ret %1
+}
+`),
+    ).toThrow(/a 4-byte access at byte 2 of its base is not a whole number of elements/);
+  });
+
+  // …and the MULTIDIMENSIONAL spelling, whose recovered subscripts are whole and whose operand
+  // DISPLACEMENT need not be. `declaredSubscripts` divides the address RESIDUAL into rows and
+  // elements and answers null when that does not come out whole; `off` is a separate fact (the
+  // load's own immediate) and is added afterwards, so a clean `gTab[a0]` can still carry a
+  // fractional tail. Without the guard on this path the emitted C is `gTab[a0][0.5]`.
+  test('a declared row index with a fractional displacement has no subscript either', () => {
+    const symbols = new Map<string, SymbolInfo>([
+      ['gTab', { name: 'gTab', kind: 'data', shape: 'array', elemSize: 4, elemSigned: true, dims: [3, 4] }],
+    ]);
+    expect(() =>
+      emit(
+        `fn multi {
+^bb0(%0: unk32):
+  %1: unk32 = gaddr {sym="gTab"}
+  %2: unk32 = const {value=16}
+  %3: unk32 = mul %0, %2
+  %4: s32* = add %1, %3
+  %5: unk32 = load %4 {off=2, width=4, signed=true}
+  ret %5
+}
+`,
+        false,
+        symbols,
+      ),
+    ).toThrow(/a 4-byte access at byte 2 of its base is not a whole number of elements/);
+  });
+});
+
+// AN INTERIOR ADDRESS IS DECLARED BY THE SAME HEADER THE SYMBOL IS. `&gBuf + 8` is a cell of a
+// project-declared object exactly as `&gBuf` is, and raise/truncload.ts's `fixed-cell` gate already
+// reads it that way (`globalCellOf`). Asking the narrower question here — "is this Value itself a
+// `gaddr` op" — split the two readers, because `constOffsetAccesses` keys an access on its raw
+// base Value, so an interior address is its own base and never the bare symbol's.
+test('an overlap at an interior global address lifts, like one at the bare symbol', () => {
+  const c = emit(`fn interior {
+^bb0():
+  %0: unk32 = gaddr {sym="gBuf"}
+  %1: unk32 = const {value=8}
+  %2: unk32 = add %0, %1
+  %3: unk32 = load %2 {off=0, width=2, signed=false}
+  %4: unk32 = load %2 {off=0, width=1, signed=false}
+  %5: unk32 = add %3, %4
+  ret %5
+}
+`);
+  expect(c).not.toContain('struct');
+  // THE SUBSCRIPT IS THE WHOLE OF WHAT MAKES THIS INTERIOR. `*(u16 *)&gBuf + *(u8 *)&gBuf` is the
+  // residue that forgives the overlap and then reads the WRONG cell, and a bare `(u16 *)&gBuf`
+  // assertion passes on it, so the byte offset is asserted rather than the cast alone.
+  expect(c).toContain('((u16 *)&gBuf)[4]');
+  expect(c).toContain('((u8 *)&gBuf)[8]');
 });

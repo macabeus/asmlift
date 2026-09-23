@@ -54,11 +54,12 @@ import type { VariationName } from './variation-tokens';
  *  that setting's own lifted fn (a map-lifted shared lift spells const bases as gaddr, which would
  *  blind the /raw-globals siblings — the /addr-home lesson). `strip` opts the variation into the
  *  dropped-sibling closure: a candidate that applies it is skipped when its default sibling (the
- *  same setting without it) failed the boundary contracts. Two variations are EXEMPT from structure()'s assertDefaultAccepts invariant:
- *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
- *  declarations — neither adds materialization or merging, so neither can unlock a function the
- *  default declines (reread also skips the strip closure). Both exemptions are stated here
- *  rather than left implicit in a missing `||` arm or trigger term. */
+ *  same setting without it) failed the boundary contracts. Which of these entries `structure()`'s
+ *  `assertDefaultAccepts` guard does NOT reset — the ones that cannot unlock a function the default
+ *  declines, and so carry a written argument in place of the guard — is stated ONCE, beside that
+ *  guard in structure.ts, and derived from the guard's own reset list in
+ *  test/variation-offers.test.ts — never restated here, where a second copy drifts from the guard
+ *  without anything going red. */
 export interface StructureVariation {
   flag:
     | 'reread'

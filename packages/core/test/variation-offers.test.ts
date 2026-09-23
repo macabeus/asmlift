@@ -224,3 +224,65 @@ describe('a rule a reader sees reads as prose', () => {
     expect([...soundness].filter(([, s]) => s.size > 1).map(([why]) => why)).toEqual([]);
   });
 });
+
+// WHICH VARIATIONS THE DEFAULT-ACCEPTS GUARD COVERS, derived from the guard rather than restated.
+//
+// `structure()` holds one invariant about the whole registry: a candidate spelling never unlocks a
+// function the default declines. It is enforced two ways, not one — `assertDefaultAccepts` re-runs
+// the default structuring for the options it RESETS, and each variation it does not reset carries a
+// written argument instead. That split is an authoring decision about every new variation, so the
+// set of non-members is a fact a reader acts on, and a prose set drifts: the same split was stated
+// in two files and the two disagreed about its size while every gate was green.
+//
+// So it is stated in ONE comment, beside the guard, and this derives the other side of it from the
+// guard's own reset list. Add a variation and forget the guard and this goes red naming it.
+describe("the assertDefaultAccepts guard's members are derived, not described", () => {
+  const STRUCTURE = 'packages/core/src/structure/structure.ts';
+  /** The options `assertDefaultAccepts` turns off before re-running the default structuring. Read
+   *  from its body with comments stripped, so a name only a comment mentions is not counted. */
+  const resetByGuard = (): Set<string> => {
+    const body = /function assertDefaultAccepts\b[\s\S]*?\n}/.exec(withoutComments(STRUCTURE));
+    expect(body, 'assertDefaultAccepts must still be a top-level function in structure.ts').not.toBeNull();
+    return new Set([...body![0].matchAll(/(\w+): false/g)].map((m) => m[1]));
+  };
+  /** The single `StructureOptions` key a variation writes. */
+  const optionKey = (v: (typeof STRUCTURE_VARIATIONS)[number]): string => {
+    const keys = Object.keys(v.options(true) ?? {});
+    expect(keys, `/${v.name} must write exactly one structure option`).toHaveLength(1);
+    return keys[0];
+  };
+  /** The `/name`s structure.ts's comment lists as deliberate non-members: the bullets that follow
+   *  its anchor line, stopping at the first line that is not one. */
+  const namedNonMembers = (): string[] => {
+    const src = readFileSync(join(REPO_ROOT, STRUCTURE), 'utf8').split('\n');
+    const at = src.findIndex((l) => l.includes('DOES NOT RESET'));
+    expect(at, 'structure.ts must still anchor the list with "DOES NOT RESET"').toBeGreaterThan(-1);
+    const out: string[] = [];
+    for (let i = at + 1; i < src.length; i++) {
+      const m = /^\s*\/\/\s+- `(\/[a-z-]+)`/.exec(src[i]);
+      if (m) {
+        out.push(m[1]);
+      } else if (!/^\s*\/\//.test(src[i])) {
+        break;
+      }
+    }
+    return out.sort();
+  };
+
+  test('the probe finds the guard and the list, so neither gate below can pass vacuously', () => {
+    expect(resetByGuard().size).toBeGreaterThan(5);
+    expect(namedNonMembers().length).toBeGreaterThan(0);
+  });
+
+  test('every structure variation the guard does not reset is one the comment names', () => {
+    const notReset = STRUCTURE_VARIATIONS.filter((v) => !resetByGuard().has(optionKey(v)))
+      .map((v) => `/${v.name}`)
+      .sort();
+    expect(notReset).toEqual(namedNonMembers());
+  });
+
+  test('…and every name the comment lists is a registered structure variation', () => {
+    const registered = new Set(STRUCTURE_VARIATIONS.map((v) => `/${v.name}`));
+    expect(namedNonMembers().filter((n) => !registered.has(n))).toEqual([]);
+  });
+});

@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=126.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.1s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,64 +137,37 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,075 s over 188 real rows** and **559 s over 743 synthetic rows**; wall clock was 367.6 s and
-307.9 s, and **480.7 s end to end** because the tiers overlap — 307.9 + 367.6 is 675.5, which is
-not the wall time and never was. The dearest single row is **165 s**
-on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to
-reach for when a scoped run looks cheap. The gate over this paragraph DERIVES that row from the
-artifact rather than naming it, so the id moves when the dearest row moves; it used to name one,
-and a sentence calling the fourth-dearest row the dearest was green under it.
+**1,106 s over 187 real rows** and **598 s over 749 synthetic rows**; wall clock was 220.7 s and
+254.1 s, and **348.9 s end to end** because the tiers overlap — 254.1 + 220.7 is 474.8, which is
+not the wall time and never was. The dearest single row is **177 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, **16% of the tier** on its own — which is the figure to reach
+for when a scoped run looks cheap.
 
-Both tiers came in cheaper than the entry below, measured 2026-09-23 (real 1,371 → 937 s, 0.68×;
-synthetic 915 → 509 s, 0.56×) on a branch that adds no candidate to any row, and `bench diff`
-agrees where it counts: `fan vs 87b49c74: 0 row(s) moved, total 67415 → 67415 (1.00×) over 928
-comparable row(s) — 2 more counted here and not at 87b49c74`.
+THE SAME TREE, BENCHED TWICE, HALVED ONE TIER. This entry replaces a reading of the same branch
+taken earlier the same day — that artifact 2026-09-23 09:06Z, this one 2026-09-23 10:43Z: real **908 s → 842 s**
+(0.93×) and synthetic **1,054 s → 524 s**
+(0.50×). Between the two artifacts `bench diff --base 6bb69524` reports **0 field changes, 0 added,
+0 removed** and a fan of **67,699 → 67,699 (1.00×) over 936 rows** — not one row enumerates or
+scores differently, and the commits between them are a decline that no corpus row reaches plus
+comments. A tier sum halved with nothing whatever to show for it. That is what these seconds are.
 
-**READ THAT QUALIFIER, because "1.00×" alone is not what the corpus says.** The multiplier is over
-the rows priced on BOTH sides, which is what a multiplier can be. Summed over every priced row the
-total is **67,415 over 928 rows → 67,465 over 930**: the two rows that stopped declining got a fan
-for the first time, 48 and 2. Nothing's fan grew; two rows entered the count. `bench diff` cannot
-see a row ENTER the fan at all, so a branch that turns declines into candidates always owes the
-second number by hand.
+Against the merge-base's own artifact (2026-09-23 03:36Z) rather than against itself: real
+**1,371 s → 842 s** and synthetic **915 s → 524 s**; `bench diff --base 87b49c74` prices it as **2,286 s → 1,352 s (0.59×) over 928
+rows**, and the same command's own note says to read it beside the fan — which is **67,415 →
+67,415, 1.00×, zero records moved**.
 
-It also priced the COST list entirely in the cheap direction, and the tool says how many rather
-than being hand-counted: five rows printed plus `…and 10 more row(s) over 10s and 1.5×`, so
-**fifteen** (`DoForcedMovement` 131.0 → 3.1 s, `WorldMapScreenCheckNewWorldUnlocked`
-255.7 → 113.7 s). The base artifact was taken with several rounds sharing the box and this one was
-not. **A row whose seconds collapse like that deserves its `droppedCandidates` read before anything
-else** — `DoForcedMovement`'s base artifact carried one candidate lost to
-`'arm-none-eabi-cpp' timed out` and this run carries none, with its outcome, score, fan and winning
-variations all identical. Across the whole corpus 11 rows carry a dropped candidate here and none
-of them records a timeout, which is the reading that matters — a timeout is machine load and moves
-in both directions on a shared box. Only **4** of the 11 say WHY in a way the artifact can be read
-for (`agbcc failed: … too many arguments to function …`). The other **7** — the six bitfield rows
-of the synthetic tier and `synthetic:ptrelem:agbcc` — carry a bare `compile command failed (exit 1)` naming the whole
-`cpp | agbcc | as` pipeline, and that command sends `cpp`'s stderr to `/dev/null`, so those entries
-cannot distinguish a compiler rejecting a candidate from the preprocessor failing. Recompute by
-grouping `asmlift.droppedCandidates[].error` over `apps/benchmark/results/results.json`.
+`bench diff --base 87b49c74` reports **41 field changes, 4 added, 0 removed**, and `bench
+regression --base 87b49c74` **0 lost, 0 missing, 0 retired, 4 added, 2 gained, 3 other flips**. The
+2 gained are `synthetic:unidev` on gcc2.7.2kmc and mwcc_242_81; the 3 other flips are
+`sa3:Sio32MultiLoadMain:agbcc` and `synthetic:unidev` on agbcc and ido7.1, each `declined` →
+nonmatch; the 4 added are the `sw_jtret` row on its four toolchains.
 
-The artifact before this one, `87b49c74`, read **1,371 s over 186 real rows** and **915 s over 742
-synthetic rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to end** (`real 417.39`
-under `/usr/bin/time -p`) because the tiers overlap — 337.5 + 332.3 is 669.8, which is not the wall
-time and never was. Its dearest single row was **255.7 s** on
-`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`, **19% of the tier** on its own, with
-`DoForcedMovement` second at 131.0 s and `WorldMapScreenIsValidPath` third at 130.4 s.
-
-ONLY THE CURRENT ARTIFACT IS GATED, so a paragraph about an earlier one is prose and has to be
-measured by hand: `git show <sha>:apps/benchmark/results/results.json`, then sort the real rows by
-`asmlift.rankSeconds` descending — the sentence above names the top three, and that sort is what
-recomputes them. This paragraph said **117 s on `kleod:PauseMenuScreenHandler:agbcc`, 9%** until a
-reviewer recomputed it: that row is the **fourth** dearest, at 8.5% of the tier, and was never the
-first. The figure was inherited from the paragraph above it rather than re-derived, and a figure
-already in the file reads as one somebody checked. The correction was itself wrong once — it said
-**third**, which the sentence four lines above contradicts by name — so re-derive the rank, do not
-adjust the word.
-
-The ranked sums two entries above are cheaper than this one on a corpus one row larger. That is
-MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
-for the box, but after a night of eight whole-tier runs, and the per-row rank seconds the artifact
-records are wall seconds. Read a sum here against its own wall-clock line, never against another
-entry's.
+NEITHER OF THOSE TWO RATIOS IS A STATEMENT ABOUT THE PASS, and the fact that they point opposite
+ways on one artifact is the cheapest proof of it in this file. The per-row rank seconds the artifact
+records are wall seconds, so a sum here prices the box as much as the work: this run was taken while
+nothing else competed for it, the entries below it were not. Read a sum here against its own
+wall-clock line, never against another entry's — and when you edit an entry, re-measure every ratio
+in it, because a ratio inherited from the entry above is a number about somebody else's run.
 
 THE CORPUS GREW AND THE RANKED PASS DID NOT. 1,218 → 1,257 rows, and the ranked sum went
 **1,457.0 s → 1,353.4 s (0.93×) over the 908 comparable rows**, because that comparison is a
@@ -208,7 +181,13 @@ argued: the 2 lost are `llshl`/`llshr` on mwcc, which matched by re-emitting `bl
 decline; the 1 missing is `ll2i:agbcc`, a cell deleted because `bx lr` scores every answer alike;
 the 3 gained are `llshl`/`llshr` on agbcc and the real row `sa3:sa2__sub_80855C0:agbcc`.
 
-The artifact before THIS branch's, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
+The artifact before THIS branch's, taken 2026-09-23 at `87b49c74`, read **1,371 s over 186 real
+rows** and **915 s over 742 synthetic rows**; wall clock was 332.3 s and 337.5 s, 417.4 s end to
+end. Its own dearest row was **117 s** on `kleod:PauseMenuScreenHandler:agbcc`, **9% of the tier** —
+the same row at 0.94× the seconds and two thirds the share, because the SHARE moves with the tier
+sum and the tier sum moves with the machine.
+
+The one before THAT, taken 2026-09-23 at `3c427cc2`, read **850 s over 185 real
 rows** and **608 s over 726 synthetic rows**; wall clock was 194.1 s and 231.6 s, 304.1 s end to
 end. THAT TREE WAS BENCHED FIVE TIMES, and the five readings are the cheapest evidence in this file
 that the seconds are not the measurement: **1,281 s + 630 s** (491.6 s wall, cold),
@@ -218,7 +197,7 @@ TWO COMMENT LINES — same corpus, same 1,218 rows, same outcomes bar its own ro
 spans 1.58× across the five while the synthetic sum spans 1.27× IN THE OPPOSITE DIRECTION between
 the last two. That is what a shared machine looks like from inside one tier.
 
-The one before THAT, taken 2026-09-22, read **813 s over 185 real rows** and **477 s over
+The one before THOSE, taken 2026-09-22, read **813 s over 185 real rows** and **477 s over
 726 synthetic rows**; wall clock was 174.9 s and 195.6 s, and 262.3 s end to end. THAT TREE WAS BENCHED TWICE AND
 THE FIRST RUN IS WHY. It walled
 304.5 s and 351.3 s, 491.6 s end to end, and summed 1,281 s and 630 s — the same outcomes, the same

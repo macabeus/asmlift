@@ -36,6 +36,11 @@ const DECLINE_CTORS = new Set([
   'FrontendUnsupportedError',
   'PpcUnsupportedError',
   'RaiseUnsupportedError',
+  // A SUBCLASS IS A FIFTH CTOR TO THIS HARVEST, not a fourth: the walk reads the NAME at the throw
+  // site and knows nothing about the class hierarchy. `StructOverlapError extends
+  // RaiseUnsupportedError`, and leaving it out took raise/structs.ts's two overlap messages out of
+  // the harvest — which made the `structs` class match nothing core can throw.
+  'StructOverlapError',
   'StructureError',
 ]);
 
@@ -1009,8 +1014,14 @@ describe('the classifier is measured against the messages core can throw, not on
   // which is a claim about 307 declined rows — not about asmlift. These three gates are the other
   // denominator: every decline message `packages/core/src` CAN throw, harvested from the throw
   // sites themselves. The residue they measure is the honest one, and the file's header paragraph
-  // names it by file — a paragraph of figures about 123 distinct messages across 11 files, which
+  // names it by file — a paragraph of figures about the distinct messages across 11 files, which
   // nothing but this can hold to them.
+  //
+  // EVERY FIGURE IN THAT PARAGRAPH IS SPELT TWICE and there is no way around it: one copy is prose
+  // a reader acts on, the other is derived here from the harvest. What keeps them honest is that
+  // the derived side is read back OUT of `declines.ts`, figure by figure — the distinct-message
+  // count, the residue total, and one `toContain` per file — so a drift in either copy is red.
+  // A figure gated on one clause of the paragraph is a gate on one clause of the paragraph.
 
   test('the harvest finds the decline sites, so a null result here would be the probe failing', () => {
     // Without this, deleting the walk would make every gate below vacuously pass.
@@ -1025,7 +1036,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 27],
-    ['structure/structure.ts', 16],
+    ['structure/structure.ts', 17],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1033,7 +1044,42 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 72;
+  const RESIDUE_TOTAL = 73;
+
+  // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
+  // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
+  // rows as hand-typed prose. Each figure below is derived from the harvest and then required to
+  // appear in `declines.ts`, so no clause of that paragraph can drift while the others hold.
+  const DECLINES_TS = 'apps/web/src/pages/benchmark/lib/declines.ts';
+  const declinesSource = (): string => readFileSync(join(ROOT, DECLINES_TS), 'utf8');
+  const distinctMessages = (): number => new Set(CORE_TEMPLATES.map((t) => t.text)).size;
+
+  test('the header paragraph names the number of messages the harvest actually finds', () => {
+    const distinct = distinctMessages();
+    expect(
+      declinesSource(),
+      `declines.ts's header paragraph must say "throws ${distinct} distinct decline messages" — that is ` +
+        `what the harvest finds today`,
+    ).toContain(`throws ${distinct} distinct decline messages`);
+  });
+
+  test('…and the share of them the paragraph calls the residue', () => {
+    expect(
+      declinesSource(),
+      `declines.ts's header paragraph must say "${RESIDUE_TOTAL} of them classify as \\"other\\"" — that is ` +
+        `the residue the harvest leaves`,
+    ).toContain(`${RESIDUE_TOTAL} of them classify as "other"`);
+  });
+
+  // The per-file table, which is the half that drifts silently: a capability lands, one file's
+  // residue drops by one, and nothing but this says so. Matched on the harvest's own file key
+  // (which is why the table spells `structure/structure.ts`, not `structure.ts`) and tolerant of
+  // the column alignment, because a realignment is not a drift.
+  test.each(RESIDUE_BY_FILE)('the per-file table says %s has %i', (file, count) => {
+    expect(declinesSource(), `declines.ts's header table must list "${file}" with ${count} residual messages`).toMatch(
+      new RegExp(`^//\\s+${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+${count}\\s`, 'm'),
+    );
+  });
 
   test('the residue the header paragraph names is the residue that is there', () => {
     const unclassified = [...new Set(CORE_TEMPLATES.map((t) => t.text))].filter((t) => classOfText(t) === 'other');

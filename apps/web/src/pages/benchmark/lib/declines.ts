@@ -20,47 +20,53 @@
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
-// 330 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
+// 326 declines. That is the anchor a comment cannot be: a reworded core message, or a gap nobody
 // has named, fails there by name rather than quietly enlarging a catch-all.
 //
 // THAT ZERO IS TRUE OF THE ARTIFACT AND NOT OF THE TOOL, and the difference is the honest residue.
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 123 distinct decline messages (the texts reached by
-// `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError` and `StructureError`,
-// harvested by taking each throw's balanced-paren argument, keeping its string-literal pieces and
-// replacing every interpolation with a placeholder). 72 of them classify as "other". Some belong
+// `packages/core/src` throws 126 distinct decline messages (the texts reached by
+// `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
+// subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
+// its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
+// separate NAME to that harvest, so it is listed separately here too). 73 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts   27  ARM-mode function, raw data in the code stream, a base alignment the
-//                           input does not determine, pc used as a data base, `stm` with its own
-//                           base in the list, control falling off the end, a register spelled in
-//                           upper case, a `bl` whose target this asm defines as a data label, and
-//                           the reaching-compare throw whose reason is interpolated
-//                           (`cross-block-flags-arm` keys on one of its reasons, so the template
-//                           with a placeholder in it matches nothing)
-//   structure.ts        16  eleven loop and post-loop naming refusals beside the two
-//                           `loop-exit-values` claims, an unsupported terminator, a volatile read
-//                           behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
-//                           and two internal invariants (an ambiguous array offset, a
-//                           parallel-copy bug)
-//   frontend/mips.ts     9  a relocation with an addend, an address below the symbol, an indirect
-//                           `jr`, a non-numeric immediate, and five refusals about a disassembly
-//                           the reader cannot account for
-//   frontend/splat.ts    8  a data directive in the code stream, a tail call / cross-function
-//                           branch, an unparsable constant expression, and a magnitude with a
-//                           leading zero (octal to the assembler)
-//   frontend/disasm.ts   7  the objdump `...` elision family
-//   frontend/ppc.ts      3  `stwu` with update, a relocation on a stack-pointer adjust, and the
-//                           two-armed branch denylist, whose template is interpolation end to end
-//   frontend/format.ts   1  the input/frontend mismatch — an input error
-//   pipeline.ts          1  the attribution wrapper, which carries whichever reason it wraps
+//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, a base alignment the
+//                               input does not determine, pc used as a data base, `stm` with its own
+//                               base in the list, control falling off the end, a register spelled in
+//                               upper case, a `bl` whose target this asm defines as a data label, and
+//                               the reaching-compare throw whose reason is interpolated
+//                               (`cross-block-flags-arm` keys on one of its reasons, so the template
+//                               with a placeholder in it matches nothing)
+//   structure/structure.ts  17  eleven loop and post-loop naming refusals beside the two
+//                               `loop-exit-values` claims, an unsupported terminator, a volatile read
+//                               behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
+//                               an access whose byte offset is not a whole number of its own elements
+//                               (no subscript spells it), and two internal invariants (an ambiguous
+//                               array offset, a parallel-copy bug)
+//   frontend/mips.ts         9  a relocation with an addend, an address below the symbol, an indirect
+//                               `jr`, a non-numeric immediate, and five refusals about a disassembly
+//                               the reader cannot account for
+//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
+//                               branch, an unparsable constant expression, and a magnitude with a
+//                               leading zero (octal to the assembler)
+//   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ppc.ts          3  `stwu` with update, a relocation on a stack-pointer adjust, and the
+//                               two-armed branch denylist, whose template is interpolation end to end
+//   frontend/format.ts       1  the input/frontend mismatch — an input error
+//   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
-// THAT COUNT IS A GATE, not a comment. `declines.test.ts` re-runs the harvest and holds the total
-// and the per-file breakdown, so a paragraph of figures cannot drift away from the files it counts.
-// Move a family out of the residue and into a class and the gate goes red with the new number.
+// EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all twelve of them, and the file
+// names are the harvest's own keys so the gate can match on them. `declines.test.ts` re-runs the
+// harvest, derives the distinct-message count, the residue total and the per-file breakdown, and
+// then reads THIS FILE back and requires each one to be spelled here. Move a family out of the
+// residue and into a class and the gate goes red with the new number. A paragraph is only as
+// checked as its least-checked clause, so a figure added here needs its `toContain` in the same
+// commit — otherwise it is prose that reads like a measurement.
 //
 // Named here rather than given classes, because a class with no inhabitant and no witness row is
 // the defect this file exists to remove. A class that HAS a name and no rows is read in only one
@@ -73,7 +79,7 @@
 // `declineClassesOf` answers only for a DECLINED row, which is also why nothing here has to cope
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
-// `raise:` — 264 / 60 / 18 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
+// `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed

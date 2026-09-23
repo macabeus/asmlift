@@ -44,11 +44,12 @@
 // naturally aligned to ITS OWN width (`off % width === 0`) — a genuinely packed layout (a field
 // at an offset natural C alignment could not place it at) is rejected LOUD, as is an
 // overlap/union.
-import { Fn, Op, Value } from '../ir/core';
+import { constAddressOf, globalCellOf } from '../ir/alias';
+import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
-import { RaiseUnsupportedError } from './errors';
+import { RaiseUnsupportedError, StructOverlapError } from './errors';
 
 /** A single observed constant-offset access to a base: the op itself and its program point, its
  *  byte offset, its access width (bytes), and the signedness a recovered field would take from it.
@@ -164,7 +165,22 @@ function isArray(accesses: Access[]): boolean {
  *  access that ran before it on every path is a cast of that access rather than a second field, and
  *  raise/truncload.ts folds it into one before this pass runs. What is left is what the asm does
  *  not settle — a narrow STORE, a read above the low-order end, a cell at a constant address, and a
- *  cover on a path the narrow read does not run — and it still declines. */
+ *  cover on a path the narrow read does not run — and every one of them refuses here.
+ *
+ *  A THROW IS NOT THE FUNCTION'S VERDICT, AND WHICH THROW IT IS DECIDES THAT. Three throw sites
+ *  below reject a layout and they fall into two CLASSES, which is the split a caller reads:
+ *    • `StructOverlapError` — two accesses whose byte ranges collide. TWO of the three sites raise
+ *      it, and they carry the same "unions not modelled" text at different offsets: a second access
+ *      at an offset already taken with a different width, and one whose range straddles the field
+ *      before it (the `aligned > f.off` arm, which is the only one that can see `{s32@0, s16@2}`).
+ *      Each access alone is spellable at its own offset and width, so a base whose ADDRESS is
+ *      declared outside this function's access set can keep its untyped spelling and lift
+ *      (`recognizeStructs` below). There is no struct to synthesize, and nothing is lost by not
+ *      synthesizing one.
+ *    • `RaiseUnsupportedError` — a field at an offset its own natural alignment could not place it
+ *      at. This one has NO per-access spelling downstream: an access at `off` under a wider access's
+ *      width folds to the element index `off / width` (structure/structure.ts), which for a
+ *      misaligned pair is a FRACTION and not C. It declines whatever the base is. */
 function buildStruct(name: string, accesses: Access[]): IrType {
   // One field per distinct offset; a load's signedness wins over a store's (more information).
   const byOff = new Map<number, Access>();
@@ -175,7 +191,7 @@ function buildStruct(name: string, accesses: Access[]): IrType {
       continue;
     }
     if (prev.width !== a.width) {
-      throw new RaiseUnsupportedError(
+      throw new StructOverlapError(
         `cannot recover struct '${name}': overlapping fields at offset ${a.off} (widths ${prev.width} and ${a.width}) — unions not modelled`,
       );
     }
@@ -215,7 +231,7 @@ function buildStruct(name: string, accesses: Access[]): IrType {
   for (const f of dataFields) {
     const aligned = roundUp(cursor, sizeAlign(accessWidth(f)));
     if (aligned > f.off) {
-      throw new RaiseUnsupportedError(
+      throw new StructOverlapError(
         `cannot recover struct '${name}': field at offset ${f.off} overlaps the prior field (aligned to ${aligned}) — unions not modelled`,
       );
     }
@@ -239,16 +255,15 @@ function accessWidth(f: StructField): number {
 export function recognizeStructs(fn: Fn): number {
   const { accessesOf, order, arrayBases } = constOffsetAccesses(fn);
 
-  // Which values are the address of a NAMED global (`gaddr`)? Consulted only when synthesis
-  // DECLINES: see the catch below.
-  const namedGlobal = new Set<Value>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops as Op[]) {
-      if (op.opcode === 'gaddr') {
-        namedGlobal.add(op.results[0]);
-      }
-    }
-  }
+  // Does this base's address have a source of truth OUTSIDE this function's access set? Consulted
+  // only when synthesis refuses an OVERLAP: see the caller below. Two kinds qualify, and both are
+  // read with the helpers raise/truncload.ts asks the same question with — one concept, one
+  // reading, and `globalCellOf` is the whole of that reading: it answers for `&gSym + K` as well as
+  // for the bare `&gSym`, and an interior address is its own base here (`constOffsetAccesses` keys
+  // on the operand Value), so a narrower opcode test would decline the shape `fixed-cell` admits.
+  const defs = defOpMap(fn);
+  const addressDeclaredElsewhere = (base: Value): boolean =>
+    globalCellOf(defs, base, 0) !== null || constAddressOf(defs, base, 0) !== null;
 
   // The NAME counter is seeded from the names already in the graph, not from this pass's own
   // success count: raise/memberarrays.ts runs first and mints `Struct<N>` types of its own, and two
@@ -270,16 +285,37 @@ export function recognizeStructs(fn: Fn): number {
     try {
       base.type = T.ptr(buildStruct(`Struct${name}`, accesses));
     } catch (e) {
-      // A NAMED global whose accesses synthesis cannot reconcile is not a reason to decline the
-      // function: its declaration belongs to the project's own headers, and its constant-offset
-      // accesses render at L3 through the symbol context (member spelling when the map knows the
-      // layout, the honest cast spelling when it does not). The inhabitant is agbcc FUSING two
-      // adjacent u8 compares into one ldrh — `s.level == 8 && s.world == 6` reads offset 12 at
-      // widths 1 AND 2, which is not a union, just two spellings of declared bytes. An ANONYMOUS
-      // base (a loaded pointer, a parameter) has no other source of truth, so for it the decline
-      // stands exactly as before — this catch narrows nothing for the shapes that already worked,
-      // because a base synthesis succeeds on takes the same path it always took.
-      if (e instanceof RaiseUnsupportedError && namedGlobal.has(base)) {
+      // A base whose ADDRESS is already declared somewhere other than this function's access set is
+      // not a struct this pass has to synthesize, so failing to synthesize one for it is not a
+      // reason to decline the function — PROVIDED the refusal is the OVERLAP one (its own class,
+      // never a substring of the message), whose residue is per-access spellings that stand on their
+      // own. Two kinds of base qualify:
+      //   • a NAMED global (`globalCellOf`) — its declaration belongs to the project's own headers,
+      //     and its constant-offset accesses render at L3 through the symbol context (member
+      //     spelling when the map knows the layout, the honest cast spelling when it does not). The
+      //     inhabitant is agbcc FUSING two adjacent u8 compares into one ldrh — `s.level == 8 &&
+      //     s.world == 6` reads offset 12 at widths 1 AND 2, which is not a union, just two
+      //     spellings of declared bytes.
+      //   • a LITERAL ADDRESS (`constAddressOf`) — a cell the hardware placed, which L3 renders as
+      //     a cast at each access's OWN width (`*(u16 *)0x4000004`). There is no layout to
+      //     reconcile: two widths at one literal address are two casts of one address, which is
+      //     what the source wrote. The inhabitant is a memory-mapped I/O register the source writes
+      //     as a halfword and as a word (`sa3:Sio32MultiLoadMain`, `synthetic:unidev`).
+      // This is the DUAL of raise/truncload.ts's `fixed-cell` gate, not a relaxation of it: that
+      // gate refuses to FOLD the two accesses into one cast of a wider load, because a device read
+      // is not a read of the bytes around it. Both readings agree that the two accesses stay two.
+      //
+      // THE PACKED REFUSAL IS NOT FORGIVEN FOR ANY BASE. Its residue is not two spellings: a
+      // misaligned access renders through the element index `off / width`, which is a fraction and
+      // not C, so forgiving it would trade a loud decline for an uncompilable candidate. THIS layer
+      // is the one that can name the layout, which is why the refusal a reader sees is this one.
+      // structure/structure.ts `displacementIndex` refuses the fraction a second time where it
+      // would be computed, for the bases that never reach this pass at all (already typed, or a
+      // forgiven overlap); that message can only describe the access, not the layout.
+      //
+      // An ANONYMOUS base (a loaded pointer, a parameter) has no other source of truth, so for it
+      // the decline stands exactly as before.
+      if (e instanceof StructOverlapError && addressDeclaredElsewhere(base)) {
         continue;
       }
       throw e;
