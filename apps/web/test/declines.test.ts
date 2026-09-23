@@ -475,14 +475,16 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
         "and is read as a value — only its matching '%lo' half may consume it",
       'reloc-halves',
     ],
-    [
-      "lift: cannot lift 'OamMalloc': literal-pool load of pool word 'gOamMallocBuffer+-0x8' is not a symbol, " +
-        'symbol±offset, or number — not modelled',
-      'pool-word-shape',
-    ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
   });
+
+  // `pool-word-shape` used to have its published marker here, `sa3:OamMalloc`'s
+  // `pool word 'gOamMallocBuffer+-0x8' is not a symbol, symbol±offset, or number`. It is gone
+  // rather than reworded: `gOamMallocBuffer+-0x8` LIFTS now, so no input produces that sentence
+  // and a fixture holding it would pass forever while testing a string the tool cannot say. The
+  // class is covered instead by the seven `why`s below, every one of them a shape that still
+  // refuses.
 
   test.each([
     // All seven `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
