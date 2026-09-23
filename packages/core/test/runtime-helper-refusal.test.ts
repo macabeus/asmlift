@@ -9,7 +9,11 @@
 // runtime and nothing in the spelling tells them apart.
 import { describe, expect, test } from 'vitest';
 
+import { Block, Fn, mkOp, mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
+import { recognizeWideHelpers } from '../src/raise/widehelpers';
+import { PPC_MWCC_RUNTIME_HELPERS } from '../src/runtime-helpers';
 import { PPC_MWCC } from '../src/target';
 
 const rel = (at: string, sym: string) => `\t\t\t${at}: R_PPC_REL24\t${sym}\n`;
@@ -68,5 +72,66 @@ describe('a trimmed argument list is not a register pair', () => {
 
   test('a helper call whose surviving operands merely COUNT right declines', () => {
     expect(() => dis('f', loop)).toThrow(/no model for the runtime helper '__shr2u'/);
+  });
+});
+
+// WHAT EACH HELPER COMPUTES, asserted rather than argued. `frontend/ppc.ts` fuses no register
+// pair, so no value on this target is ever 64 bits wide and `recognizeWideHelpers` can never fold
+// one of these from a lift — which makes the `op` column seven compiler claims that nothing
+// downstream reads, and prose is not a gate. Stripping every `op:` from the table left the whole
+// suite green. So the recognizer is driven directly, over the pair shape the frontend does not yet
+// build, which is the level the column is consumed at.
+describe('the op each PPC runtime helper computes', () => {
+  const foldedOpcode = (callee: string): string | undefined => {
+    const [a, b, r] = [mkValue(T.unk(64)), mkValue(T.unk(64)), mkValue(T.unk(64))];
+    const n = mkValue(T.unk(32));
+    const args = PPC_MWCC_RUNTIME_HELPERS[callee].params[1] > 32 ? [a, b] : [a, n];
+    const block: Block = {
+      params: [a, b, n],
+      ops: [mkOp('call', { operands: args, results: [r], attrs: { target: callee } }), mkOp('ret', { operands: [r] })],
+    };
+    const fn: Fn = {
+      name: 'f',
+      blocks: [block],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+    };
+    recognizeWideHelpers(fn, PPC_MWCC);
+    return block.ops[0].opcode;
+  };
+
+  test('the divisions and remainders split on signedness, as the vendored runtime.c does', () => {
+    expect(foldedOpcode('__div2i')).toBe('sdiv');
+    expect(foldedOpcode('__div2u')).toBe('udiv');
+    expect(foldedOpcode('__mod2i')).toBe('smod');
+    expect(foldedOpcode('__mod2u')).toBe('umod');
+  });
+
+  // ONE SHIFT LEFT AND TWO RIGHT: the bits a left shift brings in are zero whatever the operand
+  // is, so there is no `__shl2u` for `__shl2i` to be the signed half of.
+  test('the shifts are one left and two right, and the right pair splits', () => {
+    expect(foldedOpcode('__shl2i')).toBe('shl');
+    expect(foldedOpcode('__shr2i')).toBe('shr_s');
+    expect(foldedOpcode('__shr2u')).toBe('shr_u');
+    expect(Object.keys(PPC_MWCC_RUNTIME_HELPERS)).not.toContain('__shl2u');
+  });
+
+  // …AND THE SAME SHAPE ONE WORD SHORT DOES NOT FOLD, so what these assert is the table's `op`
+  // column and not merely that the recognizer runs.
+  test('a helper whose operands are words is left for the refusal', () => {
+    const [a, b, r] = [mkValue(T.unk(32)), mkValue(T.unk(32)), mkValue(T.unk(32))];
+    const block: Block = {
+      params: [a, b],
+      ops: [
+        mkOp('call', { operands: [a, b], results: [r], attrs: { target: '__div2i' } }),
+        mkOp('ret', { operands: [r] }),
+      ],
+    };
+    recognizeWideHelpers(
+      { name: 'f', blocks: [block], writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined },
+      PPC_MWCC,
+    );
+    expect(block.ops[0].opcode).toBe('call');
   });
 });

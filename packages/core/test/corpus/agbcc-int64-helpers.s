@@ -3,9 +3,16 @@
 @   s64 llmulw(s32 a, s32 b){ return (s64)a*(s64)b; }
 @   s32 llhalfuse(s64 a, s32 b){ return (s32)(a>>b) + b; }
 @   s32 lomul(s64 a, s64 b){ return (s32)(a*b); }
+@   s32 halfshare(s64 a, s64 b){ return (s32)(a*b) + (s32)a; }
 @
-@ The third one is why the parameter fusion needs its second condition: `b` is BOTH the shift
-@ count and an addend, so it is a word this function uses as a word.
+@ The third one is a parameter this function uses as a WORD: `b` is both the shift count and an
+@ addend, and it arrives in r2 — a third argument register that is no part of the pair in r0:r1.
+@ So what it pins is the fusion declining to take a lone word INTO a pair.
+@
+@ THE LAST ONE is the other side, and it is the one the fusion's use-count condition is really
+@ about: `add r4,r0,#0` copies out r0, which is ALSO the low half of the pair the `concat` names.
+@ A half the function separately uses on its own is a word, so fusing that pair would delete the
+@ copy's operand — the parameter it reads stops existing.
 @
 @ THE LAST TWO ARE THE WIDTH PAIR, and they differ in one register. `llmul` returns the pair and
 @ pops its scratch into r2; `lomul` returns a word and pops into r1, which is the pair's high
@@ -69,3 +76,18 @@ lomul:
 	bx	r1
 .Lfe4:
 	.size	 lomul,.Lfe4-lomul
+	.align	2, 0
+	.globl	halfshare
+	.type	 halfshare,function
+	.thumb_func
+halfshare:
+	push	{r4, r5, lr}
+	add	r5, r1, #0
+	add	r4, r0, #0
+	bl	__muldi3
+	add	r0, r0, r4
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.Lfe5:
+	.size	 halfshare,.Lfe5-halfshare

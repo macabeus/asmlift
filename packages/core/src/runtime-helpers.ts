@@ -162,7 +162,17 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
  *  target is 28 bytes of `mulhwu` and two `mullw` with no relocation at all, against 32 bytes and
  *  an `R_PPC_REL24` to `__div2i` for `lldivs` beside it. The float and decimal helpers of the same
  *  runtime (`__cvt_sll_flt`, `__num2dec`) are left out for the reason the agbcc table leaves out
- *  its own. */
+ *  its own.
+ *
+ *  ⚠ WHAT THIS TABLE DOES ON THIS TARGET TODAY IS REFUSE, and the `op` column is not reachable
+ *  from a lift. `frontend/ppc.ts` reads guessed argument registers and fuses none of them into a
+ *  pair, so no value on this target is ever 64 bits wide, so `arrivesAsDeclared` can never be
+ *  satisfied here and `recognizeWideHelpers` cannot fold. THAT absent pairing is the gate bounding
+ *  the path — not anything in this file, and not `refuseUnmodelledHelpers`, which is what these
+ *  names reach instead. The ops below are measured off the vendored `runtime.c` and asserted
+ *  directly by `runtime-helper-refusal.test.ts`, because a claim no lift can reach is a claim no
+ *  lift can check either; naming which operation each helper computes is the half of the frontend
+ *  work that is done. */
 export const PPC_MWCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __div2i: { op: 'sdiv', params: [64, 64], returns: 64 },
   __div2u: { op: 'udiv', params: [64, 64], returns: 64 },

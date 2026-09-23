@@ -100,6 +100,17 @@ describe('what refuses', () => {
     expect(src).toMatch(/^s64 lokeep\(/);
   });
 
+  // A HALF THE FUNCTION ALSO USES ON ITS OWN IS A WORD. `add r4,r0,#0` copies out r0, which is
+  // also the low half of the pair the `concat` names, so fusing that pair into one parameter would
+  // delete the copy's operand. The refusal leaves the `concat` standing and it reaches the loud gap
+  // at the bottom, which is the answer a shape with no C spelling is supposed to get.
+  //
+  // `llhalfuse` above does NOT pin this: its lone word arrives in r2, a third argument register
+  // that is no part of the pair, so it never reaches the use-count condition at all.
+  test('a pair one of whose halves is separately copied out is not fused', () => {
+    expect(() => decompile('halfshare', asm, ARMV4T_AGBCC)).toThrow(/no lowering for op 'concat'/);
+  });
+
   // THE CALL BOUNDARY IS WHERE THE PAIR STOPS. Handing a half to a callee whose parameter widths
   // nothing states is the wrong answer that recompiles to the right bytes, so it declines.
   test('a half handed to an ordinary callee declines, and names the half', () => {
