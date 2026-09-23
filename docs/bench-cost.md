@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.7s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=126.2s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,9 +137,10 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**937 s over 188 real rows** and **509 s over 742 synthetic rows**; wall clock was 196.2 s and
-216.1 s, and **297.8 s end to end** because the tiers overlap. The dearest single row is **131 s**
-on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on its own — which is the figure to
+**1,075 s over 188 real rows** and **559 s over 743 synthetic rows**; wall clock was 367.6 s and
+307.9 s, and **480.7 s end to end** because the tiers overlap — 307.9 + 367.6 is 675.5, which is
+not the wall time and never was. The dearest single row is **165 s**
+on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on its own — which is the figure to
 reach for when a scoped run looks cheap. The gate over this paragraph DERIVES that row from the
 artifact rather than naming it, so the id moves when the dearest row moves; it used to name one,
 and a sentence calling the fourth-dearest row the dearest was green under it.

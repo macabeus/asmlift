@@ -916,7 +916,7 @@ describe('a class may not outlive the message it classifies', () => {
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
-    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/thumb.ts'],
+    ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
