@@ -208,6 +208,23 @@ describe('all three "unmodelled …" message spellings are classified', () => {
   });
 });
 
+// A `concat` WITH NO LOWERING IS A 64-BIT GAP, and it arrives spelled as an unmodelled OP — the
+// same words `mulh` arrives in. Read as `opaque-ops` it attributes a pair this pipeline could not
+// carry to a decoder that decoded everything. The `mulh` half is the both-sided arm: it is a
+// multiply whose high word nothing folded, it inhabits 12 rows of the committed artifact, and
+// claiming it here would be a claim about those rows. `d.opcode` is interpolated at the throw, so
+// no phrase gate can pin either — this pair is the gate.
+describe('an unlowerable op is attributed by WHICH op it is', () => {
+  const unresolvable = (op: string) => `structure: 1 unresolvable value(s) in 'f' — no lowering for op '${op}'`;
+  test.each([
+    ['concat', 'wide-call-arg'],
+    ['mulh', 'opaque-ops'],
+    ['mulhu', 'opaque-ops'],
+  ])('%s -> %s', (op, want) => {
+    expect(classOf(unresolvable(op))).toBe(want);
+  });
+});
+
 describe('the two MIPS delay-slot gaps are told apart', () => {
   // `bc1fl` is a branch-likely AND an FP condition-code branch, and the FP condition code blocks it
   // either way — so the two must not share a class, or the blocker Pareto would report the FP rows

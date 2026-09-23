@@ -287,15 +287,25 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /unmodelled store-class/,
   },
   {
-    // A 64-bit value reaching an ordinary callee's argument list. Two shapes, one capability: a
-    // pair reaching a callee whose parameter widths nothing states, where both answers (the low
-    // half alone, or the two halves as two arguments) recompile to the `bl` being lifted so
-    // nothing downstream can referee either; and a pair the ABI splits across the register/stack
-    // boundary, which this frontend does not assemble. The PowerPC arm is the same gap seen from a
-    // frontend with no pair at all.
+    // A 64-bit value this pipeline could not carry as one. Two shapes, one capability:
+    //
+    //   the CALL BOUNDARY — a pair reaching a callee whose parameter widths nothing states, where
+    //   both answers (the low half alone, or the two halves as two arguments) recompile to the
+    //   `bl` being lifted, so nothing downstream can referee either; and a pair the ABI splits
+    //   across the register/stack boundary, which this frontend does not assemble. The PowerPC
+    //   arm is the same gap seen from a frontend with no pair at all.
+    //
+    //   the VALUE — a `concat` of two words that are not the two halves of a value this lift
+    //   already built (two ordinary loads of a struct's halves, say). It reaches structure.ts as
+    //   an op with no C spelling and the message is `no lowering for op 'concat'`, which read as
+    //   an unmodelled INSTRUCTION would attribute a 64-bit gap to a decoder that is working.
+    //
+    // `mulh`/`mulhu` carry the same message shape and are NOT claimed here: they are a multiply
+    // whose high half nothing folded, they inhabit 12 rows of the artifact, and moving them would
+    // be a claim about those rows rather than about this capability.
     key: 'wide-call-arg',
-    label: 'A 64-bit value handed to a call (no width in the prototype)',
-    pattern: /half of a 64-bit value/,
+    label: 'A 64-bit value the lift could not carry as one',
+    pattern: /half of a 64-bit value|no lowering for op 'concat'/,
   },
   {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody
