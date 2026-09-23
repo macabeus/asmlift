@@ -12,11 +12,16 @@
 // be wrong in a way that reads as right. So the decision is made here, once, by the shape of the
 // name, and every refusing kind gets its own sentence naming what was seen.
 //
-// Consumed by frontend/ppc.ts, which refuses before it recovers, and by frontend/thumb.ts for the
-// one kind a literal pool can carry (a function-scope static). Both refuse in the same words. A kind is listed only when it
-// behaves differently: the decomp projects' generated labels (`lbl_1_bss_2464`, `fn_1_458`) are
-// ordinary identifiers that the project's own headers declare and its own sources spell, so they
-// are `plain` and get no entry of their own.
+// Consumed by frontend/ppc.ts, which refuses before it recovers, and by frontend/thumb.ts, which
+// asks about the one kind its literal-pool grammar rejects but that IS a name: a function-scope
+// static. Both refuse in the same words. Thumb asks about that kind alone rather than taking
+// `unspellableReason`'s answer for every kind, because a pool word is not a relocation: agbcc
+// packs `.L` labels into pools, and this policy calls a leading dot `section-local` — an offset
+// into a section, not an object — which is false about a code label in the same file.
+//
+// A kind is listed only when it behaves differently: the decomp projects' generated labels
+// (`lbl_1_bss_2464`, `fn_1_458`) are ordinary identifiers that the project's own headers declare
+// and its own sources spell, so they are `plain` and get no entry of their own.
 //
 // THE SCOPE OF THIS POLICY IS THE NAME, AND ONLY ON A DATA RELOCATION.
 //  • Not the TYPE. A name this passes is still rendered at the width the asm implies, which is a
@@ -35,28 +40,19 @@
 export type RelocSymbolKind =
   'plain' | 'anon-pool' | 'section-local' | 'local-static' | 'cpp-vtable' | 'cpp-mangled' | 'not-an-identifier';
 
-/** Classify a relocation's symbol by its spelling. Order matters: the shapes that ARE valid C
- *  identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C identifier may
- *  not (`@`, `.`, `$`) are each recognised before the general identifier test, so the catch-all
- *  below can be exactly "a name of no kind this policy knows, and not an identifier either". */
+/** Classify a relocation's symbol by its spelling. Order matters twice over. The shapes that ARE
+ *  valid C identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C
+ *  identifier may not (`@`, `.`, `$`) are each recognised before the general identifier test, so
+ *  the catch-all below can be exactly "a name of no kind this policy knows, and not an identifier
+ *  either". And among themselves, the tests that look at a PREFIX come before the one that looks
+ *  at a SUFFIX: a compiler is free to hang its static counter off a name of any other kind, and
+ *  the kind is what picks the refusal sentence. */
 export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   if (sym.startsWith('@')) {
     return 'anon-pool'; // `@193` — mwcc's anonymous string/constant pool entries
   }
   if (sym.startsWith('.')) {
     return 'section-local'; // `...bss.0`, `.rodata` — an offset into a section
-  }
-  // A function-scope static plus the counter its compiler assigned: `sprHideTbl$797` (mwcc),
-  // `tide.3` / `zeroes.13` (gcc, and so agbcc). Both counters are TRANSLATION-UNIT-wide rather
-  // than per-function, which is why neither is reconstructible from the source: three functions in
-  // one TU, compiled by this project's agbcc, give `pa.3`, `pb.7`, `pc.11` and `pc2.12` — the
-  // number counts declarations across the whole unit and skips.
-  //
-  // The gcc spelling cannot collide with the two rules above: a name that LEADS with a dot is
-  // section-local and was answered already, and a plain C identifier carries no dot at all, so
-  // `\.\d+$` can only fire on a name that would otherwise fall to `not-an-identifier`.
-  if (sym.includes('$') || /\.\d+$/.test(sym)) {
-    return 'local-static';
   }
   if (sym.startsWith('__vt__')) {
     return 'cpp-vtable'; // `__vt__6System` — a compiler-emitted virtual table
@@ -75,6 +71,22 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   // would have to come first.
   if (/__(?:\d|Q\d)/.test(sym)) {
     return 'cpp-mangled';
+  }
+  // A function-scope static plus the counter its compiler assigned: `sprHideTbl$797` (mwcc),
+  // `tide.3` / `zeroes.13` (gcc, and so agbcc). Both counters are TRANSLATION-UNIT-wide rather
+  // than per-function, which is why neither is reconstructible from the source: three functions in
+  // one TU, compiled by this project's agbcc, give `pa.3`, `pb.7`, `pc.11` and `pc2.12` — the
+  // number counts declarations across the whole unit and skips.
+  //
+  // LAST of the named kinds, and the gcc pattern is anchored to a WHOLE identifier plus ONE
+  // numeric suffix, because `\.\d+$` alone is a suffix test and every other kind here can wear
+  // that suffix. Unanchored and placed first it claimed `__vt__6System.1` and
+  // `statbuff__9CmdStream.0` — each then refused with a sentence about a counter, for a name whose
+  // real problem is the class definition it comes from — and it claimed gcc's IPA clones
+  // (`foo.isra.0`, `foo.part.0`, `foo.cold.1`), which are not statics at all and fall to
+  // `not-an-identifier` where they belong.
+  if (sym.includes('$') || /^[A-Za-z_][A-Za-z0-9_]*\.\d+$/.test(sym)) {
+    return 'local-static';
   }
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sym) ? 'plain' : 'not-an-identifier';
 }

@@ -76,3 +76,26 @@ test('an ordinary C name with a double underscore is NOT mistaken for a mangling
   expect(classifyRelocSymbol('g_my__table')).toBe('plain');
   expect(classifyRelocSymbol('__initialised')).toBe('plain');
 });
+
+test('a static counter hung off another kind of name keeps that kind, and its sentence', () => {
+  // FAILS ON: testing the gcc counter as a bare `\.\d+$` suffix, or testing it before the two C++
+  // prefixes. Under either, all four names below answer `local-static` and then refuse with a
+  // sentence about "a translation-unit-wide counter the compiler assigned" — true of `tide.3`,
+  // false of a vtable, of a class-scoped member, and of gcc's IPA clones, which are not statics of
+  // any kind. The suffix is the weakest evidence in the file and so it is asked last.
+  expect(classifyRelocSymbol('__vt__6System.1')).toBe('cpp-vtable');
+  expect(classifyRelocSymbol('statbuff__9CmdStream.0')).toBe('cpp-mangled');
+  for (const clone of ['foo.isra.0', 'foo.part.0', 'foo.cold.1']) {
+    expect(classifyRelocSymbol(clone)).toBe('not-an-identifier');
+  }
+  expect(unspellableReason('__vt__6System.1')).toMatch(/C\+\+ virtual table/);
+  expect(unspellableReason('foo.isra.0')).toMatch(/is not a C identifier/);
+});
+
+test('the gcc function-scope static still classifies, base name and counter', () => {
+  // The shape the rule is FOR, so the anchoring above cannot be read as having removed it. agbcc
+  // spells these; `tide.3` is the one a benchmark row carries.
+  expect(classifyRelocSymbol('tide.3')).toBe('local-static');
+  expect(classifyRelocSymbol('zeroes.13')).toBe('local-static');
+  expect(unspellableReason('tide.3')).toMatch(/function-scope static/);
+});
