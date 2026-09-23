@@ -731,6 +731,44 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
     expect(classOf(marker)).toBe(want);
   });
 
+  // A `concat` WITH NO LOWERING IS A 64-BIT GAP, and it arrives spelled as an unmodelled OP — the
+  // same words `mulh` arrives in. Read as `opaque-ops` it attributes a pair this pipeline could not
+  // carry to a decoder that decoded everything. The `mulh` half is the both-sided arm: it is a
+  // multiply whose high word nothing folded, it inhabits 12 rows of the committed artifact, and
+  // claiming it here would be a claim about those rows. `d.opcode` is interpolated at the throw, so
+  // no phrase gate can pin either — this pair is the gate, and it is what fails if the
+  // `(?!'concat')` exclusion in `opaque-ops` is dropped or if the two entries swap places.
+  test.each([
+    ['concat', 'wide-call-arg'],
+    ['mulh', 'opaque-ops'],
+    ['mulhu', 'opaque-ops'],
+  ])("no lowering for op '%s' -> %s", (op, want) => {
+    expect(classOf(`structure: 1 unresolvable value(s) in 'f' — no lowering for op '${op}'`)).toBe(want);
+  });
+
+  // THE 64-BIT SENTENCES, AND THEY ARE CHECKED FOR EXACTLY ONE MATCH RATHER THAN FOR THE FIRST.
+  // `DECLINE_CLASSES` is ordered and `classOf` takes the first pattern that matches, so a sentence
+  // two classes both claim is classified by an array index — and `reloc-halves`, whose subject is
+  // a `%hi`/`@ha` relocation, holds `/high half/`. The split-pair refusal said "high half" and
+  // landed in `reloc-halves` on any ordering that put it first, publishing a 64-bit argument gap
+  // as a relocation gap. `thumb.ts` says "upper half" for that reason, and this is what holds it.
+  //
+  // THE STRINGS ARE PUBLISHED MARKERS, not the full reason: `apps/benchmark/src/eval/asmlift.ts`
+  // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
+  // carry. All three reach their class inside the first 80.
+  test.each([
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
+    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
+    "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
+    "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
+    // The PROJECTION arm: the `hi32` refusal. It is the only 64-bit refusal in the tree that
+    // landed in NO class at all before this line, which renders as "Other / unclassified" — the
+    // same wrong answer the relocation misfire above is, arrived at from the other side.
+    "structure: 1 unresolvable value(s) in 'f' — a 64-bit value that neither renders 64 bits wide nor has an integer type has no upper half to shift out",
+  ])('%s is wide-call-arg, and no other class claims it', (marker) => {
+    expect(DECLINE_CLASSES.filter((c) => c.pattern.test(marker)).map((c) => c.key)).toEqual(['wide-call-arg']);
+  });
+
   test('branch-likely says in its LABEL that it is leftover, because 0 rows reads as "cannot"', () => {
     // A zero-row class never reaches the Pareto at all — `declinePareto` accumulates only from
     // markers it saw, so `GapAnalysis.tsx`, the panel that calls itself the roadmap view, does not
@@ -986,6 +1024,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['float', 'unmodelled instruction', 'packages/core/src/l3/ast.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
