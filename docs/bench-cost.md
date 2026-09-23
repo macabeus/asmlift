@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.3s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,9 +137,10 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**825 s over 190 real rows** and **502 s over 751 synthetic rows**; wall clock was 179.3 s and
-186.5 s on tiers that overlap, and 255.5 s end to end (`real 255.51` under `/usr/bin/time -p`) —
-186.5 + 179.3 is 365.8, which is not the wall time and never was.
+**822 s over 190 real rows** and **497 s over 751 synthetic rows**; wall clock was 178.9 s and
+186.3 s on tiers that overlap, and **253.9 s** end to end (the CLI's own `Done in` line; the shell's
+`time` put the whole `pnpm bench run` at `4:14.47`, the half-second being pnpm start-up) —
+186.3 + 178.9 is 365.2, which is not the wall time and never was.
 The dearest single row is **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
 its own — which is the figure to reach for when a scoped run looks cheap.
 
@@ -147,7 +148,7 @@ THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIG
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
 rows, 0 added, 0 removed, and `bench regression` **0 lost, 0 missing, 0 retired, 0 added, 0 gained,
 0 other flips** against every base it has been measured against. `pnpm bench diff --base 43534788`
-prints **1,336.4 s → 1,326.7 s (0.99×)** against the committed artifact. The FIRST run, on
+prints **1,336.4 s → 1,319.0 s (0.99×)** against the committed artifact. The FIRST run, on
 2026-09-23 against `0e7b4f7b`, printed **1,439.5 s → 2,027.6 s (1.41×)** — **a reading, not a
 figure this repo can recompute**: that run's artifact was dropped when the branch rebased, because
 an artifact commit has to be the branch's last, so no sha in this history carries it and
@@ -165,12 +166,24 @@ with the bench slot predicted the movement: 0 rows, and marker changes on exactl
 `pnpm bench diff --base 5d9ce855` — this branch's own previous artifact, which isolates the wave
 from the branch — prints **10 field change(s), 0 added, 0 removed**, over exactly those five rows,
 **fan 67,760 → 67,760 (1.00×), 0 rows moved**, and **cost 1,323.8 s → 1,326.7 s (1.00×)**. Two
-rounds shared the machine for this one. So the same tree, benched three times in six hours, priced
-its own ranked pass at 2,027.6 s, 1,323.8 s and 1,326.7 s while its fan did not move by one record
-in any pair. **Diff against your own previous artifact, not only against the base: it is the only
-comparison in which your prediction and the machine's noise are separable.** Five rounds shared this machine during the first run and two during the
-second. This is the entry below's own lesson arriving a second time, on a branch that could not
-possibly have caused it.
+rounds shared the machine for this one. **Diff against your own previous artifact, not only against
+the base: it is the only comparison in which your prediction and the machine's noise are
+separable.** Five rounds shared this machine during the first run and two during the second. This
+is the entry below's own lesson arriving a second time, on a branch that could not possibly have
+caused it.
+
+THE FOURTH RUN PREDICTED ZERO AND GOT ZERO, which is the stronger control because a prediction of
+"no change" is the one a run can falsify on any row. A second remediation wave changed a register
+predicate, moved it to one exported constant, and rewrote comments, a web label and two documents.
+The `bench-slot` notice filed before the run predicted **0 field changes, 0 flips, fan 1.00×**, on
+the argument that no corpus `targetAsm` carries the token the predicate newly matches
+(`grep -c '\$f[a-z]*[0-9]\+f' apps/benchmark/results/results.json` is 0).
+`pnpm bench diff --base b347c22f` — this branch's own previous artifact — prints **0 field
+change(s), 0 added, 0 removed, 0 retired**, **fan 67,760 → 67,760 (1.00×), 0 rows moved**, and
+**cost 1,326.7 s → 1,319.0 s (0.99×)**. So the same tree, benched four times in seven hours, priced
+its own ranked pass at 2,027.6 s, 1,323.8 s, 1,326.7 s and 1,319.0 s while its fan did not move by
+one record in any pair — **a 1.53× spread over a branch whose every run changed nothing a fan can
+see.**
 
 The artifact before this one, taken 2026-09-23 at `43534788` (#250), read **834 s over 190 real
 rows** and **502 s over 751 synthetic rows**; wall clock was 180.6 s and 186.4 s, 256.4 s end to
