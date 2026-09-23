@@ -485,15 +485,27 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
   });
 
   test.each([
-    // All three `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
-    // the corpus happened to print, only the first classified, and the other two — the same
-    // capability at the same site — would have arrived as unclassified.
+    // All six `why`s that reach `frontend/thumb.ts`'s one literal-pool throw. Keyed on the `why`
+    // the corpus happened to print, only the ones saying `pool word` classified, and the rest —
+    // the same capability at the same site — would have arrived as unclassified.
     [
-      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+-0x8' is not a symbol, symbol±offset, " +
+      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+gBar' is not a symbol, symbol±offset, " +
         'or number — not modelled',
     ],
     ["lift: cannot lift 'f': literal-pool load of offset 3 is not a whole word in pool '_pool_1' — not modelled"],
-    ["lift: cannot lift 'f': literal-pool load of unparsable word '.word gFoo+' — not modelled"],
+    [
+      "lift: cannot lift 'f': literal-pool load of offset '+-0x4' into pool '_pool_1' is not a '+N' byte " +
+        'offset — not modelled',
+    ],
+    ["lift: cannot lift 'f': literal-pool load of word '0x100000000' is not a 32-bit value — not modelled"],
+    [
+      "lift: cannot lift 'f': literal-pool load of pool word 'gFoo+0x100000000' carries an addend that is " +
+        'not a 32-bit value — not modelled',
+    ],
+    [
+      "lift: cannot lift 'f': literal-pool load of pool word '010' has a leading-zero magnitude, which is " +
+        'octal to the assembler — not modelled',
+    ],
   ])('%s -> pool-word-shape', (marker) => {
     expect(classOf(marker)).toBe('pool-word-shape');
   });

@@ -84,6 +84,43 @@ describe('global-variable recovery', () => {
     }
   });
 
+  // The magnitude, from the other direction. `Number()` answers for digit strings the assembler
+  // reads differently or not at all, and its answer reached the emitted C: `gTab+010` came out as
+  // the addend 10 against the assembler's 8, because a leading zero is OCTAL to `as`, and
+  // `gTab+99999999999999999999999` came out as the DOUBLE `1e+23`, which is not an address at all.
+  // The values below are this project's `as` again, read back out of `.data`: `010` is 8, `-010`
+  // is -8, and every magnitude past 32 bits is 0, because a pool word is 32 bits and `as` reduces
+  // the expression modulo 2^32. A truncation is not something to reproduce from a guess, so both
+  // shapes refuse — and each says which one it is, since "not a number" is false about `010`.
+  test('a pool magnitude this reader cannot decide declines, and says which kind it is', () => {
+    const word = (w: string) => () => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
+    for (const w of ['gTab+0x100000000', 'gTab+4294967296', 'gTab+99999999999999999999999']) {
+      expect(word(w), w).toThrow('carries an addend that is not a 32-bit value');
+    }
+    expect(word('0x100000000'), '0x100000000').toThrow("word '0x100000000' is not a 32-bit value");
+    for (const w of ['010', '-010', 'gTab+010']) {
+      expect(word(w), w).toThrow('leading-zero magnitude, which is octal to the assembler');
+    }
+    // The controls, on both sides of each refusal: the widest addend a 32-bit word can carry still
+    // reads, and a hex magnitude whose digits start with a zero is not an octal one.
+    expect(word('gTab+0xffffffff')()).toContain('(u32)&gTab + 4294967295');
+    expect(word('gTab+0x08')()).toContain('(u32)&gTab + 8');
+  });
+
+  test('a pool word whose ADDEND refuses still names its symbol, and still vetoes promotion', () => {
+    // The refusal is about the VALUE, and the two readers ask different questions of the same
+    // word: `poolNamesASymbol` asks only whether anything external is named here. A word whose
+    // addend does not fit still names `gTab`, so the veto must still fire — answering "not a
+    // symbol" would lose the witness and spell `gPromoted`, which is the drift in its other
+    // direction. The bad word is never LOADED here; only the numeric one beside it is.
+    const symbols: SymbolMap = new Map([[0x3000010, [{ name: 'gPromoted', kind: 'data' }]]]);
+    const asm =
+      'mix:\n\tldr\tr1, .L1+0x4\n\tldrh\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgTab+0x100000000\n\t.word\t0x3000010\n';
+    const src = decompile('mix', asm, ARMV4T_AGBCC, { symbols }).source;
+    expect(src).toContain('*(u16 *)50331664');
+    expect(src).not.toContain('gPromoted');
+  });
+
   // The same rule one level up, in the pool's OPERAND rather than in its words. `poolRef` has two
   // ways to say no and they are not interchangeable: `null` means "this operand is not a pool" and
   // hands the load to the ordinary memory path, where the label becomes a phantom pointer
