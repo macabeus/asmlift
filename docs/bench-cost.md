@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.7s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=110.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,24 +137,34 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**840 s over 188 real rows** and **1,062 s over 742 synthetic rows**; wall clock was 308.2 s and
-399.0 s, and **530.6 s end to end** because the tiers overlap. The dearest single row is **120 s**
+**963 s over 188 real rows** and **517 s over 742 synthetic rows**; wall clock was 203.3 s and
+207.1 s, and **289.5 s end to end** because the tiers overlap. The dearest single row is **139 s**
 on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on its own — which is the figure to
-reach for when a scoped run looks cheap.
+reach for when a scoped run looks cheap. The gate over this paragraph DERIVES that row from the
+artifact rather than naming it, so the id moves when the dearest row moves; it used to name one,
+and a sentence calling the fourth-dearest row the dearest was green under it.
 
-The two tiers moved in OPPOSITE directions against the entry below, both measured 2026-09-23
-(real 1,371 → 840 s, 0.61×; synthetic 915 → 1,062 s, 1.16×), on a branch that adds no candidate to
-any row, and `bench diff` agrees: the fan is **unmoved at 67,415 → 67,415 (1.00×) over 928 comparable rows**. The branch
-deletes a refusal — two rows leave `declined` for `nonmatch` and two more swap one decline message
-for another — and lifting a refusal buys rows without enlarging anyone's fan. It also priced the
-COST list entirely in the cheap direction, nine rows over 10 s and 1.5× (`DoForcedMovement`
-131.0 → 3.7 s, `WorldMapScreenCheckNewWorldUnlocked` 255.7 → 88.7 s): the base artifact was taken
-with several rounds sharing the box and this one was not. **A row whose seconds collapse like that
-deserves its `droppedCandidates` read before anything else** — `DoForcedMovement`'s base artifact
-carried one candidate lost to `'arm-none-eabi-cpp' timed out` and this run carries none, with its
-outcome, score, fan and winning variations all identical. Across the whole corpus 11 rows carry a
-dropped candidate here and every one of them is a compiler REJECTING a candidate, which is a
-decompiler output; none is a timeout.
+Both tiers came in cheaper than the entry below, measured 2026-09-23 (real 1,371 → 963 s, 0.70×;
+synthetic 915 → 517 s, 0.57×) on a branch that adds no candidate to any row, and `bench diff`
+agrees where it counts: `fan vs 87b49c74: 0 row(s) moved, total 67415 → 67415 (1.00×) over 928
+comparable row(s) — 2 more counted here and not at 87b49c74`.
+
+**READ THAT QUALIFIER, because "1.00×" alone is not what the corpus says.** The multiplier is over
+the rows priced on BOTH sides, which is what a multiplier can be. Summed over every priced row the
+total is **67,415 over 928 rows → 67,465 over 930**: the two rows that stopped declining got a fan
+for the first time, 48 and 2. Nothing's fan grew; two rows entered the count. `bench diff` cannot
+see a row ENTER the fan at all, so a branch that turns declines into candidates always owes the
+second number by hand.
+
+It also priced the COST list entirely in the cheap direction, and the tool says how many rather
+than being hand-counted: five rows printed plus `…and 10 more row(s) over 10s and 1.5×`, so
+**fifteen** (`DoForcedMovement` 131.0 → 4.5 s, `WorldMapScreenCheckNewWorldUnlocked`
+255.7 → 110.4 s). The base artifact was taken with several rounds sharing the box and this one was
+not. **A row whose seconds collapse like that deserves its `droppedCandidates` read before anything
+else** — `DoForcedMovement`'s base artifact carried one candidate lost to
+`'arm-none-eabi-cpp' timed out` and this run carries none, with its outcome, score, fan and winning
+variations all identical. Across the whole corpus 11 rows carry a dropped candidate here and every
+one of them is a compiler REJECTING a candidate, which is a decompiler output; none is a timeout.
 
 The artifact before this one, `87b49c74`, read **1,371 s over 186 real rows** and **915 s over 742
 synthetic rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to end** (`real 417.39`
@@ -170,7 +180,7 @@ measured by hand: `git show <sha>:apps/benchmark/results/results.json`, then sum
 **third** dearest and was never the first. The figure was inherited from the paragraph above it
 rather than re-derived, and a figure already in the file reads as one somebody checked.
 
-The ranked sums here are roughly 1.6× the entry above them on a corpus one row larger. That is
+The ranked sums two entries above are cheaper than this one on a corpus one row larger. That is
 MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed
 for the box, but after a night of eight whole-tier runs, and the per-row rank seconds the artifact
 records are wall seconds. Read a sum here against its own wall-clock line, never against another

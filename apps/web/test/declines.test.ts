@@ -826,24 +826,37 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today.
   //
-  // `sub-word-table` joins it for a THIRD reason, and the two sitting side by side is why this note
-  // exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still cannot
-  // reach, whose one inhabitant happened to be lifted. `sub-word-table` is uninhabited BY
-  // CONSTRUCTION: its two refusals fire on a whole-word pool load of a `.short` table and on such a
-  // table's label used as a register base, and no compiler emits either — agbcc's pools are `.word`
-  // and it reaches a halfword table through its ADDRESS, which lifts. That is a stronger claim than
-  // "no rows today", because only the weaker one can change without the ISA changing.
+  // `unread-data-directive` joins it for a THIRD reason, and the two sitting side by side is why
+  // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
+  // cannot reach, whose one inhabitant happened to be lifted. `unread-data-directive` is
+  // uninhabited BY CONSTRUCTION: its two refusals fire on a whole-word pool load of a label the
+  // `.word` pass recorded no words for, and on that label used as a register base, and no compiler
+  // emits either — agbcc's pools are `.word` and it reaches a halfword table through its ADDRESS,
+  // which lifts. That is a stronger claim than "no rows today", because only the weaker one can
+  // change without the ISA changing.
   //
-  // `pool-word-shape` left this list in the same commit, inhabited by `pokeemerald:UpdateShoalTideFlag:agbcc` —
-  // which had been declining on the sub-word blanket and turns out to be blocked by a pool word
-  // spelled `tide.3`, a function-scope static the pool-word grammar cannot read.
+  // `pool-word-shape` is a FOURTH reason and the only one of the four that is an achievement. It
+  // is the catch-all tail of the pool-word reader, it held exactly one row —
+  // `pokeemerald:UpdateShoalTideFlag:agbcc`, on a pool word spelled `tide.3` — and the message it
+  // held that row with was false about its own input: `tide.3` IS a symbol, a function-scope
+  // static, rejected only because a C identifier carries no dot. Naming that shape sent the row to
+  // `tu-scoped-name`, where the five mwcc rows spelling the same thing `sprHideTbl$797` already
+  // live, and emptied the catch-all. Its emptiness is the weak kind: an agbcc pool word that is a
+  // `.L` code label or an unreadable expression would inhabit it tomorrow.
   //
   // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
   // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  const NO_ROWS = ['branch-form', 'branch-likely', 'cross-block-flags-arm', 'store-class', 'sub-word-table'];
+  const NO_ROWS = [
+    'branch-form',
+    'branch-likely',
+    'cross-block-flags-arm',
+    'pool-word-shape',
+    'store-class',
+    'unread-data-directive',
+  ];
 
   test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
     const exhibited = new Set(artifact.results.flatMap((r) => declineClassesOf(r)));
@@ -864,13 +877,18 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `float > opaque-ops` is the big one and is the reason the file is ordered at all: `opaque-ops`
   // has no mnemonic filter, so it subsumes every named instruction family. The two transfer pairs
   // are the three control-transfer capabilities sitting above `branch-form`.
-
+  //
+  // `tu-scoped-name > pool-word-shape` is the same shape one level down: `pool-word-shape` is the
+  // pool reader's catch-all and its pattern is that reader's own SENTENCE PREFIX, so every named
+  // pool gap overlaps it by construction and is answered by sitting above it. Splitting a message
+  // out of that catch-all therefore always adds a line here, and that is the intended signal.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['float > opaque-ops', 56],
     ['float > store-class', 13],
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 3],
     ['outgoing-stack-args > stack-frames', 2],
+    ['tu-scoped-name > pool-word-shape', 1],
     ['address-taken-local > stack-frames', 1],
   ];
 
