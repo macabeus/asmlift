@@ -468,8 +468,8 @@ function naturalLoops(
   fn: Fn,
   dom: Map<Block, Set<Block>>,
   predsOf: Map<Block, Block[]>,
-): { header: Block; body: Set<Block> }[] {
-  const loops: { header: Block; body: Set<Block> }[] = [];
+): { header: Block; latch: Block; body: Set<Block> }[] {
+  const loops: { header: Block; latch: Block; body: Set<Block> }[] = [];
   for (const latch of fn.blocks) {
     for (const header of successorsOf(latch)) {
       if (!dom.get(latch)?.has(header)) {
@@ -484,7 +484,7 @@ function naturalLoops(
           work.push(...(predsOf.get(x) ?? []));
         }
       }
-      loops.push({ header, body });
+      loops.push({ header, latch, body });
     }
   }
   return loops;
@@ -1397,6 +1397,61 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         !L.body.has(opBlock.get(def)!) &&
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
+  /** THE PRE-UPDATE ESCAPE. A value a bottom-tested loop computes and the code after it reads,
+   *  whose expression reads a loop variable: inlined at the post-loop read it re-reads that
+   *  variable's NAME, which by then holds the value the update wrote, one iteration past the one
+   *  the value was computed from. agbcc kept the computed value in its own register instead
+   *  (`add r3, r0, #4` inside the loop, `str r3, [r2]` after it), and naming the def at its own
+   *  position is that register. Without the name the structurer declines the loop
+   *  (`loopEscapeHazard`, hazards.ts); an exit-edge ARG carrying the same value is the sink's.
+   *
+   *  Refuses — the value then renders at its reader exactly as before:
+   *  - a reader not reached through the latch's exit edge: an early-return arm renders inside the
+   *    body, ahead of the update, where the name still holds the value it read;
+   *  - a header that leaves the loop too, unless it is the latch: the structurer may take that exit
+   *    as a test at the top and render the latch's exit as an arm inside the body;
+   *  - an expression that reads no updated loop variable — reading the BACK-EDGE ARG is reading the
+   *    post-update value, which is what the name holds.
+   *  The walk stops at a def that renders as a name anyway: a materialized one, and a call, which
+   *  the cross-block rule below names wherever it would render outside its block. */
+  const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
+    loopBodies.some((L) => {
+      const term = L.latch.ops[L.latch.ops.length - 1];
+      const back = term.successors.find((sc) => sc.block === L.header);
+      if (
+        !back ||
+        !L.body.has(opBlock.get(op)!) ||
+        (L.header !== L.latch && successorsOf(L.header).some((x) => !L.body.has(x)))
+      ) {
+        return false;
+      }
+      const after = new Set<Block>();
+      for (const { block } of term.successors) {
+        if (!L.body.has(block)) {
+          after.add(block);
+          reachFrom(block).forEach((x) => after.add(x));
+        }
+      }
+      if (!consumers.some((c) => after.has(opBlock.get(c)!) && !L.body.has(opBlock.get(c)!))) {
+        return false;
+      }
+      const seen = new Set<Value>();
+      const readsUpdated = (x: Value): boolean => {
+        if (seen.has(x) || back.args.includes(x)) {
+          return false;
+        }
+        seen.add(x);
+        if (L.header.params.includes(x)) {
+          return true;
+        }
+        const d = defOf.get(x);
+        if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && (materialize.has(d) || d.opcode === 'call'))) {
+          return false;
+        }
+        return d.operands.some(readsUpdated);
+      };
+      return readsUpdated(r);
+    });
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -1646,6 +1701,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
+          if (pr && useSitesOf.has(pr) && escapesAheadOfUpdate(op, pr, consumersOf(op))) {
+            materialize.add(op);
+            continue;
+          }
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
             if (cons.length > 1 && liveAcrossCall(op, cons)) {

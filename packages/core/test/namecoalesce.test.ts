@@ -209,8 +209,8 @@ const TRAILING_DOWHILE = `fn trailingdw {
 }
 `;
 
-// A rotated loop whose post-loop read wants a pre-update value: `structure()` declines it, and the
-// merged naming makes the guard that detects it stop firing. Found by differential fuzzing.
+// A rotated loop whose post-loop call reads a loop variable's pre-update value (`%2`), which
+// `structure()` declines.
 const UNLOCKS_A_DECLINE = `fn unlockdecline {
 ^bb0(%0: s32):
   %11: s32 = call %0 {target="f0"}
@@ -238,7 +238,7 @@ const UNLOCKS_A_DECLINE = `fn unlockdecline {
 ^bb6(%10: s32):
   %22: s32 = const {value=19}
   %23: s32 = call %18 {target="f2"}
-  %24: s32 = call %15 {target="f0"}
+  %24: s32 = call %2 {target="f0"}
   ret %4
 }
 `;

@@ -15,11 +15,13 @@
 //         blt .L10
 //         str r3, [r2, #0x4]
 //
-// WHICH ANSWER THE HAZARD GETS DEPENDS ON HOW SSA SPELLED THE VALUE, and both spellings are here:
-// crossing the exit as an edge ARG it is REPAIRED (`sinkablePreUpdateSlots` re-emits the copy
-// inside the body, ahead of the update, which is the listing above); read from the header PARAM it
-// DECLINES, there being no exit slot to sink. A refusal test that declines for the WRONG reason
-// reads as a pass, so each case pins the message and carries a control differing in ONE fact.
+// WHICH ANSWER THE HAZARD GETS DEPENDS ON HOW SSA SPELLED THE VALUE, and all three spellings are
+// here: crossing the exit as an edge ARG it is REPAIRED (`sinkablePreUpdateSlots` re-emits the copy
+// inside the body, ahead of the update, which is the listing above); computed by a body OP and read
+// after the loop it is NAMED at that op (`escapesAheadOfUpdate`, structure/analysis.ts); read from
+// the header PARAM it DECLINES, there being neither an exit slot to sink nor an op to name. A
+// refusal test that declines for the WRONG reason reads as a pass, so each case pins the message
+// and carries a control differing in ONE fact.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -101,4 +103,118 @@ test('the same pre-update value crossing the exit EDGE is repaired, not declined
   // and the post-loop store takes that copy, never the moved-on counter
   expect(out).toContain(`= ${trailing};`);
   expect(out).not.toContain(`= ${counter};\n    return`);
+});
+
+// A BODY OP'S VALUE READ AFTER THE LOOP. agbcc keeps it in a register of its own —
+// `preupdate_escape`'s `add r3, r0, #0x4` inside the loop and `str r3, [r2]` after it — so the value
+// is neither an exit arg nor a loop variable: %7 is `%2 * 3`, computed from the PRE-update counter,
+// and read only by ^bb2.
+const ESCAPED_OP = `fn escop {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body op read after the loop is named where it was computed, ahead of the update', () => {
+  const out = emit(ESCAPED_OP);
+  const m = out.match(/(\w+) = (\w+) \* 3;\s+\2 = \2 \+ 1;/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]};`);
+});
+
+// THE ONE FACT CHANGED: the op reads the BACK-EDGE ARG, the post-update counter, which is what the
+// name holds after the loop — so it still renders at its reader.
+test('a body op over the post-update counter renders at its reader, unnamed', () => {
+  const out = emit(ESCAPED_OP.replace('%7: s32 = mul %2, %6', '%7: s32 = mul %4, %6'));
+  expect(out).toMatch(/a0\[1\] = (\w+) \* 3;/);
+  expect(out).not.toMatch(/\w+ = \w+ \* 3;\s+\w+ = \w+ \+ 1;/);
+});
+
+// A CALL under the value is named by the cross-block call rule wherever it would render outside its
+// block, so what the post-loop read re-evaluates is the call's NAME — nothing reads the counter.
+// Measured on `synthetic:esccast:agbcc` (MATCH): walking through the call named its `(u16)` extension
+// by default and took the `/escape-home` candidate out of the row's fan, 4 → 2.
+test('a body op over a call renders at its reader, the call named in the loop', () => {
+  const out = emit(
+    ESCAPED_OP.replace(
+      '%6: s32 = const {value=3}\n  %7: s32 = mul %2, %6',
+      '%10: s32 = call %2 {target="cb"}\n  %6: s32 = const {value=3}\n  %7: s32 = add %10, %6',
+    ),
+  );
+  const m = out.match(/(\w+) = cb\(\w+\);/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]} + 3;`);
+});
+
+// A reader in an early-RETURN arm leaves from the middle of the body, before the update, so the
+// counter's name still holds the value the op read. Measured on `kleod:sub_08014184:agbcc`, whose
+// arm spells `(struct Struct1 *)(v3 + v1)` inline and would otherwise gain a local.
+const ESCAPED_TO_ARM = `fn escmid {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  br ^bb5()
+^bb5():
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb4()
+^bb4():
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb3():
+  store %0, %7 {off=4, width=4}
+  ret
+^bb2():
+  ret
+}
+`;
+
+test('a body op read only by an early-return arm renders in the arm, unnamed', () => {
+  const out = emit(ESCAPED_TO_ARM);
+  expect(out).toMatch(/if \((\w+) \* 3 == a1\) \{\s+a0\[1\] = \1 \* 3;\s+return;/);
+});
+
+// A header that leaves the loop may become the loop's own test, and then the LATCH's exit is an arm
+// rendered inside the body, ahead of the update — the reader above again, reached another way.
+const LATCH_EXIT_AS_ARM = `fn escle {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %8: u32 = icmp_eq %2, %1
+  cond_br %8, ^bb3(), ^bb4()
+^bb4():
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb3():
+  ret
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a latch op read past the latch exit of a loop its header also leaves renders at its reader', () => {
+  const out = emit(LATCH_EXIT_AS_ARM);
+  expect(out).toMatch(/while \((\w+) != a1\)/);
+  expect(out).toMatch(/a0\[1\] = (\w+) \* 3;\s+return;/);
 });

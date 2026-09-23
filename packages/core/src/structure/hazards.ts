@@ -492,8 +492,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // AND IT DECLINES ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots` below
     // REPAIRS this hazard, re-emitting the copy inside the body ahead of the update, whenever the
-    // pre-update value crosses the exit as an edge ARG; read from the header PARAM instead it
-    // arrives here, with no exit slot to sink. Both spellings, and the agbcc listing, are in
+    // pre-update value crosses the exit as an edge ARG; a body OP's value is named at its def
+    // (`escapesAheadOfUpdate`, analysis.ts), so its post-loop read is a name the update does not
+    // write; read from the header PARAM instead it arrives here, with neither an exit slot to sink
+    // nor an op to name. All three spellings, and the agbcc listing, are in
     // test/loop-preupdate-escape.test.ts. Routing the param one into the sink is a structure.ts
     // change with a fan effect on every row, not an edit to this predicate.
     const escaped = (v: Value): boolean => {
