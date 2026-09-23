@@ -169,10 +169,9 @@ test('a pure preheader between guard and self-loop still fuses the proven guard 
   expect(c).not.toContain('if ('); // the guard is subsumed by the while's own test
 });
 
-// The exit region renders under the un-rotation substitution, which spells a back-edge arg as its
-// loop variable's NAME. The one arg it can read after the loop dominates the guard — here `%1`, the
-// value `p` is reloaded from — and on the zero-trip path `p` still holds its init `%2`. So `h`
-// takes `%1` itself; `h(p)` would pass `a2` whenever `a0 <= 0`.
+// The exit region is reached from the guard as well, so every value it reads dominates the guard —
+// here `%1`, the value `p` is reloaded from. On the zero-trip path `p` still holds its init `%2`, so
+// the region spells `%1` as itself: `h(p)` would pass `a2` whenever `a0 <= 0`.
 const CARRIED_OUTSIDE_VALUE = `fn carried {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -190,14 +189,17 @@ const CARRIED_OUTSIDE_VALUE = `fn carried {
 }
 `;
 
-test('after a kept-guard loop, a carried value the zero-trip path disagrees on renders as itself', () => {
+test('after a kept-guard loop, a value the loop carries renders as itself, not as its loop variable', () => {
   expect(emit(CARRIED_OUTSIDE_VALUE)).toContain('return h(a1);');
 });
 
-// THE ONE FACT CHANGED: `p` starts at `%1` too, so both paths agree and the name still spells it.
-test('after a kept-guard loop, a carried value the init agrees with reads its loop variable', () => {
-  const out = emit(CARRIED_OUTSIDE_VALUE.replace('^bb1(%2, %0)', '^bb1(%1, %0)'));
-  const p = out.match(/g\((\w+)\);/)?.[1];
-  expect(p).toBeDefined();
-  expect(out).toContain(`return h(${p});`);
+// …and read through an op the region inlines, which names nothing the region reads directly.
+test('after a kept-guard loop, an inlined op over a carried value renders it as itself', () => {
+  const out = emit(
+    CARRIED_OUTSIDE_VALUE.replace(
+      '%3: s32 = const {value=0}\n',
+      '%3: s32 = const {value=0}\n  %20: s32 = add %1, %0\n',
+    ).replace('call %1 {target="h"}', 'call %20 {target="h"}'),
+  );
+  expect(out).toContain('return h(a1 + a0);');
 });

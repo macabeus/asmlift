@@ -726,8 +726,7 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
-  /** the members of `materialize` named only because the code after a loop reads them one update
-   *  late (`escapesAheadOfUpdate`) */
+  /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
   preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
@@ -1677,14 +1676,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // materialize only GROWS, and growing it only moves render positions closer / adds barriers,
   // so the loop is monotone and converges.
   //
-  // Then ONE MORE PASS with the pre-update escape rule on, repeated until that too settles: the rule
-  // reads `materialize` to stop its walk, so it must see every name the other rules give.
+  // Then the same fixpoint again with the pre-update escape rule on. The rule stops its walk at a
+  // materialized def, so it must see every name the other rules give; it adds its homes on the first
+  // sweep, and the rest of the phase is the other rules settling around them.
   let escapePhase = false;
-  for (let sizeBefore = -1; ;) {
+  for (let sizeBefore = -1; sizeBefore !== materialize.size || !escapePhase;) {
     if (sizeBefore === materialize.size) {
-      if (escapePhase) {
-        break;
-      }
       escapePhase = true;
     }
     sizeBefore = materialize.size;

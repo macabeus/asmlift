@@ -312,8 +312,8 @@ test('a body op in an inner while header stays unnamed, and the loop declines on
 
 // A body block param that takes a LOOP VARIABLE's name writes it partway through the body, and the
 // loop's own reads after that write see the wrong value (the KNOWN GAP beside `rebindHazard`,
-// structure.ts). Such a loop declined on its escaped value before that value had a home, and a home
-// does not unlock it: here %10 takes %4's name ahead of `%11 = sub %3, %4`.
+// structure.ts). A home does not unlock such a loop where it would decline on its escaped value:
+// here %10 takes %4's name ahead of `%11 = sub %3, %4`.
 const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = add %0, %1

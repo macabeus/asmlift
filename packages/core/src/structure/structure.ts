@@ -5228,25 +5228,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
-        // a stale value. Read under the un-rotation substitution (post-loop the params hold their
-        // updated values), and structure the exit region under the same substitution so a post-loop
-        // use of a loop value reads its name.
+        // a stale value — read under the un-rotation substitution: post-loop the params hold their
+        // updated values, and `staleExit` above proved the same copies right on the zero-trip path.
         //
-        // Less the back-edge args the zero-trip path disagrees on. Only a value that dominates the
-        // guard is readable after the loop at all, and where the loop never ran its variable's name
-        // still holds the INIT — so such an arg renders as itself unless the init is the same value.
-        const regionSub = new Map(
-          [...sub].filter(([a]) => {
-            const i = li.backArgOfParam.indexOf(a);
-            return (
-              !liveIn.get(li.exit)!.has(a) || (initArgs[i] !== undefined && sameAtEntry(a, initArgs[i], new Map()))
-            );
-          }),
-        );
-        out.push(
-          ...argAssigns(li.header, li.exit, sub, keptSlot),
-          ...withSub(regionSub, () => structureRegion(li.exit, stop)),
-        );
+        // The exit REGION takes no substitution. It is reached from the guard as well, so every value
+        // it reads dominates the guard — a back-edge arg among them was computed before the loop, and
+        // on a zero-trip run its loop variable's name still holds the init instead.
+        out.push(...argAssigns(li.header, li.exit, sub, keptSlot), ...structureRegion(li.exit, stop));
         return out;
       }
     }
@@ -5765,8 +5753,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The refusal is on the NAME, not on who reads it: the readers are every statement the loop
     // emits, which is not a set worth enumerating when the name alone is the whole signal.
     //
-    // The emitted C is wrong whenever this shape occurs, sink or no sink — it is a naming-pipeline
-    // defect, not this pass's, and repairing the exit copy does not touch it. What IS this pass's
+    // The emitted C can be wrong wherever this shape occurs, sink or no sink (the predicate is on
+    // names, so it also holds on loops that emit correctly) — a naming-pipeline defect, not this
+    // pass's, and repairing the exit copy does not touch it. What IS this pass's
     // is not to UNLOCK such a loop: with no sink these functions decline on the pre-update hazard,
     // so standing down keeps them loud rather than trading a decline for a silent wrong answer.
     const headerNames = new Set(dw.header.params.map((p) => varName.get(p)));
@@ -5837,9 +5826,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
       : null;
     const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
-    // A PRE-UPDATE HOME does not unlock a rebinding loop either, for the reason the sink stands down
-    // above: without the name `escapesAheadOfUpdate` gave it, the value it names would be this
-    // hazard's escaped body value.
+    // Nor does a PRE-UPDATE HOME unlock a rebinding loop, for the reason the sink stands down above:
+    // without the name `escapesAheadOfUpdate` gave it, the value would be this hazard's escaped one.
     if (
       loopUpdateHazard(
         lterm.operands[0],
