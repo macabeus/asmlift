@@ -127,6 +127,12 @@ describe('what refuses', () => {
     expect(src).toMatch(/^s32 lokeep\(/);
   });
 
+  // A PAIR THAT REACHES THE RETURN THROUGH A JOIN declines: the width is decided only in the
+  // block that builds the pair, and returning r0 alone would drop the high half of `a * b`.
+  test('a pair returned from a join declines rather than returning a word', () => {
+    expect(() => lift('llmuljoin')).toThrow(/two halves of a 64-bit value that another block built/);
+  });
+
   // THE WIDTH IS READ OFF WHAT r1 HOLDS, so an r1 the function overwrote is not the pair's.
   test('a high register overwritten after the pair is not a 64-bit return', () => {
     const src = decompile('lokeep', handWritten(['\tadd\tr4, r0, #0', '\tmov\tr1, #0x0']), ARMV4T_AGBCC).source;

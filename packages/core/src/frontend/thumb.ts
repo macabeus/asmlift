@@ -3602,24 +3602,25 @@ export function lift(
     if (a?.half !== 'lo') {
       return null;
     }
-    const hi = target.argRegs[1];
-    const held = halfOf.get(readVar(hi, bi));
+    const held = halfOf.get(readVar(target.argRegs[1], bi));
     if (held?.half !== 'hi' || held.whole !== a.whole) {
       return null;
     }
-    const instrs = asmBlocks[bi].instrs;
-    const from = instrs.indexOf(a.at);
-    if (from < 0) {
-      return null;
-    }
+    const from = asmBlocks[bi].instrs.indexOf(a.at);
+    return from >= 0 && highRegisterSurvives(bi, from + 1) ? a.whole : null;
+  };
+  /** Whether nothing from instruction `from` of block `bi` to its end writes the pair's high
+   *  register behind the value graph's back — the asm half of `wideReturn`'s question. */
+  const highRegisterSurvives = (bi: number, from: number): boolean => {
+    const hi = target.argRegs[1];
     let clobbered = false;
-    for (const ins of instrs.slice(from + 1)) {
+    for (const ins of asmBlocks[bi].instrs.slice(from)) {
       if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
         clobbered ||= callClobbers.includes(hi);
         continue;
       }
       if ((ins.mnemonic === 'pop' || classifyXfer(ins) !== null) && mentionsReg(ins, hi)) {
-        return null;
+        return false;
       }
       const [d, src, k] = ins.ops.map(reg);
       const copy = /^movs?$/.test(ins.mnemonic) ? k === undefined : /^adds?$/.test(ins.mnemonic) && immEq(k, 0);
@@ -3627,7 +3628,57 @@ export function lift(
         clobbered = false;
       }
     }
-    return clobbered ? null : a.whole;
+    return !clobbered;
+  };
+  // The returns `wideReturn` answered null for, with the value in the return register — judged by
+  // `refuseJoinedPairReturns` once every block is filled.
+  const wordReturns: Array<{ bi: number; lo: Value }> = [];
+  /** A PAIR THAT REACHES THE RETURN FROM ANOTHER BLOCK is refused, because `wideReturn` is
+   *  block-local and its null is otherwise a WORD return: `if (c) return a * b; return 0;` joins
+   *  `lo32(a*b)`/0 in r0 and `hi32(a*b)`/0 in r1, and returning r0 alone drops the high half of a
+   *  function that computed it. So where the return register holds a low half and the high register
+   *  a high half, each through any join, and the return block leaves the high register standing,
+   *  the width is a question this frontend cannot answer, and it says so.
+   *
+   *  Run after every block is filled and before `ssa.finish()`: a join's phi operands are wired by
+   *  then, and not yet folded away. */
+  const refuseJoinedPairReturns = () => {
+    type Site = { block: (typeof irBlocks)[number]; at: number };
+    const paramSites = () =>
+      new Map<Value, Site>(irBlocks.flatMap((block) => block.params.map((v, at) => [v, { block, at }])));
+    let paramOf = paramSites();
+    const reaches = (v: Value, half: 'lo' | 'hi', seen = new Set<Value>()): boolean => {
+      if (halfOf.get(v)?.half === half) {
+        return true;
+      }
+      const site = paramOf.get(v);
+      if (!site || seen.has(v)) {
+        return false;
+      }
+      seen.add(v);
+      return irBlocks.some((pb) =>
+        (pb.ops[pb.ops.length - 1]?.successors ?? []).some(
+          (s) => s.block === site.block && s.args[site.at] !== undefined && reaches(s.args[site.at], half, seen),
+        ),
+      );
+    };
+    const hi = target.argRegs[1];
+    const lows = wordReturns.filter(({ lo }) => reaches(lo, 'lo'));
+    // Read only where a low half is in play, and only a register with a definition: a read with none
+    // mints a live-in, which is a parameter. A register the return block never read gets its phi
+    // here, so the sites are taken again after.
+    const his = lows.map(({ bi }) => (ssa.hasReachingDef(hi, bi) ? readVar(hi, bi) : null));
+    paramOf = paramSites();
+    for (const [k, { bi }] of lows.entries()) {
+      const h = his[k];
+      if (h !== null && reaches(h, 'hi') && highRegisterSurvives(bi, 0)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the return in '${asmBlocks[bi].label}' holds the two halves of a 64-bit ` +
+            'value that another block built, and whether a function returns the pair is decided only ' +
+            'in the block that builds it',
+        );
+      }
+    }
   };
 
   // IS A BARE `mov rD, sp` STILL HELD, UNMODIFIED, WHEN `consumes` FIRES? Both ways an agbcc frame
@@ -5291,7 +5342,11 @@ export function lift(
         irb.ops.push(mkOp('ret'));
       } else {
         const lo = readVar(target.returnReg, bi);
-        irb.ops.push(mkOp('ret', { operands: [wideReturn(lo, bi) ?? lo] }));
+        const whole = wideReturn(lo, bi);
+        if (whole === null) {
+          wordReturns.push({ bi, lo });
+        }
+        irb.ops.push(mkOp('ret', { operands: [whole ?? lo] }));
       }
     } else if (kind === 'uncond') {
       irb.ops.push(mkOp('br', { successors: [succ(last.ops[0])] }));
@@ -5328,6 +5383,7 @@ export function lift(
     ssa.markFilled(bi);
   });
 
+  refuseJoinedPairReturns();
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
