@@ -121,7 +121,29 @@ only thing that prevents it. You create the worktree (`git worktree add`) before
 round and remove it (`git worktree remove`) after that round's PR has merged or been closed —
 never the round itself, which cannot outlive its own worktree.
 
-Each round is briefed to:
+**Every round is a run of the `match-round` workflow** (`.claude/workflows/match-round.js`), never a
+single agent you brief by hand:
+
+```
+Workflow({ name: "match-round",
+           args: { target, handle, worktree, branch, board, note } })
+```
+
+`worktree` and `board` are absolute paths; `note` is optional and carries what you know about the
+target as hypotheses. This command's instructions are the opt-in the Workflow tool asks for, so do
+not ask the user a second time. Before the workflow is on `main`, launch it with
+`scriptPath: "<a worktree holding it>/.claude/workflows/match-round.js"` instead of `name`.
+
+A workflow and not one agent per round, because a round run as one agent decides for itself
+whether Phase 5's two reviewers are separate agents, whether a second wave runs, and whether a
+refuted premise ends the round — and nothing outside that agent can see which it chose. The
+script makes those decisions, gives each phase its own agent with only the earlier phases'
+results handed on, and puts every lane's progress, phase by phase, in `/workflows`. A run that dies
+resumes with `resumeFromRunId`; a run that finishes is the task notification Phase 2 treats as "a
+round returns".
+
+Every agent of that workflow reads the list below from its own worktree, so the list is the brief —
+edit it here, never in the script. Each round is held to:
 
 - work in **the worktree you created for it**, at the absolute path you give it, branched from a
   freshly fetched `origin/main`;
@@ -133,7 +155,8 @@ Each round is briefed to:
   this command, and it is the single most important line in the brief: that table's "green and
   ready to merge" verdict means *file a `merge-slot` message and return*, not `gh pr merge`. A
   round that merges itself bypasses the whole of Phase 3 on a base that may already have moved.
-  **Say this in the brief explicitly** — the round will read the table and the table says merge.
+  `match-round`'s preamble says it in so many words, and must keep saying it — every agent reads
+  the table, and the table says merge.
 - **resolve an artifact conflict by regenerating, never by editing.**
   `apps/benchmark/results/results.json` is a tracked multi-megabyte JSON file and the repo has no
   `.gitattributes`, so git will line-merge it and a hand-merged artifact publishes per-row numbers
@@ -144,13 +167,16 @@ Each round is briefed to:
 - expect other branches to be open, expect conflicts, and **never degrade the code to dodge one**;
 - never `git stash` — the stack is shared with every other worktree and with the user's checkout,
   so a bare `stash`/`pop` can take another agent's work. Use a WIP commit.
+- **not write the memory directory.** [`/match-function`](./match-function.md) Phase 7 asks for a
+  memory update, and concurrent rounds would race on the same files there; the write-back goes to
+  the board as `facts/`, `traps/` and `rounds/` posts, and Phase 4 below promotes it per merge.
 - treat its own brief as a hypothesis, and **report a refuted brief as soon as it is refuted**,
   rather than at the end. Every round in both recorded runs refuted its brief. A lane held by a
   round whose premise is already dead is the cheapest thing this command can free.
 
 Give each round a short stable handle (`CRC`, `SIO`, `LLFROM`) and use it as the author on every
-post and every message. **Substitute the absolute board path into the brief** — never hand a
-subagent the literal string `<board>` or a shell variable. Shell state does not survive between
+post and every message. **Pass the absolute board path in `args`** — never the literal string
+`<board>` or a shell variable. Shell state does not survive between
 tool calls, each round is a separate agent with a separate shell, and an unset variable expands to
 a path that matches nothing, which reads exactly like an empty queue.
 
@@ -205,7 +231,9 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
    is not dropped, and the run does not finish while one is held.
 4. **Update `LANES.md`** — a returned round's row becomes `returned`; a round that returned without
    a PR and without a refuted-brief report becomes `dead`, and its target goes back to pending with
-   a note. There is no other way for a dead round to be noticed: it will never file anything.
+   a note — as does a `match-round` run whose result carries `stoppedAt`, the phase whose agent
+   returned nothing. There is no other way for a dead round to be noticed: it will never file
+   anything.
 5. **Close the pass**: run `bin/pass-check.sh`, read its exit status, and report to the user what
    was handled, what moved, and what was started.
 

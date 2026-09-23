@@ -3,6 +3,27 @@
 Multi-agent workflows worth re-running. Invoke by name — `Workflow({name: "meta-optimizer-loop"})`
 — optionally with `args`.
 
+## `match-round`
+
+One [`/match-function`](../commands/match-function.md) round, run as phased agents rather than as one
+agent. [`/parallel-match-function`](../commands/parallel-match-function.md) launches one per lane:
+`Workflow({name: "match-round", args: {target, handle, worktree, branch, board, note}})`.
+
+1. **Diagnose** — Phases 0–2. Ends the round early when there is nothing to build (a correct
+   decline, an unmatchable quirk, a harness problem); the Ship agent then ships only the evidence.
+2. **Implement** — Phases 3–4: atomic commits and the full-bench zero-flip gate.
+3. **Adversarial** — Phase 5's breaker and architect as two separate agents, in waves. A wave whose
+   remediation changed code is followed by another, up to three; each carries the triage ledger of
+   the waves before it.
+4. **Remediate** — reproduces every finding, fixes the confirmed ones as commits, records a reason for
+   each one it declines.
+5. **Ship** — Phases 6–7 up to a green `pr-wait`, then a `merge-slot` message on the board. It never
+   merges.
+
+What each phase does is the command file's; every agent reads it from the lane's worktree, and the
+rules a parallel run adds are the list in `parallel-match-function.md` Phase 1. The script holds
+only the order and the hand-offs.
+
 ## `meta-optimizer-loop`
 
 Supervises the rounds that are running (`/match-function`, `/attribute-function`) and improves the
