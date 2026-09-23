@@ -43,7 +43,7 @@
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
-import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
+import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
   BinOp,
   Expr,
@@ -3862,22 +3862,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // THE HIGH HALF SHIFTS BY 32, AND `x >> 32` IS UNDEFINED IN C WHERE `x` RENDERS 32 BITS
       // WIDE — the shift count must be below the promoted left operand's width. The 64-bit VALUE
       // is what this op projects, but the rendered EXPRESSION is a separate question and the two
-      // can part: a 64-bit call result inlined at its single use renders as a call, and
-      // `exprIntWidth` answers 32 for one because a callee's return type comes from a prototype
-      // outside the emitted function. So the operand is made to carry the rank the shift reads,
-      // by a cast to the value's own recovered 64-bit type — which is also the type the choice
-      // between `>>` and `>>>` is already read off, so the two now agree by construction.
+      // can part, so the operand is made to carry the rank the shift reads by a cast to the
+      // value's own recovered 64-bit type.
+      //
+      // THE SIGNEDNESS IS A SEPARATE PIN AND IS NOT MADE HERE. `>>` versus `>>>` is read off the
+      // 64-bit operand's recovered type, and what the printed operand renders as is decided one
+      // level down by backend/cfamily.ts `pinnedOperands` — which casts whenever the operand does
+      // not PROVABLY render as the operator needs, and a call never does. So the cast this arm may
+      // add carries the rank alone; claiming it carries both would be a claim about a decision
+      // this file does not make.
       const whole = asInt(d.operands[0].type);
       const wide: Expr | undefined =
         exprIntWidth(src, vtEnv) === 64 ? src : whole === undefined ? undefined : { k: 'cast', to: whole, e: src };
-      // A 64-BIT VALUE WHOSE RECOVERY IS NOT AN INTEGER has no 64-bit type to cast to and no legal
-      // shift to spell, so it is a GAP rather than the undefined C it would otherwise print — the
-      // same loud floor the un-nameable `sext` width gets two arms above. Nothing in the corpus
-      // reaches it: every `hi32` is built beside a `concat` or a pair return whose recovery is an
-      // integer, and a recovery that is not one stops at the `concat` gap below before a
-      // projection of it is rendered.
+      // A 64-BIT VALUE WHOSE RECOVERY IS NOT AN INTEGER, AND WHOSE RENDERING DOES NOT ALREADY
+      // CARRY THE RANK, has no 64-bit type to cast to and no legal shift to spell, so it is a GAP
+      // rather than the undefined C it would otherwise print — the same loud floor the un-nameable
+      // `sext` width gets two arms above. The condition is the CONJUNCTION and the refusal states
+      // it as one: neither half alone is a reason. Nothing in the corpus reaches it: every `hi32`
+      // is built beside a `concat` or a pair return whose recovery is an integer, and a recovery
+      // that is not one stops at the `concat` gap below before a projection of it is rendered.
       if (wide === undefined) {
-        return mkGap('a 64-bit value with no integer type has no high half to shift out', [src]);
+        return mkGap(
+          'a 64-bit value that neither renders 64 bits wide nor has an integer type has no high half to shift out',
+          [src],
+        );
       }
       return {
         k: 'cast',
@@ -3916,7 +3924,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
     if (d.opcode === 'call') {
-      return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
+      // THE RANK THE RETURN RENDERS WITH TRAVELS ON THE NODE, because no later reader can recover
+      // it: the width is a fact the frontend was TOLD (a runtime helper's signature, or a project's
+      // `FnProto.returns`) and it is gone from the tree by the time the C backend pins an operand.
+      // Stamping it here — at the one place a call becomes an expression — is what keeps the four
+      // readers of `exprIntWidth` agreeing: the shift below, the divides and both signedness pins.
+      const wide64 = d.results[0] !== undefined && intWidth(d.results[0].type) === 64;
+      return {
+        k: 'call',
+        fn: d.attrs.target as string,
+        args: d.operands.map(e),
+        ...(wide64 ? { wide64: true as const } : {}),
+      };
     }
     if (d.opcode === 'laddr') {
       // gaddr's local twin: the address of the frame-local object the Thumb frontend PROVED

@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaredArgWidths, declaredWidth, prototypesFromSymbols, wordsOf } from '../src/proto';
+import { declaredArgWidths, declaredReturnWidth, declaredWidth, prototypesFromSymbols, wordsOf } from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 

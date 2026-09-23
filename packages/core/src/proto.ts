@@ -312,7 +312,7 @@ export function declaredWidth(t: ParamType): number | undefined {
  *  absence of a returned value, and the one consumer here asks how many registers come back with a
  *  value in them. `validatePrototypes` is what keeps the two from contradicting each other.
  *
- *  A DESIGNATED SAFE READER, the way `protoArity` is one: a frontend indexes `prototypes` by a
+ *  A DESIGNATED SAFE READER, the way `declaredArgWidths` is one: a frontend indexes `prototypes` by a
  *  callee's name, and a callee named `toString` reads a `Function` off `Object.prototype` — which
  *  has no `returns`, so it answers here what an undeclared callee answers. */
 export function declaredReturnWidth(p: FnProto | undefined): number | undefined {

@@ -108,17 +108,22 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
  *  signedness `exprCType` reports uniformly as `s32`, this one models the width it reports the same
  *  way — and the two together are what the usual arithmetic conversions need.
  *
- *  ITS SOUNDNESS IS A CLOSED ENUMERATION, so here is the enumeration. A 64-bit value reaches a
- *  rendered expression in exactly three ways:
+ *  ITS SOUNDNESS IS AN ENUMERATION OF THE PRODUCERS, so here is the enumeration. A 64-bit value
+ *  reaches a rendered expression in exactly four ways:
  *    1. a `var`/`postincr` whose DECLARED type is 64 bits wide — read off `varType`;
  *    2. a `cast` to a 64-bit type — read off the node;
- *    3. an arithmetic node over one of those — the recursion below.
+ *    3. a `call` the structurer STAMPED `wide64` — read off the node, and it is the one case where
+ *       the rank cannot be derived from anything visible here: a callee's return type comes from a
+ *       prototype outside the emitted function, which is why `exprCType` answers `undefined` for a
+ *       call and why the stamp exists (l3/ast.ts carries what it means);
+ *    4. an arithmetic node over one of those — the recursion below.
  *  It does NOT arrive through MEMORY, because `contracts.ts` `SCALAR_WIDTHS` is {1,2,4} and there
- *  is no 64-bit global; through a `const`, because a 64-bit literal only folds inside C `int`
- *  range, where 32 is the right answer for the literal's own type; or through a `call`, because a
- *  call's return type comes from a prototype outside the emitted function, which is exactly why
- *  `exprCType` answers `undefined` for one — so a 64-bit call RESULT is materialised into a named
- *  local by the structurer and arrives here as case 1.
+ *  is no 64-bit global; nor through a `const`, because a 64-bit literal only folds inside C `int`
+ *  range, where 32 is the right answer for the literal's own type.
+ *
+ *  AN UNSTAMPED CALL IS 32 AND THAT IS THE SAFE ANSWER, not a claim: it is what C makes of a callee
+ *  nobody declared, and every consumer of this rank takes a cast on a 32 it doubts and takes none on
+ *  a 64 — so the direction that would be wrong silently is the one this never guesses.
  *
  *  A SHIFT takes the rank of its left operand alone; every other ARITHMETIC node takes the wider of
  *  the two. That is C, and it is also why this is not simply `exprCType(e).width`.
@@ -135,6 +140,8 @@ export function exprIntWidth(e: Expr, varType: VarTypes): 32 | 64 {
     case 'index':
     case 'field':
       return wide(exprCType(e, varType)) ? 64 : 32;
+    case 'call':
+      return e.wide64 === true ? 64 : 32;
     case 'un':
       return e.op === '!' ? 32 : exprIntWidth(e.e, varType);
     case 'bin':
