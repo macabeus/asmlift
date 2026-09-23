@@ -4576,7 +4576,63 @@ export function lift(
       writeData(reg(dReg), bi, res);
     };
 
-    for (const ins of ab.instrs) {
+    // A 64-BIT ADD OR SUBTRACT OVER TWO REGISTER PAIRS. Thumb-1 has no 64-bit arithmetic, so the
+    // machine spells one as a flag-setting `add`/`sub` on the low words and an `adc`/`sbc` on the
+    // high words that consumes its carry — and agbcc emits the two as ONE insn (`adddi3`/`subdi3`,
+    // thumb.md), so nothing is ever scheduled between them. Read together they are exactly
+    // `concat(lo1, hi1) ± concat(lo2, hi2)`, projected back into the two destinations: no new op,
+    // because `add`/`sub` already carry their width in their operand types. The `concat`s are what
+    // `raise/pairparams.ts` fuses into a 64-bit parameter and what the structurer spells as a widen
+    // or refuses, and the projections are what `wideReturn` reads a pair return from.
+    //
+    // `adc` does NOT mean the source wrote `+` — agbcc also reaches `adddi3` from a signed division
+    // bias and from `a*3` as `(a<<1)+a`. It means a 64-bit add, which is what this builds; the
+    // halves those feed it are not a widen, so their `concat` is the structurer's loud gap.
+    //
+    // Refused — the carry instruction then decodes as today's opaque — unless every one holds:
+    //   * the carry consumer is the NEXT instruction. The carry is the flags, and every Thumb-1
+    //     data-processing instruction writes them; adjacency is what agbcc guarantees and the only
+    //     thing that proves the `adc` reads THIS add's carry;
+    //   * add feeds adc, sub feeds sbc. The other two pairings compute a value, but not a 64-bit
+    //     add or subtract;
+    //   * every register is LOW (r0-r7). A high-register `add` is the encoding that writes no
+    //     flags, and Thumb-1 has no `adc`/`sbc` on a high register at all;
+    //   * the `adc` is `adc rH, rX` or `adc rH, rH, rX` — the only form Thumb-1 encodes;
+    //   * the add's destination is neither high-half operand: `add r0,r0,r2 ; adc r1,r0` reads the
+    //     low SUM as a high half, which is no half of either operand.
+    const carryPair = (ins: Instr, next: Instr | undefined, bi: number): boolean => {
+      const op = ins.mnemonic.replace(/s$/, '') as 'add' | 'sub';
+      if (next?.mnemonic.replace(/s$/, '') !== (op === 'add' ? 'adc' : 'sbc')) {
+        return false;
+      }
+      const [d, s1, s2] = ins.ops.map(reg);
+      const [lhs, rhs] = s2 === undefined ? [d, s1] : [s1, s2];
+      const [hd, h1, h2] = next.ops.map(reg);
+      if (h2 !== undefined && h1 !== hd) {
+        return false;
+      }
+      const hx = h2 ?? h1;
+      const low = (r: string | undefined): r is string => /^r[0-7]$/.test(r ?? '');
+      if (!low(d) || !low(lhs) || !low(hd) || !low(hx) || !(low(rhs) || /^#/.test(rhs ?? ''))) {
+        return false;
+      }
+      if (d === hd || d === hx || next.ops.length > 3) {
+        return false;
+      }
+      // Every read before either write: the machine reads the high halves after the low write,
+      // and the guard above is what makes that the same thing.
+      const a = fuseHalves(irb, readData(lhs, bi), readData(hd, bi));
+      const b = fuseHalves(irb, rhs.startsWith('#') ? constVal(imm(rhs), bi) : readData(rhs, bi), readData(hx, bi));
+      const v = mkValue(T.unk(64));
+      irb.ops.push(mkOp(op, { operands: [a, b], results: [v] }));
+      writeData(d, bi, projectHalf(irb, v, 'lo', next));
+      writeData(hd, bi, projectHalf(irb, v, 'hi', next));
+      return true;
+    };
+    // The carry instruction `carryPair` already decoded, skipped when the loop reaches it.
+    let consumed: Instr | null = null;
+
+    for (const [ii, ins] of ab.instrs.entries()) {
       // Control transfers (branches, returns) are emitted in the terminator section below — skip them
       // here so a return-form PC write (`mov pc, lr`, `pop {…,pc}`) is not decoded as a data write to a
       // phantom `pc` register (a silent drop of the return). `cmp` is not a transfer, so it still runs.
@@ -4644,6 +4700,10 @@ export function lift(
         pendingCmp = null;
       }
       frame.step(ins);
+      if (ins === consumed) {
+        consumed = null;
+        continue;
+      }
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {
         case 'mov':
@@ -4673,6 +4733,10 @@ export function lift(
           // takes the copy path and declines while `add sp, #0` is transparent — the same
           // two-spellings inconsistency one N lower down.
           if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+            break;
+          }
+          if (carryPair(ins, ab.instrs[ii + 1], bi)) {
+            consumed = ab.instrs[ii + 1];
             break;
           }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
@@ -4708,6 +4772,10 @@ export function lift(
         case 'sub':
         case 'subs': {
           if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+            break;
+          }
+          if (carryPair(ins, ab.instrs[ii + 1], bi)) {
+            consumed = ab.instrs[ii + 1];
             break;
           }
           if (c === undefined) {

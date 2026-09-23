@@ -605,6 +605,12 @@ reads its RETURN width off the value graph AND the epilogue: r1 has to hold the 
 half, through any register copies, and `pop {r2}` cannot touch the return pair where `pop {r1}` fills
 its high register with the return address — two functions otherwise identical.
 
+**A carry pair is a 64-bit add, built in the frontend.** Thumb-1 spells one as a flag-setting `add`
+(`sub`) on the low words and an `adc` (`sbc`) on the high words that takes its carry — ONE insn on
+agbcc (`adddi3`/`subdi3`), so the two are adjacent. Read together they are `concat ± concat`, with
+`lo32`/`hi32` written back, which is the same shape a helper call's pair already has, so the
+parameter fusion and the pair return need nothing new.
+
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:
 from the target's runtime-helper table, whose signatures are the COMPILER's and need no header, or
@@ -625,6 +631,7 @@ lifted from.
 | level             | refusal                                                                     | because                                                                                                                                                                                                                                                                     |
 | ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | frontend, layer 0 | a caller-saved register read after a call, the returned pair aside (Thumb)  | what it holds is the callee's, so an `r1` read after a `bl` is never the caller's pre-call value — it is the RETURNED high half where a width says a pair came back, and nothing otherwise; the PowerPC frontend builds no pair and refuses a declared wide return outright |
+| frontend          | an `adc`/`sbc` that does not directly follow its low-register `add`/`sub`   | only adjacency proves which carry it reads (every Thumb-1 ALU op writes the flags); it decodes as the unmodelled opaque it always was, and so does one whose high half is that add's own destination, which is no half of either operand                                    |
 | frontend          | a 64-bit pair that reaches the return from another block                    | `wideReturn` is block-local, and its null is otherwise a WORD return that drops the high half of a function that computed it                                                                                                                                                |
 | frontend          | a 64-bit value leaving as a word at an ordinary call boundary               | nothing states an undeclared callee's parameter widths                                                                                                                                                                                                                      |
 | raise             | a helper call whose operands did not ARRIVE at the table's widths           | an operand count is not evidence of a pair; the pair construction is                                                                                                                                                                                                        |
