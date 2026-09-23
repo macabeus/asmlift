@@ -857,7 +857,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     ['float > opaque-ops', 56],
     ['float > store-class', 13],
     ['indirect-call > branch-form', 10],
-    ['ctr-transfer > branch-form', 3],
+    ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 2],
     ['tu-scoped-name > pool-word-shape', 1],
     ['address-taken-local > stack-frames', 1],

@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=113.1s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=102.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,9 +137,9 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**1,106 s over 187 real rows** and **598 s over 749 synthetic rows**; wall clock was 220.7 s and
+**935 s over 189 real rows** and **505 s over 750 synthetic rows**; wall clock was 220.7 s and
 254.1 s, and **348.9 s end to end** because the tiers overlap — 254.1 + 220.7 is 474.8, which is
-not the wall time and never was. The dearest single row is **177 s** on
+not the wall time and never was. The dearest single row is **147 s** on
 `kleod:PauseMenuScreenHandler:agbcc`, **16% of the tier** on its own — which is the figure to reach
 for when a scoped run looks cheap.
 
