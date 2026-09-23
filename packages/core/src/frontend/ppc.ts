@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgLayout, resolveArgLayout, unresolvedArgLayout } from '../proto';
+import { type Prototypes, declaredArgWidths } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -487,24 +487,15 @@ export function lift(
   // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
   // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`declaredArgLayout` is asked first).
-  //
-  // TWO READERS, because the gap refusal belongs to only one of them. `argRegsHeld` is the count
-  // alone and answers a question a DECLARED call also asks — `proto.ts` `resolveArgLayout` weighs
-  // it against a declaration holding a spelling it could not size. There the declaration is what
-  // bounds the answer, so a gap is not the end of the count and must not throw; here nothing else
-  // bounds it, so a gap is the whole problem.
-  const argRegsHeld = (bi: number): number => {
+  // and names the gap rather than guessing. A prototype answers it (`declaredArgWidths` is asked
+  // first), and this scan is never weighed against one: it is a guess, and a guess that cannot
+  // fail cannot witness a width a declaration left open.
+  const fallbackArgc = (bi: number, at: number): number => {
     const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
     let n = 0;
     while (n < ARG_REGS.length && holdsValue(n)) {
       n++;
     }
-    return n;
-  };
-  const fallbackArgc = (bi: number, at: number): number => {
-    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
-    const n = argRegsHeld(bi);
     for (let k = n + 1; k < ARG_REGS.length; k++) {
       if (holdsValue(k)) {
         throw new PpcUnsupportedError(
@@ -800,18 +791,16 @@ export function lift(
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
           // ONE QUESTION, ONE ANSWER, AND THE OTHER FRONTEND ASKS IT THE SAME WAY. A declaration
-          // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts` converts
-          // between them, and `frontend/thumb.ts` resolves the same layout with the same function
-          // and refuses with the same sentence. A user-supplied fact that two frontends answer
+          // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts`
+          // `declaredArgWidths` converts between them and `frontend/thumb.ts` reads the same
+          // answer out of the same function. A user-supplied fact that two frontends convert
           // differently is a bug wherever it is read second.
           //
-          // A SPELLING NOTHING CAN SIZE IS NOT SILENTLY DISCARDED AND NOT BLANKET-REFUSED. It is
-          // weighed against the argument registers the caller actually set up (`argRegsHeld`): a
-          // parameter this cannot size occupies one register or two, and where the machine's count
-          // only fits the first reading, that reading is the layout. Where it fits both, the
-          // declaration is not enough and this refuses — discarding it instead would lift
-          // `g(1, 3)` from a header that says `void g(Direction)`, which is a compiling, plausible,
-          // wrong program with no gap in it.
+          // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `declaredArgWidths` abstains for the
+          // whole list and this falls to `fallbackArgc` — the guess a callee with no prototype gets,
+          // which reads each argument register through `readGuessedArg` so `finish()` can retract
+          // the ones a call destroyed. A declaration is not an excuse to ASSERT registers whose
+          // count came out of the same guess.
           //
           // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR, and this frontend has no pair.
           // Every argument register it reads becomes its own value, so a declaration that spends
@@ -821,14 +810,9 @@ export function lift(
           //
           // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
           // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
-          const layout = declaredArgLayout(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          const widths = declaredArgWidths(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
           let declared: number | undefined;
-          if (layout !== undefined) {
-            const setUp = argRegsHeld(bi);
-            const widths = resolveArgLayout(layout, setUp);
-            if (widths === null) {
-              throw new PpcUnsupportedError(`cannot lift '${name}': ${unresolvedArgLayout(sym, layout, setUp)}`);
-            }
+          if (widths !== undefined) {
             const wideAt = widths.findIndex((w) => w > 32);
             if (wideAt >= 0) {
               throw new PpcUnsupportedError(

@@ -22,15 +22,11 @@ import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import {
-  type DeclaredArgLayout,
   type Prototypes,
   STANDARD_SIGNATURES,
-  declaredArgLayout,
+  declaredArgWidths,
   declaresParams,
-  minArgRegs,
-  resolveArgLayout,
   returnsWithoutHiddenPointer,
-  unresolvedArgLayout,
   wordsOf,
 } from '../proto';
 import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper } from '../runtime-helpers';
@@ -3842,14 +3838,13 @@ export function lift(
   //
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell — including `long long`, which is why a pair no longer needs guessing at — and
-  // `undefined` for a project typedef, a `double` or a by-value struct. `declaredArgLayout` carries
-  // that absence PER PARAMETER rather than refusing the list, because the question here is not how
-  // wide the parameter is but whether it occupies one argument register or two, and what settles
-  // that is the machine: `resolveArgLayout` at the call site below compares the registers the
-  // caller actually set up against the count this list reaches when every unreadable spelling is
-  // read as one. That comparison needs the SSA, which does not exist yet here, so a list with an
-  // unreadable spelling licenses NO outgoing block — and it never needs one, since a resolution
-  // that succeeds fits inside the argument registers by construction.
+  // `undefined` for a project typedef, a by-value struct or a floating type. One such spelling and
+  // `declaredArgWidths` states no layout at all, because the question here is not how wide that
+  // parameter is but whether it occupies one argument register or two, and the choice moves every
+  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
+  // the call is lifted at the arg-register guess, exactly as a callee the project never declared
+  // is, and the guess retracts the registers a call destroyed where a stated width would assert
+  // them.
   //
   // The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word for how
   // many argument REGISTERS the call takes, and a count that lies is garbage in —
@@ -3861,7 +3856,7 @@ export function lift(
   // there IS no outgoing block. This runs over every `bl` while the outgoing-argument analysis is
   // being built, so a refusal thrown here reaches the caller ahead of every other slot-model
   // refusal, which is right because it is the most specific thing that was seen.
-  const declaredCall = (callee: string): { layout: DeclaredArgLayout; block: readonly number[] | null } | null => {
+  const declaredCall = (callee: string): { widths: readonly number[]; block: readonly number[] | null } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3876,33 +3871,10 @@ export function lift(
     const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
     const own = known(prototypes);
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const layout = declaredArgLayout(proto);
-    if (layout === undefined) {
+    const widths = declaredArgWidths(proto);
+    if (widths === undefined) {
       return null;
     }
-    if (layout.unsizable.length > 0) {
-      // TWO REFUSALS AND TWO GAPS, and the split is where the OUTGOING BLOCK starts. Below the
-      // argument registers, the only open question is which register each argument lives in, and
-      // the machine answers it at the call site. At or above them the block's SIZE is open too —
-      // and the machine cannot close it, because the contiguous scan is capped at the argument
-      // registers and so can never reach a count this high. That one is decided here, where the
-      // block is laid out, and it is decided eagerly: this runs before the outgoing-argument
-      // analysis, so naming the parameter beats the sp-as-data reason that would otherwise surface
-      // and send a reader hunting for a store.
-      if (minArgRegs(layout) > target.argRegs.length) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': callee \`${callee}\` is declared with ${layout.widths.length} ` +
-            `parameter(s) reaching at least ${minArgRegs(layout)} argument words, more than this target's ` +
-            `${target.argRegs.length} argument register(s), and its parameter type ` +
-            `\`${layout.unsizable[0]}\` is one asmlift cannot size — so the size of this frame's ` +
-            "outgoing stack-argument block depends on a width nothing states. Declare the call's " +
-            `argument-REGISTER count instead (\`{"${callee}": {"params": ${minArgRegs(layout)}}}\`), ` +
-            'which is taken at its word',
-        );
-      }
-      return { layout, block: null };
-    }
-    const widths = layout.widths as readonly number[];
     // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
     // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
     // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
@@ -3918,12 +3890,12 @@ export function lift(
     for (const [i, w] of widths.entries()) {
       if (w > 32 && at + 2 > target.argRegs.length) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': parameter ${i + 1} of \`${callee}\` is 64 bits wide and takes ` +
-            `argument words ${at + 1} and ${at + 2} of a call with ${target.argRegs.length} argument ` +
-            `register(s), so ` +
+          `cannot lift '${name}': one half of a 64-bit value would be handed to \`${callee}\` outside ` +
+            `the argument registers — its parameter ${i + 1} is 64 bits wide and takes argument words ` +
+            `${at + 1} and ${at + 2} of a call with ${target.argRegs.length} argument register(s), so ` +
             (at < target.argRegs.length
-              ? `its low half is in ${target.argRegs[at]} and its high half in this frame's outgoing ` + 'stack block'
-              : "both of its halves are in this frame's outgoing stack block") +
+              ? `the low half is in ${target.argRegs[at]} and the high half in this frame's outgoing ` + 'stack block'
+              : "both halves are in this frame's outgoing stack block") +
             ' — this frontend assembles a pair out of two argument registers and out of nothing else',
         );
       }
@@ -3933,7 +3905,7 @@ export function lift(
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-    return { layout, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
+    return { widths, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
@@ -4806,24 +4778,10 @@ export function lift(
           // reads argument registers off the answer is written once; two walks would be two chances
           // for the pairing rule and the arity rule to disagree.
           //
-          // A DECLARATION WITH A SPELLING NOTHING CAN SIZE IS RESOLVED HERE, against the registers
-          // the caller actually set up (`proto.ts` `resolveArgLayout`, and `frontend/ppc.ts` asks
-          // it the same question with the same words). It is resolved here and not in
-          // `declaredCall` because the witness is the SSA, which that function runs before.
-          const widths =
-            wide?.params ??
-            (declared === null
-              ? null
-              : (() => {
-                  const setUp = fallbackArgcHere(bi);
-                  const resolved = resolveArgLayout(declared.layout, setUp);
-                  if (resolved === null) {
-                    throw new FrontendUnsupportedError(
-                      `cannot lift '${name}': ${unresolvedArgLayout(targetSym, declared.layout, setUp)}`,
-                    );
-                  }
-                  return resolved;
-                })());
+          // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
+          // `declaredArgWidths`), so `declared` is null for it and this falls to the guess below —
+          // the same answer the callee would get with no prototype at all.
+          const widths = wide?.params ?? declared?.widths ?? null;
           const argc = widths === null ? fallbackArgcHere(bi) : wordsOf(widths);
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
@@ -4871,8 +4829,13 @@ export function lift(
           // A STATED WIDTH IS THE DISAMBIGUATION AND IT IS ONE WHETHER IT SAYS 64 OR 32. A stated
           // 64 built the pair in the walk above. A stated 32 says the callee takes a word, so
           // handing it a half is the narrowing the header authorises — `void sink(int)` against
-          // `sink((int)(a * b))` — and refusing it here would cite the absence of a prototype the
-          // user supplied.
+          // `sink((int)(a * b))` — and refusing it here would contradict a fact the user supplied.
+          //
+          // SO THE MESSAGE IS ABOUT THE WIDTH AND NOT ABOUT A PROTOTYPE, because a supplied one
+          // reaches here too: a typed list holding a spelling `declaredWidth` cannot size states
+          // no layout at all (`proto.ts` `declaredArgWidths`), and a bare COUNT states argument
+          // registers rather than widths. Both leave `widths` null with a `--proto` on the command
+          // line, and blaming an absent prototype would be false about its own input.
           if (widths === null) {
             for (const [j, v] of args.entries()) {
               const half = halfOf.get(v);
@@ -4880,8 +4843,10 @@ export function lift(
                 throw new FrontendUnsupportedError(
                   `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
                     `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
-                    `the width of '${targetSym}'s parameters — a prototype would, and without one a ` +
-                    'pair cannot be told from two ordinary arguments',
+                    `how wide '${targetSym}'s parameters are, so a pair cannot be told from two ` +
+                    `ordinary arguments. A typed prototype states it (\`{"${targetSym}": {"params": ` +
+                    '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, ' +
+                    'does not',
                 );
               }
             }

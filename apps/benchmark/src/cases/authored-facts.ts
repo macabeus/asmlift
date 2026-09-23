@@ -391,10 +391,10 @@ export function standardSignatureAgrees(ctx: string, name: string): boolean {
   const arity = args === '' || args === 'void' ? 0 : args.split(',').length;
   const ret = m[1].trim().replace(/\s+/g, ' ');
   // FITS IN ONE REGISTER, which is not the same predicate as "asmlift can size it". `declaredWidth`
-  // answers 64 for a `long long` and for a `double`, and a 64-bit return travels in a PAIR — so a
-  // width alone says nothing about the shape this compares. Nothing in `STANDARD_SIGNATURES`
-  // reaches the wide arm today (its one entry returns `void *`), which is exactly why the name has
-  // to be true before the next entry inherits it.
+  // answers 64 for a `long long`, and a 64-bit return travels in a PAIR — so a readable width
+  // alone says nothing about the shape this compares. Nothing in `STANDARD_SIGNATURES` reaches the
+  // wide arm today (its one entry returns `void *`), which is exactly why the name has to be true
+  // before the next entry inherits it.
   const inRegister = (t: string) => {
     const w = declaredWidth(t);
     return t === 'void' || (w !== undefined && w <= 32);

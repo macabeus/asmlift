@@ -152,36 +152,28 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
   });
 
-  // The other side of the same rule, and BOTH FRONTENDS ANSWER IT WITH THE SAME FUNCTION AND THE
-  // SAME SENTENCE (`proto.ts` `resolveArgLayout`). A spelling `declaredWidth` cannot read is a
-  // parameter that occupies one argument register or two, and which one it is decides whether this
-  // call passes a value or half of one.
+  // The other side of the same rule, and BOTH FRONTENDS CONVERT IT WITH THE SAME FUNCTION
+  // (`proto.ts` `declaredArgWidths`). A spelling `declaredWidth` cannot read is a parameter that
+  // occupies one argument register or two, and nothing a declaration holds says which — so the
+  // list states no layout, and this call is lifted at the arg-register guess, exactly as a callee
+  // the project never declared is. DECLARING MORE MAY NOT DO LESS.
   //
-  // THE MACHINE IS THE WITNESS AND IT IS NOT ALWAYS DECISIVE. Here it sets up TWO registers, which
-  // both readings reach — `Direction` as a pair, or a second argument the header omits — so
-  // nothing settles it. Discarding the declaration and guessing lifted `g(1, 3)` from a header
-  // that says `void g(Direction)`: an invented argument, a compiling plausible wrong program with
-  // no gap in it, and the very output the refusal above exists to prevent.
-  test('a spelling the width reader cannot size refuses when the machine does not settle it', () => {
+  // THE MACHINE IS NOT A WITNESS FOR THE MISSING WIDTH, which is what the equality below pins.
+  // Weighing the declaration against the contiguous scan refused this very shape — `void
+  // g(Direction)` against two registers held — while the same frontend lifted it when told
+  // nothing, and it accepted the narrow reading wherever the scan happened to miscount a pair.
+  test('a spelling the width reader cannot size leaves the guess standing', () => {
     const asm = '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tg\nc:\tblr\n';
-    expect(() => decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } })).toThrow(
-      /`Direction` is a spelling asmlift cannot size/,
-    );
-    // …and it names the way past itself: a COUNT states argument registers directly.
-    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: 2 } } }).source).toContain('g(1, 3)');
-  });
-
-  // THE ACCEPTING ARM, which is what keeps the refusal from being a blanket. The same unreadable
-  // spelling against a call that set up ONE register: only the one-register reading reaches that
-  // count, so the layout is determined and the declaration is honoured. A frontend that refused
-  // here would do LESS when told MORE — this lifts `g(1)` with no prototype at all.
-  test('a spelling it cannot size is honoured where the machine settles it', () => {
-    const asm = '0 <c>:\n0:\tli      r3,1\n4:\tbl      c <c+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
-    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } }).source).toContain('g(1)');
+    const guessed = decompile('c', asm, PPC_MWCC).source;
+    expect(guessed).toContain('g(1, 3)');
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } }).source).toBe(guessed);
+    // …and the assertion is not vacuous, because a declaration that DOES state a layout moves the
+    // answer: a COUNT speaks argument registers directly and is taken at its word.
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(1)');
   });
 
   test('and a prototype answers the question the gap cannot', () => {
-    // `declaredArgLayout` is consulted before the guess, so a declared callee is unaffected by the gap.
+    // `declaredArgWidths` is consulted before the guess, so a declared callee is unaffected by the gap.
     const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
     expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source).toContain(
       'g(a0, a1, 3)',

@@ -10,7 +10,7 @@ import type { SymbolMap, SymbolTypeFacts } from './symbols';
 /** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). ONE fact is
  *  read off it and everything else is derived from that fact: the WIDTH it spells
  *  (`declaredWidth`). raise/paramwidth.ts checks its inference against that width, and
- *  `declaredArgLayout` sums the list's widths into the argument registers the call occupies.
+ *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies.
  *
  *  A DECLARED WIDTH ONLY VETOES, never pins. Where the asm carries a prologue extension the
  *  declaration contradicts, the declaration wins — it is a fact from the project's headers, where
@@ -26,8 +26,9 @@ export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
    *  for how many argument REGISTERS the call occupies. The two are the same number only while
-   *  every parameter fits in a register, and `declaredArgLayout` is what converts the first into
-   *  the second. Omit to let the frontend fall back to its contiguous-arg-register heuristic. */
+   *  every parameter fits in a register, and `declaredArgWidths` is what converts the first into
+   *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
+   *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
@@ -58,7 +59,7 @@ export type Prototypes = Record<string, FnProto>;
  *  The rule lives here rather than beside either caller because it has two, and they are the two
  *  vocabularies a declaration is written in. `runtime-helpers.ts` states a compiler's own helper
  *  signatures as widths (`__ashrdi3` is `[64, 32]` — two C parameters, three registers), and
- *  `declaredArgLayout` below reads the same widths off a project's C types. One ABI fact, one
+ *  `declaredArgWidths` below reads the same widths off a project's C types. One ABI fact, one
  *  copy of it; a second copy is a rule that can disagree with itself.
  *
  *  NO EVEN-REGISTER ALIGNMENT, and that is a measured agbcc fact rather than an omission: its
@@ -84,101 +85,53 @@ export function declaresParams(p: FnProto | undefined): boolean {
   return typeof p?.params === 'number' || Array.isArray(p?.params);
 }
 
-/** The argument-register layout one declaration states, as far as the declaration can state it.
- *  ONE WALK OF THE PARAMETER LIST answers both halves, because they are two readings of the same
- *  `declaredWidth` call and a second walk is a rule that can disagree with itself. */
-export interface DeclaredArgLayout {
-  /** the width each declared parameter occupies, in argument order — `null` where `declaredWidth`
-   *  cannot read the spelling, which is "either one register or a pair" and not "one word" */
-  readonly widths: readonly (number | null)[];
-  /** the spellings that answered `null`, in argument order, in the words the user wrote them */
-  readonly unsizable: readonly ParamType[];
-}
-
-/** What a declaration says about the argument registers a call occupies, or `undefined` when
- *  `params` was omitted or malformed (a bare `"u8"` string, the shape the untyped CLI `--proto`
- *  JSON admits) — the two readings that failed before any parameter was looked at.
+/** What a declaration says about the argument registers a call occupies — the width each declared
+ *  parameter travels in, in argument order — or `undefined` when it says nothing this can act on.
  *
- *  A SPELLING THIS CANNOT SIZE IS NOT A FAILED READING OF THE LIST, and that is the whole of what
- *  this type exists to keep apart. A project typedef — `size_t`, `bool8`, `Direction`, `TaskFunc`,
- *  `int64_t` — reads as `null` exactly as `struct Foo` does, and the question a caller is asking
- *  is not "how wide is it" but "does it occupy one argument register or two". Answering "one" is a
- *  layout nothing could know to be right; refusing the WHOLE list over it is a function the caller
- *  lifts when told nothing and refuses when told more, which is worse than either. So the freedom
- *  is carried here per parameter and `resolveArgLayout` spends it against the machine.
+ *  THREE WAYS TO SAY NOTHING, AND THEY ARE ONE ANSWER. `params` omitted; `params` malformed (a
+ *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
+ *  spelling `declaredWidth` cannot read — a project typedef (`bool8`, `Direction`, `TaskFunc`), a
+ *  by-value struct, a floating type. The first two are not a reading of the list at all. The third
+ *  is a list read to the end that cannot be CONVERTED: a parameter of unknown width occupies one
+ *  argument register or two, the choice moves every later argument's home, and nothing a
+ *  declaration holds settles it.
  *
- *  The COUNT form already speaks argument registers and says so at its declaration, so it expands
- *  to that many words and can never be unsizable. */
-export function declaredArgLayout(p: FnProto | undefined): DeclaredArgLayout | undefined {
+ *  SO IT ABSTAINS, AND ABSTAINING IS NEITHER A REFUSAL NOR A GUESS. The caller falls back to its
+ *  own contiguous-arg-register scan — exactly what it does for a callee the project never declared
+ *  — and that scan names itself a guess: `SsaBuilder.readGuessedArg` ASKS whether a register was
+ *  set up, and `finish()` retracts the ones an intervening call destroyed. Refusing instead would
+ *  be a function that lifts when told nothing and declines when told more. Returning
+ *  one-register-each instead would be a layout nothing could know to be right, and the frontend
+ *  would then ASSERT those registers rather than ask for them.
+ *
+ *  THE MACHINE IS NOT A WITNESS FOR A WIDTH NOBODY STATED, which is the reading this replaces. The
+ *  contiguous scan is wrong in both directions and neither is recoverable here. It OVER-counts:
+ *  it is read before `frontend/ssa.ts` `narrowToSetupArgs` trims the registers a call sat between,
+ *  so `bl __muldi3` leaves r2 and r3 counted as arguments of the NEXT call. It UNDER-counts: an
+ *  incoming argument register this function passes straight through has no definition here at all,
+ *  so it counts zero — measured on agbcc, `void g(MyU64); void f(MyU64 x){ g(x|1); }` leaves the
+ *  high half in r1 untouched and the scan answers 1 for a call the ABI hands a pair. An equality
+ *  between that scan and the one-register-each reading is therefore as likely to be a miscounted
+ *  pair as a confirmation of anything, and a witness that cannot fail is not a witness.
+ *
+ *  The COUNT form is the user's word for argument REGISTERS and says so at its declaration, so it
+ *  expands to that many words and can never abstain. It is the way past a header this cannot size. */
+export function declaredArgWidths(p: FnProto | undefined): readonly number[] | undefined {
   if (typeof p?.params === 'number') {
-    return { widths: Array.from({ length: p.params }, () => 32), unsizable: [] };
+    return Array.from({ length: p.params }, () => 32);
   }
   if (!Array.isArray(p?.params)) {
     return undefined;
   }
-  const widths: (number | null)[] = [];
-  const unsizable: ParamType[] = [];
+  const widths: number[] = [];
   for (const t of p.params) {
     const w = declaredWidth(t);
-    widths.push(w ?? null);
     if (w === undefined) {
-      unsizable.push(t);
+      return undefined;
     }
+    widths.push(w);
   }
-  return { widths, unsizable };
-}
-
-/** The argument-register widths a declaration resolves to once the MACHINE has been consulted, or
- *  `null` when nothing decides between the readings it leaves open.
- *
- *  A list with `u` unsizable spellings spans between `known + u` argument registers (every one of
- *  them a single register) and `known + 2u` (every one of them a pair). `argRegsSetUp` is the
- *  count the caller actually set up, read off the instructions by the same contiguous scan a
- *  callee with no prototype at all is lifted by — an INDEPENDENT witness, in the vocabulary the
- *  declaration has to be converted into anyway. When it equals the MINIMUM, the only reading that
- *  fits is the one where every unsizable parameter is a single register, and that reading is
- *  returned. When it does not, two readings survive and they disagree about where every later
- *  argument lives, so this refuses and the caller says so.
- *
- *  THE SCAN IS A LOWER BOUND AND THAT IS THE SAFE DIRECTION: it under-counts a pass-through
- *  parameter (frontend/ssa.ts `fallbackArgc`), and an under-count lands below the minimum and
- *  refuses. It is also capped at the argument registers the target has, so a declaration that
- *  spans more words than there are registers can never be resolved this way — a pair in the
- *  outgoing stack block is a placement nothing here assembles in any case.
- *
- *  A FULLY READABLE LIST IS AUTHORITY AND THE MACHINE IS NOT CONSULTED FOR IT. The declaration is
- *  a fact from the project's headers; the scan is an inference, and it loses. */
-export function resolveArgLayout(layout: DeclaredArgLayout, argRegsSetUp: number): readonly number[] | null {
-  const narrow = layout.widths.map((w) => w ?? 32);
-  if (layout.unsizable.length === 0) {
-    return narrow;
-  }
-  return wordsOf(narrow) === argRegsSetUp ? narrow : null;
-}
-
-/** The fewest argument registers a declaration can occupy: every spelling it could not size read
- *  as a single register. It is the bound {@link resolveArgLayout} accepts on, and a caller laying
- *  out an outgoing stack block reads it to find the declarations no count could ever settle —
- *  above the target's argument registers, the machine's own scan is capped and can never reach it. */
-export function minArgRegs(layout: DeclaredArgLayout): number {
-  return wordsOf(layout.widths.map((w) => w ?? 32));
-}
-
-/** Why {@link resolveArgLayout} could not answer, as the sentence a frontend refuses with — ONE
- *  copy of it, because the two frontends that ask this question must not answer it differently and
- *  a second spelling is where that starts. The caller supplies `cannot lift '<fn>': ` and its own
- *  error class. */
-export function unresolvedArgLayout(callee: string, layout: DeclaredArgLayout, argRegsSetUp: number): string {
-  const narrow = layout.widths.map((w) => w ?? 32);
-  return (
-    `callee \`${callee}\` is declared with ${layout.widths.length} parameter(s), of which ` +
-    `\`${layout.unsizable[0]}\` is a spelling asmlift cannot size — so it occupies either one argument ` +
-    `register or the two a 64-bit value travels in, and the call sets up ${argRegsSetUp} argument ` +
-    `register(s) where reading every such spelling as one accounts for ${wordsOf(narrow)}. Nothing here ` +
-    `decides which it is, and the choice moves every later argument's home. Declare the call's ` +
-    `argument-REGISTER count instead (\`{"${callee}": {"params": ${argRegsSetUp}}}\`), which is taken ` +
-    'at its word'
-  );
+  return widths;
 }
 
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
@@ -231,7 +184,7 @@ export const STANDARD_SIGNATURES: Record<string, StandardSignature> = {
  *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
  *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
  *  here, and a raw TypeError would leave through neither the decline channel nor anything a
- *  caller can act on. Every other reader of this table — `declaredArgLayout`, and `declaredCall`
+ *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
  *  through it — answers "nothing is declared" for such an entry, and so does this. */
 export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
   if (Object.hasOwn(prototypes, callee) && prototypes[callee]?.returnsVoid === true) {
@@ -248,30 +201,29 @@ export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototyp
  *  `long` is 32 here and would not be on an LP64 host, so it is a target fact rather than a
  *  language one.
  *
- *  THE FLOATING TYPES ARE HERE BECAUSE THE QUESTION IS HOW MANY REGISTERS, NOT WHICH ONES. Every
- *  target asmlift lifts is soft-float: a `float` travels in one core register and a `double` in a
- *  pair, exactly as a `s32` and a `long long` do. Leaving `double` unreadable was the worse answer
- *  and it was measurably wrong rather than merely cautious — `resolveArgLayout` can only spend an
- *  unreadable spelling's freedom by finding that ONE register fits the machine's count, and for a
- *  `double` that reading is known false. A spelling whose width is known belongs here even where
- *  the VALUE is one this pipeline would render as an integer; the layout is right, and a pair it
- *  cannot spell stops at the loud `concat` gap rather than at a wrong argument list.
+ *  THE FLOATING TYPES ARE ABSENT, and that is a measured ABI fact rather than a hole in the table.
+ *  How many argument registers a `float` or a `double` occupies is a property of the TARGET and
+ *  not of the spelling: `target.ts` declares `hwFloat` on three of its four descriptions, and on a
+ *  PowerPC EABI with an FPU a floating argument travels in f1..f8 and occupies NO general argument
+ *  register at all — compiled with the benchmark's own mwcc, `void g(int, double); void fa(int a,
+ *  double b){ g(a,b); }` sets up r3 and nothing else. The one consumer that lays out argument
+ *  registers would read a width here as "one register" or "a pair", and on those targets both are
+ *  wrong; `long double` is absent for the neighbouring reason, 8 bytes on these ABIs and 10 or 16
+ *  on others with nothing having measured which one a target's compiler means. A spelling this
+ *  table does not hold costs a caller nothing it was owed: `declaredArgWidths` abstains and the
+ *  machine's own guess stands, which is what the declaration replaced.
  *
  *  THE FIXED-WIDTH NAMES ARE FIXED BY THE STANDARD, not by a project, which is the same reason
  *  `STANDARD_SIGNATURES` exists: `int32_t` is 32 bits wherever it compiles at all, and reading it
  *  as "a project typedef" put `size_t` and `int64_t` — the spellings a header extraction produces
- *  most — into the population that cannot be sized. `long double` is NOT here: it is 8 bytes on
- *  these ABIs and 10 or 16 on others, and nothing has measured which one a target's compiler
- *  means. */
+ *  most — into the population that cannot be sized. */
 const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
   ['char', 8],
   ['short', 16],
   ['short int', 16],
-  ['float', 32],
   ['int', 32],
   ['long', 32],
   ['long int', 32],
-  ['double', 64],
   ['long long', 64],
   ['long long int', 64],
   ['int8_t', 8],
@@ -290,12 +242,12 @@ const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
 ]);
 
 /** The bit width one declared parameter type spells, or `undefined` for a spelling this does not
- *  read — a project typedef, a by-value struct, a `long double`. UNDEFINED IS "NO OPINION", never
- *  "wide": a
- *  consumer treats a width it can read as authority and a width it cannot as absence, so an
- *  unrecognized spelling leaves the asm's own inference standing. `declaredArgLayout` is the one
- *  reader that cannot live with "no opinion" — it is laying out registers — and it carries the
- *  absence per parameter rather than resolving it here.
+ *  read — a project typedef, a by-value struct, a floating type. UNDEFINED IS "NO OPINION", never
+ *  "wide": a consumer treats a width it can read as authority and a width it cannot as absence, so
+ *  an unrecognized spelling leaves the asm's own inference standing. Its two readers differ in how
+ *  far the absence spreads, and that is a property of what they are asking rather than of this
+ *  answer: raise/paramwidth.ts abstains for that one parameter, and `declaredArgWidths` abstains
+ *  for the whole list, because one unknown width moves every later argument's home.
  *
  *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries.
  *
@@ -325,10 +277,10 @@ export function declaredWidth(t: ParamType): number | undefined {
 
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
  *
- *  `declaredArgLayout` above falls back to the arg-register heuristic on a `params` it cannot read,
- *  which is right when `params` is omitted and silent when it is mistyped: `params: "2"` then decompiles
- *  at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is visible in
- *  the output, so a table that came from outside is checked before it reaches either. */
+ *  `declaredArgWidths` above falls back to the arg-register heuristic on a `params` it cannot
+ *  read, which is right when `params` is omitted and silent when it is mistyped: `params: "2"` then
+ *  decompiles at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is
+ *  visible in the output, so a table that came from outside is checked before it reaches either. */
 export function validatePrototypes(value: unknown): string[] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return ['must be an object mapping a symbol name to its prototype'];

@@ -1530,7 +1530,7 @@
         "cast",
         "narrow"
       ],
-      "note": "The row hands asmlift the parameter list `include/6E840.h` declares, and asmlift never reads it as an arity — `declaredArgRegs` is consulted only at call sites, and the MIPS frontend ignores prototypes entirely — so the argument register comes from the contiguous-arg heuristic. (A function’s own `params` is read, but only for parameter WIDTH, via `paramwidth`’s `proto-width` gate.)",
+      "note": "The row hands asmlift the parameter list `include/6E840.h` declares, and asmlift never reads it as an arity — `declaredArgWidths` is consulted only at call sites, and the MIPS frontend ignores prototypes entirely — so the argument register comes from the contiguous-arg heuristic. (A function’s own `params` is read, but only for parameter WIDTH, via `paramwidth`’s `proto-width` gate.)",
       "prependC": "typedef struct {\n    u8 padding[0xB8];\n    s8 unkB8;\n} func_8006FEBC_70ABC_arg;",
       "funcC": "void func_8006FEBC_70ABC(func_8006FEBC_70ABC_arg *arg0) {\n    if (arg0 != NULL) {\n        arg0->unkB8 = (u8)(arg0->unkB8 & 0xFE);\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/63236cd8dce61b8a1b37765952eb340b66684476/src/6E840.c#L570-L574",

@@ -360,15 +360,14 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   The recurring proposal is to carry a struct pointee on `SymbolTypeFacts` so a project's DWARF
   `Sprite *` argument stops arriving at `proto.ts` `typeSpelling` and leaving it as `void *`. But a
   declared parameter type is consulted for exactly one thing, and it does not ask what a `*` points
-  at: `declaredWidth`, which answers **32 for every pointer**. Everything else is that answer
-  rebilled — `raise/paramwidth.ts` reads the function's OWN list per parameter to veto a
-  narrowing, and a callee's list goes through `proto.ts` `declaredArgLayout` to be summed into the
-  ARGUMENT REGISTERS the call occupies and then weighed against the machine. Neither can carry a
-  pointee, because the width of a `Sprite *` and the width of a `void *` are the same 32, and the
-  layout reader cannot even tell them apart enough to ask: both are readable, so neither is one of
-  the spellings it has to resolve against the instructions. So the thread would add a fact nothing
-  consumes — the shape of the
-  redundant signedness candidate above, one level down. Nor is the capability missing: asmlift already recovers a
+  at: `declaredWidth`, which answers **32 for every pointer**. Everything downstream is that answer
+  rebilled — `raise/paramwidth.ts` reads the function's OWN list per parameter to veto a narrowing,
+  and a callee's list goes through `proto.ts` `declaredArgWidths` to be summed into the ARGUMENT
+  REGISTERS the call occupies. Neither can carry a pointee: a `Sprite *` and a `void *` are the
+  same 32 bits, and both are readable, so they do not even reach the one branch where a spelling
+  decides anything — the one where the width reader cannot size the type and the whole list stops
+  stating a layout. So the thread would add a fact nothing consumes — the shape of the redundant
+  signedness candidate above, one level down. Nor is the capability missing: asmlift already recovers a
   parameter's pointee FROM THE ASM, synthesizing `struct Struct0 *` and spelling `a1->field_6`
   off the access widths alone, and what DWARF would add is field NAMES — which `declare.ts`'s
   pointer arm already states cannot move bytes, because the cell is 4 bytes whatever it addresses
