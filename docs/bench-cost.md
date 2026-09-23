@@ -156,11 +156,19 @@ outcome, score, fan and winning variations all identical. Across the whole corpu
 dropped candidate here and every one of them is a compiler REJECTING a candidate, which is a
 decompiler output; none is a timeout.
 
-The artifact before this one read **1,371 s over 186 real rows** and **915 s over 742 synthetic
-rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to end** (`real 417.39` under
-`/usr/bin/time -p`) because the tiers overlap — 337.5 + 332.3 is 669.8, which is not the wall time
-and never was. Its dearest single row was **117 s** on `kleod:PauseMenuScreenHandler:agbcc`, **9% of
-the tier** on its own.
+The artifact before this one, `87b49c74`, read **1,371 s over 186 real rows** and **915 s over 742
+synthetic rows**; wall clock was 332.3 s and 337.5 s, and **417.4 s end to end** (`real 417.39`
+under `/usr/bin/time -p`) because the tiers overlap — 337.5 + 332.3 is 669.8, which is not the wall
+time and never was. Its dearest single row was **255.7 s** on
+`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`, **19% of the tier** on its own, with
+`DoForcedMovement` second at 131.0 s and `WorldMapScreenIsValidPath` third at 130.4 s.
+
+ONLY THE CURRENT ARTIFACT IS GATED, so a paragraph about an earlier one is prose and has to be
+measured by hand: `git show <sha>:apps/benchmark/results/results.json`, then sum
+`asmlift.rankSeconds` by tier and take the max. This paragraph said **117 s on
+`kleod:PauseMenuScreenHandler:agbcc`, 9%** until a reviewer recomputed it — that row is the
+**third** dearest and was never the first. The figure was inherited from the paragraph above it
+rather than re-derived, and a figure already in the file reads as one somebody checked.
 
 The ranked sums here are roughly 1.6× the entry above them on a corpus one row larger. That is
 MACHINE LOAD, not a change in what the pass does: this run was taken while nothing else competed

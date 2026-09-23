@@ -533,7 +533,12 @@ describe('docs/bench-cost.md', () => {
    *  see none of them. The repo's own rule is that a pass may be half-converted to a table provided
    *  the residue is NAMED: the residue here is the three wall clocks in §1's first rows, which come
    *  from run logs and not from the artifact (`meta` carries `generatedAt`, `counts`, `toolchains`
-   *  and the two commits, and no duration). */
+   *  and the two commits, and no duration).
+   *
+   *  Only the CURRENT artifact is derivable, so §3's paragraphs about EARLIER artifacts are outside
+   *  this gate entirely — which is where its one false figure survived. A figure about a previous
+   *  run is a `git show <sha>:apps/benchmark/results/results.json` away; re-measure it when you
+   *  move it, because inheriting a sentence does not check it. */
   it('§3 quotes the artifact it says it is summed out of', () => {
     if (!existsSync(BENCH_COST_DOC)) {
       return;
@@ -558,19 +563,34 @@ describe('docs/bench-cost.md', () => {
     };
     const group = (n: number) => Math.round(n).toLocaleString('en-US');
 
-    const real = ranked('real');
+    const real = ranked('real') as CostRow[];
     const synthetic = ranked('synthetic');
-    const piue = row('kleod:PauseMenuScreenHandler:agbcc');
+    // THE DEAREST ROW IS DERIVED, NOT NAMED. Naming it checked that the doc quoted the right
+    // seconds for a row THIS TEST had picked, and said nothing about the doc's actual claim, which
+    // is that no row costs more. A sentence calling a row the dearest while three rows cost more
+    // was green here for as long as it existed: the base artifact's real tier is led by
+    // `WorldMapScreenCheckNewWorldUnlocked` at 255.7 s (18.6%) while §3 called
+    // `PauseMenuScreenHandler` at 117 s (9%) the dearest — and a round then carried that sentence
+    // into a second paragraph, because a figure already in the file reads as one that was checked.
+    // So the artifact picks the row and the doc has to name whichever one that is.
+    const dearest = real.reduce((a, r) => (r.asmlift.rankSeconds > a.asmlift.rankSeconds ? r : a));
     const ccg = row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc');
 
     const expected = [
       `${group(sum(real))} s over ${real.length}`,
       `${group(sum(synthetic))} s over ${synthetic.length}`,
-      `${group(piue.asmlift.rankSeconds)} s`,
-      `${Math.round((piue.asmlift.rankSeconds / sum(real)) * 100)}% of the tier`,
+      // ONE CONTIGUOUS PHRASE, not three substrings that may sit anywhere in the section. Checked
+      // as three, a sentence naming the wrong row passes whenever the right row is mentioned
+      // somewhere else in §3 — which it always is, because the previous artifact's paragraph names
+      // rows too. The seconds, the id and the share have to be the same sentence's.
+      `**${group(dearest.asmlift.rankSeconds)} s** on \`${dearest.id}\`, ` +
+        `**${Math.round((dearest.asmlift.rankSeconds / sum(real)) * 100)}% of the tier**`,
       `fan=${ccg.asmlift.fanSize} rank=${ccg.asmlift.rankSeconds.toFixed(1)}s`,
     ];
-    const missing = expected.filter((e) => !text.includes(e));
+    // Line breaks are prettier's to place, so the section is matched as one whitespace-normalised
+    // run: a figure that reflows across a wrap is the same figure.
+    const flat = text.replace(/\s+/g, ' ');
+    const missing = expected.filter((e) => !flat.includes(e));
     expect(
       missing,
       `docs/bench-cost.md §3 disagrees with apps/benchmark/results/results.json. Every figure there is ` +
