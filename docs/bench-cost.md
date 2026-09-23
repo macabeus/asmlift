@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=93.6s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=122.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -137,9 +137,9 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   for the same reason; `--force` enumerates anyway.
 
 Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**876 s over 186 real rows** and **543 s over 744 synthetic rows**; wall clock was 189.2 s and
-238.6 s on tiers that overlap, and 314.4 s end to end (`Done in 314.4s`, the run's own last line).
-The dearest single row is **125 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
+**1,060 s over 189 real rows** and **745 s over 751 synthetic rows**; wall clock was 222.1 s and
+262.8 s on tiers that overlap, and 340.5 s end to end (`Done in 340.5s`, the run's own last line).
+The dearest single row is **155 s** on `kleod:PauseMenuScreenHandler:agbcc`, **15% of the tier** on
 its own — which is the figure to reach for when a scoped run looks cheap.
 
 THE ROW IN THAT SENTENCE IS DERIVED, NOT NAMED, and the gate that derives it was built TWICE —
@@ -152,21 +152,19 @@ row the dearest stayed green while three rows cost more — at `87b49c74` it sai
 255.7 s. Requiring the id merely to APPEAR is not enough either, because the right row is named
 elsewhere in this section; the three figures are checked as ONE contiguous phrase.
 
-THE ROWS MOVED BY ONE AND THE SECONDS BY A QUARTER, AND ONLY THE FIRST IS ABOUT THE BRANCH. This
-run was owed for the 64-bit-return capability: `bench regression --base de938349` reports **1
-gained** (`synthetic:llfrom:agbcc` declined → match) and 0 lost, 0 missing, 0 retired, 0 added, 0
-other flips over 1,258 rows, and `bench diff` **8 field changes on that one row, 0 added, 0
-removed**, with the fan **unmoved at 67,417 (1.00×)** over 929 comparable rows and **0 rows moved**.
-That is the whole of what changed.
+ONE ROW MOVED AND IT IS THE ROW THE BRANCH IS FOR. `bench regression --base origin/main`
+(`0e7b4f7b`) reports **1 gained** (`synthetic:llfrom:agbcc` declined → match) and 0 lost, 0
+missing, 0 retired, 0 added, 0 other flips over **1,262 rows**; `bench diff` reports **8 field
+changes on that one row, 0 added, 0 removed**, the fan **unmoved at 67,751 (1.00×)** over 939
+comparable rows and **0 rows moved**. That is the whole of what changed.
 
-The same `bench diff`, run 2026-09-23, prints `ranked pass 1,315.7 s → 1,418.7 s (1.08×)`, which is
-not a cost this branch imposed. THE RANKED-PASS COST IS MACHINE LOAD AND A CACHE STATE, NEVER A
-PROPERTY OF THE BRANCH, and this branch measured it twice against one base to prove it: the SAME
-comparison read **1.24×** three hours earlier, on a box that had been running five rounds all day,
-and **1.08×** on this one, against the identical base artifact and with the fan — the count of
-candidates actually enumerated — identical to the digit both times. A multiplier that moves by 15
-points while nothing it claims to measure moves at all is not a measurement of the branch. Quote a
-cost only beside the run that produced it and the date, and never as a before/after for a change.
+THE RANKED-PASS COST IS MACHINE LOAD AND A CACHE STATE, NEVER A PROPERTY OF THE BRANCH, and this
+branch has now measured the same comparison three times to prove it. Against one unchanged base
+artifact, with the fan identical to the digit every time, `bench diff` printed **1.24×**, then
+**1.08×** three hours later, then **1.25×** on the run published above. A multiplier that swings 17
+points while the thing it claims to measure does not move at all is not a measurement of a branch;
+what moved was how many rounds were sharing the box. Quote a cost only beside the run that produced
+it and the date, and never as a before/after for a change.
 
 THE READING FROM THE RUN BEFORE THIS ONE, taken 2026-09-23 at `3888734f`: **819 s over 186 real
 rows** and **497 s over 743 synthetic rows**, wall clock 179.2 s and 207.1 s. It was owed for a
@@ -186,15 +184,16 @@ number was expected to move: the change's corpus reach is zero by construction, 
 stamp true is still a run you have to take** — and this branch has now taken that run FOUR times,
 which is the real price of touching a measured path late.
 
-THE FOURTH IS THE ONE PUBLISHED ABOVE, and it prices a remediation wave exactly: five defects
-fixed across `packages/core/src`, `packages/cli/src` and `apps/benchmark/dataset`, **0 field
-changes beyond the one row this branch was for**, fan **unmoved at 67,417 (1.00×)**, **0 rows
-moved**. Predicted before the run and for a stated reason — `returns` is the only key the fixes
-read and the whole corpus states it once (185 proto entries across 8 vendored manifests carry it 0
-times; `grep -c 'returns:' apps/benchmark/dataset/synthetic.ts` prints 1) — so the run confirmed a
-prediction rather than discovering anything. **314 s to confirm a zero is the price of the
-provenance rule, and it is worth paying**: the alternative is a published number no gate can tie to
-the code that produced it.
+FIVE OF THOSE RUNS WERE OWED, AND ONLY ONE DISCOVERED ANYTHING. The one published above priced a
+remediation wave of ten defect fixes across `packages/core/src`, `packages/cli/src` and
+`apps/benchmark/dataset`: **0 field changes beyond the one row this branch is for**, fan
+**unmoved (1.00×)**, **0 rows moved** — predicted before the run and for a stated reason, since
+`returns` is the only prototype key those fixes read and the whole corpus states it once (185 proto
+entries across 8 vendored manifests carry it 0 times; `grep -c "returns:"
+apps/benchmark/dataset/synthetic.ts` prints 1). **340 s to confirm a zero is the price of the
+provenance rule and it is worth paying**: the alternative is a published number no gate can tie to
+the code that produced it. What it costs is REAL, though, and this branch is the measurement of
+that too — five whole-tier runs, ~1,700 s, for one row.
 
 Both tiers came in cheaper than the entry below, measured 2026-09-23 (real 1,371 → 937 s, 0.68×;
 synthetic 915 → 509 s, 0.56×) on a branch that adds no candidate to any row, and `bench diff`
