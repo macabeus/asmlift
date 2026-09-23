@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
 import {
+  PRELUDE_TYPEDEFS,
   declaredArgWidths,
   declaredReturnWidth,
   declaredWidth,
@@ -77,20 +78,23 @@ describe('spellableType', () => {
     expect(spellableType('unsigned u32')).toBe(false);
   });
 
-  // THE PRELUDE'S TYPEDEF NAMES ARE LISTED IN `proto.ts` AND DECLARED IN `target.ts`, because
-  // `proto.ts` sits below `target.ts` in the import graph and reading them there would close a
-  // cycle. A copy that can disagree with its original is a defect, so the divergence is a red test
-  // rather than a candidate that does not compile: every name `C_TYPEDEFS` declares must be
-  // spellable, and every spelling that is NOT a C89 base must be one of those names.
-  test('the spellable typedefs are exactly the ones the candidate prelude declares', () => {
-    const declared = [...C_TYPEDEFS.matchAll(/(\w+)\s*;/g)].map((m) => m[1]);
-    expect(declared.length).toBeGreaterThan(0);
-    for (const name of declared) {
+  // THE PRELUDE IS ONE LIST NOW, not two that a test compares. `proto.ts` holds the names and the
+  // C89 text each stands for; `target.ts` PRINTS `C_TYPEDEFS` from it. The two-list arrangement was
+  // guarded in one direction only and the uncovered one was the dangerous one — measured, deleting
+  // `typedef long long s64;` from the old hand-written `C_TYPEDEFS` left this file GREEN while
+  // `spellableType('s64')` still answered true, so `s64 llsrc(void);` went into a translation unit
+  // that no longer declared `s64` and every candidate for the row died at compile. What is left to
+  // check is that the printing is a faithful reading of the data, and that the vocabulary is
+  // CLOSED — a name outside it is not spellable.
+  test('the prelude the candidate gets is exactly the vocabulary asmlift may print', () => {
+    const declared = [...C_TYPEDEFS.matchAll(/typedef\s+(.+?)\s+(\w+);/g)].map((m) => [m[2], m[1]] as const);
+    expect(new Map(declared)).toEqual(new Map(PRELUDE_TYPEDEFS));
+    for (const [name] of declared) {
       expect(spellableType(name)).toBe(true);
     }
-    // …and the converse: a name the prelude stops declaring must stop being spellable.
+    // …and the converse: a name the prelude does not declare is not one asmlift may print.
     for (const name of ['u128', 'f32', 'bool8']) {
-      expect(declared).not.toContain(name);
+      expect(PRELUDE_TYPEDEFS.has(name)).toBe(false);
       expect(spellableType(name)).toBe(false);
     }
   });

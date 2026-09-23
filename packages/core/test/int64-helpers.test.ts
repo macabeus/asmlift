@@ -19,6 +19,7 @@ import { decompile } from '../src/pipeline';
 import { type FnProto, type Prototypes, wordsOf } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper } from '../src/runtime-helpers';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');
@@ -222,6 +223,32 @@ describe('a 64-bit fold needs the widths, not the arity', () => {
     }
   });
 
+  // …AND THE SAME TABLE WITH A `returns` BESIDE IT, which is the SECOND source for the pair and
+  // was the way back in. `wideHelper` refuses a re-declared helper, which stops the ARGUMENT pair;
+  // the RESULT pair is built from `FnProto.returns`, and `raise/widehelpers.ts` folds on the
+  // result alone — so `{"params":["s64","s64"],"returns":"s64"}` printed `return a0 * a1;` at exit
+  // 0 for a call the row above declines, re-emitting the compiler's own multiply as the project's
+  // arithmetic with no gap. Each spelling of `params` is paired with a `returns` here because the
+  // decision is about the CONJUNCTION: the guard that fires is the one on `params`, and what this
+  // pins is that adding the other key does not switch it off.
+  test('…and a `returns` beside it does not put the pair back', () => {
+    for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
+      expect(() =>
+        decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params, returns: 's64' } } }),
+      ).toThrow(/no model for the runtime helper '__muldi3'/);
+    }
+  });
+
+  // THE CONTROL, and it is what keeps the rule from being "a `returns` anywhere near a helper
+  // disables it": with no `params` the project has re-declared nothing, the table is still the
+  // authority for its own name, and the fold is the one an empty prototype table gets. DECLARING
+  // MORE TRUTHFULLY MUST NOT DO LESS.
+  test('a `returns` alone leaves the helper table in charge', () => {
+    expect(decompile('llmul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { returns: 's64' } } }).source).toBe(
+      's64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n',
+    );
+  });
+
   test('…and with no prototype the same function recovers the 64-bit multiply', () => {
     expect(lift('llmul')).toBe('s64 llmul(s64 a0, s64 a1) {\n    return a0 * a1;\n}\n');
   });
@@ -326,5 +353,29 @@ describe('a pair a declaration says comes back', () => {
     expect(() =>
       decompile('stale', stale, ARMV4T_AGBCC, { prototypes: { llsrc: { params: [], returns: 'long long' } } }),
     ).toThrow(/r3 is read on a path where a call has destroyed it/);
+  });
+
+  // THE SYMBOL MAP AND THE PROTOTYPE DISAGREEING, which is the input that had the frontend acting
+  // on a width whose declaration the collector then withheld. A map entry that calls `llsrc` a
+  // shaped data object contradicts a prototype that calls it a `long long` function; `declare.ts`
+  // refused to print the prototype and the frontend read the pair anyway, so the candidate lifted
+  // `(s64)llsrc()` and was compiled against an implicitly-`int` `llsrc` — `bl llsrc ; mov r1,#0x20
+  // ; asr r0,r0,r1`, which is not this function. Adding map knowledge made the tool strictly
+  // worse, and the reconciliation now happens at the TABLE (`proto.ts` `prototypesFromSymbols`),
+  // so both readers lose the same fact: no pair, and the pre-`returns` refusal.
+  test('a symbol map that calls the callee DATA takes the width off both readers', () => {
+    const symbols: SymbolMap = new Map([
+      [0x08000100, [{ name: 'llsrc', kind: 'data', shape: 'scalar', size: 1, signed: false }]],
+    ]);
+    const prototypes: Prototypes = { llsrc: { params: [], returns: 'long long' } };
+    expect(() => decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes, symbols })).toThrow(
+      /r1 is read on a path where a call has destroyed it/,
+    );
+    // …and a map entry that states no shape is NOT the disagreement: that is what a map-less lift
+    // mints for every name the IR mentions, so it must leave the declaration standing.
+    const nameOnly: SymbolMap = new Map([[0x08000100, [{ name: 'llsrc', kind: 'data' }]]]);
+    expect(decompile('llfrom', llfrom, ARMV4T_AGBCC, { prototypes, symbols: nameOnly }).source).toBe(
+      's32 llfrom(void) {\n    return (s32)((s64)llsrc() >> 32);\n}\n',
+    );
   });
 });

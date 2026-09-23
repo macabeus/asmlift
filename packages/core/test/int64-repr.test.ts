@@ -12,7 +12,7 @@ import { Block, Fn, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T, intWidth, parseType, typeToString } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
-import type { BinOp, Expr, SFn, Stmt } from '../src/l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, exprEquals } from '../src/l3/ast';
 import { initFirstGuards } from '../src/l3/initfirst';
 import { arithConversionSignedness, exprIntWidth } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
@@ -469,5 +469,24 @@ describe('the gates that read a 64-bit rank', () => {
     expect(initFirstGuards(guard(v('w')))).toBeNull();
     // …and the same shape one rank down still rewrites, so it is the WIDTH that refused.
     expect(initFirstGuards(guard(v('n')))).not.toBeNull();
+  });
+
+  // THE STAMP IS PART OF THE NODE'S IDENTITY, and that is a claim about `exprEquals` rather than
+  // about a path through the pipeline, so it is pinned as one. No pipeline input reaches it: the
+  // stamp is a pure function of the callee (`structure.ts` reads the call result's IR width, which
+  // the frontend set from that callee's declared return), so two `call` nodes sharing `fn` and
+  // `args` always share it and deleting the term leaves the whole core suite green. A green mutant
+  // over a contract is still a gap in the contract — every other spelling-bearing field of this
+  // node is compared, and a dedup that called these two equal would keep one and take the other's
+  // arithmetic rank with it.
+  test('two calls differing only in the 64-bit stamp are not the same expression', () => {
+    const plain: Expr = { k: 'call', fn: 'g', args: [] };
+    const wide: Expr = { k: 'call', fn: 'g', args: [], wide64: true };
+    expect(exprEquals(plain, wide)).toBe(false);
+    expect(exprEquals(wide, plain)).toBe(false);
+    // …and the control, so the assertion above is about the stamp and not about the comparison
+    // refusing everything.
+    expect(exprEquals(wide, { k: 'call', fn: 'g', args: [], wide64: true })).toBe(true);
+    expect(exprEquals(plain, { k: 'call', fn: 'g', args: [] })).toBe(true);
   });
 });

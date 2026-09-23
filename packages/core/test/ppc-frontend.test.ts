@@ -152,6 +152,30 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
   });
 
+  // THE SAME RULE ON THE WAY BACK, and it needs its own refusal because `FnProto.returns` is read
+  // by ONE frontend and PRINTED on every target. `l3/symbol-refs.ts` puts `long long g(void);`
+  // into the candidate's own translation unit wherever the prototype is spellable, and this
+  // frontend reads the return register as the whole value — so honouring the declaration silently
+  // lifted `return g();` off r3, the HIGH half on big-endian PowerPC, under a declaration that
+  // makes `return g();` mean the LOW one. Same source, opposite value, compiles, no gap: the
+  // outcome the parameter refusal above exists to prevent, arriving through the return.
+  //
+  // THE SIGNIFICANCE IS THE TWO TOGETHER: reading the OTHER half already declined (`r4 is read on
+  // a path where a call has destroyed it`), so the field was inert where it would have helped and
+  // harmful where it was emitted.
+  test('a RETURN declared wider than a register refuses, rather than taking one half of it', () => {
+    const asm = '0 <c>:\n0:\tbl      c <c+0xc>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n';
+    const wide = { g: { params: [], returns: 'long long' } };
+    expect(() => decompile('c', asm, PPC_MWCC, { prototypes: wide })).toThrow(
+      /'g' would hand back one half of a 64-bit value — its return is declared wider than a register/,
+    );
+    // A register-width return states nothing this frontend cannot carry, so it is not refused —
+    // the refusal is about the PAIR, not about the key.
+    expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: [], returns: 'int' } } }).source).toContain(
+      'return g();',
+    );
+  });
+
   // The other side of the same rule, and BOTH FRONTENDS CONVERT IT WITH THE SAME FUNCTION
   // (`proto.ts` `declaredArgWidths`). A spelling `declaredWidth` cannot read is a parameter that
   // occupies one argument register or two, and nothing a declaration holds says which — so the

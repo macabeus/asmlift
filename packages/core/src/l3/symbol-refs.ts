@@ -28,20 +28,32 @@ export interface SymbolRef {
    *  own IR — attached by the enumeration (rank.ts bareGlobalAccessFacts), consumed by the
    *  declaration synthesis (declare.ts) as the width/signedness authority for `extern T name;`. */
   access?: { width: number; signed: boolean };
-  /** NO SYMBOL MAP KNOWS THIS NAME — the declaration for it is a HYPOTHESIS, not a fact. Both the
-   *  name and (through `access`) its width and signedness were read out of the candidate's own
-   *  asm: the very bytes the candidate is then scored against. A fitted declaration cannot LOSE
-   *  score, so it is not covered by declare.ts's only-loses-score argument — it can manufacture
-   *  agreement instead. Which is legitimate (the artifact is decls + source, and it does compile
-   *  to those bytes) exactly as long as the consumer SHOWS the declarations with the verdict.
-   *  Marked here so a consumer can tell the two provenances apart inside one block. */
+  /** NO SYMBOL MAP ACCOUNTS FOR THIS NAME — that is the whole predicate, and it is one fact with
+   *  two provenances the consumer must be able to tell apart.
+   *
+   *  WITHOUT `proto`, the declaration is a HYPOTHESIS: the name and (through `access`) its width
+   *  and signedness were read out of the candidate's own asm — the very bytes the candidate is
+   *  then scored against. A fitted declaration cannot LOSE score, so it is not covered by
+   *  declare.ts's only-loses-score argument; it can manufacture agreement instead. Which is
+   *  legitimate (the artifact is decls + source, and it does compile to those bytes) exactly as
+   *  long as the consumer SHOWS the declarations with the verdict.
+   *
+   *  WITH `proto`, the declaration's TEXT is the project's own — a call target asmlift has a
+   *  prototype for — and asmlift invented nothing about it. It is still marked, because the
+   *  predicate this flag states is about the symbol MAP and not about who wrote the type, and
+   *  because the score rests on that line being in the translation unit either way. A consumer
+   *  wording the block reads `proto` to say which it is looking at; dropping the mark instead
+   *  would under-report a declaration the verdict depends on, which is the direction
+   *  `synthesizedRefs` exists to avoid. */
   synthesized?: true;
   /** A CALL TARGET's own declaration, re-spelled from the prototype the project supplied — the
    *  parameter type texts and the return type text, verbatim as the user wrote them. Present only
    *  where {@link spellableProto} could read a COMPLETE C prototype out of the `FnProto`, and it
    *  is what `declare.ts` prints instead of an `extern`: a call target is a function, and
    *  `extern u32 llsrc;` is not a declaration of it. Absent where the symbol map calls the name
-   *  something other than code, because two facts that disagree are not one fact. */
+   *  something other than code — two facts that disagree are not one fact — and that subtraction
+   *  happens at the table (`proto.ts` `prototypesFromSymbols`), so the frontend loses the same
+   *  fact in the same place rather than acting on one this withheld. */
   proto?: { readonly params: readonly ParamType[]; readonly returns: ParamType };
 }
 
@@ -101,21 +113,11 @@ export function collectSymbolRefs(
   // `toString`. The union is sorted as one list so the rendered block stays deterministic.
   const proto = new Map<string, NonNullable<SymbolRef['proto']>>();
   for (const n of called) {
-    // TWO FACTS ABOUT ONE NAME, AND A DISAGREEMENT IS SILENCE. A map entry that STATES a data
-    // shape for this name contradicts the prototype that calls it a function, and printing the
-    // prototype anyway would declare `long long g(void);` for a byte the project declares `u8` —
-    // so the callee is left undeclared, which is the answer every call target had before a
-    // prototype could declare one.
-    //
-    // `kind: 'data'` ALONE IS NOT THE DISAGREEMENT, and that distinction is the whole guard: a
-    // name-only entry is what a MAP-LESS lift mints for every symbol the IR mentions, and it is
-    // data because the IR cannot tell code from data, not because anything said so (`shape`
-    // absent ⇒ name-only, see symbols.ts). A prototype outranks an inference and does not outrank
-    // the project's own header.
-    const known = symbols.get(n);
-    if (known !== undefined && known.kind !== 'code' && (known.shape !== undefined || known.declared === true)) {
-      continue;
-    }
+    // TWO FACTS ABOUT ONE NAME, AND A DISAGREEMENT IS SILENCE — decided at the TABLE, not here. A
+    // map entry that states a data shape for this name contradicts the prototype that calls it a
+    // function, and `proto.ts` `prototypesFromSymbols` has already taken the `returns` off such an
+    // entry, so what arrives here states no printable prototype and the frontend read the call the
+    // same way. Testing it a second time at this reader is what let the two answer differently.
     const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n]) : undefined;
     if (p !== undefined) {
       proto.set(n, p);

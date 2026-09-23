@@ -329,13 +329,29 @@ export function declaredWidth(t: ParamType): number | undefined {
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
 }
 
-/** The typedef names the candidate's own prelude declares (target.ts `C_TYPEDEFS`). Listed rather
- *  than derived because `proto.ts` sits BELOW `target.ts` — `target.ts` imports `runtime-helpers.ts`
- *  which imports this file, so reading the prelude here would close a cycle. A copy that can
- *  disagree with its original is a defect, so test/proto.test.ts asserts this set is
- *  exactly the names `C_TYPEDEFS` declares, and a typedef added there without one added here is a
- *  red test rather than a candidate that will not compile. */
-const PRELUDE_TYPEDEFS: ReadonlySet<string> = new Set(['u8', 'u16', 'u32', 's8', 's16', 's32', 's64', 'u64']);
+/** The scalar vocabulary every candidate's prelude declares: the typedef NAME, and the C89 text it
+ *  stands for. `s64`/`u64` are spelt `long long` because every compiler this repo targets is a C89
+ *  one with the GNU/CW extension, which is what the projects themselves use.
+ *
+ *  THE DATA LIVES HERE AND `target.ts` PRINTS IT (`C_TYPEDEFS`), rather than the other way round,
+ *  because this file sits BELOW that one — `target.ts` imports `runtime-helpers.ts` which imports
+ *  this — and the two readers need the same answer. A COPY is what the import direction made
+ *  tempting and it is a defect either way round: a name listed here and not declared there prints
+ *  a type no translation unit defines, and a typedef declared there and not listed here is a
+ *  spelling asmlift refuses to print for no reason. One of those two directions is a compile
+ *  error in every candidate of the row, with nothing naming the cause, and a test over two lists
+ *  can only ever cover the direction someone thought of — measured: deleting `s64` from the old
+ *  `C_TYPEDEFS` left `proto.test.ts` green while `spellableType('s64')` still answered true. */
+export const PRELUDE_TYPEDEFS: ReadonlyMap<string, string> = new Map([
+  ['u8', 'unsigned char'],
+  ['u16', 'unsigned short'],
+  ['u32', 'unsigned int'],
+  ['s8', 'signed char'],
+  ['s16', 'short'],
+  ['s32', 'int'],
+  ['s64', 'long long'],
+  ['u64', 'unsigned long long'],
+]);
 
 /** The C89 integer bases, which need no declaration anywhere. `signed`/`unsigned` is stripped
  *  before the lookup, exactly as {@link declaredWidth} strips it. */
@@ -409,6 +425,25 @@ export function spellableType(t: ParamType): boolean {
  *  defect in the proto — all are the common shape — and the answer for them is what it has always
  *  been, which is to leave the callee undeclared.
  *
+ *  WHAT THIS PRINTS, THE FRONTEND MUST ALSO BE ABLE TO SIZE, and the two exclusions below are what
+ *  make that true rather than nearly true. Both were reachable and both killed the whole row:
+ *
+ *    `void` AS A PARAMETER. `spellableType` admits it for the RETURN, and `(void)` is C's
+ *    parameterless list — but `declaredWidth('void')` is no width, so `declaredArgWidths` abstains
+ *    and the call is emitted at the arg-register GUESS while the declaration beside it says the
+ *    callee takes nothing. Measured with the project agbcc: `long long DoThing(void);` over
+ *    `DoThing(&DoThing)` is "too many arguments to function `DoThing'", exit 1. The empty list is
+ *    how a parameterless callee is stated and it already prints `(void)`.
+ *
+ *    `void` AS THE RETURN, which is `returnsVoid` under the other spelling ({@link
+ *    declaresVoidReturn} is where the two are one fact). The frontend models no void CALL — it
+ *    reads the return register whatever the callee is — so `void DoThing(void);` printed beside a
+ *    candidate that USES the result is "void value not ignored as it ought to be", exit 1 on the
+ *    same compiler. It is also what the paragraph below already decided: `returnsVoid` is not a
+ *    source for the printed prototype, and one fact cannot be barred under one spelling and
+ *    admitted under the other. So what this prints is always a VALUE-returning prototype, which is
+ *    what makes {@link declaredReturnWidth} total on its output.
+ *
  *  `returnsVoid` IS NOT A SECOND SOURCE FOR THE RETURN, and that is a measured decision rather
  *  than an oversight. `grep -rh '"returnsVoid": true' apps/benchmark/dataset/real/*.json | wc -l`
  *  prints 175, across all 8 vendored manifests. It is documented UNCHECKED data whose wrong value
@@ -419,25 +454,27 @@ export function spellableType(t: ParamType): boolean {
 export function spellableProto(
   p: FnProto | undefined,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
-  if (p?.returns === undefined || !spellableType(p.returns)) {
+  if (p?.returns === undefined || !spellableType(p.returns) || declaredWidth(p.returns) === undefined) {
     return undefined;
   }
   if (p.params === 0) {
     return { params: [], returns: p.returns };
   }
-  return Array.isArray(p.params) && p.params.every(spellableType)
+  const printableParam = (t: ParamType): boolean => spellableType(t) && declaredWidth(t) !== undefined;
+  return Array.isArray(p.params) && p.params.every(printableParam)
     ? { params: p.params, returns: p.returns }
     : undefined;
 }
 
 /** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a
- *  reader can act on — a proto {@link spellableProto} cannot print, or a return spelling
- *  {@link declaredWidth} does not size (`void`, which is an absence of a value rather than a width).
+ *  reader can act on — which is exactly a proto {@link spellableProto} cannot print.
  *
  *  IT IS GATED ON BEING SPELLABLE, not merely on being sizable, and that gate is the soundness of
  *  the whole reading: a width read here makes the frontend name a second register, and that is only
  *  the right lift if the candidate's own translation unit declares the callee the same way. The two
- *  questions are asked through one function so they cannot answer differently.
+ *  questions are asked through one function so they cannot answer differently — and the answer is
+ *  the RESOLVED table (`prototypesFromSymbols`), which is where a proto the symbol map contradicts
+ *  has already lost its `returns`, so the frontend and the printer see one decision.
  *
  *  `returnsVoid` is not consulted and must not be: a void return is not a width of zero, it is the
  *  absence of a returned value, and the one consumer here asks how many registers come back with a
@@ -477,12 +514,10 @@ export function validatePrototypes(value: unknown): string[] {
       returnsVoid?: unknown;
       returns?: unknown;
     };
-    if (params !== undefined) {
-      const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
-      const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
-      if (!countOk && !listOk) {
-        problems.push(`${sym}: "params" must be a non-negative integer or a list of type strings`);
-      }
+    const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
+    const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
+    if (params !== undefined && !countOk && !listOk) {
+      problems.push(`${sym}: "params" must be a non-negative integer or a list of type strings`);
     }
     if (returnsVoid !== undefined && typeof returnsVoid !== 'boolean') {
       problems.push(`${sym}: "returnsVoid" must be a boolean`);
@@ -504,6 +539,30 @@ export function validatePrototypes(value: unknown): string[] {
       returnsVoid !== (returns.trim() === 'void')
     ) {
       problems.push(`${sym}: "returnsVoid" is ${returnsVoid} but "returns" says "${returns}"`);
+    }
+    // A `returns` WIDER THAN A REGISTER IS THE ONE THAT NEEDS THE WHOLE PROTOTYPE, and a table
+    // that states one the rest of the entry cannot carry is a table whose author will see nothing
+    // happen. A register-width return is not checked here because it is not inert — it rules out a
+    // hidden struct-return pointer (`returnsWithoutHiddenPointer`) whatever else the entry says —
+    // but the register PAIR is read only where the callee's own declaration can be printed into
+    // the candidate, so a wide `returns` behind an unprintable `params`, or spelled in a type no
+    // candidate's prelude declares, buys exactly nothing and says so nowhere. Naming the gate is
+    // the point: the refusal the user then meets is `frontend/ssa.ts` reporting a destroyed
+    // register, which is true about the bytes and silent about their prototype.
+    const shaped: FnProto | undefined =
+      typeof returns === 'string' && (params === undefined || countOk || listOk)
+        ? { ...(params === undefined ? {} : { params: params as number | ParamType[] }), returns }
+        : undefined;
+    if (shaped !== undefined && (declaredWidth(shaped.returns!) ?? 0) > 32 && spellableProto(shaped) === undefined) {
+      problems.push(
+        `${sym}: "returns": ${JSON.stringify(shaped.returns)} is wider than a register, and the pair it ` +
+          'comes home in is read only where the whole prototype can be printed into the candidate — so ' +
+          '"params" must be a list of spellable C types (or 0), and the return must be spelled ' +
+          `"long long" or ${[...PRELUDE_TYPEDEFS.keys()]
+            .filter((n) => (declaredWidth(n) ?? 0) > 32)
+            .map((n) => JSON.stringify(n))
+            .join('/')}`,
+      );
     }
   }
   return problems;
@@ -540,6 +599,23 @@ function typeSpelling(t: SymbolTypeFacts): ParamType | null {
  * Every parameter must spell faithfully or the whole entry is dropped: a partly-typed list would
  * be read for its LENGTH and give the right arity with the wrong widths, which is worse than the
  * arg-register heuristic it would replace.
+ *
+ * AND IT IS WHERE THE TWO SOURCES ARE RECONCILED, not merely merged, because this is the one
+ * lookup every reader of the table goes through: `pipeline.ts` and `rank.ts` each call this once
+ * and hand the RESULT to the frontend and to the declaration collector alike. A guard put at one
+ * of those readers instead leaves the other acting on a fact it has withheld — measured, with the
+ * map calling `llsrc` a shaped data object and the proto calling it a `long long` function, the
+ * declaration was withheld and the register pair was lifted anyway, so the candidate compiled
+ * against an implicitly-`int` callee: `bl llsrc ; mov r1,#0x20 ; asr r0,r0,r1` where the target
+ * has `bl llsrc ; add r0,r1,#0`. Adding map knowledge made the tool strictly worse.
+ *
+ * A DISAGREEMENT COSTS THE `returns` AND NOTHING ELSE. The map stating a data SHAPE for a name
+ * contradicts a return type — `long long g(void);` is not a declaration of a byte the project
+ * calls `u8` — and that is the fact both readers need to lose together. The rest of the entry is
+ * untouched: `params` says how many argument registers the call occupies, which nothing about the
+ * name being data makes wrong, and dropping it would change the arity of calls nothing has
+ * measured. A `kind: 'data'` entry with no shape is not the disagreement (see l3/symbol-refs.ts:
+ * that is what a map-less lift mints for every name the IR mentions).
  */
 export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prototypes = {}): Prototypes {
   if (!symbols) {
@@ -548,6 +624,13 @@ export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prot
   const out: Prototypes = { ...base };
   for (const infos of symbols.values()) {
     for (const info of infos) {
+      if (info.kind !== 'code' && (info.shape !== undefined || info.declared === true)) {
+        const stated = Object.hasOwn(out, info.name) ? out[info.name] : undefined;
+        if (stated?.returns !== undefined) {
+          const { returns: _dropped, ...rest } = stated;
+          out[info.name] = rest;
+        }
+      }
       if (info.kind !== 'code' || !info.signature || out[info.name] !== undefined) {
         continue;
       }

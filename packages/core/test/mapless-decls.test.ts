@@ -235,6 +235,24 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     ['a return spelling no candidate declares', { DoThing: { params: ['u32'], returns: 'Fixed64' } }],
     ['a return the C standard sizes and no prelude spells', { DoThing: { params: ['u32'], returns: 'int64_t' } }],
     ['a PARAMETER spelling no candidate declares', { DoThing: { params: ['Fixed64'], returns: 'long long' } }],
+    // WHAT THIS PRINTS, THE FRONTEND MUST ALSO BE ABLE TO SIZE, and these two are the arms where
+    // it could not — each one a translation unit that does not compile, which is every candidate
+    // for the row lost with nothing naming the cause. Both measured through `$ASMLIFT_AGBCC`:
+    //   `void` AS A PARAMETER prints `(void)` while `declaredWidth` cannot size it, so the call is
+    //   emitted at the arg-register guess — `long long DoThing(void);` over `DoThing(&DoThing)` is
+    //   "too many arguments to function `DoThing'", exit 1.
+    //   `void` AS THE RETURN prints `void DoThing(void);` while the frontend models no void call
+    //   and reads the return register regardless — "void value not ignored as it ought to be",
+    //   exit 1, wherever the candidate uses the result. It is also the fact `returnsVoid` states,
+    //   and that key is deliberately not a source for a printed prototype.
+    [
+      '`void` as a parameter, which prints but cannot be sized',
+      { DoThing: { params: ['void'], returns: 'long long' } },
+    ],
+    [
+      '`void` as the return, which is `returnsVoid` under another spelling',
+      { DoThing: { params: ['u32'], returns: 'void' } },
+    ],
   ])('a call target the prototype table cannot spell is still refused: %s', (_label, prototypes) => {
     const { cands, refused } = refusalsFor('f', `f:\n${callsAndAddresses}`, ARMV4T_AGBCC, false, prototypes);
     for (const c of cands) {

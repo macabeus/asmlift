@@ -39,7 +39,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgWidths } from '../proto';
+import { type Prototypes, declaredArgWidths, declaredReturnWidth } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -824,6 +824,26 @@ export function lift(
             // Every width here is a single register — the refusal above is what makes that true —
             // so the parameter count and the argument-register count are the same number.
             declared = widths.length;
+          }
+          // THE SAME RULE ON THE WAY BACK, and it needs its own refusal because the declaration
+          // reaches the candidate whether or not this frontend can act on it. `FnProto.returns`
+          // states how many registers a callee hands back, `frontend/thumb.ts` reads the pair, and
+          // `l3/symbol-refs.ts` prints `long long g(void);` into the candidate's own translation
+          // unit on EVERY target. This frontend reads the return register alone, so honouring the
+          // declaration silently would lift `return g();` off r3 — the HIGH half on big-endian
+          // PowerPC — under a declaration that makes `return g();` mean the LOW one. Same source,
+          // opposite value, compiles, no gap: the outcome the parameter refusal above exists to
+          // prevent, arriving through the return.
+          //
+          // The other half of the pair already refuses (`r4 is read on a path where a call has
+          // destroyed it`), so this is the arm that was left, not a second reading of one gap.
+          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          if (returned !== undefined && returned > 32) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': '${sym}' would hand back one half of a 64-bit value — its return is ` +
+                'declared wider than a register, and this frontend reads the return register as the whole ' +
+                'value rather than building the pair the ABI hands back',
+            );
           }
           const argc = declared ?? fallbackArgc(bi, ins.addr);
           const args: Value[] = [];
