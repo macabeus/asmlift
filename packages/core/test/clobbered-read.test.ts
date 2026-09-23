@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
 
 import { clobberedByCall } from '../src/frontend/ssa';
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, type TargetDescription } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-clobbered-read.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC);
@@ -48,9 +48,35 @@ describe('what a call clobbers', () => {
     expect(clobberedByCall(PPC_MWCC)).toContain('r4');
   });
 
+  // OFF THE REGISTRY, not off a hand-picked list. The guard exists so a target that spells a
+  // register differently in its two lists cannot silently stop refusing, and a list someone has to
+  // remember to extend is the weaker half of that: `MIPS_GCC` was the fourth description and was
+  // not being checked. Enumerating `TOOLCHAIN_TARGETS` means a target added there is covered by
+  // the fact of being added.
   test('every target passes arguments only in registers it calls caller-saved', () => {
-    for (const t of [ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC]) {
-      expect(() => clobberedByCall(t)).not.toThrow();
+    const seen = new Set<TargetDescription>();
+    for (const [id, t] of Object.entries(TOOLCHAIN_TARGETS)) {
+      expect(() => clobberedByCall(t.description), id).not.toThrow();
+      seen.add(t.description);
+    }
+    // …and every description the registry names is reached, so the loop cannot pass by running
+    // over an empty registry.
+    expect(seen).toContain(MIPS_GCC);
+    expect(seen.size).toBe(4);
+  });
+
+  // THE ALIASING `readGuessedArg` RESTS ON IS PER-TARGET, and two of the four do not have it.
+  // ARM and PowerPC pass argument 0 in the return register, so `clobberedByCall` cannot list it;
+  // MIPS o32 returns in `v0` and passes in `a0`, so it does and there is no exemption to reason
+  // about. `frontend/mips.ts` refuses on the `jal` before either MIPS target reaches any of this.
+  test('argument 0 is exempt from the clobber set exactly where the ABI aliases it', () => {
+    for (const t of [ARMV4T_AGBCC, PPC_MWCC]) {
+      expect(t.returnReg).toBe(t.argRegs[0]);
+      expect(clobberedByCall(t)).not.toContain(t.argRegs[0]);
+    }
+    for (const t of [MIPS_IDO, MIPS_GCC]) {
+      expect(t.returnReg).not.toBe(t.argRegs[0]);
+      expect(clobberedByCall(t)).toContain(t.argRegs[0]);
     }
   });
 

@@ -3209,6 +3209,13 @@ export function lift(
   // the low half is the return register (already excluded) and this frontend writes the high one
   // itself from the callee's own result, right below. The two arms of one rule: where the callee
   // hands a register back, the frontend names it; where it does not, nobody can.
+  //
+  // `argRegs[1]` IS THE PAIR'S HIGH REGISTER ONLY WHERE THE ABI ALIASES THE FIRST ARGUMENT ONTO
+  // THE RETURN REGISTER, which makes the returned pair occupy the first two argument registers.
+  // True here (r0:r1) and on PowerPC (r3:r4); FALSE on MIPS o32, which returns in v0:v1 and passes
+  // in a0:a1, so reading a high half out of `argRegs[1]` there would name an argument register.
+  // This is an ARM file and the spelling is ISA-local, but it is written through the generic
+  // `target.` surface, so the identity it depends on is stated rather than left to be generalised.
   const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`

@@ -43,10 +43,17 @@ export interface SsaBuilder {
    *  ("did the caller set this up?") rather than an assertion, and {@link trimClobberedCallArgs} is
    *  what answers it. That answer already covers a register a call destroyed, and it covers it
    *  EXHAUSTIVELY: destroyed on any path means not written-since-the-call on that path, so the
-   *  must-analysis drops it from the run and the operand goes — bar argument 0, which every ABI here
-   *  aliases onto the return register, and which `noteCall` never lists as destroyed for that very
+   *  must-analysis drops it from the run and the operand goes — bar an argument register the ABI
+   *  ALIASES onto the return register, which `noteCall` cannot list as destroyed for that very
    *  reason. So none of these reads can leave a destroyed value in the graph, and refusing the
    *  function over one would cost a row the trim has already made correct.
+   *
+   *  THAT ALIASING IS A PER-TARGET FACT AND TWO TARGETS HERE DO NOT HAVE IT. ARM and PowerPC both
+   *  pass argument 0 in the return register (r0/r0, r3/r3), so on them the exemption is the whole
+   *  of the gap. MIPS returns in `v0` and passes in `a0`, so `clobberedByCall` lists `a0` for both
+   *  MIPS targets and there is no exemption to reason about — which is the sound direction, not a
+   *  hole. What bounds the path today is earlier still: `frontend/mips.ts` refuses on the `jal`
+   *  before any argument is read, so neither MIPS target reaches this at all.
    *
    *  A DECLARED arity uses `readVar`, and must: there the callee says the argument exists, so
    *  reading a destroyed register for it is a wrong value with nothing to retract it. */
