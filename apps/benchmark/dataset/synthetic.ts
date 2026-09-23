@@ -3197,7 +3197,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // INTEGER-LIKE (`{char a,b,c,d;}`, `{short a,b;}`), which agbcc returns in memory through a
   // one-word temp: instruction for instruction an out-parameter call. What rules that out is that
   // the temp is storage the CALLEE owns — written only by the callee, and its pointer is argument
-  // 0, always. `stkarg` is the control that keeps the refusal honest.
+  // 0, always. `stkwide` is the refusing control that keeps this honest; `stkarg` is a MATCH and
+  // refuses nothing, because a call whose callee's declaration and whose staging stores agree word
+  // for word is now consumed, and every disagreement declines naming what it saw.
   //
   // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
   // object's real extent is inferred from the accesses this function makes, so a wider frame has
@@ -3205,36 +3207,33 @@ export const SYNTHETIC: SynthSpec[] = [
   // argument 0 is the other gap, and it is not narrowable from the assembly at all: it is
   // instruction-for-instruction the struct return above.
   //
-  // Coverage: 0 of the corpus's rows carried this decline. Two real rows do decline with
-  // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
-  // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
-  // `sa3:ProcessOamBuffers:agbcc` (the address is computed at a constant frame offset).
+  // Coverage: 0 of the corpus's rows carried this decline. ONE real row declines with
+  // `stack pointer used as data`, for a reason this capability leaves untouched —
+  // `sa3:ProcessOamBuffers:agbcc`, `the address of a stack local is computed (\`add r0, sp, #0x4\`)
+  // — a CONSTANT frame offset`. Recompute rather than read:
+  //   python3 -c "import json; a=json.load(open('apps/benchmark/results/results.json'));
+  //   print([r['id'] for r in a['results'] if r['asmlift']['outcome']=='declined' and
+  //     any('stack pointer used as data' in m for m in (r['asmlift']['errorMarkers'] or []))])"
+  // `pokeemerald:GetMoveTarget:agbcc` is not one of them and is not a stack decline at all: its
+  // blocker is the structurer's `unrecovered back-edge into block #8 (loop-recovery declined this
+  // shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe
+  // break)`.
   //
-  // 2026-09-17 — EVERYTHING ABOVE IS THE STATE BEFORE OUTGOING STACK ARGUMENTS WERE CONSUMED, and
-  // three of its claims the artifact now contradicts. Each measured, not read:
-  //   * `pokeemerald:GetMoveTarget:agbcc` no longer declines on anything about the stack. Its
-  //     blocker MOVED to the structurer — `pnpm bench run --tier real --only GetMoveTarget` reports
-  //     `structure: cannot structure 'GetMoveTarget': unrecovered back-edge into block #8
-  //     (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a
-  //     conditional continue, or an unsafe break)`. The other half of that sentence holds:
-  //     `sa3:ProcessOamBuffers:agbcc` still declines on `the address of a stack local is computed
-  //     (\`add r0, sp, #0x4\`)`. Measured with the refusal REMOVED and the constant form lowered to
-  //     an `laddr`, seven agbcc shapes that name a local at a nonzero frame offset all still
-  //     decline — on the multi-object frame, on an object-vs-SSA-slot overlap, or on the
-  //     outgoing-argument dataflow. The spelling is a symptom of frame occupancy, not a missing
-  //     lowering, and a row selected for it pins three capabilities rather than one.
-  //   * `stkarg` is a MATCH, so it is no longer the control that keeps a refusal honest. The
-  //     declared-arity refusal it controlled is gone: a call whose callee's declaration and whose
-  //     staging stores agree word for word is consumed, and every disagreement declines naming what
-  //     it saw. `stkwide` below is the refusing control now.
-  //   * the message quoted below — `callee \`SetupOAMSprite\` is declared with 9 arguments` — is
-  //     still emitted verbatim, and that is the trap: it is now the OPENING of a licence refusal
-  //     that goes on to name the disagreement, not a statement that the capability is missing. A
-  //     frame staging two of the five words nine parameters ask for continues `so its outgoing
-  //     stack-argument block is [sp,#0], … — but [sp,#8], [sp,#12], [sp,#16] is not stored on
-  //     every path to the call` (measured, `--proto '{"SetupOAMSprite":{"params":9}}'`). A
-  //     function whose declaration and stores AGREE emits no message at all, so the sibling
-  //     counts below are an upper bound on that shape and are NOT re-measured here.
+  // AND THE COMPUTED SPELLING IS NOT A MISSING LOWERING, which is what makes `ProcessOamBuffers` a
+  // bad row to chase this from. Measured with that refusal REMOVED and the constant form lowered
+  // to an `laddr`, seven agbcc shapes naming a local at a nonzero frame offset all still decline —
+  // on the multi-object frame, on an object-vs-SSA-slot overlap, or on the outgoing-argument
+  // dataflow. agbcc emits `add rD, sp, #k` only when something ELSE occupies the frame, so the
+  // spelling is a symptom of frame occupancy and a row selected for it pins three capabilities
+  // rather than one.
+  //
+  // A TRAP IN THE MESSAGE QUOTED BELOW. `callee \`SetupOAMSprite\` is declared with 9 arguments` is
+  // emitted verbatim, but it is the OPENING of a licence refusal that goes on to name the
+  // disagreement, not a statement that the capability is missing. A frame staging two of the five
+  // words nine parameters ask for continues `so its outgoing stack-argument block is [sp,#0], … —
+  // but [sp,#8], [sp,#12], [sp,#16] is not stored on every path to the call` (measured,
+  // `--proto '{"SetupOAMSprite":{"params":9}}'`). A function whose declaration and stores AGREE
+  // emits no message at all, so the sibling counts below are an upper bound on that shape.
   //
   // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
   // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read

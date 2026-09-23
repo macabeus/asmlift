@@ -390,8 +390,9 @@ describe('a slot that is never written is not a frame the lifter cannot model', 
   // operand exactly as `frontend/thumb.ts` does — their comments say so — and refuse WITHOUT
   // resolving the cause, so their message is a disjunction where Thumb's is a decision. All three
   // spellings name an address-taken local first, and the first two are published markers of
-  // `ac-decomp`, `marioparty4`, `pikmin` and two synthetic rows — 17 of the 20 rows of
-  // `address-taken-local`, against 3 that arrive by Thumb's decided spelling.
+  // `ac-decomp`, `marioparty4` and `pikmin`. The share they make up of `address-taken-local` is
+  // recomputed from the artifact below rather than written here, because it moves whenever a Thumb
+  // row is lifted and a stale count in a comment is invisible to every gate in this file.
   test.each([
     [
       "lift: cannot lift 'step0_make_dl': stack pointer r1 used as data (address-taken local / frame " +
@@ -836,6 +837,29 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
         .filter((k) => !exhibited.has(k))
         .sort(),
     ).toEqual(NO_ROWS);
+  });
+
+  // THE PARAGRAPH, NOT ONE CLAUSE. `declines.ts`'s own header explains why `address-taken-local`
+  // reads as a big class that a Thumb capability barely moves: most of its rows arrive by the
+  // DISJUNCTION spelling PPC and MIPS write, which refuses without resolving which cause it is.
+  // That argument is two counts, both of which move the moment a Thumb row is lifted — and after
+  // this branch lifted one, three places in the repo still said the old pair. A number in prose is
+  // checked by nothing, so this recomputes both from the artifact and reads them back out of the
+  // comment. The comment is normalised first: it wraps, and a phrase split across two `//` lines
+  // is a phrase no `toContain` finds.
+  test('the disjunction share this paragraph names is the share the artifact has', () => {
+    const CLASS = DECLINE_CLASSES.find((c) => c.key === 'address-taken-local')!;
+    const DISJUNCTION = /address-taken local \/ frame arithmetic/;
+    const markersOf = (r: FunctionResult) => (r.asmlift.outcome === 'declined' ? (r.asmlift.errorMarkers ?? []) : []);
+    const rows = artifact.results.filter((r) => markersOf(r).some((m) => CLASS.pattern.test(m)));
+    const disjunction = rows.filter((r) => markersOf(r).some((m) => DISJUNCTION.test(m)));
+    const decided = rows.length - disjunction.length;
+
+    const prose = readFileSync(join(import.meta.dirname, '..', 'src/pages/benchmark/lib/declines.ts'), 'utf8')
+      .replace(/^\s*\/\/ ?/gm, '')
+      .replace(/\s+/g, ' ');
+    expect(prose).toContain(`disjunction is ${disjunction.length} of the ${rows.length} rows`);
+    expect(prose).toContain(`claims ${decided} of them`);
   });
 
   // The two tests above catch TOTAL shadowing — a class emptied, or a marker nobody claims. They
