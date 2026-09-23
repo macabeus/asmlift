@@ -108,6 +108,11 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
  *  signedness `exprCType` reports uniformly as `s32`, this one models the width it reports the same
  *  way — and the two together are what the usual arithmetic conversions need.
  *
+ *  THE COMPLEMENT PARTS COMPANY WITH `exprCType` AT ONE NODE, AND IT IS `call`. There `exprCType`
+ *  is UNINFORMED by design and answers `undefined`, while this reads the `wide64` stamp the
+ *  structurer put on the node and can answer 64. A reader who reaches for `exprCType` on a call
+ *  will be told the information does not exist; it does, and it is here.
+ *
  *  ITS SOUNDNESS IS AN ENUMERATION OF THE PRODUCERS, so here is the enumeration. A 64-bit value
  *  reaches a rendered expression in exactly four ways:
  *    1. a `var`/`postincr` whose DECLARED type is 64 bits wide — read off `varType`;
@@ -360,7 +365,14 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       return T.s(32);
     }
     // A callee's C return type comes from a prototype OUTSIDE the emitted function (the
-    // project ctx / C89 implicit int) — not statically knowable here.
+    // project ctx / C89 implicit int) — not derivable from the tree here.
+    //
+    // THE NODE MAY STILL CARRY ITS RANK, and that is a different question from its TYPE:
+    // `exprIntWidth` reads the `wide64` stamp and answers 64 for a call whose callee the frontend
+    // was told returns a pair. Nothing is read off it here, because the stamp is a width and this
+    // owes its callers a full `IrType` — signedness included, which no source states. Widening
+    // this to answer `s64` from the stamp would be a signedness claim nobody made, over the one
+    // node every rendered function has; the rank-only reader is the honest half.
     case 'call':
       return undefined;
     case 'index': {

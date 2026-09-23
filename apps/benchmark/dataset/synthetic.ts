@@ -2031,21 +2031,24 @@ export const SYNTHETIC: SynthSpec[] = [
   // `ctx` IS NOT IN SCOPE FOR THAT COMPILE, and an earlier revision of this comment claimed it
   // was. On the REAL tier the candidate is compiled in the project context; on the SYNTHETIC tier
   // `rankOptionsFor` falls back to `benchCompilerFor`, whose translation unit is `C_TYPEDEFS` plus
-  // declarations for the bare GLOBALS the candidate names — and `collectSymbolRefs` refuses every
-  // name that is a call's target, so a synthetic candidate's callees are all implicitly `int`.
-  // `ctx` reaches m2c and `bench target`, and nothing else. Any synthetic row whose two spellings
-  // differ only in something a callee's DECLARATION decides is scoring both of them alike.
+  // declarations for the bare GLOBALS the candidate names. `ctx` reaches m2c and `bench target`,
+  // and nothing else. Any synthetic row whose two spellings differ only in something a callee's
+  // DECLARATION decides is scoring both of them alike.
+  //
+  // WHICH IS THIS ROW'S SITUATION, AND IT IS NOW A PROPERTY OF THIS ENTRY RATHER THAN OF THE
+  // TIER. `collectSymbolRefs` declares a call target whose prototype states a COMPLETE C signature
+  // (`proto.ts` `spellableProto` — a spellable `returns` and a spellable parameter list); this
+  // row's `proto` states `params` alone, so `llsink` is still implicitly `int` in the candidate's
+  // translation unit and the narrowing is still unrefereed here. Adding a `returns` would change
+  // that — and would change what this cell measures — so it is a decision, not an omission.
   //
   // THE GATE FOR THE NARROWING IS A UNIT TEST, `int64-helpers.test.ts`: "a pair arriving in r0:r1
   // leaves in r0:r1, as one argument" asserts the whole source exactly, so a low-half reading
   // fails it, and "a mixed signature packs: the pair is r1:r2, not r2:r3" fails on the AAPCS
   // answer. Keeping this row is a judgement that a decline-to-lift differential and the mwcc
   // cell's refusal are worth their cost; it is not a claim that the agbcc cell is a width gate.
-  //
-  // AND THAT IS A PROPERTY OF ONE REFUSAL, NOT OF THE TIER. If `collectSymbolRefs` ever declares a
-  // call target it has a typed prototype for, this cell starts refereeing the narrowing and this
-  // paragraph is stale. Re-check it the way it was measured rather than assuming either answer:
-  // compile the two spellings through `bench target`'s own command and compare the objects.
+  // Re-check the compile the way it was measured rather than assuming either answer: compile the
+  // two spellings through `bench target`'s own command and compare the objects.
   {
     sym: 'llpass',
     src: 'int llpass(long long a,long long b){ llsink(a*b); return 0; }',

@@ -3885,7 +3885,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // "UPPER HALF", NOT "HIGH HALF", for the reason the split-pair refusal in thumb.ts gives at
         // its own throw: `apps/web`'s `reloc-halves` decline class holds `/high half/`, its list is
         // ORDERED, and a 64-bit gap published as a relocation gap because one entry comes first is
-        // a classification nothing states.
+        // a classification nothing states. `wide-call-arg` claims this phrase BY NAME
+        // (`/no upper half to shift out/`) — a 64-bit gap with no class at all renders as
+        // "Other / unclassified", which is the same wrong answer arrived at from the other side.
         return mkGap(
           'a 64-bit value that neither renders 64 bits wide nor has an integer type has no upper half to shift out',
           [src],
@@ -3931,8 +3933,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // THE RANK THE RETURN RENDERS WITH TRAVELS ON THE NODE, because no later reader can recover
       // it: the width is a fact the frontend was TOLD (a runtime helper's signature, or a project's
       // `FnProto.returns`) and it is gone from the tree by the time the C backend pins an operand.
-      // Stamping it here — at the one place a call becomes an expression — is what keeps the four
-      // readers of `exprIntWidth` agreeing: the shift below, the divides and both signedness pins.
+      // Stamping it here — at the one place a call becomes an expression — is what keeps every
+      // reader of `exprIntWidth` agreeing. `grep -rn exprIntWidth packages/core/src` is the
+      // enumeration, and it lists SIX call sites in three files: the `hi32` shift and the two
+      // compare pins in this file, the shift rank and the divide rank in backend/cfamily.ts
+      // `pinnedOperands`, and `l3/initfirst.ts`'s `meaningPreserved`.
+      //
+      // THE LAST ONE IS A BEHAVIOUR CHANGE THE STAMP MAKES, and it is named because a reader who
+      // trusts an enumeration is owed a complete one: a `wide64` call answered 32 before the stamp
+      // and answers 64 now, so `meaningPreserved` refuses to fold such a result into a 32-bit
+      // local where it used to admit it. That is what its own reason asks for — a 64-bit value
+      // assigned to a 32-bit one truncates — but it is a pass this branch did not set out to move.
       const wide64 = d.results[0] !== undefined && intWidth(d.results[0].type) === 64;
       return {
         k: 'call',
