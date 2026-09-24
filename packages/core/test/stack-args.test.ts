@@ -190,6 +190,10 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'TaskFunc', 's32'] } })).toThrow(
       /stack pointer used as data/,
     );
+    // The `stkwide` row's own declaration: a `double` has no width, so it licenses no block either.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
+      /stack pointer used as data — the store to \[sp,#0\] is never reloaded/,
+    );
     // …and a COUNT, which states argument registers directly, is what gets past it.
     expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');
   });

@@ -100,11 +100,13 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
 //   * a large struct return adds a hidden pointer argument that appears in no parameter list.
 //
-// None of those is recorded by `FnProto` or `SymbolSignature`, so an ARITY-ONLY acceptance had
-// all three holes: supplying a TRUE fact (`{ sprintf: { params: 2 } }`) turned a correct decline
-// into `return sprintf(a0, a1)` with both stack arguments deleted. Under the rule here the four
-// words `sprintf` is really handed are four offsets reaching the call that its declaration does
-// not account for, the witnesses disagree, and the answer is the decline again. And the CODE
+// A `SymbolSignature` records none of those, and neither does a COUNT. A typed `FnProto` list
+// records only a `long long`, which the Thumb frontend refuses past the argument registers; a
+// `double` or a by-value struct has no width there, so the list states no layout at all. An
+// ARITY-ONLY acceptance therefore has all three holes: supplying a TRUE fact
+// (`{ sprintf: { params: 2 } }`) turns a correct decline into `return sprintf(a0, a1)` with both
+// stack arguments deleted. Under the rule here the four words `sprintf` is really handed are four
+// offsets reaching the call that its declaration does not account for, the witnesses disagree, and the answer is the decline again. And the CODE
 // alone cannot say where a block ENDS — a store never reloaded is an argument's signature, but
 // so is a dead local, which is why reading the code alone could only ever refuse (conditions (a)
 // and (b) below, kept for every call no declaration covers).
