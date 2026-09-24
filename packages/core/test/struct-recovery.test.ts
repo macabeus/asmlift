@@ -21,18 +21,23 @@ import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
-import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, type TargetDescription, structureOptionsFor } from '../src/target';
 
 // Run the raise tower (post-lift IR → recognizeStructs → recover → structure → C), mirroring the
-// pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C.
-// `aggregateAlign` is agbcc's unless a test says otherwise (target.ts `compilerBehaviors`).
-function emit(ir: string, returnsVoid = false, symbols?: Map<string, SymbolInfo>, aggregateAlign = 4): string {
+// pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C — for
+// agbcc unless a test names another target.
+function emit(
+  ir: string,
+  returnsVoid = false,
+  symbols?: Map<string, SymbolInfo>,
+  target: TargetDescription = ARMV4T_AGBCC,
+): string {
   const fn = parse(ir);
   verify(fn);
-  recognizeStructs(fn, aggregateAlign);
+  recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary);
   recoverTypes(fn);
   verify(fn);
-  const sfn = structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, returnsVoid), ...(symbols ? { symbols } : {}) });
+  const sfn = structure(fn, { ...structureOptionsFor(target, returnsVoid), ...(symbols ? { symbols } : {}) });
   return cBackend.emit(sfn);
 }
 
@@ -333,9 +338,9 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   });
 
   // agbcc aligns and rounds EVERY struct and union to 4 bytes: `union { u16 h; u8 b; }` is four
-  // bytes there and two on ido/kmc/mwcc (target.ts `aggregateAlign`, compiled). A field inside the
-  // rounded size would be mislaid by every compiler of that kind, so it declines there — and lifts
-  // where the compiler lays the union out naturally.
+  // bytes there and two on ido/kmc/mwcc (target.ts `aggregateBoundary`, compiled). A field inside
+  // the rounded size would be mislaid on agbcc, so it declines there — and lifts where the compiler
+  // lays the union out naturally, and declines where nobody measured the boundary.
   const NARROW_THEN_FIELD = `fn narrowthen {
 ^bb0(%0: unk32, %1: unk32):
   store %0, %1 {off=0, width=2}
@@ -352,9 +357,36 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
   });
 
   test('…and is laid out naturally where the compiler has no boundary', () => {
-    const c = emit(NARROW_THEN_FIELD, false, undefined, 1);
+    const c = emit(NARROW_THEN_FIELD, false, undefined, MIPS_IDO);
     expect(c).toContain('struct Struct0 { union { u16 half; u8 byte[2]; } field_0; u16 field_2; };');
     expect(c).toContain('a0->field_0.byte[1] + a0->field_2');
+  });
+
+  test('…and declines on a compiler whose boundary is unmeasured', () => {
+    const unmeasured = { ...MIPS_IDO, compilerBehaviors: { ...MIPS_IDO.compilerBehaviors } };
+    delete unmeasured.compilerBehaviors.aggregateBoundary;
+    expect(() => emit(NARROW_THEN_FIELD, false, undefined, unmeasured)).toThrow(
+      /narrower than a word, and this compiler's aggregate boundary is unmeasured/,
+    );
+  });
+
+  // The same both-extensions rule on a cell that has ONE width: it is a union of `uhalf` and
+  // `shalf`, not the one signed field `buildStruct` would give it.
+  test('a single-width cell loaded both ways beside another overlap is a union too', () => {
+    const c = emit(`fn cellexts {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=4, width=2, signed=false}
+  store %0, %1 {off=0, width=1}
+  %3: unk32 = load %0 {off=4, width=2, signed=true}
+  %4: unk32 = load %0 {off=0, width=2, signed=false}
+  %5: unk32 = add %2, %3
+  %6: unk32 = add %5, %4
+  ret %6
+}
+`);
+    expect(c).toContain('union { u16 uhalf; s16 shalf; } field_4;');
+    expect(c).toContain('a0->field_4.uhalf');
+    expect(c).toContain('a0->field_4.shalf');
   });
 
   test('a narrow union off the 4-byte boundary declines there too', () => {

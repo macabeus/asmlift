@@ -34,7 +34,7 @@ function emit(ir: string, returnsVoid = true): string {
   if (recognizeMemberArrays(fn)) {
     dce(fn);
   }
-  recognizeStructs(fn);
+  recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   recoverTypes(fn);
   verify(fn);
   return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, returnsVoid)));

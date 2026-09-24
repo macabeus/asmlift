@@ -28,13 +28,13 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     Seven exceptions are read off the target directly, their consumers not being the
-//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
-//     `reloadsLocalReread` and `aggregateAlign` (raise/pre-recovery.ts), `hoistsSingleSetArm` (two
-//     raising passes — raise/narrowlocal.ts and raise/retsink.ts),
-//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn) and
-//     `eightByteReturnScratch` (frontend/thumb.ts, which reads the epilogue). The field names are a
-//     SUPERSET of StructureOptions' — see `structureOptionsFor`.
+//     Others are read off the target directly by a consumer that is not the structurer — among
+//     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
+//     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
+//     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
+//     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
+//     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
+//     StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
@@ -460,17 +460,20 @@ export interface TargetDescription {
     // three descriptions that measured false (four compilers) set it anyway, so absent means
     // UNMEASURED rather than "no".
     reloadsLocalReread?: boolean;
-    // The boundary, in bytes, this compiler aligns and rounds EVERY struct and union to, whatever
-    // its members. agbcc: 4 — `sizeof(struct { u16 h; })` is 4, and `struct { u8 a; union { u16 h;
-    // u8 b[2]; } u; }` seats `u` at 4 (gcc 2.9's arm STRUCTURE_SIZE_BOUNDARY). ido7.1, gcc2.7.2kmc
-    // and mwcc_242_81 answer 2 and 2: the natural layout, 1. Compiled as `return sizeof …` /
-    // `return (int)&((T *)0)->m` at each row's flags; gcc2.7.2 and the other mwcc versions share
-    // those descriptions unmeasured. Read off the target by raise/structs.ts (through
-    // raise/pre-recovery.ts), the one pass that nests an aggregate inside a recovered struct.
+    // A LAYOUT fact rather than a canonicalization one, kept here because it is the COMPILER's:
+    // the size, in bytes, it aligns and rounds EVERY struct and union to, whatever its members.
+    // agbcc: 4 — `sizeof(struct { u16 h; })` is 4, and `struct { u8 a; union { u16 h; u8 b[2]; } u; }`
+    // seats `u` at 4 (gcc 2.9's arm STRUCTURE_SIZE_BOUNDARY). ido7.1, gcc2.7.2kmc and mwcc_242_81
+    // answer 2 and 2: the natural layout, 1. Compiled as `return sizeof …` / `return (int)&((T *)0)->m`
+    // at each row's flags; gcc2.7.2 (-O1), mwcc_233_163n and mwcc_247_107 answer the same as their
+    // descriptions' measured compilers. Read by raise/structs.ts (through raise/pre-recovery.ts),
+    // which sizes a recovered UNION member with it; raise/struct-arrays.ts sizes element structs
+    // without it, which on agbcc is a known gap.
     //
-    // ABSENT ⇒ 4, the widest boundary measured: an unmeasured compiler declines a union narrower
-    // than it rather than mislaying every field after it.
-    aggregateAlign?: number;
+    // ABSENT ⇒ unmeasured, and the union recovery declines every union narrower than a word: no
+    // value is safe to assume, since one too small mislays the fields after it on agbcc and one too
+    // large drops the pad in front of them everywhere else.
+    aggregateBoundary?: number;
   };
 }
 
@@ -541,7 +544,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
-    aggregateAlign: 4,
+    aggregateBoundary: 4,
     narrowParamWitness: 'prologue-extension',
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
     // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
@@ -603,7 +606,7 @@ export const MIPS_IDO: TargetDescription = {
     switchAllowsNeqCase: false,
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
-    aggregateAlign: 1,
+    aggregateBoundary: 1,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
     // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
@@ -718,7 +721,7 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
-    aggregateAlign: 1,
+    aggregateBoundary: 1,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
     // gcc2.7.2 at -O1 alike — so the object carries no witness at all and the pass refuses.
@@ -766,7 +769,7 @@ export const PPC_MWCC: TargetDescription = {
     // `u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; }` under an `if (a)`
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
-    aggregateAlign: 1,
+    aggregateBoundary: 1,
     // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
     // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.

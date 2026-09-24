@@ -207,7 +207,7 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
   {
     id: 'structs',
-    run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateAlign),
+    run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary),
     dce: false,
   },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },

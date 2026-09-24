@@ -27,7 +27,8 @@ export type IrType =
   // Several VIEWS of one storage cell (raise/structs.ts): a base read or written at more than one
   // width or extension over the same bytes. Every member sits at offset 0. It carries no name
   // because it is only ever declared INLINE, as the type of the struct member that holds it, and its
-  // `size` is the one the target's compiler gives it — which is not always its widest view.
+  // `size` is the one the target's compiler gives it — which is not always its widest view
+  // (`T.union` computes it from the compiler's aggregate boundary).
   | { kind: 'union'; members: StructField[]; size: number }
   | { kind: 'void' }; // a function that returns nothing
 
@@ -64,9 +65,19 @@ export const T = {
   ptr: (to: IrType): IrType => ({ kind: 'ptr', to }),
   struct: (name: string, fields: StructField[], size?: number): IrType => ({ kind: 'struct', name, fields, size }),
   array: (elem: IrType, count: number): IrType => ({ kind: 'array', elem, count }),
-  union: (members: StructField[], size: number): IrType => ({ kind: 'union', members, size }),
+  union: (members: StructField[], boundary: number): IrType => ({
+    kind: 'union',
+    members,
+    size: Math.max(boundary, ...members.map((m) => (m.type.kind === 'array' ? m.type.count : 1) * viewBytes(m.type))),
+  }),
   void: (): IrType => ({ kind: 'void' }),
 };
+
+/** The byte width of a union view's element (an array view's element, or the scalar itself). */
+function viewBytes(t: IrType): number {
+  const e = t.kind === 'array' ? t.elem : t;
+  return (intWidth(e) ?? 32) / 8;
+}
 
 /** The member `name` of an aggregate — a struct's field or a union's view — or undefined when `t`
  *  is not an aggregate or declares no such member. THE one lookup the typing walk and the deref
@@ -99,6 +110,8 @@ export function unionViewAt(
   }
   const elemOf = (t: IrType): IrType => (t.kind === 'array' ? t.elem : t);
   const wide = member.type.members.filter((m) => intWidth(elemOf(m.type)) === width * 8);
+  // A width with ONE view is read and written through it: raise/structs.ts made it for every
+  // extension that width was loaded with.
   const view =
     wide.length > 1
       ? wide.find((m) => {

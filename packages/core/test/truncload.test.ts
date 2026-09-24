@@ -34,7 +34,7 @@ function emit(ir: string, littleEndian = true, gates = TRUNC_LOAD_GATES): string
   verify(fn);
   foldTruncatedLoads(fn, littleEndian, gates);
   verify(fn);
-  recognizeStructs(fn);
+  recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   recoverTypes(fn);
   verify(fn);
   return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, true)));
@@ -44,7 +44,7 @@ function emit(ir: string, littleEndian = true, gates = TRUNC_LOAD_GATES): string
  *  overlap on a parameter is declared as a UNION member (raise/structs.ts), so that member is the
  *  witness that the fold left the narrow access alone. */
 function keepsBothWidths(fn: Fn, off: number): boolean {
-  recognizeStructs(fn);
+  recognizeStructs(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   const t = fn.blocks[0].params[0].type;
   return (
     t.kind === 'ptr' && t.to.kind === 'struct' && t.to.fields.some((f) => f.off === off && f.type.kind === 'union')

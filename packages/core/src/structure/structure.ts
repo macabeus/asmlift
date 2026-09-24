@@ -812,14 +812,16 @@ function memAccess(
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === bt.to.name && baseExpr.k !== 'index';
     const structBase = ok ? baseExpr : { k: 'cast' as const, to: bt, e: baseExpr };
     // A byte range recovered as a UNION member (raise/structs.ts) is read through the view of the
-    // access's own width: `p->field_0.word`, `p->field_0.half[1]`.
+    // access's own width and extension: `p->field_0.word`, `p->field_0.half[1]`, `p->field_0.shalf`.
     const u = unionViewAt(bt.to, off, width, signed, isStore);
     if (u === undefined) {
       return { k: 'field', base: structBase, name: `field_${off}` };
     }
-    // An internal invariant: the builder made a view for every width a union's own base accessed,
-    // and a value that inherits the type through recoverTypes carries a pointee of its own instead.
-    if (u.view === undefined) {
+    // An internal invariant: the builder made a view for every width and narrow extension a union's
+    // own base accessed, and a value that inherits the type through recoverTypes carries a pointee
+    // of its own instead.
+    const viewElem = u.view?.type.kind === 'array' ? u.view.type.elem : u.view?.type;
+    if (u.view === undefined || (width < 4 && !isStore && viewElem?.kind === 'int' && viewElem.signed !== signed)) {
       throw new StructureError(
         `a ${width}-byte access at byte ${off} has no view in the union member '${u.member.name}'`,
       );

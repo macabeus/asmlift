@@ -266,30 +266,34 @@ const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 
  *  read, a word store and the same narrow read again compiles, through casts, to ONE `ldrh` whose
  *  value is reused, where the union spelling reloads after the `str` — as the asm the union was
  *  compiled from does (`synthetic:ureread`). gcc2.7.2kmc, ido7.1 and mwcc_242_81 reload for both.
- *  The direction matters and is one-way: a union access aliases every view of its cell, so the
- *  union spelling keeps every access the asm performed, and there is no row for which the cast is
- *  the better candidate — which is why this is the default and not a variation.
+ *  The direction is one-way: a union access aliases every view of its cell, so the union spelling
+ *  keeps every access the asm performed and the cast cannot be the better candidate — which is why
+ *  this is the default and not a variation.
  *
  *  THE LAYOUT. Every access must be naturally aligned (a packed one declines, as in
  *  `buildStruct`), and access widths are powers of two, so an aligned access never straddles the
  *  boundary of a wider aligned one: two accesses overlap only when the wider CONTAINS the narrower.
- *  A cell is therefore one widest access and every access inside it, and it becomes one member
- *  `field_<off>` holding a union with a view per width — `word`, `half`, `byte`. A narrow width
- *  LOADED with both extensions gets two views, `u…` and `s…` (`uhalf`, `shalf`): the view's type is
- *  the extension, so one view for both would read one of them wrong; a store, which carries none,
- *  writes through the unsigned one. A view that holds one element at the cell's start is a
- *  scalar; any other is an array reaching the furthest element accessed (`u16 half[2]` for the
- *  halfword at +2).
+ *  A cell is therefore one widest access and every access inside it, and it gets a VIEW per width —
+ *  `word`, `half`, `byte` — and, for a narrow width LOADED with both extensions, per extension —
+ *  `uhalf` and `shalf` — because a view's type IS its extension and one view for both reads one of
+ *  them wrong. A store carries no extension and writes through the unsigned view. A view that holds
+ *  one element at the cell's start is a scalar; any other is an array reaching the furthest
+ *  element accessed (`u16 half[2]` for the halfword at +2). A cell with ONE view is a plain field;
+ *  any other is a member `field_<off>` holding a union of its views — including a single-width cell
+ *  loaded both ways, which `buildStruct` types by its signed load alone.
  *
- *  THE COMPILER DECIDES THE UNION'S SIZE, not its widest view. `aggregateAlign` is the boundary it
- *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateAlign`):
+ *  THE COMPILER DECIDES THE UNION'S SIZE, not its widest view. `aggregateBoundary` is the size it
+ *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateBoundary`):
  *  agbcc makes `union { u16 h; u8 b; }` four bytes, four-aligned, where the other compilers make
  *  it two. A union that boundary would move — seated off it, or with the next field inside its
- *  rounded size — declines rather than mislaying every access at or after it.
+ *  rounded size — declines rather than mislaying every access at or after it. An UNMEASURED
+ *  compiler (undefined) declines every union narrower than a word, since neither answer is safe:
+ *  a boundary too small mislays the fields after the union on agbcc, one too large drops the pad
+ *  in front of them everywhere else.
  *
  *  An overlap at a width no view is named for declines too; given the containment reading above
  *  none can arise from a 1-, 2- or 4-byte access. */
-function buildUnionStruct(structName: string, accesses: Access[], aggregateAlign: number): IrType {
+function buildUnionStruct(structName: string, accesses: Access[], aggregateBoundary: number | undefined): IrType {
   for (const a of accesses) {
     refusePacked(structName, a.off, a.width);
   }
@@ -302,17 +306,8 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateAlign
       clusters.push([a]);
     }
   }
-  // A load's signedness wins over a store's, as in `buildStruct`.
-  const scalarOf = (group: Access[]): IrType =>
-    scalarTypeForAccess(
-      group[0].width,
-      group.some((a) => a.signed),
-    );
   const dataFields = clusters.map((c): StructField => {
     const start = c[0].off;
-    if (c.every((a) => a.width === c[0].width)) {
-      return { off: start, type: scalarOf(c), name: `field_${start}` };
-    }
     const members = [...new Set(c.map((a) => a.width))].flatMap((width): StructField[] => {
       const group = c.filter((a) => a.width === width);
       const name = VIEW_NAMES[width];
@@ -321,19 +316,29 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateAlign
           `cannot recover struct '${structName}': no union view for a ${width}-byte access at offset ${group[0].off}`,
         );
       }
-      // The extensions this width is LOADED with; a word has one type whatever its loads say.
-      const signs = width === 4 ? [true] : [...new Set(group.filter((a) => a.isLoad).map((a) => a.signed))].sort();
+      // The extensions this width is LOADED with, unsigned first; a word has one type whatever its
+      // loads say, and a width only stored gets the unsigned view.
+      const loaded = new Set(group.filter((a) => a.isLoad).map((a) => a.signed));
+      const signs = width === 4 ? [true] : [false, true].filter((sg) => loaded.has(sg));
       const views = signs.length === 0 ? [false] : signs;
+      const viewOf = (a: Access): boolean => (views.length === 1 ? views[0] : a.isLoad ? a.signed : false);
       return views.map((signed): StructField => {
-        const reads = group.filter((a) => (a.isLoad && width !== 4 ? a.signed : views[0]) === signed);
+        const reads = group.filter((a) => viewOf(a) === signed);
         const count = Math.max(...reads.map((a) => a.off - start)) / width + 1;
         const elem = scalarTypeForAccess(width, signed);
         const viewName = views.length > 1 ? `${signed ? 's' : 'u'}${name}` : name;
         return { off: 0, type: count === 1 ? elem : T.array(elem, count), name: viewName };
       });
     });
-    const size = Math.max(c[0].width, aggregateAlign);
-    return { off: start, type: T.union(members, size), name: `field_${start}` };
+    if (members.length === 1) {
+      return { off: start, type: members[0].type, name: `field_${start}` };
+    }
+    if (aggregateBoundary === undefined && c[0].width < 4) {
+      throw new RaiseUnsupportedError(
+        `cannot recover struct '${structName}': the union at offset ${start} is narrower than a word, and this compiler's aggregate boundary is unmeasured`,
+      );
+    }
+    return { off: start, type: T.union(members, aggregateBoundary ?? 1), name: `field_${start}` };
   });
   dataFields.forEach((f, i) => {
     if (f.type.kind !== 'union') {
@@ -342,7 +347,7 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateAlign
     const next = dataFields[i + 1];
     if (f.off % f.type.size !== 0 || (next !== undefined && next.off < f.off + f.type.size)) {
       throw new RaiseUnsupportedError(
-        `cannot recover struct '${structName}': the union at offset ${f.off} does not fit this compiler's ${aggregateAlign}-byte aggregate boundary`,
+        `cannot recover struct '${structName}': the union at offset ${f.off} does not fit this compiler's ${aggregateBoundary}-byte aggregate boundary`,
       );
     }
   });
@@ -366,10 +371,9 @@ function fieldSize(t: IrType): number {
 
 /** Recover struct-pointer types from access-pattern evidence. Runs after array legalization and
  *  before type recovery, so `recoverTypes` sees the base already typed and does not flatten it to a
- *  plain pointer. Returns the number of bases recovered as structs. `aggregateAlign` is the
- *  compiler's struct/union boundary (`buildUnionStruct`); left out, it is the widest one measured,
- *  so an unmeasured compiler declines a narrow union rather than mislaying it. */
-export function recognizeStructs(fn: Fn, aggregateAlign = 4): number {
+ *  plain pointer. Returns the number of bases recovered as structs. `aggregateBoundary` is the
+ *  compiler's struct/union size boundary, undefined where nobody measured it (`buildUnionStruct`). */
+export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined): number {
   const { accessesOf, order, arrayBases } = constOffsetAccesses(fn);
 
   // Does this base's address have a source of truth OUTSIDE this function's access set? Consulted
@@ -442,7 +446,7 @@ export function recognizeStructs(fn: Fn, aggregateAlign = 4): number {
       if (addressDeclaredElsewhere(base)) {
         continue;
       }
-      base.type = T.ptr(buildUnionStruct(`Struct${name}`, accesses, aggregateAlign));
+      base.type = T.ptr(buildUnionStruct(`Struct${name}`, accesses, aggregateBoundary));
     }
     name++;
     count++;

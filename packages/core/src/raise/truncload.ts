@@ -58,8 +58,8 @@
 // census reads `covering-store 12, covering-dominates 4, fixed-cell 2`; on ido7.1 (179 rows) and
 // gcc2.7.2kmc (183) `covering-store 12, high-order-read 4, fixed-cell 2`, the big-endian rows
 // reaching the skew rule because `utag`'s union members are read at the field's TOP; on
-// mwcc_242_81 (189) `covering-store 12, fixed-cell 2`. The union rows (`uhalf`, `uniwrite`,
-// `ureread`, `utag`) are most of it, and they are counted whole only because raise/structs.ts
+// mwcc_242_81 (189) `covering-store 12, fixed-cell 2`. The union rows (`uhalf`, `ureread`, `utag`)
+// are most of it, and they are counted whole only because raise/structs.ts
 // recovers them rather than declining part-way through the enumeration — the next paragraph.
 //
 // READ THE `did not lift` LINE WITH THE COUNTS, because the census runs the whole RANKED
