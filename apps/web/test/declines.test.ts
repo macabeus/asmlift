@@ -1042,8 +1042,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-cr', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-flags-arm', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
-    ['cross-block-flags-arm', 'no compare crosses the edge into ', 'packages/core/src/frontend/thumb.ts'],
-    ['cross-block-flags-arm', 'no compare crosses the edges into ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edge into ', 'packages/core/src/frontend/flags-edge.ts'],
+    ['cross-block-flags-arm', 'no compare crosses the edges into ', 'packages/core/src/frontend/flags-edge.ts'],
     ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],
@@ -1150,11 +1150,11 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 3],
+    ['frontend/ppc.ts', 4],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 74;
+  const RESIDUE_TOTAL = 75;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

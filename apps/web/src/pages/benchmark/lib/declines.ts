@@ -27,11 +27,11 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 136 distinct decline messages (the texts reached by
+// `packages/core/src` throws 137 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 74 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 75 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -56,7 +56,8 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          3  `stwu` with update, a relocation on a stack-pointer adjust, and the
+//   frontend/ppc.ts          4  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), and the
 //                               two-armed branch denylist, whose template is interpolation end to end
 //                               (its two 64-bit refusals are NOT here — both carry `wide-call-arg`'s
 //                               phrase, because they are that capability gap seen from the frontend

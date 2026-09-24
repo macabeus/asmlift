@@ -51,6 +51,7 @@ import {
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
+import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
@@ -137,6 +138,20 @@ const rlwinmMask = (mb: number, me: number): number => {
 // branch-prediction hint suffixes (`blt-`/`bge+` — a hint, not a different instruction; without
 // stripping, the mnemonic misses the cond tables and the branch is silently dropped).
 const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { relocs: true, hintSuffixes: true });
+
+/** A compare a `cr` field holds: its operands and signedness, which the reading branch turns into a
+ *  condition. */
+type CrCompare = { lhs: Value; rhs: Value; signed: boolean };
+
+/** What a block leaves in the condition register for a successor to inherit. `fields` holds, per
+ *  field, the compare it holds, or the sentence saying what overwrote it. A field absent from the map
+ *  never held a compare on the chain of edges that reached here, and `none` is why: the sentence
+ *  from the block where that chain started. */
+type CrExit = { fields: ReadonlyMap<string, CrCompare | string>; none: string };
+
+/** The `cr` fields the EABI makes volatile across a call: cr0, cr1 and cr5–cr7. The callee may
+ *  write any of them, so a compare in one does not survive a `bl`. cr2–cr4 are nonvolatile. */
+const CR_VOLATILE = ['cr0', 'cr1', 'cr5', 'cr6', 'cr7'] as const;
 
 interface PpcBlock {
   startAddr: number;
@@ -536,6 +551,15 @@ export function lift(
     return slots;
   };
 
+  // What each filled block left in the condition register. Written as blocks are filled, so a lookup
+  // finds only blocks filled earlier, which is what `inheritFlags` needs to tell "not known" from
+  // "none".
+  const exitCr = new Map<number, CrExit>();
+  const blockLabel = (bi: number): string =>
+    blocks[bi].startAddr >= 0
+      ? `${name}+0x${blocks[bi].startAddr.toString(16)}`
+      : `the return block '${name}' synthesizes`;
+
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
     const succ = (j: number): Successor => ({ block: irBlocks[j], args: [] });
@@ -770,16 +794,29 @@ export function lift(
 
     // cr-field compare state, so a following branch fuses. Keyed by cr name ("cr0" default).
     //
-    // BLOCK-LOCAL, and the Thumb frontend's `PendingCmp` is not. There a compare is inherited
-    // across a straight-line edge, under a rule (`inheritedCmp` in thumb.ts) that is the same rule
-    // this map would need: one predecessor, already filled, not a jump-table dispatch, and left
-    // through an unconditional branch or a fall-through. Only the STATE differs — one implicit
-    // flags register there, this eight-entry map with per-entry signedness here — and the clobber
-    // rule, which is `FLAG_SETTING` there and the record-form `.` suffix plus a call here.
+    // A block starts with what its predecessor left, under the edge rule both frontends share
+    // (`inheritFlags`, frontend/flags-edge.ts): one predecessor, already filled, not a jump-table
+    // dispatch. The edge out of a CONDITIONAL branch carries too, because a `bc` writes no CR field:
+    // mwcc's switch dispatch `cmpwi r0,1; beq- case1; bge- default` reads one compare from the
+    // `beq-` and then from the `bge-` on its fall-through, which begins a block of its own.
     //
-    // The edge rule is not extracted because it has one caller. The rows that would earn the
-    // extraction are the PowerPC ones still declining at the throw below.
-    const cmpDef = new Map<string, { lhs: Value; rhs: Value; signed: boolean }>();
+    // The clobber rule is this frontend's own: a compare writes its field, a record-form op writes
+    // cr0, and a call destroys every volatile field (CR_VOLATILE). A field something else wrote holds
+    // the sentence saying so rather than an entry, so the branch that reads it can name the writer.
+    // Every other instruction that writes a CR field (`crxor`, `mtcrf`, `fcmpu`, …) names no
+    // register destination and is refused outright by the opaque policy, so it never reaches here.
+    const inherited = inheritFlags(bi, {
+      preds,
+      exit: exitCr,
+      label: blockLabel,
+      dispatches: (i) => {
+        const pbr = blocks[i].branch;
+        return pbr !== null && jts.has(pbr.addr);
+      },
+      refusesConditional: () => false,
+    });
+    const cmpDef = new Map<string, CrCompare | string>(typeof inherited === 'string' ? [] : inherited.fields);
+    const noCmpWhy = typeof inherited === 'string' ? inherited : inherited.none;
     // One operand-grammar normalizer for the four compare decodes: `cmpX rA,…` (cr0 implicit)
     // or `cmpX crN,rA,…` → the cr field, the lhs register token, and the rhs token (register or
     // immediate — the case reads/parses it).
@@ -888,6 +925,12 @@ export function lift(
           }
           write(RET, res);
           ssa.noteCall(bi, CALL_CLOBBERS);
+          for (const cr of CR_VOLATILE) {
+            cmpDef.set(
+              cr,
+              `the call at 0x${ins.addr.toString(16)} destroyed it (the EABI does not preserve ${cr} across a call)`,
+            );
+          }
           break;
         }
         // Stack-frame + link-register bookkeeping. `stwu r1,-N(r1)` / `addi r1,r1,N` adjust the frame
@@ -1265,6 +1308,11 @@ export function lift(
       // next branch reading cr0 fuses (`andi. r0,r3,1; beq …` → `if ((a0 & 1) == 0)`).
       if (rc && lastDef) {
         cmpDef.set('cr0', { lhs: lastDef, rhs: constVal(0), signed: true });
+      } else if (rc) {
+        cmpDef.set(
+          'cr0',
+          `'${ins.mnemonic}' at 0x${ins.addr.toString(16)} wrote it from no value this frontend models`,
+        );
       }
       // THE CHOKE POINT. Everything above either took the relocation or threw; a relocation still
       // sitting here was dropped, and a dropped relocation is the printed placeholder standing in
@@ -1277,6 +1325,11 @@ export function lift(
     for (const ins of b.body) {
       decode(ins);
     }
+    // No terminator writes a CR field (a `bc` reads one, `bdnz` writes CTR), so the state after the
+    // body is the state at the block's exit. Recorded for EVERY block, including those whose edges
+    // `inheritFlags` will refuse: the edge rule lives in one place, and a second copy of it here
+    // could disagree with the first.
+    exitCr.set(bi, { fields: cmpDef, none: noCmpWhy });
 
     const br = b.branch;
     // Recovered dense switch: the bounds block dispatches a `switch_br` over the scrutinee — N case
@@ -1343,19 +1396,14 @@ export function lift(
       // The branch names its cr field as the first operand when not cr0.
       const crName = br.ops[0]?.startsWith('cr') ? br.ops[0] : 'cr0';
       const cmp = cmpDef.get(crName);
-      // `cmpDef` is block-local; a compare split from its branch by a block boundary is a
-      // cross-block cr dependency this frontend does not model. Decline loud.
-      //
-      // UNBUILT AND KNOWN, not absent. The Thumb frontend carries a compare across a straight-line
-      // edge and refuses the rest by name (`inheritedCmp`): two edges into the block, a predecessor
-      // lifted after it, an edge out of a jump-table dispatch, and an edge leaving a CONDITIONAL
-      // branch. That last refusal is where this side lives — a `cmpwi` read by the fall-through of
-      // the `bc` that already consumed it is the shape these rows carry, and Thumb declines it only
-      // because no ARM row inhabits it. Whoever builds this reads that rule rather than writing a
-      // second one.
+      if (typeof cmp === 'string') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': conditional branch '${base}' tests ${crName}, but ${cmp}`,
+        );
+      }
       if (!cmp) {
         throw new PpcUnsupportedError(
-          `cannot lift '${name}': conditional branch '${base}' has no reaching compare (${crName}) in its block`,
+          `cannot lift '${name}': conditional branch '${base}' has no reaching compare (${crName}): ${noCmpWhy}`,
         );
       }
       const table = !cmp.signed ? COND_UNSIGNED : COND_SIGNED;

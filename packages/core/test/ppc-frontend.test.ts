@@ -11,15 +11,45 @@ import { PPC_MWCC } from '../src/target';
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 
 describe('PPC frontend robustness', () => {
-  test('a conditional branch whose compare sits in a PREVIOUS block declines loud', () => {
-    // The `cmpw` lands in the entry block; `40 <cross+0x40>` is branched to from below, making it a
-    // block boundary, so the `blt` at 0x40 has no reaching compare in ITS block. Silently emitting
-    // `constVal(0)` there is an always-false condition — it must decline loud instead.
-    const asm =
+  test('a compare in the ONLY predecessor reaches the branch, across a `b` or a `bc` fall-through', () => {
+    // `40 <cross+0x40>` is a block of its own, entered only from the `b` at 0x4, so the `blt` there
+    // reads the `cmpw` its one predecessor left (`inheritFlags`, frontend/flags-edge.ts).
+    const straight =
       '0:\tcmpw    r3,r4\n4:\tb       40 <cross+0x40>\n' +
       '40:\tblt     50 <cross+0x50>\n44:\tli      r3,1\n48:\tblr\n' +
       '50:\tli      r3,2\n54:\tblr\n';
-    expect(() => dis('cross', asm)).toThrow(/no reaching compare/);
+    expect(dis('cross', straight)).toContain('a0 >= a1');
+    // mwcc's switch dispatch: one `cmpwi` read by the `beq-` and then by the `bge-` on its
+    // fall-through. A `bc` writes no CR field, so the edge it falls out of carries the compare too.
+    const dispatch =
+      '0:\tcmpwi   r3,1\n4:\tbeq-    18 <disp+0x18>\n8:\tbge-    20 <disp+0x20>\n' +
+      'c:\tcmpwi   r3,0\n10:\tbge-    28 <disp+0x28>\n14:\tb       20 <disp+0x20>\n' +
+      '18:\tli      r3,11\n1c:\tblr\n20:\tli      r3,99\n24:\tblr\n28:\tli      r3,10\n2c:\tblr\n';
+    const src = dis('disp', dispatch);
+    expect(src).toContain('a0 != 1');
+    expect(src).toContain('a0 < 1');
+  });
+
+  test('a compare does not cross a JOIN: two predecessors decline loud', () => {
+    // `10 <join+0x10>` is reached from the `beq-` (cr0 = r3 vs r4) and by falling out of 0x8
+    // (cr0 = r3 vs r5). The flags need not agree, so picking either states a condition the machine
+    // does not promise, and silently emitting `constVal(0)` would be an always-false one.
+    const asm =
+      '0:\tcmpw    r3,r4\n4:\tbeq-    10 <join+0x10>\n8:\tcmpw    r3,r5\nc:\tnop\n' +
+      '10:\tblt-    20 <join+0x20>\n14:\tli      r3,1\n18:\tblr\n20:\tli      r3,2\n24:\tblr\n';
+    expect(() => dis('join', asm)).toThrow(
+      "has no reaching compare (cr0): no compare crosses the edges into 'join+0x10': 2 meet there",
+    );
+  });
+
+  test('a call destroys the volatile cr fields: a compare before a `bl` does not reach a branch after it', () => {
+    // The EABI preserves cr2–cr4 only. Before, the `beq-` fused the pre-call `cmpwi` and lifted as
+    // `if (a0 != 0)`, a test of flags the callee was free to overwrite.
+    const asm =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tcmpwi   r3,0\n' +
+      '10:\tbl      10 <cc+0x10>\n14:\tbeq-    24 <cc+0x24>\n18:\tli      r3,1\n1c:\tb       28 <cc+0x28>\n' +
+      '24:\tli      r3,2\n28:\tlwz     r0,20(r1)\n2c:\tmtlr    r0\n30:\taddi    r1,r1,16\n34:\tblr\n';
+    expect(() => dis('cc', asm)).toThrow('tests cr0, but the call at 0x10 destroyed it');
   });
 
   test('record-form andi. feeds cr0 — the mask test survives, not `if (!0)`', () => {
