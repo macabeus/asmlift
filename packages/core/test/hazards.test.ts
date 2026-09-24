@@ -432,6 +432,48 @@ describe('sinkablePreUpdateSlots', () => {
     );
   });
 
+  // TWO SLOTS, ONE TREE. The exit edge hands `e = cb(p) + p` to two merge params, so each sunk copy
+  // rebuilds it: for a READ that is one extra load, for a CALL it is `cb` run twice per iteration.
+  // The edge stands down whole for an effect; the control swaps the call for a load and sinks both.
+  const twoSlots = (opcode: 'call' | 'load') => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const q2 = v();
+    exit.params.push(q2);
+    const rd = v();
+    const e = v();
+    const rdOp = bodyOp(
+      header,
+      opcode === 'call'
+        ? mkOp('call', { operands: [p], results: [rd], attrs: { target: 'cb' } })
+        : mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
+    );
+    const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [rd, rdOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [rdOp, header],
+        [op, header],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [q2, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    return { op, run: () => h.sinkablePreUpdateSlots(header, exit, [e, e], body, latch, empty, new Set(['v0'])) };
+  };
+
+  test('two sunk slots sharing one inlined CALL stand the edge down', () => {
+    expect(twoSlots('call').run()).toEqual(new Map());
+    const { op, run } = twoSlots('load');
+    expect(run()).toEqual(
+      new Map([
+        [0, op],
+        [1, op],
+      ]),
+    );
+  });
+
   test('the two arg gates are a PARTITION — ablating one does not disable the other', () => {
     // `add(mid, *p)` with a store in between trips both: a body-computed name AND a memory read the
     // copy's position is on the far side of — the store writes the loop variable rather than the

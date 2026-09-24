@@ -744,10 +744,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // other, so an emitter free to re-derive its own would be free to place a copy where nothing
   // cleared it — silently, since the statement is still emitted and still reads names that resolve.
   //
-  // `PREUPDATE_SINK_GATES` holds the per-candidate refusals, ablatable one at a time. Two rules are
-  // properties of the EDGE rather than of a candidate and stay here: the exit edge is a PARALLEL
-  // copy, so splitting it across two program points must not let two slots claim one name, nor let
-  // a slot that stays behind read a name the body now writes first.
+  // `PREUPDATE_SINK_GATES` holds the per-candidate refusals, ablatable one at a time. Three rules
+  // are properties of the EDGE rather than of a candidate and stay here. Two because the exit edge
+  // is a PARALLEL copy, so splitting it across two program points must not let two slots claim one
+  // name, nor let a slot that stays behind read a name the body now writes first. And one because
+  // of how often the copies RUN: two sunk slots must not spell one inlined effect, which would run
+  // once per copy.
   //
   // The third parallel-copy question — one sunk slot's REBUILT expression reading another sunk
   // slot's destination — needs no rule, and the copies are emitted sequentially because of it.
@@ -840,15 +842,39 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // while the whole between-scan refuses exactly one corpus row as it stands.
     //
     // PER SLOT, and two slots sharing one order-sensitive def spell it TWICE — one `ldr` feeding
-    // two exit args becomes two reads in the emitted C. Legal by this same scan: either nothing
-    // order-sensitive lies between the two homes, or the second slot is refused and the edge stands
-    // down whole. It costs a spelling; only a `volatile` qualifier would make the extra access
-    // observable, and that qualifier is minted by a variation the differ referees (l3/volatileptr.ts),
-    // never by the default candidate.
+    // two exit args becomes two reads in the emitted C. For a READ that is legal by this same scan:
+    // either nothing order-sensitive lies between the two homes, or the second slot is refused and
+    // the edge stands down whole. It costs a spelling; only a `volatile` qualifier would make the
+    // extra access observable, and that qualifier is minted by a variation the differ referees
+    // (l3/volatileptr.ts), never by the default candidate. For an EFFECT it is not a spelling: a
+    // call spelled in two copies runs twice per iteration, so an edge whose sunk slots share an
+    // inlined effect stands down whole (`effectsOf`, below).
     const movesPast = (d: Op, home: Op): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
       return i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+    };
+    // The EFFECTS a rebuilt tree spells inline — walked where `blockersOf` walks, stopping at a
+    // loop variable and at a named value, which render as their names.
+    const effectsOf = (a: Value): Set<Op> => {
+      const seen = new Set<Value>();
+      const found = new Set<Op>();
+      const walk = (x: Value): void => {
+        if (seen.has(x) || header.params.includes(x) || varName.has(x)) {
+          return;
+        }
+        seen.add(x);
+        const d = defs.get(x);
+        if (!d) {
+          return;
+        }
+        if (EFFECTFUL_OPS.has(d.opcode)) {
+          found.add(d);
+        }
+        d.operands.forEach(walk);
+      };
+      walk(a);
+      return found;
     };
     const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
@@ -904,6 +930,15 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     const names = new Set([...cleared.values()].map((c) => c.name));
     if (cleared.size === 0 || names.size !== cleared.size) {
       return none;
+    }
+    const spelled = new Set<Op>();
+    for (const j of cleared.keys()) {
+      for (const e of effectsOf(exitArgs[j])) {
+        if (spelled.has(e)) {
+          return none;
+        }
+        spelled.add(e);
+      }
     }
     return exitArgs.some((a, j) => !cleared.has(j) && readsClobbered(a, sub, names))
       ? none

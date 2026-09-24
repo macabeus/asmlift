@@ -475,3 +475,36 @@ test('a latch store of a loop variable reads it ahead of the update, with no arm
       '}\n',
   );
 });
+
+// ONE CALL, TWO EXIT SLOTS. The exit edge hands `f1(v2) + v2` to two merge params; sunk, each copy
+// rebuilds the tree and `f1` runs twice per iteration where the asm ran it once. The edge declines
+// instead. The control reads memory where the call was: two copies of a READ are two loads, a
+// spelling rather than a different program, and both slots sink.
+const ONE_CALL_TWO_SLOTS = `fn dupcall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(), ^bb3(%0, %0)
+^bb1():
+  br ^bb2(%1, %0)
+^bb2(%4: s32, %5: s32):
+  %6: s32 = call %5 {target="f1"}
+  %7: s32 = add %6, %5
+  %8: s32 = const {value=1}
+  %9: s32 = sub %4, %8
+  %10: s32 = add %5, %8
+  %11: u32 = icmp_slt %2, %9
+  cond_br %11, ^bb2(%9, %10), ^bb3(%7, %7)
+^bb3(%12: s32, %13: s32):
+  %14: s32 = add %12, %13
+  ret %14
+}
+`;
+
+test('two sunk exit slots never spell one call twice', () => {
+  expect(() => emit(ONE_CALL_TWO_SLOTS)).toThrow(/reads a pre-update loop variable/);
+  const read = ONE_CALL_TWO_SLOTS.replace('call %5 {target="f1"}', 'load %5 {off=0, signed=true, width=4}');
+  expect(read).not.toBe(ONE_CALL_TWO_SLOTS);
+  const body = emit(read).split('do {')[1].split('} while')[0];
+  expect(body.match(/= \*\(s32 \*\)v\d+ \+ v\d+;/g)).toHaveLength(2);
+});
