@@ -307,3 +307,36 @@ test('an exit copy of a pre-loop value that differs across the exit edges keeps 
   expect(r.judged).toBe(SEEDS.length);
   expect(r.disagree).toBe(0);
 });
+
+// A second guarded loop in the first one's exit region: the first loop's substitution is still in
+// force there, and so is what it may not spell — `h(p)` after the inner loop is the same zero-trip
+// read as above.
+const AFTER_A_NESTED_GUARDED_LOOP = `fn nested {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sgt %0, %3
+  cond_br %4, ^bb1(%2, %0), ^bb2()
+^bb1(%5: s32, %6: s32):
+  %7: s32 = call %5 {target="g"}
+  %8: s32 = const {value=1}
+  %9: s32 = sub %6, %8
+  %10: u32 = icmp_ne %9, %3
+  cond_br %10, ^bb1(%1, %9), ^bb2()
+^bb2():
+  %20: u32 = icmp_sgt %2, %3
+  cond_br %20, ^bb3(%2), ^bb4()
+^bb3(%21: s32):
+  %22: s32 = call %21 {target="k"}
+  %23: s32 = const {value=1}
+  %24: s32 = sub %21, %23
+  %25: u32 = icmp_ne %24, %3
+  cond_br %25, ^bb3(%24), ^bb4()
+^bb4():
+  %11: s32 = call %1 {target="h"}
+  ret %11
+}
+`;
+
+test('a zero-trip read after a nested guarded loop still declines', () => {
+  expect(() => emit(AFTER_A_NESTED_GUARDED_LOOP)).toThrow(ZERO_TRIP);
+});

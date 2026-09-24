@@ -1327,8 +1327,8 @@ export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
     rejects: (c) => !c.pureAlias && c.reDerivesName,
   },
   {
-    // The two gates above waive a pure alias because the alias and its value are equal on every
-    // path under the value's own name. A loop variable's name holds the value only once the back
+    // `carrier-live` and `re-derives` waive a pure alias because the alias and its value are equal on
+    // every path under the value's own name. A loop variable's name holds the value only once the back
     // edge that carries it has run.
     id: 'alias-under-its-own-name',
     why: "a loop variable's name holds the value it is offered for only after the back edge that carries it",
@@ -4091,9 +4091,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // read the name, not re-inline the computation (which would double-count, e.g. `(u8)(v1+1)` instead
   // of `v1`). `expr` consults it; `withSub` installs/merges it around the exit region. Null normally.
   let activeSub: Map<Value, string> | null = null;
-  // The entries of a guarded self-loop's substitution its exit region may not render (the
-  // guarded-loop site's `holdsInitInstead`): installed around that region only, and consulted where
-  // a substitution hit renders, so it judges exactly what the region spells.
+  // The entries of a guarded self-loop's substitution its exit region may not render (that site's
+  // `stale`), merged over every enclosing guarded loop's like `activeSub` is: consulted where ANY
+  // substitution hit renders in scope, so it judges what the region spells, dead copies included —
+  // which over-declines, the refusing direction.
   let zeroTripStale: Map<Value, string> | null = null;
   const expr = (v: Value): Expr => exprWith(activeSub)(v);
   const withSub = <R>(sub: Map<Value, string>, run: () => R): R => {
@@ -5253,10 +5254,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // name. Both run on the zero-trip path too, where that name still holds its init — so an arg
         // computed BEFORE the loop reads right there only if the init is that very value (`sub` is
         // last-wins over params sharing an arg, so the init is read off the last one). `staleExit`
-        // proves a copy whose arg differs across the two exit edges; a copy passing ONE value on
-        // both is judged here through its inlined expression, and the region where its render hits
-        // such an entry (`zeroTripStale`) — only a value that dominates the guard can reach it, but
-        // what it renders is what the region renders, not what is live at its entry.
+        // proves a copy through `sameAtEntry`, which answers true for one value on both exit edges
+        // without looking inside it — so such a copy is judged here through its inlined expression,
+        // and the region wherever its render hits such an entry (`zeroTripStale`).
+        //
+        // KNOWN GAP, wrong before this check existed too: two DIFFERENT exit values sharing a subtree
+        // that reaches a stale entry pass `staleExit` for the same reason, and so do two calls whose
+        // operands map to each other through the entry values.
         const stale = new Map(
           [...sub].filter(([x]) => {
             const d = defs.get(x);
@@ -5300,7 +5304,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ...withSub(sub, () => {
             const copies = argAssigns(li.header, li.exit, sub, keptSlot);
             const prevStale = zeroTripStale;
-            zeroTripStale = stale;
+            zeroTripStale = prevStale ? new Map([...prevStale, ...stale]) : stale;
             try {
               return [...copies, ...structureRegion(li.exit, stop)];
             } finally {
@@ -5816,7 +5820,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const updates = argAssigns(dw.latch, dw.header, latchMap);
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
-    // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
+    // A DEFENSIVE GUARD, and the reason the sink stands down rather than repairing anything. A body
     // block's param that holds a LOOP VARIABLE's name makes the arm's copy into it a real write
     // partway through the body, and everything rendered after it reads the name RAW: the update,
     // the bottom test, the header's own ops, the latch's side effects. The pure-alias route to such

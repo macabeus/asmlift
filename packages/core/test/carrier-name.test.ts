@@ -156,3 +156,15 @@ test('a redundant merge shares only its value’s own name, not a later loop var
   expect(r.judged).toBe(SEEDS.length);
   expect(r.disagree).toBe(0);
 });
+
+test('ablating alias-under-its-own-name makes that merge disagree with its IR', () => {
+  const fn = parse(ALIAS_THROUGH_A_LATER_LOOP);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(
+    fn,
+    { coalesceLoopInit: true },
+    { carrierNameGates: without(CARRIER_NAME_GATES, 'alias-under-its-own-name') },
+  );
+  expect(irAgreement(ALIAS_THROUGH_A_LATER_LOOP, sfn, SEEDS).disagree).toBeGreaterThan(0);
+});
