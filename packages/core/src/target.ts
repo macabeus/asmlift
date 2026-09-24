@@ -350,6 +350,33 @@ export interface TargetDescription {
     // with no equality fold anywhere — the identical IR shape, from a producer that is not a
     // dispatch. Each compiler opts in on its own dispatch's evidence.
     switchAllowsBoundCase?: boolean;
+    // Regime-A switch recovery: accept a RELATIONAL test as a case where the range the tests ABOVE
+    // it leave admits exactly one scrutinee value on one of its sides (`pathSingleton` in
+    // structure/switch-recover.ts), on the taken side or the fall-through alike.
+    //
+    // A DEFAULT rather than a candidate variation because for mwcc the relational test has one
+    // producer: its binary-search switch dispatch, which reuses one `cmpwi` for a `beq` and a `bge`
+    // and then pins the remaining value with a bound test instead of an equality —
+    // `switch (x) { case 0: … case 1: … default: … }` is `cmpwi r3,1; beq- case1; bge- default;
+    // cmpwi r3,0; bge- case0; b default`, where `x >= 0` means `x == 0` only because `x != 1` and
+    // `x < 1` came first. The same body as an if/else-if ladder is a different object with no
+    // relational test at all, and a ladder written WITH the relational tests is a third object that
+    // puts an arm's body between two tests. The three are committed:
+    // `corpus/mwcc-sw{dispatch,ladder,relladder}.asm` from `corpus/probe-mwcc-sw*.c`, regenerated
+    // by `scripts/regen-switch-spelling-probes.ts` and read by switch-arms.test.ts. All three builds
+    // this description serves emit the dispatch identically at -O4,p and at -O0,p
+    // (`packages/cli/test/matching/ppc-compiler-behaviors.test.ts`).
+    //
+    // Not agbcc's `switchAllowsBoundCase`, which reads the BRANCH alone and only a value at an end
+    // of the 32-bit domain, from agbcc's own `emit_case_nodes`. mwcc's pinned value sits at no end
+    // (`case 0` above), and `synthetic:sw_ret:mwcc_242_81` pins one on the FALL side
+    // (`cmpwi r3,4; bge- default; b case3` under `x > 2`, `x != 2`), which agbcc's reading refuses
+    // by design. PRE3's per-case simulation of the original tree stays the backstop: the range is a
+    // superset of what reaches the test, so a singleton an unsigned ancestor already excluded is
+    // caught there.
+    //
+    // Absent ⇒ false. Each compiler opts in on its own dispatch's evidence.
+    switchAllowsPathBoundCase?: boolean;
     // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
     // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
     // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
@@ -770,6 +797,8 @@ export const PPC_MWCC: TargetDescription = {
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
     aggregateBoundary: 1,
+    // MEASURED on all three builds at -O4,p and -O0,p: the note at the field.
+    switchAllowsPathBoundCase: true,
     // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
     // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.

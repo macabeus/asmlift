@@ -900,8 +900,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     STORE, which fixes no signedness (`uhalf`, `ureread`: `covering-store`, whichever end of the
   //     word they read), and a narrow STORE (`uniwrite`). No value cast spells any of them, and
   //     raise/structs.ts declares each overlap on a parameter as a UNION member — a view per width
-  //     — which is what these rows' sources declare. `utag` still declines on mwcc_242_81, before
-  //     this pass: a `bge` with no reaching compare.
+  //     — which is what these rows' sources declare. On mwcc_242_81 `utag`'s switch arms are
+  //     reached through CodeWarrior's binary-search dispatch, whose `bge` reads the compare its
+  //     `beq` already consumed (frontend/flags-edge.ts) and pins `case 0` by its path
+  //     (`switchAllowsPathBoundCase`, target.ts).
   //   • `unidev` is not a case of that sentence at all: its base is a LITERAL ADDRESS, so the
   //     accesses are not evidence about a layout nobody declared, and raise/structs.ts forgives the
   //     failed synthesis. It LIFTS, at each access's own width, and what it measures is below.

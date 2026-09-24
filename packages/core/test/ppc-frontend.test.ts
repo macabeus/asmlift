@@ -26,8 +26,9 @@ describe('PPC frontend robustness', () => {
       'c:\tcmpwi   r3,0\n10:\tbge-    28 <disp+0x28>\n14:\tb       20 <disp+0x20>\n' +
       '18:\tli      r3,11\n1c:\tblr\n20:\tli      r3,99\n24:\tblr\n28:\tli      r3,10\n2c:\tblr\n';
     const src = dis('disp', dispatch);
-    expect(src).toContain('a0 != 1');
-    expect(src).toContain('a0 < 1');
+    for (const k of [10, 11, 99]) {
+      expect(src).toContain(`return ${k};`);
+    }
   });
 
   test('a compare does not cross a JOIN: two predecessors decline loud', () => {

@@ -1492,6 +1492,11 @@ export interface StructureOptions {
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that its dispatch jumps
   // straight to a bounded subtree's body. Default false: absent, every relational edge navigates.
   switchAllowsBoundCase?: boolean;
+  // Comparison-tree switch recovery: treat a relational test as a case where the range the tests
+  // above it leave admits exactly one scrutinee value on either of its sides. A compiler behavior
+  // declared in TargetDescription.compilerBehaviors. Default false: absent, only
+  // `switchAllowsBoundCase`'s endpoint reading pins a relational edge.
+  switchAllowsPathBoundCase?: boolean;
   // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
   // bodies out, rather than sorted by ascending case value. A compiler behavior declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
@@ -1987,6 +1992,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     preferDefPosCopyOrder = false,
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
+    switchAllowsPathBoundCase = false,
     switchArmsFollowLayout = false,
     switchRequiresFrontLoadedTests = false,
     spellSwitchFallthrough = true,
@@ -4788,6 +4794,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
     switchAllowsBoundCase,
+    switchAllowsPathBoundCase,
     switchArmsFollowLayout,
     switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,

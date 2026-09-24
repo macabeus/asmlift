@@ -21,6 +21,9 @@ export interface SwitchRecoverDeps {
   switchAllowsNeqCase: boolean;
   /** read a relational test whose BRANCH admits exactly one scrutinee value as that case */
   switchAllowsBoundCase: boolean;
+  /** read a relational test as a case where the values that can reach it, narrowed by the tests
+   *  above it, leave exactly one on either of its sides (`pathSingleton`) */
+  switchAllowsPathBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
   /** DECLINE a recovered tree whose own layout INTERLEAVES a test with a case body. A source
@@ -190,6 +193,80 @@ function singletonTaken(ti: TestInfo): number | null {
   return null;
 }
 
+/** What the tests above a block leave of the scrutinee's SIGNED range: `[lo, hi]`, and inside it the
+ *  values an `==` or `!=` edge has already sent elsewhere. A SUPERSET of the values that reach the
+ *  block, never a subset: an unsigned test narrows nothing, and an excluded value only trims an
+ *  end of the range. So a range that comes out a singleton names the only value that CAN reach —
+ *  whether that value does is PRE3's simulation to say. */
+interface PathRange {
+  lo: number;
+  hi: number;
+  excluded: ReadonlySet<number>;
+}
+
+const INT_MIN = -0x80000000;
+const INT_MAX = 0x7fffffff;
+const FULL_PATH: PathRange = { lo: INT_MIN, hi: INT_MAX, excluded: new Set() };
+
+/** The same opcode with its operands swapped: `k < x` is `x > k`. */
+const MIRRORED: Record<string, string> = {
+  icmp_slt: 'icmp_sgt',
+  icmp_sgt: 'icmp_slt',
+  icmp_sle: 'icmp_sge',
+  icmp_sge: 'icmp_sle',
+};
+
+/** The range `path` leaves on one side of the test `ti`, trimmed by the excluded values. An
+ *  unsigned relational test leaves the range as it was: a superset stays a superset. */
+function narrowPath(path: PathRange, ti: TestInfo, taken: boolean): PathRange {
+  let { lo, hi } = path;
+  let excluded = path.excluded;
+  if (ti.cls === 'rel' && !ti.opcode.startsWith('icmp_u')) {
+    const op = ti.xOnLeft ? ti.opcode : (MIRRORED[ti.opcode] ?? ti.opcode);
+    const k = ti.k | 0;
+    // The TAKEN half-line; the fall side is its complement. `x > INT_MAX` and `x < INT_MIN` are
+    // empty, which `lo > hi` spells.
+    const [tlo, thi] =
+      op === 'icmp_sge'
+        ? [k, INT_MAX]
+        : op === 'icmp_sgt'
+          ? [k + 1, INT_MAX]
+          : op === 'icmp_sle'
+            ? [INT_MIN, k]
+            : op === 'icmp_slt'
+              ? [INT_MIN, k - 1]
+              : [INT_MIN, INT_MAX];
+    const [slo, shi] = taken ? [tlo, thi] : tlo === INT_MIN ? [thi + 1, INT_MAX] : [INT_MIN, tlo - 1];
+    lo = Math.max(lo, slo);
+    hi = Math.min(hi, shi);
+  } else if ((ti.cls === 'eq' && !taken) || (ti.cls === 'ne' && taken)) {
+    excluded = new Set([...excluded, ti.k | 0]);
+  }
+  while (lo <= hi && excluded.has(lo)) {
+    lo++;
+  }
+  while (hi >= lo && excluded.has(hi)) {
+    hi--;
+  }
+  return { lo, hi, excluded };
+}
+
+/** Which single scrutinee value can follow this relational test's `taken` (or fall) edge, given
+ *  the range the tests above it leave, if exactly one? mwcc's binary-search dispatch pins a case
+ *  this way: `switch (x) { case 0: … case 1: … default: … }` compiles to
+ *  `cmpwi r0,1; beq- case1; bge- default; cmpwi r0,0; bge- case0; b default`, where `x >= 0` is
+ *  `case 0` only because `x != 1` and `x < 1` came first. The value sits at no end of the 32-bit
+ *  domain, so agbcc's endpoint reading (`singletonTaken`) cannot see it, and the case lands on
+ *  EITHER side of its test: `sw_ret` (`cmpwi r3,4; bge- default; b case3` under `x > 2`,
+ *  `x != 2`) pins `case 3` on the fall-through. Null when that side admits none or several. */
+function pathSingleton(path: PathRange, ti: TestInfo, taken: boolean): number | null {
+  if (ti.cls !== 'rel' || ti.opcode.startsWith('icmp_u')) {
+    return null;
+  }
+  const r = narrowPath(path, ti, taken);
+  return r.lo === r.hi ? r.lo : null;
+}
+
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
  *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
  *  which is the caller's own arm-order policy — so with no fall-through every chain is a
@@ -252,6 +329,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isCmpOpcode,
     switchAllowsNeqCase,
     switchAllowsBoundCase,
+    switchAllowsPathBoundCase,
     switchArmsFollowLayout,
     switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,
@@ -594,6 +672,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     };
     const seen = new Set<Block>();
     const work: Block[] = [b];
+    // The scrutinee's range on the way into each test block, written as the walk pushes it. Only
+    // `switchAllowsPathBoundCase` reads it; the tree is a tree (a second visit declines below), so
+    // each block has one entry.
+    const pathOf = new Map<Block, PathRange>([[b, FULL_PATH]]);
     while (work.length) {
       const blk = work.pop()!;
       if (seen.has(blk)) {
@@ -628,10 +710,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         cases.set(k, child);
         return true;
       };
+      const path = pathOf.get(blk)!;
       /** Read `child` as a NAVIGATION edge: more dispatch to walk, or a non-test leaf, which is a
-       *  default candidate. Never declines — the leaf's own reading is settled below. */
-      const asNav = (child: Block): boolean => {
+       *  default candidate. Never declines — the leaf's own reading is settled below. `onTaken`
+       *  says which of `blk`'s edges it is, which decides what the range narrows to. */
+      const asNav = (child: Block, onTaken: boolean): boolean => {
         if (isTestOn(child)) {
+          pathOf.set(child, narrowPath(path, ti, onTaken));
           work.push(child);
           return true;
         }
@@ -642,7 +727,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         if (!asCase(taken, ti.k)) {
           return null;
         } // x==k → taken is case k
-        if (!asNav(fall)) {
+        if (!asNav(fall, false)) {
           return null;
         }
       } else if (ti.cls === 'ne') {
@@ -652,7 +737,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         if (!asCase(fall, ti.k)) {
           return null;
         } // x!=k → the EQUAL side (fall) is case k
-        if (!asNav(taken)) {
+        if (!asNav(taken, true)) {
           return null;
         }
       } else {
@@ -665,11 +750,19 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         //   - a singleton branch onto another TEST of the scrutinee, which is the search
         //     descending to pin the value. It is dispatch, so the walk reads it as dispatch —
         //     recovering it, or declining at PRE4 if it is not collapsible.
-        const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
-        if (!(k === null ? asNav(taken) : asCase(taken, k))) {
+        //
+        // A PATH-bound test is the same reading with the range the tests above it leave in place of
+        // the whole domain, on either side (`pathSingleton`), under the same two refusals.
+        const bound = blk !== b && switchAllowsPathBoundCase;
+        let kTaken = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
+        if (kTaken === null && bound && !isTestOn(taken)) {
+          kTaken = pathSingleton(path, ti, true);
+        }
+        const kFall = bound && !isTestOn(fall) ? pathSingleton(path, ti, false) : null;
+        if (!(kTaken === null ? asNav(taken, true) : asCase(taken, kTaken))) {
           return null;
         }
-        if (!asNav(fall)) {
+        if (!(kFall === null ? asNav(fall, false) : asCase(fall, kFall))) {
           return null;
         }
       }
