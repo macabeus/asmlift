@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=98.1s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=108.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,22 +136,23 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-24**, the union-recovery branch's
-(`match/uhalf`, rebased onto #255): the ranked pass alone is **1,014 s over 192 real rows** and
-**530 s over 767 synthetic rows**; wall clock was 255.2 s and 188.6 s on tiers that overlap, and
-**273.2 s** end to end (the CLI's own `Done in` line). Its fan against `origin/main` is **67,779 →
-67,779 (1.00×)** over 943 comparable rows while its ranked pass reads **2,811.8 s → 1,453.9 s
-(0.52×)** — the box was quieter, not the branch cheaper. The dearest single row is **128 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — which is the figure to reach
-for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-24**, taken at `ad42a88b` (`match/stkextsret`,
+rebased onto #256: a dataset comment and a unit test): the ranked pass alone is **1,143 s over 192
+real rows** and **642 s over 767 synthetic rows**; wall clock was 309.2 s and 243.9 s on tiers that
+overlap, and **337.1 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is **0
+field changes**, fan **69,853 → 69,853 (1.00×)** over 959 comparable rows, while its ranked pass
+reads **1,544.0 s → 1,784.7 s (1.16×)** — the box was busier, not the branch dearer. The dearest
+single row is **140 s** on `kleod:PauseMenuScreenHandler:agbcc`, **12% of the tier** on its own —
+which is the figure to reach for when a scoped run looks cheap.
 
-The artifact `origin/main` carried before this one, taken 2026-09-24 at `f36050cb` (#255), read
-**1,911 s over 191 real rows** and **901 s over 752 synthetic rows**; wall clock was 442.9 s and
-319.3 s, **548.5 s** end to end, on a machine shared with the other rounds of a parallel run, and
-its dearest row was **294 s** on `marioparty3:FileSeek:gcc2.7.2`, 15% of the tier. The one before
-it, taken 2026-09-23 at `c6eea3f4` (#252), read 822 s over 190 real rows and 497 s over 751
-synthetic rows; wall clock was 178.9 s and 186.3 s, 253.9 s end to end, and its dearest row was
-118 s on `kleod:PauseMenuScreenHandler:agbcc`, 14% of the tier.
+The artifact `origin/main` carried before this one, taken 2026-09-24 at `2cb1be3c` (`match/uhalf`,
+#256), read **1,014 s over 192 real rows** and **530 s over 767 synthetic rows**; wall clock was
+255.2 s and 188.6 s, **273.2 s** end to end, and its dearest row was **128 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it, taken at `f36050cb`
+(#255), read 1,911 s over 191 real rows and 901 s over 752 synthetic rows; wall clock was 442.9 s
+and 319.3 s, 548.5 s end to end, on a machine shared with the other rounds of a parallel run, and
+its dearest row was 294 s on `marioparty3:FileSeek:gcc2.7.2`, 15% of the tier. So an unmoved fan
+has been priced 0.52× and 1.16× on consecutive artifacts: the seconds are the box, not the branch.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
