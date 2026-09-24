@@ -6941,9 +6941,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
   // witness rather than of who was told what: the pair differs in the ASM, not in the context.
   // Not symmetrically, and the asymmetry is asmlift's to carry: m2c's `ctx` spells the RETURN
-  // (`struct Blob64 makeblob(const void *);`) and `FnProto` cannot spell a struct return at all,
-  // so asmlift is told strictly less about the one fact the pair turns on. Told it, m2c uses it —
-  // its published `stkextsret` source is `makeblob(/* return */ &sp0, &gBlob);`.
+  // (`struct Blob64 makeblob(const void *);`) and asmlift's `proto` does not. `FnProto.returns`
+  // CAN spell it, and `returns: 'struct Blob64'` validates, but a return nothing here can size is
+  // silence (`proto.ts`): the decline is the same sentence with it. Silence is the right reading of
+  // a type NAME, because what hands argument 0 a hidden pointer is the struct's SIZE (the one-word
+  // threshold below) and a name carries none. So asmlift is still told strictly less about the one
+  // fact the pair turns on. Told it, m2c uses it — its published `stkextsret` source is
+  // `makeblob(/* return */ &sp0, &gBlob);`.
   //
   // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
   // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128

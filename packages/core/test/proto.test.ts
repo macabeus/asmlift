@@ -130,6 +130,9 @@ describe('a void return, whichever key states it', () => {
     expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } })).toBe(true);
     expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } })).toBe(true);
     expect(returnsWithoutHiddenPointer('g', { g: { params: [] } })).toBe(false);
+    // A struct NAME leaves it open: agbcc returns a one-word struct in r0 and a larger one through
+    // the hidden pointer, and the name carries no size (`stkextsret` is the row).
+    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } })).toBe(false);
   });
 });
 
