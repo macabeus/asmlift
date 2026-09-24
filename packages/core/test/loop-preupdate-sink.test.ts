@@ -27,9 +27,11 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
+import { analyze } from '../src/structure/analysis';
 import { StructureError, structure } from '../src/structure/structure';
 
 const emit = (ir: string): string => {
@@ -507,4 +509,65 @@ test('two sunk exit slots never spell one call twice', () => {
   expect(read).not.toBe(ONE_CALL_TWO_SLOTS);
   const body = emit(read).split('do {')[1].split('} while')[0];
   expect(body.match(/= \*\(s32 \*\)v\d+ \+ v\d+;/g)).toHaveLength(2);
+});
+
+// THE CALL AHEAD OF A READ, `r = *q + cb(q)`: agbcc runs `bl cb; ldr r1,[q]; add`, so the exit
+// arg's tree holds a call with the load between it and the add the copy is rebuilt at. Inlined, the
+// call would move past that load, which `arg-safe-to-reevaluate` refuses; the analysis names it at
+// its own position instead (`callsAheadOfExitCopy`), the order `t = cb(q); r = *q + t;` spells —
+// byte-identical to the original on agbcc. The control swaps ONE fact, the order of the load and
+// the call: `int t = *q; r = t + cb(q);` compiles to `ldr; bl; add`, the call is adjacent to its
+// consumer and moves past nothing, and it is left inline. What moves there is the READ, which this
+// rule does not name — that refusal belongs to the sink, and `preupdate_exit_load` is its row.
+const CALL_THEN_LOAD = `fn calllast {
+^bb0(%0: s32*, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sle %1, %3
+  cond_br %4, ^bb3(%2), ^bb1()
+^bb1():
+  br ^bb2(%0, %1)
+^bb2(%7: s32*, %8: s32):
+  %9: s32 = call %7 {target="cb"}
+  %10: s32 = load %7 {off=0, signed=true, width=4}
+  %11: s32 = add %10, %9
+  %12: s32 = const {value=4}
+  %13: s32* = sub %7, %12
+  %14: s32 = const {value=1}
+  %15: s32 = sub %8, %14
+  %16: s32 = const {value=0}
+  %17: u32 = icmp_ne %15, %16
+  cond_br %17, ^bb2(%13, %15), ^bb3(%11)
+^bb3(%18: s32):
+  ret %18
+}
+`;
+const LOAD_THEN_CALL = CALL_THEN_LOAD.replace(
+  '  %9: s32 = call %7 {target="cb"}\n  %10: s32 = load %7 {off=0, signed=true, width=4}\n',
+  '  %10: s32 = load %7 {off=0, signed=true, width=4}\n  %9: s32 = call %7 {target="cb"}\n',
+);
+
+const homedCalls = (ir: string): string[] => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const { materialize } = analyze(fn, false, { defs: defOpMap(fn), dom: dominators(fn) });
+  return fn.blocks.flatMap((b) => b.ops).flatMap((op) => (op.opcode === 'call' && materialize.has(op) ? ['cb'] : []));
+};
+
+test('a call the exit copy would rebuild behind a read is named where it ran', () => {
+  expect(LOAD_THEN_CALL).not.toBe(CALL_THEN_LOAD);
+  expect(homedCalls(CALL_THEN_LOAD)).toEqual(['cb']);
+  expect(homedCalls(LOAD_THEN_CALL)).toEqual([]);
+});
+
+test('the call is named only where the exit copy has a pre-update hazard to repair', () => {
+  // The one-fact edit: the call and the read take the loop-INVARIANT pointer `%0` instead of the
+  // loop variable, so the arg reads nothing the update writes, no copy is rebuilt in the body, and
+  // the call is left to the rules that place it after the loop.
+  const noHazard = CALL_THEN_LOAD.replace('%9: s32 = call %7', '%9: s32 = call %0').replace(
+    '%10: s32 = load %7',
+    '%10: s32 = load %0',
+  );
+  expect(noHazard).not.toBe(CALL_THEN_LOAD);
+  expect(homedCalls(noHazard)).toEqual([]);
 });

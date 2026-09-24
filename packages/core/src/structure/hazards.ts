@@ -821,9 +821,13 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // NOT A RESTATEMENT OF WHAT `materialize` ALREADY BOUNDS, which is the reading to guard against.
     // That pass NAMES an order-sensitive value whose consumer is not adjacent to it, and a named
     // leaf is refused by `arg-reads-current-names` before this scan runs — so on a ONE-op tree the
-    // two bounds do coincide. They part as soon as the tree has two ops: `r = *q + cb(q)` compiles
-    // to `call, load, add`, where the load IS adjacent to its consumer and the CALL is what this
-    // turns away. That is the `preupdate_exit_order` row, and the only refusal this arm has.
+    // two bounds do coincide. They part as soon as the tree has two ops, because a sibling effect
+    // inlined into the SAME statement is no barrier to that pass: `t = *q; r = t + cb(q)` compiles
+    // to `load, call, add`, where the call IS adjacent to its consumer and the LOAD is what this
+    // turns away. That is the `preupdate_exit_load` row, and the only refusal this arm has. The
+    // other order, `*q + cb(q)` as `call, load, add`, no longer reaches here: the analysis names a
+    // call the rebuild would carry past a read at its own position (`callsAheadOfExitCopy`), and
+    // the tree then reads it by name.
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
