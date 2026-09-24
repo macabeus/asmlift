@@ -32,6 +32,7 @@ interface Fixture {
   opBlock?: Map<Op, Block>;
   materialize?: Set<Op>;
   respelledDefs?: Map<Op, unknown>;
+  exitCopyCalls?: Set<Op>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
@@ -42,6 +43,7 @@ const make = (f: Fixture = {}) =>
     opBlock: f.opBlock ?? new Map(),
     materialize: f.materialize ?? new Set(),
     respelledDefs: f.respelledDefs ?? new Map(),
+    exitCopyCalls: f.exitCopyCalls ?? new Set(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -372,12 +374,12 @@ describe('sinkablePreUpdateSlots', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const mid = v();
     const e = v();
-    // `mid` is NAMED and defined in the body, which is all the gate asks: it refuses on the NAME and
-    // never on the place. Here the place would have been safe — the copy lands at `op`, one
-    // statement after `v2` is written — so what the ablation admits is a conservative refusal, not a
-    // wrong value. The fixture below is the one where the admitted copy really does read the
-    // previous iteration. The loop variable is in the tree as well, which is what makes the slot a
-    // repair candidate in the first place.
+    // `mid` is NAMED and defined in the body, and its def is not one the analysis materialized, so
+    // nothing says a statement writing `v2` renders at its index — the gate refuses on the NAME. Here
+    // the place would have been safe — the copy lands at `op`, one op after `mid` is computed — so
+    // what the ablation admits is a conservative refusal, not a wrong value. The fixture below is
+    // the one where the admitted copy really does read the previous iteration. The loop variable is
+    // in the tree as well, which is what makes the slot a repair candidate in the first place.
     const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
     const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
     const h = make({
@@ -430,6 +432,154 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
       new Map([[0, null]]),
     );
+  });
+
+  // A CALL NAMED FOR THE SINK, AHEAD OF THE HOME, IS CURRENT THERE. The shape is
+  // `preupdate_exit_order`'s once the analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the
+  // copy homed at the add, and the statement writing `v2` rendered one index earlier on the same
+  // iteration. Each control changes ONE fact and is refused at `arg-reads-current-names`, which its
+  // own ablation then admits.
+  const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherRule?: boolean; otherBlock?: boolean } = {}) => {
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const e = v();
+    const midOp = mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } });
+    const op = mkOp('add', { operands: [mid, p], results: [e] });
+    const arm: Block = { params: [], ops: [] };
+    if (edit.otherBlock) {
+      arm.ops.push(midOp);
+      header.ops.push(op);
+    } else {
+      header.ops.push(...(edit.after ? [op, midOp] : [midOp, op]));
+    }
+    const body = new Set([header, arm]);
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, edit.otherBlock ? arm : header],
+        [op, header],
+      ]),
+      materialize: edit.unnamed ? new Set() : new Set([midOp]),
+      exitCopyCalls: edit.unnamed || edit.otherRule ? new Set() : new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']), gates);
+    return { op, run };
+  };
+
+  test('a call named for the sink, written ahead of the home, is current there', () => {
+    const { op, run } = namedAhead();
+    expect(run()).toEqual(new Map([[0, op]]));
+  });
+
+  test.each([
+    ['written AFTER the home', { after: true }],
+    ['not a def the analysis named', { unnamed: true }],
+    ['named by a rule other than the exit-copy call rule', { otherRule: true }],
+    ['written in another body block', { otherBlock: true }],
+  ])('a body name %s still refuses at arg-reads-current-names', (_, edit) => {
+    const { op, run } = namedAhead(edit);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  test('a tree that also spells a call of its own still refuses at arg-reads-current-names', () => {
+    // The same name ahead of the home, under a tree that inlines a second call: that call is
+    // rebuilt at the home, and the analysis ordered it against the terminator's other copies, which
+    // the between-scan does not see. The position argument covers the name, not the tree.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const c2 = v();
+    const s2 = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const c2Op = bodyOp(header, mkOp('call', { operands: [p], results: [c2], attrs: { target: 'cb2' } }));
+    const s2Op = bodyOp(header, mkOp('add', { operands: [mid, c2], results: [s2] }));
+    const op = bodyOp(header, mkOp('add', { operands: [s2, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [c2, c2Op],
+        [s2, s2Op],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [c2Op, header],
+        [s2Op, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      exitCopyCalls: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  test('a latch def ahead of the home under a LOOP VARIABLE name still refuses', () => {
+    // The in-place adoption: the def writes the loop variable's own name, which the update also
+    // writes — the other conjunct of the gate, which the position does not answer.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      exitCopyCalls: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v0']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  test('a latch def ahead of the home under a name ANOTHER loop value answers to still refuses', () => {
+    // `other` is live into the loop under `v2`, so the name has two writers and the position of
+    // one of them says nothing about which value it holds at the copy.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const other = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      exitCopyCalls: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2'], [other, 'v2']),
+      liveIn: new Map([[header, new Set<Value>([other])]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
   });
 
   // TWO SLOTS, ONE TREE. The exit edge hands `e = cb(p) + p` to two merge params, so each sunk copy

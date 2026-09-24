@@ -571,3 +571,28 @@ test('the call is named only where the exit copy has a pre-update hazard to repa
   expect(noHazard).not.toBe(CALL_THEN_LOAD);
   expect(homedCalls(noHazard)).toEqual([]);
 });
+
+test('the named call is current at the copy, and the exit value is rebuilt behind it', () => {
+  // `a2 = *v1 + v0` reads `v0` one statement after `v0 = cb(v1)` wrote it, on the same iteration,
+  // and `v1` ahead of its update: the value the exit edge carried. The load-first order still has
+  // the READ to carry past the call, and still declines.
+  expect(emit(CALL_THEN_LOAD)).toBe(
+    's32 calllast(s32 *a0, s32 a1, s32 a2) {\n' +
+      '    s32 v0;\n' +
+      '    s32 *v1;\n' +
+      '    s32 v2;\n' +
+      '    if (a1 > 0) {\n' +
+      '        v1 = a0;\n' +
+      '        v2 = a1;\n' +
+      '        do {\n' +
+      '            v0 = cb(v1);\n' +
+      '            a2 = *v1 + v0;\n' +
+      '            v1 = v1 - 1;\n' +
+      '            v2 = v2 - 1;\n' +
+      '        } while (v2 != 0);\n' +
+      '    }\n' +
+      '    return a2;\n' +
+      '}\n',
+  );
+  expect(() => emit(LOAD_THEN_CALL)).toThrow(/reads a pre-update loop variable/);
+});

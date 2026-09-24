@@ -728,6 +728,8 @@ export interface StructureAnalysis {
   materialize: Set<Op>;
   /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
   preUpdateHomes: Set<Op>;
+  /** the calls `callsAheadOfExitCopy` named, for the pre-update sink (`writtenAheadOf`, hazards.ts) */
+  exitCopyCalls: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
@@ -1427,6 +1429,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     return back && L.body.size === 1 ? [{ ...L, back }] : [];
   });
   const preUpdateHomes = new Set<Op>();
+  const exitCopyCalls = new Set<Op>();
   const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
     escapeLoops.some((L) => {
       if (!L.body.has(opBlock.get(op)!) || consumers.every((c) => L.body.has(opBlock.get(c)!))) {
@@ -1915,6 +1918,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // (`callsAheadOfExitCopy` above). Asked in the escape phase, for the reason that rule is.
         if (isCall && escapePhase && callsAheadOfExitCopy(op)) {
           materialize.add(op);
+          exitCopyCalls.add(op);
           continue;
         }
         // Live across a LOOP neither side belongs to: the access ran before the loop and the
@@ -2055,6 +2059,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     liveIn,
     materialize,
     preUpdateHomes,
+    exitCopyCalls,
     reachFrom,
     emitPos,
     memWriteBetween,

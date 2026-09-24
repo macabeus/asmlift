@@ -32,8 +32,9 @@
 // And every name the rebuilt expression reads must still denote the same value there. A loop
 // variable does: the update sits at the bottom, so anywhere ahead of it the name holds exactly the
 // value the edge read. A name the body itself defines does NOT, wherever the copy lands ahead of
-// the assignment that writes it — and `arg-reads-current-names` refuses every such name rather than
-// asking where.
+// the assignment that writes it — and `arg-reads-current-names` refuses every such name but one
+// shape it can place: a def the analysis named, in the latch, strictly ahead of the copy's home
+// (`writtenAheadOf`), whose statement has run on every iteration that reaches the copy.
 //
 // KNOWN GAP: `body` is the natural-loop body, which EXCLUDES the blocks an early-return arm owns
 // even though their statements are emitted inside the loop. A name assigned only in such an arm is
@@ -71,6 +72,10 @@ export interface LoopHazardDeps {
    *  over the operands cannot see what such an op will render, so predicates that reason about
    *  the rendered expression have to treat it as opaque. LIVE, like `varName`. */
   respelledDefs: ReadonlyMap<Op, unknown>;
+  /** the calls the analysis named because a pre-update exit copy would carry them past a read
+   *  (`callsAheadOfExitCopy`, analysis.ts) — the one kind of body-defined name `writtenAheadOf`
+   *  takes as current */
+  exitCopyCalls: ReadonlySet<Op>;
 }
 
 export interface LoopHazards {
@@ -156,7 +161,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
   {
     id: 'arg-reads-current-names',
-    why: 'a value computed in the body may still hold the PREVIOUS iteration where the copy lands, wherever that is',
+    why: 'a value computed in the body may still hold the PREVIOUS iteration where the copy lands, unless its named def runs in the latch ahead of it',
     sound: true,
     guardedBy: 'hazards.test.ts: ablating arg-reads-current-names admits an arg over a body-computed name',
     rejects: (c) => c.argBlockers.has('stale-name'),
@@ -405,7 +410,7 @@ function sameAtEntry(defs: Map<Value, Op>, a: Value, b: Value, entry: Map<Value,
 }
 
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs, exitCopyCalls } = deps;
 
   // The names one loop iteration writes under its VARIABLES' names: the update copies, plus a
   // loop-variable name a materialized body def writes IN PLACE. Adoption (seedLoopParams) makes
@@ -755,9 +760,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // slot's destination — needs no rule, and the copies are emitted sequentially because of it.
   // Every leaf such an expression could read is already refused by a per-candidate gate: a header
   // param makes the other slot fail `dest-not-loop-variable`; a body-defined value is
-  // `stale-name`; and a value defined outside the loop but read on the exit edge is live-in at the
-  // header (analysis.ts counts a successor arg as a use at the predecessor's end), which makes the
-  // other slot fail `dest-free-inside-loop`.
+  // `stale-name`, or — the one it takes as current, a call named ahead of the home — a body value
+  // under the other slot's destination, which fails `dest-free-inside-loop`; and a value defined
+  // outside the loop but read on the exit edge is live-in at the header (analysis.ts counts a
+  // successor arg as a use at the predecessor's end), which makes the other slot fail
+  // `dest-free-inside-loop` too.
   const sinkablePreUpdateSlots = (
     header: Block,
     exit: Block,
@@ -880,9 +887,40 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       walk(a);
       return found;
     };
+    // A body-defined name that IS current where the copy lands: a def the analysis NAMED (so it
+    // renders as a statement at its own index), in the latch, strictly ahead of the copy's home.
+    // `sideEffects` renders the latch in index order, so on every iteration that reaches the copy
+    // the statement writing the name has just run — the name holds this iteration's value, not the
+    // previous one's. That it is the ONLY write to the name is the other two conjuncts' job, which
+    // this leaves standing: a loop variable's name (`headerNames`) and a name any other value in
+    // the loop also answers to (`busyInLoop`) still refuse. So does every other body-defined name —
+    // one defined AFTER the home, in another body block, or not named by a def at all (a block
+    // param) — and the copy that opens the body (`home === null`) has no position to be behind.
+    //
+    // AND ONLY A CALL THE ANALYSIS NAMED FOR THIS SINK (`callsAheadOfExitCopy`, analysis.ts), which
+    // is `preupdate_exit_order`'s shape, and not every materialized def the position argument would
+    // cover. A differential fuzz over generated self-loops (base vs head, 14 structure variations)
+    // found the wider reading unlocking loops that other rules then spell wrong — a loop variable
+    // adopted in place while a read of its old value still renders after it, a call spelled in two
+    // update copies — so the name this admits is the one whose rule was built with the sink. And
+    // only into a tree that spells no effect of its own (`effectsOf`): the between-scan orders the
+    // tree against the latch ops between its members and the home, but an inlined CALL in it is
+    // also ordered against the calls the analysis inlined into the terminator's OTHER copies —
+    // the update copies at the foot of the body — which the scan does not see, and the same fuzz
+    // found a sunk `f1(v5)` overtaking an update's `f1(a0)` that the asm called first. The row's
+    // tree, `*v1 + v0`, reads memory and a name and calls nothing.
+    const writtenAheadOf = (x: Value, home: Op | null): boolean => {
+      const d = defs.get(x);
+      if (home === null || d === undefined || !materialize.has(d) || !exitCopyCalls.has(d)) {
+        return false;
+      }
+      const i = latch.ops.indexOf(d);
+      return i >= 0 && i < latch.ops.indexOf(home);
+    };
     const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
       const found = new Set<ArgBlocker>();
+      const effectFree = effectsOf(a).size === 0;
       const walk = (x: Value): void => {
         if (seen.has(x)) {
           return;
@@ -893,7 +931,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         }
         const n = varName.get(x);
         if (n !== undefined) {
-          if (definedInBody(x) || headerNames.has(n) || busyInLoop(n, x)) {
+          if (
+            (definedInBody(x) && !(effectFree && writtenAheadOf(x, home))) ||
+            headerNames.has(n) ||
+            busyInLoop(n, x)
+          ) {
             found.add('stale-name');
           }
           return;
