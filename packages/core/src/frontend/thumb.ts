@@ -445,10 +445,10 @@ function expandRegList(tokens: string[]): string[] {
 //   * `heldFrameBaseWalk`, the one walk both frame-base acceptances are spelled with, asks it of
 //     EVERY instruction. It is an ACCEPTANCE, so it may never over-approximate: MENTION, not
 //     "writes" — a `cmp` on the register ends the walk, which costs a decline, never a wrong value.
-//   * `highRegisterHeld` asks it only of a `pop` or a control transfer, the two writes the value
-//     graph cannot see (every other write it leaves to the value graph). It feeds an acceptance
-//     (`wideReturn`) and a REFUSAL (`refuseCrossBlockPairReturns`), and for the refusal a spurious
-//     mention is the unsafe direction — it answers "not held", which lets a word return through.
+//   * `highRegisterHeld` asks it only of a `pop` or a control transfer; calls, copies and stack
+//     slots it tracks itself. It feeds an acceptance (`wideReturn`) and a REFUSAL
+//     (`refuseWordReturns`), and for the refusal every over-statement — a spurious mention
+//     included — is the unsafe direction: it answers "not held", which lets a word return through.
 // The caller list is the only record of that, so it is a list and not "its callers": anyone
 // relaxing this for one of them has to see the others.
 function mentionsReg(ins: { ops: string[] }, r: string): boolean {
@@ -3583,7 +3583,7 @@ export function lift(
    *  built in this block, so its `hi32` can only reach r1 through this block's own definition.
    *
    *  BLOCK-LOCAL, like every other acceptance here: a pair built in another block is
-   *  `refuseCrossBlockPairReturns`'s to judge.
+   *  `refuseWordReturns`'s to judge.
    *
    *  WHERE THE EPILOGUE DOES NOT DISCRIMINATE, THE WIDTH IS NOT PINNED, and this widens. Without
    *  `-mthumb-interwork` both spellings compile to `push {lr}; bl __muldi3; pop {pc}`, byte for
@@ -3603,71 +3603,100 @@ export function lift(
     return from >= 0 && highRegisterHeld(bi, from + 1) ? a.whole : null;
   };
   /** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
-   *  register a value the value graph misnames — the asm half of `wideReturn`'s question.
+   *  register a value the value graph misnames — the asm half of `wideReturn`'s question, and the
+   *  half the value graph cannot answer.
    *
-   *  TWO WRITES THE VALUE GRAPH CANNOT SEE. A `pop` (the frame is transparent to it): `push {lr};
-   *  bl __muldi3; pop {r1}; bx r1` pops the RETURN ADDRESS into r1, which is how agbcc spells a
-   *  32-bit function's interworking epilogue — the 64-bit twin pops into r2, precisely because it
-   *  may not touch the pair — so a pop or a control transfer naming r1 ends the question. And a
-   *  CALL, which destroys every caller-saved register while `ssa.ts` goes on answering its
-   *  pre-call value.
+   *  TWO WRITES THE VALUE GRAPH CANNOT SEE. A `pop`, since the frame is transparent to it — so a pop
+   *  or a control transfer naming the high register ends the question (`pop {r1}; bx r1` is agbcc's
+   *  interworking epilogue for a WORD return); a pop of anything else leaves what it loaded
+   *  unknown. And a CALL, which destroys every caller-saved register while `ssa.ts` goes on
+   *  answering its pre-call value. (A pair-returning call's r1 is one the frontend names; taking it
+   *  as unknown too errs toward a word return, and only a return block that makes such a call
+   *  after the pair it returns could see the difference.)
    *
-   *  SO A REGISTER'S STALENESS TRAVELS THROUGH COPIES. agbcc returns a pair it held across a call
-   *  by parking the halves in r4:r5 and copying them back (`s64 x = a*b; g(); return x;`): a copy
-   *  out of a register the call preserved and nothing popped makes r1 fresh again, and a copy out
-   *  of a stale one makes it stale. Any other write makes its destination fresh, and the value graph
-   *  then says what it holds. */
+   *  SO WHAT A REGISTER HOLDS IS KNOWN ONLY THROUGH IDENTITIES. agbcc returns a pair it held across
+   *  a call by parking the halves in r4:r5 and copying them back (`s64 x = a*b; g(); return x;`).
+   *  The value graph reads a register copy, and a store to a stack slot and its reload, as the same
+   *  value moving, so a register is known exactly when it is a copy or a reload of a known one;
+   *  every other write leaves it unknown, since no other write can put a pair's half there in the
+   *  value graph's eyes. Registers are keyed by spelling, as `ssa.ts` keys them (`ip` is not
+   *  `r12`), and a slot by its offset until `sp` moves, after which a reload is unknown. */
   const highRegisterHeld = (bi: number, from: number): boolean => {
     const hi = target.argRegs[1];
-    const stale = new Set<string>();
+    const regTok = (t: string | undefined): t is string =>
+      t !== undefined && (isThumbReg(t) || HIGH_REGS.has(t) || t === 'lr');
+    const unknown = new Set<string>();
+    const slots = new Map<number, boolean>(); // offset -> whether what was stored there is unknown
+    let spMoved = false;
+    const slotOff = (t: string | undefined): number | null => {
+      const m = /^\[sp(?:,\s*#(-?(?:0x[0-9a-f]+|\d+)))?\]$/i.exec(t ?? '');
+      return m ? (m[1] === undefined ? 0 : Number(m[1])) : null;
+    };
     for (const ins of asmBlocks[bi].instrs.slice(from)) {
+      const [d, src, k] = ins.ops;
       if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-        callClobbers.forEach((r) => stale.add(r));
+        callClobbers.forEach((r) => unknown.add(r));
         continue;
       }
       if ((ins.mnemonic === 'pop' || classifyXfer(ins) !== null) && mentionsReg(ins, hi)) {
         return false;
       }
-      if (ins.mnemonic === 'pop') {
-        (regListOf(ins.ops) ?? []).forEach((r) => stale.add(r));
+      if (ins.mnemonic === 'pop' || ins.mnemonic === 'push' || isSpReg(d ?? '')) {
+        (ins.mnemonic === 'pop' ? (regListOf(ins.ops) ?? []) : []).forEach((r) => unknown.add(r));
+        spMoved = true;
         continue;
       }
-      const [d, src, k] = ins.ops.map(reg);
       const copy = /^movs?$/.test(ins.mnemonic) ? k === undefined : /^adds?$/.test(ins.mnemonic) && immEq(k, 0);
-      if (copy && isThumbReg(d) && isThumbReg(src)) {
-        if (stale.has(src)) {
-          stale.add(d);
+      if (copy && regTok(d) && regTok(src)) {
+        if (unknown.has(src)) {
+          unknown.add(d);
         } else {
-          stale.delete(d);
+          unknown.delete(d);
         }
-      } else if (isThumbReg(d) && !/^(str|stm|push|cmp|cmn|tst)/.test(ins.mnemonic)) {
-        stale.delete(d);
+      } else if (ins.mnemonic === 'str' && regTok(d) && slotOff(src) !== null) {
+        slots.set(slotOff(src)!, unknown.has(d));
+      } else if (ins.mnemonic === 'ldr' && regTok(d) && slotOff(src) !== null) {
+        const stored = slots.get(slotOff(src)!);
+        if (stored === false || (stored === undefined && !spMoved)) {
+          unknown.delete(d);
+        } else {
+          unknown.add(d);
+        }
+      } else if (/^ldmia$/.test(ins.mnemonic)) {
+        [reg(d ?? '').replace(/!$/, ''), ...(regListOf(ins.ops.slice(1)) ?? [])].forEach((r) => unknown.add(r));
+      } else if (regTok(d) && !/^(str|stm|cmp|cmn|tst)/.test(ins.mnemonic)) {
+        unknown.add(d);
       }
     }
-    return !stale.has(hi);
+    return !unknown.has(hi);
   };
-  // The returns `wideReturn` answered null for, with the value in the return register — judged by
-  // `refuseCrossBlockPairReturns` once every block is filled.
-  const wordReturns: Array<{ bi: number; lo: Value }> = [];
-  /** A PAIR BUILT IN ANOTHER BLOCK THAT REACHES THE RETURN is refused, because `wideReturn` is
-   *  block-local and its null is otherwise a WORD return: `if (c) return a * b; return 0;` joins
-   *  `lo32(a*b)`/0 in r0 and `hi32(a*b)`/0 in r1, and returning r0 alone drops the high half of a
-   *  function that computed it. So where the return register holds a low half and the high register
-   *  a high half, each through any join, and the return block leaves the high register held, asmlift
-   *  cannot decide the width, and it says so. A 64-bit phi is the capability this stands in for.
+  // The returns `wideReturn` answered null for — the value in the return register, and whether the
+  // epilogue says the return type is 5 to 8 bytes — judged by `refuseWordReturns` once every block
+  // is filled.
+  const wordReturns: Array<{ bi: number; lo: Value; widerEpilogue: boolean }> = [];
+  /** THE WORD RETURNS THAT WOULD DROP A HIGH HALF, refused. Run after every block is filled and
+   *  before `ssa.finish()`: a join's phi operands are wired by then, and not yet folded away.
    *
-   *  Run after every block is filled and before `ssa.finish()`: a join's phi operands are wired by
-   *  then, and not yet folded away. The classes are `mergeClasses`'s, whose undirected closure can
-   *  only over-approximate a half reaching the return — which costs a decline, never a wrong
-   *  answer. And, as in `wideReturn`, r1 is asked about and never read. */
-  const refuseCrossBlockPairReturns = () => {
-    if (halfOf.size === 0) {
-      return;
-    }
-    const classes = mergeClasses({ blocks: irBlocks });
+   *  A PAIR BUILT IN ANOTHER BLOCK THAT REACHES THE RETURN, because `wideReturn` is block-local:
+   *  `if (c) return a * b; return 0;` joins `lo32(a*b)`/0 in r0 and `hi32(a*b)`/0 in r1, and
+   *  returning r0 alone drops the high half of a function that computed it. So where the return
+   *  register holds a low half and the high register a high half, each through any join, and the
+   *  return block leaves the high register held, asmlift cannot decide the width. A 64-bit phi is the
+   *  capability this stands in for. The classes are `mergeClasses`'s, whose undirected closure can
+   *  only over-approximate a half reaching the return — which costs a decline — and, as in
+   *  `wideReturn`, r1 is asked about and never read.
+   *
+   *  AN EPILOGUE THAT SAYS THE RETURN TYPE IS 5 TO 8 BYTES (`compilerBehaviors.
+   *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
+   *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
+   *  the same way. A word return there is wrong in the first two cases and declines in the third,
+   *  where it would have been right: the epilogue cannot tell them apart. */
+  const refuseWordReturns = () => {
+    const classes = halfOf.size ? mergeClasses({ blocks: irBlocks }) : new Map<Value, readonly Value[]>();
     const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
-    for (const { bi, lo } of wordReturns) {
+    for (const { bi, lo, widerEpilogue } of wordReturns) {
       if (
+        halfOf.size &&
         carries(lo, 'lo') &&
         highRegisterHeld(bi, 0) &&
         ssa.hasReachingDef(target.argRegs[1], bi, (v) => carries(v, 'hi'))
@@ -3675,6 +3704,12 @@ export function lift(
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': the return in '${asmBlocks[bi].label}' holds halves of a 64-bit pair ` +
             'another block built, and asmlift decides a 64-bit return only in the block that builds it',
+        );
+      }
+      if (widerEpilogue) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the epilogue of '${asmBlocks[bi].label}' says the return type is 5 to 8 bytes ` +
+            '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
         );
       }
     }
@@ -5410,26 +5445,16 @@ export function lift(
       } else {
         const lo = readVar(target.returnReg, bi);
         const whole = wideReturn(lo, bi);
-        // AN EPILOGUE THAT POPS THE RETURN ADDRESS INTO r2 SAYS THE RETURN IS 8 BYTES WIDE: agbcc's
-        // `thumb_exit` (thumb.c) picks that scratch register from the size of the returned value —
-        // r0 for `void`, r1 up to 4 bytes, r2 up to 8 — so a word return there drops the high half
-        // r1 carries, whether or not this lift knows how r1 was computed (`s64 f(s32 x, s32 y){
-        // s64 r = x; r *= y; return r / 256; }` builds it from shifts).
-        const scratch = target.argRegs[2];
-        const prev = ab.instrs[ab.instrs.length - 2];
-        const eightBytes =
-          last.mnemonic === 'bx' &&
-          last.ops[0] === scratch &&
-          prev?.mnemonic === 'pop' &&
-          regListOf(prev.ops)?.join() === scratch;
-        if (whole === null && eightBytes) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': its epilogue pops the return address into ${scratch}, which agbcc does only ` +
-              `for an 8-byte return value, and r0:r1 there are not the two halves of one 64-bit value this lift built`,
-          );
-        }
         if (whole === null) {
-          wordReturns.push({ bi, lo });
+          const scratch = target.compilerBehaviors.eightByteReturnScratch;
+          const prev = ab.instrs[ab.instrs.length - 2];
+          const widerEpilogue =
+            scratch !== undefined &&
+            last.mnemonic === 'bx' &&
+            last.ops[0] === scratch &&
+            prev?.mnemonic === 'pop' &&
+            regListOf(prev.ops)?.join() === scratch;
+          wordReturns.push({ bi, lo, widerEpilogue });
         }
         irb.ops.push(mkOp('ret', { operands: [whole ?? lo] }));
       }
@@ -5468,7 +5493,7 @@ export function lift(
     ssa.markFilled(bi);
   });
 
-  refuseCrossBlockPairReturns();
+  refuseWordReturns();
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at

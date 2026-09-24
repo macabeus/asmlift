@@ -68,7 +68,7 @@ describe('the return width', () => {
   });
 
   test('a pair returned from a join declines rather than returning a word', () => {
-    expect(() => lift('lljoin')).toThrow(/pops the return address into r2, which agbcc does only for an 8-byte/);
+    expect(() => lift('lljoin')).toThrow(/halves of a 64-bit pair another block built/);
     const noInterwork = asm.replace('\tpop\t{r4, r5}\n\tpop\t{r2}\n\tbx\tr2\n.Lfe9:', '\tpop\t{r4, r5, pc}\n.Lfe9:');
     expect(noInterwork).not.toBe(asm);
     expect(() => decompile('lljoin', noInterwork, ARMV4T_AGBCC)).toThrow(/halves of a 64-bit pair another block built/);
@@ -89,7 +89,7 @@ describe('the return width', () => {
   // THE HIGH HALF BUILT FROM SHIFTS, not projected from a pair: nothing this lift built reaches
   // r0:r1, and the r2 epilogue says the function returns eight bytes.
   test('an 8-byte epilogue with no pair in r0:r1 declines', () => {
-    expect(() => lift('llmuldiv')).toThrow(/8-byte return value/);
+    expect(() => lift('llmuldiv')).toThrow(/says the return type is 5 to 8 bytes/);
   });
 
   // STALENESS TRAVELS THROUGH COPIES: a call destroys r1 and a pop reloads r4, and a copy out of
@@ -106,6 +106,44 @@ describe('the return width', () => {
     const body = ['\tpush\t{r4, lr}', '\tadd\tr0, r0, r2', '\tadc\tr1, r1, r3', '\tadd\tr4, r1, #0', '\tpop\t{r4}'];
     const src = liftLeaf([...body, '\tadd\tr1, r4, #0'], ['\tpop\t{pc}']);
     expect(src).not.toMatch(/^s64 f\(/);
+  });
+
+  // WHAT r1 HOLDS AFTER A CALL IS KNOWN ONLY THROUGH IDENTITIES: a register copy (either spelling,
+  // any register name) or a stack slot's store and reload carry what they moved, known or not, and
+  // a store to memory is no write to r1 at all.
+  const pair = ['\tadd\tr0, r0, r2', '\tadc\tr1, r1, r3'];
+  const framed = (body: string[]) =>
+    decompile('f', leaf(['\tpush\t{r4, r5, lr}', ...body], ['\tpop\t{r4, r5, pc}']), ARMV4T_AGBCC, g0).source;
+  test('the high half survives a call through copies and slots of registers the call preserved', () => {
+    const viaMov = ['\tmov\tr4, r0', '\tmov\tr5, r1', '\tbl\tg', '\tmov\tr1, r5', '\tmov\tr0, r4'];
+    expect(framed([...pair, ...viaMov])).toMatch(/^s64 f\(/);
+    const viaHigh = ['\tadd\tr4, r0, #0', '\tmov\tsl, r1', '\tbl\tg', '\tmov\tr1, sl', '\tadd\tr0, r4, #0'];
+    expect(framed([...pair, ...viaHigh])).toMatch(/^s64 f\(/);
+    const viaSlot = ['\tadd\tsp, #-8', ...pair, '\tstr\tr1, [sp, #4]', '\tadd\tr4, r0, #0', '\tbl\tg'];
+    expect(framed([...viaSlot, '\tldr\tr1, [sp, #4]', '\tadd\tr0, r4, #0', '\tadd\tsp, #8'])).toMatch(/^s64 f\(/);
+    const stored = [...pair, '\tldr\tr4, .Lg', '\tstr\tr1, [r4]'];
+    expect(decompile('f', leaf(stored, ['\tpop\t{r4, r5, pc}', '.Lg:', '\t.word\tgv']), ARMV4T_AGBCC).source).toMatch(
+      /^s64 f\(/,
+    );
+  });
+
+  test('…and does not survive through copies and slots of the register the call destroyed', () => {
+    const tail = ['\tadd\tr0, r4, #0'];
+    expect(framed([...pair, '\tadd\tr4, r0, #0', '\tbl\tg', '\tmov\tr5, r1', '\tmov\tr1, r5', ...tail])).not.toMatch(
+      /^s64/,
+    );
+    expect(framed([...pair, '\tadd\tr4, r0, #0', '\tbl\tg', '\tmov\tip, r1', '\tmov\tr1, ip', ...tail])).not.toMatch(
+      /^s64/,
+    );
+    const slot = [
+      '\tadd\tsp, #-8',
+      ...pair,
+      '\tadd\tr4, r0, #0',
+      '\tbl\tg',
+      '\tstr\tr1, [sp, #4]',
+      '\tldr\tr1, [sp, #4]',
+    ];
+    expect(framed([...slot, ...tail, '\tadd\tsp, #8'])).not.toMatch(/^s64/);
   });
 
   // agbcc holds the sum in r4:r5 across `g()` and copies it back; the call rules are pinned beside

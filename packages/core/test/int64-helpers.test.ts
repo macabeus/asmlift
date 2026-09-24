@@ -129,14 +129,10 @@ describe('what refuses', () => {
   });
 
   // A PAIR THAT REACHES THE RETURN THROUGH A JOIN declines: the width is decided only in the
-  // block that builds the pair, and returning r0 alone would drop the high half of `a * b`.
+  // block that builds the pair, and returning r0 alone would drop the high half of `a * b`. The
+  // same refusal, and the same message, with the interworking epilogue and without it.
   test('a pair returned from a join declines rather than returning a word', () => {
-    expect(() => lift('llmuljoin')).toThrow(/pops the return address into r2, which agbcc does only for an 8-byte/);
-  });
-
-  // …and where the epilogue does not say the width (a leaf, or no `-mthumb-interwork`), the pair
-  // reaching the return from another block is what refuses.
-  test('…as it does where the epilogue does not pin the width', () => {
+    expect(() => lift('llmuljoin')).toThrow(/halves of a 64-bit pair another block built/);
     const noInterwork = asm.replace('\tpop\t{r4, r5}\n\tpop\t{r2}\n\tbx\tr2\n.Lfe8:', '\tpop\t{r4, r5, pc}\n.Lfe8:');
     expect(noInterwork).not.toBe(asm);
     expect(() => decompile('llmuljoin', noInterwork, ARMV4T_AGBCC)).toThrow(
@@ -144,15 +140,37 @@ describe('what refuses', () => {
     );
   });
 
-  // agbcc's `thumb_exit` pops the return address into r2 only for an 8-byte return value, so a
-  // word return there drops a high half, however it was computed.
+  // agbcc's `thumb_exit` pops the return address into r2 only when the return type is 5 to 8
+  // bytes, so a word return there drops a high half, however it was computed…
+  const r2Epilogue = (mid: string[], opts = {}) =>
+    decompile(
+      'f',
+      [
+        '\t.code\t16',
+        '\t.globl\tf',
+        '\t.thumb_func',
+        'f:',
+        '\tpush\t{lr}',
+        '\tbl\tg',
+        ...mid,
+        '\tpop\t{r2}',
+        '\tbx\tr2',
+        '',
+      ].join('\n'),
+      ARMV4T_AGBCC,
+      { prototypes: { g: { params: 0 } }, ...opts },
+    );
   test('an epilogue popping into r2 with no pair in r0:r1 declines', () => {
+    expect(() => r2Epilogue(['\tasr\tr1, r0, #0x8'])).toThrow(/says the return type is 5 to 8 bytes/);
+  });
+
+  // …and it is the TARGET's fact: a target that states no such register infers nothing from r2.
+  test('a target that states no 8-byte scratch register reads nothing into the epilogue', () => {
+    const { eightByteReturnScratch: _, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const silent = { ...ARMV4T_AGBCC, compilerBehaviors: behaviors };
     const src = ['\t.code\t16', '\t.globl\tf', '\t.thumb_func', 'f:', '\tpush\t{lr}', '\tbl\tg', '\tasr\tr1, r0, #0x8'];
-    expect(() =>
-      decompile('f', [...src, '\tpop\t{r2}', '\tbx\tr2', ''].join('\n'), ARMV4T_AGBCC, {
-        prototypes: { g: { params: 0 } },
-      }),
-    ).toThrow(/8-byte return value/);
+    const asmText = [...src, '\tpop\t{r2}', '\tbx\tr2', ''].join('\n');
+    expect(decompile('f', asmText, silent, { prototypes: { g: { params: 0 } } }).source).toMatch(/^s32 f\(/);
   });
 
   // ASKING WHAT r1 HOLDS MUST NOT READ IT: one path to this join never defines r1, and a read there
@@ -269,7 +287,7 @@ describe('a 64-bit fold needs the widths, not the arity', () => {
     // Two C parameters is the header spelling and the one a user reaches for after reading
     // `no model for the runtime helper '__muldi3'`; four is the word arity. `validatePrototypes`
     // accepts all three, and all three must decline.
-    // `lomul`, whose word return keeps the 8-byte epilogue refusal out of the way of this one.
+    // `lomul`, whose word return keeps the r2-epilogue refusal out of the way of this one.
     for (const params of [['s64', 's64'], 2, 4] as FnProto['params'][]) {
       expect(() => decompile('lomul', asm, ARMV4T_AGBCC, { prototypes: { __muldi3: { params } } })).toThrow(
         /no model for the runtime helper '__muldi3'/,

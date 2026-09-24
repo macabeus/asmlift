@@ -28,11 +28,12 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     Five exceptions are read off the target directly, their consumers not being the
+//     Six exceptions are read off the target directly, their consumers not being the
 //     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread` (raise/pre-recovery.ts), `hoistsSingleSetArm` (two raising passes —
-//     raise/narrowlocal.ts and raise/retsink.ts) and
-//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
+//     raise/narrowlocal.ts and raise/retsink.ts),
+//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn) and
+//     `eightByteReturnScratch` (frontend/thumb.ts, which reads the epilogue). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
@@ -219,6 +220,14 @@ export interface TargetDescription {
     // compiler behavior is to claim nothing. The evidence a future round needs is one run of
     // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
     hoistsSingleSetArm?: boolean;
+    // THE REGISTER AN INTERWORKING EPILOGUE POPS THE RETURN ADDRESS INTO WHEN THE RETURN TYPE IS 5
+    // TO 8 BYTES, which is then a fact the epilogue states about the function's width. agbcc's
+    // `thumb_exit` (gcc/thumb.c) picks that register from the SIZE of the return mode, not from
+    // liveness — r0 for `void`, r1 up to 4 bytes, r2 up to 8 — so `pop {r2}; bx r2` ends a function
+    // returning a `long long`, a `double`, or an 8-byte aggregate (which DImode covers even when it is
+    // returned through memory). Read by `frontend/thumb.ts`'s `refuseWordReturns` directly, not by
+    // the structurer. Absent ⇒ the epilogue states nothing.
+    eightByteReturnScratch?: string;
     // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
     // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
     // the compilers measured give three, and the pass refuses wherever the object is silent. Each
@@ -518,6 +527,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
+    eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     narrowParamWitness: 'prologue-extension',

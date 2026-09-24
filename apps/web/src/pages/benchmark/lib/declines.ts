@@ -329,9 +329,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // throw: `reloc-halves` holds `/high half/`, this list is ordered, and a classification that
     // depends on which entry comes first is a classification nothing states.
     //
-    //   the RETURN — a pair another block built reaching the return (`refuseCrossBlockPairReturns`,
-    //   thumb.ts), and an epilogue that pops into r2, which agbcc does only for an 8-byte return,
-    //   over an r0:r1 that is no pair this lift built. Both are a width asmlift cannot spell there.
+    //   the RETURN — a pair another block built reaching the return, and an epilogue that says the
+    //   return type is 5 to 8 bytes over an r0:r1 that is no pair this lift built (both
+    //   `refuseWordReturns`, thumb.ts). The second also claims an 8-byte aggregate returned through
+    //   memory, which agbcc's epilogue sizes the same way: a width asmlift cannot tell apart there.
     //
     //   the VALUE — a `concat` of two words that are not the two halves of a value this lift
     //   already built (two ordinary loads of a struct's halves, say). It reaches structure.ts as
@@ -348,7 +349,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'wide-call-arg',
     label: 'A 64-bit value the lift could not carry as one',
     pattern:
-      /(?:half|halves) of a 64-bit (?:value|pair)|8-byte return value|no lowering for op 'concat'|no upper half to shift out/,
+      /(?:half|halves) of a 64-bit (?:value|pair)|return type is 5 to 8 bytes|no lowering for op 'concat'|no upper half to shift out/,
   },
   {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody
