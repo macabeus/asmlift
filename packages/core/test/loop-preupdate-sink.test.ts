@@ -21,9 +21,9 @@
 //
 // A refusal test that declines for the WRONG reason reads as a pass, so each one pins the message
 // and carries a positive control: either the accepted fixture emitted first, or — where the
-// refusal turns on one fact — the same IR with that fact changed. The two body-rebind fixtures are
-// the exception: the shape they refuse cannot be spelled without the rebind, so the message is all
-// they pin.
+// refusal turns on one fact — the same IR with that fact changed. The two back-edge-alias fixtures
+// pin the whole emitted function instead: under a loop variable's name their arm would rebind it,
+// and what they hold is that the name stays with the loop.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -353,11 +353,13 @@ test('a trapping op is rebuilt at its own position, behind the arm that leaves f
   );
 });
 
-// REFUSAL — a merge inside the body writes a loop variable's NAME (a body param adopts it), and
-// everything the loop emits after that arm reads the name raw. The emitted loop is wrong with or
-// without a sunk copy — a naming-pipeline defect — so the sink stands down and leaves the function
-// declining, rather than unlocking a loop it cannot make right.
-const BODY_REBINDS_LOOP_VAR = `fn rebind {
+// A merge inside the body whose every edge passes ONE value may share that value's own name — but
+// not a loop variable's name offered for it through the back edge: that name holds the value only
+// once the back edge has run, and the arm's copy into it would be a real write partway through the
+// body, read raw by everything after it (the rebind the sink stands down on). Here ^bb3's param is
+// fed `%9`, the back-edge arg of `%7`, so the arm spells its own local and the update keeps `%7`'s
+// name: the loop returns the IR's `%7 * %6` over the pre-update values.
+const BACK_EDGE_ALIAS_IN_AN_ARM = `fn rebind {
 ^bb0(%0: s32, %1: s32):
   %2: s32* = gaddr {sym="gbuf"}
   %3: s32 = const {value=0}
@@ -388,17 +390,44 @@ const BODY_REBINDS_LOOP_VAR = `fn rebind {
 }
 `;
 
-test('the sink stands down where a body merge rewrites a loop variable name', () => {
-  // Without this the loop emits `v2 = v2 ^ a0` in an arm and then reads `v2` in the update, which
-  // for (a0, a1) = (3, -2) returns 9 where the IR returns 0.
-  expect(() => emit(BODY_REBINDS_LOOP_VAR)).toThrow(/pre-update loop variable/);
+test('a body merge fed a back-edge arg does not take the loop variable name', () => {
+  // Under the loop variable's name the arm would write `v2 = v2 ^ a0` and the update then read `v2`:
+  // 9 at (a0, a1) = (3, -2), where the IR returns 0.
+  expect(emit(BACK_EDGE_ALIAS_IN_AN_ARM)).toBe(
+    's32 rebind(s32 a0, s32 a1) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    s32 v2;\n' +
+      '    s32 v3;\n' +
+      '    s32 v4;\n' +
+      '    s32 v5;\n' +
+      '    s32 v6;\n' +
+      '    v0 = 0;\n' +
+      '    v1 = 0;\n' +
+      '    v2 = 0;\n' +
+      '    do {\n' +
+      '        if (v2 >= (v2 ^ a0)) {\n' +
+      '            v4 = v2 ^ a0;\n' +
+      '            v5 = a0;\n' +
+      '        } else {\n' +
+      '            v3 = v2 * v0;\n' +
+      '            v5 = v0;\n' +
+      '        }\n' +
+      '        v6 = v2 * v1;\n' +
+      '        v1 = a0;\n' +
+      '        v2 = v2 ^ a0;\n' +
+      '        v0 = v0 + 1;\n' +
+      '    } while (v0 < v1);\n' +
+      '    return v6;\n' +
+      '}\n',
+  );
 });
 
-// REFUSAL — the same body-rebind shape, with NOTHING reading the rebound name at the bottom of the
-// loop: the update's own value never touches it and the test does not either. A screen over the
-// READERS misses this one; the store in the latch reads it, and so would a call argument or an
-// in-body condition. The refusal is on the name.
-const BODY_REBIND_READ_BY_A_STORE = `fn rb2 {
+// The same shape with NOTHING reading the loop variable's name at the bottom of the loop but a
+// store in the latch — the reader a screen over the update and the test would miss. The arm's merge
+// is dead and takes no name; the latch stores `%5` before the update writes it, and the exit's
+// pre-update copy of `%5` is sunk to the top of the body.
+const BACK_EDGE_ALIAS_READ_BY_A_STORE = `fn rb2 {
 ^bb0(%0: s32):
   %1: s32* = gaddr {sym="gbuf"}
   %2: s32 = const {value=0}
@@ -421,8 +450,28 @@ const BODY_REBIND_READ_BY_A_STORE = `fn rb2 {
 }
 `;
 
-test('the stand-down is on the rebound NAME, not on who reads it', () => {
-  // Sunk, this emits `gbuf[1] = v1` after an arm has overwritten v1: at a0 = 3 the IR stores
-  // 0, 0, 1 and the emitted C stored 0, 1, 4.
-  expect(() => emit(BODY_REBIND_READ_BY_A_STORE)).toThrow(/pre-update loop variable/);
+test('a latch store of a loop variable reads it ahead of the update, with no arm writing it', () => {
+  // Under the loop variable's name an arm would overwrite v1 ahead of `gbuf[1] = v1`: at a0 = 3 the
+  // IR stores 0, 0, 1 and that C would store 0, 1, 4.
+  expect(emit(BACK_EDGE_ALIAS_READ_BY_A_STORE)).toBe(
+    's32 rb2(s32 a0) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    s32 v2;\n' +
+      '    s32 v3;\n' +
+      '    v0 = 0;\n' +
+      '    v1 = 0;\n' +
+      '    do {\n' +
+      '        v3 = v1;\n' +
+      '        if (v0 < a0) {\n' +
+      '            v2 = v0 * v0;\n' +
+      '            *(s32 *)&gbuf = v2;\n' +
+      '        }\n' +
+      '        ((s32 *)&gbuf)[1] = v1;\n' +
+      '        v1 = v0 * v0;\n' +
+      '        v0 = v0 + 1;\n' +
+      '    } while (v0 < a0);\n' +
+      '    return v3;\n' +
+      '}\n',
+  );
 });

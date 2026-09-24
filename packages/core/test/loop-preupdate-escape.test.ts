@@ -15,11 +15,13 @@
 //         blt .L10
 //         str r3, [r2, #0x4]
 //
-// WHICH ANSWER THE HAZARD GETS DEPENDS ON HOW SSA SPELLED THE VALUE, and both spellings are here:
-// crossing the exit as an edge ARG it is REPAIRED (`sinkablePreUpdateSlots` re-emits the copy
-// inside the body, ahead of the update, which is the listing above); read from the header PARAM it
-// DECLINES, there being no exit slot to sink. A refusal test that declines for the WRONG reason
-// reads as a pass, so each case pins the message and carries a control differing in ONE fact.
+// WHICH ANSWER THE HAZARD GETS DEPENDS ON HOW SSA SPELLED THE VALUE, and all three spellings are
+// here: crossing the exit as an edge ARG it is REPAIRED (`sinkablePreUpdateSlots` re-emits the copy
+// inside the body, ahead of the update, which is the listing above); computed by a body OP and read
+// after the loop it is NAMED at that op (`escapesAheadOfUpdate`, structure/analysis.ts); read from
+// the header PARAM it DECLINES, there being neither an exit slot to sink nor an op to name. A
+// refusal test that declines for the WRONG reason reads as a pass, so each case pins the message
+// and carries a control differing in ONE fact.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -101,4 +103,222 @@ test('the same pre-update value crossing the exit EDGE is repaired, not declined
   // and the post-loop store takes that copy, never the moved-on counter
   expect(out).toContain(`= ${trailing};`);
   expect(out).not.toContain(`= ${counter};\n    return`);
+});
+
+// A BODY OP'S VALUE READ AFTER THE LOOP. agbcc keeps it in a register of its own —
+// `preupdate_escape`'s `add r3, r0, #0x4` inside the loop and `str r3, [r2]` after it — so the value
+// is neither an exit arg nor a loop variable: %7 is `%2 * 3`, computed from the PRE-update counter,
+// and read only by ^bb2.
+const ESCAPED_OP = `fn escop {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body op read after the loop is named where it was computed, ahead of the update', () => {
+  const out = emit(ESCAPED_OP);
+  const m = out.match(/(\w+) = (\w+) \* 3;\s+\2 = \2 \+ 1;/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]};`);
+});
+
+// THE ONE FACT CHANGED: the op reads the BACK-EDGE ARG, the post-update counter, which is what the
+// name holds after the loop — so it still renders at its reader.
+test('a body op over the post-update counter renders at its reader, unnamed', () => {
+  const out = emit(ESCAPED_OP.replace('%7: s32 = mul %2, %6', '%7: s32 = mul %4, %6'));
+  expect(out).toMatch(/a0\[1\] = (\w+) \* 3;/);
+  expect(out).not.toMatch(/\w+ = \w+ \* 3;\s+\w+ = \w+ \+ 1;/);
+});
+
+// A CALL under the value is named by the cross-block call rule wherever it would render outside its
+// block, so what the post-loop read re-evaluates is the call's NAME — nothing reads the counter.
+// Walking through it instead names `synthetic:esccast:agbcc`'s `(u16)` extension by default and
+// takes that MATCH row's `/escape-home` candidate out of its fan.
+test('a body op over a call renders at its reader, the call named in the loop', () => {
+  const out = emit(
+    ESCAPED_OP.replace(
+      '%6: s32 = const {value=3}\n  %7: s32 = mul %2, %6',
+      '%10: s32 = call %2 {target="cb"}\n  %6: s32 = const {value=3}\n  %7: s32 = add %10, %6',
+    ),
+  );
+  const m = out.match(/(\w+) = cb\(\w+\);/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]} + 3;`);
+});
+
+// A reader in an early-RETURN arm leaves from the middle of the body, before the update, so the
+// counter's name still holds the value the op read — and a body of two blocks gets no home at all.
+// `kleod:sub_08014184:agbcc` is this shape, and its arm spells `(struct Struct1 *)(v3 + v1)` inline.
+const ESCAPED_TO_ARM = `fn escmid {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %6: s32 = const {value=3}
+  %7: s32 = mul %2, %6
+  br ^bb5()
+^bb5():
+  %8: u32 = icmp_eq %7, %1
+  cond_br %8, ^bb3(), ^bb4()
+^bb4():
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2()
+^bb3():
+  store %0, %7 {off=4, width=4}
+  ret
+^bb2():
+  ret
+}
+`;
+
+test('a body op read only by an early-return arm renders in the arm, unnamed', () => {
+  const out = emit(ESCAPED_TO_ARM);
+  expect(out).toMatch(/if \((\w+) \* 3 == a1\) \{\s+a0\[1\] = \1 \* 3;\s+return;/);
+});
+
+// A MEMORY READ is the same value home — `do { s = f->v; f = f->next; } while (--n); *out = s;` —
+// and naming a load at its own position keeps the asm's read order as well.
+const ESCAPED_LOAD = `fn escload {
+^bb0(%0: s32*, %1: s32, %20: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%9, %20)
+^bb1(%2: s32, %21: s32*):
+  %7: s32 = load %21 {off=4, signed=true, width=4}
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %22: s32* = load %21 {off=0, signed=false, width=4}
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4, %22), ^bb2()
+^bb2():
+  store %0, %7 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body load read after the loop is named where it read, ahead of the update', () => {
+  const out = emit(ESCAPED_LOAD);
+  const m = out.match(/(\w+) = (\w+)\[1\];[\s\S]*\2 = \(s32 \*\)\*\2;/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]};`);
+});
+
+// A value another rule has already NAMED renders as that name after the loop, whatever it read:
+// here a store between the load and its reader names the load, and the `+ 1` over it stays at the
+// reader. The rule is asked only after the other rules settle, so it sees that name.
+const OVER_A_NAMED_LOAD = `fn escnamed {
+^bb0(%0: s32*, %1: s32, %20: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%9, %20)
+^bb1(%2: s32, %21: s32*):
+  %7: s32 = load %21 {off=4, signed=true, width=4}
+  %40: s32 = const {value=0}
+  store %21, %40 {off=4, width=4}
+  %41: s32 = const {value=1}
+  %8: s32 = add %7, %41
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %22: s32* = load %21 {off=0, signed=false, width=4}
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4, %22), ^bb2()
+^bb2():
+  store %0, %8 {off=4, width=4}
+  ret
+}
+`;
+
+test('a body op over a load another rule named renders at its reader', () => {
+  const out = emit(OVER_A_NAMED_LOAD);
+  const m = out.match(/(\w+) = \w+\[1\];/);
+  expect(m).not.toBeNull();
+  expect(out).toContain(`a0[1] = ${m![1]} + 1;`);
+});
+
+// ONLY A SELF-LOOP. Generated by the structure differential fuzz (seed 412407): the home would name
+// `%9` in a two-block body whose `%11` call result adopts a loop variable's name in place, ahead of a
+// read of its old value — spelled wrong on shapes that already structure, and here it would be
+// unlocked. It declines as it does without the home.
+const IN_A_MULTI_BLOCK_BODY = `fn pz412407 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %1 {target="f0"}
+  %3: s32 = sub %1, %2
+  %4: s32 = sub %2, %3
+  %5: s32 = call %1 {target="g"}
+  br ^bb1(%0, %3)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = add %6, %2
+  %9: s32 = sub %5, %7
+  %10: s32 = call %0 {target="f2"}
+  %11: s32 = call %9 {target="g"}
+  %12: u32 = icmp_slt %8, %11
+  cond_br %12, ^bb4(%1), ^bb2()
+^bb2():
+  %13: s32 = const {value=0}
+  %14: s32 = sub %1, %1
+  br ^bb3()
+^bb3():
+  %15: s32 = call %10 {target="f0"}
+  br ^bb4(%14)
+^bb4(%16: s32):
+  %17: s32 = call %7 {target="f0"}
+  %18: u32 = icmp_slt %9, %4
+  cond_br %18, ^bb1(%11, %8), ^bb5()
+^bb5():
+  %19: s32 = call %1 {target="f0"}
+  br ^bb6(%9)
+^bb6(%20: s32):
+  %21: s32 = sub %2, %1
+  %22: s32 = add %8, %8
+  %23: s32 = add %5, %17
+  ret %21
+}
+`;
+
+test('a body of more than one block gets no pre-update home', () => {
+  expect(() => emit(IN_A_MULTI_BLOCK_BODY)).toThrow(/reads a pre-update loop variable/);
+});
+
+// A block after the loop whose param holds a loop variable's NAME (fuzz seed 400010): the merge in
+// ^bb4 takes `%4`'s name while the region still reads `%5`, the value the loop leaves under it. The
+// self-loop's home would unlock it; it declines as it does without the home.
+const AFTER_A_MERGE_ON_A_LOOP_NAME = `fn pz400010 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = add %1, %0
+  %3: s32 = call %1 {target="f1"}
+  br ^bb1(%1)
+^bb1(%4: s32):
+  %5: s32 = sub %3, %3
+  %6: s32 = add %1, %4
+  %7: s32 = add %0, %2
+  %8: u32 = icmp_slt %0, %5
+  cond_br %8, ^bb1(%5), ^bb2()
+^bb2():
+  %9: s32 = sub %0, %6
+  %10: s32 = add %1, %1
+  %11: u32 = icmp_slt %5, %0
+  cond_br %11, ^bb3(%1), ^bb4(%5)
+^bb3(%12: s32):
+  %13: s32 = sub %3, %0
+  %14: s32 = sub %0, %5
+  br ^bb4(%9)
+^bb4(%15: s32):
+  %16: s32 = call %15 {target="f0"}
+  ret %5
+}
+`;
+
+test('a pre-update home does not unlock a loop whose variable name a later merge holds', () => {
+  expect(() => emit(AFTER_A_MERGE_ON_A_LOOP_NAME)).toThrow(/reads a pre-update loop variable/);
 });

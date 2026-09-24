@@ -12,6 +12,9 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
+
+const SEEDS = Array.from({ length: 96 }, (_, k) => 1 + k * 4099);
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -167,4 +170,173 @@ test('a pure preheader between guard and self-loop still fuses the proven guard 
   expect(c).toContain('while (');
   expect(c).not.toContain('do {');
   expect(c).not.toContain('if ('); // the guard is subsumed by the while's own test
+});
+
+// AFTER A GUARDED LOOP the exit copies and the exit region read a back-edge arg by its loop
+// variable's name, which on a zero-trip run still holds the init. Everything the region reads
+// dominates the guard, so an arg it reaches was computed before the loop — here `%1`, the value `p`
+// is reloaded from, while `p` starts at `%2`. `h(p)` would pass `a2` whenever `a0 <= 0`, so the
+// function declines.
+const CARRIED_OUTSIDE_VALUE = `fn carried {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sgt %0, %3
+  cond_br %4, ^bb1(%2, %0), ^bb2()
+^bb1(%5: s32, %6: s32):
+  %7: s32 = call %5 {target="g"}
+  %8: s32 = const {value=1}
+  %9: s32 = sub %6, %8
+  %10: u32 = icmp_ne %9, %3
+  cond_br %10, ^bb1(%1, %9), ^bb2()
+^bb2():
+  %11: s32 = call %1 {target="h"}
+  ret %11
+}
+`;
+const ZERO_TRIP = /holds its initial value on a zero-trip run/;
+
+test('after a guarded loop, a pre-loop value read by a loop variable holding another init declines', () => {
+  expect(() => emit(CARRIED_OUTSIDE_VALUE)).toThrow(ZERO_TRIP);
+});
+
+// …and read through an op the region inlines, which is what the region renders.
+test('after a guarded loop, an inlined op over such a value declines too', () => {
+  expect(() =>
+    emit(
+      CARRIED_OUTSIDE_VALUE.replace(
+        '%3: s32 = const {value=0}\n',
+        '%3: s32 = const {value=0}\n  %20: s32 = add %1, %0\n',
+      ).replace('call %1 {target="h"}', 'call %20 {target="h"}'),
+    ),
+  ).toThrow(ZERO_TRIP);
+});
+
+// THE ONE FACT CHANGED: `p` starts at `%1` too, so its name holds `%1` on both paths.
+test('after a guarded loop, a value carried as its own init is read by its loop variable', () => {
+  const out = emit(CARRIED_OUTSIDE_VALUE.replace('^bb1(%2, %0)', '^bb1(%1, %0)'));
+  const p = out.match(/g\((\w+)\);/)?.[1];
+  expect(p).toBeDefined();
+  expect(out).toContain(`return h(${p});`);
+});
+
+// Under `coalesceLoopInit` the counter `%22` coalesces onto `a1`, which the loop bumps, while
+// `v = a1 - a0`, computed ahead of the guard, is carried as its own init: read by the loop
+// variable's name it is right on both paths, where `a1 - a0` re-derived after the loop is not.
+const CARRIED_AS_ITS_OWN_INIT = `fn ownit {
+^bb0(%0: s32, %1: s32):
+  %c: u32 = icmp_slt %0, %1
+  cond_br %c, ^bb1(), ^bb2()
+^bb1():
+  %x: s32 = call %0 {target="f0"}
+  br ^bb3(%1)
+^bb2():
+  br ^bb3(%1)
+^bb3(%11: s32):
+  %16: s32 = const {value=4}
+  %18: s32 = sub %11, %0
+  %21: u32 = icmp_slt %11, %16
+  cond_br %21, ^bb7(%1, %18), ^bb8()
+^bb7(%22: s32, %23: s32):
+  %g: s32 = call %23 {target="g"}
+  %25: s32 = const {value=1}
+  %26: s32 = add %22, %25
+  %m: s32 = const {value=-100}
+  %27: u32 = icmp_sge %26, %m
+  cond_br %27, ^bb8(), ^bb7(%26, %18)
+^bb8():
+  ret %18
+}
+`;
+
+test('after a guarded loop, a value carried as its own init computes what the IR computes', () => {
+  const fn = parse(CARRIED_AS_ITS_OWN_INIT);
+  verify(fn);
+  recoverTypes(fn);
+  const r = irAgreement(CARRIED_AS_ITS_OWN_INIT, structure(fn, { coalesceLoopInit: true }), SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});
+
+// An exit COPY passing one value on both exit edges: `staleExit` sees the same value there and
+// cannot tell. Here it is `%3 = h(a0) + a0`, over `%2`, which the loop carries back into `%6` from
+// an init of `a1` — spelled through `%6`'s name it adds `a1` whenever the loop never ran.
+const EXIT_COPY_OVER_A_CARRIED_VALUE = `fn exitcarried {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="h"}
+  %3: s32 = add %2, %0
+  %4: u32 = icmp_slt %1, %0
+  cond_br %4, ^bb3(%3), ^bb2(%1, %1)
+^bb2(%5: s32, %6: s32):
+  %f: s32 = call %6 {target="g"}
+  %7: s32 = const {value=1}
+  %8: s32 = add %5, %7
+  %9: u32 = icmp_sge %8, %0
+  cond_br %9, ^bb3(%3), ^bb2(%8, %2)
+^bb3(%11: s32):
+  ret %11
+}
+`;
+
+test('an exit copy passing one value that reads a carried pre-loop value declines', () => {
+  expect(() => emit(EXIT_COPY_OVER_A_CARRIED_VALUE)).toThrow(ZERO_TRIP);
+});
+
+// A flag: `found = 0; while (i < n) { found = 1; i++; } return found;` with the 1 computed before the
+// guard. The exit copy's arg differs across the two exit edges (1 against 0), so `staleExit` proves
+// it and it keeps the loop variable's name — the value read as itself would be 1 on a zero-trip run.
+const FLAG = `fn flag {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: s32 = const {value=1}
+  %4: u32 = icmp_slt %0, %1
+  cond_br %4, ^bb1(%0, %2), ^bb2(%2)
+^bb1(%5: s32, %6: s32):
+  %7: s32 = add %5, %3
+  %8: u32 = icmp_slt %7, %1
+  cond_br %8, ^bb1(%7, %3), ^bb2(%3)
+^bb2(%9: s32):
+  ret %9
+}
+`;
+
+test('an exit copy of a pre-loop value that differs across the exit edges keeps its loop variable', () => {
+  const fn = parse(FLAG);
+  verify(fn);
+  recoverTypes(fn);
+  const r = irAgreement(FLAG, structure(fn), SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
+  expect(r.disagree).toBe(0);
+});
+
+// A second guarded loop in the first one's exit region: the first loop's substitution is still in
+// force there, and so is what it may not spell — `h(p)` after the inner loop is the same zero-trip
+// read as above.
+const AFTER_A_NESTED_GUARDED_LOOP = `fn nested {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sgt %0, %3
+  cond_br %4, ^bb1(%2, %0), ^bb2()
+^bb1(%5: s32, %6: s32):
+  %7: s32 = call %5 {target="g"}
+  %8: s32 = const {value=1}
+  %9: s32 = sub %6, %8
+  %10: u32 = icmp_ne %9, %3
+  cond_br %10, ^bb1(%1, %9), ^bb2()
+^bb2():
+  %20: u32 = icmp_sgt %2, %3
+  cond_br %20, ^bb3(%2), ^bb4()
+^bb3(%21: s32):
+  %22: s32 = call %21 {target="k"}
+  %23: s32 = const {value=1}
+  %24: s32 = sub %21, %23
+  %25: u32 = icmp_ne %24, %3
+  cond_br %25, ^bb3(%24), ^bb4()
+^bb4():
+  %11: s32 = call %1 {target="h"}
+  ret %11
+}
+`;
+
+test('a zero-trip read after a nested guarded loop still declines', () => {
+  expect(() => emit(AFTER_A_NESTED_GUARDED_LOOP)).toThrow(ZERO_TRIP);
 });

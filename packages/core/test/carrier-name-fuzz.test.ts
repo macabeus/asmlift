@@ -190,13 +190,10 @@ describe.each([
 // measured as a pass-through, which is the evidence the rule asks for.
 //
 // A DIFFERENTIAL AGAINST THE SAME GENERATOR UNMEASURED, not an absolute `bad = []`. That shape
-// reaches wrong answers the walk gives with or WITHOUT this rule — 7 of 4,000 seeds, the same 7
-// measured or not. KNOWN GAP, not this rule's: ablating `canTakeName`'s `pureAlias` waiver clears 6
-// of them (a fact about one value, waiving `carrier-live` for every value under the name), and the
-// seventh survives that and the back-edge adoption's ablation alike. What the record may not do is
-// ADD one. This arm USED to catch an unguarded rule (no `canTakeName`), at seed 1472; with
-// `carriedByBothLoops` in front of it that shape is refused first: dropping `canTakeName` from the
-// rule leaves this arm green, and dropping both reddens it at 1472 again. The two `canTakeName`
+// reaches a wrong answer the walk gives with or WITHOUT this rule — 1 of 4,000 seeds (302), the
+// same one measured or not. KNOWN GAP, not this rule's: it survives the back-edge adoption's
+// ablation. What the record may not do is ADD one. The rule without `canTakeName` adds one at seed
+// 1472 only if `carriedByBothLoops` is dropped too — that shape is refused first. The two `canTakeName`
 // refusals the rule reaches are pinned in `nested-carrier.test.ts`, each by a fixture and its
 // ablation, rather than here.
 //
@@ -238,12 +235,12 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
   // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
   // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
   // declines on.
-  expect(judged, 'the measured arm judges the population it measured').toBe(1088);
+  expect(judged, 'the measured arm judges the population it measured').toBe(1093);
   // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
   // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
   // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
-  // from 252 firings to 1 would leave both arms green, with `judged` still at 1,088 vouching for it.
-  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(252);
+  // from 253 firings to 1 would leave both arms green, with `judged` still at 1,093 vouching for it.
+  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(253);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 
@@ -276,6 +273,15 @@ test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it mak
         if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
       }
       if (found) break;
+    }
+    // `alias-under-its-own-name` needs a value carried out through a loop's back edge while a merge
+    // after it is offered that loop variable's name — the nested MEASURED shape's reach.
+    for (let seed = 1; seed <= SEEDS && !found; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
+      const r = spellings(seed, 2, g.id, { measured: true });
+      if (!r || !tracesDiffer({ off: r.ir, on: r.on })) continue;
+      const base = spellings(seed, 2, undefined, { measured: true });
+      if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
     }
     if (!found) inert.push(g.id);
   }

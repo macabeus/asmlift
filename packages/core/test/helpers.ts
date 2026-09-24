@@ -12,6 +12,7 @@
 // function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
 // the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 
@@ -482,7 +483,7 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
  *
  *  SO NO BENCHMARK ROW, RANKED CANDIDATE OR WINNER IS JUDGED BY THIS TODAY — the readers are the two
  *  naming fuzzes, `generator-shape`, `dead-effect` and `loop-shape-refusals`, all of which feed it
- *  the same generator. That is named debt, not a design: the arithmetic and comparison blockers are
+ *  the same generator, and {@link irAgreement}'s hand-written fixtures in its vocabulary. That is named debt, not a design: the arithmetic and comparison blockers are
  *  one `case` each, `load`/`aload` want a memory model that `store` half-implies, and the place a
  *  real-row assertion belongs is `apps/benchmark/src/eval/asmlift.ts`, which already holds both the
  *  lifted `Fn` and the structured tree. `undef` is NOT one `case`: {@link traceOf} models it as a
@@ -588,3 +589,27 @@ export const breathe = (): Promise<void> => new Promise((resolve) => setImmediat
  *  60 s RPC timeout even at the 3.4x fork-contention factor these sweeps measured; large enough
  *  that the yields themselves cost nothing measurable. */
 export const BREATHE_EVERY = 512;
+
+/** How many of `seeds` the structured tree and its own IR text disagree on. An input either
+ *  interpreter cannot run is NOT judged — a run past the step cap, or an opcode {@link irTraceOf}
+ *  does not model — so a caller asserts `judged` as well as `disagree`. */
+export function irAgreement(ir: string, sfn: SFn, seeds: readonly number[]): { judged: number; disagree: number } {
+  const fn = parse(ir);
+  let judged = 0;
+  let disagree = 0;
+  for (const seed of seeds) {
+    let off: Event[];
+    let on: Event[];
+    try {
+      off = irTraceOf(fn, seed);
+      on = traceOf(sfn, seed);
+    } catch {
+      continue;
+    }
+    judged++;
+    if (tracesDiffer({ off, on })) {
+      disagree++;
+    }
+  }
+  return { judged, disagree };
+}
