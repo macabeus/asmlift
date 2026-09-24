@@ -18,6 +18,8 @@ import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
+const SEEDS = Array.from({ length: 96 }, (_, k) => 1 + k * 4099);
+
 const emit = (ir: string, gate?: string): string => {
   const fn = parse(ir);
   verify(fn);
@@ -150,7 +152,7 @@ test('a redundant merge shares only its value’s own name, not a later loop var
   verify(fn);
   recoverTypes(fn);
   const sfn = structure(fn, { coalesceLoopInit: true });
-  const r = irAgreement(ALIAS_THROUGH_A_LATER_LOOP, sfn);
-  expect(r.judged).toBeGreaterThan(0);
+  const r = irAgreement(ALIAS_THROUGH_A_LATER_LOOP, sfn, SEEDS);
+  expect(r.judged).toBe(SEEDS.length);
   expect(r.disagree).toBe(0);
 });

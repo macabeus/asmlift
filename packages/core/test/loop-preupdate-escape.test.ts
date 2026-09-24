@@ -31,6 +31,8 @@ import { recoverTypes } from '../src/raise/recover';
 import { StructureError, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
+const SEEDS = Array.from({ length: 96 }, (_, k) => 1 + k * 4099);
+
 const emit = (ir: string): string => {
   const fn = parse(ir);
   verify(fn);
@@ -315,7 +317,7 @@ test('a body op in an inner while header stays unnamed, and the loop declines on
 // rebind the sink stands down on, which would write it partway through the body). Here %10 is fed
 // %2, the back-edge arg of %4, ahead of `%11 = sub %3, %4`; the loop keeps %4's value and the escaped
 // `%11` is named at its def.
-const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
+const BACK_EDGE_ALIAS_BESIDE_A_HOME = `fn escrebind {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = add %0, %1
   %3: s32 = add %0, %2
@@ -336,11 +338,11 @@ const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
 `;
 
 test('a pre-update home beside a merge fed a back-edge arg computes what the IR computes', () => {
-  const fn = parse(REBINDS_A_LOOP_VARIABLE);
+  const fn = parse(BACK_EDGE_ALIAS_BESIDE_A_HOME);
   verify(fn);
   recoverTypes(fn);
   const sfn = structure(fn);
-  const r = irAgreement(REBINDS_A_LOOP_VARIABLE, sfn);
-  expect(r.judged).toBeGreaterThan(0);
+  const r = irAgreement(BACK_EDGE_ALIAS_BESIDE_A_HOME, sfn, SEEDS);
+  expect(r.judged).toBe(29); // the other inputs run past the interpreter's step cap
   expect(r.disagree).toBe(0);
 });

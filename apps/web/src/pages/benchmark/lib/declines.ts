@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 135 distinct decline messages (the texts reached by
+// `packages/core/src` throws 136 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -393,12 +393,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // The loop IS recovered here and the values crossing its exit are what refuse: a post-loop read
-    // of a temp the guarded body may never assign, and a fused guard whose exit edge carries a
-    // value the post-loop copies do not reproduce on a zero-trip run. Separate from `loop-shapes`
+    // of a temp the guarded body may never assign, a fused guard whose exit edge carries a value the
+    // post-loop copies do not reproduce on a zero-trip run, and a post-loop read of a pre-loop value
+    // through a loop variable's name that still holds its init on that run. Separate from `loop-shapes`
     // because the thing to build is different — an exit-value model, not a second loop recognizer.
     key: 'loop-exit-values',
     label: 'Loop exit values (zero-trip edges / post-loop temps)',
-    pattern: /post-loop read reaches a temp|do not reproduce on a zero-trip run/,
+    pattern: /post-loop read reaches a temp|do not reproduce on a zero-trip run|its initial value on a zero-trip run/,
   },
   {
     // Keyed on the three producers rather than on the bare words `fall-through` and `jump-table`,

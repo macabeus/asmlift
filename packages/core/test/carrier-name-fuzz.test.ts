@@ -192,9 +192,7 @@ describe.each([
 // A DIFFERENTIAL AGAINST THE SAME GENERATOR UNMEASURED, not an absolute `bad = []`. That shape
 // reaches a wrong answer the walk gives with or WITHOUT this rule — 1 of 4,000 seeds (302), the
 // same one measured or not. KNOWN GAP, not this rule's: it survives the back-edge adoption's
-// ablation, and `canTakeName`'s `pureAlias` waiver, which is granted only under the value's own
-// name. What the record may not do is
-// ADD one. This arm USED to catch an unguarded rule (no `canTakeName`), at seed 1472; with
+// ablation. What the record may not do is ADD one. This arm USED to catch an unguarded rule (no `canTakeName`), at seed 1472; with
 // `carriedByBothLoops` in front of it that shape is refused first: dropping `canTakeName` from the
 // rule leaves this arm green, and dropping both reddens it at 1472 again. The two `canTakeName`
 // refusals the rule reaches are pinned in `nested-carrier.test.ts`, each by a fixture and its
@@ -276,6 +274,15 @@ test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it mak
         if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
       }
       if (found) break;
+    }
+    // `alias-under-its-own-name` needs a value carried out through a loop's back edge while a merge
+    // after it is offered that loop variable's name — the nested MEASURED shape's reach.
+    for (let seed = 1; seed <= SEEDS && !found; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
+      const r = spellings(seed, 2, g.id, { measured: true });
+      if (!r || !tracesDiffer({ off: r.ir, on: r.on })) continue;
+      const base = spellings(seed, 2, undefined, { measured: true });
+      if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
     }
     if (!found) inert.push(g.id);
   }

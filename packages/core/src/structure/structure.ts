@@ -1256,6 +1256,8 @@ function reHomesParamMerge(
 export interface CarrierName {
   /** the merge is a pure alias — every in-edge hands it the same value */
   readonly pureAlias: boolean;
+  /** the name offered is that value's OWN, not a loop variable's name offered through its back edge */
+  readonly ownName: boolean;
   /** the name's declaration and the parameter disagree about carrier width */
   readonly widthDiffers: boolean;
   /** …or, at a sub-word width, about signedness — which at that width is part of the width */
@@ -1323,6 +1325,16 @@ export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
     sound: true,
     guardedBy: 'name-clobber.test.ts: the inlined difference keeps reading the value the asm computed it from',
     rejects: (c) => !c.pureAlias && c.reDerivesName,
+  },
+  {
+    // The two gates above waive a pure alias because the alias and its value are equal on every
+    // path under the value's own name. A loop variable's name holds the value only once the back
+    // edge that carries it has run.
+    id: 'alias-under-its-own-name',
+    why: "a loop variable's name holds the value it is offered for only after the back edge that carries it",
+    sound: true,
+    guardedBy: 'carrier-name.test.ts: a redundant merge shares only its value’s own name, not a later loop variable’s',
+    rejects: (c) => c.pureAlias && !c.ownName && (c.carrierLive || c.reDerivesName),
   },
 ];
 
@@ -2769,7 +2781,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     return { carrierLive, carrierWritten };
   };
-  const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
+  const canTakeName = (p: Value, B: Block, name: string, pureAlias = false, ownName = true): boolean => {
     const lin = liveIn.get(B)!;
     let scan: ReturnType<typeof carrierScan> | undefined;
     const scanned = (): ReturnType<typeof carrierScan> => (scan ??= carrierScan(p, B, name));
@@ -2800,6 +2812,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return (
       firstRejection(hooks.carrierNameGates ?? CARRIER_NAME_GATES, {
         pureAlias,
+        ownName,
         widthDiffers: carrierWidth(varType.get(name)) !== carrierWidth(p.type),
         signDiffers: carrierSign(varType.get(name)) !== carrierSign(p.type),
         siblingHolds: B.params.some((q) => q !== p && varName.get(q) === name),
@@ -3122,8 +3135,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           incoming.push({ v: succ.args[i], pr: pred });
         }
         // A redundant phi (every edge passes the SAME value) is a pure alias of it — sharing the
-        // name is sound even while the value stays live (they are equal on every path). This
-        // waives only the LIVENESS half of canTakeName; the sibling-param check always applies.
+        // value's own name is sound even while the value stays live (they are equal on every path).
+        // This waives `carrier-live` and `re-derives`; the sibling-param check always applies.
         const allSame = incoming.length > 0 && incoming.every((c) => c.v === incoming[0].v);
         // prefer a carrier that already has a name; then a loop var whose update this receives —
         // but only one whose name survives the C3 interference check (else the edge copies into
@@ -3138,9 +3151,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ...incoming.filter((c) => backArgName.has(c.v)),
         ]) {
           const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          // The alias waiver is about `c.v`'s OWN name, which holds it on every path; a loop
-          // variable's name offered through `backArgName` holds it only once that back edge ran.
-          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame && varName.has(c.v))) {
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, varName.has(c.v))) {
             continue;
           }
           // `freshParamMerge` (the `/fresh-merge` variation): this merge takes its own home rather
@@ -4031,6 +4042,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const e = (v: Value): Expr => {
       const subbed = sub?.get(v);
       if (subbed) {
+        if (zeroTripStale?.get(v) === subbed) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': a read after the loop spells a value computed before it by a ` +
+              `loop variable's name, which holds its initial value on a zero-trip run`,
+          );
+        }
         return { k: 'var', name: subbed };
       }
       if (varName.has(v)) {
@@ -4074,6 +4091,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // read the name, not re-inline the computation (which would double-count, e.g. `(u8)(v1+1)` instead
   // of `v1`). `expr` consults it; `withSub` installs/merges it around the exit region. Null normally.
   let activeSub: Map<Value, string> | null = null;
+  // The entries of a guarded self-loop's substitution its exit region may not render (the
+  // guarded-loop site's `holdsInitInstead`): installed around that region only, and consulted where
+  // a substitution hit renders, so it judges exactly what the region spells.
+  let zeroTripStale: Map<Value, string> | null = null;
   const expr = (v: Value): Expr => exprWith(activeSub)(v);
   const withSub = <R>(sub: Map<Value, string>, run: () => R): R => {
     const prev = activeSub;
@@ -5227,29 +5248,65 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           } // entering the loop must be `taken`
           out.push(mkIf(gcond, [loopStmt], []));
         }
+        // A POST-LOOP READ THAT HOLDS THE INIT INSTEAD. The exit copies and the exit region render
+        // under the un-rotation substitution, which spells a back-edge arg as its loop variable's
+        // name. Both run on the zero-trip path too, where that name still holds its init — so an arg
+        // computed BEFORE the loop reads right there only if the init is that very value (`sub` is
+        // last-wins over params sharing an arg, so the init is read off the last one). `staleExit`
+        // proves a copy whose arg differs across the two exit edges; a copy passing ONE value on
+        // both is judged here through its inlined expression, and the region where its render hits
+        // such an entry (`zeroTripStale`) — only a value that dominates the guard can reach it, but
+        // what it renders is what the region renders, not what is live at its entry.
+        const stale = new Map(
+          [...sub].filter(([x]) => {
+            const d = defs.get(x);
+            return (
+              !li.header.params.includes(x) &&
+              (d === undefined || opBlock.get(d) !== li.header) &&
+              initArgs[li.backArgOfParam.lastIndexOf(x)] !== x
+            );
+          }),
+        );
+        const holdsInitInstead = (root: Value): boolean => {
+          const seen = new Set<Value>();
+          const walk = (x: Value): boolean => {
+            if (seen.has(x)) {
+              return false;
+            }
+            seen.add(x);
+            if (sub.has(x)) {
+              return stale.has(x);
+            }
+            if (varName.has(x)) {
+              return false;
+            }
+            const d = defs.get(x);
+            return d !== undefined && d.operands.some(walk);
+          };
+          return walk(root);
+        };
+        if (hexitArgs.some((a, j) => keptSlot(j) && a === guardExit.args[j] && holdsInitInstead(a))) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': a read after the loop spells a value computed before it by a ` +
+              `loop variable's name, which holds its initial value on a zero-trip run`,
+          );
+        }
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
-        // a stale value — and structure the exit region after them, both under the un-rotation
-        // substitution: post-loop the params hold their updated values.
-        //
-        // Less the back-edge args computed BEFORE the loop. Both renders run on the zero-trip path
-        // too, where a loop variable's name still holds its init — the arg itself only when the init
-        // IS that value. `sub` is last-wins over params sharing an arg, so the init is read off the
-        // last one. (`staleExit` cannot see this: an exit arg over such a value is the same value on
-        // both edges.)
-        const exitSub = new Map(
-          [...sub].filter(
-            ([a]) =>
-              li.header.params.includes(a) ||
-              opBlock.get(defs.get(a)!) === li.header ||
-              initArgs[li.backArgOfParam.lastIndexOf(a)] === a,
-          ),
-        );
+        // a stale value. Read under the un-rotation substitution (post-loop the params hold their
+        // updated values), and structure the exit region under the same substitution so a post-loop
+        // use of a loop value reads its name.
         out.push(
-          ...withSub(exitSub, () => [
-            ...argAssigns(li.header, li.exit, exitSub, keptSlot),
-            ...structureRegion(li.exit, stop),
-          ]),
+          ...withSub(sub, () => {
+            const copies = argAssigns(li.header, li.exit, sub, keptSlot);
+            const prevStale = zeroTripStale;
+            zeroTripStale = stale;
+            try {
+              return [...copies, ...structureRegion(li.exit, stop)];
+            } finally {
+              zeroTripStale = prevStale;
+            }
+          }),
         );
         return out;
       }
@@ -5760,11 +5817,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
-    // block's param may adopt a LOOP VARIABLE's name (canTakeName waives the liveness half for a
-    // pure alias, an argument that does not carry when the name came from `backArgName` — it is
-    // then a different value's). The arm's copy into it is a real write partway through the body,
-    // and everything rendered after it reads the name RAW: the update, the bottom test, the
-    // header's own ops, the latch's side effects.
+    // block's param that holds a LOOP VARIABLE's name makes the arm's copy into it a real write
+    // partway through the body, and everything rendered after it reads the name RAW: the update,
+    // the bottom test, the header's own ops, the latch's side effects. The pure-alias route to such
+    // a name is closed (`alias-under-its-own-name`); a param may still take it through `varName`
+    // once the header param is dead, and no fixture reaches that today, so this guard is defensive.
     //
     // The refusal is on the NAME, not on who reads it: the readers are every statement the loop
     // emits, which is not a set worth enumerating when the name alone is the whole signal.
