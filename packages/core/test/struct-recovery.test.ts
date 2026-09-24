@@ -356,17 +356,19 @@ describe('struct recovery — an overlap on an anonymous base is a union', () =>
     );
   });
 
-  test('…and is laid out naturally where the compiler has no boundary', () => {
+  test('…and is laid out naturally where the boundary is 1', () => {
     const c = emit(NARROW_THEN_FIELD, false, undefined, MIPS_IDO);
     expect(c).toContain('struct Struct0 { union { u16 half; u8 byte[2]; } field_0; u16 field_2; };');
     expect(c).toContain('a0->field_0.byte[1] + a0->field_2');
   });
 
   test('…and declines on a compiler whose boundary is unmeasured', () => {
-    const unmeasured = { ...MIPS_IDO, compilerBehaviors: { ...MIPS_IDO.compilerBehaviors } };
-    delete unmeasured.compilerBehaviors.aggregateBoundary;
+    const unmeasured = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, aggregateBoundary: undefined },
+    };
     expect(() => emit(NARROW_THEN_FIELD, false, undefined, unmeasured)).toThrow(
-      /narrower than a word, and this compiler's aggregate boundary is unmeasured/,
+      /the union at offset 0 needs this compiler's aggregate boundary, which is unmeasured/,
     );
   });
 

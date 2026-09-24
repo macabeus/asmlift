@@ -820,10 +820,9 @@ function memAccess(
     // An internal invariant: the builder made a view for every width and narrow extension a union's
     // own base accessed, and a value that inherits the type through recoverTypes carries a pointee
     // of its own instead.
-    const viewElem = u.view?.type.kind === 'array' ? u.view.type.elem : u.view?.type;
-    if (u.view === undefined || (width < 4 && !isStore && viewElem?.kind === 'int' && viewElem.signed !== signed)) {
+    if (u.view === undefined) {
       throw new StructureError(
-        `a ${width}-byte access at byte ${off} has no view in the union member '${u.member.name}'`,
+        `a ${width}-byte ${isStore ? 'store' : signed ? 'signed load' : 'unsigned load'} at byte ${off} has no view in the union member '${u.member.name}'`,
       );
     }
     const cell: Expr = { k: 'field', base: structBase, name: u.member.name };

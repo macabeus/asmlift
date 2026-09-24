@@ -276,23 +276,25 @@ const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 
  *  A cell is therefore one widest access and every access inside it, and it gets a VIEW per width —
  *  `word`, `half`, `byte` — and, for a narrow width LOADED with both extensions, per extension —
  *  `uhalf` and `shalf` — because a view's type IS its extension and one view for both reads one of
- *  them wrong. A store carries no extension and writes through the unsigned view. A view that holds
+ *  them wrong. A store carries no extension and writes through its width's only view, or the
+ *  unsigned one where there are two. A view that holds
  *  one element at the cell's start is a scalar; any other is an array reaching the furthest
  *  element accessed (`u16 half[2]` for the halfword at +2). A cell with ONE view is a plain field;
  *  any other is a member `field_<off>` holding a union of its views — including a single-width cell
- *  loaded both ways, which `buildStruct` types by its signed load alone.
+ *  loaded both ways. KNOWN GAP: on a base with no overlap anywhere, `buildStruct` never hands over,
+ *  and that same cell there is one field typed by its signed load (as on main before this pass had
+ *  unions), so its unsigned read is spelled sign-extended.
  *
  *  THE COMPILER DECIDES THE UNION'S SIZE, not its widest view. `aggregateBoundary` is the size it
  *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateBoundary`):
  *  agbcc makes `union { u16 h; u8 b; }` four bytes, four-aligned, where the other compilers make
  *  it two. A union that boundary would move — seated off it, or with the next field inside its
  *  rounded size — declines rather than mislaying every access at or after it. An UNMEASURED
- *  compiler (undefined) declines every union narrower than a word, since neither answer is safe:
- *  a boundary too small mislays the fields after the union on agbcc, one too large drops the pad
- *  in front of them everywhere else.
+ *  compiler (undefined) declines every union, since no boundary is safe to assume: one too small
+ *  mislays the fields after the union on agbcc, one too large drops the pad in front of them
+ *  everywhere else.
  *
- *  An overlap at a width no view is named for declines too; given the containment reading above
- *  none can arise from a 1-, 2- or 4-byte access. */
+ *  A cell at a width no view is named for declines; the frontends emit none. */
 function buildUnionStruct(structName: string, accesses: Access[], aggregateBoundary: number | undefined): IrType {
   for (const a of accesses) {
     refusePacked(structName, a.off, a.width);
@@ -333,12 +335,12 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
     if (members.length === 1) {
       return { off: start, type: members[0].type, name: `field_${start}` };
     }
-    if (aggregateBoundary === undefined && c[0].width < 4) {
+    if (aggregateBoundary === undefined) {
       throw new RaiseUnsupportedError(
-        `cannot recover struct '${structName}': the union at offset ${start} is narrower than a word, and this compiler's aggregate boundary is unmeasured`,
+        `cannot recover struct '${structName}': the union at offset ${start} needs this compiler's aggregate boundary, which is unmeasured`,
       );
     }
-    return { off: start, type: T.union(members, aggregateBoundary ?? 1), name: `field_${start}` };
+    return { off: start, type: T.union(members, aggregateBoundary), name: `field_${start}` };
   });
   dataFields.forEach((f, i) => {
     if (f.type.kind !== 'union') {

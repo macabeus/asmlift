@@ -65,18 +65,21 @@ export const T = {
   ptr: (to: IrType): IrType => ({ kind: 'ptr', to }),
   struct: (name: string, fields: StructField[], size?: number): IrType => ({ kind: 'struct', name, fields, size }),
   array: (elem: IrType, count: number): IrType => ({ kind: 'array', elem, count }),
-  union: (members: StructField[], boundary: number): IrType => ({
-    kind: 'union',
-    members,
-    size: Math.max(boundary, ...members.map((m) => (m.type.kind === 'array' ? m.type.count : 1) * viewBytes(m.type))),
-  }),
+  // Its size is its widest view rounded up to the compiler's aggregate boundary (target.ts).
+  union: (members: StructField[], boundary: number): IrType => {
+    const extent = Math.max(...members.map((m) => (m.type.kind === 'array' ? m.type.count : 1) * viewBytes(m.type)));
+    return { kind: 'union', members, size: Math.ceil(extent / boundary) * boundary };
+  },
   void: (): IrType => ({ kind: 'void' }),
 };
 
 /** The byte width of a union view's element (an array view's element, or the scalar itself). */
 function viewBytes(t: IrType): number {
   const e = t.kind === 'array' ? t.elem : t;
-  return (intWidth(e) ?? 32) / 8;
+  if (e.kind !== 'int') {
+    throw new Error(`a union view is an integer or an array of one, not '${typeToString(t)}'`);
+  }
+  return e.width / 8;
 }
 
 /** The member `name` of an aggregate — a struct's field or a union's view — or undefined when `t`
@@ -93,10 +96,10 @@ export function memberOf(t: IrType | undefined, name: string): StructField | und
 }
 
 /** The union member of a struct that holds byte `off`, and the view of it an access of `width`
- *  bytes reads — the view of that width, and where a width has two views (a signed and an unsigned
- *  one) the one of the load's own extension, or the unsigned one for a store, which carries none —
- *  with the element index inside an ARRAY view (null for a scalar one). Undefined when no union
- *  member holds `off`; `view` undefined when the member has no view that wide. */
+ *  bytes reads — the view of that width and, for a narrow LOAD, of that extension; a store, which
+ *  carries none, takes the width's only view or the unsigned one of two — with the element index
+ *  inside an ARRAY view (null for a scalar one). Undefined when no union member holds `off`; `view`
+ *  undefined when the member has no view for the access. */
 export function unionViewAt(
   st: Extract<IrType, { kind: 'struct' }>,
   off: number,
@@ -110,15 +113,14 @@ export function unionViewAt(
   }
   const elemOf = (t: IrType): IrType => (t.kind === 'array' ? t.elem : t);
   const wide = member.type.members.filter((m) => intWidth(elemOf(m.type)) === width * 8);
-  // A width with ONE view is read and written through it: raise/structs.ts made it for every
-  // extension that width was loaded with.
+  const signOf = (m: StructField): boolean | undefined => {
+    const e = elemOf(m.type);
+    return e.kind === 'int' ? e.signed : undefined;
+  };
   const view =
-    wide.length > 1
-      ? wide.find((m) => {
-          const e = elemOf(m.type);
-          return e.kind === 'int' && e.signed === (isStore ? false : signed);
-        })
-      : wide[0];
+    width === 4 || (isStore && wide.length === 1)
+      ? wide[0]
+      : wide.find((m) => signOf(m) === (isStore ? false : signed));
   return { member, view, index: view?.type.kind === 'array' ? (off - member.off) / width : null };
 }
 
