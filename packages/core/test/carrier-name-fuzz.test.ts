@@ -192,9 +192,8 @@ describe.each([
 // A DIFFERENTIAL AGAINST THE SAME GENERATOR UNMEASURED, not an absolute `bad = []`. That shape
 // reaches a wrong answer the walk gives with or WITHOUT this rule — 1 of 4,000 seeds (302), the
 // same one measured or not. KNOWN GAP, not this rule's: it survives the back-edge adoption's
-// ablation. What the record may not do is ADD one. This arm USED to catch an unguarded rule (no `canTakeName`), at seed 1472; with
-// `carriedByBothLoops` in front of it that shape is refused first: dropping `canTakeName` from the
-// rule leaves this arm green, and dropping both reddens it at 1472 again. The two `canTakeName`
+// ablation. What the record may not do is ADD one. The rule without `canTakeName` adds one at seed
+// 1472 only if `carriedByBothLoops` is dropped too — that shape is refused first. The two `canTakeName`
 // refusals the rule reaches are pinned in `nested-carrier.test.ts`, each by a fixture and its
 // ablation, rather than here.
 //
