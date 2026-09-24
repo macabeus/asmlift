@@ -3689,8 +3689,8 @@ export function lift(
    *  AN EPILOGUE THAT SAYS THE RETURN TYPE IS 5 TO 8 BYTES (`compilerBehaviors.
    *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
    *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
-   *  the same way. A word return there is wrong in the first two cases and declines in the third,
-   *  where it would have been right: the epilogue cannot tell them apart. */
+   *  the same way. A word return drops r1 in the first two, and the third is a false decline the
+   *  epilogue cannot tell apart from them. */
   const refuseWordReturns = () => {
     const classes = halfOf.size ? mergeClasses({ blocks: irBlocks }) : new Map<Value, readonly Value[]>();
     const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
@@ -4620,10 +4620,11 @@ export function lift(
     // or refuses, and the projections are what `wideReturn` reads a pair return from.
     //
     // `adc` does NOT mean the source wrote `+` — agbcc also reaches `adddi3` from a signed division
-    // bias and from `a*3` as `(a<<1)+a`. It means a 64-bit add, which is what this builds; the
-    // halves those feed it are not a widen, so their `concat` is the structurer's loud gap.
+    // bias and from `a*3` as `(a<<1)+a`. It means a 64-bit add, which is what this builds, exactly;
+    // where the halves it is fed are neither a widen nor a parameter pair, their `concat` is the
+    // structurer's loud gap.
     //
-    // Refused — the carry instruction then decodes as today's opaque — unless every one holds:
+    // Refused — the carry instruction then decodes as an unmodelled opaque — unless every one holds:
     //   * the carry consumer is the NEXT instruction. The carry is the flags, and every Thumb-1
     //     data-processing instruction writes them; adjacency is what agbcc guarantees and the only
     //     thing that proves the `adc` reads THIS add's carry;

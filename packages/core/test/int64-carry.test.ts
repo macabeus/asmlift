@@ -13,7 +13,7 @@ import { ARMV4T_AGBCC } from '../src/target';
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-carry.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC).source;
 
-/** A hand-written leaf `f` with `body` between its label and `bx lr`. */
+/** A hand-written `f`: `body` after its label, then `ret` (a leaf's `bx lr` unless given). */
 const leaf = (body: string[], ret = ['\tbx\tlr']) =>
   ['\t.code\t16', '\t.globl\tf', '\t.thumb_func', 'f:', ...body, ...ret, ''].join('\n');
 const liftLeaf = (body: string[], ret?: string[]) => decompile('f', leaf(body, ret), ARMV4T_AGBCC).source;
@@ -87,7 +87,7 @@ describe('the return width', () => {
   });
 
   // THE HIGH HALF BUILT FROM SHIFTS, not projected from a pair: nothing this lift built reaches
-  // r0:r1, and the r2 epilogue says the function returns eight bytes.
+  // r0:r1, and the r2 epilogue says the return type is 5 to 8 bytes.
   test('an 8-byte epilogue with no pair in r0:r1 declines', () => {
     expect(() => lift('llmuldiv')).toThrow(/says the return type is 5 to 8 bytes/);
   });
@@ -154,7 +154,7 @@ describe('the return width', () => {
   });
 });
 
-// Each refusal leaves the carry instruction to decode as the opaque it always was.
+// Each refusal leaves the carry instruction to decode as an unmodelled opaque.
 describe('what refuses', () => {
   const unmodelled = /unmodelled instruction '(adc|sbc)'/;
 
