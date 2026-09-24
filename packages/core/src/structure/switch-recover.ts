@@ -132,35 +132,6 @@ export interface TestInfo {
   xOnLeft: boolean;
 }
 
-// Evaluate a test predicate for a CONCRETE scrutinee value — used to SIMULATE the decision tree and
-// verify recovered case values (below). Returns true iff the `taken` (successors[0]) edge is followed.
-// Signed/unsigned per the icmp opcode (PRE3, done concretely rather than via interval lattices).
-function evalCmp(opcode: string, xOnLeft: boolean, xv: number, k: number): boolean {
-  const uns = opcode.startsWith('icmp_u');
-  const [xn, kn] = uns ? [xv >>> 0, k >>> 0] : [xv | 0, k | 0];
-  const [l, r] = xOnLeft ? [xn, kn] : [kn, xn]; // put the scrutinee where it textually appears
-  switch (opcode) {
-    case 'icmp_eq':
-      return l === r;
-    case 'icmp_ne':
-      return l !== r;
-    case 'icmp_slt':
-    case 'icmp_ult':
-      return l < r;
-    case 'icmp_sle':
-    case 'icmp_ule':
-      return l <= r;
-    case 'icmp_sgt':
-    case 'icmp_ugt':
-      return l > r;
-    case 'icmp_sge':
-    case 'icmp_uge':
-      return l >= r;
-    default:
-      return false;
-  }
-}
-
 // WHICH SCRUTINEE VALUES CAN REACH A TEST, AND WHICH ONE A SIDE OF IT PINS. A comparison dispatch
 // pins its last value with a RELATIONAL test once the tests above it have narrowed the scrutinee to
 // one value on that side: mwcc's `switch (x) { case 0: … case 1: … default: … }` is `cmpwi r0,1;
@@ -268,6 +239,14 @@ function takenBy(ti: TestInfo): Ranges {
 function narrow(path: Ranges, ti: TestInfo, taken: boolean): Ranges {
   const t = takenBy(ti);
   return intersect(path, taken ? t : complement(t));
+}
+
+/** Whether register value `v` is in `r`. PRE3's concrete simulation reads each test through this
+ *  and {@link takenBy}, so the tree it walks and the ranges a bound case is read off are one
+ *  definition of the icmp family, not two. */
+function contains(r: Ranges, v: number): boolean {
+  const x = v | 0;
+  return r.some(([lo, hi]) => lo <= x && x <= hi);
 }
 
 /** The one value in `r`, if it holds exactly one. */
@@ -676,7 +655,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         }
         guard.add(cur);
         const term = cur.ops[cur.ops.length - 1];
-        const taken = evalCmp(ti.opcode, ti.xOnLeft, xv, ti.k);
+        const taken = contains(takenBy(ti), xv);
         cur = forwardingTarget(term.successors[taken ? 0 : 1].block);
       }
     };
