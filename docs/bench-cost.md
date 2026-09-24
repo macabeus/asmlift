@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=111.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=108.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,23 +136,25 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-24**, taken at `b7857a14`
-(`match/stkwide`, rebased onto #258: comments and one test, no row moved): the ranked pass alone is
-**1,154 s over 192 real rows** and **590 s over 768 synthetic rows**; wall clock was 291.2 s and
-212.7 s on tiers that overlap, and **306.9 s** end to end (the CLI's own `Done in` line). Against
-`origin/main` it is **0 field changes**, fan **69,855 → 69,855 (1.00×)** over 960 comparable rows,
-while its ranked pass reads **2,353.2 s → 1,743.9 s (0.74×)**. The box was quieter; the branch is
-no cheaper. The dearest single row is **148 s** on `kleod:PauseMenuScreenHandler:agbcc`, **13% of
-the tier** on its own — which is the figure to reach for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-24**, taken at `787670c0`
+(`match/utag-mwcc`, rebased onto #259: a PowerPC frontend capability and a switch-recovery one, 11
+rows gained): the ranked pass alone is **1,703 s over 195 real rows** and **1,032 s over 782
+synthetic rows**; wall clock was 631.8 s and 330.8 s on tiers that overlap, and **632.0 s** end to
+end (the CLI's own `Done in` line). Against `origin/main` it is **136 field changes over 20 rows,
+all PowerPC**, fan **69,855 → 69,855 (1.00×)** over 960 comparable rows, while its ranked pass
+reads **1,743.9 s → 2,363.9 s (1.36×)**, and 17 rows (370.6 s) rank here that declined at
+`origin/main`. The dearest single row is **298 s** on `marioparty4:SceneMain:mwcc_242_81`, **18% of
+the tier** on its own — one of those 17, and a `noncompile`: all 324 of its candidates are compiled
+and none compiles. That is the figure to reach for when a scoped run looks cheap.
 
-The artifact `origin/main` carried before this one, taken 2026-09-24 at `0ff9a625`
-(`match/preupdate-escape`, #258), read **1,548 s over 192 real rows** and **805 s over 768
-synthetic rows**; wall clock was 385.8 s and 284.4 s, **403.7 s** end to end, and its dearest row
-was **205 s** on `kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it, taken at
-`ad42a88b` (#257), read 1,143 s over 192 real rows and 642 s over 767 synthetic rows; wall clock
-was 309.2 s and 243.9 s, 337.1 s end to end, and its dearest row was 140 s on
-`kleod:PauseMenuScreenHandler:agbcc`, 12% of the tier. So an unmoved fan has been priced 1.16×,
-1.32× and 0.74× on consecutive artifacts: the seconds are the box, not the branch.
+The artifact `origin/main` carried before this one, taken 2026-09-24 at `b7857a14`
+(`match/stkwide`, #259), read **1,154 s over 192 real rows** and **590 s over 768 synthetic rows**;
+wall clock was 291.2 s and 212.7 s, **306.9 s** end to end, and its dearest row was **148 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it, taken at `0ff9a625`
+(#258), read 1,548 s over 192 real rows and 805 s over 768 synthetic rows; wall clock was 385.8 s
+and 284.4 s, 403.7 s end to end, and its dearest row was 205 s on
+`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. So an unmoved fan has been priced 1.32×,
+0.74× and 1.36× on consecutive artifacts: the seconds are the box, not the branch.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
