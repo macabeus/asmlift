@@ -73,6 +73,10 @@ export function cType(t: IrType): string {
   if (t.kind === 'struct') {
     return `struct ${t.name}`;
   }
+  // Declared inline, where the struct member that holds it is declared (ir/types.ts).
+  if (t.kind === 'union') {
+    return `union { ${t.members.map((m) => `${cDeclare(m.type, m.name)};`).join(' ')} }`;
+  }
   if (t.kind === 'array') {
     return `${cType(t.elem)}[${t.count}]`;
   } // ill-formed as a prefix; use cDeclare

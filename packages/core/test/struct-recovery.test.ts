@@ -21,17 +21,23 @@ import { recoverTypes } from '../src/raise/recover';
 import { recognizeStructs } from '../src/raise/structs';
 import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
-import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, type TargetDescription, structureOptionsFor } from '../src/target';
 
 // Run the raise tower (post-lift IR → recognizeStructs → recover → structure → C), mirroring the
-// pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C.
-function emit(ir: string, returnsVoid = false, symbols?: Map<string, SymbolInfo>): string {
+// pipeline's post-lift stages (pre-recovery structs pass onward), and return the emitted C — for
+// agbcc unless a test names another target.
+function emit(
+  ir: string,
+  returnsVoid = false,
+  symbols?: Map<string, SymbolInfo>,
+  target: TargetDescription = ARMV4T_AGBCC,
+): string {
   const fn = parse(ir);
   verify(fn);
-  recognizeStructs(fn);
+  recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary);
   recoverTypes(fn);
   verify(fn);
-  const sfn = structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, returnsVoid), ...(symbols ? { symbols } : {}) });
+  const sfn = structure(fn, { ...structureOptionsFor(target, returnsVoid), ...(symbols ? { symbols } : {}) });
   return cBackend.emit(sfn);
 }
 
@@ -86,18 +92,19 @@ describe('struct recovery — access-pattern evidence discriminator', () => {
   });
 
   // OVERLAP at DISTINCT offsets (a word at 0 AND a half at 2 — byte ranges [0,4) and [2,4) collide;
-  // the same-offset union check above cannot see it). A union view natural C cannot lay out → LOUD.
-  test('fields overlapping at distinct offsets fail loud (union view)', () => {
-    expect(() =>
-      emit(`fn ov {
+  // the same-offset check cannot see it). No plain struct lays it out, so it is a UNION member —
+  // the halfword at 2 is element 1 of the `half` view (the next describe block owns the rule).
+  test('fields overlapping at distinct offsets become one union member', () => {
+    const c = emit(`fn ov {
 ^bb0(%0: unk32):
   %1: unk32 = load %0 {off=0, width=4, signed=true}
   %2: unk32 = load %0 {off=2, width=2, signed=true}
   %3: unk32 = add %1, %2
   ret %3
 }
-`),
-    ).toThrow(/overlaps the prior field/);
+`);
+    expect(c).toContain('struct Struct0 { union { s32 word; s16 half[2]; } field_0; };');
+    expect(c).toContain('a0->field_0.word + a0->field_0.half[1]');
   });
 
   // UNIFORM STRIDE (off 0/4/8, all width 4) ⇒ array, untouched. This is the `mfield` shape —
@@ -217,22 +224,199 @@ describe('struct recovery — a base whose address is declared elsewhere', () =>
     expect(c).toContain('->field_4');
   });
 
-  // WRONG-ANSWER SIDE ②. The gate this rule does NOT relax: an ANONYMOUS base — a parameter, a
-  // loaded pointer — has no source of truth but its own access set, so the identical overlap still
-  // declines. `synthetic:uhalf` and `synthetic:uniwrite` are that shape, and they keep declining.
-  test('the identical overlap on an anonymous base still fails loud', () => {
-    expect(() =>
-      emit(
-        `fn anon {
+  // ② THE BASE THIS RULE DOES NOT COVER: an ANONYMOUS base — a parameter, a
+  // loaded pointer — has no source of truth but its own access set, so the identical overlap is
+  // evidence about ITS layout and is declared as a union rather than left as two casts.
+  test('the identical overlap on an anonymous base is declared as a union', () => {
+    const c = emit(
+      `fn anon {
 ^bb0(%0: unk32, %1: unk32):
   store %0, %1 {off=0, width=2}
   store %0, %1 {off=0, width=4}
   ret
 }
 `,
-        true,
-      ),
-    ).toThrow(/overlapping fields at offset 0 \(widths 2 and 4\)/);
+      true,
+    );
+    expect(c).toContain('struct Struct0 { union { s32 word; u16 half; } field_0; };');
+    expect(c).toContain('a0->field_0.half = a1;');
+    expect(c).toContain('a0->field_0.word = a1;');
+  });
+});
+
+// AN OVERLAP ON AN ANONYMOUS BASE IS A UNION (raise/structs.ts `buildUnionStruct`). The same bytes
+// read or written at two widths are two views of one cell. Aligned power-of-two accesses overlap
+// only by CONTAINMENT, so each overlap is one widest access and the narrower ones inside it, and it
+// becomes one member holding one view per width. A cast of the base at each access's own width
+// spells the same accesses but not the same program on agbcc, whose aliasing rules let it reuse a
+// narrow read across a wider store — `synthetic:ureread` is the row that referees it.
+describe('struct recovery — an overlap on an anonymous base is a union', () => {
+  // `synthetic:uhalf`: a word written, both of its halves read back. The half at +2 makes the
+  // view an ARRAY reaching the furthest element read; index 0 prints in the `*` form.
+  test('a word written and both halves read back', () => {
+    const c = emit(`fn halves {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=4}
+  %2: unk32 = load %0 {off=0, width=2, signed=false}
+  %3: unk32 = load %0 {off=2, width=2, signed=false}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`);
+    expect(c).toContain('struct Struct0 { union { s32 word; u16 half[2]; } field_0; };');
+    expect(c).toContain('a0->field_0.word = a1;');
+    expect(c).toContain('*a0->field_0.half + a0->field_0.half[1]');
+  });
+
+  // `synthetic:uniwrite`: the narrow STORE raise/truncload.ts refuses to widen stays one byte wide.
+  test('a narrow store writes the narrow view', () => {
+    const c = emit(`fn narrowst {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=1}
+  store %0, %1 {off=0, width=1}
+  %2: unk32 = load %0 {off=0, width=2, signed=false}
+  ret %2
+}
+`);
+    expect(c).toContain('struct Struct0 { union { u16 half; u8 byte; } field_0; };');
+    expect(c).toContain('a0->field_0.byte = 1;');
+    expect(c).toContain('return a0->field_0.half;');
+  });
+
+  // `synthetic:utag`: the overlap is ONE member of a struct whose other fields stay plain.
+  test('an overlap at an interior offset is one member beside plain fields', () => {
+    const c = emit(`fn tagged {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  %2: unk32 = load %0 {off=4, width=4, signed=true}
+  %3: unk32 = load %0 {off=4, width=2, signed=false}
+  %4: unk32 = load %0 {off=4, width=1, signed=false}
+  %5: unk32 = add %1, %2
+  %6: unk32 = add %3, %4
+  %7: unk32 = add %5, %6
+  ret %7
+}
+`);
+    expect(c).toContain('struct Struct0 { s32 field_0; union { s32 word; u16 half; u8 byte; } field_4; };');
+    expect(c).toContain('a0->field_0 + a0->field_4.word');
+    expect(c).toContain('a0->field_4.half + a0->field_4.byte');
+  });
+
+  // The union does not forgive a PACKED access: it has no view to seat it in either.
+  test('a misaligned access beside an overlap still declines as packed', () => {
+    expect(() =>
+      emit(`fn packedov {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=4, signed=true}
+  %2: unk32 = load %0 {off=0, width=2, signed=true}
+  %3: unk32 = load %0 {off=2, width=4, signed=true}
+  %4: unk32 = add %1, %2
+  %5: unk32 = add %4, %3
+  ret %5
+}
+`),
+    ).toThrow(/field at offset 2 \(width 4\) is not naturally aligned — packed layout not modelled/);
+  });
+
+  // A narrow width LOADED with both extensions (MIPS `lh`/`lhu`, PPC `lha`/`lhz`) is two views: one
+  // view would read one of the two with the other's extension. The store writes the unsigned one.
+  test('a width loaded with both extensions gets a view for each', () => {
+    const c = emit(`fn exts {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=2, signed=true}
+  store %0, %1 {off=0, width=4}
+  %3: unk32 = load %0 {off=0, width=2, signed=false}
+  store %0, %3 {off=2, width=2}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`);
+    expect(c).toContain('struct Struct0 { union { s32 word; u16 uhalf[2]; s16 shalf; } field_0; };');
+    expect(c).toContain('a0->field_0.shalf');
+    expect(c).toContain('a0->field_0.uhalf[1] = ');
+    expect(c).not.toMatch(/\(u16\)|\(s16\)/);
+  });
+
+  // agbcc aligns and rounds EVERY struct and union to 4 bytes: `union { u16 h; u8 b; }` is four
+  // bytes there and two on ido/kmc/mwcc (target.ts `aggregateBoundary`, compiled). A field inside
+  // the rounded size would be mislaid on agbcc, so it declines there — and lifts where the compiler
+  // lays the union out naturally, and declines where nobody measured the boundary.
+  const NARROW_THEN_FIELD = `fn narrowthen {
+^bb0(%0: unk32, %1: unk32):
+  store %0, %1 {off=0, width=2}
+  %2: unk32 = load %0 {off=1, width=1, signed=false}
+  %3: unk32 = load %0 {off=2, width=2, signed=false}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`;
+  test('a narrow union with a field inside its rounded size declines on a 4-byte boundary', () => {
+    expect(() => emit(NARROW_THEN_FIELD)).toThrow(
+      /the union at offset 0 does not fit this compiler's 4-byte aggregate boundary/,
+    );
+  });
+
+  test('…and is laid out naturally where the boundary is 1', () => {
+    const c = emit(NARROW_THEN_FIELD, false, undefined, MIPS_IDO);
+    expect(c).toContain('struct Struct0 { union { u16 half; u8 byte[2]; } field_0; u16 field_2; };');
+    expect(c).toContain('a0->field_0.byte[1] + a0->field_2');
+  });
+
+  test('…and declines on a compiler whose boundary is unmeasured', () => {
+    const unmeasured = {
+      ...MIPS_IDO,
+      compilerBehaviors: { ...MIPS_IDO.compilerBehaviors, aggregateBoundary: undefined },
+    };
+    expect(() => emit(NARROW_THEN_FIELD, false, undefined, unmeasured)).toThrow(
+      /the union at offset 0 needs this compiler's aggregate boundary, which is unmeasured/,
+    );
+  });
+
+  // The same both-extensions rule on a cell that has ONE width: it is a union of `uhalf` and
+  // `shalf`, not the one signed field `buildStruct` would give it.
+  test('a single-width cell loaded both ways beside another overlap is a union too', () => {
+    const c = emit(`fn cellexts {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=4, width=2, signed=false}
+  store %0, %1 {off=0, width=1}
+  %3: unk32 = load %0 {off=4, width=2, signed=true}
+  %4: unk32 = load %0 {off=0, width=2, signed=false}
+  %5: unk32 = add %2, %3
+  %6: unk32 = add %5, %4
+  ret %6
+}
+`);
+    expect(c).toContain('union { u16 uhalf; s16 shalf; } field_4;');
+    expect(c).toContain('a0->field_4.uhalf');
+    expect(c).toContain('a0->field_4.shalf');
+  });
+
+  test('a narrow union off the 4-byte boundary declines there too', () => {
+    expect(() =>
+      emit(`fn narrowoff {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = load %0 {off=0, width=1, signed=false}
+  store %0, %1 {off=2, width=2}
+  %3: unk32 = load %0 {off=3, width=1, signed=false}
+  %4: unk32 = add %2, %3
+  ret %4
+}
+`),
+    ).toThrow(/the union at offset 2 does not fit this compiler's 4-byte aggregate boundary/);
+  });
+
+  // A width no view is named for keeps the overlap decline.
+  test('an overlap involving a width with no view declines', () => {
+    expect(() =>
+      emit(`fn wide {
+^bb0(%0: unk32):
+  %1: unk32 = load %0 {off=0, width=8, signed=true}
+  %2: unk32 = load %0 {off=0, width=4, signed=true}
+  %3: unk32 = add %1, %2
+  ret %3
+}
+`),
+    ).toThrow(/no union view for a 8-byte access at offset 0/);
   });
 });
 

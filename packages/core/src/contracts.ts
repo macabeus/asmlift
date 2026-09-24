@@ -4,7 +4,7 @@
 // A pass that regresses fails AT its boundary with a diagnostic, not three stages later as
 // wrong C.
 import { type Fn, type Value, reachableBlocks } from './ir/core';
-import { type IrType, typeToString } from './ir/types';
+import { type IrType, memberOf, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
 import {
   exprChildren,
@@ -577,10 +577,10 @@ export function assertDerefsTyped(sfn: SFn): void {
       if (bt) {
         // type-check against the same dot-vs-arrow spelling the printer will use (shared rule)
         const st = fieldSpellsDot(e) ? bt : bt.kind === 'ptr' ? bt.to : undefined;
-        if (!st || st.kind !== 'struct') {
+        if (!st || (st.kind !== 'struct' && st.kind !== 'union')) {
           bad.push(`member access '${e.name}' on a non-struct base (C type '${typeToString(bt)}')`);
-        } else if (!st.fields.some((f) => f.name === e.name)) {
-          bad.push(`member access '${e.name}' not declared on '${st.name}'`);
+        } else if (memberOf(st, e.name) === undefined) {
+          bad.push(`member access '${e.name}' not declared on '${typeToString(st)}'`);
         }
       }
     }

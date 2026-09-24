@@ -673,3 +673,46 @@ describe('byte offsets on a rendered pointer', () => {
     expect(decompile('f', bytesOnWordPtr, ARMV4T_AGBCC).source).toContain('*(u8 *)(a0 + 15) = 7;');
   });
 });
+
+// A UNION MEMBER (ir/types.ts): views of one cell, declared inline as the type of a struct member.
+// Selecting a view is a dot-form member access on the member itself, and both the type walk and
+// the stage contract read it through the same lookup a struct field goes through.
+describe('a union member of a recovered struct', () => {
+  const cell = T.union(
+    [
+      { off: 0, type: T.s(32), name: 'word' },
+      { off: 0, type: T.array(T.u(16), 2), name: 'half' },
+    ],
+    4,
+  );
+  const st = T.struct('Struct0', [{ off: 0, type: cell, name: 'field_0' }]);
+  const member: Expr = { k: 'field', base: v('p'), name: 'field_0' };
+  const view = (name: string): Expr => ({ k: 'field', base: member, name, dot: true });
+  const half1: Expr = { k: 'index', base: view('half'), idx: c(1), width: 2, signed: false };
+  const sfn = (value: Expr): SFn => ({
+    name: 'f',
+    params: [{ name: 'p', type: T.ptr(st) }],
+    locals: [],
+    retType: T.s(32),
+    body: [{ k: 'return', value }],
+    structs: [{ name: 'Struct0', fields: st.kind === 'struct' ? st.fields : [] }],
+  });
+
+  test('each view types as its own declaration, and an array view strides its element', () => {
+    const ct = (e: Expr) => exprCType(e, (n) => (n === 'p' ? T.ptr(st) : undefined));
+    expect(ct(member)).toEqual(cell);
+    expect(ct(view('word'))).toEqual(T.s(32));
+    expect(ct(half1)).toEqual(T.u(16));
+  });
+
+  test('the contract admits a declared view and refuses an undeclared one', () => {
+    expect(() => assertDerefsTyped(sfn({ k: 'bin', op: '+', l: view('word'), r: half1 }))).not.toThrow();
+    expect(() => assertDerefsTyped(sfn(view('byte')))).toThrow(/member access 'byte' not declared on 'union\{/);
+  });
+
+  test('the union is declared inline, and a view reads through the member with no cast', () => {
+    const out = cBackend.emit(sfn({ k: 'bin', op: '+', l: view('word'), r: half1 }));
+    expect(out).toContain('struct Struct0 { union { s32 word; u16 half[2]; } field_0; };');
+    expect(out).toContain('return p->field_0.word + p->field_0.half[1];');
+  });
+});

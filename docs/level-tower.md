@@ -653,6 +653,36 @@ byte-identical and the operator is simply not recoverable for an unsigned operan
 frontend but Thumb pairs registers, so on PowerPC the helper table's effect is the refusal alone,
 and both MIPS targets have no table at all and refuse the `jal` before the question arises.
 
+## A union, and why it is a type kind
+
+An `IrType` kind, and the case for it is a compiler, not a row count.
+A base read or written at two widths over the same bytes (`u->w = v; return u->h[0] + u->h[1];`)
+has two C spellings: a union member whose views are those widths, and a pointer cast per access
+(`((u16 *)p)[1]` beside `*p`), which is what a declared address already gets (raise/structs.ts). On
+most targets they compile identically. On agbcc they do not: at -O2 it applies C's aliasing rules,
+so through casts a narrow read, a word store and the same narrow read again become ONE `ldrh`
+whose value is reused, and through a union the read after the store is reloaded, as in the asm
+the union was compiled from (`synthetic:ureread`). The union keeps every access the asm performed,
+the cast can lose one, so the union is the default and not a variation.
+
+**Raise decides it, at L1→L2, beside the struct it lives in.** `union` carries its views (every
+one at offset 0) and its SIZE, because the size is the compiler's: agbcc rounds every struct and
+union to four bytes (`compilerBehaviors.aggregateBoundary`), so `union { u16 h; u8 b; }` is four
+bytes there and two on ido, kmc and mwcc. A union that boundary would move declines rather than
+mislaying the fields after it, and on a compiler nobody measured every union narrower than a word
+declines, since a boundary guessed in either direction mislays something. It has no name — it is only ever declared inline, as the type
+of the struct member holding it — so none of the name-keyed struct machinery (`collectStructs`,
+the `/ptr-field` flip) reaches it. **Structure** reads an access through the view of its own
+width and extension (`p->field_0.half[1]`, `p->field_0.shalf`; `ir/types.ts` `unionViewAt`); the type walk and the
+deref contract share `memberOf`, so they agree on which member access is well-typed.
+
+**Not built:** a declared address (a named global, a literal) read at two widths keeps the cast
+spelling, and the aliasing argument above applies to it too; no row has a narrow re-read across a
+store there, and a union would be the wrong declaration for its inhabitants (agbcc fusing two byte
+compares into one `ldrh`; a device register, whose reads are `volatile`). Nor does
+raise/struct-arrays.ts read the boundary yet: it sizes an element struct naturally, which agbcc
+does not.
+
 ## The contracts are the point
 
 The reason the levels earn their keep is not that the graph changes shape between them — it is

@@ -891,17 +891,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // exactly the instructions `utag` does. raise/truncload.ts folds the narrow read into a cast of
   // the wider one where the bytes are the field's LOW-ORDER end. WHICH ROWS THAT LIFTS IS A
   // MEASUREMENT, and the committed artifact is where it is read — `node -e` over
-  // apps/benchmark/results/results.json filtering `^synthetic:(unitrunc|utag|uhalf|uniwrite|unidev):`
+  // apps/benchmark/results/results.json filtering `^synthetic:(unitrunc|utag|uhalf|ureread|uniwrite|unidev):`
   // prints the outcome and the decline of every cell. As it stands:
   //   • `unitrunc` LIFTS on all four toolchains — one word member and its low byte, which is the
   //     fold's own shape.
-  //   • `utag` DECLINES on all four. On the three that lift it at all the refusal is an overlap at
-  //     offset 4, so the fold answers some of that row's overlapping pairs and not the one that
-  //     decides it; on mwcc_242_81 the row never reaches this pass (a `bge` with no reaching
-  //     compare). THE ROW IS NOT A LITTLE-ENDIAN/BIG-ENDIAN SPLIT, which is what it was described
-  //     as before this was read off the artifact.
-  //   • `uhalf` and `uniwrite` decline whatever the target — a read above the low-order end, and a
-  //     narrow STORE, neither of which any cast spells.
+  //   • `utag`, `uhalf`, `ureread` and `uniwrite` carry what the fold leaves: a read on a path the
+  //     cover does not dominate (`utag`'s switch arms), narrow reads whose only cover is the word
+  //     STORE, which fixes no signedness (`uhalf`, `ureread`: `covering-store`, whichever end of the
+  //     word they read), and a narrow STORE (`uniwrite`). No value cast spells any of them, and
+  //     raise/structs.ts declares each overlap on a parameter as a UNION member — a view per width
+  //     — which is what these rows' sources declare. `utag` still declines on mwcc_242_81, before
+  //     this pass: a `bge` with no reaching compare.
   //   • `unidev` is not a case of that sentence at all: its base is a LITERAL ADDRESS, so the
   //     accesses are not evidence about a layout nobody declared, and raise/structs.ts forgives the
   //     failed synthesis. It LIFTS, at each access's own width, and what it measures is below.
@@ -913,6 +913,18 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'uhalf',
     src: 'union W{u32 w;u16 h[2];};\nu32 uhalf(union W*u,u32 v){ u->w=v; return u->h[0]+u->h[1]; }',
+    features: ['union', 'field', 'array', 'mixed-width'],
+    toolchains: ALL,
+  },
+  // WHY THE RECOVERY DECLARES A UNION AND NOT A CAST. `((u16 *)u)[1]` beside `*u` spells the same
+  // accesses as the union, and on `uhalf` it compiles to the same bytes everywhere. Here it does
+  // not: agbcc -O2 applies C's aliasing rules, so through casts the halfword read after the word
+  // store is taken to be the one read before it — `ldrh; str; adds` — where the union reloads it,
+  // `ldrh; str; ldrh`, which is this target. gcc2.7.2kmc, ido7.1 and mwcc_242_81 reload for both,
+  // so the agbcc cell is the one that referees the spelling.
+  {
+    sym: 'ureread',
+    src: 'union W{u32 w;u16 h[2];};\nu32 ureread(union W*u,u32 v){ u16 a=u->h[1]; u->w=v; return a+u->h[1]; }',
     features: ['union', 'field', 'array', 'mixed-width'],
     toolchains: ALL,
   },
@@ -956,8 +968,10 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // THE NARROW STORE, which `ustore` above does not reach: its own narrow write goes through a
   // variable index, so it arrives as an element access rather than as a constant-offset one. Here
-  // there is no index, so the write lands on the refusal itself. Widening it would clobber the byte
-  // past it and no cast spells a partial write, so this row must keep declining.
+  // there is no index, so the write lands on the overlap itself. raise/truncload.ts must never
+  // widen it — that would clobber the byte past it, and no value cast spells a partial write — and
+  // the row SCORES that: the union's `byte` view stores one byte, and a widened store would compile
+  // to a halfword store and stop matching.
   {
     sym: 'uniwrite',
     src: 'union U{u16 h;u8 b;};\nu32 uniwrite(union U*u){ u->b=1; return u->h; }',

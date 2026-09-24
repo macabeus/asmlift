@@ -880,6 +880,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // this list is their union: `unread-data-directive` is #247's and `clobbered-value` is #250's,
   // and a merge that took either side alone would have silently dropped the other's entry while
   // the derived count in the name moved by one and looked right.
+  //
+  // `structs` joins on the `clobbered-value` reading: its thirteen inhabitants were overlaps on a
+  // base only this function's accesses describe, which raise/structs.ts declares as a union
+  // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
+  // is a population, not a capability.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -887,6 +892,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'cross-block-flags-arm',
     'pool-word-shape',
     'store-class',
+    'structs',
     'unread-data-directive',
   ];
 
@@ -1140,7 +1146,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 27],
-    ['structure/structure.ts', 17],
+    ['structure/structure.ts', 18],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1148,7 +1154,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 73;
+  const RESIDUE_TOTAL = 74;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

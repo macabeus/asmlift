@@ -8,10 +8,10 @@
 //     ldrh r0, [r4, #0xc]        @ the member, read whole
 //     ldrb r2, [r4, #0xc]        @ the same member, narrowed for the call
 //
-// The pass that groups a base's constant-offset accesses reads that as ONE OFFSET AT TWO WIDTHS and
-// refuses: `raise/structs.ts`'s `buildStruct` throws "overlapping fields ... unions not modelled".
-// The refusal is right about the SHAPE and wrong about the CAUSE — there is no second object here,
-// only a cast — so a function carrying one declines whole. (`raise/memberarrays.ts`'s
+// The pass that groups a base's constant-offset accesses reads that as ONE OFFSET AT TWO WIDTHS:
+// `raise/structs.ts` declares the pair a union member (on a parameter or a loaded pointer). That
+// reading is right about the SHAPE and wrong about the CAUSE — there is no second object here, only
+// a cast — so the function would carry a union its source never declared. (`raise/memberarrays.ts`'s
 // same-sounding `member-conflict` judges VARIABLE-INDEX accesses, `aload`/`astore`, and a base with
 // any constant-offset load is already outside that pass by `direct-access`. It is a different shape
 // and this fold does not reach it.)
@@ -53,12 +53,14 @@
 // the low bytes of a little-endian one at its base. Both directions have a corpus inhabitant and
 // the benchmark's `unitrunc` row carries both.
 //
-// WHICH GATE BOUNDS THE CORPUS PATH — `pnpm bench gates --pass truncload`, and the answer is the
-// SOUND ones, per population. Over the synthetic tier on agbcc (336 rows) the census reads
-// `fixed-cell 2, covering-store 2, covering-dominates 2`; on ido7.1 (178 rows) and gcc2.7.2kmc
-// (182) `fixed-cell 2, covering-store 2, high-order-read 2`, the big-endian rows reaching the
-// skew rule because `utag`'s union members are read at the field's TOP; on mwcc_242_81 (188)
-// `fixed-cell 2, covering-store 2`.
+// WHICH GATE BOUNDS THE CORPUS PATH — `pnpm bench gates --pass truncload [--toolchain <id>]`, and
+// the answer is the SOUND ones, per population. Over the synthetic tier on agbcc (337 rows) the
+// census reads `covering-store 12, covering-dominates 4, fixed-cell 2`; on ido7.1 (179 rows) and
+// gcc2.7.2kmc (183) `covering-store 12, high-order-read 4, fixed-cell 2`, the big-endian rows
+// reaching the skew rule because `utag`'s union members are read at the field's TOP; on
+// mwcc_242_81 (189) `covering-store 12, fixed-cell 2`. The union rows (`uhalf`, `ureread`, `utag`)
+// are most of it, and they are counted whole only because raise/structs.ts
+// recovers them rather than declining part-way through the enumeration — the next paragraph.
 //
 // READ THE `did not lift` LINE WITH THE COUNTS, because the census runs the whole RANKED
 // enumeration per row and a row that THROWS part-way through it contributes a TRUNCATED count
@@ -87,16 +89,14 @@
 // A NARROW STORE IS NOT A CANDIDATE AT ALL — the refusal is in the candidate builder below rather
 // than in the gate table, and this is the table's named residue. Widening a write clobbers the
 // bytes past it, and no cast spelling expresses a partial write: `(u8)p->f = v` is not C. A base
-// whose conflict is a narrow STORE therefore keeps both widths and declines exactly as it did.
+// whose conflict is a narrow STORE therefore keeps both widths — two views of a union member where
+// raise/structs.ts synthesizes the layout, two casts at a declared address.
 //
-// THE SECOND RESIDUE, and it is the one that costs a row. A union read through members of three
-// widths on three arms of a `switch` (`synthetic:utag`) is refused by `covering-dominates`, and
-// the honest spelling for it is a `union` — a type this pass deliberately does not introduce, and
-// which the corpus does not pin, since the asm cannot tell a union from a cast. So that row keeps
-// declining. Widening its reads DOES compile byte-exactly on agbcc, which is exactly why the rule
-// has to be a rule: the differ scores the sound and the unsound spelling the same, so nothing
-// downstream would ever refuse it. A raise-level seam that enumerated both spellings and let the
-// differ pick is the shape that could take this back; it is priced here and not built.
+// THE SECOND RESIDUE. A union read through members of three widths on three arms of a `switch`
+// (`synthetic:utag`) is refused by `covering-dominates`, and the overlap it leaves is declared as a
+// union member by raise/structs.ts — which is what that source wrote. Widening its reads DOES
+// compile byte-exactly on agbcc, which is exactly why the rule has to be a rule: the differ scores
+// the sound and the unsound spelling the same, so nothing downstream would ever refuse it.
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkOp, mkValue } from '../ir/core';
 import { CAST_WIDTHS } from '../ir/opcodes';
