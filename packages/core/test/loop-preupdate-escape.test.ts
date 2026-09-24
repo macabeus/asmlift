@@ -29,6 +29,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { StructureError, structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -310,10 +311,10 @@ test('a body op in an inner while header stays unnamed, and the loop declines on
   expect(() => emit(IN_AN_INNER_WHILE_HEADER)).toThrow(/reads a pre-update loop variable/);
 });
 
-// A body block param that takes a LOOP VARIABLE's name writes it partway through the body, and the
-// loop's own reads after that write see the wrong value (the KNOWN GAP beside `rebindHazard`,
-// structure.ts). A home does not unlock such a loop where it would decline on its escaped value:
-// here %10 takes %4's name ahead of `%11 = sub %3, %4`.
+// A body block param fed a loop variable's BACK-EDGE ARG does not take that variable's name (the
+// rebind the sink stands down on, which would write it partway through the body). Here %10 is fed
+// %2, the back-edge arg of %4, ahead of `%11 = sub %3, %4`; the loop keeps %4's value and the escaped
+// `%11` is named at its def.
 const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = add %0, %1
@@ -334,6 +335,12 @@ const REBINDS_A_LOOP_VARIABLE = `fn escrebind {
 }
 `;
 
-test('a pre-update home does not unlock a loop whose body rebinds a loop variable', () => {
-  expect(() => emit(REBINDS_A_LOOP_VARIABLE)).toThrow(/reads a pre-update loop variable/);
+test('a pre-update home beside a merge fed a back-edge arg computes what the IR computes', () => {
+  const fn = parse(REBINDS_A_LOOP_VARIABLE);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  const r = irAgreement(REBINDS_A_LOOP_VARIABLE, sfn);
+  expect(r.judged).toBeGreaterThan(0);
+  expect(r.disagree).toBe(0);
 });

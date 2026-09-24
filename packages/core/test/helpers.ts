@@ -12,6 +12,7 @@
 // function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
 // the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 
@@ -588,3 +589,27 @@ export const breathe = (): Promise<void> => new Promise((resolve) => setImmediat
  *  60 s RPC timeout even at the 3.4x fork-contention factor these sweeps measured; large enough
  *  that the yields themselves cost nothing measurable. */
 export const BREATHE_EVERY = 512;
+
+/** How many of `seeds` inputs the structured tree and its own IR text disagree on, over the inputs
+ *  both {@link irTraceOf} and {@link traceOf} can run — a run past the step cap on either side is
+ *  not judged, so a caller asserts `judged` as well as `disagree`. */
+export function irAgreement(ir: string, sfn: SFn, seeds = 96): { judged: number; disagree: number } {
+  let judged = 0;
+  let disagree = 0;
+  for (let k = 0; k < seeds; k++) {
+    const seed = 1 + k * 4099;
+    let off: Event[];
+    let on: Event[];
+    try {
+      off = irTraceOf(parse(ir), seed);
+      on = traceOf(sfn, seed);
+    } catch {
+      continue;
+    }
+    judged++;
+    if (tracesDiffer({ off, on })) {
+      disagree++;
+    }
+  }
+  return { judged, disagree };
+}

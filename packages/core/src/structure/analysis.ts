@@ -726,8 +726,6 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
-  /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
-  preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
@@ -1460,7 +1458,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       };
       return readsUpdated(r);
     });
-  const preUpdateHomes = new Set<Op>();
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -1704,7 +1701,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           escapesAheadOfUpdate(op, er, consumersOf(op))
         ) {
           materialize.add(op);
-          preUpdateHomes.add(op);
           continue;
         }
         if (op.opcode !== 'call' && op.opcode !== 'load' && op.opcode !== 'aload') {
@@ -1999,7 +1995,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     opBlock,
     liveIn,
     materialize,
-    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,

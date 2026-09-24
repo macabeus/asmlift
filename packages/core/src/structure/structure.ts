@@ -2079,7 +2079,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     liveIn,
     materialize,
-    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,
@@ -3139,7 +3138,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ...incoming.filter((c) => backArgName.has(c.v)),
         ]) {
           const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame)) {
+          // The alias waiver is about `c.v`'s OWN name, which holds it on every path; a loop
+          // variable's name offered through `backArgName` holds it only once that back edge ran.
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame && varName.has(c.v))) {
             continue;
           }
           // `freshParamMerge` (the `/fresh-merge` variation): this merge takes its own home rather
@@ -5228,13 +5229,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
-        // a stale value — read under the un-rotation substitution: post-loop the params hold their
-        // updated values, and `staleExit` above proved the same copies right on the zero-trip path.
+        // a stale value — and structure the exit region after them, both under the un-rotation
+        // substitution: post-loop the params hold their updated values.
         //
-        // The exit REGION takes no substitution. It is reached from the guard as well, so every value
-        // it reads dominates the guard — a back-edge arg among them was computed before the loop, and
-        // on a zero-trip run its loop variable's name still holds the init instead.
-        out.push(...argAssigns(li.header, li.exit, sub, keptSlot), ...structureRegion(li.exit, stop));
+        // Less the back-edge args computed BEFORE the loop. Both renders run on the zero-trip path
+        // too, where a loop variable's name still holds its init — the arg itself only when the init
+        // IS that value. `sub` is last-wins over params sharing an arg, so the init is read off the
+        // last one. (`staleExit` cannot see this: an exit arg over such a value is the same value on
+        // both edges.)
+        const exitSub = new Map(
+          [...sub].filter(
+            ([a]) =>
+              li.header.params.includes(a) ||
+              opBlock.get(defs.get(a)!) === li.header ||
+              initArgs[li.backArgOfParam.lastIndexOf(a)] === a,
+          ),
+        );
+        out.push(
+          ...withSub(exitSub, () => [
+            ...argAssigns(li.header, li.exit, exitSub, keptSlot),
+            ...structureRegion(li.exit, stop),
+          ]),
+        );
         return out;
       }
     }
@@ -5826,8 +5842,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
       : null;
     const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
-    // Nor does a PRE-UPDATE HOME unlock a rebinding loop, for the reason the sink stands down above:
-    // without the name `escapesAheadOfUpdate` gave it, the value would be this hazard's escaped one.
     if (
       loopUpdateHazard(
         lterm.operands[0],
@@ -5837,8 +5851,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         updateWrites,
         postLoop,
         condFold !== null,
-      ) ||
-      (rebindHazard && [...dw.body].some((bb) => bb.ops.some((o) => preUpdateHomes.has(o))))
+      )
     ) {
       // Three reasons share this refusal — the test, an exit slot, an escaped body value — and the
       // one that was asked in detail names the gate that answered.

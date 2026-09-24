@@ -16,6 +16,7 @@ import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const emit = (ir: string, gate?: string): string => {
   const fn = parse(ir);
@@ -111,4 +112,45 @@ test('a merge that feeds its own loop variable takes that variable name', () => 
   expect(out).toMatch(/if \(v0 >= a1\) v1 = v0;/);
   // ONE assignment, in the arm — not an arm copy plus an update copy at the bottom of the body
   expect(out.split('v1 = v0;').length - 1).toBe(1);
+});
+
+// A REDUNDANT merge (every edge passes one value) may share that value's own name while it is still
+// live — the two are equal on every path. A LOOP VARIABLE's name offered for it through a back-edge
+// arg is not that: it holds the value only once that back edge has run. Here `%9` is fed `%2`, the
+// later loop's back-edge arg, whose loop variable's name holds the live `%5` at `^bb2`.
+const ALIAS_THROUGH_A_LATER_LOOP = `fn aliaslater {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = add %0, %0
+  br ^bb1(%1)
+^bb1(%4: s32):
+  %5: s32 = sub %0, %4
+  %6: s32 = const {value=1}
+  %7: s32 = add %4, %6
+  %8: u32 = icmp_slt %7, %0
+  cond_br %8, ^bb1(%7), ^bb2(%2)
+^bb2(%9: s32):
+  %10: u32 = icmp_slt %0, %5
+  cond_br %10, ^bb5(), ^bb3()
+^bb3():
+  br ^bb4(%1, %5)
+^bb4(%12: s32, %13: s32):
+  %15: s32 = call %2 {target="f1"}
+  %16: s32 = const {value=1}
+  %17: s32 = add %12, %16
+  %18: u32 = icmp_sge %17, %0
+  cond_br %18, ^bb5(), ^bb4(%17, %2)
+^bb5():
+  %22: s32 = call %0 {target="f2"}
+  ret %22
+}
+`;
+
+test('a redundant merge shares only its value’s own name, not a later loop variable’s', () => {
+  const fn = parse(ALIAS_THROUGH_A_LATER_LOOP);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn, { coalesceLoopInit: true });
+  const r = irAgreement(ALIAS_THROUGH_A_LATER_LOOP, sfn);
+  expect(r.judged).toBeGreaterThan(0);
+  expect(r.disagree).toBe(0);
 });

@@ -12,6 +12,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -202,4 +203,75 @@ test('after a kept-guard loop, an inlined op over a carried value renders it as 
     ).replace('call %1 {target="h"}', 'call %20 {target="h"}'),
   );
   expect(out).toContain('return h(a1 + a0);');
+});
+
+// …but a loop variable whose INIT is the carried value holds it on both paths, and the region keeps
+// reading it by name. Here the counter `%22` coalesces onto `a1` (`coalesceLoopInit`), which the
+// loop bumps, while `v = a1 - a0` computed ahead of the guard is carried unchanged: `a1 - a0`
+// re-derived after the loop would read the bumped `a1`.
+const CARRIED_AS_ITS_OWN_INIT = `fn ownit {
+^bb0(%0: s32, %1: s32):
+  %c: u32 = icmp_slt %0, %1
+  cond_br %c, ^bb1(), ^bb2()
+^bb1():
+  %x: s32 = call %0 {target="f0"}
+  br ^bb3(%1)
+^bb2():
+  br ^bb3(%1)
+^bb3(%11: s32):
+  %16: s32 = const {value=4}
+  %18: s32 = sub %11, %0
+  %21: u32 = icmp_slt %11, %16
+  cond_br %21, ^bb7(%1, %18), ^bb8()
+^bb7(%22: s32, %23: s32):
+  %g: s32 = call %23 {target="g"}
+  %25: s32 = const {value=1}
+  %26: s32 = add %22, %25
+  %m: s32 = const {value=-100}
+  %27: u32 = icmp_sge %26, %m
+  cond_br %27, ^bb8(), ^bb7(%26, %18)
+^bb8():
+  ret %18
+}
+`;
+
+test('after a kept-guard loop, a value carried as its own init is read by its loop variable', () => {
+  const fn = parse(CARRIED_AS_ITS_OWN_INIT);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn, { coalesceLoopInit: true });
+  const r = irAgreement(CARRIED_AS_ITS_OWN_INIT, sfn);
+  expect(r.judged).toBeGreaterThan(0);
+  expect(r.disagree).toBe(0);
+});
+
+// The exit COPIES run on the zero-trip path too, and here the kept one carries `%3 = h(a0) + a0`, a
+// value computed before the guard over `%2`, which the loop carries back into `%6`. Spelled through
+// `%6`'s name it would add the init `a1` whenever the loop never ran; `staleExit` passes it, since
+// `%3` is the same value on both edges.
+const EXIT_COPY_OVER_A_CARRIED_VALUE = `fn exitcarried {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="h"}
+  %3: s32 = add %2, %0
+  %4: u32 = icmp_slt %1, %0
+  cond_br %4, ^bb3(%3), ^bb2(%1, %1)
+^bb2(%5: s32, %6: s32):
+  %f: s32 = call %6 {target="g"}
+  %7: s32 = const {value=1}
+  %8: s32 = add %5, %7
+  %9: u32 = icmp_sge %8, %0
+  cond_br %9, ^bb3(%3), ^bb2(%8, %2)
+^bb3(%11: s32):
+  ret %11
+}
+`;
+
+test('an exit copy over a value the loop carries spells it as itself', () => {
+  const fn = parse(EXIT_COPY_OVER_A_CARRIED_VALUE);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  const r = irAgreement(EXIT_COPY_OVER_A_CARRIED_VALUE, sfn);
+  expect(r.judged).toBeGreaterThan(0);
+  expect(r.disagree).toBe(0);
 });
