@@ -27,7 +27,7 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   // (`{same:'X'}`) and the structurer's pre-update loop test compare on.
   test.each(spellings)('`add rD, rS, %s` is a register copy', (n) => {
     expect(dc('f', `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${n}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`).source).toBe(
-      's32 f(s32 a0) {\n    return a0;\n}\n',
+      's32 f(s32 a0, s32 a1) {\n    return a1;\n}\n',
     );
   });
 
@@ -35,7 +35,7 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   // so the wrong spelling costs the whole function rather than one `+ 0`.
   test.each(spellings)('`rsb rD, rS, %s` is a negate', (n) => {
     expect(dc('f', `\tpush\t{r4, lr}\n\trsb\tr0, r1, ${n}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`).source).toBe(
-      's32 f(s32 a0) {\n    return -a0;\n}\n',
+      's32 f(s32 a0, s32 a1) {\n    return -a1;\n}\n',
     );
   });
 
@@ -53,8 +53,8 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   // the gap where a reader will find it rather than leave the header claiming it cannot happen.
   test('KNOWN GAP: a binary immediate reaches the `add` lowering and is misread', () => {
     const add = (imm: string) => `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
-    expect(dc('f', add('#0X1')).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n'); // the radix fix
-    expect(dc('f', add('#0b1')).source).toBe('s32 f(s32 a0) {\n    return a0 + 0;\n}\n'); // gas: + 1
+    expect(dc('f', add('#0X1')).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1 + 1;\n}\n'); // the radix fix
+    expect(dc('f', add('#0b1')).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1 + 0;\n}\n'); // gas: + 1
   });
 });
 
@@ -487,8 +487,8 @@ describe('pre-UAL mnemonic spellings', () => {
   test('`ldmfd rN, {rD}` loads — it used to be deleted outright', () => {
     // The reason ldmfd is in the table. Without it the op reaches opaqueDest, which takes ops[0] —
     // the BASE — as the destination; the opaque is then dead, DCE removes it, and the load simply
-    // vanishes. That is a SILENT wrong answer, not a decline: it lifted to `return a0;`.
-    expect(dc('f', '\tldmfd\tr1, {r0}\n\tbx\tlr\n').source).toContain('*a0');
+    // vanishes. That is a SILENT wrong answer, not a decline: it lifted to `return a1;`.
+    expect(dc('f', '\tldmfd\tr1, {r0}\n\tbx\tlr\n').source).toContain('*a1');
   });
 
   test('a register list naming no register degrades loud, it does not invent one', () => {
@@ -501,7 +501,7 @@ describe('pre-UAL mnemonic spellings', () => {
     expect(() => dc('f', '\tldmia\tr1!, {foo}\n\tbx\tlr\n')).toThrow(/unmodelled effect instruction/);
     expect(() => dc('f', '\tldmia\tr1!, {ip}\n\tbx\tlr\n')).toThrow(/unmodelled effect instruction/);
     // the well-formed spelling still lifts, so the guard is not simply refusing everything
-    expect(dc('f', '\tldmia\tr1!, {r0}\n\tbx\tlr\n').source).toContain('*a0');
+    expect(dc('f', '\tldmia\tr1!, {r0}\n\tbx\tlr\n').source).toContain('*a1');
   });
 
   test('Thumb-1 has no no-writeback LDM: the `!`-less spelling still advances the base', () => {

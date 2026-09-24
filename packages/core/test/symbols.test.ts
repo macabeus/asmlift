@@ -612,13 +612,13 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     // the declaration's, so the term riding it is the ROW and what is left is the column.
     const twoTerms = '\tlsls\tr2, r2, #0x3\n\tadds\tr0, r0, r2\n\tadds\tr1, r1, r0\n';
     const src = run('f', derefAt('ldrb\tr0, [r1]', twoTerms), mapOf([[0x03001234, pointee(ranked([6, 8]))]]));
-    expect(src).toContain('gPtr->grid[a1][a0]');
+    expect(src).toContain('gPtr->grid[a2][a0]');
 
     // …and the SAME asm against a map stating rank 1 spells the one subscript that declaration
     // has. The rank is not decoration: these are two different declarations of one object, and
     // each spelling type-checks against exactly one of them.
     const flat = run('f', derefAt('ldrb\tr0, [r1]', twoTerms), mapOf([[0x03001234, pointee(ranked([48]))]]));
-    expect(flat).toContain('gPtr->grid[a0 + (a1 << 3)]');
+    expect(flat).toContain('gPtr->grid[a0 + (a2 << 3)]');
   });
 
   test('a rank the residual cannot be split along still spells every subscript, never a row', () => {
@@ -987,7 +987,7 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     // different agbcc objects and the order is part of the answer.
     const body = derefAt('ldrb\tr0, [r1]', '\tadds\tr1, r1, r0\n\tadds\tr1, r1, r2\n');
     const layout = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16, dims: [16] }];
-    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->slots[a0 + a1]');
+    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->slots[a0 + a2]');
     // …and a member the map states no rank for still declines, on the rank gate rather than on
     // the base decomposition: the consumer decides a residual it cannot explain, not the
     // recognizer on its behalf.

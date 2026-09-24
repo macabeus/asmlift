@@ -41,7 +41,15 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, clobberedByCall, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
+import {
+  abiSortEntryParams,
+  clobberedByCall,
+  fallbackArgc,
+  makeSsaBuilder,
+  mintArgRegisterHoles,
+  slotKeyOffset,
+  stackSlotKey,
+} from './ssa';
 import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
@@ -5425,6 +5433,7 @@ export function lift(
   });
 
   refuseWordReturns();
+  mintArgRegisterHoles(ssa, target.argRegs);
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at

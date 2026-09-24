@@ -39,7 +39,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, parseSplatMips } from './splat';
-import { abiSortEntryParams, stackSlotKey } from './ssa';
+import { abiSortEntryParams, mintArgRegisterHoles, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1322,6 +1322,7 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
+  mintArgRegisterHoles(ssa, ARG_REGS);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 

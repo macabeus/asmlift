@@ -26,7 +26,7 @@ const fails = (bounds: string, ptr: string, pool: string) => () => decompile('f'
 
 test('the DIRECT bounds form (`cmp; bhi DEF`) recovers a switch', () => {
   const out = src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${TABLE}`);
-  expect(out).toContain('switch (a0)');
+  expect(out).toContain('switch (a1)');
   expect(out).toContain('case 0:');
   expect(out).toContain('case 1:');
 });
@@ -35,7 +35,7 @@ test('the LONG-JUMP bounds form (`cmp; bls DISP; b DEF`) recovers the same switc
   // agbcc's spelling whenever the default is out of a conditional branch's ±256-byte reach, which
   // on a real switch it usually is — five of the six benchmark functions with a table use it.
   const out = src(LONGJMP, '.Lp', `.Lp:\n\t.word\t.Ltab\n${TABLE}`);
-  expect(out).toContain('switch (a0)');
+  expect(out).toContain('switch (a1)');
   expect(out).toContain('case 1:');
   expect(out).toContain('99'); // the long-branched default is still the default arm
 });
@@ -43,7 +43,7 @@ test('the LONG-JUMP bounds form (`cmp; bls DISP; b DEF`) recovers the same switc
 test('the table pointer is read at ANY pool offset, not just a bare label', () => {
   // A literal pool is a POOL: the dispatch pointer sits wherever emission order put it.
   const pool = `.Lp:\n\t.word\tgOther\n\t.word\t.Ltab\n${TABLE}`;
-  expect(src(DIRECT, '.Lp+0x4', pool)).toContain('switch (a0)');
+  expect(src(DIRECT, '.Lp+0x4', pool)).toContain('switch (a1)');
   // …and the slot must actually hold the table: slot 0 here is an unrelated global.
   expect(fails(DIRECT, '.Lp', pool)).toThrow(/indirect\/computed jump/);
 });
@@ -54,7 +54,7 @@ test('two case values sharing one body lift cleanly (the switch_br block-arg inv
   // M params"), which is how this shape used to be unliftable rather than wrong.
   const shared = '.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc0\n';
   const out = src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${shared}`);
-  expect(out).toContain('switch (a0)');
+  expect(out).toContain('switch (a1)');
   expect(out).not.toContain('ASMLIFT_ERROR');
   // ONE arm carrying both labels — not the body emitted twice.
   expect(out).toMatch(/case 0:\s*\n\s*case 1:/);
@@ -269,7 +269,7 @@ const spelled = (shift: string, sh: string, plus: string) =>
 
 test('the UAL spelling (`lsls`/`adds`/`#0x02`) recovers the same switch as the pre-UAL one', () => {
   const control = spelled('lsl', '#0x2', 'add');
-  expect(control).toContain('switch (a0)');
+  expect(control).toContain('switch (a1)');
   // the whole klonoa spelling at once, then each difference on its own
   expect(spelled('lsls', '#0x02', 'adds')).toBe(control);
   expect(spelled('lsls', '#0x2', 'add')).toBe(control);
@@ -318,7 +318,7 @@ test('the indexed load must address the scaled index EXACTLY — no displacement
   // the long-jump bounds form is the same recogniser and must refuse it too
   expect(() => decompile('f', withLoad('ldr\tr0, [r0, #0x4]', LONGJMP), ARMV4T_AGBCC)).toThrow(jump);
   // ...and `#0`, which is how the corpus spells it, still recovers
-  expect(decompile('f', withLoad('ldr\tr0, [r0, #0x00]'), ARMV4T_AGBCC).source).toContain('switch (a0)');
+  expect(decompile('f', withLoad('ldr\tr0, [r0, #0x00]'), ARMV4T_AGBCC).source).toContain('switch (a1)');
 });
 
 test('the two address operands must be DISTINCT registers, not one listed twice', () => {

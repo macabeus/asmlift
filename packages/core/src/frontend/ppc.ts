@@ -57,7 +57,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams } from './ssa';
+import { abiSortEntryParams, mintArgRegisterHoles } from './ssa';
 import { clobberedByCall, makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1432,6 +1432,7 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
+  mintArgRegisterHoles(ssa, ARG_REGS);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 

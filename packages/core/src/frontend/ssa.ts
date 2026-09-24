@@ -1079,6 +1079,25 @@ export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
+/** Give the TRUE entry block a parameter for every argument register below the highest one it
+ *  takes. Naming is POSITIONAL (`a0`, `a1`, … in {@link abiSortEntryParams} order), so an
+ *  argument register the body never reads drops out of the signature and binds every later
+ *  argument one ABI slot low, silently: `int f(int a, int b, int c) { return a + c; }` reads r3
+ *  and r5, and lifted as `f(a0, a1)` with r5 in r4's slot. Arguments take their registers in
+ *  order, so reading register k proves slots 0..k-1 precede it — an obligation on the signature,
+ *  which is what `ensureParam` is for (a no-op on an entry with predecessors, whose parameters are
+ *  phis). A live-in outside `argRegs` proves nothing about that sequence and is ignored. Call it
+ *  before `finish()`, which records evidence for every entry parameter. */
+export function mintArgRegisterHoles(
+  ssa: Pick<SsaBuilder, 'irBlocks' | 'paramReg' | 'ensureParam'>,
+  argRegs: readonly string[],
+): void {
+  const top = Math.max(-1, ...ssa.irBlocks[0].params.map((p) => argRegs.indexOf(ssa.paramReg.get(p) ?? '')));
+  for (let k = 0; k < top; k++) {
+    ssa.ensureParam(argRegs[k], 0);
+  }
+}
+
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can
  *  read a later argument register first). No-op when the entry has predecessors — a loop
