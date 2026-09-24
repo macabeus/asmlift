@@ -798,7 +798,9 @@ export const PPC_MWCC: TargetDescription = {
     reloadsLocalReread: false,
     aggregateBoundary: 1,
     // MEASURED on all three builds at -O4,p and -O0,p: the note at the field. The two are one
-    // declaration: without the layout gate a relational if-ladder reads as a `switch`.
+    // declaration: without the layout gate a relational if-ladder reads as a `switch`. The gate's
+    // reach is the committed probes alone — withdrawn, it moves 0 of the 180 PPC benchmark rows
+    // that lift — so switch-arms.test.ts holds the pairing over every target instead of a row.
     switchBoundCase: 'either',
     switchRequiresFrontLoadedTests: true,
     // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the

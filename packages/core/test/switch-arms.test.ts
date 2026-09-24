@@ -21,7 +21,7 @@ import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
 import { makeSwitchRecovery } from '../src/structure/switch-recover';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
@@ -1612,6 +1612,17 @@ test('a relational ladder its path reads as a switch is declined by its layout',
   };
   expect(ppcLift(nest, layoutBlind)).toContain('switch (a0)');
   expect(ppcLift(nest)).toBe(ppcLift(nest, pathBoundUndeclared));
+});
+
+test('every target that reads a bound case declares the layout gate beside it', () => {
+  // The previous test is the regression a lone `switchBoundCase` brings back, and no benchmark row
+  // would show it (target.ts, PPC_MWCC), so the pairing is asserted here for every target.
+  for (const [id, { description }] of Object.entries(TOOLCHAIN_TARGETS)) {
+    const { switchBoundCase, switchRequiresFrontLoadedTests } = description.compilerBehaviors;
+    if (switchBoundCase !== undefined) {
+      expect([id, switchRequiresFrontLoadedTests]).toEqual([id, true]);
+    }
+  }
 });
 
 test('a path-bound case lands on the FALL side too', () => {
