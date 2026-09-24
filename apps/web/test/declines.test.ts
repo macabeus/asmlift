@@ -880,6 +880,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // this list is their union: `unread-data-directive` is #247's and `clobbered-value` is #250's,
   // and a merge that took either side alone would have silently dropped the other's entry while
   // the derived count in the name moved by one and looked right.
+  //
+  // `structs` joins on the `clobbered-value` reading: its thirteen inhabitants were overlaps on a
+  // base only this function's accesses describe, which raise/structs.ts declares as a union
+  // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
+  // is a population, not a capability.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -887,6 +892,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'cross-block-flags-arm',
     'pool-word-shape',
     'store-class',
+    'structs',
     'unread-data-directive',
   ];
 
