@@ -2,8 +2,8 @@
 // `packages/core/test/switch-arms.test.ts`.
 //
 // Four compilers, and two claims. `switchRequiresFrontLoadedTests` is read off the agbcc and MIPS
-// pairs; `switchAllowsPathBoundCase` (target.ts, PPC_MWCC) off the three mwcc fixtures, which add a
-// ladder written with the relational tests themselves.
+// pairs and the mwcc fixtures; `switchAllowsPathBoundCase` (target.ts, PPC_MWCC) off the four mwcc
+// fixtures, which add two ladders written with the relational tests themselves.
 //
 // WHY A SCRIPT AND NOT A NOTE. `switchRequiresFrontLoadedTests` (target.ts) is a COMPILER claim
 // about two SOURCE spellings — that a `switch` and the if/else-if ladder over the same values are
@@ -123,6 +123,7 @@ const MWCC_VARIANTS = [
   { suffix: 'swdispatch', src: 'probe-mwcc-swdispatch.c' },
   { suffix: 'swladder', src: 'probe-mwcc-swladder.c' },
   { suffix: 'swrelladder', src: 'probe-mwcc-swrelladder.c' },
+  { suffix: 'swrelnest', src: 'probe-mwcc-swrelnest.c' },
 ] as const;
 
 for (const v of MWCC_VARIANTS) {

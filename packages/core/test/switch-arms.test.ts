@@ -1322,13 +1322,10 @@ test('the reading is PER SITE: one function keeps its ladder AND its switch', ()
 });
 
 test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
-  // Two descriptions declare this, on three committed pairs — agbcc's, and one from each toolchain
-  // `MIPS_GCC` serves — all asserted below. IDO has never been put through one, and CodeWarrior fails the
-  // premise's frontend half outright — ppc.ts appends synthetic return blocks out of stream order,
-  // so `fn.blocks` there is not the assembly's layout and the reading has nothing to read.
-  for (const t of [MIPS_IDO, PPC_MWCC]) {
-    expect(t.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
-  }
+  // Three descriptions declare this, on committed objects — agbcc's pair, one pair from each
+  // toolchain `MIPS_GCC` serves, and CodeWarrior's dispatch against its relational ladders (the mwcc
+  // tests at the end of this file). IDO has never been put through one.
+  expect(MIPS_IDO.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
   expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
 });
 
@@ -1540,7 +1537,8 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
 // value only because of the tests above it: `switch (x) { case 0: … case 1: … default: … }` is
 // `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, and `x >= 0` means
 // `x == 0` only after `x != 1` and `x < 1`. `corpus/mwcc-sw{dispatch,ladder,relladder}.asm` are
-// mwcc_242_81's own output for one body written three ways (`corpus/probe-mwcc-sw*.c`,
+// mwcc_242_81's own output for one body written three ways, and `mwcc-swrelnest.asm` a nested
+// relational ladder (`corpus/probe-mwcc-sw*.c`,
 // `scripts/regen-switch-spelling-probes.ts`); the matching suite re-compiles the dispatch on the
 // other two CodeWarrior builds this description serves.
 const ppcLift = (asm: string, t = PPC_MWCC) => decompile('swpath', asm, t).source;
@@ -1586,6 +1584,20 @@ test('the ladders do not come back as that switch', () => {
   // two bodies, so no single default spells it.
   expect(ppcLift(mwccFixture('mwcc-swrelladder'))).not.toContain('switch (');
   expect(ppcLift(mwccFixture('mwcc-swladder'))).toBe(ppcLift(mwccFixture('mwcc-swladder'), pathBoundUndeclared));
+});
+
+test('a relational ladder its path reads as a switch is declined by its layout', () => {
+  // `if (x >= 4) { if (x < 5) … } else if (x >= 3) …` pins 4 and 3 by its path, and its misses
+  // share one `return 0`, so the path alone reads it as `switch (x) { case 3: … case 4: … }`. mwcc
+  // puts the `p[4]` body between `cmpwi 5` and `cmpwi 3`, which the dispatch never does.
+  const nest = mwccFixture('mwcc-swrelnest');
+  expect(ppcLift(nest)).not.toContain('switch (');
+  const layoutBlind = {
+    ...PPC_MWCC,
+    compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, switchRequiresFrontLoadedTests: false },
+  };
+  expect(ppcLift(nest, layoutBlind)).toContain('switch (a0)');
+  expect(ppcLift(nest)).toBe(ppcLift(nest, pathBoundUndeclared));
 });
 
 test('a path-bound case lands on the FALL side too', () => {

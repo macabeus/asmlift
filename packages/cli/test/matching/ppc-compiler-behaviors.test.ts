@@ -1,10 +1,10 @@
 // THE POWERPC COMPILER-BEHAVIOR PROBES, RE-RUN ON EVERY CODEWARRIOR BUILD.
 //
-// `PPC_MWCC` (target.ts) is the description asmlift decompiles CodeWarrior against, and three of its
+// `PPC_MWCC` (target.ts) is the description asmlift decompiles CodeWarrior against, and four of its
 // fields were earned by compiling a probe rather than assumed: `reloadsLocalReread: false`,
-// `switchAllowsPathBoundCase: true`, and the `spillSlotOrder: 'unknown'` that records a direction
-// nobody could measure. Three builds now map
-// to that one description, and a description is per COMPILER — so a build that read a field
+// `switchAllowsPathBoundCase: true` and the `switchRequiresFrontLoadedTests: true` beside it, and
+// the `spillSlotOrder: 'unknown'` that records a direction nobody could measure. Three builds now
+// map to that one description, and a description is per COMPILER — so a build that read a field
 // differently would be mis-keyed by construction, with no way to spell the difference.
 //
 // So each build re-runs every probe here, at the flags its own rows compile at, and the
@@ -196,11 +196,12 @@ describe.runIf(HAVE)('declaration rank, on each CodeWarrior build', () => {
   );
 });
 
-// ── switchAllowsPathBoundCase ────────────────────────────────────────────────────────────
-// The committed fixtures (`corpus/mwcc-sw{dispatch,ladder}.asm`, switch-arms.test.ts) are
-// mwcc_242_81's at its canonical flags. Each build re-compiles both bodies here, at both levels:
+// ── switchAllowsPathBoundCase + switchRequiresFrontLoadedTests ───────────────────────────
+// The committed fixtures (`corpus/mwcc-sw{dispatch,ladder,relnest}.asm`, switch-arms.test.ts) are
+// mwcc_242_81's at its canonical flags. Each build re-compiles all three here, at both levels:
 // the `switch` must dispatch instruction for instruction as the committed fixture does, pinning
-// `case 0` with the path-bound `bge-`, and the equality ladder must carry no relational test. At
+// `case 0` with the path-bound `bge-`, the equality ladder must carry no relational test, and the
+// nested relational ladder must put a body between two tests (`switchRequiresFrontLoadedTests`). At
 // `-O0,p` the arm bodies leave through a `b` to one shared `blr` instead of returning in place,
 // which is why only the dispatch — everything above the first body — is compared, and Pikmin's
 // `-lang=c++` mangles the symbol every branch target is printed against (`swpath__FiPi`), which is
@@ -230,13 +231,17 @@ describe.runIf(HAVE)('a path-bound switch case, on each CodeWarrior build', () =
     ...AT_O4.map(([id, f]) => [id, '-O4,p', f] as const),
     ...AT_O0.map(([id, f]) => [id, '-O0,p', f] as const),
   ])(
-    '%s at %s dispatches the switch as the committed fixture does, and the ladder with no relational test',
+    '%s at %s dispatches the switch as the committed fixture does, and neither ladder as a switch',
     (mwcc, _level, flags) => {
       expect(committed.filter((l) => RELATIONAL.test(l))).toHaveLength(2);
       expect(dispatchOf(insns(compilePpcTarget(mwcc, swProbe('swdispatch'), 'swpath', flags).asm))).toEqual(committed);
       const ladder = insns(compilePpcTarget(mwcc, swProbe('swladder'), 'swpath', flags).asm);
       expect(ladder.filter((l) => RELATIONAL.test(l))).toEqual([]);
+      const nest = insns(compilePpcTarget(mwcc, swProbe('swrelnest'), 'swpath', flags).asm);
+      const lastTest = nest.findLastIndex((l) => l.startsWith('cmpwi'));
+      expect(lastTest).toBeGreaterThan(nest.findIndex((l) => l.startsWith('lwz')));
       expect(PPC_MWCC.compilerBehaviors.switchAllowsPathBoundCase).toBe(true);
+      expect(PPC_MWCC.compilerBehaviors.switchRequiresFrontLoadedTests).toBe(true);
     },
     BUDGET,
   );

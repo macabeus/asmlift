@@ -343,9 +343,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // A block's index in `fn.blocks` as its position in the ASSEMBLY — the warrant for every reading
   // of layout below, and true PER FRONTEND rather than of the IR:
   //   - thumb.ts and mips.ts build the list by scanning the instruction stream in address order;
-  //   - ppc.ts does not. It APPENDS a synthetic return block (`synthReturn`) at the end of the list
-  //     for every conditional-return branch, wherever in the stream that branch sits, so its list
-  //     is not address order at all;
+  //   - ppc.ts does too, and then APPENDS a synthetic return block (`synthReturn`) at the end of
+  //     the list for every conditional-return branch, wherever in the stream that branch sits. So
+  //     its real blocks keep address order among themselves, and each synthetic one — a bare
+  //     return, never a test — sorts after all of them;
   //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
   //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
   // TWO READERS, both target-gated, and they need DIFFERENT strengths of the compiler half:
@@ -356,9 +357,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     `MIPS_GCC` declares `switchRequiresFrontLoadedTests` and NOT `switchArmsFollowLayout` for
   //     exactly that reason — it has a scheduler and fills delay slots (target.ts).
   // Both are therefore claims about a target's FRONTEND as much as about its compiler, and a target
-  // opts in on both halves — which is why PPC_MWCC, whose frontend fails the frontend half outright,
-  // declares neither. Anything added below that reads `layoutIndex` inherits the frontend half and
-  // owes a statement of which strength of the compiler half it needs.
+  // opts in on both halves. PPC_MWCC's frontend holds the weaker half only: a synthetic return body
+  // sorting last can make PRE5 keep a `switch` it should decline, never decline one it should keep,
+  // so mwcc declares `switchRequiresFrontLoadedTests` and could not declare the placing reading.
+  // Anything added below that reads `layoutIndex` inherits the frontend half and owes a statement
+  // of which strength of the compiler half it needs.
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
