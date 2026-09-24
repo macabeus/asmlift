@@ -3308,16 +3308,25 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`Unable to find stack arg 0x0`), which is the same blocker asmlift names there.
   //
   // `stkwide` is the DECLINING row for the other side of that licence — a declaration that does
-  // not account for every word staged. `void fived(s32, s32, s32, s32, double)` truthfully
-  // declares five parameters and agbcc stages TWO words for the fifth: `ldr r4, .L3` /
+  // not account for every word staged. `void fived(s32, s32, s32, s32, double)` has five
+  // parameters and agbcc stages TWO words for the fifth: `ldr r4, .L3` /
   // `ldr r5, .L3+0x4` / `str r4, [sp]` / `str r5, [sp, #0x4]`, the literal sitting in the pool as
-  // `.long 0x3ff80000, 0x0`. One declared word against two staged ones is the may-set
+  // `.long 0x3ff80000, 0x0`. The row's proto is the COUNT `params: 5`, which `FnProto` reads as
+  // five argument WORDS. One declared stack word against two staged ones is the may-set
   // disagreement, and asmlift declines: `stack pointer used as data — callee \`fived\` is declared
   // with 5 arguments, so its outgoing stack-argument block is [sp,#0] — but [sp,#4] also reaches
   // the call unread, so the declaration does not account for every word staged here`. `stkarg` is
   // the ACCEPTING control for that licence and this row is the REFUSING one: without it nothing
   // in the corpus notices an acceptance widened back to "a declared arity is enough", which is
   // the shape that used to delete a variadic call's uncovered arguments.
+  //
+  // A TYPED proto keeps it declining. `double` has no width in `FnProto` (how many general
+  // registers it takes is a target fact), so that list states no layout and the store refuses on
+  // the code alone. Spelled `long long`, both halves of the fifth parameter are in the stack block,
+  // and the Thumb frontend assembles a pair only from argument registers. Only `params: 6` lifts,
+  // and it lifts the word split m2c prints below. The asm cannot choose between the two types:
+  // agbcc stages a double's HIGH word first, so `1.5` and a `long long` `0x3ff80000` in this
+  // argument compile to byte-identical objects.
   //
   // m2c renders it with SIX arguments, the double split into the two words the ABI staged —
   // `fived(a, b, a + b, a - b, /* f64+0x0 */ 0x3FF80000, /* f64+0x4 */ 0)`, a nonmatch. So the
