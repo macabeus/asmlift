@@ -655,7 +655,7 @@ and both MIPS targets have no table at all and refuse the `jal` before the quest
 
 ## A union, and why it is a type kind
 
-The one new `IrType` kind since L2 was earned, and the case for it is a compiler, not a row count.
+An `IrType` kind, and the case for it is a compiler, not a row count.
 A base read or written at two widths over the same bytes (`u->w = v; return u->h[0] + u->h[1];`)
 has two C spellings: a union member whose views are those widths, and a pointer cast per access
 (`((u16 *)p)[1]` beside `*p`), which is what a declared address already gets (raise/structs.ts). On

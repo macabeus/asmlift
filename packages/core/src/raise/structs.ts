@@ -282,8 +282,7 @@ const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 
  *  element accessed (`u16 half[2]` for the halfword at +2). A cell with ONE view is a plain field;
  *  any other is a member `field_<off>` holding a union of its views — including a single-width cell
  *  loaded both ways. KNOWN GAP: on a base with no overlap anywhere, `buildStruct` never hands over,
- *  and that same cell there is one field typed by its signed load (as on main before this pass had
- *  unions), so its unsigned read is spelled sign-extended.
+ *  and that same cell there is one field typed by its signed load, so its unsigned read is spelled sign-extended.
  *
  *  THE COMPILER DECIDES THE UNION'S SIZE, not its widest view. `aggregateBoundary` is the size it
  *  aligns and rounds every struct and union to (target.ts `compilerBehaviors.aggregateBoundary`):
