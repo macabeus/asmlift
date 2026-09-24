@@ -890,7 +890,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // recovery is the bare declaration.
     const diamond =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
-      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     // ONE parameter — the arity is the assertion. `uninit0` is declared and never assigned.
     expect(decompile('f', diamond, ARMV4T_AGBCC).source).toBe(
       's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 == 0) a0 = uninit_sp0;\n    return a0 + 1;\n}\n',
@@ -898,7 +898,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // control: store it on BOTH arms and there is nothing undefined to declare
     const both =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
-      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
     // …and the refusal that survives, NOT YET rather than by design. A slot no store reaches
     // ANYWHERE is the same C as the diamond above; the reasons one reaches for — frame arithmetic,

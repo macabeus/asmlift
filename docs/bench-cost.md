@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=88.8s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=162.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,13 +136,18 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-23**, this branch's: the ranked pass alone is
-**822 s over 190 real rows** and **497 s over 751 synthetic rows**; wall clock was 178.9 s and
-186.3 s on tiers that overlap, and **253.9 s** end to end (the CLI's own `Done in` line; the shell's
-`time` put the whole `pnpm bench run` at `4:14.47`, the half-second being pnpm start-up) —
-186.3 + 178.9 is 365.2, which is not the wall time and never was.
-The dearest single row is **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, **14% of the tier** on
-its own — which is the figure to reach for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-24**, this branch's (`match/lladd`): the ranked
+pass alone is **1,911 s over 191 real rows** and **901 s over 752 synthetic rows**; wall clock was
+442.9 s and 319.3 s on tiers that overlap, and **548.5 s** end to end (the CLI's own `Done in` line),
+on a machine shared with the other rounds of a parallel run — so these seconds are the box, not the
+branch: its fan against `origin/main` is **67,759 → 67,759 (1.00×)** while its ranked pass reads
+**1,319.0 s → 2,811.2 s (2.13×)**. The dearest single row is **294 s** on
+`marioparty3:FileSeek:gcc2.7.2`, **15% of the tier** on its own — which is the figure to reach for
+when a scoped run looks cheap.
+
+The artifact `origin/main` carried before this one, taken 2026-09-23 at `c6eea3f4` (#252), read **822 s over 190 real rows** and
+**497 s over 751 synthetic rows**; wall clock was 178.9 s and 186.3 s, **253.9 s** end to end, and its
+dearest row was **118 s** on `kleod:PauseMenuScreenHandler:agbcc`, 14% of the tier.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
@@ -185,7 +190,7 @@ its own ranked pass at 2,027.6 s, 1,323.8 s, 1,326.7 s and 1,319.0 s while its f
 one record in any pair — **a 1.53× spread over a branch whose every run changed nothing a fan can
 see.**
 
-The artifact before this one, taken 2026-09-23 at `43534788` (#250), read **834 s over 190 real
+The one before that, taken 2026-09-23 at `43534788` (#250), read **834 s over 190 real
 rows** and **502 s over 751 synthetic rows**; wall clock was 180.6 s and 186.4 s, 256.4 s end to
 end (`real 256.41` under `/usr/bin/time -p`). Its own dearest row was **119 s** on the same
 `kleod:PauseMenuScreenHandler:agbcc` at the same **14% of the tier** — the closest two consecutive

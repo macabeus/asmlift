@@ -601,9 +601,17 @@ two divides and both signedness pins then agree. An unstamped call stays 32, whi
 of a callee nobody declared.
 
 **The frontend decides THIS function's width, because only the asm can** — `frontend/thumb.ts`
-reads its RETURN width off the epilogue rather than off the value graph: `pop {r2}` cannot touch the
-return pair, `pop {r1}` fills its high register with the return address, and the two functions are
-otherwise identical.
+reads its RETURN width off the value graph AND the epilogue: r1 has to hold the same value's high
+half, through any register copies, and `pop {r2}` cannot touch the return pair where `pop {r1}` fills
+its high register with the return address — two functions otherwise identical.
+
+**A carry pair is a 64-bit add, built in the frontend.** Thumb-1 spells one as a flag-setting `add`
+(`sub`) on the low words and an `adc` (`sbc`) on the high words that takes its carry — ONE insn on
+agbcc (`adddi3`/`subdi3`), so the two are adjacent. Read together they are `concat ± concat`, with
+`lo32`/`hi32` written back, which is the same shape a helper call's pair already has, so the
+parameter fusion reads it unchanged, and `wideReturn` reads the return off the projections — through
+register copies, which agbcc makes of a sum it computed outside r0:r1. A pair that reaches the return
+from another block is refused rather than joined: a 64-bit phi is the capability not built.
 
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:
@@ -625,6 +633,9 @@ lifted from.
 | level             | refusal                                                                     | because                                                                                                                                                                                                                                                                     |
 | ----------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | frontend, layer 0 | a caller-saved register read after a call, the returned pair aside (Thumb)  | what it holds is the callee's, so an `r1` read after a `bl` is never the caller's pre-call value — it is the RETURNED high half where a width says a pair came back, and nothing otherwise; the PowerPC frontend builds no pair and refuses a declared wide return outright |
+| frontend          | an `adc`/`sbc` that does not directly follow its low-register `add`/`sub`   | only adjacency proves which carry it reads (every Thumb-1 ALU op writes the flags); it decodes as the unmodelled opaque it always was, and so does one whose high half is that add's own destination, which is no half of either operand                                    |
+| frontend          | a word return under an epilogue that pops the return address into r2        | agbcc sizes that register by the return type (`eightByteReturnScratch`): r2 is 5 to 8 bytes, so a word drops r1 — and declines an 8-byte aggregate returned through memory, which the epilogue cannot tell apart                                                            |
+| frontend          | a 64-bit pair that reaches the return from another block                    | `wideReturn` is block-local, and its null is otherwise a WORD return that drops the high half of a function that computed it                                                                                                                                                |
 | frontend          | a 64-bit value leaving as a word at an ordinary call boundary               | nothing states an undeclared callee's parameter widths                                                                                                                                                                                                                      |
 | raise             | a helper call whose operands did not ARRIVE at the table's widths           | an operand count is not evidence of a pair; the pair construction is                                                                                                                                                                                                        |
 | raise             | a table name no recognizer folded                                           | see above — the pass-through matches for free                                                                                                                                                                                                                               |
