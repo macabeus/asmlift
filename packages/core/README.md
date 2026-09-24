@@ -126,12 +126,13 @@ direct calls, constant-offset and variable-index memory (`*p`, `p[n]`, `a[i]`, s
 magic-number and soft division, short-circuit booleans, width casts, PowerPC small-data access
 through its `R_PPC_EMB_SDA21` relocation, a call's outgoing stack arguments on agbcc, where the
 declaration and the code agree (`stagesOutgoingArgsInFrame`; MIPS still declines the same shape),
-and a MIPS likely branch's nullified delay slot. Still DECLINED (loud, never
-wrong code): **local stack frames** (address-taken locals / sp-as-data; MIPS models word `sp`
+a compare read by a branch in a later block that only its own block enters (Thumb and
+PowerPC, `frontend/flags-edge.ts`), and a MIPS likely branch's nullified delay slot. Still DECLINED (loud,
+never wrong code): **local stack frames** (address-taken locals / sp-as-data; MIPS models word `sp`
 slots and PPC elides callee-saved save slots, so a spill/reload pair is modelled on those two —
 anything the narrow models cannot honour declines),
-**cross-block condition flags** on PPC (a `cmpw` whose branch lands in another block — the
-capability gap behind the mwcc switch stubs), computed tail calls, PIC and `gp`-relative access outside PowerPC's
+**condition flags at a join** (a compare two or more edges bring to one branch, or one the caller
+set), computed tail calls, PIC and `gp`-relative access outside PowerPC's
 small-data relocation — MIPS refuses `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` alike —
 switch fall-through, multi-latch/irreducible loops, floats, and 64-bit memory ops. Prototypes
 (callee arities, void-ness) come from a caller-supplied map, as a real project takes them from
