@@ -1543,12 +1543,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // it, which is also what lets the memory-read tier through — `preupdate_exit` and
   // `preupdate_exit_pure` both MATCH.
   //
-  // WHAT THE SINK STILL REFUSES IS ORDER, and `preupdate_exit_order` is the row that carries it:
-  // `*q + cb(q)`, where agbcc calls first and loads second, so an op the copy must not cross sits
-  // BETWEEN the read and the point it would be rebuilt at. That is the one shape
-  // `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES, structure/hazards.ts) turns away, so without
-  // this row the gate would refuse nothing a command can show. It is also the shape no C spelling
-  // could pin: `+` leaves its operands' evaluation order unspecified even where both values agree.
+  // WHAT THE SINK STILL REFUSES IS ORDER, and two rows carry it, one per order of a READ and a
+  // CALL under one `+`. `preupdate_exit_order` is `*q + cb(q)`, where agbcc calls first and loads
+  // second, so rebuilding the tree at the add would carry the call past the load.
+  // `preupdate_exit_load` is `t = *q; r = t + cb(q)`, where agbcc loads first (into a callee-saved
+  // register) and calls second, so the rebuild would carry the load past the call. Both are the
+  // shape `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES, structure/hazards.ts) turns away — an op
+  // the copy must not cross sits BETWEEN a member of the tree and the point it would be rebuilt at
+  // — and without them the gate would refuse nothing a command can show. Neither order is beyond C:
+  // compiled, `t = cb(q); r = *q + t;` is byte-identical to `*q + cb(q)`, since the sequence point
+  // pins the order agbcc chose anyway, and the load-first row is spelled with its own.
   //
   // AND BESIDE THE THREE, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1645,6 +1649,22 @@ export const SYNTHETIC: SynthSpec[] = [
       'an exiting edge whose value is a memory READ and a CALL added together (`*q + cb(q)`). agbcc ' +
       'emits the call, then the load, then the add, so rebuilding the read at the add would move it ' +
       'across the call — the sink refuses, and the decline is the whole point of the row',
+  },
+  {
+    sym: 'preupdate_exit_load',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit_load(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { int t = *q; r = t + cb(q); q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note:
+      'the same exiting edge with the READ first (`t = *q; r = t + cb(q)`): agbcc loads into a ' +
+      'callee-saved register, calls, then adds, so rebuilding the tree at the add would move the ' +
+      'load past the call. Nothing names the read where it ran, so the sink refuses rather than ' +
+      'move it, and the decline is what the row measures',
   },
   {
     sym: 'preupdate_escape',
