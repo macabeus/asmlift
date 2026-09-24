@@ -95,7 +95,7 @@ import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './haz
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { unspelledEpilogues } from './retspell';
-import { type ArmExit, makeSwitchRecovery } from './switch-recover';
+import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
 // struct pointer (raise/structs.ts), the byte offset resolves to a NAMED field (`base->field_<off>`);
@@ -1487,16 +1487,11 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A compiler behavior, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
-  // Comparison-tree switch recovery: treat a relational test whose BRANCH admits exactly one
-  // scrutinee value as that case rather than as navigation. A compiler behavior declared in
-  // TargetDescription.compilerBehaviors — a compiler opts in on evidence that its dispatch jumps
-  // straight to a bounded subtree's body. Default false: absent, every relational edge navigates.
-  switchAllowsBoundCase?: boolean;
-  // Comparison-tree switch recovery: treat a relational test as a case where the range the tests
-  // above it leave admits exactly one scrutinee value on either of its sides. A compiler behavior
-  // declared in TargetDescription.compilerBehaviors. Default false: absent, only
-  // `switchAllowsBoundCase`'s endpoint reading pins a relational edge.
-  switchAllowsPathBoundCase?: boolean;
+  // Comparison-tree switch recovery: treat a relational test as a case where the values that can
+  // reach it leave exactly one on a side its compiler's dispatch lands a body on — the BRANCH
+  // (`'taken'`) or either side (`'either'`). A compiler behavior declared in
+  // TargetDescription.compilerBehaviors. Absent: every relational edge navigates.
+  switchBoundCase?: SwitchBoundCase;
   // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
   // bodies out, rather than sorted by ascending case value. A compiler behavior declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
@@ -1991,8 +1986,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     switchAllowsNeqCase = true,
-    switchAllowsBoundCase = false,
-    switchAllowsPathBoundCase = false,
+    switchBoundCase,
     switchArmsFollowLayout = false,
     switchRequiresFrontLoadedTests = false,
     spellSwitchFallthrough = true,
@@ -4793,8 +4787,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
-    switchAllowsBoundCase,
-    switchAllowsPathBoundCase,
+    switchBoundCase: switchBoundCase ?? null,
     switchArmsFollowLayout,
     switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,

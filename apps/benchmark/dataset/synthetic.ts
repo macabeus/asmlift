@@ -903,7 +903,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //     — which is what these rows' sources declare. On mwcc_242_81 `utag`'s switch arms are
   //     reached through CodeWarrior's binary-search dispatch, whose `bge` reads the compare its
   //     `beq` already consumed (frontend/flags-edge.ts) and pins `case 0` by its path
-  //     (`switchAllowsPathBoundCase`, target.ts).
+  //     (`switchBoundCase`, target.ts).
   //   • `unidev` is not a case of that sentence at all: its base is a LITERAL ADDRESS, so the
   //     accesses are not evidence about a layout nobody declared, and raise/structs.ts forgives the
   //     failed synthesis. It LIFTS, at each access's own width, and what it measures is below.
@@ -1379,7 +1379,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // uninit_join:mwcc_242_81 and uninit_sw:mwcc_242_81 MATCH, uninit_spill:gcc2.7.2kmc scores 53).
   // uninit_sw:mwcc_242_81 declined on a cr0 reaching-compare until the PowerPC compare crossed the
   // edge out of its `beq` (frontend/flags-edge.ts) and its switch's path-bound case was read
-  // (`switchAllowsPathBoundCase`, target.ts); it is the register half, like uninit_sw:agbcc.
+  // (`switchBoundCase`, target.ts); it is the register half, like uninit_sw:agbcc.
   // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
   // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
   // and uninit_sw:agbcc is the register half, which `undef` does not touch.
@@ -3780,9 +3780,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // dispatch edge admitting exactly one value to route a case (structure/switch-recover.ts). Read
   // as navigation instead, that arm is a second default candidate, the whole tree declines to
   // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that,
-  // and is also what pins the reading's three refusals: the BRANCH of the test, never its
+  // and is also what pins the reading's three refusals on agbcc: the BRANCH of the test, never its
   // fall-through; never the test that OPENS the dispatch; and only on a compiler that declared the
-  // spelling (`switchAllowsBoundCase` — agbcc alone). Each is a shape `emit_case_nodes` cannot
+  // spelling (`switchBoundCase`, `'taken'` on agbcc). Each is a shape `emit_case_nodes` cannot
   // emit, so a relational test in it is an ordinary comparison and recovers as one.
   // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
   // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register

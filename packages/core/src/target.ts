@@ -47,6 +47,7 @@ import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flag
 import { PRELUDE_TYPEDEFS } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
+import type { SwitchBoundCase } from './structure/switch-recover';
 
 /** What a compiler's OBJECT shows for a narrow declared parameter — see
  *  `compilerBehaviors.narrowParamWitness` for the compiled pair behind each value. */
@@ -334,51 +335,44 @@ export interface TargetDescription {
     // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
     // which the post-lift audit settles per call rather than by size.
     oneWordFrameIsTheCapturedObject?: boolean;
-    // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
-    // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
-    // navigation.
+    // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
+    // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's
+    // dispatch lands a case body on: `'taken'` for its BRANCH only, `'either'` for both sides
+    // (structure/switch-recover.ts, the note at `Ranges`).
     //
-    // A DEFAULT rather than a candidate variation because for agbcc the asm determines the source: at
-    // -O2 fold-const rewrites a bounded unsigned comparison into an equality before codegen, so
-    // `x < 1u` compiles to `cmp r0, #0 / bne` and `x > 0u` to `cmp r0, #0 / beq` — no source-level
-    // comparison chain emits a bound test at all. `emit_case_nodes` runs after folding and does:
-    // it jumps straight to `node->left->code_label` on LT once `node_is_bounded (node->left)`, so
-    // the remaining value's own test is never emitted. One producer, one reading.
+    // One mechanism on both compilers that declare it: a binary-search dispatch stops testing a
+    // value once the tests above have narrowed it to one. agbcc's `emit_case_nodes` jumps straight to
+    // `node->left->code_label` on LT once `node_is_bounded (node->left)` holds, so
+    // `switch (x) { case 1: … case 2: … case 3: … case 4: … case 5: … case 1000: … case 2000: … }`
+    // pins `case 3` with `cmp r1, #2; bgt` under `x < 4`, `x != 2` (`corpus/agbcc-swpathbound.s`),
+    // and an unsigned switch's `case 0` with `cmp r0, #1; bcc`, which pins it at the end of the
+    // domain whatever came first. mwcc's `switch (x) { case 0: … case 1: … default: … }` is
+    // `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, where `x >= 0` is
+    // `case 0` only because `x != 1` and `x < 1` came first (`corpus/mwcc-swdispatch.asm`).
     //
-    // Absent ⇒ false, and inheriting it would be wrong rather than merely unmeasured: on the MIPS
-    // lanes `sltiu rd, rs, 1` is the ordinary spelling of `!x`, and it lifts to `icmp_ult rs, 1`
-    // with no equality fold anywhere — the identical IR shape, from a producer that is not a
-    // dispatch. Each compiler opts in on its own dispatch's evidence.
-    switchAllowsBoundCase?: boolean;
-    // Regime-A switch recovery: accept a RELATIONAL test as a case where the range the tests ABOVE
-    // it leave admits exactly one scrutinee value on one of its sides (`pathSingleton` in
-    // structure/switch-recover.ts), on the taken side or the fall-through alike.
+    // THE SIDES DIFFER, and each is read off its own compiler. Every jump in `emit_case_nodes` that
+    // lands on a case body is its test's BRANCH, while the fall-through always continues into more
+    // dispatch, and none of 3176 generated agbcc dispatches lands a body on a fall side — so agbcc
+    // is `'taken'`. mwcc lands one on either: `synthetic:sw_ret:mwcc_242_81` pins `case 3` on the
+    // FALL side (`cmpwi r3,4; bge- default; b case3` under `x > 2`, `x != 2`), so mwcc is
+    // `'either'`.
     //
-    // A DEFAULT rather than a candidate variation because mwcc's two producers of a path-bound test
-    // are told apart by their LAYOUT. Its binary-search switch dispatch reuses one `cmpwi` for a
-    // `beq` and a `bge` and then pins the remaining value with a bound test instead of an equality —
-    // `switch (x) { case 0: … case 1: … default: … }` is `cmpwi r3,1; beq- case1; bge- default;
-    // cmpwi r3,0; bge- case0; b default`, where `x >= 0` means `x == 0` only because `x != 1` and
-    // `x < 1` came first — and puts every test above every body. An if/else-if ladder written with
-    // relational tests pins values by its path just the same (`if (x >= 4) { if (x < 5) … } else
-    // if (x >= 3) …` pins 4 and 3), but puts a body between two tests, so this reading needs
-    // `switchRequiresFrontLoadedTests` beside it and PPC_MWCC declares both. The same body as an
-    // equality ladder is a third object, with no relational test at all. All four are committed:
-    // `corpus/mwcc-sw{dispatch,ladder,relladder,relnest}.asm` from `corpus/probe-mwcc-sw*.c`,
-    // regenerated by `scripts/regen-switch-spelling-probes.ts` and read by switch-arms.test.ts. All
-    // three builds this description serves emit the dispatch identically at -O4,p and at -O0,p
-    // (`packages/cli/test/matching/ppc-compiler-behaviors.test.ts`).
+    // A DEFAULT rather than a candidate variation because each declaring compiler's other producer
+    // of the same test is told apart by its LAYOUT. An if/else-if ladder written with relational
+    // tests pins values by its path just the same (`if (x >= 4) { if (x < 5) … } else if (x >= 3)
+    // …` pins 4 and 3) but puts a body between two tests, where the dispatch puts every test above
+    // every body — so this reading needs `switchRequiresFrontLoadedTests` beside it, and both
+    // declaring compilers declare that too (`corpus/mwcc-sw{dispatch,ladder,relladder,relnest}.asm`
+    // from `corpus/probe-mwcc-sw*.c`, regenerated by `scripts/regen-switch-spelling-probes.ts`). On
+    // agbcc the unsigned endpoint has no ladder at all: -O2 fold-const rewrites `x < 1u` into
+    // `cmp r0, #0 / bne` before codegen. All three builds PPC_MWCC serves emit the dispatch
+    // identically at -O4,p and at -O0,p (`packages/cli/test/matching/ppc-compiler-behaviors.test.ts`).
     //
-    // Not agbcc's `switchAllowsBoundCase`, which reads the BRANCH alone and only a value at an end
-    // of the 32-bit domain, from agbcc's own `emit_case_nodes`. mwcc's pinned value sits at no end
-    // (`case 0` above), and `synthetic:sw_ret:mwcc_242_81` pins one on the FALL side
-    // (`cmpwi r3,4; bge- default; b case3` under `x > 2`, `x != 2`), which agbcc's reading refuses
-    // by design. PRE3's per-case simulation of the original tree stays the backstop: the range is a
-    // superset of what reaches the test, so a singleton an unsigned ancestor already excluded is
-    // caught there.
-    //
-    // Absent ⇒ false. Each compiler opts in on its own dispatch's evidence.
-    switchAllowsPathBoundCase?: boolean;
+    // Absent ⇒ every relational test navigates, and inheriting it would be wrong rather than merely
+    // unmeasured: on the MIPS lanes `sltiu rd, rs, 1` is the ordinary spelling of `!x`, and it lifts
+    // to `icmp_ult rs, 1` with no equality fold anywhere — the identical IR shape, from a producer
+    // that is not a dispatch. Each compiler opts in on its own dispatch's evidence.
+    switchBoundCase?: SwitchBoundCase;
     // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
     // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
     // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
@@ -417,7 +411,7 @@ export interface TargetDescription {
     //
     // mwcc declares it on its own objects: its `switch` dispatch puts every test above every body,
     // and a ladder written with relational tests puts a body between two of them
-    // (`corpus/mwcc-sw{dispatch,relladder,relnest}.asm`, the note at `switchAllowsPathBoundCase`).
+    // (`corpus/mwcc-sw{dispatch,relladder,relnest}.asm`, the note at `switchBoundCase`).
     //
     // Absent ⇒ every recoverable tree is still spelled `switch`, which is where ido sits: it has a
     // scheduler that may move a body above a test, and it has not been put through the pair.
@@ -570,7 +564,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     foldsConstAddrOffset: true,
     foldsPointerAdvance: true,
     readsStayWhereWritten: true,
-    switchAllowsBoundCase: true,
+    switchBoundCase: 'taken',
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
@@ -805,7 +799,7 @@ export const PPC_MWCC: TargetDescription = {
     aggregateBoundary: 1,
     // MEASURED on all three builds at -O4,p and -O0,p: the note at the field. The two are one
     // declaration: without the layout gate a relational if-ladder reads as a `switch`.
-    switchAllowsPathBoundCase: true,
+    switchBoundCase: 'either',
     switchRequiresFrontLoadedTests: true,
     // The PowerPC prologue widens a declared narrow parameter with `extsb`/`extsh`, which the
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on

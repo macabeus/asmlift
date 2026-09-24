@@ -2,7 +2,7 @@
 //
 // `PPC_MWCC` (target.ts) is the description asmlift decompiles CodeWarrior against, and four of its
 // fields were earned by compiling a probe rather than assumed: `reloadsLocalReread: false`,
-// `switchAllowsPathBoundCase: true` and the `switchRequiresFrontLoadedTests: true` beside it, and
+// `switchBoundCase: 'either'` and the `switchRequiresFrontLoadedTests: true` beside it, and
 // the `spillSlotOrder: 'unknown'` that records a direction nobody could measure. Three builds now
 // map to that one description, and a description is per COMPILER — so a build that read a field
 // differently would be mis-keyed by construction, with no way to spell the difference.
@@ -196,7 +196,7 @@ describe.runIf(HAVE)('declaration rank, on each CodeWarrior build', () => {
   );
 });
 
-// ── switchAllowsPathBoundCase + switchRequiresFrontLoadedTests ───────────────────────────
+// ── switchBoundCase + switchRequiresFrontLoadedTests ──────────────────────────────────────
 // The committed fixtures (`corpus/mwcc-sw{dispatch,ladder,relnest}.asm`, switch-arms.test.ts) are
 // mwcc_242_81's at its canonical flags. Each build re-compiles all three here, at both levels:
 // the `switch` must dispatch instruction for instruction as the committed fixture does, pinning
@@ -240,7 +240,7 @@ describe.runIf(HAVE)('a path-bound switch case, on each CodeWarrior build', () =
       const nest = insns(compilePpcTarget(mwcc, swProbe('swrelnest'), 'swpath', flags).asm);
       const lastTest = nest.findLastIndex((l) => l.startsWith('cmpwi'));
       expect(lastTest).toBeGreaterThan(nest.findIndex((l) => l.startsWith('lwz')));
-      expect(PPC_MWCC.compilerBehaviors.switchAllowsPathBoundCase).toBe(true);
+      expect(PPC_MWCC.compilerBehaviors.switchBoundCase).toBe('either');
       expect(PPC_MWCC.compilerBehaviors.switchRequiresFrontLoadedTests).toBe(true);
     },
     BUDGET,

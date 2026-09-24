@@ -2,8 +2,8 @@
 // `packages/core/test/switch-arms.test.ts`.
 //
 // Four compilers, and two claims. `switchRequiresFrontLoadedTests` is read off the agbcc and MIPS
-// pairs and the mwcc fixtures; `switchAllowsPathBoundCase` (target.ts, PPC_MWCC) off the four mwcc
-// fixtures, which add two ladders written with the relational tests themselves.
+// pairs and the mwcc fixtures; `switchBoundCase` (target.ts) off agbcc's path-bound dispatch and
+// the four mwcc fixtures, which add two ladders written with the relational tests themselves.
 //
 // WHY A SCRIPT AND NOT A NOTE. `switchRequiresFrontLoadedTests` (target.ts) is a COMPILER claim
 // about two SOURCE spellings — that a `switch` and the if/else-if ladder over the same values are
@@ -93,13 +93,15 @@ for (const t of MIPS_LANE) {
 }
 
 /** The agbcc lane: agbcc emits TEXT, so what is committed is the compiler's own `.s` — no objdump
- *  step and nothing to normalise. Three fixtures, not two: the pair the declaration rests on, plus
- *  the NESTED tree that pins what PRE5's decline actually produces when the tree it declines holds
- *  a sub-tree that re-recovers (switch-recover.ts PRE5, "WHAT THE DECLINE PRODUCES"). */
+ *  step and nothing to normalise. Four fixtures: the pair the declaration rests on, the NESTED
+ *  tree that pins what PRE5's decline actually produces when the tree it declines holds a sub-tree
+ *  that re-recovers (switch-recover.ts PRE5, "WHAT THE DECLINE PRODUCES"), and a dispatch that pins
+ *  a case by its path (`switchBoundCase`). */
 const AGBCC_VARIANTS = [
   { out: 'agbcc-swfrontload.s', src: 'probe-agbcc-swfrontload.c' },
   { out: 'agbcc-swladder.s', src: 'probe-agbcc-swladder.c' },
   { out: 'agbcc-swnested.s', src: 'probe-agbcc-swnested.c' },
+  { out: 'agbcc-swpathbound.s', src: 'probe-agbcc-swpathbound.c' },
 ] as const;
 
 for (const v of AGBCC_VARIANTS) {

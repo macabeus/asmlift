@@ -1,5 +1,5 @@
 /* The `switch` half of the mwcc spelling fixtures for
- * `TargetDescription.compilerBehaviors.switchAllowsPathBoundCase` (target.ts, PPC_MWCC).
+ * `TargetDescription.compilerBehaviors.switchBoundCase` (target.ts, PPC_MWCC).
  *
  * CodeWarrior dispatches this with one `cmpwi` read by a `beq` and then by a `bge` on its
  * fall-through, and pins `case 0` with a bound test (`x >= 0`) that admits one value only because

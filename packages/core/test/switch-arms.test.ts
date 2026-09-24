@@ -683,9 +683,9 @@ test('TWO jump-table arms falling into ONE still fails LOUD', () => {
 // if-nesting, which compiles to a different compare AND a different arm layout.
 //
 // An `if (x < 1) … else if …` chain compiles to the same asm, so the reading is held to what
-// `emit_case_nodes` can emit: the BRANCH of a test BELOW the root, on a compiler that declared
-// `switchAllowsBoundCase`. Each of those three refusals has a fixture of its own below, and PRE3
-// closes the fourth question — a singleton an ancestor already ruled out.
+// `emit_case_nodes` can emit: a test BELOW the root, on the side agbcc declared
+// (`switchBoundCase: 'taken'`, its BRANCH). Each of those three refusals has a fixture of its own
+// below, and so does a singleton an ancestor already ruled out.
 
 /** agbcc's own `switch (x) { case 0..2 }`: the dispatch verbatim from `-O2 -mthumb-interwork
  *  -fhex-asm -fprologue-bugfix`, where `case 0:` is the bound test `cmp r0, #1 / bcc` under the
@@ -762,22 +762,37 @@ test('a bound branch onto another TEST is the search descending, and still recov
 });
 
 test('a compiler that has not declared bound cases reads the branch as navigation', () => {
-  // The rule is agbcc's, from agbcc's `stmt.c`. The same asm is a plain if-else chain on a
-  // compiler whose dispatch never elides the remaining value's test, and IDO already pays for
-  // that mis-recognition once (`switchAllowsNeqCase: false`), so nobody inherits this one.
+  // Each declaring compiler reads it off its own dispatch (agbcc's `stmt.c`, mwcc's objects). The
+  // same asm is a plain if-else chain on a compiler whose dispatch never elides the remaining
+  // value's test, and IDO already pays for that mis-recognition once (`switchAllowsNeqCase:
+  // false`), so nobody inherits this one.
   const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
-  delete undeclared.compilerBehaviors.switchAllowsBoundCase;
+  delete undeclared.compilerBehaviors.switchBoundCase;
   const out = decompile('f', boundCase, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
   expect(out).not.toContain('switch (');
-  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-    expect(t.compilerBehaviors.switchAllowsBoundCase).toBeUndefined();
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(t.compilerBehaviors.switchBoundCase).toBeUndefined();
   }
 });
 
-test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather than resurrect it', () => {
-  // The reading is over the whole 32-bit domain, so `x < 1` still says `{0}` under an ancestor
-  // that sent every x < 5 elsewhere. Simulating the original tree for the recovered value is what
-  // catches it: x == 0 reaches `.Ldef`, not `.Lc0`.
+test('agbcc pins a case by its PATH, at no end of the domain, and it is that case', () => {
+  // `cmp r1, #2; bgt` admits only 3, because the tests above it left `x < 4` and `x != 2`.
+  // Navigation would make `return 30` a second default and decline the whole tree to an if-nest
+  // that compiles to a different object.
+  const asm = readFileSync(new URL('corpus/agbcc-swpathbound.s', import.meta.url), 'utf8');
+  const out = decompile('h', asm, ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([1, 2, 3, 4, 5, 1000, 2000]);
+  expect(out).not.toContain('if (');
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchBoundCase;
+  expect(decompile('h', asm, undeclared).source).not.toContain('switch (');
+});
+
+test('a singleton an ancestor already excluded is DEAD, and the tree declines rather than resurrect it', () => {
+  // Over the whole 32-bit domain `x < 1` says `{0}`, but the range reaching it is what is left
+  // under an ancestor that sent every x < 5 elsewhere, and there `x < 1` admits nothing. So
+  // `.Lc0` is navigation, a second default beside `.Ldef`, and the tree declines.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x5\n\tbcc\t.Ldef\t@cond_branch\n' +
@@ -1225,8 +1240,7 @@ test('every withholding on the `default:` position, one call each', () => {
     isNamed: () => false,
     isCmpOpcode: () => false,
     switchAllowsNeqCase: false,
-    switchAllowsBoundCase: false,
-    switchAllowsPathBoundCase: false,
+    switchBoundCase: null,
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: false,
     spellSwitchFallthrough: true,
@@ -1532,7 +1546,7 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
   expect(cBackend.emit(structure(fn, opts))).toContain('switch (a0)');
 });
 
-// ── mwcc: A CASE PINNED BY ITS PATH (switchAllowsPathBoundCase) ──────────────────────────────────
+// ── mwcc: A CASE PINNED BY ITS PATH, ON EITHER SIDE (switchBoundCase: 'either') ──────────────────
 // CodeWarrior's binary-search dispatch pins its last value with a RELATIONAL test that admits one
 // value only because of the tests above it: `switch (x) { case 0: … case 1: … default: … }` is
 // `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, and `x >= 0` means
@@ -1544,7 +1558,7 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
 const ppcLift = (asm: string, t = PPC_MWCC) => decompile('swpath', asm, t).source;
 const mwccFixture = (f: string) => readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8');
 const pathBoundUndeclared = { ...PPC_MWCC, compilerBehaviors: { ...PPC_MWCC.compilerBehaviors } };
-delete pathBoundUndeclared.compilerBehaviors.switchAllowsPathBoundCase;
+delete pathBoundUndeclared.compilerBehaviors.switchBoundCase;
 
 test('the three mwcc spellings of ONE body are three objects, and only the switch has a path-bound test', () => {
   const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
@@ -1574,9 +1588,9 @@ test("mwcc's own dispatch recovers as the switch it was compiled from", () => {
   // declines to the if-nesting.
   const undeclared = ppcLift(mwccFixture('mwcc-swdispatch'), pathBoundUndeclared);
   expect(undeclared).not.toContain('switch (');
-  for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC]) {
-    expect(t.compilerBehaviors.switchAllowsPathBoundCase).toBeUndefined();
-  }
+  // agbcc reads the same mechanism on its BRANCH only, which this `case 0` is; the next test's
+  // fall-side case is the one it refuses.
+  expect(ARMV4T_AGBCC.compilerBehaviors.switchBoundCase).toBe('taken');
 });
 
 test('the ladders do not come back as that switch', () => {
@@ -1603,7 +1617,7 @@ test('a relational ladder its path reads as a switch is declined by its layout',
 test('a path-bound case lands on the FALL side too', () => {
   // `synthetic:sw_ret:mwcc_242_81`'s target, verbatim: under `x >= 2` and `x != 2`, the fall side
   // of `x >= 4` admits only 3, and `b 40` is its body. `x >= 0` on the other half pins 1 on the
-  // taken side. agbcc's endpoint reading refuses a fall side by design; this one reads both.
+  // taken side. A compiler declaring its BRANCH only, as agbcc does, reads `case 3` as navigation.
   const asm =
     '0:\tcmpwi   r3,2\n4:\tbeq-    38 <sw_ret+0x38>\n8:\tbge-    1c <sw_ret+0x1c>\n' +
     'c:\tcmpwi   r3,0\n10:\tbeq-    28 <sw_ret+0x28>\n14:\tbge-    30 <sw_ret+0x30>\n18:\tb       48 <sw_ret+0x48>\n' +
@@ -1614,12 +1628,17 @@ test('a path-bound case lands on the FALL side too', () => {
   expect(out).toContain('switch (a0)');
   expect(armOrder(out)).toEqual([0, 1, 2, 3]);
   expect(out).toContain('return -1;');
+  const takenOnly = {
+    ...PPC_MWCC,
+    compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, switchBoundCase: 'taken' as const },
+  };
+  expect(decompile('sw_ret', `0 <sw_ret>:\n${asm}`, takenOnly).source).not.toContain('switch (');
 });
 
-test('a path singleton an UNSIGNED ancestor already excluded is dead, and PRE3 declines', () => {
-  // An unsigned test narrows nothing, so the range under it is a superset: `x >= 0` still reads
-  // as `case 0` below the root that sent `x <u 1` — which is 0 — to the default. Simulating the
-  // original tree for 0 lands on the default, not on the body, so the tree declines.
+test('a path singleton an UNSIGNED ancestor already excluded is dead, and the tree declines', () => {
+  // The range narrows by an unsigned test as exactly as by a signed one: below the root that sent
+  // `x <u 1` — which is 0 — to the default, `x >= 0` admits nothing on its taken side, so its body
+  // is navigation, a second default, and the tree declines.
   const asm =
     '0:\tcmplwi  r3,1\n4:\tblt-    30 <dead+0x30>\n' +
     '8:\tcmpwi   r3,1\nc:\tbeq-    28 <dead+0x28>\n10:\tbge-    30 <dead+0x30>\n' +
