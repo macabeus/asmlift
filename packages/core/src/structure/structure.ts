@@ -2091,6 +2091,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     liveIn,
     materialize,
+    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,
@@ -5903,7 +5904,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
       : null;
     const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
+    // A PRE-UPDATE HOME DOES NOT UNLOCK A LOOP whose variable's NAME a block after it also holds.
+    // The exit region reads the loop's back-edge values under those names (`sub`), and such a
+    // param's copies write the same name first — the merge naming's `carrier-live` sees live NAMED
+    // values, not ones the substitution spells, so it does not refuse them. The spelling is wrong
+    // wherever it occurs; it is the home's to keep from unlocking one, which without the name would
+    // decline on this hazard.
+    const homed = [...dw.body].some((bb) => bb.ops.some((o) => preUpdateHomes.has(o)));
+    const sharesALoopName = homed && [...postLoop].some((bb) => bb.params.some((p) => headerNames.has(varName.get(p))));
     if (
+      sharesALoopName ||
       loopUpdateHazard(
         lterm.operands[0],
         exitArgs.filter((_, j) => !sunk.has(j)),

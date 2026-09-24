@@ -726,6 +726,8 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
+  /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
+  preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
@@ -1406,39 +1408,28 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  structurer declines the loop (`loopEscapeHazard`, hazards.ts); an exit-edge ARG carrying the
    *  same value is the sink's.
    *
-   *  Asked only once every other rule has settled (`escapePhase` below), so the walk sees each def
-   *  those rules name. No refusal here protects meaning — naming a def at its own position never
-   *  changes a value, and `loopEscapeHazard` stays the check — so each one keeps a spelling:
-   *  - a reader not reached through the latch's exit edge: an early-return arm renders inside the
-   *    body, ahead of the update, where the name still holds the value it read;
-   *  - a header that leaves the loop too, unless it is the latch: the structurer may take that exit
-   *    as a test at the top and render the latch's exit as an arm inside the body;
-   *  - a def in another loop's multi-block header, where a test-at-top `while` has no seat for it;
-   *  - an expression that reads no updated loop variable — reading the BACK-EDGE ARG is reading the
-   *    post-update value, which is what the name holds, and a materialized def renders as its name. */
+   *  Naming a def at its own position never changes a value, and `loopEscapeHazard` stays the
+   *  check. What the name does change is which functions structure at all, and a function this rule
+   *  lets through is spelled by the rest of the structurer, whose naming has shapes it gets wrong.
+   *  So it is kept to the shape the listing has, A SELF-LOOP: in a body of more than one block a
+   *  differential fuzz over generated IR found functions it unlocked that were then spelled wrong —
+   *  a loop variable's name adopted in place ahead of a read of its old value, the calls of a bottom
+   *  test reordered — each wrong on shapes that already structure, too. In a self-loop every reader
+   *  outside the body lies past the latch's exit, where the update has run. The structurer adds one
+   *  refusal of its own, on names (`preUpdateHomes`, structure.ts).
+   *
+   *  Asked only once every other rule has settled (`escapePhase` below), so the walk stops at each
+   *  def those rules name: a materialized def renders as its name. It stops at a BACK-EDGE ARG too —
+   *  reading it is reading the post-update value, which is what the name holds. */
   const escapeLoops = loopBodies.flatMap((L) => {
     const term = L.latch.ops[L.latch.ops.length - 1];
     const back = term.successors.find((sc) => sc.block === L.header);
-    if (!back || (L.header !== L.latch && successorsOf(L.header).some((x) => !L.body.has(x)))) {
-      return [];
-    }
-    const after = new Set<Block>();
-    for (const { block } of term.successors) {
-      if (!L.body.has(block)) {
-        after.add(block);
-        reachFrom(block).forEach((x) => after.add(x));
-      }
-    }
-    return [{ ...L, back, after }];
+    return back && L.body.size === 1 ? [{ ...L, back }] : [];
   });
+  const preUpdateHomes = new Set<Op>();
   const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
     escapeLoops.some((L) => {
-      const b = opBlock.get(op)!;
-      if (
-        !L.body.has(b) ||
-        (b !== L.header && multiBlockHeaders.has(b)) ||
-        !consumers.some((c) => L.after.has(opBlock.get(c)!) && !L.body.has(opBlock.get(c)!))
-      ) {
+      if (!L.body.has(opBlock.get(op)!) || consumers.every((c) => L.body.has(opBlock.get(c)!))) {
         return false;
       }
       const seen = new Set<Value>();
@@ -1701,6 +1692,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           escapesAheadOfUpdate(op, er, consumersOf(op))
         ) {
           materialize.add(op);
+          preUpdateHomes.add(op);
           continue;
         }
         if (op.opcode !== 'call' && op.opcode !== 'load' && op.opcode !== 'aload') {
@@ -1995,6 +1987,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     opBlock,
     liveIn,
     materialize,
+    preUpdateHomes,
     reachFrom,
     emitPos,
     memWriteBetween,
