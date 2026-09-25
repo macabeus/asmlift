@@ -1,9 +1,12 @@
 # Hardware floating point
 
-asmlift has no floating-point model. Not a partial one: there is no `IrType` kind for a float, no
-opcode that computes one, no ABI home that carries one, and no backend that spells one. On MIPS and
-PowerPC that shows up as a decline; on the GBA it does not show up at all, because agbcc routes
-every `float` through soft-float helper calls that asmlift already models as ordinary calls.
+asmlift lifts the SINGLE-PRECISION ARITHMETIC of the FPU's register file on MIPS o32 and the
+PowerPC EABI — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fsubs`/`fmuls`/`fdivs`/
+`fneg`/`fmr` — through each ABI's float argument and return homes, and nothing else in that file.
+§6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
+tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
+On the GBA none of this shows up at all, because agbcc routes every `float` through soft-float
+helper calls that asmlift already models as ordinary calls.
 
 This document exists because hardware floating point is the largest single gap between asmlift and
 m2c, and because the obvious first move — decode the FPU instructions — is the wrong one. It
@@ -115,13 +118,13 @@ not 303/1,000.
 A `float fadd(float a, float b){ return a+b; }` compiles on MIPS to two instructions
 (`jr ra` / `add.s $f0,$f12,$f14`). Matching it needs all four of:
 
-1. **A register file.** Neither frontend has one. PowerPC's `isReg` is `/^r\d+$/`, so an `f1` is
-   not a register to it at all. MIPS is the worse half and in the other direction: `isMipsReg` is
+1. **A register file.** Neither frontend's integer register predicate takes one. PowerPC's `isReg`
+   is `/^r\d+$/`, so an `f1` is not a register to it at all. MIPS is the worse half and in the other direction: `isMipsReg` is
    `/^(\$\d+|[a-z][a-z0-9]*)$/i`, which REJECTS the objdump spelling `$f12` and ACCEPTS a bare
    `f12` — so on the Splat dialect, which strips the `$` sigil, an FPU register passes for a GPR
    and an `add.s` becomes an opaque on a register in a file nothing models. This is the layer the
-   decline now names (`unmodelled floating-point instruction … the floating-point register file`),
-   and it is the only layer that exists today. `frontend/splat.ts` keeps the sigil on an FPU
+   decline names (`unmodelled floating-point instruction … the floating-point register file`) for
+   every FPU instruction outside the decoded arithmetic (§6). `frontend/splat.ts` keeps the sigil on an FPU
    register for exactly this reason — objdump writes a GPR bare and an FPU register with the sigil,
    so preserving it is what the reader's own header promises, and the bare form is indistinguishable
    from an objdump branch target, which is also bare lower-case hex (`f4`, `fa0`).
@@ -231,7 +234,8 @@ grep -rn "\.kind === 'int'\|\.kind === 'ptr'\|\.kind === 'unknown'\|\.kind === '
 grep -rln "kind === 'int'\|kind: 'int'\|case 'int':" packages/core/src | wc -l
 ```
 
-**102 discrimination sites across 17 files.** Two of them are named in `ir/types.ts` as the reason
+**107 discrimination sites across 17 files** (re-counted at `e8db01a0`; the document first
+measured 102). Two of them are named in `ir/types.ts` as the reason
 `intWidth` has exactly one copy: `ir/verify.ts` reads a null width as "not subject to the rule, so
 pass" and `raise/runtime-helpers.ts` reads it as "refuse to fold". A float kind is null-width under
 both readings and lands on opposite policies, so **a new kind reaches the verifier and the
@@ -239,17 +243,18 @@ recogniser together or neither** — the file says so, and this is the first kin
 
 ## 5. The recommendation
 
-**Do not build hardware floating point before MIPS calls.** The ordering is not a preference; it is
-the 87% above. A float model landed first reaches 39 functions per 1,000 of remaining MIPS work and
+**Do not build hardware floating point before MIPS calls — for MIPS remaining work.** The ordering
+is not a preference there; it is the 87% above. A float model landed first reaches 39 functions per 1,000 of remaining MIPS work and
 turns 69 corpus declines into candidates, most of which would then decline one guard later on the
 call they also contain. Board 004 reached the same ordering from the 64-bit side; two independent
 gaps now point at the same missing capability.
 
-When it is built, build it **downwards, not upwards**: the type and its spelling (layer 4) are what
+It does not bind the corpus or PowerPC, which is why §6 exists: every MIPS row that declines on the
+FPU is a leaf. And when it is built, build it **downwards, not upwards**: the type and its spelling (layer 4) are what
 decide whether any of it matches, the ABI homes (layer 3) are what make a value reach a return, and
 the decode (layer 2) is the cheapest and the only one that produces a wrong answer on its own.
 
-What this round shipped instead is layer 1's honesty: the refusal now names the register file rather
+Layer 1's honesty came first: the refusal now names the register file rather
 than describing the shape of the instruction that ran into it, so the 69 rows read as one capability
 in the report instead of three, and `apps/web`'s decline table stops re-deriving "is this floating
 point?" from a list of mnemonics that core never told it. It says so on **both MIPS dialects**, in
@@ -264,3 +269,42 @@ so the next frontend with an FPU has to answer for them rather than inherit the 
 omission. The predicate itself has exactly one copy, and a test counts them: the reader decides
 which tokens still carry a sigil when the frontend's policy sees them, so a second copy is not a
 duplicate but a second half of one decision.
+
+## 6. What is built, and the next layer
+
+Built downwards, in §5's order, and every step of it is in `docs/level-tower.md` ("A float, across the
+tower"): an `IrType` kind and its C spelling, the float opcodes and their own L3 operators, the ABI
+homes as target data (`TargetDescription.fpu`), and last the decode, which lands only beside the homes.
+
+**What it reached.** Of the 69 rows that decline naming an FPU instruction, the ones whose every FPU
+instruction is in the decoded set — rerun it against the artifact you rebased onto:
+
+```sh
+node -e "const R=require('./apps/benchmark/results/results.json').results;
+const MN=/^\s*[0-9a-f]+:\t([a-z][\w.]*)/;
+const FP=/^(l|s)(wc1|dc1)\$|^(mf|mt|ct|cf)c1\$|^bc1[tf]l?\$|^(add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[sdw]|^f[a-z]|^(lfs|lfd|stfs|stfd|psq_|ps_)/;
+const fpm=r=>(r.targetAsm||'').split('\n').map(l=>MN.exec(l)).filter(m=>m&&FP.test(m[1])).map(m=>m[1]);
+const named=R.filter(r=>fpm(r).length&&(r.asmlift.errorMarkers||[]).some(m=>/unmodelled floating-point instruction/.test(m)));
+const A=new Set(['add.s','sub.s','mul.s','div.s','neg.s','mov.s','fadds','fsubs','fmuls','fdivs','fneg','fmr']);
+const B=new Set([...A,'lwc1','swc1','lfs','stfs']);
+const inA=named.filter(r=>fpm(r).every(m=>A.has(m))), inB=named.filter(r=>fpm(r).every(m=>B.has(m))&&!inA.includes(r));
+console.log('arithmetic only:',inA.length,'| m2c matches:',inA.filter(r=>r.m2c.outcome==='match').length);
+console.log('+ 32-bit load/store:',inB.length,'| m2c matches:',inB.filter(r=>r.m2c.outcome==='match').length)"
+```
+
+Against `origin/main` at `e8db01a0` (before this layer) that prints **13 / 13** and **15 / 6**. The 13
+are all synthetic — `fadd`, `fsub`, `fmul` and `fdiv` on ido7.1, gcc2.7.2kmc and mwcc_242_81, and
+`fma1` on mwcc_242_81 — and each lifts to the program that compiled it.
+
+**§5's ordering held for MIPS remaining work and not for this.** Every MIPS row that declines on the
+FPU in the corpus is a leaf, and PowerPC calls are modelled, so 58 of the 69 are reachable with no call
+work. What bounds the PowerPC half is a refusal of this layer's own: a function that computes on a
+float and makes a call refuses, because which FPRs a callee reads, returns in and destroys is not
+modelled.
+
+**The next layer is 32-bit FP load and store** (`lwc1`/`swc1`, `lfs`/`stfs`): the second count above,
+15 rows, 6 of which m2c matches, real rows among them. §3 is the warning that comes with it — the type
+IS the FP part of that gap, and a carrier decode onto the word load is the wrong one. The layer owns a
+typed memory access (a float element, a float struct member), and it owns an `lfs` of a small-data
+constant, which is how a float LITERAL arrives on PowerPC. After it: doubles and `frsp`, the
+int/float conversions, and the compares and `bc1t`/`bc1f`, the fifth thing §1 named.
