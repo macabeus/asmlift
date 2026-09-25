@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=111.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=136.3s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,16 +136,22 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-24**, taken at `b7857a14`
-(`match/stkwide`, rebased onto #258: comments and one test, no row moved): the ranked pass alone is
-**1,154 s over 192 real rows** and **590 s over 768 synthetic rows**; wall clock was 291.2 s and
-212.7 s on tiers that overlap, and **306.9 s** end to end (the CLI's own `Done in` line). Against
-`origin/main` it is **0 field changes**, fan **69,855 → 69,855 (1.00×)** over 960 comparable rows,
-while its ranked pass reads **2,353.2 s → 1,743.9 s (0.74×)**. The box was quieter; the branch is
-no cheaper. The dearest single row is **148 s** on `kleod:PauseMenuScreenHandler:agbcc`, **13% of
-the tier** on its own — which is the figure to reach for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-25**, taken at `4848e173` (`match/fadd-fpu`,
+on `e8db01a0`: single-precision FPU arithmetic, 13 rows declined → MATCH, 0 lost): the ranked pass
+alone is **1,288 s over 192 real rows** and **712 s over 781 synthetic rows**; wall clock was 306.3 s
+and 232.0 s on tiers that overlap, and **343.4 s** end to end (the CLI's own `Done in` line). Against
+`origin/main` it is **113 field changes**, fan **69,855 → 69,855 (1.00×)** over 960 comparable rows
+(13 more counted here: the rows that now lift), while its ranked pass reads **1,743.9 s → 1,996.4 s
+(1.14×)**. The dearest single row is **151 s** on `marioparty3:FileSeek:gcc2.7.2`, **12% of the
+tier** on its own — which is the figure to reach for when a scoped run looks cheap.
 
-The artifact `origin/main` carried before this one, taken 2026-09-24 at `0ff9a625`
+The artifact before it, taken 2026-09-24 at `b7857a14` (`match/stkwide`, rebased onto #258:
+comments and one test, no row moved), read **1,154 s over 192 real rows** and **590 s over 768
+synthetic rows**; wall clock was 291.2 s and 212.7 s, **306.9 s** end to end, its ranked pass read
+2,353.2 s → 1,743.9 s (0.74×) against its own base with 0 field changes, and its dearest row was
+**148 s** on `kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier.
+
+The one before that, taken 2026-09-24 at `0ff9a625`
 (`match/preupdate-escape`, #258), read **1,548 s over 192 real rows** and **805 s over 768
 synthetic rows**; wall clock was 385.8 s and 284.4 s, **403.7 s** end to end, and its dearest row
 was **205 s** on `kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it, taken at

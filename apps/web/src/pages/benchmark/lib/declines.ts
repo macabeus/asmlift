@@ -257,8 +257,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'float',
     // THE LABEL NAMES THE FILE, NOT A LIST OF INSTRUCTION KINDS, because the pattern below has no
     // list in it either and a label that enumerates goes stale against a class that does not. The
-    // 69 markers it claims today span arithmetic, the FPU loads and stores, the moves in both
-    // directions, the conversions and one compare — and NO paired single, which an earlier label
+    // 55 markers it claims today span double arithmetic, the FPU loads and stores, the moves in both
+    // directions, the conversions and two compares — and NO paired single, which an earlier label
     // advertised at zero inhabitants:
     //   node -e 'const R=require("./apps/benchmark/results/results.json").results;const c={};
     //   for(const r of R){if(r.asmlift.outcome!=="declined")continue;
@@ -291,7 +291,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 69 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 56 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, and PowerPC's float-plus-
     // call refusal): the single-precision arithmetic lifts through the float homes, and what still
