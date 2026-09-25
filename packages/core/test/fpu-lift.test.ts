@@ -229,6 +229,15 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
     expect(src).toContain('return v0;');
   });
 
+  // …and read through a negation. Compiled with `-fp_contract on` from
+  //   float n1(float a, float b, float c){ float t = a * b; float u = -t; return u + c; }
+  // the inline `-(a0 * a1) + a2` recompiles to one `fnmsubs`, the temp to this listing.
+  test('a product read by a sum through a negation is named too', () => {
+    expect(ppc('n1', '   0:\tfmuls   f0,f1,f2\n   4:\tfneg    f0,f0\n   8:\tfadds   f1,f0,f3\n   c:\tblr\n')).toBe(
+      'float n1(float a0, float a1, float a2) {\n    float v0;\n    v0 = a0 * a1;\n    return -v0 + a2;\n}\n',
+    );
+  });
+
   test('negation, a nested expression, and an unread first float argument', () => {
     expect(lift('neg2', MWCC, PPC_MWCC)).toContain('return -(a0 - a1);');
     expect(lift('poly', MWCC, PPC_MWCC)).toContain('return (v0 - a1) / (a0 + a1);');

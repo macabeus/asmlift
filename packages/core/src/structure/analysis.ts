@@ -1373,6 +1373,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     !op.results.length ||
     !useSitesOf.has(op.results[0]);
   const consumersOf = (op: Op): Op[] => [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))];
+  /** Does `op`'s value reach a float add or subtract, directly or through negations only? */
+  const feedsFloatAdd = (op: Op): boolean =>
+    consumersOf(op).some(
+      (c) => c.opcode === 'fadd' || c.opcode === 'fsub' || (c.opcode === 'fneg' && feedsFloatAdd(c)),
+    );
   const emitPos = (op: Op): { blk: Block; idx: number } | null => {
     if (emitPosCache.has(op)) {
       return emitPosCache.get(op)!;
@@ -1788,13 +1793,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // (mwcc `-fp_contract on`, set on some pikmin, marioparty4 and ac-decomp units) fuses a
           // multiply into an add only WITHIN one expression, so `a * b + c` recompiles to one
           // `fmadds` — one rounding, a different value — where the object holds `fmuls` then
-          // `fadds`, and `t = a * b; t + c` compiles to that pair under either setting. KNOWN GAP:
-          // not at a multi-block loop header, the seat the scopes below refuse too.
-          if (
-            op.opcode === 'fmul' &&
-            consumersOf(op).some((c) => c.opcode === 'fadd' || c.opcode === 'fsub') &&
-            !multiBlockHeaders.has(b)
-          ) {
+          // `fadds`, and `t = a * b; t + c` compiles to that pair under either setting. Read through
+          // a negation too: `-(a * b) + c` fuses to one `fnmsubs`, and `c - -(a * b)` to `fmadds`.
+          // KNOWN GAP: not at a multi-block loop header, the seat the scopes below refuse too.
+          if (op.opcode === 'fmul' && feedsFloatAdd(op) && !multiBlockHeaders.has(b)) {
             materialize.add(op);
           }
           // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
