@@ -174,3 +174,34 @@ test('a forward edge laid out backward still names the call it carries', () => {
     expect(emit(ir)).toMatch(/v0 = f1\(a0\);\n\s+if \(a1 > 0\) a1 = v0 \+ 1;/);
   }
 });
+
+// ONE `br`, TWO EDGE COPIES: a call's value and a read's. agbcc, `if (n > 0) { int t = cb(p); a = *p;
+// b = t + m; } return a - b;` runs `bl cb; ldr r1, [r5]; add` and falls into the merge. The copies
+// are two statements, so a read in one and the call in the other are not one expression's operands:
+// inlined, `a1 = *a0; a2 = cb(a0) + a2;` read before the call. The call is named where it ran. The
+// control moves the read into the same copy as the call, where one expression gives the order back.
+const SIBLING_COPIES = `fn brc {
+^bb0(%0: s32*, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sle %1, %3
+  cond_br %4, ^bb2(%2, %1), ^bb1()
+^bb1():
+  %5: s32 = call %0 {target="cb"}
+  %6: s32 = load %0 {off=0, signed=true, width=4}
+  %7: s32 = add %5, %2
+  br ^bb2(%7, %6)
+^bb2(%8: s32, %9: s32):
+  %10: s32 = sub %9, %8
+  ret %10
+}
+`;
+
+test('a call and a read in sibling edge copies keep the order the asm ran them in', () => {
+  expect(emit(SIBLING_COPIES)).toMatch(/v0 = cb\(a0\);\n\s+a1 = \*a0;\n\s+a2 = v0 \+ a2;/);
+  const oneCopy = SIBLING_COPIES.replace('%7: s32 = add %5, %2', '%7: s32 = add %5, %6').replace(
+    'br ^bb2(%7, %6)',
+    'br ^bb2(%7, %2)',
+  );
+  expect(oneCopy).not.toBe(SIBLING_COPIES);
+  expect(emit(oneCopy)).toContain('a2 = cb(a0) + *a0;');
+});

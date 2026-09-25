@@ -2000,7 +2000,41 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // TWO CALLS in one statement have no such order: agbcc calls `cg(k) - cb(p)` in operand
         // order and mwcc in its own, so `bl cb; bl cg` inlined as that comes back reversed. A call
         // ahead of another is named too, unless its value is only the later call's argument.
-        const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
+        //
+        // AND A TERMINATOR IS NOT ONE STATEMENT. It renders in parts — its own operands, then one
+        // copy per edge argument, each a statement of its own — so a read in one edge copy and a
+        // call in its sibling are sequenced, whatever order the copies come out in: agbcc's `bl cb;
+        // ldr r1, [r5]` into a merge came back `a1 = *a0; a2 = cb(a0) + a2;`. Two ops share a
+        // statement only when they render in the same part.
+        //
+        // Which part of its anchor `x` renders in: '' when the anchor is not a terminator, null
+        // when it has no one part.
+        const partOf = (x: Op): string | null => {
+          for (let cur = x; ;) {
+            const cons = consumersOf(cur);
+            if (cons.length !== 1) {
+              return null;
+            }
+            const [c] = cons;
+            if (c.successors.length > 0) {
+              const v = cur.results[0];
+              const parts = [
+                ...c.operands.flatMap((o, i) => (o === v ? [`op${i}`] : [])),
+                ...c.successors.flatMap((sc, si) => sc.args.flatMap((a, ai) => (a === v ? [`${si}:${ai}`] : []))),
+              ];
+              return parts.length === 1 ? parts[0] : null;
+            }
+            if (anchored(c)) {
+              return '';
+            }
+            cur = c;
+          }
+        };
+        const ownPart = partOf(op);
+        const sameStatement = (x: Op): boolean => {
+          const q = emitPos(x);
+          return q !== null && q.blk === pos.blk && q.idx === pos.idx && ownPart !== null && partOf(x) === ownPart;
+        };
         // Is every use of the def inside `call`'s arguments, as rendered?
         const onlyFeedsCall = (call: Op): boolean => {
           const cone = new Set<Op>([call]);
@@ -2036,7 +2070,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !x.results.length ||
               !useSitesOf.has(x.results[0]) ||
               materialize.has(x) ||
-              !samePos(emitPos(x)) ||
+              !sameStatement(x) ||
               !onlyFeedsCall(x)
             );
           }
@@ -2046,7 +2080,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           if (x.opcode === 'load' || x.opcode === 'aload') {
             return !x.results.length || !useSitesOf.has(x.results[0])
               ? false // dead load: never emitted at all
-              : materialize.has(x) || !samePos(emitPos(x));
+              : materialize.has(x) || !sameStatement(x);
           }
           return false;
         };
