@@ -87,7 +87,7 @@ describe('MIPS o32: single-precision arithmetic through $f12/$f14 and $f0', () =
 
   test('operand order, negation and a nested expression', () => {
     expect(lift('neg2', KMC, MIPS_GCC)).toContain('return -(a0 - a1);');
-    expect(lift('poly', KMC, MIPS_GCC)).toContain('return (a0 * a0 - a1) / (a0 + a1);');
+    expect(lift('poly', KMC, MIPS_GCC)).toContain('v0 = a0 * a0;\n    return (v0 - a1) / (a0 + a1);');
   });
 
   // THE 'leading' SLOT RULE. The two floats take o32 slots 0 and 1, so the integer arrives in `a2`,
@@ -207,15 +207,31 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
   });
 
   // `fmuls fD,fA,fC` names its second source third; a third float argument is f3.
+  // A product that feeds a sum is NAMED: under mwcc `-fp_contract on` the inline `a2 + a0 * a1`
+  // recompiles to one `fmadds`, which rounds once, while the temp gives this pair under either
+  // setting (structure/analysis.ts). Both spellings compile to this row's object at its own flags.
   test('the fma1 row: a third float argument, and a product feeding a sum', () => {
     expect(ppc('fma1', '   0:\tfmuls   f0,f1,f2\n   4:\tfadds   f1,f3,f0\n   8:\tblr\n')).toBe(
-      'float fma1(float a0, float a1, float a2) {\n    return a2 + a0 * a1;\n}\n',
+      'float fma1(float a0, float a1, float a2) {\n    float v0;\n    v0 = a0 * a1;\n    return a2 + v0;\n}\n',
     );
+  });
+
+  // …on every path it reaches, and still once when it is also returned alone. Compiled with
+  // `-fp_contract on` from
+  //   float c3(float a, float b, float c, int k){ float t = a*b; if (k) return t; return t + c; }
+  test('a product read by a sum and returned alone is one named value', () => {
+    const src = ppc(
+      'c3',
+      '  24:\tcmpwi   r3,0\n  28:\tfmuls   f1,f1,f2\n  2c:\tbnelr\n  30:\tfadds   f1,f1,f3\n  34:\tblr\n',
+    );
+    expect(src).toContain('v0 = a1 * a2;');
+    expect(src).toContain('return v0 + a3;');
+    expect(src).toContain('return v0;');
   });
 
   test('negation, a nested expression, and an unread first float argument', () => {
     expect(lift('neg2', MWCC, PPC_MWCC)).toContain('return -(a0 - a1);');
-    expect(lift('poly', MWCC, PPC_MWCC)).toContain('return (a0 * a0 - a1) / (a0 + a1);');
+    expect(lift('poly', MWCC, PPC_MWCC)).toContain('return (v0 - a1) / (a0 + a1);');
     expect(lift('second', MWCC, PPC_MWCC)).toBe('float second(float a0, float a1) {\n    return a1;\n}\n');
   });
 

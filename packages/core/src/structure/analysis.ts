@@ -1784,6 +1784,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
+          // A float PRODUCT read by a float add or subtract is named, always. A contracting compiler
+          // (mwcc `-fp_contract on`, set on some pikmin, marioparty4 and ac-decomp units) fuses a
+          // multiply into an add only WITHIN one expression, so `a * b + c` recompiles to one
+          // `fmadds` — one rounding, a different value — where the object holds `fmuls` then
+          // `fadds`, and `t = a * b; t + c` compiles to that pair under either setting. KNOWN GAP:
+          // not at a multi-block loop header, the seat the scopes below refuse too.
+          if (
+            op.opcode === 'fmul' &&
+            consumersOf(op).some((c) => c.opcode === 'fadd' || c.opcode === 'fsub') &&
+            !multiBlockHeaders.has(b)
+          ) {
+            materialize.add(op);
+          }
           // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
           // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
           // along with the gate duplication that is its price.
