@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=133.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=136.1s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,18 +136,18 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-24**, taken at `e0a82346`
-(`match/utag-mwcc`, rebased onto #259: a PowerPC frontend capability and a switch-recovery one, 11
-rows gained): the ranked pass alone is **1,543 s over 195 real rows** and **658 s over 782
-synthetic rows**; wall clock was 546.1 s and 237.8 s on tiers that overlap, and **546.3 s** end to
-end (the CLI's own `Done in` line). Against `origin/main` it is **136 field changes over 20 rows,
-all PowerPC**, fan **69,855 → 69,855 (1.00×)** over 960 comparable rows, while its ranked pass
-reads **1,743.9 s → 1,905.1 s (1.09×)**, and 17 rows (296.1 s) rank here that declined at
-`origin/main`. The dearest single row is **243 s** on `marioparty4:SceneMain:mwcc_242_81`, **16% of
-the tier** on its own — one of those 17, and a `noncompile`: all 324 of its candidates are compiled
-and none compiles. That is the figure to reach for when a scoped run looks cheap. The same branch
-one full run earlier, at `787670c0`, read 1,703 s and 1,032 s over the same rows with 0 field
-changes between the two: the ranked pass is wall clock on a shared machine.
+Summed out of the committed artifact of **2026-09-25**, taken at `7f2430d3` (`match/utag-mwcc`
+after its wave-2 remediation, on #259: a PowerPC frontend capability, a switch-recovery one, the
+argument-register slot fix, 16 rows gained): the ranked pass alone is **1,868 s over 195 real
+rows** and **1,101 s over 782 synthetic rows**; wall clock was 574.3 s and 407.8 s on tiers that
+overlap, and **574.5 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is
+**178 field changes over 47 rows**, fan **69,855 → 68,912 (0.99×)** over 960 comparable rows,
+while its ranked pass reads **1,743.9 s → 2,697.8 s (1.55×)**, and 17 rows (271.3 s) rank here
+that declined at `origin/main`. The dearest single row is **206 s** on
+`marioparty3:FileSeek:gcc2.7.2`, **11% of the tier** on its own, a row this branch does not touch:
+its fan is 336 at both artifacts, and `origin/main` priced it 141.4 s. Other rounds shared the
+machine for this run. The previous artifact of this branch, at `e0a82346`, read 1,543 s and 658 s
+over the same rows: the ranked pass is wall clock on a shared machine.
 
 The artifact `origin/main` carried before this one, taken 2026-09-24 at `b7857a14`
 (`match/stkwide`, #259), read **1,154 s over 192 real rows** and **590 s over 768 synthetic rows**;
