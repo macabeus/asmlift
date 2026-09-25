@@ -8,6 +8,8 @@
 // positive case below would be that, or a decline, without the homes. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
+import { writesFloatReturn } from '../src/frontend/fpu';
+import { mipsEvenFpKey } from '../src/frontend/splat';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
@@ -256,5 +258,39 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
     expect(() => ppc('f', '   0:\tfadds   f1,f9,f1\n   4:\tblr\n')).toThrow(
       /f9 is read before this function writes it, and no floating-point argument arrives there/,
     );
+  });
+
+  // The float return is read off the blocks the entry reaches: a write to f1 past the `blr` is on
+  // no path, and deciding by it would return f1 — argument 0's home — and drop `r3`.
+  test('an unreachable write to f1 does not make the function return a float', () => {
+    expect(ppc('f', '   0:\taddi    r3,r3,1\n   4:\tblr\n   8:\tfmr     f1,f2\n')).toBe(
+      's32 f(s32 a0) {\n    return a0 + 1;\n}\n',
+    );
+  });
+});
+
+// THE RETURN RULE IS SOUND ONLY WHILE A FLOAT CANNOT LEAVE THE FILE (frontend/fpu.ts
+// `writesFloatReturn`). Compiled with GCC_KMC_TOOLCHAIN's flags from
+//   int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }
+// it writes `$f0` and returns `v0`. The `swc1` refusal is what stands between it and a float return
+// that drops the `2`: a layer that decodes the store turns the second test red, and must decide
+// the return from the value reaching each `ret` before it can land.
+describe('the refusal the float return rule stands on', () => {
+  const ST3 = objdump(
+    'st3',
+    '   0:\tmul.s\t$f0,$f12,$f14\n   4:\tadd.s\t$f12,$f12,$f14\n   8:\tli\tv0,2\n' +
+      '   c:\tswc1\t$f0,0(a2)\n  10:\tjr\tra\n  14:\tswc1\t$f12,0(a3)\n',
+  );
+
+  test('the mnemonic scan reads an int-returning function as a float return', () => {
+    const instrs = [
+      { mnemonic: 'mul.s', ops: ['$f0', '$f12', '$f14'] },
+      { mnemonic: 'add.s', ops: ['$f12', '$f12', '$f14'] },
+    ];
+    expect(writesFloatReturn(instrs, new Set(['mul.s', 'add.s']), mipsEvenFpKey, MIPS_GCC.fpu)).toBe(true);
+  });
+
+  test('and the float store refuses, so it does not lift', () => {
+    expect(() => lift('st3', ST3, MIPS_GCC)).toThrow(/unmodelled floating-point instruction 'swc1'/);
   });
 });

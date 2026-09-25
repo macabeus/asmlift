@@ -729,7 +729,12 @@ export function lift(
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
-  const floatReturn = writesFloatReturn(instrs, FP_SINGLE_MNEMONICS, mipsEvenFpKey, fpu);
+  const floatReturn = writesFloatReturn(
+    blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body)),
+    FP_SINGLE_MNEMONICS,
+    mipsEvenFpKey,
+    fpu,
+  );
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
   // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer

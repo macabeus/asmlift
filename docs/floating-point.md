@@ -306,5 +306,11 @@ modelled.
 15 rows, 6 of which m2c matches, real rows among them. §3 is the warning that comes with it — the type
 IS the FP part of that gap, and a carrier decode onto the word load is the wrong one. The layer owns a
 typed memory access (a float element, a float struct member), and it owns an `lfs` of a small-data
-constant, which is how a float LITERAL arrives on PowerPC. After it: doubles and `frsp`, the
+constant, which is how a float LITERAL arrives on PowerPC. **It must first replace two rules this
+layer rests on**: the float RETURN is decided by scanning for a decoded write to `$f0`/`f1`
+(`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that a float reaches only a float
+op or `ret`. Both are sound only while no float can reach memory, so a store that lands before them
+lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
+float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
+from the value that reaches each `ret`. After it: doubles and `frsp`, the
 int/float conversions, and the compares and `bc1t`/`bc1f`, the fifth thing §1 named.
