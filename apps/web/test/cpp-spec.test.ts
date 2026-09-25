@@ -18,13 +18,16 @@ const VEC_DOT_ASM =
 test('mangled symbol, no user spec: demangle + synthesized word-field layout', () => {
   const sym = 'dot__3VecFP3Vec';
   const pass1 = decompile(sym, VEC_DOT_ASM, PPC_MWCC, { onGap: 'annotate' });
-  const spec = deriveSpec(sym, pass1.sfn);
+  const spec = deriveSpec(sym, pass1.sfn, PPC_MWCC.fpu?.slots);
   expect(spec.method).toBe('dot');
   expect(spec.cls).toBe('Vec');
   expect(spec.params).toEqual([{ name: 'a', type: { base: 'Vec', ptr: 1 } }]);
   expect(spec.classes?.Vec.fields.map((f) => f.name)).toEqual(['field_0', 'field_1']);
 
-  const r = decompile(sym, VEC_DOT_ASM, PPC_MWCC, { backend: cppBackend(spec), onGap: 'annotate' });
+  const r = decompile(sym, VEC_DOT_ASM, PPC_MWCC, {
+    backend: cppBackend(spec, PPC_MWCC.fpu?.slots),
+    onGap: 'annotate',
+  });
   expect(r.diagnostics).toEqual([]);
   expect(r.source).toBe(
     'struct Vec { int field_0; int field_1; int dot(Vec *a); };\n' +
@@ -49,7 +52,10 @@ test('user spec (the examples.ts Vec::dot JSON) reproduces the pinned ppc-cpp go
       },
     }),
   );
-  const r = decompile('dot__3VecFP3Vec', VEC_DOT_ASM, PPC_MWCC, { backend: cppBackend(spec), onGap: 'annotate' });
+  const r = decompile('dot__3VecFP3Vec', VEC_DOT_ASM, PPC_MWCC, {
+    backend: cppBackend(spec, PPC_MWCC.fpu?.slots),
+    onGap: 'annotate',
+  });
   expect(r.source).toBe(
     'struct Vec { int x; int y; int dot(Vec *o); };\nint Vec::dot(Vec *o) {\n    return x * o->x + y * o->y;\n}\n',
   );
@@ -58,13 +64,13 @@ test('user spec (the examples.ts Vec::dot JSON) reproduces the pinned ppc-cpp go
 test('unmangled symbol: free-function spec from the lifted params', () => {
   const asm = readFileSync(join(import.meta.dirname, '../../../packages/core/test/corpus/ido-add1.asm'), 'utf8');
   const pass1 = decompile('add1', asm, MIPS_IDO, { onGap: 'annotate' });
-  const spec = deriveSpec('add1', pass1.sfn);
+  const spec = deriveSpec('add1', pass1.sfn, MIPS_IDO.fpu?.slots);
   expect(spec).toEqual({
     method: 'add1',
     retType: { base: 'int', ptr: 0 },
     params: [{ name: 'a0', type: { base: 'int', ptr: 0 } }],
   });
-  const r = decompile('add1', asm, MIPS_IDO, { backend: cppBackend(spec), onGap: 'annotate' });
+  const r = decompile('add1', asm, MIPS_IDO, { backend: cppBackend(spec, MIPS_IDO.fpu?.slots), onGap: 'annotate' });
   expect(r.source).toBe('int add1(int a0) {\n    return a0 + 1;\n}\n');
 });
 
@@ -75,7 +81,7 @@ test('a sub-word receiver DECLINES auto-derivation instead of mis-mapping fields
     '00000000 <sum__3VecFv>:\n   0:\tlha     r4,0(r3)\n   4:\tlha     r0,2(r3)\n' +
     '   8:\tadd     r3,r4,r0\n   c:\tblr\n';
   const pass1 = decompile('sum__3VecFv', asm, PPC_MWCC, { onGap: 'annotate' });
-  expect(() => deriveSpec('sum__3VecFv', pass1.sfn)).toThrow(/sub-word width/);
+  expect(() => deriveSpec('sum__3VecFv', pass1.sfn, PPC_MWCC.fpu?.slots)).toThrow(/sub-word width/);
 });
 
 test('a demangle false-positive (plain C symbol shaped x__F<codes>) falls back to free-fn', () => {
@@ -83,18 +89,21 @@ test('a demangle false-positive (plain C symbol shaped x__F<codes>) falls back t
   // arity cross-check rejects the fabricated signature.
   const asm = '00000000 <buf__Fill>:\n   0:\tjr\tra\n   4:\taddiu\tv0,a0,1\n';
   const pass1 = decompile('buf__Fill', asm, MIPS_IDO, { onGap: 'annotate' });
-  const spec = deriveSpec('buf__Fill', pass1.sfn);
+  const spec = deriveSpec('buf__Fill', pass1.sfn, MIPS_IDO.fpu?.slots);
   expect(spec.method).toBe('buf__Fill'); // kept as mangled-C, not renamed to "buf"
   expect(spec.cls).toBeUndefined();
   expect(spec.params).toHaveLength(1);
-  const r = decompile('buf__Fill', asm, MIPS_IDO, { backend: cppBackend(spec), onGap: 'annotate' });
+  const r = decompile('buf__Fill', asm, MIPS_IDO, {
+    backend: cppBackend(spec, MIPS_IDO.fpu?.slots),
+    onGap: 'annotate',
+  });
   expect(r.source).toBe('int buf__Fill(int a0) {\n    return a0 + 1;\n}\n');
 });
 
 test('demangle length-prefix overrun yields free-fn, never invalid C++', () => {
   const asm = '00000000 <map__Fill16>:\n   0:\tjr\tra\n   4:\taddiu\tv0,a0,1\n';
   const pass1 = decompile('map__Fill16', asm, MIPS_IDO, { onGap: 'annotate' });
-  const spec = deriveSpec('map__Fill16', pass1.sfn);
+  const spec = deriveSpec('map__Fill16', pass1.sfn, MIPS_IDO.fpu?.slots);
   expect(spec.method).toBe('map__Fill16');
   expect(spec.params.every((p) => p.type.base.length > 0)).toBe(true);
 });
@@ -126,8 +135,8 @@ const FADD_MWCC = '00000000 <fadd>:\n   0:\tfadds\tf1,f1,f2\n   4:\tblr\n';
 const FADD_IDO = '00000000 <fadd>:\n   0:\tjr\tra\n   4:\tadd.s\t$f0,$f12,$f14\n';
 const G_FFI = '00000000 <g__Ffi>:\n   0:\tcmpwi\tr3,0\n   4:\tbnelr\n   8:\tfneg\tf1,f1\n   c:\tblr\n';
 const cpp = (sym: string, asm: string, target: typeof PPC_MWCC) => {
-  const spec = deriveSpec(sym, decompile(sym, asm, target, { onGap: 'annotate' }).sfn);
-  return decompile(sym, asm, target, { backend: cppBackend(spec), onGap: 'annotate' }).source;
+  const spec = deriveSpec(sym, decompile(sym, asm, target, { onGap: 'annotate' }).sfn, target.fpu?.slots);
+  return decompile(sym, asm, target, { backend: cppBackend(spec, target.fpu?.slots), onGap: 'annotate' }).source;
 };
 
 test.each([
@@ -146,7 +155,11 @@ test('a demangled signature binds its float to the lifted float, whatever the AB
 
 // A demangle whose float count is not the lift's is a false positive, like an arity mismatch.
 test('a demangled float count the lift does not have falls back to the free function', () => {
-  const spec = deriveSpec('g__Fii', decompile('g__Fii', G_FFI.replace('g__Ffi', 'g__Fii'), PPC_MWCC).sfn);
+  const spec = deriveSpec(
+    'g__Fii',
+    decompile('g__Fii', G_FFI.replace('g__Ffi', 'g__Fii'), PPC_MWCC).sfn,
+    PPC_MWCC.fpu?.slots,
+  );
   expect(spec.method).toBe('g__Fii');
   expect(spec.params.map((p) => p.type.base)).toEqual(['int', 'float']);
 });
@@ -162,7 +175,59 @@ test('a user spec that disagrees with the lift on the float parameters is refuse
       ],
     }),
   );
-  expect(() => decompile('g__Ffi', G_FFI, PPC_MWCC, { backend: cppBackend(spec) })).toThrow(
+  expect(() => decompile('g__Ffi', G_FFI, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) })).toThrow(
     /the spec's floating-point parameters do not match the lifted function's/,
   );
+});
+
+// THE BINDING FOLLOWS THE TARGET'S SLOT MODEL. Under the PowerPC EABI a float the body never reads
+// leaves no hole, so a spec may name more floats than the lift has: `int m(int n, float x)` for
+// `addi r3,r3,1` lifts as `(s32 a0)`, and `n` is that `a0`. Under o32 an unread LEADING float is
+// minted as an integer hole, so binding by file would hand `int k(float x, int n)`'s `n` the hole
+// `a0`; binding by position hands it `a1`, the register the body reads.
+const specOf = (method: string, params: [string, string][], ret = 'int') =>
+  parseSpec(
+    JSON.stringify({
+      method,
+      retType: { base: ret, ptr: 0 },
+      params: params.map(([name, base]) => ({ name, type: { base, ptr: 0 } })),
+    }),
+  );
+
+test.each([
+  [
+    'EABI: a trailing unread float',
+    'm',
+    '00000000 <m>:\n   0:\taddi\tr3,r3,1\n   4:\tblr\n',
+    PPC_MWCC,
+    specOf('m', [
+      ['n', 'int'],
+      ['x', 'float'],
+    ]),
+    'return n + 1;',
+  ],
+  [
+    'EABI: a leading unread float',
+    'k',
+    '00000000 <k>:\n   0:\taddi\tr3,r3,1\n   4:\tblr\n',
+    PPC_MWCC,
+    specOf('k', [
+      ['x', 'float'],
+      ['n', 'int'],
+    ]),
+    'return n + 1;',
+  ],
+  [
+    'o32: a leading unread float',
+    'k',
+    '00000000 <k>:\n   0:\tjr\tra\n   4:\taddiu\tv0,a1,1\n',
+    MIPS_IDO,
+    specOf('k', [
+      ['x', 'float'],
+      ['n', 'int'],
+    ]),
+    'return n + 1;',
+  ],
+])('%s binds the integer the body reads', (_label, sym, asm, target, spec, body) => {
+  expect(decompile(sym, asm, target, { backend: cppBackend(spec, target.fpu?.slots) }).source).toContain(body);
 });

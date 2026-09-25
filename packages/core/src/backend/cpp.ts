@@ -15,7 +15,11 @@
 // built ahead of an inhabitant.
 import { Expr, LanguageBackend, SFn } from '../l3/ast';
 import { type CppType, declareCpp, mangle, spellType } from '../mangle';
+import type { TargetDescription } from '../target';
 import { LeafHook, cComment, emitCFamily } from './cfamily';
+
+/** How the target's argument slots hold floats (`TargetDescription.fpu`). */
+type FloatSlots = NonNullable<TargetDescription['fpu']>['slots'];
 
 export interface CppClass {
   fields: { name: string; type: CppType }[];
@@ -34,22 +38,31 @@ export function cppSymbol(spec: CppFnSpec): string {
 }
 
 /** The lifted parameter each EXPLICIT spec parameter is (its SFn name), for a member function after
- *  `this` (SFn.params[0]). Bound by register FILE, then by position within it — not by position
- *  alone, because the lifted order is the ABI sort's and a float does not always sort where the
- *  source put it: under the PowerPC EABI the files count independently and every float argument
- *  ranks after the integers (frontend/fpu.ts `fpuArgSlots`), so `float g(float x, int n)` lifts as
- *  `(s32 a0, float a1)`. Under o32 a lifted float argument always leads, so the two bindings agree.
- *  NULL when the spec and the lift disagree on how many floating-point parameters there are: no
- *  binding of the rest is then trustworthy. */
+ *  `this` (SFn.params[0]). How depends on the target's float slot model (`TargetDescription.fpu`),
+ *  because the lifted order is the ABI sort's (frontend/fpu.ts `fpuArgSlots`):
+ *   - `'separate'` (PowerPC EABI): by register FILE, then by position within it. The files count
+ *     independently and every float argument sorts after the integers, so `float g(float x, int n)`
+ *     lifts as `(s32 a0, float a1)`. A float the body never reads leaves no hole, so the spec may
+ *     have MORE floats than the lift (`int m(int n, float x)` lifts as `(s32 a0)`), never fewer.
+ *   - `'leading'` (MIPS o32), and a target with no float file: by POSITION. The lifted order is the
+ *     slot order, which is the source order, and an unread leading float is minted as an integer
+ *     hole — so binding by file would hand `int k(float x, int n)`'s `n` the hole `a0`.
+ *  NULL when the two contradict: a lifted float the spec has no float for. No binding of the rest is
+ *  then trustworthy. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: SFn['params'],
+  floatSlots: FloatSlots | undefined,
 ): (string | undefined)[] | null {
   const isFloat = (t: CppType) => t.ptr === 0 && (t.base === 'float' || t.base === 'double');
   const explicit = lifted.slice(spec.cls ? 1 : 0);
+  if (floatSlots !== 'separate') {
+    const clash = explicit.some((p, i) => p.type.kind === 'float' && !(spec.params[i] && isFloat(spec.params[i].type)));
+    return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
+  }
   const floats = explicit.filter((p) => p.type.kind === 'float');
   const others = explicit.filter((p) => p.type.kind !== 'float');
-  if (spec.params.filter((p) => isFloat(p.type)).length !== floats.length) {
+  if (spec.params.filter((p) => isFloat(p.type)).length < floats.length) {
     return null;
   }
   let f = 0;
@@ -57,9 +70,10 @@ export function bindSpecParams(
   return spec.params.map((p) => (isFloat(p.type) ? floats[f++] : others[o++])?.name);
 }
 
-/** Build a C++ backend for one function, parameterized by its recovered C++ signature. For a member
- *  function SFn.params[0] is `this`; the rest bind to `params` by `bindSpecParams`. */
-export function cppBackend(spec: CppFnSpec): LanguageBackend {
+/** Build a C++ backend for one function, parameterized by its recovered C++ signature and the float
+ *  slot model of the target it was lifted for. For a member function SFn.params[0] is `this`; the
+ *  rest bind to `params` by `bindSpecParams`. */
+export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined): LanguageBackend {
   return {
     id: 'cpp',
     spellsSwitchFallthrough: true,
@@ -73,7 +87,7 @@ export function cppBackend(spec: CppFnSpec): LanguageBackend {
         rename.set(thisVar, 'this');
         recv.set(thisVar, { cls: spec.cls!, via: 'this' });
       }
-      const bound = bindSpecParams(spec, fn.params);
+      const bound = bindSpecParams(spec, fn.params, floatSlots);
       if (!bound) {
         throw new Error(
           `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +
