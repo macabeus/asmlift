@@ -133,8 +133,11 @@ const FP_SINGLE: Readonly<Record<string, Opcode | 'copy'>> = {
   fmr: 'copy',
 };
 const FP_SINGLE_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_SINGLE));
-/** An FPU register: the token, and the key the SSA builder holds it under. */
-const isFpKey = (k: string) => /^f\d+$/.test(k);
+/** An FPU register: the token, and the key the SSA builder holds it under. ONE predicate for the
+ *  decode above and the register-file refusal below (`fpReg`), so a token one of them reads as an
+ *  FPR cannot be one the other does not. */
+const PPC_FP_REG = /^f\d+$/;
+const isFpKey = (k: string) => PPC_FP_REG.test(k);
 
 // Shared objdump scaffolding (frontend/disasm.ts). parseMem narrowed to `r\d+` bases — a
 // non-register base is an SDA/global placeholder assertOrdinaryMem declines.
@@ -710,7 +713,7 @@ export function lift(
         // pre-pass before a block is even filled. Those two are exhaustive over the mnemonics that
         // can carry an address, so no operand reaching this policy is one. `test/fp-refusal.test.ts`
         // pins it, and moving the FPU check into a pre-pass ahead of that one turns it red.
-        fpReg: /^f\d+$/i,
+        fpReg: PPC_FP_REG,
         // The FPSCR moves that name no `fN` operand at all: `mtfsfi 7,0` takes a field number,
         // `mtfsb0`/`mtfsb1` a bit number, `mcrfs cr0,cr1` two condition registers. Without this
         // they read as "no register destination to degrade", which is the message that hides a

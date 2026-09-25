@@ -188,6 +188,14 @@ describe('a PowerPC branch target is an ADDRESS, and the FP predicate has no sig
   test('a non-branch instruction with an fN operand still names the file', () => {
     expect(liftPpc('tw      4,r3,f4')).toThrow(/floating-point register file \(f4\)/);
   });
+
+  // The MIPS rule above, on PowerPC: the decode that lifts an FPR and the refusal that names the
+  // file ask one predicate, so a token cannot be a float to one and not to the other.
+  test('the decode and the refusal share one FP-register predicate', () => {
+    const ppc = readFileSync(new URL('../src/frontend/ppc.ts', import.meta.url), 'utf8');
+    expect(ppc.match(/\/\^f\\d\+\$\/i?/g)).toHaveLength(1);
+    expect(ppc).toContain('fpReg: PPC_FP_REG');
+  });
 });
 
 describe('an FPU instruction that names no FP register is refused by the file too', () => {
