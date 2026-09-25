@@ -5,9 +5,23 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { mkOp, mkValue } from '../src/ir/core';
+import { isDceSafe } from '../src/ir/opcodes';
+import { parse } from '../src/ir/parse';
 import { T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
+import type { Expr } from '../src/l3/ast';
+import { exprCType, renderedIntSignedness } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
-import { C_TYPEDEFS } from '../src/target';
+import { structure } from '../src/structure/structure';
+import { C_TYPEDEFS, MIPS_IDO, structureOptionsFor } from '../src/target';
+
+/** Parse, verify, recover and print one function, the way `decompile` runs the tower's ends. */
+const emitC = (text: string): string => {
+  const fn = parse(text);
+  verify(fn);
+  recoverTypes(fn);
+  return cBackend.emit(structure(fn, structureOptionsFor(MIPS_IDO, false)));
+};
 
 describe('a float is its own kind, not an integer width', () => {
   test('both widths round-trip through the IR text', () => {
@@ -67,5 +81,104 @@ describe('what the backends can spell', () => {
 
   test('the Pascal backend refuses a float rather than spelling it as an integer', () => {
     expect(() => pascalBackend.emit(sfn(T.f32()))).toThrow(/no faithful spelling for a float-typed value/);
+  });
+});
+
+describe('the float opcodes compute on floats, and nothing else does', () => {
+  test.each(['fadd', 'fsub', 'fmul', 'fdiv'])('%s over two floats of one width verifies', (op) => {
+    expect(() =>
+      verify(parse(`fn f {\n^bb0(%0: f32, %1: f32):\n  %2: f32 = ${op} %0, %1\n  ret %2\n}\n`)),
+    ).not.toThrow();
+  });
+
+  test('a float op over an integer is rejected', () => {
+    expect(() => verify(parse('fn f {\n^bb0(%0: f32, %1: s32):\n  %2: f32 = fadd %0, %1\n  ret %2\n}\n'))).toThrow(
+      /'fadd' computes on floats of one width, got f32, s32, f32/,
+    );
+  });
+
+  // At L1 every INTEGER value is `unknown`; a float op must never meet one, because the frontend
+  // mints every value of the FPU's file as a float.
+  test('a float op over an unrecovered value is rejected too', () => {
+    expect(() => verify(parse('fn f {\n^bb0(%0: unk32):\n  %1: f32 = fneg %0\n  ret %1\n}\n'))).toThrow(
+      /'fneg' computes on floats of one width/,
+    );
+  });
+
+  test('a float op mixing single and double is rejected', () => {
+    expect(() => verify(parse('fn f {\n^bb0(%0: f32, %1: f64):\n  %2: f64 = fmul %0, %1\n  ret %2\n}\n'))).toThrow(
+      /'fmul' computes on floats of one width/,
+    );
+  });
+
+  test('an integer op over a float is rejected', () => {
+    expect(() => verify(parse('fn f {\n^bb0(%0: f32, %1: f32):\n  %2: s32 = add %0, %1\n  ret %2\n}\n'))).toThrow(
+      /a float value reaches 'add', which does not compute on floats/,
+    );
+  });
+
+  test('a float crosses an edge only into a float parameter', () => {
+    const text = (param: string) => `fn f {\n^bb0(%0: f32):\n  br ^bb1(%0)\n^bb1(%1: ${param}):\n  ret %1\n}\n`;
+    expect(() => verify(parse(text('f32')))).not.toThrow();
+    expect(() => verify(parse(text('s32')))).toThrow(/passes a f32 to a s32 block parameter/);
+  });
+
+  test('a dead float op is reaped like any pure op', () => {
+    for (const op of ['fadd', 'fsub', 'fmul', 'fdiv', 'fneg']) {
+      expect(isDceSafe(op)).toBe(true);
+    }
+  });
+});
+
+describe('their C spelling', () => {
+  test('each op prints its own C token, with C precedence and no operand pin', () => {
+    const src = emitC(
+      'fn f {\n^bb0(%0: f32, %1: f32, %2: f32):\n  %3: f32 = fsub %1, %2\n  %4: f32 = fsub %0, %3\n' +
+        '  %5: f32 = fadd %0, %1\n  %6: f32 = fmul %5, %4\n  %7: f32 = fneg %6\n  %8: f32 = fdiv %7, %2\n  ret %8\n}\n',
+    );
+    expect(src).toContain('float f(float a0, float a1, float a2)');
+    expect(src).toContain('return -((a0 + a1) * (a0 - (a1 - a2))) / a2;');
+    // `/` is the SIGNED integer divide's token too, and that one pins its operands with `(s32)`.
+    expect(src).not.toContain('(s32)');
+  });
+
+  // A LOOP-CARRIED float is a block parameter, and the structurer declares it by its IR type.
+  test('a float carried around a loop is declared a float', () => {
+    const src = emitC(
+      'fn g {\n^bb0(%0: s32, %1: f32):\n  br ^bb1(%0, %1)\n^bb1(%2: s32, %3: f32):\n  %4: f32 = fmul %3, %1\n' +
+        '  %5: s32 = const {value = 1}\n  %6: s32 = sub %2, %5\n  %7: s32 = const {value = 0}\n' +
+        '  %8: s32 = icmp_ne %6, %7\n  cond_br %8, ^bb1(%6, %4), ^bb2()\n^bb2():\n  ret %4\n}\n',
+    );
+    expect(src).toContain('float g(s32 a0, float a1)');
+    expect(src).toContain('float v0;');
+    expect(src).toContain('v0 = v0 * a1;');
+  });
+
+  test('the Pascal backend refuses a float operator and a float negation', () => {
+    const fn = (value: Expr) => ({
+      name: 'f',
+      params: [{ name: 'a0', type: T.s(32) }],
+      locals: [],
+      retType: T.s(32),
+      body: [{ k: 'return' as const, value }],
+    });
+    const a: Expr = { k: 'var', name: 'a0' };
+    expect(() => pascalBackend.emit(fn({ k: 'bin', op: 'f+', l: a, r: a }))).toThrow(/operator 'f\+'/);
+    expect(() => pascalBackend.emit(fn({ k: 'un', op: 'f-', e: a }))).toThrow(/float negation/);
+  });
+});
+
+describe('what a rendered float expression is', () => {
+  const env = (name: string) => (name === 'x' ? T.f32() : T.s(32));
+  const x: Expr = { k: 'var', name: 'x' };
+
+  test('its C type is the float, never the integer an integer operator would yield', () => {
+    expect(exprCType({ k: 'bin', op: 'f*', l: x, r: x }, env)).toEqual(T.f32());
+    expect(exprCType({ k: 'un', op: 'f-', e: x }, env)).toEqual(T.f32());
+  });
+
+  test('it has no integer signedness to pin', () => {
+    expect(renderedIntSignedness({ k: 'bin', op: 'f/', l: x, r: x }, env)).toBeUndefined();
+    expect(renderedIntSignedness({ k: 'un', op: 'f-', e: x }, env)).toBeUndefined();
   });
 });
