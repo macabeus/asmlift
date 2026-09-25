@@ -30,7 +30,7 @@ import {
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
-import { Fn, defOpMap } from './ir/core';
+import { Fn, Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { advancedBases } from './l3/advance';
@@ -109,11 +109,24 @@ import { type SubjectVariationName, type Variation, offeredOn, withSubject } fro
  *  A param NARROWED by raise/paramwidth.ts is not pinnable: the extension it was narrowed at states
  *  the signedness as well as the width — agbcc's shift pair by its `asr`/`lsr`, PPC's `extsb`/`extsh`
  *  by the opcode — so there is no question for the signedness variation to put to the differ, and pinning would
- *  widen it back to 32 bits. */
+ *  widen it back to 32 bits.
+ *
+ *  Nor is a param NOTHING READS. Its declared signedness reaches no instruction, so the two
+ *  candidates would differ only in the signature's text and compile to the same object. The frontend
+ *  mints such params on purpose: an argument register below the highest one read keeps its slot
+ *  (`frontend/fpu.ts` settleArgSlots). Counting one as pinnable doubled the fan of every
+ *  function whose only scalar params are unread. */
 function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
+  const read = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.operands.forEach((v) => read.add(v));
+      op.successors.forEach((s) => s.args.forEach((v) => read.add(v)));
+    }
+  }
   let pinnable = false;
   fn.blocks[0].params.forEach((p, i) => {
-    if (ptrIdx.has(i)) {
+    if (ptrIdx.has(i) || !read.has(p)) {
       return;
     }
     // AT THE PARAMETER'S OWN WIDTH. The pin answers a question the asm does not — whether the
