@@ -180,7 +180,8 @@ const PROBES: Record<string, Probe> = {
     // Same four arms. `fcmpo`'s destination is a CONDITION register, which is the PowerPC shape
     // that forces the predicate to read every operand rather than only `ops[0]`.
     fpu: [
-      ['arithmetic', '0:\tfadds\tf1,f1,f2\n4:\tblr\n'],
+      // DOUBLE precision, as on MIPS: `fadds` lifts through the float homes.
+      ['arithmetic', '0:\tfadd\tf1,f1,f2\n4:\tblr\n'],
       ['a compare into a condition register', '0:\tfcmpo\tcr0,f1,f2\n4:\tblr\n'],
       ['an FPU store', '0:\tstfs\tf1,0(r3)\n4:\tblr\n'],
       ['the FPSCR', '0:\tmtfsfi\t7,0\n4:\tblr\n'],

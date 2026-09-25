@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const lift = (sym: string, asm: string, target: TargetDescription = MIPS_IDO) => decompile(sym, asm, target).source;
 /** One objdump function under its symbol header, the shape the benchmark's targets carry. */
@@ -149,5 +149,112 @@ describe('the refusals the homes add', () => {
   test('a target that declares no float homes keeps the register-file refusal', () => {
     const noHomes: TargetDescription = { ...MIPS_IDO, fpu: undefined };
     expect(() => lift('fadd', FADD, noHomes)).toThrow(/unmodelled floating-point instruction 'add.s'/);
+  });
+});
+
+// Compiled with the synthetic tier's mwcc_242_81 flags (`-proc gekko -O4,p -fp hard -lang=c`) from
+// the same five functions as the KMC listing above, plus
+//   float mixed(int *p, float b){ *p = 1; return b + b; }
+// and each lift recompiles through that compiler to its function instruction for instruction —
+// except `pw`, whose integer loop spells differently, which is not a float question.
+const MWCC = `00000000 <sel>:
+   0:\tcmpwi   r3,0
+   4:\tbnelr
+   8:\tfmr     f1,f2
+   c:\tblr
+
+00000010 <pw>:
+  10:\tfmr     f0,f1
+  14:\tb       1c <pw+0xc>
+  18:\tfmuls   f0,f0,f1
+  1c:\taddic.  r3,r3,-1
+  20:\tbne     18 <pw+0x8>
+  24:\tfmr     f1,f0
+  28:\tblr
+
+0000002c <neg2>:
+  2c:\tfsubs   f0,f1,f2
+  30:\tfneg    f1,f0
+  34:\tblr
+
+00000038 <second>:
+  38:\tfmr     f1,f2
+  3c:\tblr
+
+00000040 <poly>:
+  40:\tfmuls   f3,f1,f1
+  44:\tfadds   f0,f1,f2
+  48:\tfsubs   f1,f3,f2
+  4c:\tfdivs   f1,f1,f0
+  50:\tblr
+
+00000054 <mixed>:
+  54:\tli      r0,1
+  58:\tfadds   f1,f1,f1
+  5c:\tstw     r0,0(r3)
+  60:\tblr
+`;
+
+describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
+  const ppc = (sym: string, body: string) => lift(sym, objdump(sym, body), PPC_MWCC);
+
+  test('the fadd row lifts to the program that compiled it', () => {
+    expect(ppc('fadd', '   0:\tfadds   f1,f1,f2\n   4:\tblr\n')).toBe(
+      'float fadd(float a0, float a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
+
+  // `fmuls fD,fA,fC` names its second source third; a third float argument is f3.
+  test('the fma1 row: a third float argument, and a product feeding a sum', () => {
+    expect(ppc('fma1', '   0:\tfmuls   f0,f1,f2\n   4:\tfadds   f1,f3,f0\n   8:\tblr\n')).toBe(
+      'float fma1(float a0, float a1, float a2) {\n    return a2 + a0 * a1;\n}\n',
+    );
+  });
+
+  test('negation, a nested expression, and an unread first float argument', () => {
+    expect(lift('neg2', MWCC, PPC_MWCC)).toContain('return -(a0 - a1);');
+    expect(lift('poly', MWCC, PPC_MWCC)).toContain('return (a0 * a0 - a1) / (a0 + a1);');
+    expect(lift('second', MWCC, PPC_MWCC)).toBe('float second(float a0, float a1) {\n    return a1;\n}\n');
+  });
+
+  // f1 is both the first float argument and the float return, so the conditional return that leaves
+  // it untouched returns `a`.
+  test('a return path that leaves f1 alone returns the float argument that arrived there', () => {
+    const src = lift('sel', MWCC, PPC_MWCC);
+    expect(src).toContain('float sel(s32 a0, float a1, float a2)');
+    expect(src).toContain('return a1;');
+    expect(src).toContain('return a2;');
+  });
+
+  // THE 'separate' ORDER IS A SPELLING: `float mixed(int *p, float b)` and `float mixed(float b,
+  // int *p)` are one object, so the integer argument is put first by choice, not by reading.
+  test('integer arguments come first, then the floats', () => {
+    expect(lift('mixed', MWCC, PPC_MWCC)).toContain('float mixed(s32 *a0, float a1)');
+  });
+
+  test('a float carried round a loop is declared a float', () => {
+    const src = lift('pw', MWCC, PPC_MWCC);
+    expect(src).toContain('float pw(s32 a0, float a1)');
+    expect(src).toMatch(/float v\d;/);
+  });
+
+  test('a record form sets cr1, which is not modelled, and keeps the register-file refusal', () => {
+    expect(() => ppc('f', '   0:\tfadds.  f1,f1,f2\n   4:\tblr\n')).toThrow(
+      /unmodelled floating-point instruction 'fadds\.'/,
+    );
+  });
+
+  // Which FPRs a callee reads, returns in and destroys is unmodelled, so a float and a call in one
+  // function refuses — here `a * g2()` would otherwise read g2's return in f1 as the argument `a`.
+  test('a function that computes on floats and makes a call refuses', () => {
+    const body =
+      '   0:\tfmr     f31,f1\n   4:\tbl      4 <f+0x4>\n\t\t\t4: R_PPC_REL24\tg2\n   8:\tfmuls   f1,f31,f1\n   c:\tblr\n';
+    expect(() => ppc('f', body)).toThrow(/the floating-point registers a call reads, returns in and destroys/);
+  });
+
+  test('a float register read before any write that is not an argument home refuses', () => {
+    expect(() => ppc('f', '   0:\tfadds   f1,f9,f1\n   4:\tblr\n')).toThrow(
+      /f9 is read before this function writes it, and no floating-point argument arrives there/,
+    );
   });
 });
