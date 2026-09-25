@@ -87,7 +87,20 @@ describe('MIPS o32: single-precision arithmetic through $f12/$f14 and $f0', () =
 
   test('operand order, negation and a nested expression', () => {
     expect(lift('neg2', KMC, MIPS_GCC)).toContain('return -(a0 - a1);');
-    expect(lift('poly', KMC, MIPS_GCC)).toContain('v0 = a0 * a0;\n    return (v0 - a1) / (a0 + a1);');
+    expect(lift('poly', KMC, MIPS_GCC)).toContain('return (a0 * a0 - a1) / (a0 + a1);');
+  });
+
+  // MIPS II and III have no fused multiply-add, so a product feeding a sum stays inline
+  // (target.ts `contractsFloatProducts`). Compiled at IDO 7.1's synthetic flags from
+  //   float q14(float p0, float p1) { return ((p0 * p0) + (p1 + p0)); }
+  // the named spelling `v0 = a0 * a0; return v0 + (a1 + a0);` swaps `$f4` and `$f6`, and this one
+  // recompiles to the listing.
+  test('a product feeding a sum is not named where the compiler cannot contract it', () => {
+    const Q14 = objdump(
+      'q14',
+      '   0:\tmul.s\t$f4,$f12,$f12\n   4:\tadd.s\t$f6,$f14,$f12\n   8:\tjr\tra\n   c:\tadd.s\t$f0,$f4,$f6\n',
+    );
+    expect(lift('q14', Q14, MIPS_IDO)).toBe('float q14(float a0, float a1) {\n    return a0 * a0 + (a1 + a0);\n}\n');
   });
 
   // THE 'leading' SLOT RULE. The two floats take o32 slots 0 and 1, so the integer arrives in `a2`,
@@ -207,7 +220,7 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
   });
 
   // `fmuls fD,fA,fC` names its second source third; a third float argument is f3.
-  // A product that feeds a sum is NAMED: under mwcc `-fp_contract on` the inline `a2 + a0 * a1`
+  // A product that feeds a sum is NAMED on mwcc: under `-fp_contract on` the inline `a2 + a0 * a1`
   // recompiles to one `fmadds`, which rounds once, while the temp gives this pair under either
   // setting (structure/analysis.ts). Both spellings compile to this row's object at its own flags.
   test('the fma1 row: a third float argument, and a product feeding a sum', () => {

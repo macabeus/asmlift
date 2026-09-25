@@ -853,6 +853,9 @@ export interface AnalyzeOptions {
    *  address (rendered standalone the byte-stride cast lands outside the sum — see
    *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling variations refuse. */
   homeDerivedReads?: boolean;
+  /** Name a float product a float add or subtract reads, so a contracting compiler cannot fuse the
+   *  two (StructureOptions.contractsFloatProducts). */
+  contractsFloatProducts?: boolean;
   /** The merge-feed-home variation (rank.ts `/merge-home`). A pure value one join's incoming edges
    *  render into the SAME parameter slot from 2+ places materializes at its def: the copy machinery
    *  has no name to reference, so the default re-derives the whole expression per arm
@@ -1190,6 +1193,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     homeMergeFeeds = false,
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
+    contractsFloatProducts = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -1789,14 +1793,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
-          // A float PRODUCT read by a float add or subtract is named, always. A contracting compiler
-          // (mwcc `-fp_contract on`, set on some pikmin, marioparty4 and ac-decomp units) fuses a
-          // multiply into an add only WITHIN one expression, so `a * b + c` recompiles to one
-          // `fmadds` — one rounding, a different value — where the object holds `fmuls` then
-          // `fadds`, and `t = a * b; t + c` compiles to that pair under either setting. Read through
-          // a negation too: `-(a * b) + c` fuses to one `fnmsubs`, and `c - -(a * b)` to `fmadds`.
-          // KNOWN GAP: not at a multi-block loop header, the seat the scopes below refuse too.
-          if (op.opcode === 'fmul' && feedsFloatAdd(op) && !multiBlockHeaders.has(b)) {
+          // A float PRODUCT read by a float add or subtract is named, on a compiler that can
+          // contract. One that does (mwcc `-fp_contract on`, set on some pikmin, marioparty4 and
+          // ac-decomp units) fuses a multiply into an add only WITHIN one expression, so `a * b + c`
+          // recompiles to one `fmadds` — one rounding, a different value — where the object holds
+          // `fmuls` then `fadds`, and `t = a * b; t + c` compiles to that pair under either setting.
+          // Read through a negation too: `-(a * b) + c` fuses to one `fnmsubs`, and `c - -(a * b)`
+          // to `fmadds`. KNOWN GAP: not at a multi-block loop header, the seat the scopes below
+          // refuse too.
+          if (contractsFloatProducts && op.opcode === 'fmul' && feedsFloatAdd(op) && !multiBlockHeaders.has(b)) {
             materialize.add(op);
           }
           // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
