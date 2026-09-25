@@ -480,19 +480,12 @@ export function lift(
     }
   });
 
-  // A CALL IN A FUNCTION THAT COMPUTES ON FLOATS refuses: which FPRs a callee destroys, which it
-  // reads as float arguments and which it returns in are all unmodelled, so a float live across a
-  // call — or handed to one in f1 — would resolve to a value the callee overwrote or be dropped.
   const fpu = target.fpu;
-  const fpInsn = fpu ? instrs.find((ins) => FP_SINGLE_MNEMONICS.has(ins.mnemonic)) : undefined;
+  // A CALL IN A FUNCTION THAT COMPUTES ON FLOATS refuses — at the float instruction, so a refusal
+  // the stream reaches first keeps its own reason: which FPRs a callee destroys, which it reads as
+  // float arguments and which it returns in are all unmodelled, so a float live across a call — or
+  // handed to one in f1 — would resolve to a value the callee overwrote or be dropped.
   const callInsn = instrs.find((ins) => ins.mnemonic === 'bl');
-  if (fpInsn && callInsn) {
-    throw new PpcUnsupportedError(
-      `cannot lift '${name}': '${fpInsn.mnemonic}' computes on a float and '${callInsn.mnemonic}' at ` +
-        `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns in and ` +
-        `destroys are not modelled`,
-    );
-  }
   const floatReturn = writesFloatReturn(instrs, FP_SINGLE_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
 
   const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
@@ -1358,6 +1351,13 @@ export function lift(
           if (rc || fpu === undefined || ins.ops.length === 0 || !ins.ops.every(isFpKey)) {
             emitOpaqueDest(ins);
             break;
+          }
+          if (callInsn) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': '${ins.mnemonic}' computes on a float and '${callInsn.mnemonic}' at ` +
+                `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns ` +
+                `in and destroys are not modelled`,
+            );
           }
           const [dst, ...srcs] = ins.ops;
           if (op === 'copy') {
