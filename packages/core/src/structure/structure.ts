@@ -2835,7 +2835,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           // NAMED live values are `carrier-live`'s, so the two rules stay disjoint and each one's
           // ablation is its own claim. The walk itself still crosses into a named OPERAND, which
           // is the whole point of it.
-          return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set()));
+          //
+          // Scanned where the copies LAND, which is more than `B`'s entry when the edge leaves a
+          // loop from its latch: the do-while and self-loop emitters sink that exit copy into the
+          // body (`preUpdateCopies`), so what is live into the loop header is live at the copy. A
+          // predecessor all of whose edges hand the slot a value already under `name` writes
+          // nothing. Without it, `t = b * b` hoisted ahead of a do-while that reassigns `b` and
+          // exits into `return b` inlines as `a1 * a1` past the sunk copy `a1 = …` (hw1 on ido
+          // and kmc). A `while` exiting from its header puts the copy in the exit arm, and keeps
+          // the name.
+          const at = new Set(lin);
+          const slot = B.params.indexOf(p);
+          const writes = new Map<Block, boolean>();
+          for (const { pred, succ } of inEdgeRecords(preds, B)) {
+            writes.set(pred, (writes.get(pred) ?? false) || varName.get(succ.args[slot]) !== name);
+          }
+          for (const [pr, w] of writes) {
+            for (const s of w ? successorsOf(pr) : []) {
+              if (forest.byHeader.get(s)?.body.has(pr)) {
+                liveIn.get(s)!.forEach((v) => at.add(v));
+              }
+            }
+          }
+          return [...at].some((w) => !varName.has(w) && reDerives(w, new Set()));
         },
       }) === null
     );
