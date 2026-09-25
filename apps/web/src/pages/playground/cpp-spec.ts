@@ -8,6 +8,7 @@ import { type CppFnSpec, bindSpecParams } from '@asmlift/core/backend/cpp';
 import type { IrType } from '@asmlift/core/ir/types';
 import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from '@asmlift/core/l3/ast';
 import { type CppType, demangle } from '@asmlift/core/mangle';
+import type { TargetDescription } from '@asmlift/core/target';
 
 const INT: CppType = { base: 'int', ptr: 0 };
 const BUILTINS = new Set([
@@ -88,7 +89,11 @@ export function parseSpec(json: string): CppFnSpec {
 }
 
 /** Best-effort spec from the symbol + the typed neutral AST (see the module header). */
-export function deriveSpec(name: string, sfn: SFn): CppFnSpec {
+export function deriveSpec(
+  name: string,
+  sfn: SFn,
+  floatSlots: NonNullable<TargetDescription['fpu']>['slots'] | undefined,
+): CppFnSpec {
   const freeFn = (): CppFnSpec => ({
     method: name,
     retType: irToCpp(sfn.retType),
@@ -104,10 +109,14 @@ export function deriveSpec(name: string, sfn: SFn): CppFnSpec {
   // than fabricate a C++ signature. Strict equality: a real C++ fn with UNUSED params also
   // falls back — ugly but sound; the spec textarea is the full-fidelity path.
   //
-  // The same for the register FILE: the spec binds to the lifted parameters by file, then by
-  // position (`bindSpecParams`), so a demangled signature whose float count is not the lift's binds
-  // nothing it can trust.
-  const bound = bindSpecParams({ cls: sig.cls, params: sig.params.map((type) => ({ name: '', type })) }, sfn.params);
+  // The same for the register FILE: the spec binds to the lifted parameters the way the target's
+  // float slot model says (`bindSpecParams`), and a demangled signature that contradicts the lift's
+  // floats binds nothing it can trust.
+  const bound = bindSpecParams(
+    { cls: sig.cls, params: sig.params.map((type) => ({ name: '', type })) },
+    sfn.params,
+    floatSlots,
+  );
   if (sfn.params.length !== (sig.cls ? 1 : 0) + sig.params.length || !bound) {
     return freeFn();
   }

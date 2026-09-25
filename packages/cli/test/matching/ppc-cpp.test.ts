@@ -76,7 +76,7 @@ describe('C++ backend: compile → disasm → decompile (idiomatic C++) → reco
     test.runIf(HAVE)(`${sym} — ${note}`, () => {
       const { obj, asm } = compilePpcCppTarget('mwcc_242_81', cpp, sym, TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags);
       const r = decompile(sym, asm, PPC_MWCC, {
-        backend: cppBackend(spec),
+        backend: cppBackend(spec, PPC_MWCC.fpu?.slots),
         prototypes: { [sym]: { returnsVoid: spec.retType.base === 'void' } },
       });
       expect(r.source).toBe(golden);
@@ -119,14 +119,14 @@ describe('C++ backend — offline (committed disasm, no toolchain)', () => {
       },
     };
     const asm = '00000000 <getB__1SFv>:\n   0:\tlha     r3,4(r3)\n   4:\tblr\n';
-    const res = decompile('getB__1SFv', asm, PPC_MWCC, { backend: cppBackend(SUBWORD) });
+    const res = decompile('getB__1SFv', asm, PPC_MWCC, { backend: cppBackend(SUBWORD, PPC_MWCC.fpu?.slots) });
     expect(res.source).toContain('((s16 *)this)[2]'); // bytes 4–5 = `b`, honestly spelled
     expect(res.source).not.toMatch(/return c;/); // the mis-mapped member, never
     const wordAsm = '00000000 <getA__1SFv>:\n   0:\tlwz     r3,4(r3)\n   4:\tblr\n';
     const WORD: CppFnSpec = { ...SUBWORD, method: 'getA' };
-    expect(() => decompile('getA__1SFv', wordAsm, PPC_MWCC, { backend: cppBackend(WORD) })).toThrow(
-      /sub-word\/mixed field layout/,
-    );
+    expect(() =>
+      decompile('getA__1SFv', wordAsm, PPC_MWCC, { backend: cppBackend(WORD, PPC_MWCC.fpu?.slots) }),
+    ).toThrow(/sub-word\/mixed field layout/);
   });
 
   test('Vec::dot lifts + emits idiomatic C++ from real committed CodeWarrior disasm', () => {
@@ -141,7 +141,7 @@ describe('C++ backend — offline (committed disasm, no toolchain)', () => {
       params: [{ name: 'o', type: VECP }],
       classes: { Vec: VEC },
     };
-    const r = decompile('dot__3VecFP3Vec', asm, PPC_MWCC, { backend: cppBackend(spec) });
+    const r = decompile('dot__3VecFP3Vec', asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) });
     expect(r.source).toBe(
       'struct Vec { int x; int y; int dot(Vec *o); };\nint Vec::dot(Vec *o) {\n    return x * o->x + y * o->y;\n}\n',
     );
