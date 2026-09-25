@@ -5528,7 +5528,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       negateHere = branchSenseFlipSites?.has(ord) ? !siteDefault : siteDefault;
       hooks.onBranchSenseSite?.({ block: bi, ordinal: ord, joined: ipd !== null, negated: negateHere });
     }
-    if (stmtsEqual(thenS, elseS) && testRereadsOnly(term, b, { defs, useSitesOf, dom, ipdom })) {
+    if (
+      stmtsEqual(thenS, elseS) &&
+      testRereadsOnly(term, b, { defs, useSitesOf, dom, ipdom, loops: forest.byHeader.values() })
+    ) {
       out.push(...thenS);
     } else {
       out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));

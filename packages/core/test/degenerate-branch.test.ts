@@ -3,7 +3,12 @@
 // machine loaded once, which no source spells.
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
+import { parse } from '../src/ir/parse';
+import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
+import { structure } from '../src/structure/structure';
 import { PPC_MWCC } from '../src/target';
 
 // mwcc_242_81 at canonical flags, compiled through `compilePpcTarget`:
@@ -88,4 +93,42 @@ test('a reader on the sibling path does not stand in for the test', () => {
   const out = decompile('sib', SIBLING, PPC_MWCC).source;
   expect(out).toMatch(/\*a0 [<>]=? 0;/);
   expect(out).toContain('*a2 = *a0;');
+});
+
+// The test and its volatile load run on every iteration; the store after the loop reads the last
+// value once. That reader post-dominates the test but does not run as often, so it does not stand
+// in for the test's read: without the test, the loop would read the register zero times.
+const LOOP_EXIT_READER = `fn vd {
+^bb0(%0: s32, %1: s32*):
+  %2: s32* = gaddr {sym="gVolReg"}
+  %4: s32 = const {value=0}
+  %9: s32 = const {value=1}
+  br ^bb1(%0)
+^bb1(%5: s32):
+  %3: s32 = load %2 {off=0, signed=true, width=4}
+  %6: u32 = icmp_slt %3, %4
+  cond_br %6, ^bb2(), ^bb2()
+^bb2():
+  %7: s32 = sub %5, %9
+  %8: u32 = icmp_ne %7, %4
+  cond_br %8, ^bb1(%7), ^bb3()
+^bb3():
+  store %1, %3 {off=0, width=4}
+  ret
+}
+`;
+
+test('a reader after the loop does not stand in for a test inside it', () => {
+  const fn = parse(LOOP_EXIT_READER);
+  verify(fn);
+  recoverTypes(fn);
+  const symbols = new Map([
+    [
+      'gVolReg',
+      { name: 'gVolReg', kind: 'data', shape: 'scalar', size: 4, signed: true, declared: true, volatile: true },
+    ],
+  ]);
+  const out = cBackend.emit(structure(fn, { returnsVoid: true, symbols } as Parameters<typeof structure>[1]));
+  const loop = out.slice(out.indexOf('do {'), out.indexOf('} while'));
+  expect(loop).toContain('gVolReg');
 });

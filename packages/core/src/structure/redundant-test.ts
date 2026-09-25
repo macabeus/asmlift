@@ -8,10 +8,13 @@
 //
 // The IR can. The test is left out when every memory read in its operand cone is a load whose
 // value something OUTSIDE the cone also reads, on the test's own path: a reader in a block that
-// dominates the test's, or one that post-dominates it. The C then performs that read on every path
-// through the test, so the bare statement would be a second read of a value the machine loaded
-// once. A reader on a SIBLING path is not one: `if (a1 != 0) *a2 = *a0; else *a0 < 0;` reads `*a0`
-// on both paths, and without its test the `a1 == 0` path reads nothing. A load only this test
+// dominates the test's, or one that post-dominates it, and inside exactly the loops the test is
+// in. The C then performs that read as often as the test runs, so the bare statement would be a
+// second read of a value the machine loaded once. A reader on a SIBLING path is not one:
+// `if (a1 != 0) *a2 = *a0; else *a0 < 0;` reads `*a0` on both paths, and without its test the
+// `a1 == 0` path reads nothing. Nor is a reader after the loop the test is in: it post-dominates
+// the test and runs once, where the test and its load run on every iteration, so a volatile
+// register read N times would be read once. A load only this test
 // reads is the machine's one access there and keeps the statement, as does a call or other effect
 // in the cone. A `volatile` load needs nothing more: an on-path reader already performs the one
 // access the machine made, and keeping the test beside it would add a second.
@@ -36,17 +39,20 @@
 import type { Block, Op, Value } from '../ir/core';
 import { EFFECTFUL_OPS, opSig } from '../ir/opcodes';
 import type { UseSite } from './analysis';
+import type { NaturalLoop } from './loops';
 
 export interface RedundantTestDeps {
   defs: Map<Value, Op>;
   useSitesOf: Map<Value, UseSite[]>;
   dom: Map<Block, Set<Block>>;
   ipdom: Map<Block, Block | null>;
+  loops: Iterable<NaturalLoop>;
 }
 
 /** Whether `branch`, the terminator of `at`, only re-reads what the machine read on its path. */
 export function testRereadsOnly(branch: Op, at: Block, deps: RedundantTestDeps): boolean {
   const { defs, useSitesOf, dom, ipdom } = deps;
+  const loops = [...deps.loops];
   const cone = new Set<Op>();
   const loads: Op[] = [];
   const work = [...branch.operands];
@@ -64,7 +70,13 @@ export function testRereadsOnly(branch: Op, at: Block, deps: RedundantTestDeps):
     }
     work.push(...op.operands);
   }
+  // Dominance and post-dominance say a reader runs whenever the test does, not as often: a loop
+  // between them repeats one and not the other.
+  const sameLoops = (b: Block): boolean => loops.every((l) => l.body.has(b) === l.body.has(at));
   const onPath = (b: Block): boolean => {
+    if (!sameLoops(b)) {
+      return false;
+    }
     if (dom.get(at)?.has(b)) {
       return true;
     }
