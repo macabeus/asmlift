@@ -92,7 +92,14 @@ import {
   globalOf,
   subscriptsFromExtents,
 } from './globalaccess';
-import { makeLoopHazards, preUpdateCopyHome, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
+import {
+  PREUPDATE_SINK_GATES,
+  type SinkCandidate,
+  makeLoopHazards,
+  preUpdateCopyHome,
+  sunkCopyOverDroppedUndef,
+  updateWriteSet,
+} from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -1779,6 +1786,8 @@ export interface StructureHooks {
   /** `enclosingCarrierName`'s admission rules (`ENCLOSING_CARRIER_GATES`), ablatable the same way —
    *  and, wrapped in `tallying`, the census of which rule refuses a nest. */
   enclosingCarrierGates?: readonly Gate<EnclosingCarrier>[];
+  /** `sinkablePreUpdateSlots`'s per-slot rules (`PREUPDATE_SINK_GATES`), ablatable the same way. */
+  preUpdateSinkGates?: readonly Gate<SinkCandidate>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -5150,7 +5159,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // seed — the only edge holding the never-entered value. That is why the sink demands the
         // proof above: it makes the fused zero-trip path load-bearing.
         const sunk = guardProven
-          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), li.header, sub, updateWrites)
+          ? sinkablePreUpdateSlots(
+              li.header,
+              li.exit,
+              hexitArgs,
+              new Set([li.header]),
+              li.header,
+              sub,
+              updateWrites,
+              hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+            )
           : new Map<number, Op | null>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
         // too — where the loop variables still hold their init values. It must therefore produce
@@ -5914,7 +5932,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already emits.
     const sunk = rebindHazard
       ? new Map<number, Op | null>()
-      : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, dw.latch, sub, updateWrites);
+      : sinkablePreUpdateSlots(
+          dw.header,
+          dw.exit,
+          exitArgs,
+          dw.body,
+          dw.latch,
+          sub,
+          updateWrites,
+          hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+        );
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline

@@ -1561,12 +1561,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // render in `s`'s update copy at the foot of the body, behind the read rebuilt at the `eor` —
   // wrong on 68 of 100 inputs under an agbcc+unicorn judge. Named, it runs where the asm ran it.
   //
-  // `preupdate_exit_reads` is what `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES,
-  // structure/hazards.ts) still turns away once the calls are named: `u = q[1]; r = *q + 1; s = s +
-  // u;`, a read ahead of the tree's read that renders in the update copy behind it. Two plain reads
-  // commute, so this refusal is CONSERVATIVE — the gate weighs every order-sensitive op, reads
-  // included, and only a `volatile` access would make the swap observable. It is the row that shows
-  // the gate refusing at all; a change that proves two reads commute may lift it.
+  // `preupdate_exit_reads` is `u = q[1]; r = *q + 1; s = s + u;`: a read ahead of the tree's read
+  // that renders in the update copy behind it. Two reads commute, so the sink rebuilds the exit read
+  // ahead of it (`movesPast`, structure/hazards.ts) — the control that the ORDER rule weighs a read
+  // only against what it can conflict with.
+  //
+  // What `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) still turns away once every read and call
+  // that something would cross is named is a TRAPPING op, which the analysis does not name:
+  // `preupdate_exit_div` is `t = k / n; *q = n; r = t + 1;`, where agbcc calls `__divsi3` ahead of
+  // the store. Rebuilt at the add, the divide would run behind the store — where division by zero
+  // traps, after the store has landed — so the row declines, and the decline is what it measures.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1705,8 +1709,20 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     note:
       "a read ahead of the exit value's read, inlined into the update of `s` at the foot of the " +
-      'body; the sink refuses to rebuild the exit read ahead of it although two plain reads commute ' +
-      '(a conservative refusal of `arg-safe-to-reevaluate`), and the decline is what the row measures',
+      'body; two reads commute, so the exit read is rebuilt ahead of it',
+  },
+  {
+    sym: 'preupdate_exit_div',
+    src:
+      'int preupdate_exit_div(int *p, int n, int m, int k){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n); }' +
+      ' return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note:
+      "the exit value's tree holds a DIVIDE the asm runs ahead of a store; rebuilt at the add it would " +
+      'run behind it, which a trapping divide can tell, so the sink refuses (`arg-safe-to-reevaluate`) ' +
+      'and the decline is what the row measures',
   },
   {
     sym: 'preupdate_escape',

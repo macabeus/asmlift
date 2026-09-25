@@ -27,12 +27,17 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { frontendFor } from '../src/frontend/registry';
 import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
+import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
+import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { StructureError, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -633,4 +638,50 @@ test('a copy is not sunk into a name a hoisted value still reads inside the loop
   const control = HOISTED_READS_DEST.replace('astore %7, %9, %15', 'astore %7, %12, %15');
   expect(control).not.toBe(HOISTED_READS_DEST);
   expect(emit(control)).toMatch(/do \{[^}]*\n\s+a3 = v\d+ \+ v\d+;[^}]*\} while/);
+});
+
+// WHAT `arg-safe-to-reevaluate` REFUSES THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory read
+// or a call never reaches it: the analysis names a read or a call wherever something would cross it
+// (the barrier scan, `ridesEdge`), and a named leaf is current at the copy (`writtenAheadOf`). What
+// the analysis does not name is a TRAPPING op. agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q -
+// 1; } while (--n);`: `bl __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the
+// store, and the exit value rebuilt at the add would divide after it — where division by zero
+// traps, the store would already have landed. So the edge declines; with the gate dropped the copy
+// sinks and spells the divide behind the store.
+const DIVIDE_AHEAD_OF_STORE = `dv:
+	push	{r4, r5, r6, lr}
+	add	r5, r0, #0
+	add	r4, r1, #0
+	add	r6, r3, #0
+	add	r0, r2, #0
+	cmp	r4, #0
+	ble	.L3	@cond_branch
+	lsl	r0, r4, #0x2
+	add	r5, r5, r0
+.L4:
+	add	r0, r6, #0
+	add	r1, r4, #0
+	bl	__divsi3
+	str	r4, [r5]
+	add	r0, r0, #0x1
+	sub	r5, r5, #0x4
+	sub	r4, r4, #0x1
+	cmp	r4, #0
+	bne	.L4	@cond_branch
+.L3:
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+`;
+
+test('a divide rebuilt behind a store it ran ahead of is refused, through the pipeline', () => {
+  const run = (hooks = {}): string => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
+    return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false), hooks));
+  };
+  expect(() => run()).toThrow(/reads a pre-update loop variable/);
+  const ablated = run({ preUpdateSinkGates: without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate') });
+  expect(ablated).toMatch(/\*v\d+ = v\d+;\n\s+a2 = a3 \/ v\d+ \+ 1;/);
 });
