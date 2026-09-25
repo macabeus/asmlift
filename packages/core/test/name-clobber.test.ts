@@ -7,7 +7,7 @@
 // rather than what it was defined from — and the emitted C computes a different number, at the
 // same score, in ordinary-looking C.
 //
-// Both fixtures below are what agbcc really emits for the C in their comments, so this is a
+// The fixtures below are what a compiler really emits for the C in their comments, so this is a
 // property of the committed path and not of hand-written IR. The rule is the structurer's, so it
 // is given its own input here rather than reached through a frontend.
 import { describe, expect, test } from 'vitest';
@@ -59,5 +59,44 @@ describe('a merge may not adopt a name an unnamed live value re-derives from', (
     // adoption is sound again, which is the coalescing every loop and branch row depends on.
     const ir = RE_DERIVED_ACROSS_MERGE.replace('  %2: unk32 = sub %0, %1\n', '').replace('add %6, %2', 'add %6, %1');
     expect(emit(ir)).toMatch(/a0 = a0 \+ a1/);
+  });
+});
+
+/** `int t = b; while (d-- > 0) { b = a - (a + a); a = (t * t) * (a + b); } return b;` — the listing
+ *  gcc2.7.2kmc and IDO 7.1 emit for it (as `hw1`, in floats; the rule reads no type). `t * t` is
+ *  computed ONCE, ahead of the loop, from the entry `b`, and the loop reuses `b`'s register for the
+ *  new `b`. The exit merge `%18` is offered `b`'s entry name `a1`, and its copy is sunk into the body
+ *  at `%11` — where the unnamed `%7` is still live, though it is dead at the merge itself. */
+const HOISTED_PAST_SUNK_COPY = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: unk32):
+  %3: unk32 = const {value=0}
+  %4: u32 = icmp_sle %2, %3
+  %5: unk32 = const {value=-1}
+  %6: unk32 = add %2, %5
+  cond_br %4, ^bb3(%1), ^bb1()
+^bb1():
+  %7: unk32 = mul %1, %1
+  br ^bb2(%0, %6)
+^bb2(%8: unk32, %9: unk32):
+  %10: unk32 = add %8, %8
+  %11: unk32 = sub %8, %10
+  %12: unk32 = add %8, %11
+  %13: unk32 = const {value=-1}
+  %14: unk32 = add %9, %13
+  %15: unk32 = const {value=0}
+  %16: u32 = icmp_sgt %9, %15
+  %17: unk32 = mul %7, %12
+  cond_br %16, ^bb2(%17, %14), ^bb3(%11)
+^bb3(%18: unk32):
+  ret %18
+}
+`;
+
+describe('the re-derived value is looked for where the copies land, not only at the merge', () => {
+  test('a loop invariant hoisted from the name keeps reading it past the sunk exit copy', () => {
+    const src = emit(HOISTED_PAST_SUNK_COPY);
+    // `a1 * a1` is `t * t`: nothing inside the loop may assign `a1` before it is read
+    expect(src).toContain('a1 * a1');
+    expect(src).not.toMatch(/a1 = /);
   });
 });
