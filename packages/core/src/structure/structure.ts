@@ -58,6 +58,7 @@ import {
   mentionedName,
   negateCond,
   stmtChildren,
+  stmtsEqual,
   walkExprs,
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -94,6 +95,7 @@ import {
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
+import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
 
@@ -2075,73 +2077,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const preds = predecessorBlocks(fn);
   const ipdom = postDominators(fn);
   const dom = dominators(fn);
-
-  /** Whether a test that READS MEMORY, and whose two arms spell the SAME statements, can be left
-   *  out of the C: it decides nothing (both outcomes run the same code next — usually none, or the
-   *  same edge copy into a join), and leaving it out drops no access the machine made. Without this the `if` reaches
-   *  `l3/tailmerge.ts` and `l3/dce.ts`, which hoist the common statements and keep a condition that
-   *  reads memory as a bare statement (`a1[14] >= 1;`), because they cannot tell a read the machine
-   *  made there from one it made elsewhere.
-   *
-   *  The IR can. The test is left out when every memory read in its operand cone is a load whose
-   *  value something OUTSIDE the cone also reads: the C re-reads it at that other use, so the bare
-   *  statement would be a second read of a value the machine loaded once. A load only this test
-   *  reads is the machine's one access there and keeps the statement, as does a call or other
-   *  effect in the cone.
-   *
-   *  A test that reads NO memory is left to the passes after this one, as before: an empty `if`
-   *  over registers is one `l3/dce.ts` already deletes, and one whose two arms are the same
-   *  non-empty statements prints as the lift spelled it. Collapsing those too was measured
-   *  behaviour-preserving (9 more GameCube functions change, 0 benchmark rows) and is left out
-   *  because it is not this defect: nothing in them is read twice.
-   *
-   *  Where the shape comes from: CodeWarrior folds a `case` label into `default:` and keeps its
-   *  test, so `case 1: … case 0: default: …` dispatches `beq case1; bge default; b default`
-   *  (mwcc_242_81; ac-decomp mTG_select_tag_decide_needlework, and aSNMgr_set_appear_info_guest,
-   *  whose two edges carry the same merge value, both reachable once PowerPC carries a compare
-   *  across an edge); pikmin UpdateMgr::removeClient keeps an assert's `blt`, whose other side
-   *  held only a dead load.
-   *
-   *  RENDERING ONLY, and deliberately not a CFG rewrite ahead of the raising tower. Measured: a
-   *  pre-recovery pass turning the same `cond_br` into a `br` costs `af:adds:ido7.1` 6/41 -> 18/41.
-   *  ido guards a `div` with `bne v0, at` over the numerator, the MIPS lift keeps that trap check as
-   *  a branch whose arms meet, and that compare is the out-of-block reader that offers
-   *  `/escape-home` on the numerator, the spelling that wins. It also moved retsink's reading of
-   *  second arrivals on four more functions. */
-  let readers: Map<Value, Op[]> | undefined;
-  const testRereadsOnly = (branch: Op): boolean => {
-    if (readers === undefined) {
-      readers = new Map();
-      for (const blk of fn.blocks) {
-        for (const op of blk.ops) {
-          for (const v of [...op.operands, ...op.successors.flatMap((sc) => sc.args)]) {
-            readers.set(v, [...(readers.get(v) ?? []), op]);
-          }
-        }
-      }
-    }
-    const cone = new Set<Op>();
-    const loads: Op[] = [];
-    const work = [...branch.operands];
-    for (let v = work.pop(); v !== undefined; v = work.pop()) {
-      const op = defs.get(v);
-      if (op === undefined || cone.has(op)) {
-        continue;
-      }
-      if (EFFECTFUL_OPS.has(op.opcode)) {
-        return false;
-      }
-      cone.add(op);
-      if (opSig(op.opcode)?.reads === true) {
-        loads.push(op);
-      }
-      work.push(...op.operands);
-    }
-    return (
-      loads.length > 0 &&
-      loads.every((ld) => ld.results.some((r) => (readers!.get(r) ?? []).some((u) => u !== branch && !cone.has(u))))
-    );
-  };
 
   /** The byte step `raise/const.ts` recorded on the literal that feeds this access's address, or
    *  `undefined` where the address was not reached by advancing a register. Read at the two
@@ -5593,7 +5528,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       negateHere = branchSenseFlipSites?.has(ord) ? !siteDefault : siteDefault;
       hooks.onBranchSenseSite?.({ block: bi, ordinal: ord, joined: ipd !== null, negated: negateHere });
     }
-    if (JSON.stringify(thenS) === JSON.stringify(elseS) && testRereadsOnly(term)) {
+    if (stmtsEqual(thenS, elseS) && testRereadsOnly(term, b, { defs, useSitesOf, dom, ipdom })) {
       out.push(...thenS);
     } else {
       out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));

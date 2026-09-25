@@ -1,4 +1,4 @@
-// A test whose two arms are both empty decides nothing (structure/structure.ts `testRereadsOnly`).
+// A test whose two arms are both empty decides nothing (structure/redundant-test.ts).
 // It used to reach the C as a bare statement (`a0[14] >= 1;`): a second read of a value the
 // machine loaded once, which no source spells.
 import { expect, test } from 'vitest';
@@ -68,4 +68,24 @@ test('arms that write the same copy leave no bare compare behind', () => {
   const out = decompile('copy', SAME_COPY, PPC_MWCC).source;
   expect(out).not.toMatch(/a1\[5\] [<>]=? 1;/);
   expect(out).toContain('a1[5] != 1');
+});
+
+// `*a0` has a second reader, but on the OTHER side of `a1 != 0`: on the `a1 == 0` path the test is
+// the machine's only access to it, so the test stays.
+const SIBLING = `00000000 <sib>:
+   0:\tlwz     r0,0(r3)
+   4:\tcmpwi   r4,0
+   8:\tbeq-    14 <sib+0x14>
+   c:\tstw     r0,0(r5)
+  10:\tb       1c <sib+0x1c>
+  14:\tcmpwi   r0,0
+  18:\tblt-    1c <sib+0x1c>
+  1c:\tli      r3,0
+  20:\tblr
+`;
+
+test('a reader on the sibling path does not stand in for the test', () => {
+  const out = decompile('sib', SIBLING, PPC_MWCC).source;
+  expect(out).toMatch(/\*a0 [<>]=? 0;/);
+  expect(out).toContain('*a2 = *a0;');
 });
