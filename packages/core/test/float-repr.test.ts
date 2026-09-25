@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
+import { MIPS_FP_REG } from '../src/frontend/splat';
 import { mkOp, mkValue } from '../src/ir/core';
 import { isDceSafe } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
@@ -13,7 +14,15 @@ import type { Expr } from '../src/l3/ast';
 import { exprCType, renderedIntSignedness } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
-import { C_TYPEDEFS, MIPS_IDO, structureOptionsFor } from '../src/target';
+import {
+  ARMV4T_AGBCC,
+  C_TYPEDEFS,
+  MIPS_GCC,
+  MIPS_IDO,
+  PPC_MWCC,
+  TOOLCHAIN_TARGETS,
+  structureOptionsFor,
+} from '../src/target';
 
 /** Parse, verify, recover and print one function, the way `decompile` runs the tower's ends. */
 const emitC = (text: string): string => {
@@ -180,5 +189,41 @@ describe('what a rendered float expression is', () => {
   test('it has no integer signedness to pin', () => {
     expect(renderedIntSignedness({ k: 'bin', op: 'f/', l: x, r: x }, env)).toBeUndefined();
     expect(renderedIntSignedness({ k: 'un', op: 'f-', e: x }, env)).toBeUndefined();
+  });
+});
+
+describe('the floating-point homes a target declares', () => {
+  const descriptions = [...new Set(Object.values(TOOLCHAIN_TARGETS).map((t) => t.description))];
+
+  // A float home on a target with no FPU would be a register file nothing can read; an FPU with no
+  // homes is a frontend that refuses every float argument, which is the safe direction but a
+  // description that stopped saying what it measured.
+  test('a target declares homes exactly when it has a floating-point unit', () => {
+    for (const d of descriptions) {
+      expect(d.fpu !== undefined, `${d.compiler}`).toBe(d.capabilities.hwFloat);
+    }
+    expect(ARMV4T_AGBCC.fpu).toBeUndefined();
+  });
+
+  test('the homes are in the FPU file, and never an integer argument register', () => {
+    for (const d of descriptions.filter((x) => x.fpu)) {
+      const fpu = d.fpu!;
+      const file = d.id === 'mips' ? MIPS_FP_REG : /^f\d+$/;
+      for (const r of [...fpu.argRegs, fpu.returnReg]) {
+        expect(r, `${d.compiler}`).toMatch(file);
+        expect(d.argRegs).not.toContain(r);
+      }
+    }
+  });
+
+  // o32 hands float argument k its register only while it also has integer slot k to shadow.
+  test("a 'leading' ABI has no more float argument registers than integer ones", () => {
+    for (const d of descriptions.filter((x) => x.fpu?.slots === 'leading')) {
+      expect(d.fpu!.argRegs.length).toBeLessThanOrEqual(d.argRegs.length);
+    }
+    expect(MIPS_IDO.fpu).toEqual({ argRegs: ['$f12', '$f14'], returnReg: '$f0', slots: 'leading' });
+    expect(MIPS_GCC.fpu).toEqual(MIPS_IDO.fpu);
+    expect(PPC_MWCC.fpu?.slots).toBe('separate');
+    expect(PPC_MWCC.fpu?.returnReg).toBe('f1');
   });
 });

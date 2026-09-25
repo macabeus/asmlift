@@ -62,6 +62,20 @@ export interface TargetDescription {
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
   argRegs: string[];
   returnReg: string;
+  /** The floating-point ABI: where a float argument and a float return travel, on a target whose
+   *  frontend lifts hardware floating point (`docs/floating-point.md`). ABSENT ⇒ none is claimed, and
+   *  a frontend refuses every read of its FPU file that no instruction of the function wrote.
+   *
+   *  `argRegs` are the float argument registers in argument order, spelled as the frontend keys
+   *  them; `returnReg` the float return. `slots` is how they count against `argRegs` above, and the
+   *  two ABIs here differ in kind rather than in degree — both MEASURED by compiling (below):
+   *   - `'leading'` (MIPS o32): argument k is in `argRegs[k]` only while arguments 0..k are ALL
+   *     floating, and it still takes integer slot k — `float f(float a, int b)` reads `$f12` and
+   *     `a1`, while `float f(int a, float b)` receives `b` in `a1` and moves it over with `mtc1`.
+   *   - `'separate'` (PowerPC EABI): floating arguments count on their own and take no integer
+   *     slot — `float g(int *p, float b)` and `float g(float b, int *p)` are one object, `r3` and
+   *     `f1` either way. */
+  fpu?: { argRegs: readonly string[]; returnReg: string; slots: 'leading' | 'separate' };
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
@@ -596,6 +610,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
   },
 };
 
+/** MIPS o32's floating-point homes, shared by both compilers that target it (see `fpu`). The odd
+ *  halves (`$f13`, `$f15`) carry the other word of a DOUBLE argument, which no frontend lifts. */
+const O32_FPU: TargetDescription['fpu'] = { argRegs: ['$f12', '$f14'], returnReg: '$f0', slots: 'leading' };
+
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
  *  statically recompiled to run natively (ido-static-recomp). Unlike agbcc
  *  it emits no textual asm, so asmlift's input is the DISASSEMBLED object (`mips-linux-gnu-
@@ -629,6 +647,9 @@ export const MIPS_IDO: TargetDescription = {
     't9',
     'ra',
   ],
+  // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
+  // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair at the field.
+  fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
@@ -711,6 +732,9 @@ export const MIPS_GCC: TargetDescription = {
   // and dmastride on agbcc lost; maxarr and preupdate_exit_call on agbcc gained) — because a pred
   // that computes the initial value INTO the param's own register wrote the key and still
   // coalesces.
+  // The same o32 convention, measured on GCC_KMC_TOOLCHAIN at -O2: the fadd pair compiles to the
+  // same two instructions IDO's does, and `float f(int a, float b)` moves `b` over with `mtc1 a1`.
+  fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
     coalesceLoopInit: true,
@@ -789,6 +813,9 @@ export const PPC_MWCC: TargetDescription = {
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
+  // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third
+  // float argument in f3, and the GPR/FPR order of mixed parameters absent from the object.
+  fpu: { argRegs: ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8'], returnReg: 'f1', slots: 'separate' },
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring compiler behaviors are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
