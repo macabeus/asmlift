@@ -1285,13 +1285,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // nothing to do there, which is not the same claim as a rule refusing it. What `loop-escape`
   // actually costs is visible on `nestedloop`, which this family does not inhabit.
   //
-  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: four decline in the
-  // FRONTEND for reasons with nothing to do with merges — MIPS branch-likely (`beql`/`bnezl`), a
-  // branch to a non-block-boundary. A fifth, `mergechain:mwcc_242_81`, declined there on a PPC
-  // branch with no reaching `cr0` compare and now lifts, since the compare crosses the edge
-  // (frontend/flags-edge.ts): a nonmatch (10/68 in `pnpm bench run --tier synthetic --toolchain
-  // mwcc_242_81`), not attributed to any path of the merge pass. Three more exist to be refused.
-  // Four rows reach the accept path.
+  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: `mergeloop:ido7.1`
+  // declines in the FRONTEND for a reason with nothing to do with merges (a branch to a
+  // non-block-boundary), and `mergechain:mwcc_242_81` lifts to a nonmatch that no path of the merge
+  // pass is credited with. Three more exist to be refused. Four rows reach the accept path.
   {
     sym: 'mergechain',
     src:
@@ -1373,13 +1370,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // argument, and the row would decline on THAT instead.
   // Attribution, so nothing here is credited to the wrong gap: of the twelve rows, five turn on
   // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
-  // of uninit_spill (agbcc, ido7.1). Of the other seven, three decline for pre-existing and
-  // unrelated reasons — branch-likely (uninit_join and uninit_sw on gcc2.7.2kmc), r1-as-data
-  // (uninit_spill:mwcc_242_81) — and four recover without touching this gap (uninit_join:agbcc,
-  // uninit_join:mwcc_242_81 and uninit_sw:mwcc_242_81 MATCH, uninit_spill:gcc2.7.2kmc scores 53).
-  // uninit_sw:mwcc_242_81 declined on a cr0 reaching-compare until the PowerPC compare crossed the
-  // edge out of its `beq` (frontend/flags-edge.ts) and its switch's path-bound case was read
-  // (`switchBoundCase`, target.ts); it is the register half, like uninit_sw:agbcc.
+  // of uninit_spill (agbcc, ido7.1). Of the other seven, one declines for an unrelated reason —
+  // r1-as-data (uninit_spill:mwcc_242_81) — three recover without touching this gap
+  // (uninit_join:agbcc, uninit_join:mwcc_242_81 and uninit_sw:mwcc_242_81 MATCH; the last is the
+  // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
+  // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
+  // gcc2.7.2kmc).
   // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
   // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
   // and uninit_sw:agbcc is the register half, which `undef` does not touch.

@@ -44,7 +44,7 @@ describe('PPC frontend robustness', () => {
   });
 
   test('a call destroys the volatile cr fields: a compare before a `bl` does not reach a branch after it', () => {
-    // The EABI preserves cr2–cr4 only. Before, the `beq-` fused the pre-call `cmpwi` and lifted as
+    // The EABI preserves cr2–cr4 only. Fusing the pre-call `cmpwi` into the `beq-` would lift as
     // `if (a0 != 0)`, a test of flags the callee was free to overwrite.
     const asm =
       '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tcmpwi   r3,0\n' +

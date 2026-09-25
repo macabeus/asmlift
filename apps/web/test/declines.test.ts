@@ -856,8 +856,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `cross-block-flags` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
   // lift, so the class names what the model left over rather than what it refuses today. PowerPC's
-  // rows went the same way when mwcc's compare crossed its edges; the one PPC row still on the
-  // headline, `pikmin:setChildren__6ActionFie:mwcc_233_163n`, tests a `cr1` its caller set, at
+  // rows lift under the same edge rule; the one PPC row still on the headline, `pikmin:setChildren__6ActionFie:mwcc_233_163n`, tests a `cr1` its caller set, at
   // entry, where there is no edge.
   //
   // `unread-data-directive` joins it for a THIRD reason, and the two sitting side by side is why

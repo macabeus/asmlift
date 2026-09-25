@@ -55,9 +55,9 @@
 //
 // SCOPE. Only `assign`/`store`/`exprstmt` merge, compared structurally through `stmtEquals`.
 // Control flow (`break`/`continue`/`return`) is excluded: moving one out of an arm changes which
-// statements the arm can still reach. Nested `if`/loop/`switch` statements are excluded because
-// comparing them needs a full `Stmt` congruence, and there is no second inhabitant for one — the
-// `Expr`-level comparison is the part that already exists, is tested, and is all this needs.
+// statements the arm can still reach. Nested `if`/loop/`switch` statements are excluded: merging
+// one needs a congruence over loops and `switch` too, which `stmtEquals` does not have, and there
+// is no second inhabitant for one.
 //
 // An `ASMLIFT_ERROR` marker ending both arms merges like anything else. The gap stays loud (the
 // artifact still refuses to compile) but `collectMarkers` then reports it once rather than twice,

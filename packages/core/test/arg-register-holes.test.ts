@@ -48,7 +48,7 @@ test('MIPS: a loop at the entry still binds each argument to its own slot', () =
 // mwcc_242_81 at canonical flags, compiled: `int lp2(int *p, int n) { int i; int v; for (i = 0;
 // i < n; i++) { v = p[i]; if (v <= 0) break; } return v == 0 ? 7 : 9; }`. `v` is read uninitialised
 // when `n <= 0`, so r0 is a live-in no argument arrives in. It goes after the arguments: ranked
-// first, it took `a0` and bound `p` to `a1` and `n` to `a2`.
+// first, it would take `a0` and bind `p` to `a1` and `n` to `a2`.
 test('a live-in no argument arrives in ranks after every argument', () => {
   const lp2 =
     '00000000 <lp2>:\n0:\tmtctr   r4\n4:\tcmpwi   r4,0\n8:\tble     20 <lp2+0x20>\nc:\tlwz     r0,0(r3)\n' +

@@ -1615,8 +1615,9 @@ test('a relational ladder its path reads as a switch is declined by its layout',
 });
 
 test('every target that reads a bound case declares the layout gate beside it', () => {
-  // The previous test is the regression a lone `switchBoundCase` brings back, and no benchmark row
-  // would show it (target.ts, PPC_MWCC), so the pairing is asserted here for every target.
+  // A lone `switchBoundCase` reads the nested relational ladder (`mwcc-swrelnest`) as a `switch`,
+  // and no benchmark row would show it (target.ts, PPC_MWCC), so the pairing is asserted here for
+  // every target.
   for (const [id, { description }] of Object.entries(TOOLCHAIN_TARGETS)) {
     const { switchBoundCase, switchRequiresFrontLoadedTests } = description.compilerBehaviors;
     if (switchBoundCase !== undefined) {

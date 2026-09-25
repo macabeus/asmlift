@@ -1,5 +1,5 @@
-// A test whose two arms are both empty decides nothing (structure/redundant-test.ts).
-// It used to reach the C as a bare statement (`a0[14] >= 1;`): a second read of a value the
+// A test whose two arms say the same thing decides nothing (structure/redundant-test.ts).
+// Printed, it reaches the C as a bare statement (`a0[14] >= 1;`): a second read of a value the
 // machine loaded once, which no source spells.
 import { expect, test } from 'vitest';
 

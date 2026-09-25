@@ -85,9 +85,10 @@ describe('the signedness variation declines where the pin writes nothing', () =>
     expect(lifts.n).toBe(3);
   });
 
-  // r1 is dereferenced and r0 is overwritten before anything reads it: the frontend still gives r0 its slot (an argument
-  // register below the highest one read, frontend/ssa.ts mintArgSlotHoles), and that slot is
-  // the only scalar. Its signedness reaches no instruction, so there is nothing to pin.
+  // r1 is dereferenced and r0 is overwritten before anything reads it: the frontend still gives r0
+  // its slot (an argument register below the highest one read, frontend/ssa.ts mintArgSlotHoles),
+  // and that slot is the only scalar. Its signedness reaches no instruction, so there is nothing to
+  // pin.
   test('a scalar entry param nothing reads is not a second pass', () => {
     const { backend, emitted } = recordingBackend();
     lifts.n = 0;

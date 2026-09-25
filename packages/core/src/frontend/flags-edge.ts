@@ -79,9 +79,8 @@ export function inheritFlags<S>(bi: number, edges: FlagsEdges<S>): S | string {
   const carried = edges.exit.get(p);
   // Named for the fill order that decides it, not for a loop: this is true of any predecessor not
   // yet lifted, and a CFG with no cycle in it can be laid out so that one is (`f: b .L2` /
-  // `.L1: bge` / `.L2: cmp; b .L1`). Saying "a back edge" sent a reader to look for a loop that is
-  // not there, and named a property of the CFG for a property of the walk over it. A
-  // reverse-postorder fill is what would close this, which is why the sentence points at the walk.
+  // `.L1: bge` / `.L2: cmp; b .L1`). A reverse-postorder fill is what would close this, which is
+  // why the sentence points at the walk.
   if (carried === undefined) {
     return `no compare crosses the edge into '${here}': its only predecessor '${edges.label(p)}' is lifted after it`;
   }
