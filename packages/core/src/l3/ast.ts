@@ -7,7 +7,7 @@ export type Expr =
   | { k: 'var'; name: string }
   | { k: 'const'; value: number }
   | { k: 'bin'; op: BinOp; l: Expr; r: Expr }
-  | { k: 'un'; op: '-' | '~' | '!'; e: Expr }
+  | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
   // WRITES anything, so `exprHasEffect` answers for it alongside `call` and `marker` — that is what
@@ -221,7 +221,19 @@ export type Expr =
 // which side a compare was spelled from genuinely underdetermines — a signed spelling that
 // byte-matched was proved non-negative by the compiler — so it is refereed as a variation, while a
 // division helper is a pure function of the expression's C type with no such proof available.
+//
+// THE FLOAT OPERATORS (`f+` `f-` `f*` `f/`) are the third split, and they are earned by what an
+// integer operator MEANS to the passes that read one rather than by a spelling: C writes both with
+// the same token, but `/` here is the SIGNED divide the C-family backend pins with `(s32)` casts,
+// and `+`/`-` are the pointer walks, reassociations and constant folds of a dozen L3 passes. A float
+// under any of those is a wrong program, so it gets operators none of them match — the same reason
+// the IR has `fadd` rather than a float-typed `add`. The unary minus splits the same way (`f-` on
+// `un`).
 export type BinOp =
+  | 'f+'
+  | 'f-'
+  | 'f*'
+  | 'f/'
   | '+'
   | '-'
   | '*'

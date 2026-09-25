@@ -236,6 +236,44 @@ function splitOperands(s: string): string[] {
  *   | sort -u | grep -icE '^\$f[vats]?[0-9]+f?$'` */
 export const MIPS_FP_REG = /^\$f[vats]?\d+f?$/i;
 
+/** The o32 ABI names of the EVEN FPU registers, by register number — the only ones a
+ *  single-precision arithmetic instruction names under the FR=0 register model these compilers
+ *  target. Read off the instruction words, not a manual: over 9,981 `add.s`/`sub.s`/`mul.s`/`div.s`
+ *  lines in the `af` and `marioparty3` trees, decoding each word's `fd`/`fs`/`ft` fields gives every
+ *  name one number and no name two. */
+const O32_FP_NAMES: ReadonlyMap<string, number> = new Map([
+  ['fv0', 0],
+  ['fv1', 2],
+  ['ft0', 4],
+  ['ft1', 6],
+  ['ft2', 8],
+  ['ft3', 10],
+  ['fa0', 12],
+  ['fa1', 14],
+  ['ft4', 16],
+  ['ft5', 18],
+  ['fs0', 20],
+  ['fs1', 22],
+  ['fs2', 24],
+  ['fs3', 26],
+  ['fs4', 28],
+  ['fs5', 30],
+]);
+
+/** An FPU register token, in either dialect's spelling, as the ONE key both dialects share — the
+ *  objdump number (`$fa0` and `$f12` are both `$f12`) — or null for anything this does not name: a
+ *  GPR, or an ODD half (`$f13`, `$fa0f`), which only a double-precision value or a word move uses.
+ *  A key is what the SSA builder names a register by, so two spellings of one register that did
+ *  not meet here would be two variables. */
+export function mipsEvenFpKey(tok: string): string | null {
+  if (!MIPS_FP_REG.test(tok)) {
+    return null;
+  }
+  const bare = tok.slice(1).toLowerCase();
+  const num = /^f\d+$/.test(bare) ? Number(bare.slice(1)) : O32_FP_NAMES.get(bare);
+  return num !== undefined && num < 32 && num % 2 === 0 ? `$f${num}` : null;
+}
+
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
 // `$` register sigil (except on an FPU register, where objdump keeps it), fold a memory operand's
 // displacement expression, evaluate a bare constant expression, split a `%hi`/`%lo` reference into

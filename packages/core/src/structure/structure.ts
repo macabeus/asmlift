@@ -1007,6 +1007,12 @@ export const ARITH_TO_BIN: Record<string, BinOp> = {
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
 };
 
+// The float ops (ir/opcodes.ts) and their L3 operators (l3/ast.ts BinOp). A table of their own and
+// not entries in ARITH_TO_BIN, because every rule that table's consumers apply — the pointer
+// stride, the integer legalizations, the constant fold, the commutative re-spelling — is an
+// integer rule.
+const FLOAT_TO_BIN: Record<string, BinOp> = { fadd: 'f+', fsub: 'f-', fmul: 'f*', fdiv: 'f/' };
+
 // The operators whose operand order the machine does not fix — candidates for the def-order
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
@@ -1274,6 +1280,9 @@ export interface CarrierName {
   readonly carrierWritten: boolean;
   /** a value with no name of its own re-derives the name at a use past the copy */
   readonly reDerivesName: boolean;
+  /** …or reads it through a loop's back-edge argument, which carries the loop variable's name
+   *  (`backArgName`) and renders as that name past its loop */
+  readonly backArgReadsName: boolean;
 }
 
 /** `canTakeName`'s admission: may this block parameter be SPELLED with a name that already exists,
@@ -1327,6 +1336,18 @@ export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
     sound: true,
     guardedBy: 'name-clobber.test.ts: the inlined difference keeps reading the value the asm computed it from',
     rejects: (c) => !c.pureAlias && c.reDerivesName,
+  },
+  {
+    // A back-edge argument is in no `varName`: it takes the header's name unconditionally
+    // (`seedLoopParams`), and the exit region's substitution renders it as that name after the loop.
+    // So a merge there offered the same name overwrites it on every other in-edge. `int u; do { … u =
+    // …; } while (--d > 0); return (c != 1 ? u : u + t) * u;` at mwcc: the merge took `u`'s name, and
+    // its `else` copy overwrote the `u` the multiply still reads.
+    id: 'back-arg-live',
+    why: "a loop's back-edge value renders under the loop variable's name after the loop, and the copies would overwrite it",
+    sound: true,
+    guardedBy: 'name-clobber.test.ts: a back-edge argument live across a merge reads the name it carries',
+    rejects: (c) => !c.pureAlias && c.backArgReadsName,
   },
   {
     // `carrier-live` and `re-derives` waive a pure alias because the alias and its value are equal on
@@ -1651,6 +1672,11 @@ export interface StructureOptions {
   // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` variation —
   // see analysis.ts AnalyzeOptions.
   homeDerivedReads?: boolean;
+  // Can this compiler FUSE a float multiply into the add or subtract that reads it, when both are
+  // written in one expression? Then every such product is named (analysis.ts), so the spelling
+  // compiles to the unfused pair the object holds. A compiler opts in; the target says which
+  // (`compilerBehaviors.contractsFloatProducts`).
+  contractsFloatProducts?: boolean;
   // Materialize a pure value that one join's incoming edges render into the SAME parameter slot
   // from 2+ places — the value the source computed once above the branch and the copy machinery
   // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
@@ -2008,6 +2034,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds = false,
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
+    contractsFloatProducts = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     freshParamMerge = false,
@@ -2109,6 +2136,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds,
     homeEscapingExtensions,
     readsStayWhereWritten,
+    contractsFloatProducts,
     // the map's own declaration truth: a volatile object's read may not be duplicated or moved.
     // A qualified MEMBER answers only for the bytes it spans — the `vu16 field;` idiom puts one in
     // a struct whose other members are ordinary cells — and a field of unknown extent spans
@@ -2611,6 +2639,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  which is the chain-rooted widening rather than this rule. */
   const paramSeededMerges = new Set<Value>();
   const backArgName = new Map<Value, string>();
+  /** The loop header each `backArgName` entry was seeded by. */
+  const backArgHeader = new Map<Value, Block>();
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
   const vtEnv = (n: string): IrType | undefined => varType.get(n);
@@ -2797,20 +2827,62 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // computes 10 — agbcc emits exactly that asm, so this is not a generated-IR curiosity. The
     // walk stops at any value with a name of its own (it reads THAT name) and at a materialized
     // def (it is assigned at its own position, which the clause above already judges).
-    const reDerives = (w: Value, seen: Set<Value>): boolean => {
+    //
+    // `viaBackArg` asks the `back-arg-live` question instead: the walk is the same, and what it
+    // looks for is a loop's back-edge argument carrying `name` through `backArgName`, so that the two
+    // gates' evidence stays disjoint and each one's ablation is its own claim.
+    // The exit regions that render a back-edge argument AS its loop variable's name are the ones
+    // under the loop's substitution — a self-loop's and a do-while's (`withSub`). A test-at-top
+    // `while` installs none: past it the argument is re-derived from its operands, which the plain
+    // walk judges.
+    const rendersAsBackArgName = (w: Value): boolean => {
+      const h = backArgHeader.get(w);
+      return h !== undefined && (loops.has(h) || doWhileLoops.has(h));
+    };
+    const reDerives = (w: Value, seen: Set<Value>, viaBackArg: boolean): boolean => {
       if (w === p || seen.has(w)) {
         return false;
       }
       seen.add(w);
       const nm = varName.get(w);
       if (nm !== undefined) {
-        return nm === name;
+        return !viaBackArg && nm === name;
+      }
+      if (viaBackArg && backArgName.get(w) === name && rendersAsBackArgName(w)) {
+        return true;
       }
       const d = defs.get(w);
       if (!d || materialize.has(d)) {
         return false;
       }
-      return d.operands.some((o) => reDerives(o, seen));
+      return d.operands.some((o) => reDerives(o, seen, viaBackArg));
+    };
+    // The values live where the in-edge copies LAND, which is more than `B`'s entry when the edge
+    // leaves a loop from its latch: the do-while and self-loop emitters sink that exit copy into the
+    // body (`preUpdateCopies`), so what is live into the loop header is live at the copy. A
+    // predecessor all of whose edges hand the slot a value already under `name` writes nothing.
+    // Without it, `t = b * b` hoisted ahead of a do-while that reassigns `b` and exits into
+    // `return b` inlines as `a1 * a1` past the sunk copy `a1 = …` (`name-clobber.test.ts`). A `while`
+    // exiting from its header puts the copy in the exit arm, and keeps the name.
+    let landed: Set<Value> | undefined;
+    const landing = (): Set<Value> => {
+      if (landed) {
+        return landed;
+      }
+      landed = new Set(lin);
+      const slot = B.params.indexOf(p);
+      const writes = new Map<Block, boolean>();
+      for (const { pred, succ } of inEdgeRecords(preds, B)) {
+        writes.set(pred, (writes.get(pred) ?? false) || varName.get(succ.args[slot]) !== name);
+      }
+      for (const [pr, w] of writes) {
+        for (const s of w ? successorsOf(pr) : []) {
+          if (forest.byHeader.get(s)?.body.has(pr)) {
+            liveIn.get(s)!.forEach((v) => landed!.add(v));
+          }
+        }
+      }
+      return landed;
     };
     return (
       firstRejection(hooks.carrierNameGates ?? CARRIER_NAME_GATES, {
@@ -2829,7 +2901,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           // NAMED live values are `carrier-live`'s, so the two rules stay disjoint and each one's
           // ablation is its own claim. The walk itself still crosses into a named OPERAND, which
           // is the whole point of it.
-          return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set()));
+          return [...landing()].some((w) => !varName.has(w) && reDerives(w, new Set(), false));
+        },
+        get backArgReadsName() {
+          return [...landing()].some((w) => !varName.has(w) && reDerives(w, new Set(), true));
         },
       }) === null
     );
@@ -3063,6 +3138,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // agbcc compiles to an unconditional branch.
       if (backArgs) {
         backArgName.set(backArgs[i], varName.get(p)!);
+        backArgHeader.set(backArgs[i], header);
       }
     });
   };
@@ -3505,6 +3581,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const bf = bitfieldSpelling.get(d);
     if (bf) {
       return { k: 'field', base: { k: 'var', name: bf.global }, name: bf.field, dot: true };
+    }
+    if (FLOAT_TO_BIN[d.opcode]) {
+      return { k: 'bin', op: FLOAT_TO_BIN[d.opcode], l: e(d.operands[0]), r: e(d.operands[1]) };
+    }
+    if (d.opcode === 'fneg') {
+      return { k: 'un', op: 'f-', e: e(d.operands[0]) };
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
@@ -4073,6 +4155,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // here.
   const {
     readsClobbered,
+    loopEscapeHazard,
     loopUpdateHazard,
     testSkipsAnEffect,
     preUpdateCondFold,
@@ -5368,7 +5451,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // `if (found) { *out = i; return; }` would store `i + 1`. Handing the arm's own region makes
       // the escape check judge exactly those reads.
       const exitRegion = new Set([exitB, ...reachFrom(exitB)].filter((x) => !loopCtx!.body.has(x)));
-      const hazard = loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion);
+      // A `break`'s exit region is NOT rendered under `sub`: it is the `while`'s own exit region,
+      // shared with the header exit and rendered once after the loop, raw. Where the break leaves
+      // behind the update, a header value re-derived there from a name the update wrote is
+      // computed once more — `do { b = t / (b + t); if (c > 2) break; } while (--d > 0); return b;`
+      // renders `return t / (v + t)` after `v = t / (v + t)` already ran. So the region is judged
+      // with no substitution as well.
+      const hazard =
+        loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion) ||
+        (isBreak && loopEscapeHazard(loopCtx.body, new Map(), updateWrites, exitRegion));
       if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);

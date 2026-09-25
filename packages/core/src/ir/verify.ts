@@ -3,11 +3,13 @@
 //   1. every block ends in exactly one terminator (and it is the last op)
 //   2. operands well-formed: opcode registered, correct arity/attrs
 //   3. SSA: each value defined once; every use is defined; def dominates use
-//   4. side data: a fn that carries a write-order record carries one for EVERY block, with every
+//   4. a float value is an operand or result of a float op or `ret` only, and crosses an edge
+//      only into a block parameter of its own type
+//   5. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
 import { Block, Fn, Op, Value, dominators } from './core';
-import { WIDE_BITS, opSig } from './opcodes';
-import { type IrType, intWidth } from './types';
+import { FLOAT_OPS, WIDE_BITS, opSig } from './opcodes';
+import { type IrType, intWidth, typeEquals, typeToString } from './types';
 
 export class VerifyError extends Error {}
 
@@ -197,6 +199,19 @@ export function verify(fn: Fn): void {
               );
             }
           }
+          // A FLOAT IS COMPUTED ON BY THE FLOAT OPS AND RETURNED, AND NOTHING ELSE TOUCHES IT. Both
+          // halves are checked, because each is a silent wrong the other cannot see: a float op over
+          // an integer is a frontend that lost track of a register file, and an integer op over a
+          // float is a pass that matched an opcode without asking what it computes on.
+          const floats = [...op.operands, ...op.results].map((v) => v.type).filter((t) => t.kind === 'float');
+          if (FLOAT_OPS.has(op.opcode)) {
+            const all = [...op.operands, ...op.results].map((v) => v.type);
+            if (floats.length !== all.length || all.some((t) => !typeEquals(t, all[0]))) {
+              throw new VerifyError(`'${op.opcode}' computes on floats only, got ${all.map(typeToString).join(', ')}`);
+            }
+          } else if (floats.length > 0 && op.opcode !== 'ret') {
+            throw new VerifyError(`a float value reaches '${op.opcode}', which does not compute on floats`);
+          }
           for (const k of sig.requiredAttrs ?? []) {
             if (!(k in op.attrs)) {
               throw new VerifyError(`'${op.opcode}' missing required attr '${k}'`);
@@ -221,6 +236,15 @@ export function verify(fn: Fn): void {
                 throw new VerifyError(`use of undefined value in successor args of '${op.opcode}'`);
               }
             }
+            // …and a float crosses an edge only into a block parameter of its own type.
+            s.args.forEach((u, i) => {
+              const p = s.block.params[i].type;
+              if ((u.type.kind === 'float' || p.kind === 'float') && !typeEquals(u.type, p)) {
+                throw new VerifyError(
+                  `successor of '${op.opcode}' passes a ${typeToString(u.type)} to a ${typeToString(p)} block parameter`,
+                );
+              }
+            });
           }
         },
         () => at(b, idx),

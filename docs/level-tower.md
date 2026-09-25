@@ -683,6 +683,62 @@ compares into one `ldrh`; a device register, whose reads are `volatile`). Nor do
 raise/struct-arrays.ts read the boundary yet: it sizes an element struct naturally, which agbcc
 does not.
 
+## A float, across the tower
+
+The one value that is not an integer of any width, and the case where the first move a reader
+reaches for — decode the FPU's instructions — is the wrong one. Decoded alone, the arithmetic lifts
+`float fadd(float a, float b){ return a + b; }` as `void fadd(s32 a0, s32 a1) { return; }` on every
+FPU target: the entry reads of `$f12`/`f1` mint phantom integer parameters, and the sum lands in a
+register that is not the return, so the add is dead ([`floating-point.md`](floating-point.md) §2).
+So it was built downwards, and each level is a layer that document prices.
+
+**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32}` is the one exception to the
+64-bit section's rule ("for TYPES, widen the number that is already there"): a float is not an integer
+of any width, so every pass that tests `kind === 'int'` must SKIP it, and a new kind is what makes it
+skip. Its width is 32 alone until a frontend mints a double: a width nothing produces is the
+scaffolding "earn the level" forbids. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
+same reason `concat` is its own opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
+float op computes on floats only, and a float is an operand of nothing else but `ret` — so a
+pass that matched an opcode without asking what it computes on fails where it did it.
+
+**The ABI homes are target DATA.** `TargetDescription.fpu` names the float argument registers, the
+float return and how the two files COUNT: o32 is `'leading'` (argument k is in `$f12`/`$f14` only
+while arguments 0..k are all floating, and it still takes integer slot k), the PowerPC EABI is
+`'separate'` (f1..f8 count on their own). `frontend/fpu.ts` is the one reading of them, shared by both
+frontends, and the SSA builder types every parameter and phi of the FPU's file a float where it mints
+it (`keyType`), so recovery's s32 default never reaches one — a float carried round a loop is declared
+a float.
+
+**L3 — operators of its own too.** A float op lowers to `f+ f- f* f/` (unary `f-`), not to `+ - * /`.
+C writes both with one token, but `/` at L3 is the SIGNED integer divide the C backend pins with
+`(s32)` casts, and `+`/`-` are what the pointer walks and the constant folds match — so the split is
+earned by what the integer operators MEAN to passes, the rule `BinOp`'s own note gives for the splits
+before it. A float product read by a float add or subtract is NAMED on a compiler that can contract
+(`structure/analysis.ts`, gated by the target's `contractsFloatProducts`): mwcc `-fp_contract on`
+fuses a multiply into an add only within one expression, so the inline spelling recompiles to a
+fused multiply-add that rounds once, where the temp compiles to the unfused pair under either
+setting. MIPS II and III have no fused multiply-add, and there the product stays inline. **The
+backend** spells the C89 keyword `float`, which no translation unit has to declare, so the candidate prelude and every project context
+that already typedefs `f32` are untouched.
+
+**What refuses, and why each refusal is where it is.**
+
+| level    | refusal                                                                                                                 | because                                                                                                                                                                                                     |
+| -------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| frontend | every FPU instruction but the single-precision arithmetic and its copies (register-file refusal)                        | a double, a conversion, a move to memory or the integer file, a compare: each would let a float reach something that is not another float op or the return, which is what makes the return rule below sound |
+| frontend | an FPU register read before any write that is not a float argument home                                                 | it would mint a parameter no caller passes — including a return path that never writes `$f0`, since a function returns a float on every path or on none                                                     |
+| frontend | an integer argument register in a slot a float shadows (o32)                                                            | `'leading'` gives a float argument its integer slot too, so `a0` beside `$f12` is not a layout the ABI produces                                                                                             |
+| frontend | PowerPC: a function that computes on a float and makes a call; a record form (`fadds.` sets `cr1`)                      | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`); MIPS refuses every call already                                                                |
+| verify   | a float operand of any op but a float op or `ret`; a float op over a non-float; a float edge into a non-float parameter | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                          |
+| backend  | Pascal, on a float type, operator or negation                                                                           | it throws rather than spelling an integer                                                                                                                                                                   |
+
+**What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
+float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`
+touch it, and neither is the ORDER of integer parameters against float ones: both are spellings,
+fixed so the output is deterministic (`fpuArgSlots`). A declaration decides them, and only the C++
+backend reads one (`bindSpecParams`): in C, a project context declaring a float ahead of an integer
+makes the fixed int-first spelling a redeclaration the compiler refuses.
+
 ## The contracts are the point
 
 The reason the levels earn their keep is not that the graph changes shape between them — it is
