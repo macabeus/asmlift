@@ -696,8 +696,8 @@ So it was built downwards, and each level is a layer that document prices.
 64-bit section's rule ("for TYPES, widen the number that is already there"): a float is not an integer
 of any width, so every pass that tests `kind === 'int'` must SKIP it, and a new kind is what makes it
 skip. Its width is 32 alone until a frontend mints a double: a width nothing produces is the
-scaffolding "earn the level" forbids. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the same reason `concat` is its own
-opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
+scaffolding "earn the level" forbids. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
+same reason `concat` is its own opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
 float op computes on floats only, and a float is an operand of nothing else but `ret` — so a
 pass that matched an opcode without asking what it computes on fails where it did it.
 
@@ -717,8 +717,8 @@ before it. A float product read by a float add or subtract is NAMED on a compile
 (`structure/analysis.ts`, gated by the target's `contractsFloatProducts`): mwcc `-fp_contract on`
 fuses a multiply into an add only within one expression, so the inline spelling recompiles to a
 fused multiply-add that rounds once, where the temp compiles to the unfused pair under either
-setting. MIPS II and III have no fused multiply-add, and there the product stays inline. **The backend** spells the C89 keyword
-`float`, which no translation unit has to declare, so the candidate prelude and every project context
+setting. MIPS II and III have no fused multiply-add, and there the product stays inline. **The
+backend** spells the C89 keyword `float`, which no translation unit has to declare, so the candidate prelude and every project context
 that already typedefs `f32` are untouched.
 
 **What refuses, and why each refusal is where it is.**

@@ -527,9 +527,8 @@ export interface TargetDescription {
     // `fnmsubs`, but only within one expression, so the structurer names every such product
     // (StructureOptions.contractsFloatProducts) and the spelling compiles to the unfused pair under
     // either setting. The MIPS targets cannot: MIPS II (ido7.1 `-mips2`) and MIPS III (kmc `-mips3`)
-    // have no fused multiply-add, and naming the product there only costs matches — over 80
-    // generated two-float expressions recompiled at each row's flags, 44 lifts reproduce their
-    // object on ido7.1 without the naming and 38 with it, 80 against 78 on gcc2.7.2kmc.
+    // have no fused multiply-add, and naming the product there only moves the register allocation
+    // off the object (`fpu-lift.test.ts` pins one on ido7.1).
     //
     // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
     // compute on a float at all.
@@ -661,7 +660,7 @@ export const MIPS_IDO: TargetDescription = {
     'ra',
   ],
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
-  // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair at the field.
+  // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
   fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
