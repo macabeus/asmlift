@@ -346,6 +346,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // opts in on both halves. PPC_MWCC's frontend holds the weaker half only: a synthetic return body
   // sorting last can make PRE5 keep a `switch` it should decline, never decline one it should keep,
   // so mwcc declares `switchRequiresFrontLoadedTests` and could not declare the placing reading.
+  // That is the frontend's limit and not the compiler's: mwcc lays its case bodies in source order
+  // (the compiled pairs at target.ts `switchArmsFollowLayout`), so a synthetic block placed at its
+  // branch's address would give PPC both halves.
   // Anything added below that reads `layoutIndex` inherits the frontend half and owes a statement
   // of which strength of the compiler half it needs.
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));

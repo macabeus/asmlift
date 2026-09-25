@@ -382,8 +382,14 @@ export interface TargetDescription {
     // neither sched.c nor reorg.c. SCOPE — SRCS does compile jump.c, whose cross-jump merges two
     // identical arm bodies into ONE block, so a merged pair's own order is gone from the asm; that
     // surfaces as two case values sharing a body, which switch-recover.ts ties by ascending value.
-    // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
-    // been put through that evidence. A compiler opts in on its own, never by inheriting.
+    // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit. ido and kmc-gcc have a scheduler
+    // and have not been put through that evidence. mwcc_242_81 HAS been, on two compiled pairs, and
+    // lays the bodies in source order: `synthetic:sw_defmid` with `default:` between two cases, and
+    // a three-case switch whose first case is a `beqlr`. What keeps it from declaring the reading is
+    // its FRONTEND: frontend/ppc.ts appends every conditional-return block after all the real ones,
+    // so such an arm sorts last whatever its address (switch-recover.ts, at `layoutIndex`). Placing
+    // those blocks at their branch's address is the prerequisite, and a declaration after it owes
+    // its own pairs. A compiler opts in on its own, never by inheriting.
     switchArmsFollowLayout?: boolean;
     // Switch recovery: DECLINE a comparison tree whose own layout INTERLEAVES a test block with a
     // case body, on the reading that the source wrote an if/else-if LADDER there. True claims the
