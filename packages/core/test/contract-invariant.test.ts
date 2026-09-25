@@ -149,7 +149,8 @@ const PROBES: Record<string, Probe> = {
     // the file (a destination it accepts), a store (which `storeClass` would otherwise claim), and
     // a control-register move (which names no FP register at all).
     fpu: [
-      ['arithmetic', '0:\tadd.s\t$f0,$f12,$f14\n4:\tjr\tra\n8:\tnop\n'],
+      // DOUBLE precision: the single-precision `add.s` lifts through the float homes.
+      ['arithmetic', '0:\tadd.d\t$f0,$f12,$f14\n4:\tjr\tra\n8:\tnop\n'],
       ['a move out of the file', '0:\tmfc1\tv0,$f12\n4:\tjr\tra\n8:\tnop\n'],
       ['an FPU store', '0:\tswc1\t$f0,0(a1)\n4:\tjr\tra\n8:\tnop\n'],
       ['the control register', '0:\tcfc1\tv0,$31\n4:\tjr\tra\n8:\tnop\n'],
