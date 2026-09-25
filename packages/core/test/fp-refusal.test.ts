@@ -53,12 +53,13 @@ describe('an instruction that touches the FPU is refused by the FILE it needs', 
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
     ['a MIPS FPU load', 'lwc1\t$f0,0(a1)', '\\$f0', liftMips],
-    // …AND THE REGISTER LIST IS A SET. `fadds f1,f1,f2` reads two registers and writes one of
+    // …AND THE REGISTER LIST IS A SET. `fadd f1,f1,f2` reads two registers and writes one of
     // them; an undeduped filter published `(f1, f1, f2)` in five markers of the committed
     // artifact, which reads as three registers in a file the reader is being told does not exist.
-    ['PowerPC single-precision arithmetic', 'fadds   f1,f1,f2', 'f1, f2', liftPpc],
+    // Double precision, because the single-precision `fadds` lifts (`fpu-lift.test.ts`).
+    ['PowerPC double-precision arithmetic', 'fadd    f1,f1,f2', 'f1, f2', liftPpc],
     ['a PowerPC FPU load', 'lfs     f1,0(r4)', 'f1', liftPpc],
-    ['a PowerPC float move', 'fmr     f0,f2', 'f0, f2', liftPpc],
+    ['a PowerPC float absolute value', 'fabs    f0,f2', 'f0, f2', liftPpc],
   ])('%s', (_label, insn, regs, lift) => {
     const run = lift(insn);
     expect(run).toThrow(/unmodelled floating-point instruction/);

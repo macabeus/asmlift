@@ -53,6 +53,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
+import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -116,6 +117,24 @@ const isXfer = (ins: Instr) => isReturn(ins) || isUncond(ins) || isCond(ins) || 
 const isModeledBranch = (ins: Instr) => isXfer(ins) || ins.mnemonic === 'bl';
 
 const isReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
+
+/** The single-precision FPU arithmetic this frontend lifts, onto the float opcodes; `fmr` is a copy
+ *  and has none. `fneg` and `fmr` carry no precision at all — an FPR holds a double either way — and
+ *  are read as single because the float and double spellings of a negation or a copy compile to one
+ *  object. Everything else in the file keeps the register-file refusal `opaqueDest` gives it: the
+ *  double-precision ops, `frsp`, the loads and stores, the conversions, the compares, the fused
+ *  multiply-adds, paired singles — and a record form (`fadds.`), which sets `cr1`. */
+const FP_SINGLE: Readonly<Record<string, Opcode | 'copy'>> = {
+  fadds: 'fadd',
+  fsubs: 'fsub',
+  fmuls: 'fmul',
+  fdivs: 'fdiv',
+  fneg: 'fneg',
+  fmr: 'copy',
+};
+const FP_SINGLE_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_SINGLE));
+/** An FPU register: the token, and the key the SSA builder holds it under. */
+const isFpKey = (k: string) => /^f\d+$/.test(k);
 
 // Shared objdump scaffolding (frontend/disasm.ts). parseMem narrowed to `r\d+` bases — a
 // non-register base is an SDA/global placeholder assertOrdinaryMem declines.
@@ -461,7 +480,22 @@ export function lift(
     }
   });
 
-  const ssa = makeSsaBuilder(name, blocks.length, preds);
+  // A CALL IN A FUNCTION THAT COMPUTES ON FLOATS refuses: which FPRs a callee destroys, which it
+  // reads as float arguments and which it returns in are all unmodelled, so a float live across a
+  // call — or handed to one in f1 — would resolve to a value the callee overwrote or be dropped.
+  const fpu = target.fpu;
+  const fpInsn = fpu ? instrs.find((ins) => FP_SINGLE_MNEMONICS.has(ins.mnemonic)) : undefined;
+  const callInsn = instrs.find((ins) => ins.mnemonic === 'bl');
+  if (fpInsn && callInsn) {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': '${fpInsn.mnemonic}' computes on a float and '${callInsn.mnemonic}' at ` +
+        `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns in and ` +
+        `destroys are not modelled`,
+    );
+  }
+  const floatReturn = writesFloatReturn(instrs, FP_SINGLE_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
+
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
@@ -569,13 +603,18 @@ export function lift(
       ? `${name}+0x${blocks[bi].startAddr.toString(16)}`
       : `the return block '${name}' synthesizes`;
 
+  // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and then
+  // r3 is scratch like any other integer register.
+  const returnOperands = (bi: number): Value[] =>
+    floatReturn ? [readReg(fpu!.returnReg, bi)] : ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
+
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
     const succ = (j: number): Successor => ({ block: irBlocks[j], args: [] });
 
     // A synthetic conditional-return block: just return the current return register.
     if (b.synthReturn) {
-      const retOps = ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
+      const retOps = returnOperands(bi);
       ops.push(mkOp('ret', { operands: retOps }));
       return;
     }
@@ -1309,6 +1348,27 @@ export function lift(
           recordCmp(c.cr, read(c.lhsTok), rhs, false);
           break;
         }
+        case 'fadds':
+        case 'fsubs':
+        case 'fmuls':
+        case 'fdivs':
+        case 'fneg':
+        case 'fmr': {
+          const op = FP_SINGLE[mnem];
+          if (rc || fpu === undefined || ins.ops.length === 0 || !ins.ops.every(isFpKey)) {
+            emitOpaqueDest(ins);
+            break;
+          }
+          const [dst, ...srcs] = ins.ops;
+          if (op === 'copy') {
+            writeVar(dst, bi, read(srcs[0]));
+            break;
+          }
+          const v = mkValue(T.f32());
+          ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
+          writeVar(dst, bi, v);
+          break;
+        }
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
@@ -1425,8 +1485,7 @@ export function lift(
         ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succIdx[bi][0])] }));
         return;
       }
-      const retOps = ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
-      ops.push(mkOp('ret', { operands: retOps }));
+      ops.push(mkOp('ret', { operands: returnOperands(bi) }));
       return;
     }
     // unconditional branch
@@ -1441,12 +1500,19 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
+  if (fpu) {
+    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
+  }
   const argSlots = registerArgSlots(ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
+  const rank = floatAwareRank(fpu, ARG_REGS);
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, {
+    ...argSlots,
+    slotOf: (k) => (rank(k) < 0 ? null : rank(k)),
+  });
   return ssa.fn;
 }
 
