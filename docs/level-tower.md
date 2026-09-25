@@ -692,12 +692,13 @@ FPU target: the entry reads of `$f12`/`f1` mint phantom integer parameters, and 
 register that is not the return, so the add is dead ([`floating-point.md`](floating-point.md) §2).
 So it was built downwards, and each level is a layer that document prices.
 
-**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32|64}` is the one exception to the
+**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32}` is the one exception to the
 64-bit section's rule ("for TYPES, widen the number that is already there"): a float is not an integer
 of any width, so every pass that tests `kind === 'int'` must SKIP it, and a new kind is what makes it
-skip. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the same reason `concat` is its own
+skip. Its width is 32 alone until a frontend mints a double: a width nothing produces is the
+scaffolding "earn the level" forbids. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the same reason `concat` is its own
 opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
-float op computes on floats of one width, and a float is an operand of nothing else but `ret` — so a
+float op computes on floats only, and a float is an operand of nothing else but `ret` — so a
 pass that matched an opcode without asking what it computes on fails where it did it.
 
 **The ABI homes are target DATA.** `TargetDescription.fpu` names the float argument registers, the
@@ -712,7 +713,7 @@ a float.
 C writes both with one token, but `/` at L3 is the SIGNED integer divide the C backend pins with
 `(s32)` casts, and `+`/`-` are what the pointer walks and the constant folds match — so the split is
 earned by what the integer operators MEAN to passes, the rule `BinOp`'s own note gives for the splits
-before it. **The backend** spells the C89 keywords `float`/`double`, which no translation unit has to
+before it. **The backend** spells the C89 keyword `float`, which no translation unit has to
 declare, so the candidate prelude and every project context that already typedefs `f32` are untouched.
 
 **What refuses, and why each refusal is where it is.**
@@ -724,7 +725,7 @@ declare, so the candidate prelude and every project context that already typedef
 | frontend | an integer argument register in a slot a float shadows (o32)                                                                          | `'leading'` gives a float argument its integer slot too, so `a0` beside `$f12` is not a layout the ABI produces                                                                                             |
 | frontend | a float argument at an entry block that is a loop header                                                                              | its parameters are phis and can be neither completed (`ensureParam`) nor ordered                                                                                                                            |
 | frontend | PowerPC: a function that computes on a float and makes a call; a record form (`fadds.` sets `cr1`)                                    | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`); MIPS refuses every call already                                                                |
-| verify   | a float operand of any op but a float op or `ret`; a float op over a non-float or two widths; a float edge into a non-float parameter | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                          |
+| verify   | a float operand of any op but a float op or `ret`; a float op over a non-float; a float edge into a non-float parameter              | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                          |
 | backend  | Pascal, on a float type, operator or negation                                                                                         | it throws rather than spelling an integer                                                                                                                                                                   |
 
 **What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
