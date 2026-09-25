@@ -1138,3 +1138,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   };
   return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms };
 }
+
+/** Internal surface for this module's own tests, and for nothing else: PRE3 reads each test
+ *  through {@link takenBy}, so the ranges need a check that does not share their definition. */
+export const __testing = { takenBy, narrow, contains, ALL };

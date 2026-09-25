@@ -20,7 +20,7 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
-import { makeSwitchRecovery } from '../src/structure/switch-recover';
+import { makeSwitchRecovery, __testing as switchRangesForTest } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
@@ -1658,4 +1658,45 @@ test('a path singleton an UNSIGNED ancestor already excluded is dead, and the tr
   const out = decompile('dead', `0 <dead>:\n${asm}`, PPC_MWCC).source;
   expect(out).not.toContain('case 0:');
   expect(out).toContain('return 10;'); // the body survives, under the tests that really reach it
+});
+
+// PRE3 simulates the dispatch through `takenBy`, the same ranges a bound case is read from, so a
+// wrong arm there is a wrong case that PRE3 confirms. This pins every opcode, both operand sides,
+// against the plain comparison it stands for — over each domain end, the sign boundary, and the
+// values either side of the constant.
+test('the bound-case ranges agree with the comparison they read, on every opcode and side', () => {
+  const { takenBy, narrow, contains, ALL } = switchRangesForTest;
+  const s = (v: number) => v | 0;
+  const u = (v: number) => v >>> 0;
+  const holds: Record<string, (a: number, b: number) => boolean> = {
+    icmp_eq: (a, b) => s(a) === s(b),
+    icmp_ne: (a, b) => s(a) !== s(b),
+    icmp_slt: (a, b) => s(a) < s(b),
+    icmp_sle: (a, b) => s(a) <= s(b),
+    icmp_sgt: (a, b) => s(a) > s(b),
+    icmp_sge: (a, b) => s(a) >= s(b),
+    icmp_ult: (a, b) => u(a) < u(b),
+    icmp_ule: (a, b) => u(a) <= u(b),
+    icmp_ugt: (a, b) => u(a) > u(b),
+    icmp_uge: (a, b) => u(a) >= u(b),
+  };
+  const edges = [-0x80000000, -0x7fffffff, -2, -1, 0, 1, 2, 5, 0x7ffffffe, 0x7fffffff];
+  const probes = (k: number) => [...edges, k - 1, k, k + 1].map(s);
+  let checked = 0;
+  for (const [opcode, cmp] of Object.entries(holds)) {
+    for (const xOnLeft of [true, false]) {
+      for (const k of edges) {
+        const ti = { x: undefined as never, k, cls: 'rel' as const, opcode, xOnLeft };
+        const taken = takenBy(ti);
+        for (const x of probes(k)) {
+          const want = xOnLeft ? cmp(x, k) : cmp(k, x);
+          expect({ opcode, xOnLeft, k, x, taken: contains(taken, x) }).toEqual({ opcode, xOnLeft, k, x, taken: want });
+          expect(contains(narrow(ALL, ti, true), x)).toBe(want);
+          expect(contains(narrow(ALL, ti, false), x)).toBe(!want);
+          checked++;
+        }
+      }
+    }
+  }
+  expect(checked).toBe(10 * 2 * edges.length * (edges.length + 3));
 });
