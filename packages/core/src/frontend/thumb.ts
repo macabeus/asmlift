@@ -42,11 +42,12 @@ import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
+  type ArgSlots,
   abiSortEntryParams,
   clobberedByCall,
   fallbackArgc,
   makeSsaBuilder,
-  mintArgRegisterHoles,
+  mintArgSlotHoles,
   slotKeyOffset,
   stackSlotKey,
 } from './ssa';
@@ -5096,28 +5097,6 @@ export function lift(
           {
             const index = frame.argIndex({ base, off, regOff }, width, bi);
             if (index !== null) {
-              // Mint EVERY argument below this one — the register half included. Downstream naming
-              // is POSITIONAL (structure.ts), so any hole binds every later parameter to the wrong
-              // ABI slot, silently: `push {r4,r5,lr}; add r4,r3,#0; ldr r0,[sp,#0xc]` emitted a
-              // 2-parameter signature where the ABI proves 5, with both of them bound wrong.
-              //
-              // Reading slot k proves the caller passed arguments 0..k: the register arguments are
-              // filled before any stack argument exists, and the stack area is contiguous with slot
-              // 4 at the lowest offset. So this is entailed by the calling convention, not guessed —
-              // which is what separates it from inventing parameters a function might not have.
-              // (It assumes one word per argument, which is what this frontend assumes everywhere —
-              // it types every parameter s32. An 8-byte argument, which AAPCS may align into r1 or
-              // straddle across r3 and the stack, would break the index↔slot correspondence; no
-              // agbcc row in the corpus has one, and recovering them is its own capability.)
-              //
-              // ensureParam, NOT readVar: a register the entry block DEFINES before this point
-              // (`bl g` then a read of the frame, the commonest shape there is) answers readVar with
-              // that local definition and no parameter appears — reopening the very hole this loop
-              // closes. It emitted `s32 f(s32 a0, s32 a1, s32 a2, s32 a3) { return g() + a3; }`:
-              // arity 4 where the ABI proves 5, with the stack argument bound to r3's slot.
-              for (let j = 0; j < index; j++) {
-                ssa.ensureParam(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
-              }
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;
             }
@@ -5433,7 +5412,18 @@ export function lift(
   });
 
   refuseWordReturns();
-  mintArgRegisterHoles(ssa, target.argRegs);
+  // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
+  // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
+  // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
+  // correspondence, and recovering one is its own capability.
+  const argSlots: ArgSlots = {
+    slotOf: (key) => {
+      const i = target.argRegs.indexOf(key);
+      return i >= 0 ? i : stackArgIndex(key);
+    },
+    keyOf: (k) => (k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k)),
+  };
+  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
@@ -5450,37 +5440,7 @@ export function lift(
     target,
   });
 
-  // Order the entry block's parameters by ABI register (r0, r1, r2, …) so downstream
-  // naming (`a0`, `a1`, …) matches the calling convention, not the read order. Safe only
-  // for the true entry (no predecessors) — a loop header's params are phis whose position
-  // is index-aligned with predecessor terminator args and must not be reordered.
-  const entry = irBlocks[0];
-  // non-ABI live-in ranks LAST (99) — deliberate Thumb tie-break; MIPS/PPC's is -1/first
-  //
-  // "Non-ABI" means NOT AN ARGUMENT REGISTER, and it has to be tested that way rather than by the
-  // shape of the name. A `/^r(\d+)$/` test ranked `r8` at 8 and `r4` at 4 while sending only `sl`
-  // and `sb` to 99 — harmless while nothing else occupied ranks >= 4, and a positional miscompile
-  // the moment incoming stack arguments started ranking there. `sub_80B6B3C` in sa3's
-  // `asm/code_x.s` — still undecompiled, so not a benchmark row — takes 10 arguments (its caller
-  // stores six words at [sp,#0]..[sp,#0x14] plus r0-r3) and saves r8 in its prologue;
-  // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
-  // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
-  //
-  // The register partition (LiveInModel.uninitRegs) takes most of r4-sl before they reach here — one
-  // the ABI does not pass arguments in and this function saved is an uninitialised local, not a
-  // parameter. What still ranks 99 is `lr`/`pc`, which the partition does not list, and an r4-sl the
-  // prologue did not save. Not an argument either way, and the honest place for one is after
-  // everything the convention actually describes.
-  abiSortEntryParams(entry, preds[0].length > 0, (v) => {
-    const key = paramReg.get(v) ?? '';
-    // an incoming STACK argument ranks by its ABI index, after every register argument
-    const s = stackArgIndex(key);
-    if (s !== null) {
-      return s;
-    }
-    const i = target.argRegs.indexOf(key);
-    return i >= 0 ? i : 99;
-  });
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return fn;
 }
 

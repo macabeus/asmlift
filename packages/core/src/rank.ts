@@ -114,7 +114,7 @@ import { type SubjectVariationName, type Variation, offeredOn, withSubject } fro
  *  Nor is a param NOTHING READS. Its declared signedness reaches no instruction, so the two
  *  candidates would differ only in the signature's text and compile to the same object. The frontend
  *  mints such params on purpose: an argument register below the highest one read keeps its slot
- *  (`frontend/ssa.ts` mintArgRegisterHoles). Counting one as pinnable doubled the fan of every
+ *  (`frontend/ssa.ts` mintArgSlotHoles). Counting one as pinnable doubled the fan of every
  *  function whose only scalar params are unread. */
 function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
   const read = new Set<Value>();

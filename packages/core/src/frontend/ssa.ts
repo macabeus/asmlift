@@ -1079,39 +1079,66 @@ export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
-/** Give the TRUE entry block a parameter for every argument register below the highest one it
- *  takes. Naming is POSITIONAL (`a0`, `a1`, … in {@link abiSortEntryParams} order), so an
- *  argument register the body never reads drops out of the signature and binds every later
- *  argument one ABI slot low, silently: `int f(int a, int b, int c) { return a + c; }` reads r3
- *  and r5, and lifted as `f(a0, a1)` with r5 in r4's slot. Arguments take their registers in
- *  order, so reading register k proves slots 0..k-1 precede it — an obligation on the signature,
- *  which is what `ensureParam` is for (a no-op on an entry with predecessors, whose parameters are
- *  phis). A live-in outside `argRegs` proves nothing about that sequence and is ignored. Call it
- *  before `finish()`, which records evidence for every entry parameter. */
-export function mintArgRegisterHoles(
+/** Where a live-in of the entry block sits in the calling convention: `slotOf` gives its ABI
+ *  argument slot (a register or an incoming stack word), or null for a live-in no argument arrives
+ *  in — an uninitialised register the body reads; `keyOf` is its inverse. One per frontend, read by
+ *  both halves of the entry-parameter rule: {@link mintArgSlotHoles} and {@link abiSortEntryParams}.
+ *
+ *  Both halves need an entry block with NO predecessors, whose parameters are the function's own.
+ *  A loop header's are phis, index-aligned with its predecessors' edge arguments, and neither
+ *  minting one nor reordering them is legal there — so a frontend whose first block is a branch
+ *  target inserts an empty preheader ahead of it (each frontend's `preheader` note). */
+export interface ArgSlots {
+  slotOf(key: string): number | null;
+  keyOf(slot: number): string;
+}
+
+/** The slots of a convention that passes arguments in `argRegs` only. */
+export const registerArgSlots = (argRegs: readonly string[]): ArgSlots => ({
+  slotOf: (key) => (argRegs.includes(key) ? argRegs.indexOf(key) : null),
+  keyOf: (k) => argRegs[k],
+});
+
+/** A rank past every argument slot, for a live-in that is not one. */
+const NOT_AN_ARGUMENT = Number.MAX_SAFE_INTEGER;
+
+/** Give the entry block a parameter for every argument slot below the highest one it takes. Naming
+ *  is POSITIONAL (`a0`, `a1`, … in {@link abiSortEntryParams} order), so a slot the body never reads
+ *  drops out of the signature and binds every later argument one slot low, silently: `int f(int a,
+ *  int b, int c) { return a + c; }` reads r3 and r5, and lifted as `f(a0, a1)` with r5 in r4's slot.
+ *  Arguments take their slots in order, registers first and then the stack words, so reading slot
+ *  k proves slots 0..k-1 precede it — an obligation on the signature, which is what `ensureParam`
+ *  is for. A live-in that is no slot proves nothing about that sequence. Call it before `finish()`,
+ *  which records evidence for every entry parameter. */
+export function mintArgSlotHoles(
   ssa: Pick<SsaBuilder, 'irBlocks' | 'paramReg' | 'ensureParam'>,
-  argRegs: readonly string[],
+  entryHasPreds: boolean,
+  slots: ArgSlots,
 ): void {
-  const top = Math.max(-1, ...ssa.irBlocks[0].params.map((p) => argRegs.indexOf(ssa.paramReg.get(p) ?? '')));
+  assertTrueEntry(entryHasPreds);
+  const top = Math.max(-1, ...ssa.irBlocks[0].params.map((p) => slots.slotOf(ssa.paramReg.get(p) ?? '') ?? -1));
   for (let k = 0; k < top; k++) {
-    ssa.ensureParam(argRegs[k], 0);
+    ssa.ensureParam(slots.keyOf(k), 0);
   }
 }
 
-/** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
- *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can
- *  read a later argument register first). No-op when the entry has predecessors — a loop
- *  header's params are phis position-aligned with predecessor terminator args and must not be
- *  reordered. `rank` is per-ISA: the tie-break for a non-ABI live-in deliberately differs
- *  (Thumb sorts it LAST via 99, MIPS/PPC FIRST via indexOf's -1) to keep each frontend's
- *  output byte-exact. */
+/** Order the entry block's parameters by ABI argument slot, so downstream naming (`a0`, `a1`, …)
+ *  matches the calling convention, not first-read order (a callee-saved copy can read a later
+ *  argument register first). A live-in that is no slot goes after every one that is: ranked
+ *  first, it takes `a0` and binds every real argument one slot high. */
 export function abiSortEntryParams(
   entry: { params: Value[] },
   entryHasPreds: boolean,
-  rank: (v: Value) => number,
+  paramReg: ReadonlyMap<Value, string>,
+  slots: ArgSlots,
 ): void {
-  if (entryHasPreds) {
-    return;
-  }
+  assertTrueEntry(entryHasPreds);
+  const rank = (v: Value): number => slots.slotOf(paramReg.get(v) ?? '') ?? NOT_AN_ARGUMENT;
   entry.params.sort((x, y) => rank(x) - rank(y));
+}
+
+function assertTrueEntry(entryHasPreds: boolean): void {
+  if (entryHasPreds) {
+    throw new Error('internal: the entry-parameter rule needs an entry block with no predecessors');
+  }
 }

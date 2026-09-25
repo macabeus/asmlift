@@ -57,7 +57,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgRegisterHoles } from './ssa';
+import { abiSortEntryParams, mintArgSlotHoles, registerArgSlots } from './ssa';
 import { clobberedByCall, makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -444,6 +444,15 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
+  // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
+  // of it becomes the entry, and its live-ins are the function's parameters (frontend/ssa.ts
+  // `ArgSlots`). It starts where the function does, which is what its label says.
+  if (succIdx.some((ss) => ss.includes(0))) {
+    blocks.unshift({ startAddr: blocks[0].startAddr, body: [], branch: null });
+    succIdx.forEach((ss, i) => (succIdx[i] = ss.map((j) => j + 1)));
+    succIdx.unshift([1]);
+  }
 
   const preds: number[][] = blocks.map(() => []);
   blocks.forEach((_, i) => {
@@ -1432,15 +1441,12 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
-  mintArgRegisterHoles(ssa, ARG_REGS);
+  const argSlots = registerArgSlots(ARG_REGS);
+  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  // ABI-ordered entry parameters (r3, r4, …) — a callee-saved copy can read a later argument
-  // register first, so sort the true entry's params by argument-register index.
-  const entry = irBlocks[0];
-  // non-ABI live-in ranks FIRST (indexOf's -1) — deliberate MIPS/PPC tie-break; Thumb's is 99/last
-  abiSortEntryParams(entry, preds[0].length > 0, (v) => ARG_REGS.indexOf(paramReg.get(v) ?? ''));
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
 }
 
