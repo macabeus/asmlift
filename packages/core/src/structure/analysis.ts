@@ -1242,9 +1242,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
   const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
-  // How many times each value rides a BACKWARD edge (to a block at or above its own), which
-  // `ridesEdge` weighs apart.
+  // How many times each value rides a BACK edge (to a block that dominates its own: a loop's
+  // header), which `ridesEdge` weighs apart. Decided by dominance, not layout: a return tail laid
+  // out above the branch into it is still a forward edge, and its copy renders in the arm.
   const backArgFed = new Map<Value, number>();
+  const domOf = dom ?? dominators(fn);
+  const backEdge = (from: Block, to: Block): boolean => domOf.get(from)?.has(to) ?? false;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.successors.length > 1) {
@@ -1254,7 +1257,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             if (op.opcode === 'cond_br') {
               condBrArgFed.add(a);
             }
-            if (blockPos.get(s.block)! <= blockPos.get(b)!) {
+            if (backEdge(b, s.block)) {
               backArgFed.set(a, (backArgFed.get(a) ?? 0) + 1);
             }
           }

@@ -143,3 +143,34 @@ test('a call under a back-edge copy with nothing order-sensitive behind it stays
   expect(alone).not.toBe(BACK_EDGE_CALL);
   expect(emit(alone)).toMatch(/v\d+ = f0\(v\d+\) \+ /);
 });
+
+// A BACK EDGE IS A DOMINANCE FACT, NOT A LAYOUT ONE. `^bb1`, the return tail, is laid out above the
+// branch that jumps to it, and nothing about that edge is a loop: `^bb1` does not dominate `^bb2`.
+// Read by layout, the edge took the back-edge reading (the value renders once, at the foot of a
+// body) and `f1` was inlined into the `if` arm, called only when `a1 > 0` where the IR calls it on
+// every path. The control is the same function with `^bb1` laid out last.
+const BACKWARD_TAIL = `fn backtail {
+^bb0(%0: s32, %1: s32):
+  br ^bb2()
+^bb1(%6: s32):
+  ret %6
+^bb2():
+  %3: s32 = call %0 {target="f1"}
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_sgt %1, %7
+  cond_br %8, ^bb1(%5), ^bb3()
+^bb3():
+  br ^bb1(%1)
+}
+`;
+
+test('a forward edge laid out backward still names the call it carries', () => {
+  const tailLast = BACKWARD_TAIL.replace('^bb1(%6: s32):\n  ret %6\n', '');
+  const control = tailLast.replace(/\}\n$/, '^bb1(%6: s32):\n  ret %6\n}\n');
+  expect(control).not.toBe(BACKWARD_TAIL);
+  for (const ir of [BACKWARD_TAIL, control]) {
+    expect(emit(ir)).toMatch(/v0 = f1\(a0\);\n\s+if \(a1 > 0\) a1 = v0 \+ 1;/);
+  }
+});
