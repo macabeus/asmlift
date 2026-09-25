@@ -33,8 +33,32 @@ export function cppSymbol(spec: CppFnSpec): string {
   return mangle({ name: spec.method, cls: spec.cls, params: spec.params.map((p) => p.type) });
 }
 
-/** Build a C++ backend for one function, parameterized by its recovered C++ signature. The lifted
- *  SFn params are positional: for a member function SFn.params[0] is `this`, the rest are `params`. */
+/** The lifted parameter each EXPLICIT spec parameter is (its SFn name), for a member function after
+ *  `this` (SFn.params[0]). Bound by register FILE, then by position within it — not by position
+ *  alone, because the lifted order is the ABI sort's and a float does not always sort where the
+ *  source put it: under the PowerPC EABI the files count independently and every float argument
+ *  ranks after the integers (frontend/fpu.ts `argSlots`), so `float g(float x, int n)` lifts as
+ *  `(s32 a0, float a1)`. Under o32 a lifted float argument always leads, so the two bindings agree.
+ *  NULL when the spec and the lift disagree on how many floating-point parameters there are: no
+ *  binding of the rest is then trustworthy. */
+export function bindSpecParams(
+  spec: Pick<CppFnSpec, 'cls' | 'params'>,
+  lifted: SFn['params'],
+): (string | undefined)[] | null {
+  const isFloat = (t: CppType) => t.ptr === 0 && (t.base === 'float' || t.base === 'double');
+  const explicit = lifted.slice(spec.cls ? 1 : 0);
+  const floats = explicit.filter((p) => p.type.kind === 'float');
+  const others = explicit.filter((p) => p.type.kind !== 'float');
+  if (spec.params.filter((p) => isFloat(p.type)).length !== floats.length) {
+    return null;
+  }
+  let f = 0;
+  let o = 0;
+  return spec.params.map((p) => (isFloat(p.type) ? floats[f++] : others[o++])?.name);
+}
+
+/** Build a C++ backend for one function, parameterized by its recovered C++ signature. For a member
+ *  function SFn.params[0] is `this`; the rest bind to `params` by `bindSpecParams`. */
 export function cppBackend(spec: CppFnSpec): LanguageBackend {
   return {
     id: 'cpp',
@@ -43,15 +67,21 @@ export function cppBackend(spec: CppFnSpec): LanguageBackend {
       // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
       // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.
       const thisVar = spec.cls ? fn.params[0]?.name : undefined;
-      const explicitStart = spec.cls ? 1 : 0;
       const rename = new Map<string, string>(); // lifted var → C++ name
       const recv = new Map<string, { cls: string; via: 'this' | string }>(); // var → member receiver
       if (thisVar) {
         rename.set(thisVar, 'this');
         recv.set(thisVar, { cls: spec.cls!, via: 'this' });
       }
+      const bound = bindSpecParams(spec, fn.params);
+      if (!bound) {
+        throw new Error(
+          `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +
+            `supply a signature whose float and integer parameters are the ones it takes`,
+        );
+      }
       spec.params.forEach((p, i) => {
-        const v = fn.params[explicitStart + i]?.name;
+        const v = bound[i];
         if (!v) {
           return;
         }
