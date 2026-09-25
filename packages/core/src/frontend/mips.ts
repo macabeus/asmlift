@@ -35,7 +35,7 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
+import { argSlots, settleArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -1379,9 +1379,7 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
-  if (fpu) {
-    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
-  }
+  settleArgSlots(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
@@ -1391,7 +1389,7 @@ export function lift(
   // integer slot it shadows (frontend/fpu.ts).
   const entry = irBlocks[0];
   // non-ABI live-in ranks FIRST (indexOf's -1) — deliberate MIPS/PPC tie-break; Thumb's is 99/last
-  const rank = floatAwareRank(fpu, ARG_REGS);
+  const { rank } = argSlots(fpu, ARG_REGS);
   abiSortEntryParams(entry, preds[0].length > 0, (v) => rank(paramReg.get(v) ?? ''));
   return ssa.fn;
 }

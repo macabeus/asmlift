@@ -52,7 +52,7 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
+import { argSlots, settleArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -1451,18 +1451,16 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
-  if (fpu) {
-    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
-  }
+  settleArgSlots(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
   // ABI-ordered entry parameters (r3, r4, …) — a callee-saved copy can read a later argument
   // register first, so sort the true entry's params by argument-register index; the float
-  // arguments follow every integer one (frontend/fpu.ts `floatAwareRank` says why that is a choice).
+  // arguments follow every integer one (frontend/fpu.ts `argSlots` says why that is a choice).
   const entry = irBlocks[0];
   // non-ABI live-in ranks FIRST (indexOf's -1) — deliberate MIPS/PPC tie-break; Thumb's is 99/last
-  const rank = floatAwareRank(fpu, ARG_REGS);
+  const { rank } = argSlots(fpu, ARG_REGS);
   abiSortEntryParams(entry, preds[0].length > 0, (v) => rank(paramReg.get(v) ?? ''));
   return ssa.fn;
 }
