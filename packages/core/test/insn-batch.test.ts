@@ -35,7 +35,7 @@ describe('thumb bic / ror / ldmia', () => {
 
   test('ldmia multi-register loads ascending offsets then advances by 4×count', () => {
     const src = thumb('pair', '\tldmia\tr2!, {r0, r1}\n\tadd\tr0, r0, r1\n\tbx\tlr\n');
-    expect(src).toContain('*a0 + a0[1]'); // r2 is the only live input → param a0; offsets 0 and 4
+    expect(src).toContain('*a2 + a2[1]'); // r2 is the only live input → param a2; offsets 0 and 4
   });
 });
 

@@ -215,7 +215,7 @@ f:
 `;
 
   const dispatches =
-    's32 f(s32 a0) {\n    switch (a0) {\n        case 0:\n            return 10;\n' +
+    's32 f(s32 a0, s32 a1) {\n    switch (a1) {\n        case 0:\n            return 10;\n' +
     '        case 1:\n            return 11;\n        default:\n            return 99;\n    }\n}\n';
 
   test('the control — no unread directive anywhere — recovers the table', () => {

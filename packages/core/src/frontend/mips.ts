@@ -39,7 +39,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, parseSplatMips } from './splat';
-import { abiSortEntryParams, stackSlotKey } from './ssa';
+import { abiSortEntryParams, mintArgSlotHoles, registerArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -682,6 +682,20 @@ export function lift(
   }
   checkDelaySlots(name, instrs);
   const { blocks, succAddrs } = toBlocks(instrs, jts, likelyAddrs);
+  // PREHEADER, as in frontend/ppc.ts: an entry that is a branch target gets an empty block ahead of
+  // it, whose live-ins are the function's parameters. One word below the function, so it falls
+  // through to it.
+  if (blocks.some((b) => succAddrs.get(b)!.includes(blocks[0].startAddr))) {
+    const ph: MipsBlock = {
+      startAddr: blocks[0].startAddr - 4,
+      body: [],
+      branch: null,
+      delay: null,
+      delayAnnulled: false,
+    };
+    succAddrs.set(ph, [blocks[0].startAddr]);
+    blocks.unshift(ph);
+  }
   const idxOf = new Map(blocks.map((b, i) => [b.startAddr, i]));
 
   // CFG predecessors by block index.
@@ -1322,15 +1336,12 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
+  const argSlots = registerArgSlots(ARG_REGS);
+  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  // ABI-ordered entry parameters (a0, a1, …) — a callee-saved copy can read a later argument
-  // register first. Only the true entry (no predecessors) is sorted; a loop header's phis are
-  // index-aligned with predecessor args and must not be reordered.
-  const entry = irBlocks[0];
-  // non-ABI live-in ranks FIRST (indexOf's -1) — deliberate MIPS/PPC tie-break; Thumb's is 99/last
-  abiSortEntryParams(entry, preds[0].length > 0, (v) => ARG_REGS.indexOf(paramReg.get(v) ?? ''));
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
 }
 

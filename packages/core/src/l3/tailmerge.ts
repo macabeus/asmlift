@@ -53,37 +53,24 @@
 //     lifts alike. What no arm of the fan spells is the third form, the hidden statement merged
 //     while KEEPING the record's order.
 //
-// SCOPE. Only `assign`/`store`/`exprstmt` merge, compared structurally through `exprEquals`.
+// SCOPE. Only `assign`/`store`/`exprstmt` merge, compared structurally through `stmtEquals`.
 // Control flow (`break`/`continue`/`return`) is excluded: moving one out of an arm changes which
-// statements the arm can still reach. Nested `if`/loop/`switch` statements are excluded because
-// comparing them needs a full `Stmt` congruence, and there is no second inhabitant for one — the
-// `Expr`-level comparison is the part that already exists, is tested, and is all this needs.
+// statements the arm can still reach. Nested `if`/loop/`switch` statements are excluded: merging
+// one needs a congruence over loops and `switch` too, which `stmtEquals` does not have, and there
+// is no second inhabitant for one.
 //
 // An `ASMLIFT_ERROR` marker ending both arms merges like anything else. The gap stays loud (the
 // artifact still refuses to compile) but `collectMarkers` then reports it once rather than twice,
 // which is accurate — it is one gap that ran on both paths.
 import type { SFn, Stmt } from './ast';
-import { exprEquals } from './ast';
+import { stmtEquals } from './ast';
 
 /** Statements this pass may move. Deliberately narrow — see SCOPE. */
 type Mergeable = Extract<Stmt, { k: 'assign' } | { k: 'store' } | { k: 'exprstmt' }>;
 const isMergeable = (s: Stmt): s is Mergeable => s.k === 'assign' || s.k === 'store' || s.k === 'exprstmt';
 
 /** Do these two statements write the same thing from the same expression? */
-function sameStmt(a: Stmt, b: Stmt): boolean {
-  if (!isMergeable(a) || !isMergeable(b) || a.k !== b.k) {
-    return false;
-  }
-  if (a.k === 'assign' && b.k === 'assign') {
-    return a.name === b.name && exprEquals(a.value, b.value);
-  }
-  if (a.k === 'store' && b.k === 'store') {
-    return exprEquals(a.lval, b.lval) && exprEquals(a.value, b.value);
-  }
-  const av = (a as Extract<Stmt, { k: 'exprstmt' }>).value;
-  const bv = (b as Extract<Stmt, { k: 'exprstmt' }>).value;
-  return exprEquals(av, bv);
-}
+const sameStmt = (a: Stmt, b: Stmt): boolean => isMergeable(a) && isMergeable(b) && stmtEquals(a, b);
 
 /** Rewrite one statement, then the list it lives in. */
 function rewrite(s: Stmt): Stmt[] {

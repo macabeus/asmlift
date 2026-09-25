@@ -20,8 +20,8 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
-import { makeSwitchRecovery } from '../src/structure/switch-recover';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
+import { makeSwitchRecovery, __testing as switchRangesForTest } from '../src/structure/switch-recover';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, TOOLCHAIN_TARGETS, structureOptionsFor } from '../src/target';
 import { count } from './helpers';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
@@ -683,9 +683,9 @@ test('TWO jump-table arms falling into ONE still fails LOUD', () => {
 // if-nesting, which compiles to a different compare AND a different arm layout.
 //
 // An `if (x < 1) … else if …` chain compiles to the same asm, so the reading is held to what
-// `emit_case_nodes` can emit: the BRANCH of a test BELOW the root, on a compiler that declared
-// `switchAllowsBoundCase`. Each of those three refusals has a fixture of its own below, and PRE3
-// closes the fourth question — a singleton an ancestor already ruled out.
+// `emit_case_nodes` can emit: a test BELOW the root, on the side agbcc declared
+// (`switchBoundCase: 'taken'`, its BRANCH). Each of those three refusals has a fixture of its own
+// below, and so does a singleton an ancestor already ruled out.
 
 /** agbcc's own `switch (x) { case 0..2 }`: the dispatch verbatim from `-O2 -mthumb-interwork
  *  -fhex-asm -fprologue-bugfix`, where `case 0:` is the bound test `cmp r0, #1 / bcc` under the
@@ -762,22 +762,37 @@ test('a bound branch onto another TEST is the search descending, and still recov
 });
 
 test('a compiler that has not declared bound cases reads the branch as navigation', () => {
-  // The rule is agbcc's, from agbcc's `stmt.c`. The same asm is a plain if-else chain on a
-  // compiler whose dispatch never elides the remaining value's test, and IDO already pays for
-  // that mis-recognition once (`switchAllowsNeqCase: false`), so nobody inherits this one.
+  // Each declaring compiler reads it off its own dispatch (agbcc's `stmt.c`, mwcc's objects). The
+  // same asm is a plain if-else chain on a compiler whose dispatch never elides the remaining
+  // value's test, and IDO already pays for that mis-recognition once (`switchAllowsNeqCase:
+  // false`), so nobody inherits this one.
   const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
-  delete undeclared.compilerBehaviors.switchAllowsBoundCase;
+  delete undeclared.compilerBehaviors.switchBoundCase;
   const out = decompile('f', boundCase, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
   expect(out).not.toContain('switch (');
-  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-    expect(t.compilerBehaviors.switchAllowsBoundCase).toBeUndefined();
+  for (const t of [MIPS_IDO, MIPS_GCC]) {
+    expect(t.compilerBehaviors.switchBoundCase).toBeUndefined();
   }
 });
 
-test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather than resurrect it', () => {
-  // The reading is over the whole 32-bit domain, so `x < 1` still says `{0}` under an ancestor
-  // that sent every x < 5 elsewhere. Simulating the original tree for the recovered value is what
-  // catches it: x == 0 reaches `.Ldef`, not `.Lc0`.
+test('agbcc pins a case by its PATH, at no end of the domain, and it is that case', () => {
+  // `cmp r1, #2; bgt` admits only 3, because the tests above it left `x < 4` and `x != 2`.
+  // Navigation would make `return 30` a second default and decline the whole tree to an if-nest
+  // that compiles to a different object.
+  const asm = readFileSync(new URL('corpus/agbcc-swpathbound.s', import.meta.url), 'utf8');
+  const out = decompile('h', asm, ARMV4T_AGBCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([1, 2, 3, 4, 5, 1000, 2000]);
+  expect(out).not.toContain('if (');
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchBoundCase;
+  expect(decompile('h', asm, undeclared).source).not.toContain('switch (');
+});
+
+test('a singleton an ancestor already excluded is DEAD, and the tree declines rather than resurrect it', () => {
+  // Over the whole 32-bit domain `x < 1` says `{0}`, but the range reaching it is what is left
+  // under an ancestor that sent every x < 5 elsewhere, and there `x < 1` admits nothing. So
+  // `.Lc0` is navigation, a second default beside `.Ldef`, and the tree declines.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x5\n\tbcc\t.Ldef\t@cond_branch\n' +
@@ -1225,7 +1240,7 @@ test('every withholding on the `default:` position, one call each', () => {
     isNamed: () => false,
     isCmpOpcode: () => false,
     switchAllowsNeqCase: false,
-    switchAllowsBoundCase: false,
+    switchBoundCase: null,
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: false,
     spellSwitchFallthrough: true,
@@ -1321,13 +1336,10 @@ test('the reading is PER SITE: one function keeps its ladder AND its switch', ()
 });
 
 test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
-  // Two descriptions declare this, on three committed pairs — agbcc's, and one from each toolchain
-  // `MIPS_GCC` serves — all asserted below. IDO has never been put through one, and CodeWarrior fails the
-  // premise's frontend half outright — ppc.ts appends synthetic return blocks out of stream order,
-  // so `fn.blocks` there is not the assembly's layout and the reading has nothing to read.
-  for (const t of [MIPS_IDO, PPC_MWCC]) {
-    expect(t.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
-  }
+  // Three descriptions declare this, on committed objects — agbcc's pair, one pair from each
+  // toolchain `MIPS_GCC` serves, and CodeWarrior's dispatch against its relational ladders (the mwcc
+  // tests at the end of this file). IDO has never been put through one.
+  expect(MIPS_IDO.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
   expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
 });
 
@@ -1532,4 +1544,160 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
   expect(() => structure(kept, opts)).toThrow(/is not a block of this fn.*predecessorBlocks/);
   // …and the tree itself, with its layout intact, is one PRE5 lets through.
   expect(cBackend.emit(structure(fn, opts))).toContain('switch (a0)');
+});
+
+// ── mwcc: A CASE PINNED BY ITS PATH, ON EITHER SIDE (switchBoundCase: 'either') ──────────────────
+// CodeWarrior's binary-search dispatch pins its last value with a RELATIONAL test that admits one
+// value only because of the tests above it: `switch (x) { case 0: … case 1: … default: … }` is
+// `cmpwi r3,1; beq- case1; bge- default; cmpwi r3,0; bge- case0; b default`, and `x >= 0` means
+// `x == 0` only after `x != 1` and `x < 1`. `corpus/mwcc-sw{dispatch,ladder,relladder}.asm` are
+// mwcc_242_81's own output for one body written three ways, and `mwcc-swrelnest.asm` a nested
+// relational ladder (`corpus/probe-mwcc-sw*.c`,
+// `scripts/regen-switch-spelling-probes.ts`); the matching suite re-compiles the dispatch on the
+// other two CodeWarrior builds this description serves.
+const ppcLift = (asm: string, t = PPC_MWCC) => decompile('swpath', asm, t).source;
+const mwccFixture = (f: string) => readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8');
+const pathBoundUndeclared = { ...PPC_MWCC, compilerBehaviors: { ...PPC_MWCC.compilerBehaviors } };
+delete pathBoundUndeclared.compilerBehaviors.switchBoundCase;
+
+test('the three mwcc spellings of ONE body are three objects, and only the switch has a path-bound test', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const relational = /^b(ge|gt|le|lt)-?\s/;
+  const tests = (ls: string[]) => at(ls, /^(cmpwi|b(eq|ne|ge|gt|le|lt)-?)\s/);
+  const bodies = (ls: string[]) => at(ls, /^lwz\s/);
+  const sw = dumpOf('mwcc-swdispatch');
+  const lad = dumpOf('mwcc-swladder');
+  const rel = dumpOf('mwcc-swrelladder');
+  expect(new Set([sw, lad, rel].map((ls) => ls.join('\n'))).size).toBe(3);
+  // the `switch`: every test ahead of every body, and two of its branches relational.
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  expect(at(sw, relational)).toHaveLength(2);
+  // the equality ladder: no relational test at all.
+  expect(at(lad, relational)).toHaveLength(0);
+  // the ladder written WITH the relational tests: a body sits between two of them.
+  expect(Math.max(...tests(rel))).toBeGreaterThan(Math.min(...bodies(rel)));
+});
+
+test("mwcc's own dispatch recovers as the switch it was compiled from", () => {
+  const out = ppcLift(mwccFixture('mwcc-swdispatch'));
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1]);
+  expect(out).toContain('default:');
+  expect(out).not.toContain('if (');
+  // Without the declaration `x >= 0` is navigation, its body a second default, and the tree
+  // declines to the if-nesting.
+  const undeclared = ppcLift(mwccFixture('mwcc-swdispatch'), pathBoundUndeclared);
+  expect(undeclared).not.toContain('switch (');
+  // agbcc reads the same mechanism on its BRANCH only, which this `case 0` is; the next test's
+  // fall-side case is the one it refuses.
+  expect(ARMV4T_AGBCC.compilerBehaviors.switchBoundCase).toBe('taken');
+});
+
+test('the ladders do not come back as that switch', () => {
+  // The relational ladder carries the very tests the dispatch does, but its two `return p[2]` are
+  // two bodies, so no single default spells it.
+  expect(ppcLift(mwccFixture('mwcc-swrelladder'))).not.toContain('switch (');
+  expect(ppcLift(mwccFixture('mwcc-swladder'))).toBe(ppcLift(mwccFixture('mwcc-swladder'), pathBoundUndeclared));
+});
+
+test('a relational ladder its path reads as a switch is declined by its layout', () => {
+  // `if (x >= 4) { if (x < 5) … } else if (x >= 3) …` pins 4 and 3 by its path, and its misses
+  // share one `return 0`, so the path alone reads it as `switch (x) { case 3: … case 4: … }`. mwcc
+  // puts the `p[4]` body between `cmpwi 5` and `cmpwi 3`, which the dispatch never does.
+  const nest = mwccFixture('mwcc-swrelnest');
+  expect(ppcLift(nest)).not.toContain('switch (');
+  const layoutBlind = {
+    ...PPC_MWCC,
+    compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, switchRequiresFrontLoadedTests: false },
+  };
+  expect(ppcLift(nest, layoutBlind)).toContain('switch (a0)');
+  expect(ppcLift(nest)).toBe(ppcLift(nest, pathBoundUndeclared));
+});
+
+test('every target that reads a bound case declares the layout gate beside it', () => {
+  // A lone `switchBoundCase` reads the nested relational ladder (`mwcc-swrelnest`) as a `switch`,
+  // and no benchmark row would show it (target.ts, PPC_MWCC), so the pairing is asserted here for
+  // every target.
+  for (const [id, { description }] of Object.entries(TOOLCHAIN_TARGETS)) {
+    const { switchBoundCase, switchRequiresFrontLoadedTests } = description.compilerBehaviors;
+    if (switchBoundCase !== undefined) {
+      expect([id, switchRequiresFrontLoadedTests]).toEqual([id, true]);
+    }
+  }
+});
+
+test('a path-bound case lands on the FALL side too', () => {
+  // `synthetic:sw_ret:mwcc_242_81`'s target, verbatim: under `x >= 2` and `x != 2`, the fall side
+  // of `x >= 4` admits only 3, and `b 40` is its body. `x >= 0` on the other half pins 1 on the
+  // taken side. A compiler declaring its BRANCH only, as agbcc does, reads `case 3` as navigation.
+  const asm =
+    '0:\tcmpwi   r3,2\n4:\tbeq-    38 <sw_ret+0x38>\n8:\tbge-    1c <sw_ret+0x1c>\n' +
+    'c:\tcmpwi   r3,0\n10:\tbeq-    28 <sw_ret+0x28>\n14:\tbge-    30 <sw_ret+0x30>\n18:\tb       48 <sw_ret+0x48>\n' +
+    '1c:\tcmpwi   r3,4\n20:\tbge-    48 <sw_ret+0x48>\n24:\tb       40 <sw_ret+0x40>\n' +
+    '28:\tli      r3,10\n2c:\tblr\n30:\tli      r3,20\n34:\tblr\n38:\tli      r3,30\n3c:\tblr\n' +
+    '40:\tli      r3,40\n44:\tblr\n48:\tli      r3,-1\n4c:\tblr\n';
+  const out = decompile('sw_ret', `0 <sw_ret>:\n${asm}`, PPC_MWCC).source;
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2, 3]);
+  expect(out).toContain('return -1;');
+  const takenOnly = {
+    ...PPC_MWCC,
+    compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, switchBoundCase: 'taken' as const },
+  };
+  expect(decompile('sw_ret', `0 <sw_ret>:\n${asm}`, takenOnly).source).not.toContain('switch (');
+});
+
+test('a path singleton an UNSIGNED ancestor already excluded is dead, and the tree declines', () => {
+  // The range narrows by an unsigned test as exactly as by a signed one: below the root that sent
+  // `x <u 1` — which is 0 — to the default, `x >= 0` admits nothing on its taken side, so its body
+  // is navigation, a second default, and the tree declines.
+  const asm =
+    '0:\tcmplwi  r3,1\n4:\tblt-    30 <dead+0x30>\n' +
+    '8:\tcmpwi   r3,1\nc:\tbeq-    28 <dead+0x28>\n10:\tbge-    30 <dead+0x30>\n' +
+    '14:\tcmpwi   r3,0\n18:\tbge-    20 <dead+0x20>\n1c:\tb       30 <dead+0x30>\n' +
+    '20:\tli      r3,10\n24:\tblr\n28:\tli      r3,20\n2c:\tblr\n30:\tli      r3,-1\n34:\tblr\n';
+  const out = decompile('dead', `0 <dead>:\n${asm}`, PPC_MWCC).source;
+  expect(out).not.toContain('case 0:');
+  expect(out).toContain('return 10;'); // the body survives, under the tests that really reach it
+});
+
+// PRE3 simulates the dispatch through `takenBy`, the same ranges a bound case is read from, so a
+// wrong arm there is a wrong case that PRE3 confirms. This pins every opcode, both operand sides,
+// against the plain comparison it stands for — over each domain end, the sign boundary, and the
+// values either side of the constant.
+test('the bound-case ranges agree with the comparison they read, on every opcode and side', () => {
+  const { takenBy, narrow, contains, ALL } = switchRangesForTest;
+  const s = (v: number) => v | 0;
+  const u = (v: number) => v >>> 0;
+  const holds: Record<string, (a: number, b: number) => boolean> = {
+    icmp_eq: (a, b) => s(a) === s(b),
+    icmp_ne: (a, b) => s(a) !== s(b),
+    icmp_slt: (a, b) => s(a) < s(b),
+    icmp_sle: (a, b) => s(a) <= s(b),
+    icmp_sgt: (a, b) => s(a) > s(b),
+    icmp_sge: (a, b) => s(a) >= s(b),
+    icmp_ult: (a, b) => u(a) < u(b),
+    icmp_ule: (a, b) => u(a) <= u(b),
+    icmp_ugt: (a, b) => u(a) > u(b),
+    icmp_uge: (a, b) => u(a) >= u(b),
+  };
+  const edges = [-0x80000000, -0x7fffffff, -2, -1, 0, 1, 2, 5, 0x7ffffffe, 0x7fffffff];
+  const probes = (k: number) => [...edges, k - 1, k, k + 1].map(s);
+  let checked = 0;
+  for (const [opcode, cmp] of Object.entries(holds)) {
+    for (const xOnLeft of [true, false]) {
+      for (const k of edges) {
+        const ti = { x: undefined as never, k, cls: 'rel' as const, opcode, xOnLeft };
+        const taken = takenBy(ti);
+        for (const x of probes(k)) {
+          const want = xOnLeft ? cmp(x, k) : cmp(k, x);
+          expect({ opcode, xOnLeft, k, x, taken: contains(taken, x) }).toEqual({ opcode, xOnLeft, k, x, taken: want });
+          expect(contains(narrow(ALL, ti, true), x)).toBe(want);
+          expect(contains(narrow(ALL, ti, false), x)).toBe(!want);
+          checked++;
+        }
+      }
+    }
+  }
+  expect(checked).toBe(10 * 2 * edges.length * (edges.length + 3));
 });

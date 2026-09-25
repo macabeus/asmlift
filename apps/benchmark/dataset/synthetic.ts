@@ -900,8 +900,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     STORE, which fixes no signedness (`uhalf`, `ureread`: `covering-store`, whichever end of the
   //     word they read), and a narrow STORE (`uniwrite`). No value cast spells any of them, and
   //     raise/structs.ts declares each overlap on a parameter as a UNION member — a view per width
-  //     — which is what these rows' sources declare. `utag` still declines on mwcc_242_81, before
-  //     this pass: a `bge` with no reaching compare.
+  //     — which is what these rows' sources declare. On mwcc_242_81 `utag`'s switch arms are
+  //     reached through CodeWarrior's binary-search dispatch, whose `bge` reads the compare its
+  //     `beq` already consumed (frontend/flags-edge.ts) and pins `case 0` by its path
+  //     (`switchBoundCase`, target.ts).
   //   • `unidev` is not a case of that sentence at all: its base is a LITERAL ADDRESS, so the
   //     accesses are not evidence about a layout nobody declared, and raise/structs.ts forgives the
   //     failed synthesis. It LIFTS, at each access's own width, and what it measures is below.
@@ -1283,10 +1285,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // nothing to do there, which is not the same claim as a rule refusing it. What `loop-escape`
   // actually costs is visible on `nestedloop`, which this family does not inhabit.
   //
-  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: five decline in the
-  // FRONTEND for reasons with nothing to do with merges — MIPS branch-likely (`beql`/`bnezl`), a
-  // PPC branch with no reaching `cr0` compare, a branch to a non-block-boundary. Three more exist
-  // to be refused. Four rows reach the accept path.
+  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: `mergeloop:ido7.1`
+  // declines in the FRONTEND for a reason with nothing to do with merges (a branch to a
+  // non-block-boundary), and `mergechain:mwcc_242_81` lifts to a nonmatch that no path of the merge
+  // pass is credited with. Three more exist to be refused. Four rows reach the accept path.
   {
     sym: 'mergechain',
     src:
@@ -1368,11 +1370,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // argument, and the row would decline on THAT instead.
   // Attribution, so nothing here is credited to the wrong gap: of the twelve rows, five turn on
   // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
-  // of uninit_spill (agbcc, ido7.1). Of the other seven, four decline for pre-existing and
-  // unrelated reasons — branch-likely (uninit_join and uninit_sw on gcc2.7.2kmc), a cr0
-  // reaching-compare (uninit_sw:mwcc_242_81), r1-as-data (uninit_spill:mwcc_242_81) — and three
-  // recover without touching this gap (uninit_join:agbcc and uninit_join:mwcc_242_81 MATCH,
-  // uninit_spill:gcc2.7.2kmc scores 53).
+  // of uninit_spill (agbcc, ido7.1). Of the other seven, one declines for an unrelated reason —
+  // r1-as-data (uninit_spill:mwcc_242_81) — three recover without touching this gap
+  // (uninit_join:agbcc, uninit_join:mwcc_242_81 and uninit_sw:mwcc_242_81 MATCH; the last is the
+  // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
+  // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
+  // gcc2.7.2kmc).
   // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
   // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
   // and uninit_sw:agbcc is the register half, which `undef` does not touch.
@@ -3773,9 +3776,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // dispatch edge admitting exactly one value to route a case (structure/switch-recover.ts). Read
   // as navigation instead, that arm is a second default candidate, the whole tree declines to
   // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that,
-  // and is also what pins the reading's three refusals: the BRANCH of the test, never its
+  // and is also what pins the reading's three refusals on agbcc: the BRANCH of the test, never its
   // fall-through; never the test that OPENS the dispatch; and only on a compiler that declared the
-  // spelling (`switchAllowsBoundCase` — agbcc alone). Each is a shape `emit_case_nodes` cannot
+  // spelling (`switchBoundCase`, `'taken'` on agbcc). Each is a shape `emit_case_nodes` cannot
   // emit, so a relational test in it is an ordinary comparison and recovers as one.
   // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
   // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register

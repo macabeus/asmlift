@@ -8,6 +8,9 @@ import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from
 import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
+/** Which side of a relational test a compiler's dispatch lands a pinned case body on. */
+export type SwitchBoundCase = 'taken' | 'either';
+
 export interface SwitchRecoverDeps {
   fn: Fn;
   defs: Map<Value, Op>;
@@ -19,8 +22,9 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
-  /** read a relational test whose BRANCH admits exactly one scrutinee value as that case */
-  switchAllowsBoundCase: boolean;
+  /** read a relational test as a case where the values that can reach it leave exactly one on
+   *  this side of it — its branch, or either side — or never (null) */
+  switchBoundCase: SwitchBoundCase | null;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
   /** DECLINE a recovered tree whose own layout INTERLEAVES a test with a case body. A source
@@ -128,66 +132,126 @@ export interface TestInfo {
   xOnLeft: boolean;
 }
 
-// Evaluate a test predicate for a CONCRETE scrutinee value — used to SIMULATE the decision tree and
-// verify recovered case values (below). Returns true iff the `taken` (successors[0]) edge is followed.
-// Signed/unsigned per the icmp opcode (PRE3, done concretely rather than via interval lattices).
-function evalCmp(opcode: string, xOnLeft: boolean, xv: number, k: number): boolean {
-  const uns = opcode.startsWith('icmp_u');
-  const [xn, kn] = uns ? [xv >>> 0, k >>> 0] : [xv | 0, k | 0];
-  const [l, r] = xOnLeft ? [xn, kn] : [kn, xn]; // put the scrutinee where it textually appears
-  switch (opcode) {
-    case 'icmp_eq':
-      return l === r;
-    case 'icmp_ne':
-      return l !== r;
-    case 'icmp_slt':
-    case 'icmp_ult':
-      return l < r;
-    case 'icmp_sle':
-    case 'icmp_ule':
-      return l <= r;
-    case 'icmp_sgt':
-    case 'icmp_ugt':
-      return l > r;
-    case 'icmp_sge':
-    case 'icmp_uge':
-      return l >= r;
-    default:
-      return false;
+// WHICH SCRUTINEE VALUES CAN REACH A TEST, AND WHICH ONE A SIDE OF IT PINS. A comparison dispatch
+// pins its last value with a RELATIONAL test once the tests above it have narrowed the scrutinee to
+// one value on that side: mwcc's `switch (x) { case 0: … case 1: … default: … }` is `cmpwi r0,1;
+// beq- case1; bge- default; cmpwi r0,0; bge- case0; b default`, where `x >= 0` is `case 0` only
+// because `x != 1` and `x < 1` came first. agbcc's `emit_case_nodes` does the same on the branch it
+// takes once `node_is_bounded` holds, and its `x <u 1` for `case 0` of an unsigned switch is the
+// instance that needs nothing from the tests above: one value at an end of the 32-bit domain. Read
+// as navigation instead, the pinned arm's body becomes a second default candidate and the whole
+// tree declines. Which SIDE of a test may pin a case is the compiler's (`switchBoundCase`,
+// target.ts).
+//
+// EXACT, not a bound. A range is the set of 32-bit register values, as disjoint signed intervals in
+// ascending order, and every test the walk narrows it by — `==`, `!=`, and a relational test under
+// either signedness — is an exact set over that register. An unsigned interval straddling 2^31 is
+// two signed ones (`fromUnsigned`). So a side that comes out a singleton names the only value that
+// CAN take it, and a side that comes out empty is one no value takes. Whether the value DOES reach
+// the body is still PRE3's to say, simulating the original tree case by case.
+//
+// THE DOMAIN IS THE REGISTER's, not the scrutinee's recovered type, so a narrower type has nearer
+// ends this misses. That costs a case and never invents one.
+type Ranges = readonly (readonly [number, number])[];
+
+const INT_MIN = -0x80000000;
+const INT_MAX = 0x7fffffff;
+const ALL: Ranges = [[INT_MIN, INT_MAX]];
+
+/** The same opcode with its operands swapped: `k < x` is `x > k`. */
+const MIRRORED: Record<string, string> = {
+  icmp_slt: 'icmp_sgt',
+  icmp_sgt: 'icmp_slt',
+  icmp_sle: 'icmp_sge',
+  icmp_sge: 'icmp_sle',
+  icmp_ult: 'icmp_ugt',
+  icmp_ugt: 'icmp_ult',
+  icmp_ule: 'icmp_uge',
+  icmp_uge: 'icmp_ule',
+};
+
+/** `[lo, hi]` of the UNSIGNED order as signed intervals: one, or two where it straddles 2^31. */
+function fromUnsigned(lo: number, hi: number): Ranges {
+  if (lo > hi) {
+    return [];
   }
+  return hi <= INT_MAX || lo > INT_MAX
+    ? [[lo | 0, hi | 0]]
+    : [
+        [INT_MIN, hi | 0],
+        [lo, INT_MAX],
+      ];
 }
 
-// Which single scrutinee value does this relational test's BRANCH admit, if exactly one? A
-// relational side is a HALF-LINE in the compare's own ordering, so it can hold one value only at
-// a domain endpoint — which is why testing the two endpoints and their neighbours decides it,
-// with no interval lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's
-// spelling of `case 0` in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the
-// value, whenever the remaining range has collapsed to one. Read as navigation instead, that
-// arm's body becomes a second default candidate and the whole tree declines.
-//
-// THE BRANCH, never the fall-through. Every jump in `emit_case_nodes` that lands on a case body
-// is its test's BRANCH — for a single-valued node, LT to `node->left->code_label` and GT to
-// `node->right->code_label`, each guarded by `node_is_bounded` on that side — while the
-// fall-through always continues into more dispatch, so a fall-side reading has no producer in
-// this dispatch — and none turns up in 3176 generated agbcc dispatches.
-//
-// TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
-// type, so a narrower type has a nearer endpoint this misses — which costs a case and never
-// invents one. And it is the WHOLE of that domain, so an ancestor that already excluded the
-// value makes the reading wrong; PRE3 is what catches that, simulating the original tree for
-// every recovered case value and declining unless it lands on the recorded body, exactly as it
-// does for the `eq` cases. Null when the branch admits none, several, or the whole domain.
-function singletonTaken(ti: TestInfo): number | null {
-  const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
-  for (const [v, next] of [
-    [min, min + 1],
-    [max, max - 1],
-  ]) {
-    if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) && !evalCmp(ti.opcode, ti.xOnLeft, next, ti.k)) {
-      return v;
+function complement(r: Ranges): Ranges {
+  const out: [number, number][] = [];
+  let next = INT_MIN;
+  for (const [lo, hi] of r) {
+    if (lo > next) {
+      out.push([next, lo - 1]);
+    }
+    next = hi + 1;
+  }
+  if (next <= INT_MAX) {
+    out.push([next, INT_MAX]);
+  }
+  return out;
+}
+
+function intersect(a: Ranges, b: Ranges): Ranges {
+  const out: [number, number][] = [];
+  for (const [alo, ahi] of a) {
+    for (const [blo, bhi] of b) {
+      const lo = Math.max(alo, blo);
+      const hi = Math.min(ahi, bhi);
+      if (lo <= hi) {
+        out.push([lo, hi]);
+      }
     }
   }
-  return null;
+  return out.sort((x, y) => x[0] - y[0]);
+}
+
+/** The register values that take the test's BRANCH. */
+function takenBy(ti: TestInfo): Ranges {
+  const op = ti.xOnLeft ? ti.opcode : (MIRRORED[ti.opcode] ?? ti.opcode);
+  if (op === 'icmp_eq' || op === 'icmp_ne') {
+    const k = ti.k | 0;
+    return op === 'icmp_eq' ? [[k, k]] : complement([[k, k]]);
+  }
+  const uns = op.startsWith('icmp_u');
+  const [min, max, k] = uns ? [0, 0xffffffff, ti.k >>> 0] : [INT_MIN, INT_MAX, ti.k | 0];
+  const rel = op.slice('icmp_s'.length);
+  const [lo, hi] =
+    rel === 'lt'
+      ? [min, k - 1]
+      : rel === 'le'
+        ? [min, k]
+        : rel === 'gt'
+          ? [k + 1, max]
+          : rel === 'ge'
+            ? [k, max]
+            : [min, max];
+  return uns ? fromUnsigned(lo, hi) : lo > hi ? [] : [[lo, hi]];
+}
+
+/** What of `path` follows the test's `taken` edge, or its fall-through. */
+function narrow(path: Ranges, ti: TestInfo, taken: boolean): Ranges {
+  const t = takenBy(ti);
+  return intersect(path, taken ? t : complement(t));
+}
+
+/** Whether register value `v` is in `r`. PRE3's concrete simulation reads each test through this
+ *  and {@link takenBy}, so the tree it walks and the ranges a bound case is read off are one
+ *  definition of the icmp family, not two. */
+function contains(r: Ranges, v: number): boolean {
+  const x = v | 0;
+  return r.some(([lo, hi]) => lo <= x && x <= hi);
+}
+
+/** The one value in `r`, if it holds exactly one. */
+function singleton(r: Ranges): number | null {
+  return r.length === 1 && r[0][0] === r[0][1] ? r[0][0] : null;
 }
 
 /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
@@ -251,7 +315,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isNamed,
     isCmpOpcode,
     switchAllowsNeqCase,
-    switchAllowsBoundCase,
+    switchBoundCase,
     switchArmsFollowLayout,
     switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,
@@ -265,9 +329,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // A block's index in `fn.blocks` as its position in the ASSEMBLY — the warrant for every reading
   // of layout below, and true PER FRONTEND rather than of the IR:
   //   - thumb.ts and mips.ts build the list by scanning the instruction stream in address order;
-  //   - ppc.ts does not. It APPENDS a synthetic return block (`synthReturn`) at the end of the list
-  //     for every conditional-return branch, wherever in the stream that branch sits, so its list
-  //     is not address order at all;
+  //   - ppc.ts does too, and then APPENDS a synthetic return block (`synthReturn`) at the end of
+  //     the list for every conditional-return branch, wherever in the stream that branch sits. So
+  //     its real blocks keep address order among themselves, and each synthetic one — a bare
+  //     return, never a test — sorts after all of them;
   //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
   //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
   // TWO READERS, both target-gated, and they need DIFFERENT strengths of the compiler half:
@@ -278,9 +343,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     `MIPS_GCC` declares `switchRequiresFrontLoadedTests` and NOT `switchArmsFollowLayout` for
   //     exactly that reason — it has a scheduler and fills delay slots (target.ts).
   // Both are therefore claims about a target's FRONTEND as much as about its compiler, and a target
-  // opts in on both halves — which is why PPC_MWCC, whose frontend fails the frontend half outright,
-  // declares neither. Anything added below that reads `layoutIndex` inherits the frontend half and
-  // owes a statement of which strength of the compiler half it needs.
+  // opts in on both halves. PPC_MWCC's frontend holds the weaker half only: a synthetic return body
+  // sorting last can make PRE5 keep a `switch` it should decline, never decline one it should keep,
+  // so mwcc declares `switchRequiresFrontLoadedTests` and could not declare the placing reading.
+  // That is the frontend's limit and not the compiler's: mwcc lays its case bodies in source order
+  // (the compiled pairs at target.ts `switchArmsFollowLayout`), so a synthetic block placed at its
+  // branch's address would give PPC both halves.
+  // Anything added below that reads `layoutIndex` inherits the frontend half and owes a statement
+  // of which strength of the compiler half it needs.
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
@@ -588,12 +658,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         }
         guard.add(cur);
         const term = cur.ops[cur.ops.length - 1];
-        const taken = evalCmp(ti.opcode, ti.xOnLeft, xv, ti.k);
+        const taken = contains(takenBy(ti), xv);
         cur = forwardingTarget(term.successors[taken ? 0 : 1].block);
       }
     };
     const seen = new Set<Block>();
     const work: Block[] = [b];
+    // The values that can reach each test block, written as the walk pushes it. Only a bound case
+    // reads it; the tree is a tree (a second visit declines below), so each block has one entry.
+    const pathOf = new Map<Block, Ranges>([[b, ALL]]);
     while (work.length) {
       const blk = work.pop()!;
       if (seen.has(blk)) {
@@ -628,10 +701,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         cases.set(k, child);
         return true;
       };
+      const path = pathOf.get(blk)!;
       /** Read `child` as a NAVIGATION edge: more dispatch to walk, or a non-test leaf, which is a
-       *  default candidate. Never declines — the leaf's own reading is settled below. */
-      const asNav = (child: Block): boolean => {
+       *  default candidate. Never declines — the leaf's own reading is settled below. `onTaken`
+       *  says which of `blk`'s edges it is, which decides what the range narrows to. */
+      const asNav = (child: Block, onTaken: boolean): boolean => {
         if (isTestOn(child)) {
+          pathOf.set(child, narrow(path, ti, onTaken));
           work.push(child);
           return true;
         }
@@ -642,7 +718,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         if (!asCase(taken, ti.k)) {
           return null;
         } // x==k → taken is case k
-        if (!asNav(fall)) {
+        if (!asNav(fall, false)) {
           return null;
         }
       } else if (ti.cls === 'ne') {
@@ -652,12 +728,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         if (!asCase(fall, ti.k)) {
           return null;
         } // x!=k → the EQUAL side (fall) is case k
-        if (!asNav(taken)) {
+        if (!asNav(taken, true)) {
           return null;
         }
       } else {
-        // relational → navigation, except where the BRANCH has collapsed to a single value and
-        // lands on a BODY, on a compiler that declared the spelling. Two more refusals:
+        // relational → navigation, except where a side the compiler declared (`switchBoundCase`)
+        // admits a single value and lands on a BODY. Two more refusals:
         //   - a bound test at the ROOT. `emit_case_nodes` emits a single-valued node's own
         //     `do_jump_if_equal` before either descent test, so a bound test always sits under
         //     another test of the same tree; one that OPENS the region did not come from this
@@ -665,11 +741,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         //   - a singleton branch onto another TEST of the scrutinee, which is the search
         //     descending to pin the value. It is dispatch, so the walk reads it as dispatch —
         //     recovering it, or declining at PRE4 if it is not collapsible.
-        const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
-        if (!(k === null ? asNav(taken) : asCase(taken, k))) {
+        const sides = blk !== b ? switchBoundCase : null;
+        const kTaken = sides && !isTestOn(taken) ? singleton(narrow(path, ti, true)) : null;
+        const kFall = sides === 'either' && !isTestOn(fall) ? singleton(narrow(path, ti, false)) : null;
+        if (!(kTaken === null ? asNav(taken, true) : asCase(taken, kTaken))) {
           return null;
         }
-        if (!asNav(fall)) {
+        if (!(kFall === null ? asNav(fall, false) : asCase(fall, kFall))) {
           return null;
         }
       }
@@ -1060,3 +1138,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   };
   return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms };
 }
+
+/** Internal surface for this module's own tests, and for nothing else: PRE3 reads each test
+ *  through {@link takenBy}, so the ranges need a check that does not share their definition. */
+export const __testing = { takenBy, narrow, contains, ALL };

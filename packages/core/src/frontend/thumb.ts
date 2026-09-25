@@ -36,11 +36,21 @@ import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
+import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, clobberedByCall, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
+import {
+  type ArgSlots,
+  abiSortEntryParams,
+  clobberedByCall,
+  fallbackArgc,
+  makeSsaBuilder,
+  mintArgSlotHoles,
+  slotKeyOffset,
+  stackSlotKey,
+} from './ssa';
 import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
@@ -331,12 +341,12 @@ const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12',
  *      wearing two implementations.
  *    * the CLOBBER RULE is two things. Here it is `FLAG_SETTING` plus a call; there it is the
  *      record-form `.` suffix plus a call.
- *    * the EDGE RULE is ONE thing — one predecessor, already filled, not a jump-table dispatch,
- *      leaving through an unconditional branch or a fall-through — and it is where all the
- *      soundness lives. It is not extracted, because `inheritedCmp` is its only caller. The
- *      PowerPC rows that still decline on a cross-block compare are what would earn the
- *      extraction, and a round that builds that side should take the rule from here rather than
- *      write a second one. */
+ *    * the EDGE RULE is ONE thing — one predecessor, already filled, not a jump-table dispatch —
+ *      and it is where all the soundness lives, so it is `inheritFlags` in frontend/flags-edge.ts,
+ *      called by both frontends. The ISAs differ in one answer it asks for: PowerPC carries across
+ *      the edges of a conditional branch (mwcc's switch dispatch reads one `cmpwi` from a `beq`
+ *      and then from the `bge` on its fall-through), and Thumb, with no row inhabiting that shape,
+ *      does not. */
 type PendingCmp = { lhs: Value; rhs: Value };
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
@@ -4430,96 +4440,25 @@ export function lift(
   const exitCmp = new Map<number, PendingCmp | string>();
 
   /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
-   *  it starts with none. One call answers both, so a refusal and its reason cannot drift apart.
-   *
-   *  ARM/Thumb writes ONE implicit flags register, so a block entered from exactly one predecessor
-   *  begins with exactly the flags that predecessor left. agbcc depends on it: a function long
-   *  enough to need a mid-function literal pool gets a `b` over the pool between a `cmp` and the
-   *  branch that reads it, leaving the branch alone under a label.
-   *
-   *  What crosses the edge is the compare's SSA values, never its register names — a lone
-   *  predecessor dominates, so those values dominate every use on this side, while re-reading `r0`
-   *  here would pick up whatever this block redefined it to.
-   *
-   *  TRANSITIVE, over as many edges as the chain has: each block runs this and writes its own
-   *  `exitCmp`, so a compare reaches the end of a run of straight-line blocks and refuses at the
-   *  first one that breaks the chain. That is not decoration — agbcc emits `.LBB`/`.LBE`/`.LM`
-   *  debug labels freely, and a chain is the ordinary case rather than the exotic one.
-   *
-   *  NOT THE BLOCK-PARAMETER MACHINERY, though this frontend has SSA with block parameters and
-   *  `readData` already does cross-block lookup with phi insertion. Three reasons, and the last is
-   *  the one a later "improvement" would get wrong:
-   *    * the flags are not a register anything reads, so there is nothing for `readData` to look
-   *      up — the compare is consumed by the terminator, never by a named operand;
-   *    * the value a phi would carry does not exist yet on the predecessor's side. The condition
-   *      IS materialised as an ordinary op with a result (the `cond` terminator below builds an
-   *      `icmp`), and a phi over two of those is something a `cond_br` would take — but WHICH
-   *      comparison it is comes from the branch's mnemonic, at the SUCCESSOR's terminator, while
-   *      the predecessor is filled first. Flags are not a condition until a branch names one, so
-   *      at the edge there is nothing yet to phi;
-   *    * `preds.length === 1` is deliberately STRONGER than dominance. A dominating predecessor's
-   *      flags can still be overwritten on a longer path that rejoins here, so answering this from
-   *      the dominator tree would state a condition that holds on one path in.
-   *
-   *  Refuses when either half of that sentence fails:
-   *    * the block has no predecessor, or more than one — the flags on two paths need not agree,
-   *      and picking one states a condition the machine does not promise;
-   *    * the only predecessor has not been filled yet, so this pass has nothing to read;
-   *    * the edge leaves a CONDITIONAL branch. Thumb's `b<cc>` does preserve the flags, so this one
-   *      is UNBUILT rather than unsound: it is exactly the PowerPC shape (a `cmpwi` read by the
-   *      fall-through of the `bc` that already consumed it, see `cmpDef` in ppc.ts) and has no ARM
-   *      inhabitant to earn it here. A jump-table dispatch answers before it and says so instead,
-   *      which is a truer sentence over the same verdict rather than a fifth refusal — see the
-   *      note at the arm.
-   *
-   *  It does NOT refuse when no compare survives to the predecessor's last instruction, because
-   *  that is not this function's gap to report: the predecessor already wrote down what took the
-   *  flags, and that sentence is what crosses the edge.
-   *
-   *  Not a `Gate` table, on docs/level-tower.md's structural bar rather than on cost: every refusal
-   *  reads `exitCmp`, which exists only because of the order this pass fills blocks in, so its
-   *  input cannot be prepared as a getter at any price. */
-  const inheritedCmp = (bi: number): PendingCmp | string => {
-    const here = asmBlocks[bi].label;
-    const ps = preds[bi];
-    if (ps.length !== 1) {
-      return ps.length === 0
-        ? `no compare reaches '${here}', and it has no predecessor to inherit any from`
-        : `no compare crosses the edges into '${here}': ${ps.length} meet there, and the flags need not agree on all of them`;
-    }
-    const pb = asmBlocks[ps[0]];
-    const carried = exitCmp.get(ps[0]);
-    // Named for the fill order that decides it, not for a loop: this is true of any predecessor
-    // not yet lifted, and a CFG with no cycle in it can be laid out so that one is (`f: b .L2` /
-    // `.L1: bge` / `.L2: cmp; b .L1`). Saying "a back edge" sent a reader to look for a loop that
-    // is not there, and named a property of the CFG for a property of the walk over it — a
-    // reverse-postorder fill is what would close this, which is why the sentence has to point at
-    // the walk.
-    if (carried === undefined) {
-      return `no compare crosses the edge into '${here}': its only predecessor '${pb.label}' is lifted after it`;
-    }
-    // A REFINEMENT OF THE ARM BELOW, not a second guarantee. `recoverJumpTable` only recognises a
-    // table whose bounds block ends in `bhi`/`bls`, so every key of `tables` also answers `cond`
-    // and deleting this would cost the sentence, never the verdict. It earns its place on the
-    // sentence alone: the edge into a case is a switch edge, and the bounds guard is not the
-    // branch that made it. `thumb-frontend.test.ts` runs that ablation rather than asserting it.
-    if (tables.has(pb)) {
-      return `no compare crosses the edge into '${here}': it leaves the jump-table dispatch in '${pb.label}'`;
-    }
-    // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it is
-    // in nobody's `preds`, and an `indirect` one throws before the CFG is built — so an arm for
-    // either would be an arm no input reaches, which is an arm no test can be failing on purpose.
-    // `uncond` and a fall-through (`null`) are the edges this whole function exists to carry.
-    const plast = pb.instrs[pb.instrs.length - 1];
-    if (plast && classifyXfer(plast) === 'cond') {
-      return `no compare crosses the edge into '${here}': it leaves '${pb.label}' through a conditional branch`;
-    }
-    // Whatever the predecessor left — the compare, or ITS reason, verbatim. The reason already
-    // names the block the chain broke in, so it is as true here as it was there, and a run of ten
-    // straight-line blocks reports the one instruction that took the flags rather than reporting
-    // the last edge it crossed.
-    return carried;
-  };
+   *  it starts with none. The rule is `inheritFlags` (frontend/flags-edge.ts), shared with the
+   *  PowerPC frontend; what is Thumb's here is only the answer to its last question. Thumb's `b<cc>`
+   *  preserves the flags, so carrying across a conditional edge would be sound, but no ARM row
+   *  inhabits that shape, so this side refuses it as UNBUILT. */
+  const inheritedCmp = (bi: number): PendingCmp | string =>
+    inheritFlags(bi, {
+      preds,
+      exit: exitCmp,
+      label: (i) => asmBlocks[i].label,
+      dispatches: (i) => tables.has(asmBlocks[i]),
+      // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it
+      // is in nobody's `preds`, and an `indirect` one throws before the CFG is built, so asking
+      // about either would be a question no input reaches. `uncond` and a fall-through (`null`)
+      // are the edges the rule exists to carry.
+      refusesConditional: (i) => {
+        const plast = asmBlocks[i].instrs[asmBlocks[i].instrs.length - 1];
+        return plast !== undefined && classifyXfer(plast) === 'cond';
+      },
+    });
 
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   const fillBlock = (ab: AsmBlock, bi: number) => {
@@ -5158,28 +5097,6 @@ export function lift(
           {
             const index = frame.argIndex({ base, off, regOff }, width, bi);
             if (index !== null) {
-              // Mint EVERY argument below this one — the register half included. Downstream naming
-              // is POSITIONAL (structure.ts), so any hole binds every later parameter to the wrong
-              // ABI slot, silently: `push {r4,r5,lr}; add r4,r3,#0; ldr r0,[sp,#0xc]` emitted a
-              // 2-parameter signature where the ABI proves 5, with both of them bound wrong.
-              //
-              // Reading slot k proves the caller passed arguments 0..k: the register arguments are
-              // filled before any stack argument exists, and the stack area is contiguous with slot
-              // 4 at the lowest offset. So this is entailed by the calling convention, not guessed —
-              // which is what separates it from inventing parameters a function might not have.
-              // (It assumes one word per argument, which is what this frontend assumes everywhere —
-              // it types every parameter s32. An 8-byte argument, which AAPCS may align into r1 or
-              // straddle across r3 and the stack, would break the index↔slot correspondence; no
-              // agbcc row in the corpus has one, and recovering them is its own capability.)
-              //
-              // ensureParam, NOT readVar: a register the entry block DEFINES before this point
-              // (`bl g` then a read of the frame, the commonest shape there is) answers readVar with
-              // that local definition and no parameter appears — reopening the very hole this loop
-              // closes. It emitted `s32 f(s32 a0, s32 a1, s32 a2, s32 a3) { return g() + a3; }`:
-              // arity 4 where the ABI proves 5, with the stack argument bound to r3's slot.
-              for (let j = 0; j < index; j++) {
-                ssa.ensureParam(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
-              }
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;
             }
@@ -5495,6 +5412,18 @@ export function lift(
   });
 
   refuseWordReturns();
+  // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
+  // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
+  // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
+  // correspondence, and recovering one is its own capability.
+  const argSlots: ArgSlots = {
+    slotOf: (key) => {
+      const i = target.argRegs.indexOf(key);
+      return i >= 0 ? i : stackArgIndex(key);
+    },
+    keyOf: (k) => (k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k)),
+  };
+  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
@@ -5511,37 +5440,7 @@ export function lift(
     target,
   });
 
-  // Order the entry block's parameters by ABI register (r0, r1, r2, …) so downstream
-  // naming (`a0`, `a1`, …) matches the calling convention, not the read order. Safe only
-  // for the true entry (no predecessors) — a loop header's params are phis whose position
-  // is index-aligned with predecessor terminator args and must not be reordered.
-  const entry = irBlocks[0];
-  // non-ABI live-in ranks LAST (99) — deliberate Thumb tie-break; MIPS/PPC's is -1/first
-  //
-  // "Non-ABI" means NOT AN ARGUMENT REGISTER, and it has to be tested that way rather than by the
-  // shape of the name. A `/^r(\d+)$/` test ranked `r8` at 8 and `r4` at 4 while sending only `sl`
-  // and `sb` to 99 — harmless while nothing else occupied ranks >= 4, and a positional miscompile
-  // the moment incoming stack arguments started ranking there. `sub_80B6B3C` in sa3's
-  // `asm/code_x.s` — still undecompiled, so not a benchmark row — takes 10 arguments (its caller
-  // stores six words at [sp,#0]..[sp,#0x14] plus r0-r3) and saves r8 in its prologue;
-  // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
-  // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
-  //
-  // The register partition (LiveInModel.uninitRegs) takes most of r4-sl before they reach here — one
-  // the ABI does not pass arguments in and this function saved is an uninitialised local, not a
-  // parameter. What still ranks 99 is `lr`/`pc`, which the partition does not list, and an r4-sl the
-  // prologue did not save. Not an argument either way, and the honest place for one is after
-  // everything the convention actually describes.
-  abiSortEntryParams(entry, preds[0].length > 0, (v) => {
-    const key = paramReg.get(v) ?? '';
-    // an incoming STACK argument ranks by its ABI index, after every register argument
-    const s = stackArgIndex(key);
-    if (s !== null) {
-      return s;
-    }
-    const i = target.argRegs.indexOf(key);
-    return i >= 0 ? i : 99;
-  });
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return fn;
 }
 

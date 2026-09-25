@@ -27,11 +27,11 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 136 distinct decline messages (the texts reached by
+// `packages/core/src` throws 137 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 74 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 76 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -40,7 +40,7 @@
 //                               base in the list, control falling off the end, a register spelled in
 //                               upper case, a `bl` whose target this asm defines as a data label, and
 //                               the reaching-compare throw whose reason is interpolated
-//                               (`cross-block-flags-arm` keys on one of its reasons, so the template
+//                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
 //   structure/structure.ts  18  eleven loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
@@ -56,8 +56,10 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          3  `stwu` with update, a relocation on a stack-pointer adjust, and the
-//                               two-armed branch denylist, whose template is interpolation end to end
+//   frontend/ppc.ts          5  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), the
+//                               reaching-compare throw whose reason is interpolated (as Thumb's), and
+//                               the two-armed branch denylist, whose template is interpolation end to end
 //                               (its two 64-bit refusals are NOT here — both carry `wide-call-arg`'s
 //                               phrase, because they are that capability gap seen from the frontend
 //                               with no register pair: one for a declared wide PARAMETER and one for
@@ -168,37 +170,36 @@ export const DECLINE_CLASSES: DeclineClass[] = [
       /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
   },
   {
-    // KEYED ON THE FIELD THE MESSAGE NAMES, because two frontends write this subject and only one
-    // of them has fields to name. PowerPC has eight condition-register fields and says which one
-    // it wanted (`(cr0)`, `(cr1)`); ARM/Thumb has one, so it spends the same space on the reason
-    // instead. A pattern over `no reaching compare` alone caught both and filed an ARM row under a
-    // label that says PPC.
-    key: 'cross-block-cr',
-    label: 'Cross-block condition flags (PPC cr)',
-    pattern: /no reaching compare \(/,
+    // A branch whose block has NO predecessor reads flags nothing in this function set: at the
+    // entry, the caller's. A PowerPC varargs function tests the `cr1` bit its caller sets to say
+    // whether float arguments were passed (`pikmin:setChildren__6ActionFie:mwcc_233_163n`), and no
+    // edge model reaches it, because there is no edge. Both frontends word it the same
+    // (`frontend/flags-edge.ts`), so the class is ISA-neutral.
+    key: 'entry-flags',
+    label: 'Condition flags read at function entry (set by the caller)',
+    pattern: /no compare reaches '[^']*', and it has no predecessor/,
   },
   {
-    // THE ARM SIDE, and the leftovers of a capability that landed rather than one that is missing —
-    // the same reading `branch-likely` below asks for. Thumb carries a compare across a run of
-    // straight-line edges into blocks with one predecessor each, so what still refuses is what that
-    // model leaves over, and it is exactly four shapes: two or more edges meet at the block, the
-    // one predecessor is lifted after it, or the edge leaves a conditional branch or a jump-table
-    // dispatch. No compiled row in the corpus reaches any of them, so the class reads 0; deleting
-    // it would assert that nothing is left.
+    // THE LEFTOVERS OF A CAPABILITY THAT LANDED, not a missing one — the reading `branch-likely`
+    // below asks for. Both Thumb and PowerPC carry a compare across a run of edges into blocks with
+    // one predecessor each (`frontend/flags-edge.ts`, one rule for both), so what still refuses is
+    // what that rule leaves over, and it is exactly four shapes: two or more edges meet at the block,
+    // the one predecessor is lifted after it, the edge leaves a jump-table dispatch, or (Thumb only)
+    // it leaves a conditional branch. No compiled row in the corpus reaches any of them, so the class
+    // reads 0; deleting it would assert that nothing is left.
     //
-    // KEYED ON THE REASON, not on the headline, and that is the whole point. The same throw fires
-    // for two more subjects that no edge model would move, and both say so in their own words
-    // rather than in this one:
-    //   * the flags were written by ARITHMETIC, by `tst`/`cmn` or by a call — the message names
-    //     the instruction and the block it sits in, and it crosses an edge unchanged, so the run
-    //     of straight-line blocks between the writer and the branch does not turn it into an edge
-    //     problem;
-    //   * the branch's block has no predecessor at all, so there is no edge to carry anything.
-    // `/no reaching compare: /` caught all three and filed them under a label that says "across an
-    // edge", which is the over-claim the `stack-frames` class was fixed for. Neither of the two has
-    // a row, so they stay in the residue the header paragraph names rather than take a class each.
-    key: 'cross-block-flags-arm',
-    label: 'Condition flags across an edge (ARM) — residual shapes only',
+    // KEYED ON THE REASON, not on the headline, and that is the whole point. Both frontends' throws
+    // interpolate the reason, and the same throw fires for subjects no edge model would move, each
+    // in its own words:
+    //   * (Thumb) the flags were written by ARITHMETIC, by `tst`/`cmn` or by a call — the message
+    //     names the instruction and its block, and it crosses an edge unchanged. PowerPC names a
+    //     field a call or a non-compare took in a different throw (`tests crN, but …`);
+    //   * (both) the branch's block has no predecessor at all, so there is no edge to carry
+    //     anything — `entry-flags` above.
+    // A pattern over the headline caught all of them and filed them under a label that says
+    // "across an edge", which is the over-claim the `stack-frames` class was fixed for.
+    key: 'cross-block-flags',
+    label: 'Condition flags across an edge — residual shapes only',
     pattern: /no compare crosses the edges? into /,
   },
   {

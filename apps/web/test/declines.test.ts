@@ -293,7 +293,7 @@ describe('a pattern keyed on an English word claims sentences that are not about
         'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',
       'address-taken-local',
     ],
-    // `cross-block-flags-arm` must not reach the bare headline `no reaching compare: `. Thumb
+    // `cross-block-flags` must not reach the bare headline `no reaching compare: `. Thumb
     // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
     // inheritance model left over; flags written by arithmetic, by `tst`/`cmn` or by a call, which
     // no edge model would move; and a block with no predecessor, where there is no edge to carry
@@ -319,32 +319,46 @@ describe('a pattern keyed on an English word claims sentences that are not about
         "written by 'add' in '.L2', over the compare that reached it, and only a compare's are modelled",
       'other',
     ],
-    // …and a branch whose block nothing reaches is not an edge shape either.
+    // …and a branch whose block nothing reaches is not an edge shape either: it reads the caller's.
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare reaches 'f', and " +
         'it has no predecessor to inherit any from',
-      'other',
+      'entry-flags',
     ],
     // …while the four shapes the model really does leave at an edge land in the class.
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edges " +
         "into '.L2': 2 meet there, and the flags need not agree on all of them",
-      'cross-block-flags-arm',
+      'cross-block-flags',
     ],
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
         "into '.L1': its only predecessor '.L2' is lifted after it",
-      'cross-block-flags-arm',
+      'cross-block-flags',
     ],
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
         "into '.L2': it leaves 'f' through a conditional branch",
-      'cross-block-flags-arm',
+      'cross-block-flags',
     ],
     [
       "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare: no compare crosses the edge " +
         "into '.Lc0': it leaves the jump-table dispatch in 'f'",
-      'cross-block-flags-arm',
+      'cross-block-flags',
+    ],
+    // PowerPC names the cr field before the same reasons, and the same split holds: a varargs `cr1`
+    // test at function entry is the published marker of `pikmin:setChildren__6ActionFie`, and has
+    // no edge at all…
+    [
+      "lift: cannot lift 'setChildren__6ActionFie': conditional branch 'bne' has no reaching compare (cr1): no " +
+        "compare reaches 'setChildren__6ActionFie+0x0', and it has no predecessor to inherit any from",
+      'entry-flags',
+    ],
+    // …while an edge the rule leaves over lands in the class, whichever ISA's headline carries it.
+    [
+      "lift: cannot lift 'f': conditional branch 'bge' has no reaching compare (cr0): no compare crosses the " +
+        "edges into 'f+0x10': 2 meet there, and the flags need not agree on all of them",
+      'cross-block-flags',
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
@@ -839,12 +853,14 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // these disappears, an unnamed gap found an inhabitant — good news, and this list moves in the
   // commit that earns it, as it did when `synthetic:tax_gprel` gave `pic-globals` one.
   //
-  // `cross-block-flags-arm` arrived empty on purpose: the corpus's one ARM inhabitant of that
+  // `cross-block-flags` arrived empty on purpose: the corpus's one ARM inhabitant of that
   // subject is `kleod:LoadObjects_World2Select:agbcc`, which the same commit taught asmlift to
-  // lift, so the class names what the model left over rather than what it refuses today.
+  // lift, so the class names what the model left over rather than what it refuses today. PowerPC's
+  // rows lift under the same edge rule; the one PPC row still on the headline, `pikmin:setChildren__6ActionFie:mwcc_233_163n`, tests a `cr1` its caller set, at
+  // entry, where there is no edge.
   //
   // `unread-data-directive` joins it for a THIRD reason, and the two sitting side by side is why
-  // this note exists. `cross-block-flags-arm` is a MODEL GAP left over — a subject asmlift still
+  // this note exists. `cross-block-flags` is a MODEL GAP left over — a subject asmlift still
   // cannot reach, whose one inhabitant happened to be lifted. `unread-data-directive` is empty
   // because of what the benchmark SELECTS: its two refusals fire on a whole-word pool load of a
   // label the `.word` pass recorded no words for, and on that label used as a register base, and
@@ -889,7 +905,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'branch-form',
     'branch-likely',
     'clobbered-value',
-    'cross-block-flags-arm',
+    'cross-block-flags',
     'pool-word-shape',
     'store-class',
     'structs',
@@ -1040,10 +1056,11 @@ describe('a class may not outlive the message it classifies', () => {
     ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
-    ['cross-block-cr', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
-    ['cross-block-flags-arm', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
-    ['cross-block-flags-arm', 'no compare crosses the edge into ', 'packages/core/src/frontend/thumb.ts'],
-    ['cross-block-flags-arm', 'no compare crosses the edges into ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
+    ['cross-block-flags', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
+    ['cross-block-flags', 'no compare crosses the edge into ', 'packages/core/src/frontend/flags-edge.ts'],
+    ['entry-flags', 'and it has no predecessor to inherit any from', 'packages/core/src/frontend/flags-edge.ts'],
+    ['cross-block-flags', 'no compare crosses the edges into ', 'packages/core/src/frontend/flags-edge.ts'],
     ['branch-likely', "branch-likely '", 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'cannot annul its delay slot', 'packages/core/src/frontend/mips.ts'],
     ['branch-likely', 'lands on its delay slot', 'packages/core/src/frontend/mips.ts'],
@@ -1150,11 +1167,11 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 3],
+    ['frontend/ppc.ts', 5],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 74;
+  const RESIDUE_TOTAL = 76;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
@@ -1224,11 +1241,13 @@ describe('the classifier is measured against the messages core can throw, not on
     'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'section-label': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
-    // Same shape one level in: thumb.ts's reaching-compare throw interpolates its REASON, and the
-    // class keys on one reason rather than on the headline — deliberately, because the headline
-    // is shared with a different capability (flags written by arithmetic or a call). Both halves
-    // are pinned above, and the shapes themselves are pinned in `thumb-frontend.test.ts`.
-    'cross-block-flags-arm': 'thumb.ts interpolates the reason, and the class keys on the reason',
+    // Same shape one level in: the reaching-compare throws of thumb.ts and ppc.ts interpolate
+    // their REASON, and the class keys on the edge reasons rather than on the headline —
+    // deliberately, because the headline is shared with subjects no edge model moves (flags
+    // written by arithmetic or a call, a block with no predecessor). Both halves are pinned above,
+    // and the shapes themselves in `thumb-frontend.test.ts` and `ppc-frontend.test.ts`.
+    'cross-block-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
+    'entry-flags': 'thumb.ts and ppc.ts interpolate the reason, and the class keys on the reason',
     // Same shape, one layer down: `l3/ast.ts`'s `gapReasonFor` builds this one and `structure.ts`
     // writes it into a marker, which `pipeline.ts` then interpolates into its throw. Pinned by hand
     // in `SPELT_BY` against the file that spells it, as `opaque-ops`'s sibling phrase is.

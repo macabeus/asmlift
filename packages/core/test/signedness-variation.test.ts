@@ -85,6 +85,26 @@ describe('the signedness variation declines where the pin writes nothing', () =>
     expect(lifts.n).toBe(3);
   });
 
+  // r1 is dereferenced and r0 is overwritten before anything reads it: the frontend still gives r0
+  // its slot (an argument register below the highest one read, frontend/ssa.ts mintArgSlotHoles),
+  // and that slot is the only scalar. Its signedness reaches no instruction, so there is nothing to
+  // pin.
+  test('a scalar entry param nothing reads is not a second pass', () => {
+    const { backend, emitted } = recordingBackend();
+    lifts.n = 0;
+    const cands = enumerateCandidates(
+      'f',
+      wrap('\tldr\tr2, [r1]\n\tadd\tr2, r2, #1\n\tstr\tr2, [r1]\n\tmov\tr0, #0\n'),
+      ARMV4T_AGBCC,
+      {
+        backend,
+      },
+    );
+    expect(cands.length).toBe(1);
+    expect(emitted.length).toBe(1);
+    expect(lifts.n).toBe(2);
+  });
+
   // The per-setting decline, the shape addr-home.test.ts pins for its own gate: the `/raw-globals`
   // sibling lifts WITHOUT the map, so it decides for itself whether the pin has a param. A decline
   // read from one shared probe would answer for a lift it is not the lift of.

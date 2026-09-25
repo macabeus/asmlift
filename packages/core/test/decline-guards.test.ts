@@ -214,10 +214,10 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   // compares a back-edge argument against an exit argument by value identity — would read the two
   // as different values and decline a loop that is perfectly ordinary. (NOT callee-saved liveness,
   // which this line claimed for several releases; the arity machinery is keyed on the register,
-  // never on the value.) What the assertion sees of that is `return a0;`, not `return a0 + 0;`.
+  // never on the value.) What the assertion sees of that is `return a1;`, not `return a1 + 0;`.
   expect(
     decompile('f', '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tadd\tr0, r1, #0\n\tbx\tlr\n', ARMV4T_AGBCC).source,
-  ).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
+  ).toBe('s32 f(s32 a0, s32 a1) {\n    return a1;\n}\n');
 
   // annotate mode degrades to a stub carrying the same reason — never a fabricated stack local
   const annotated = decompile(

@@ -551,6 +551,35 @@ export function exprEquals(a: Expr, b: Expr): boolean {
   }
 }
 
+/** Do two statements print the same C? The leaf statements compare through {@link exprEquals},
+ *  and an `if` arm by arm; every other kind answers no, which can only keep apart two statements a
+ *  caller might have merged. */
+export function stmtEquals(a: Stmt, b: Stmt): boolean {
+  switch (a.k) {
+    case 'assign':
+      return b.k === 'assign' && a.name === b.name && exprEquals(a.value, b.value);
+    case 'store':
+      return b.k === 'store' && exprEquals(a.lval, b.lval) && exprEquals(a.value, b.value);
+    case 'exprstmt':
+      return b.k === 'exprstmt' && exprEquals(a.value, b.value);
+    case 'return':
+      return (
+        b.k === 'return' &&
+        (a.unspelled ?? false) === (b.unspelled ?? false) &&
+        (a.value === undefined ? b.value === undefined : b.value !== undefined && exprEquals(a.value, b.value))
+      );
+    case 'if':
+      return b.k === 'if' && exprEquals(a.cond, b.cond) && stmtsEqual(a.then, b.then) && stmtsEqual(a.else, b.else);
+    default:
+      return false;
+  }
+}
+
+/** {@link stmtEquals} over two lists, in order. */
+export function stmtsEqual(a: readonly Stmt[], b: readonly Stmt[]): boolean {
+  return a.length === b.length && a.every((s, i) => stmtEquals(s, b[i]));
+}
+
 /** THE spelling of an `opaque`'s gap reason, in one place: `structure.ts` writes it into the
  *  marker, `contracts.ts` matches on it to prove the gap was not dropped, and the benchmark
  *  classifies declines by it. Two spellings make that contract silently vacuous — enforced-looking
