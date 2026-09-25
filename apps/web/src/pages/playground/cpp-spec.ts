@@ -4,7 +4,7 @@
 //   2. else the MANGLED SYMBOL (real mwcc C++ symbols carry class + param types) + a synthesized
 //      all-word field layout (`field_K`) sized by the member accesses actually in the function;
 //   3. else a free function with the lifted param names/types.
-import type { CppFnSpec } from '@asmlift/core/backend/cpp';
+import { type CppFnSpec, bindSpecParams } from '@asmlift/core/backend/cpp';
 import type { IrType } from '@asmlift/core/ir/types';
 import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from '@asmlift/core/l3/ast';
 import { type CppType, demangle } from '@asmlift/core/mangle';
@@ -47,6 +47,8 @@ export function irToCpp(t: IrType): CppType {
       return { base: t.name, ptr: 0 };
     case 'void':
       return { base: 'void', ptr: 0 };
+    case 'float':
+      return { base: 'float', ptr: 0 };
     default:
       return INT; // unknown/array — the playground's safe default
   }
@@ -101,7 +103,12 @@ export function deriveSpec(name: string, sfn: SFn): CppFnSpec {
   // demangle was a false positive, so fall back to the (sound) mangled-C free function rather
   // than fabricate a C++ signature. Strict equality: a real C++ fn with UNUSED params also
   // falls back — ugly but sound; the spec textarea is the full-fidelity path.
-  if (sfn.params.length !== (sig.cls ? 1 : 0) + sig.params.length) {
+  //
+  // The same for the register FILE: the spec binds to the lifted parameters by file, then by
+  // position (`bindSpecParams`), so a demangled signature whose float count is not the lift's binds
+  // nothing it can trust.
+  const bound = bindSpecParams({ cls: sig.cls, params: sig.params.map((type) => ({ name: '', type })) }, sfn.params);
+  if (sfn.params.length !== (sig.cls ? 1 : 0) + sig.params.length || !bound) {
     return freeFn();
   }
   const letters = 'abcdefghij';
@@ -120,9 +127,8 @@ export function deriveSpec(name: string, sfn: SFn): CppFnSpec {
   if (sig.cls && sfn.params[0]) {
     recv.set(sfn.params[0].name, sig.cls);
   }
-  const explicitStart = sig.cls ? 1 : 0;
   spec.params.forEach((p, i) => {
-    const v = sfn.params[explicitStart + i]?.name;
+    const v = bound[i];
     if (v && p.type.ptr === 1 && !BUILTINS.has(p.type.base)) {
       recv.set(v, p.type.base);
     }
