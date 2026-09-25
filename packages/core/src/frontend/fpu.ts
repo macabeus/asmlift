@@ -23,10 +23,14 @@ export type Fpu = NonNullable<TargetDescription['fpu']>;
  *  `rank` is the slot, with one exception: under `'separate'` a float argument ranks after every
  *  integer one. THAT ORDER IS A SPELLING, NOT A READING. Under the PowerPC EABI the two files count
  *  independently, so `float g(int *p, float b)` and `float g(float b, int *p)` compile to one object
- *  and nothing in it says which the source wrote. Either spelling reproduces the bytes; this one is
- *  fixed so the output is deterministic. KNOWN GAP: a declaration of the function's own signature
- *  would decide it, and nothing reads one here. A key in neither file ranks first (-1), the
- *  tie-break both of these frontends already give a non-ABI live-in. */
+ *  and nothing in it says which the source wrote. Either spelling reproduces the bytes in a unit
+ *  that does not declare the function; this one is fixed so the output is deterministic. KNOWN GAP:
+ *  a unit that does declare it — a project context — decides the order, and only the C++ backend
+ *  reads that declaration (`bindSpecParams`). In C the int-first spelling of
+ *  `float mix(float a, int n);` is a redeclaration mwcc refuses: a noncompile, not a wrong program.
+ *  Ranking by the function's own declared parameters here would close it, once `proto.ts` can
+ *  size a float. A key in neither file ranks first (-1), the tie-break both of these frontends
+ *  already give a non-ABI live-in. */
 export function argSlots(
   fpu: Fpu | undefined,
   argRegs: readonly string[],

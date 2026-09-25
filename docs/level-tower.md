@@ -735,8 +735,9 @@ that already typedefs `f32` are untouched.
 **What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
 float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`
 touch it, and neither is the ORDER of integer parameters against float ones: both are spellings,
-fixed so the output is deterministic (`argSlots`), and a declaration would decide them —
-nothing reads one yet.
+fixed so the output is deterministic (`argSlots`). A declaration decides them, and only the C++
+backend reads one (`bindSpecParams`): in C, a project context declaring a float ahead of an integer
+makes the fixed int-first spelling a redeclaration the compiler refuses.
 
 ## The contracts are the point
 
