@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=187.1s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=170.6s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,18 +136,17 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-25**, taken at `df0044d5` (`match/utag-mwcc`
-after its comment audit, on #259: a PowerPC frontend capability, a switch-recovery one, one
-argument-slot rule for all three frontends, 17 rows gained): the ranked pass alone is **1,875 s
-over 195 real rows** and **1,075 s over 782 synthetic rows**; wall clock was 596.7 s and 372.9 s on
-tiers that overlap, and **597.0 s** end to end (the CLI's own `Done in` line). Against
+Summed out of the committed artifact of **2026-09-25**, taken at `a9f22e79` (`match/utag-mwcc`
+after its merge review, on #259: a PowerPC frontend capability, a switch-recovery one, one
+argument-slot rule for all three frontends, 17 rows gained): the ranked pass alone is **2,059 s
+over 195 real rows** and **1,160 s over 782 synthetic rows**; wall clock was 591.0 s and 400.5 s on
+tiers that overlap, and **591.3 s** end to end (the CLI's own `Done in` line). Against
 `origin/main` it is **205 field changes over 55 rows**, fan **69,855 → 68,912 (0.99×)** over 960
-comparable rows, while its ranked pass reads **1,743.9 s → 2,666.7 s (1.53×)**, and 17 rows
-(283.2 s) rank here that declined at `origin/main`. The dearest single row is **209 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **11% of the tier** on its own, a row this branch does not
-touch; `marioparty4:SceneMain:mwcc_242_81`, one of those 17 and a `noncompile` with a fan of 162,
-is a hair behind it at 208 s. The previous artifact of this branch, at `194fac10`, read 1,821 s
-and 1,020 s over the same rows with the same fan, and 0 field changes against this one: the ranked
+comparable rows, while its ranked pass reads **1,743.9 s → 2,896.8 s (1.66×)**, and 17 rows
+(322.7 s) rank here that declined at `origin/main`. The dearest single row is **248 s** on
+`marioparty4:SceneMain:mwcc_242_81`, **12% of the tier** on its own — one of those 17, and a
+`noncompile` with a fan of 162. The previous artifact of this branch, at `df0044d5`, read 1,875 s
+and 1,075 s over the same rows with the same fan, and 0 field changes against this one: the ranked
 pass is wall clock on a shared machine.
 
 The artifact `origin/main` carried before this one, taken 2026-09-24 at `b7857a14`
