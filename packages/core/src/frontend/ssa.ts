@@ -28,7 +28,7 @@ import {
   mkValue,
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
-import { T } from '../ir/types';
+import { type IrType, T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
@@ -65,6 +65,9 @@ export interface SsaBuilder {
   /** Live-in parameter value → the key it arrived on (for calling-convention order). Usually an
    *  ABI register name, but a frontend's virtual key (see the module header) ranks here too. */
   paramReg: Map<Value, string>;
+  /** The key a block parameter stands for — `paramReg` for a live-in, and the key of a PHI too,
+   *  which is how an entry block that is itself a loop header receives its arguments. */
+  keyOf(v: Value): string | undefined;
   /** Assert that block `b` takes a parameter for `key`, whether or not anything reads it.
    *
    *  `readVar` cannot express this. It asks "what value does `key` hold here?", so a key the block
@@ -268,7 +271,12 @@ export function makeSsaBuilder(
    *  comes from a prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒
    *  no partition is claimed, so every slot refuses and every register is a parameter. */
   liveInOf: () => LiveInModel = () => ({}),
+  /** The type of a value that stands for `key` before any instruction defines it — a parameter, a
+   *  phi. A register FILE, not a register: the FPU's keys are floats wherever they arrive, and every
+   *  other key is `unknown` for type recovery to settle. */
+  keyType: (key: string) => IrType | undefined = () => undefined,
 ): SsaBuilder {
+  const unset = (key: string): IrType => keyType(key) ?? T.unk(32);
   let modelMemo: LiveInModel | null = null;
   // Checked ONCE, where the model is materialised — every function with a parameter reads a
   // register def-lessly, so this runs on effectively every lift rather than only on the rare
@@ -495,7 +503,7 @@ export function makeSsaBuilder(
   };
 
   const newPhi = (reg: string, b: number): Value => {
-    const phi = mkValue(T.unk(32));
+    const phi = mkValue(unset(reg));
     irBlocks[b].params.push(phi);
     phiBlock.set(phi, b);
     phiKey.set(phi, reg);
@@ -549,7 +557,7 @@ export function makeSsaBuilder(
         defs[b].set(reg, obliged);
         return obliged;
       }
-      const p = mkValue(T.unk(32));
+      const p = mkValue(unset(reg));
       irBlocks[b].params.push(p);
       defs[b].set(reg, p);
       paramReg.set(p, reg);
@@ -627,7 +635,7 @@ export function makeSsaBuilder(
         return; // already a parameter, however it got there
       }
     }
-    const p = mkValue(T.unk(32));
+    const p = mkValue(unset(key));
     irBlocks[b].params.push(p);
     paramReg.set(p, key); // ranked by the ABI sort like any other parameter
     obligedParams[b].set(key, p);
@@ -723,6 +731,7 @@ export function makeSsaBuilder(
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
     writeVar,
     paramReg,
+    keyOf: (v: Value) => paramReg.get(v) ?? phiKey.get(v),
     ensureParam,
     hasReachingDef,
     noteCall: (b: number, clobbers: readonly string[]) => {
