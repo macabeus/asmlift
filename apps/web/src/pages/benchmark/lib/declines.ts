@@ -27,7 +27,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 137 distinct decline messages (the texts reached by
+// `packages/core/src` throws 139 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -164,10 +164,14 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // Thumb `stack pointer used as data` — so one alternative with a wildcard between "pointer"
     // and "used" reads as ISA-neutral and is not: a space on both sides requires a word there, so
     // it takes the PPC form alone.
+    //
+    // `stack-frame access` and `not the one frame push` are PPC's refusals where r1's depth below its
+    // entry value is not known (`r1Displacements` in `frontend/ppc.ts`): a slot cannot be named
+    // there, which is this class's gap seen one step earlier.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
+      /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
   },
   {
     // A branch whose block has NO predecessor reads flags nothing in this function set: at the

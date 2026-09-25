@@ -371,6 +371,68 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   };
 }
 
+/** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
+ *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
+ *
+ *  A frame slot has to be named by its offset from the ENTRY r1, because the compilers disagree on
+ *  which side of the push they save the link register. mwcc 2.4.x pushes first and saves at
+ *  `N+4(r1)`; mwcc 2.3.3 saves at `4(r1)` BEFORE `stwu r1,-N(r1)` and restores from `N+4(r1)`. That is
+ *  one word of the caller's frame spelled at two offsets, and an offset from the CURRENT r1 reads it
+ *  as two different words: every non-leaf function Pikmin's compiler produced declined on its own
+ *  epilogue. Measured over the committed artifact: all 26 non-leaf `mwcc_233_163n` rows save the
+ *  link register before the push, and none lifted.
+ *
+ *  Forward dataflow over the block graph, per instruction. Only the two forms a compiler uses to
+ *  move r1 are counted: `stwu r1,-N(r1)` from the entry value, and `addi r1,r1,N`. Anything else
+ *  that writes r1 — a second push, an `addi r1,rX,N` from another register, an `mr r1,r11` — makes
+ *  the displacement unknown from there on, and so does a join whose predecessors arrive at
+ *  different depths. Unknown is not a refusal by itself: a displacement nothing reads decides
+ *  nothing. The frame accesses and the push that DO read it refuse loud (`lift`, `entryOffset`). */
+function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, number | string> {
+  const at = new Map<Instr, number | string>();
+  const into: Array<number | string | undefined> = blocks.map(() => undefined);
+  // The first reason a block's displacement became unknown is the one kept: it is the earliest cause.
+  const meet = (bi: number, d: number | string): boolean => {
+    const old = into[bi];
+    let next = d;
+    if (typeof old === 'string' || old === d) {
+      next = old;
+    } else if (typeof old === 'number' && typeof d === 'number') {
+      const where = blocks[bi].startAddr >= 0 ? `0x${blocks[bi].startAddr.toString(16)}` : 'a synthesized return';
+      next = `the paths into ${where} arrive with r1 at two depths (${old} and ${d} bytes from its entry value)`;
+    }
+    into[bi] = next;
+    return next !== old;
+  };
+  const writesR1 = (ins: Instr) => ins.ops[0] === 'r1' && !/^(st|cmp|tw|mt|dc|ic)/.test(ins.mnemonic);
+  meet(0, 0);
+  const work = [0];
+  while (work.length) {
+    const bi = work.pop()!;
+    let d = into[bi]!;
+    for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
+      at.set(ins, d);
+      const where = `0x${ins.addr.toString(16)}`;
+      if (ins.mnemonic === 'stwu' && ins.ops[0] === 'r1' && parseMem(ins.ops[1]).base === 'r1') {
+        d =
+          d === 0
+            ? parseMem(ins.ops[1]).off
+            : `the frame push at ${where} is a second one (r1 already moved from its entry value)`;
+      } else if (ins.mnemonic === 'addi' && ins.ops[0] === 'r1' && ins.ops[1] === 'r1' && !ins.reloc) {
+        d = typeof d === 'number' ? d + parseImm(ins.ops[2]) : d;
+      } else if (writesR1(ins)) {
+        d = `'${ins.mnemonic} ${ins.ops.join(',')}' at ${where} sets r1 to a value this frontend does not track`;
+      }
+    }
+    for (const s of succIdx[bi]) {
+      if (meet(s, d)) {
+        work.push(s);
+      }
+    }
+  }
+  return at;
+}
+
 /** Lift disassembled PowerPC text → an L1 Fn with block-argument SSA. `asmData` (optional) supplies
  *  the data-section jump table for dense-switch (Regime-B) recovery; absent ⇒ a `bctr` dispatch
  *  loud-fails. */
@@ -454,6 +516,8 @@ export function lift(
     succIdx.unshift([1]);
   }
 
+  const r1At = r1Displacements(blocks, succIdx);
+
   const preds: number[][] = blocks.map(() => []);
   blocks.forEach((_, i) => {
     for (const s of succIdx[i]) {
@@ -532,8 +596,8 @@ export function lift(
     return n;
   };
 
-  // Frame slots (r1-relative offsets) that hold a TRANSPARENT save, and WHICH REGISTER each one
-  // holds — a callee-saved register's entry value or the saved link register. A reload is dropped
+  // Frame slots (offsets from the ENTRY r1, see `r1Displacements`) that hold a TRANSPARENT save,
+  // and WHICH REGISTER each one holds — a callee-saved register's entry value or the saved link register. A reload is dropped
   // (the value is unchanged, so the in-register SSA value already carries it) only when it restores
   // the very register the slot was saved from. Function-scoped so a save in the prologue block
   // matches a restore in a different epilogue block. Any OTHER r1 access is a genuine local spill /
@@ -549,6 +613,19 @@ export function lift(
   // and 28 Mario Party 4 checkout functions share the shape, each losing an argument the relocation
   // fold recovered.
   const savedSlots = new Map<number, string>();
+  /** The slot an r1-relative operand names: its offset from the entry r1. Where r1's displacement is
+   *  not known, no offset can be named, and a save or restore there refuses rather than being
+   *  matched against a slot it may not be. */
+  const entryOffset = (ins: Instr, mem: string): number => {
+    const d = r1At.get(ins);
+    if (typeof d !== 'number') {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': stack-frame access '${mem}' at 0x${ins.addr.toString(16)} — the stack ` +
+          `pointer's offset from its entry value is not known there: ${d ?? 'the instruction is unreachable'}`,
+      );
+    }
+    return parseMem(mem).off + d;
+  };
   // `stmw rS,D(r1)` saves rS..r31 into consecutive words from D; `lmw rD,D(r1)` restores the same
   // range.
   const frameRange = (firstReg: string, off: number): Array<{ off: number; reg: string }> => {
@@ -616,25 +693,23 @@ export function lift(
     // a save of a register with no reaching def (callee-saved entry value / saved lr), or a reload
     // from a recorded save slot. A store of a LIVE (reaching-def) value is a real local spill →
     // fail LOUD. A reload from an unrecorded slot is a genuine stack local → fail LOUD.
-    const frameStore = (srcReg: string, mem: string): boolean => {
-      const { base, off } = parseMem(mem);
-      if (base !== 'r1') {
+    const frameStore = (ins: Instr, srcReg: string, mem: string): boolean => {
+      if (parseMem(mem).base !== 'r1') {
         return false;
       }
       if (!ssa.hasReachingDef(srcReg, bi)) {
-        savedSlots.set(off, srcReg);
+        savedSlots.set(entryOffset(ins, mem), srcReg);
         return true;
       }
       throw new PpcUnsupportedError(
         `cannot lift '${name}': spill of a live value to the stack ('${srcReg},${mem}') — local stack frames not supported`,
       );
     };
-    const frameLoad = (dstReg: string, mem: string): boolean => {
-      const { base, off } = parseMem(mem);
-      if (base !== 'r1') {
+    const frameLoad = (ins: Instr, dstReg: string, mem: string): boolean => {
+      if (parseMem(mem).base !== 'r1') {
         return false;
       }
-      const saved = savedSlots.get(off);
+      const saved = savedSlots.get(entryOffset(ins, mem));
       if (saved === dstReg) {
         return true;
       }
@@ -949,8 +1024,17 @@ export function lift(
         // LIVE value fails loud); `stmw`/`lmw` record/consume the slot directly.
         // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a real store-with-BASE-UPDATE
         // (`*(rA+D)=rS; rA+=D`) — neither effect is modelled here, so loud-fail rather than drop both.
+        // The push itself must be the only one, taken from the entry r1: every slot is named by its
+        // offset from there (`r1Displacements`), and a push from anywhere else moves that origin.
         case 'stwu':
           if (parseMem(s).base === 'r1') {
+            if (d !== 'r1' || r1At.get(ins) !== 0) {
+              throw new PpcUnsupportedError(
+                `cannot lift '${name}': '${ins.mnemonic} ${ins.ops.join(',')}' at 0x${ins.addr.toString(16)} ` +
+                  `is not the one frame push from the entry stack pointer — ` +
+                  `${d !== 'r1' ? `it stores ${d}, not the back chain` : `r1 had already moved (${r1At.get(ins)})`}`,
+              );
+            }
             break;
           }
           throw new PpcUnsupportedError(
@@ -968,7 +1052,7 @@ export function lift(
           break;
         case 'stmw':
           if (parseMem(s).base === 'r1') {
-            for (const slot of frameRange(d, parseMem(s).off)) {
+            for (const slot of frameRange(d, entryOffset(ins, s))) {
               savedSlots.set(slot.off, slot.reg);
             }
             break;
@@ -982,7 +1066,7 @@ export function lift(
         case 'lmw':
           if (parseMem(s).base === 'r1') {
             for (const slot of frameRange(d, parseMem(s).off)) {
-              frameLoad(slot.reg, `${slot.off}(r1)`);
+              frameLoad(ins, slot.reg, `${slot.off}(r1)`);
             }
             break;
           }
@@ -1234,7 +1318,7 @@ export function lift(
         // Word load/store: a transparent frame save/restore is skipped; a live-value spill or a
         // stack local fails loud (frameStore/frameLoad); otherwise it is ordinary memory.
         case 'lwz':
-          if (frameLoad(d, s)) {
+          if (frameLoad(ins, d, s)) {
             break;
           }
           emitLoad(ins, d, s, 4, true);
@@ -1249,7 +1333,7 @@ export function lift(
           emitLoad(ins, d, s, 1, false);
           break;
         case 'stw':
-          if (frameStore(d, s)) {
+          if (frameStore(ins, d, s)) {
             break;
           }
           emitStore(ins, d, s, 4);
