@@ -35,10 +35,11 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
+import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
-import { MIPS_FP_REG, isSplatMips, parseSplatMips } from './splat';
+import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { abiSortEntryParams, mintArgSlotHoles, registerArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
@@ -72,6 +73,23 @@ const LIKELY_BASE: Record<string, string> = {
 // A coprocessor-1 branch tests an FP condition code (`fcc`) that `c.cond.s/d` sets. Neither the
 // code nor the compare is modelled, so these refuse whether or not they are also likely.
 const isFpCondBranch = (m: string) => m.startsWith('bc1');
+
+/** The single-precision FPU arithmetic this frontend lifts, onto the float opcodes (`mov.s` is a
+ *  copy and has none). Every other FPU instruction — the doubles, the conversions, the moves to and
+ *  from the integer file and memory, the compares — keeps the register-file refusal `opaqueDest`
+ *  gives it, and so does one of these naming an odd register or a target with no `fpu` homes.
+ *  `docs/floating-point.md` says what the next layer is. */
+const FP_SINGLE: Readonly<Record<string, Opcode | 'copy'>> = {
+  'add.s': 'fadd',
+  'sub.s': 'fsub',
+  'mul.s': 'fmul',
+  'div.s': 'fdiv',
+  'neg.s': 'fneg',
+  'mov.s': 'copy',
+};
+const FP_SINGLE_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_SINGLE));
+/** A key the SSA builder holds for the FPU's file: `mipsEvenFpKey`'s canonical spelling. */
+const isFpKey = (k: string) => /^\$f\d+$/.test(k);
 
 const isZero = (r: string) => r === 'zero' || r === '$0';
 // The stack pointer (`$29`). A `sw/lw` through it is not a store/load through a data pointer — it
@@ -720,10 +738,12 @@ export function lift(
   // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
   // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
   // `<pentry offset="16">` encode.
-  const ssa = makeSsaBuilder(name, blocks.length, preds);
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
+  const fpu = target.fpu;
+  const floatReturn = writesFloatReturn(instrs, FP_SINGLE_MNEMONICS, mipsEvenFpKey, fpu);
 
   // The pending `%hi` halves of this function's global addresses, keyed by the SSA VALUE each `lui`
   // defines (frontend/high-half.ts holds the invariant and why a register-keyed map cannot answer
@@ -1090,6 +1110,14 @@ export function lift(
         case 'sb':
           emitStore(ins, d, s, 1);
           break;
+        case 'add.s':
+        case 'sub.s':
+        case 'mul.s':
+        case 'div.s':
+        case 'neg.s':
+        case 'mov.s':
+          emitFpSingle(ins);
+          break;
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
@@ -1168,6 +1196,25 @@ export function lift(
       write(od.dst, res);
     };
     const emitUn = kit.un;
+    // Single-precision arithmetic on the FPU's file, keyed by `mipsEvenFpKey` so both dialects'
+    // spellings of one register are one SSA variable. Anything it cannot key — an odd half, a
+    // target with no float homes — is the register-file refusal it always was.
+    const emitFpSingle = (ins: Instr) => {
+      const keys = ins.ops.map(mipsEvenFpKey);
+      if (fpu === undefined || keys.length === 0 || keys.some((k) => k === null)) {
+        emitOpaqueDest(ins);
+        return;
+      }
+      const [dst, ...srcs] = keys as string[];
+      const op = FP_SINGLE[ins.mnemonic];
+      if (op === 'copy') {
+        write(dst, read(srcs[0]));
+        return;
+      }
+      const v = mkValue(T.f32());
+      ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
+      write(dst, v);
+    };
     // `%lo` completes the address a `lui %hi` began. The pairing asks SSA — through `readVar`, not
     // `read`, which refuses a half — what `rHi` holds HERE, so a pair separated by unrelated
     // instructions folds while a register reused between the halves does not, and a half that
@@ -1314,17 +1361,22 @@ export function lift(
       // loud, but for a merge that never happened. Rejecting it gives the honest void return.
       // PowerPC reads its return register through the guard, so the refusal it would get is already
       // the right one; it passes this same predicate to its call-arity count.
-      const retOps = ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v)) ? [readVar(RET, bi)] : [];
       if (!br) {
         // A nullified slot's block leaves by its branch's TARGET, which need not be the next
         // address, so `fallthrough` is claimed only where control really does fall through.
         const to = succAddrs.get(b)![0];
         const next = (b.body[b.body.length - 1]?.addr ?? b.startAddr) + 4;
         ops.push(mkOp('br', { attrs: to === next ? { fallthrough: true } : {}, successors: [succ(to)] }));
-      } // fall-through
-      else {
-        ops.push(mkOp('ret', { operands: retOps }));
+        return;
       }
+      // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and
+      // then `v0` is scratch like any other integer register.
+      const retOps = floatReturn
+        ? [read(fpu!.returnReg)]
+        : ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v))
+          ? [readVar(RET, bi)]
+          : [];
+      ops.push(mkOp('ret', { operands: retOps }));
       return;
     }
     // unconditional branch
@@ -1336,12 +1388,19 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
+  if (fpu) {
+    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
+  }
   const argSlots = registerArgSlots(ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
+  const rank = floatAwareRank(fpu, ARG_REGS);
+  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, {
+    ...argSlots,
+    slotOf: (k) => (rank(k) < 0 ? null : rank(k)),
+  });
   return ssa.fn;
 }
 
