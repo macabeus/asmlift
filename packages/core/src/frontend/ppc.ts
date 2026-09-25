@@ -1155,6 +1155,14 @@ export function lift(
             }
             break;
           }
+          // mwcc 2.3.3's register MOVE: it prints `addi rD,rS,0` where 2.4.x prints `mr` (17 of the 42
+          // `mwcc_233_163n` rows carry one, no 2.4.x row does). Lifted as an add, the `+ 0` turns a
+          // pointer into an integer sum, and C++ will not pass `(u32)&table + 0` as a `const char *`.
+          // `addic` sets the carry and is not a move.
+          if (mnem === 'addi' && parseImm(t) === 0) {
+            write(d, read(s));
+            break;
+          }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base

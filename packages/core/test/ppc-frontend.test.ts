@@ -388,6 +388,20 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '10:\tlwz     r31,-4(r1)\n14:\tblr\n';
     expect(() => dis('depths', depths)).toThrow(/arrive with r1 at two depths \(0 and -16 bytes/);
   });
+  // mwcc 2.3.3 moves a register with `addi rD,rS,0` where 2.4.x prints `mr`. Lifted as an add, the
+  // `+ 0` makes the table's address an integer sum, and mwcc's C++ refuses to pass
+  // `(u32)&gTable + 0` to a `const char *` parameter.
+  test('`addi rD,rS,0` with no relocation is a move: the address it carries keeps its type', () => {
+    const asm =
+      '0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgTable\n4:\taddi    r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgTable\n' +
+      '8:\taddi    r3,r4,0\nc:\tb       10 <mv+0x10>\n10:\tblr\n';
+    const src = decompile('mv', `0 <mv>:\n${asm}`, PPC_MWCC).source;
+    expect(src).toContain('return &gTable;');
+    expect(src).not.toContain('+ 0');
+    expect(dis('mvp', '0:\taddi    r4,r3,0\n4:\tlwz     r3,4(r4)\n8:\tblr\n')).toBe(
+      's32 mvp(s32 *a0) {\n    return a0[1];\n}\n',
+    );
+  });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {
     // `stw r0,0(0)` — the base field is a 0 placeholder an SDA relocation fills at link. Lifting it
     // as a store to a fabricated first pointer parameter loses the global write.
