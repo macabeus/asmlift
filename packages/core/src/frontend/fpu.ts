@@ -40,9 +40,6 @@ export function settleFloatParams(
   isFpKey: (key: string) => boolean,
   entryHasPreds: boolean,
 ): void {
-  const refuse = (why: string): never => {
-    throw new FrontendUnsupportedError(`cannot lift '${name}': ${why} — not modelled`);
-  };
   const entryKeys = () => ssa.irBlocks[0].params.map((p) => ssa.keyOf(p)).filter((k): k is string => k !== undefined);
   const fpKeys = entryKeys().filter(isFpKey);
   if (fpKeys.length === 0) {
@@ -50,11 +47,16 @@ export function settleFloatParams(
   }
   for (const k of fpKeys) {
     if (!fpu.argRegs.includes(k)) {
-      refuse(`${k} is read before this function writes it, and no floating-point argument arrives there`);
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${k} is read before this function writes it, and no floating-point argument ` +
+          `arrives there — not modelled`,
+      );
     }
   }
   if (entryHasPreds) {
-    refuse(`a floating-point argument arrives at an entry block that is a loop header`);
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': a floating-point argument arrives at an entry block that is a loop header — not modelled`,
+    );
   }
   const top = Math.max(...fpKeys.map((k) => fpu.argRegs.indexOf(k)));
   for (let i = 0; i < top; i++) {
@@ -64,9 +66,9 @@ export function settleFloatParams(
     for (const k of entryKeys()) {
       const slot = argRegs.indexOf(k);
       if (slot >= 0 && slot <= top) {
-        refuse(
-          `${k} and ${fpu.argRegs[slot]} both carry argument ${slot} — a floating-point argument takes the ` +
-            `integer slot it shadows`,
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${k} and ${fpu.argRegs[slot]} both carry argument ${slot} — a floating-point ` +
+            `argument takes the integer slot it shadows, so the ABI does not produce this — not modelled`,
         );
       }
     }
