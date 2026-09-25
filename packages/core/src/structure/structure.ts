@@ -1014,6 +1014,12 @@ export const ARITH_TO_BIN: Record<string, BinOp> = {
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
 };
 
+// The float ops (ir/opcodes.ts) and their L3 operators (l3/ast.ts BinOp). A table of their own and
+// not entries in ARITH_TO_BIN, because every rule that table's consumers apply — the pointer
+// stride, the integer legalizations, the constant fold, the commutative re-spelling — is an
+// integer rule.
+const FLOAT_TO_BIN: Record<string, BinOp> = { fadd: 'f+', fsub: 'f-', fmul: 'f*', fdiv: 'f/' };
+
 // The operators whose operand order the machine does not fix — candidates for the def-order
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
@@ -3554,6 +3560,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const bf = bitfieldSpelling.get(d);
     if (bf) {
       return { k: 'field', base: { k: 'var', name: bf.global }, name: bf.field, dot: true };
+    }
+    if (FLOAT_TO_BIN[d.opcode]) {
+      return { k: 'bin', op: FLOAT_TO_BIN[d.opcode], l: e(d.operands[0]), r: e(d.operands[1]) };
+    }
+    if (d.opcode === 'fneg') {
+      return { k: 'un', op: 'f-', e: e(d.operands[0]) };
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
