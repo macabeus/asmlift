@@ -35,12 +35,12 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
+import { argSlots, settleArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { abiSortEntryParams, mintArgSlotHoles, registerArgSlots, stackSlotKey } from './ssa';
+import { abiSortEntryParams, registerArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1393,17 +1393,13 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
-  if (fpu) {
-    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
-  }
-  const argSlots = registerArgSlots(ARG_REGS);
-  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
+  settleArgSlots(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  const rank = floatAwareRank(fpu, ARG_REGS);
+  const { rank } = argSlots(fpu, ARG_REGS);
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, {
-    ...argSlots,
+    ...registerArgSlots(ARG_REGS),
     slotOf: (k) => (rank(k) < 0 ? null : rank(k)),
   });
   return ssa.fn;

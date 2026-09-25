@@ -53,12 +53,12 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { floatAwareRank, settleFloatParams, writesFloatReturn } from './fpu';
+import { argSlots, settleArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgSlotHoles, registerArgSlots } from './ssa';
+import { abiSortEntryParams, registerArgSlots } from './ssa';
 import { clobberedByCall, makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1508,17 +1508,13 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
-  if (fpu) {
-    settleFloatParams(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
-  }
-  const argSlots = registerArgSlots(ARG_REGS);
-  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
+  settleArgSlots(name, ssa, fpu, ARG_REGS, isFpKey, preds[0].length > 0);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
 
-  const rank = floatAwareRank(fpu, ARG_REGS);
+  const { rank } = argSlots(fpu, ARG_REGS);
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, {
-    ...argSlots,
+    ...registerArgSlots(ARG_REGS),
     slotOf: (k) => (rank(k) < 0 ? null : rank(k)),
   });
   return ssa.fn;

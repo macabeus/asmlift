@@ -731,7 +731,7 @@ declare, so the candidate prelude and every project context that already typedef
 **What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
 float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`
 touch it, and neither is the ORDER of integer parameters against float ones: both are spellings,
-fixed so the output is deterministic (`floatAwareRank`), and a declaration would decide them —
+fixed so the output is deterministic (`argSlots`), and a declaration would decide them —
 nothing reads one yet.
 
 ## The contracts are the point

@@ -269,6 +269,93 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
   });
 });
 
+// ONE SLOT READING FOR BOTH FILES (frontend/fpu.ts `argSlots`, `settleArgSlots`). Compiled from
+//   float hole4(float a, float b, int c, int d){ return d ? a : b; }
+//   float hole2(float a, int b, int c){ return c ? a : -a; }
+//   int gap(int a, int b, int c){ return a + c; }
+// with GCC_KMC_TOOLCHAIN's flags and the synthetic tier's mwcc_242_81 flags. Each reads an argument
+// register above one it never reads, and the unread slot is a parameter from the file the ABI puts
+// it in: under o32 `'leading'` a slot above the highest float is an integer, under the EABI
+// `'separate'` each file fills its own holes. Without the hole, every later argument binds one slot
+// low and the program still compiles.
+const KMC_SLOTS = `00000000 <hole4>:
+   0:\tbeqz\ta3,c <hole4+0xc>
+   4:\tmov.s\t$f0,$f14
+   8:\tmov.s\t$f0,$f12
+   c:\tjr\tra
+  10:\tnop
+
+00000014 <hole2>:
+  14:\tbnez\ta2,20 <hole2+0xc>
+  18:\tmov.s\t$f0,$f12
+  1c:\tneg.s\t$f0,$f0
+  20:\tjr\tra
+  24:\tnop
+
+0000003c <gap>:
+  3c:\tjr\tra
+  40:\taddu\tv0,a0,a2
+`;
+const MWCC_SLOTS = `00000000 <hole4>:
+   0:\tcmpwi   r4,0
+   4:\tbnelr
+   8:\tfmr     f1,f2
+   c:\tblr
+
+00000010 <hole2>:
+  10:\tcmpwi   r4,0
+  14:\tbnelr
+  18:\tfneg    f1,f1
+  1c:\tblr
+
+00000028 <gap>:
+  28:\tadd     r3,r3,r5
+  2c:\tblr
+`;
+
+describe('an unread argument keeps its slot, in the file the ABI puts it in', () => {
+  test.each([
+    [
+      'o32: an integer hole above two floats',
+      'hole4',
+      KMC_SLOTS,
+      MIPS_GCC,
+      'float hole4(float a0, float a1, s32 a2, s32 a3)',
+      'if (a3 != 0)',
+    ],
+    [
+      'o32: an integer hole above one float',
+      'hole2',
+      KMC_SLOTS,
+      MIPS_GCC,
+      'float hole2(float a0, s32 a1, s32 a2)',
+      'if (a2 == 0)',
+    ],
+    ['o32: an integer function', 'gap', KMC_SLOTS, MIPS_GCC, 's32 gap(s32 a0, s32 a1, s32 a2)', 'return a0 + a2;'],
+    [
+      'EABI: an integer hole beside two floats',
+      'hole4',
+      MWCC_SLOTS,
+      PPC_MWCC,
+      'float hole4(s32 a0, s32 a1, float a2, float a3)',
+      'if (a1 == 0)',
+    ],
+    [
+      'EABI: an integer hole beside one float',
+      'hole2',
+      MWCC_SLOTS,
+      PPC_MWCC,
+      'float hole2(s32 a0, s32 a1, float a2)',
+      'return -a2;',
+    ],
+    ['EABI: an integer function', 'gap', MWCC_SLOTS, PPC_MWCC, 's32 gap(s32 a0, s32 a1, s32 a2)', 'return a0 + a2;'],
+  ])('%s', (_label, sym, asm, target, signature, body) => {
+    const src = lift(sym, asm, target);
+    expect(src).toContain(signature);
+    expect(src).toContain(body);
+  });
+});
+
 // THE RETURN RULE IS SOUND ONLY WHILE A FLOAT CANNOT LEAVE THE FILE (frontend/fpu.ts
 // `writesFloatReturn`). Compiled with GCC_KMC_TOOLCHAIN's flags from
 //   int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }
