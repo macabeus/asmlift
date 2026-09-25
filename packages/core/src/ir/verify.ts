@@ -208,7 +208,7 @@ export function verify(fn: Fn): void {
             const all = [...op.operands, ...op.results].map((v) => v.type);
             if (floats.length !== all.length || all.some((t) => !typeEquals(t, all[0]))) {
               throw new VerifyError(
-                `'${op.opcode}' computes on floats of one width, got ${all.map(typeToString).join(', ')}`,
+                `'${op.opcode}' computes on floats only, got ${all.map(typeToString).join(', ')}`,
               );
             }
           } else if (floats.length > 0 && op.opcode !== 'ret') {
