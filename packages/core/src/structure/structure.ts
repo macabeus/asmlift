@@ -4107,6 +4107,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // here.
   const {
     readsClobbered,
+    loopEscapeHazard,
     loopUpdateHazard,
     testSkipsAnEffect,
     preUpdateCondFold,
@@ -5402,7 +5403,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // `if (found) { *out = i; return; }` would store `i + 1`. Handing the arm's own region makes
       // the escape check judge exactly those reads.
       const exitRegion = new Set([exitB, ...reachFrom(exitB)].filter((x) => !loopCtx!.body.has(x)));
-      const hazard = loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion);
+      // A `break`'s exit region is NOT rendered under `sub`: it is the `while`'s own exit region,
+      // shared with the header exit and rendered once after the loop, raw. Where the break leaves
+      // behind the update, a header value re-derived there from a name the update wrote is
+      // computed once more — `do { b = t / (b + t); if (c > 2) break; } while (--d > 0); return b;`
+      // renders `return t / (v + t)` after `v = t / (v + t)` already ran. So the region is judged
+      // with no substitution as well.
+      const hazard =
+        loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion) ||
+        (isBreak && loopEscapeHazard(loopCtx.body, new Map(), updateWrites, exitRegion));
       if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
