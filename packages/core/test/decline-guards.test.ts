@@ -11,7 +11,7 @@ import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { demangle } from '../src/mangle';
 import { decompile } from '../src/pipeline';
 import { PRE_RECOVERY_PASSES } from '../src/raise/pre-recovery';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 const AGBCC = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
@@ -96,17 +96,6 @@ test('a `bl` into this function’s own text declines loud rather than emitting 
 test('control falling off the end declines loud, never a TypeError', () => {
   const noRet = '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tmov\tr0, #1\n';
   expect(() => decompile('f', noRet, ARMV4T_AGBCC)).toThrow(/falls off the end/);
-});
-
-// `int si(int a, int b, int c, int d){ while (d-- > 0) { } return a * b; }` at gcc2.7.2kmc -O2: the
-// loop's back edge targets the function's first instruction, so the entry block's only predecessor is
-// itself, and a register read there asked that block for its value without end.
-test('an entry block that is its own only predecessor declines loud, never a RangeError', () => {
-  const si =
-    '00000000 <si>:\n   0:\tmove\tv0,a3\n   4:\tbgtz\tv0,0 <si>\n   8:\taddiu\ta3,a3,-1\n   c:\tnop\n' +
-    '  10:\tmult\ta0,a1\n  14:\tmflo\tv0\n  18:\tjr\tra\n  1c:\tnop\n';
-  expect(() => decompile('si', si, MIPS_GCC)).toThrow(FrontendUnsupportedError);
-  expect(() => decompile('si', si, MIPS_GCC)).toThrow(/entry block is a loop header with no other predecessor/);
 });
 
 test('demangle: a length prefix that overruns the symbol is a plain C name, not a fabricated class', () => {

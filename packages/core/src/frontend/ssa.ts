@@ -65,9 +65,6 @@ export interface SsaBuilder {
   /** Live-in parameter value → the key it arrived on (for calling-convention order). Usually an
    *  ABI register name, but a frontend's virtual key (see the module header) ranks here too. */
   paramReg: Map<Value, string>;
-  /** The key a block parameter stands for — `paramReg` for a live-in, and the key of a PHI too,
-   *  which is how an entry block that is itself a loop header receives its arguments. */
-  keyOf(v: Value): string | undefined;
   /** Assert that block `b` takes a parameter for `key`, whether or not anything reads it.
    *
    *  `readVar` cannot express this. It asks "what value does `key` hold here?", so a key the block
@@ -564,15 +561,6 @@ export function makeSsaBuilder(
       return p;
     }
     if (ps.length === 1) {
-      // A block that is its own only predecessor is the entry of a function whose first instruction
-      // heads a loop: the caller's edge into it is not a block edge, so the lookup would ask this
-      // block forever.
-      if (ps[0] === b) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the entry block is a loop header with no other predecessor, and the ` +
-            `caller's edge into it is not modelled`,
-        );
-      }
       const v = readAny(reg, ps[0]);
       defs[b].set(reg, v);
       return v;
@@ -740,7 +728,6 @@ export function makeSsaBuilder(
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
     writeVar,
     paramReg,
-    keyOf: (v: Value) => paramReg.get(v) ?? phiKey.get(v),
     ensureParam,
     hasReachingDef,
     noteCall: (b: number, clobbers: readonly string[]) => {
@@ -1098,9 +1085,15 @@ export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
 /** Where a live-in of the entry block sits in the calling convention: `slotOf` gives its ABI
- *  argument slot (a register or an incoming stack word), or null for a live-in no argument arrives
- *  in — an uninitialised register the body reads; `keyOf` is its inverse. One per frontend, read by
- *  both halves of the entry-parameter rule: {@link mintArgSlotHoles} and {@link abiSortEntryParams}.
+ *  argument rank (a register or an incoming stack word), or null for a live-in no argument arrives
+ *  in — an uninitialised register the body reads; `holes` gives the keys of the argument slots the
+ *  convention proves precede the ones read (`readKeys`), whether or not the body reads them. One per
+ *  frontend, read by both halves of the entry-parameter rule: {@link mintArgSlotHoles} and
+ *  {@link abiSortEntryParams}.
+ *
+ *  `holes` is a function of everything read, not a slot-to-key table, because where two register
+ *  files share one slot sequence (MIPS o32's floats) the file a hole comes from depends on what the
+ *  function reads — `frontend/fpu.ts` `fpuArgSlots`.
  *
  *  Both halves need an entry block with NO predecessors, whose parameters are the function's own.
  *  A loop header's are phis, index-aligned with its predecessors' edge arguments, and neither
@@ -1108,13 +1101,14 @@ export const slotKeyOffset = (key: string): number | null =>
  *  target inserts an empty preheader ahead of it (each frontend's `preheader` note). */
 export interface ArgSlots {
   slotOf(key: string): number | null;
-  keyOf(slot: number): string;
+  holes(readKeys: readonly string[]): string[];
 }
 
-/** The slots of a convention that passes arguments in `argRegs` only. */
+/** The slots of a convention that passes arguments in `argRegs` only: every register below the
+ *  highest one read. */
 export const registerArgSlots = (argRegs: readonly string[]): ArgSlots => ({
   slotOf: (key) => (argRegs.includes(key) ? argRegs.indexOf(key) : null),
-  keyOf: (k) => argRegs[k],
+  holes: (readKeys) => argRegs.slice(0, Math.max(0, ...readKeys.map((k) => argRegs.indexOf(k)))),
 });
 
 /** A rank past every argument slot, for a live-in that is not one. */
@@ -1134,9 +1128,9 @@ export function mintArgSlotHoles(
   slots: ArgSlots,
 ): void {
   assertTrueEntry(entryHasPreds);
-  const top = Math.max(-1, ...ssa.irBlocks[0].params.map((p) => slots.slotOf(ssa.paramReg.get(p) ?? '') ?? -1));
-  for (let k = 0; k < top; k++) {
-    ssa.ensureParam(slots.keyOf(k), 0);
+  const read = ssa.irBlocks[0].params.map((p) => ssa.paramReg.get(p)).filter((k): k is string => k !== undefined);
+  for (const k of slots.holes(read)) {
+    ssa.ensureParam(k, 0);
   }
 }
 
