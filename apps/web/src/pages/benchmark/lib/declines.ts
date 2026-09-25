@@ -393,9 +393,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /unmodelled (?:effect )?instruction|no lowering for op (?!'concat')/,
   },
   {
+    // `entry block is a loop header` is `frontend/ssa.ts`'s: a loop whose header is the function's
+    // first instruction, which reaches the SSA builder before any loop recognizer sees it. Its float
+    // twin ("a floating-point argument arrives at an entry block that is …") does not carry the
+    // phrase, and is `float`'s.
     key: 'loop-shapes',
     label: 'Loop shapes declined (multi-latch / irreducible / hazards)',
-    pattern: /unrecovered back-edge|loop-recovery declined|pre-update loop variable/,
+    pattern: /unrecovered back-edge|loop-recovery declined|pre-update loop variable|entry block is a loop header/,
   },
   {
     // The loop IS recovered here and the values crossing its exit are what refuse: a post-loop read
