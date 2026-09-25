@@ -69,6 +69,18 @@ const CALL_BETWEEN = `fn f {
 }
 `;
 
+// one read that is the call's argument AND its sibling in one statement, `gValue & sink(gValue)`:
+// every compiler calls first, so the sibling read re-rendered there would read after the call
+const CALL_ARG_AND_SIBLING = `fn f {
+^bb0():
+  %0: s32* = gaddr {sym="gValue"}
+  %1: s32 = load %0 {off=0, signed=true, width=4}
+  %2: s32 = call %1 {target="sink"}
+  %3: s32 = and %1, %2
+  ret %3
+}
+`;
+
 describe('the write barrier', () => {
   test('OFF: a store to an unrelated global forces the read into a local', () => {
     const out = emit(STORE_BETWEEN, false);
@@ -95,6 +107,10 @@ describe('the write barrier', () => {
 
   test('a call still bars — it may write anything', () => {
     expect(emit(CALL_BETWEEN, true)).toContain('v0 = gValue;');
+  });
+
+  test('a call bars the read it takes as an argument when the read also renders beside it', () => {
+    expect(emit(CALL_ARG_AND_SIBLING, true)).toContain('v0 = gValue;');
   });
 });
 

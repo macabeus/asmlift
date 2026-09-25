@@ -1971,20 +1971,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // is the order the recompile gives back, and bars nothing. A READ ahead of such a call is
         // the order no single expression gives back — `int t = *p; return t + cb(p);` compiles
         // `ldr; bl; add`, and inlined as `*p + cb(p)` it recompiles `bl; ldr` — so that call bars
-        // the read, which is named where it ran. Unless the read is the call's own argument, which
-        // every compiler evaluates first.
+        // the read, which is named where it ran. Unless the read is only the call's argument,
+        // which every compiler evaluates first; read a second time beside the call (`G & cg(G)`
+        // for one `ldr`), that second read comes back after it.
         const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
-        const feedsCall = (call: Op): boolean => {
-          const seen = new Set<Value>();
-          const walk = (v: Value): boolean => {
-            if (seen.has(v)) {
-              return false;
-            }
-            seen.add(v);
+        // Is every use of the read inside `call`'s arguments, as rendered?
+        const onlyFeedsCall = (call: Op): boolean => {
+          const cone = new Set<Op>([call]);
+          const walk = (v: Value): void => {
             const d = defOf.get(v);
-            return d === op || (d !== undefined && !materialize.has(d) && d.operands.some(walk));
+            if (d !== undefined && d !== op && !cone.has(d) && !materialize.has(d)) {
+              cone.add(d);
+              d.operands.forEach(walk);
+            }
           };
-          return call.operands.some(walk);
+          call.operands.forEach(walk);
+          return sites.every((u) => cone.has(u.op));
         };
         const isBarrier = (x: Op): boolean => {
           // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
@@ -2009,7 +2011,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !useSitesOf.has(x.results[0]) ||
               materialize.has(x) ||
               !samePos(emitPos(x)) ||
-              (!isCall && !feedsCall(x))
+              (!isCall && !onlyFeedsCall(x))
             );
           }
           if (!isCall) {
