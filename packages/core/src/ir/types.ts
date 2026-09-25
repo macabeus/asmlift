@@ -30,6 +30,13 @@ export type IrType =
   // `size` is the one the target's compiler gives it — which is not always its widest view
   // (`T.union` computes it from the compiler's aggregate boundary).
   | { kind: 'union'; members: StructField[]; size: number }
+  // A hardware floating-point value, IEEE single (32) or double (64). A KIND and not an `int`
+  // width, which is the one exception to the 64-bit rule at `ir/opcodes.ts` `concat` ("widen the
+  // number that is already there"): a float is not an integer of any width, so every pass that
+  // tests `kind === 'int'` must SKIP it rather than compute on it, and skipping is what a new kind
+  // buys. Its values live in the FPU's own register file and are computed only by the float opcodes
+  // (`fadd` …); `docs/floating-point.md` says which frontends mint one and what they still refuse.
+  | { kind: 'float'; width: 32 | 64 }
   | { kind: 'void' }; // a function that returns nothing
 
 /** The scalar type of a memory access of `width` bytes: word ⇒ the s32 integer default;
@@ -70,6 +77,8 @@ export const T = {
     const extent = Math.max(...members.map((m) => (m.type.kind === 'array' ? m.type.count : 1) * viewBytes(m.type)));
     return { kind: 'union', members, size: Math.ceil(extent / boundary) * boundary };
   },
+  f32: (): IrType => ({ kind: 'float', width: 32 }),
+  f64: (): IrType => ({ kind: 'float', width: 64 }),
   void: (): IrType => ({ kind: 'void' }),
 };
 
@@ -138,6 +147,8 @@ export function typeToString(t: IrType): string {
       return `${typeToString(t.elem)}[${t.count}]`;
     case 'union':
       return `union{${t.members.map((m) => `${typeToString(m.type)} ${m.name}`).join(';')}}`;
+    case 'float':
+      return `f${t.width}`;
     case 'void':
       return 'void';
   }
@@ -147,6 +158,9 @@ export function parseType(s: string): IrType {
   s = s.trim();
   if (s.endsWith('*')) {
     return T.ptr(parseType(s.slice(0, -1)));
+  }
+  if (s === 'f32' || s === 'f64') {
+    return s === 'f32' ? T.f32() : T.f64();
   }
   const m = s.match(/^(unk|s|u)(\d+)$/);
   if (!m) {
@@ -166,7 +180,7 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   if (a.kind === 'int' && b.kind === 'int') {
     return a.width === b.width && a.signed === b.signed;
   }
-  if (a.kind === 'unknown' && b.kind === 'unknown') {
+  if ((a.kind === 'unknown' && b.kind === 'unknown') || (a.kind === 'float' && b.kind === 'float')) {
     return a.width === b.width;
   }
   if (a.kind === 'array' && b.kind === 'array') {
