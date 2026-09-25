@@ -564,6 +564,15 @@ export function makeSsaBuilder(
       return p;
     }
     if (ps.length === 1) {
+      // A block that is its own only predecessor is the entry of a function whose first instruction
+      // heads a loop: the caller's edge into it is not a block edge, so the lookup would ask this
+      // block forever.
+      if (ps[0] === b) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the entry block is a loop header with no other predecessor, and the ` +
+            `caller's edge into it is not modelled`,
+        );
+      }
       const v = readAny(reg, ps[0]);
       defs[b].set(reg, v);
       return v;
