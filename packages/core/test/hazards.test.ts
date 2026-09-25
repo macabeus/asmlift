@@ -32,7 +32,6 @@ interface Fixture {
   opBlock?: Map<Op, Block>;
   materialize?: Set<Op>;
   respelledDefs?: Map<Op, unknown>;
-  exitCopyCalls?: Set<Op>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
@@ -43,7 +42,6 @@ const make = (f: Fixture = {}) =>
     opBlock: f.opBlock ?? new Map(),
     materialize: f.materialize ?? new Set(),
     respelledDefs: f.respelledDefs ?? new Map(),
-    exitCopyCalls: f.exitCopyCalls ?? new Set(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -434,16 +432,18 @@ describe('sinkablePreUpdateSlots', () => {
     );
   });
 
-  // A CALL NAMED FOR THE SINK, AHEAD OF THE HOME, IS CURRENT THERE. The shape is
-  // `preupdate_exit_order`'s once the analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the
-  // copy homed at the add, and the statement writing `v2` rendered one index earlier on the same
-  // iteration. Each control changes ONE fact and is refused at `arg-reads-current-names`, which its
-  // own ablation then admits.
-  const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherRule?: boolean; otherBlock?: boolean } = {}) => {
+  // A DEF NAMED AHEAD OF THE HOME IS CURRENT THERE. The shape is `preupdate_exit_order`'s once the
+  // analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the copy homed at the add, and the
+  // statement writing `v2` rendered one index earlier on the same iteration — and
+  // `preupdate_exit_load`'s with a read in the call's place. Each control changes ONE fact and is
+  // refused at `arg-reads-current-names`, which its own ablation then admits.
+  const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherBlock?: boolean; load?: boolean } = {}) => {
     const { p, q, header, exit, latch } = scaffold();
     const mid = v();
     const e = v();
-    const midOp = mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } });
+    const midOp = edit.load
+      ? mkOp('load', { operands: [p], results: [mid], attrs: { off: 0, width: 4, signed: true } })
+      : mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } });
     const op = mkOp('add', { operands: [mid, p], results: [e] });
     const arm: Block = { params: [], ops: [] };
     if (edit.otherBlock) {
@@ -463,7 +463,6 @@ describe('sinkablePreUpdateSlots', () => {
         [op, header],
       ]),
       materialize: edit.unnamed ? new Set() : new Set([midOp]),
-      exitCopyCalls: edit.unnamed || edit.otherRule ? new Set() : new Set([midOp]),
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
@@ -472,15 +471,17 @@ describe('sinkablePreUpdateSlots', () => {
     return { op, run };
   };
 
-  test('a call named for the sink, written ahead of the home, is current there', () => {
-    const { op, run } = namedAhead();
+  test.each([
+    ['a call', {}],
+    ['a read', { load: true }],
+  ])('%s named ahead of the home is current there', (_, edit) => {
+    const { op, run } = namedAhead(edit);
     expect(run()).toEqual(new Map([[0, op]]));
   });
 
   test.each([
     ['written AFTER the home', { after: true }],
     ['not a def the analysis named', { unnamed: true }],
-    ['named by a rule other than the exit-copy call rule', { otherRule: true }],
     ['written in another body block', { otherBlock: true }],
   ])('a body name %s still refuses at arg-reads-current-names', (_, edit) => {
     const { op, run } = namedAhead(edit);
@@ -515,7 +516,6 @@ describe('sinkablePreUpdateSlots', () => {
         [op, header],
       ]),
       materialize: new Set([midOp]),
-      exitCopyCalls: new Set([midOp]),
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
@@ -598,7 +598,6 @@ describe('sinkablePreUpdateSlots', () => {
         [op, header],
       ]),
       materialize: new Set([midOp]),
-      exitCopyCalls: new Set([midOp]),
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v0']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
@@ -627,7 +626,6 @@ describe('sinkablePreUpdateSlots', () => {
         [op, header],
       ]),
       materialize: new Set([midOp]),
-      exitCopyCalls: new Set([midOp]),
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2'], [other, 'v2']),
       liveIn: new Map([[header, new Set<Value>([other])]]),
     });

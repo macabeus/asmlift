@@ -526,8 +526,8 @@ test('two sunk exit slots never spell one call twice', () => {
 // its own position instead (`callsAheadOfExitCopy`), the order `t = cb(q); r = *q + t;` spells —
 // byte-identical to the original on agbcc. The control swaps ONE fact, the order of the load and
 // the call: `int t = *q; r = t + cb(q);` compiles to `ldr; bl; add`, the call is adjacent to its
-// consumer and moves past nothing, and it is left inline. What moves there is the READ, which this
-// rule does not name — that refusal belongs to the sink, and `preupdate_exit_load` is its row.
+// consumer and moves past nothing, and it is left inline. What would move there is the READ, which
+// the barrier scan names on its own (a read ahead of a call it shares a statement with).
 const CALL_THEN_LOAD = `fn calllast {
 ^bb0(%0: s32*, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -583,8 +583,8 @@ test('the call is named only where the exit copy has a pre-update hazard to repa
 
 test('the named call is current at the copy, and the exit value is rebuilt behind it', () => {
   // `a2 = *v1 + v0` reads `v0` one statement after `v0 = cb(v1)` wrote it, on the same iteration,
-  // and `v1` ahead of its update: the value the exit edge carried. The load-first order still has
-  // the READ to carry past the call, and still declines.
+  // and `v1` ahead of its update: the value the exit edge carried. The load-first order is the
+  // mirror image: the read is named where it ran, and the call is rebuilt at the add behind it.
   expect(emit(CALL_THEN_LOAD)).toBe(
     's32 calllast(s32 *a0, s32 a1, s32 a2) {\n' +
       '    s32 v0;\n' +
@@ -603,5 +603,5 @@ test('the named call is current at the copy, and the exit value is rebuilt behin
       '    return a2;\n' +
       '}\n',
   );
-  expect(() => emit(LOAD_THEN_CALL)).toThrow(/reads a pre-update loop variable/);
+  expect(emit(LOAD_THEN_CALL)).toContain('            v0 = *v1;\n            a2 = v0 + cb(v1);\n');
 });

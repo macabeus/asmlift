@@ -2094,7 +2094,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     liveIn,
     materialize,
     preUpdateHomes,
-    exitCopyCalls,
     reachFrom,
     emitPos,
     memWriteBetween,
@@ -4126,7 +4125,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     materialize,
     respelledDefs: bitfieldSpelling,
-    exitCopyCalls,
   });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a

@@ -728,8 +728,6 @@ export interface StructureAnalysis {
   materialize: Set<Op>;
   /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
   preUpdateHomes: Set<Op>;
-  /** the calls `callsAheadOfExitCopy` named, for the pre-update sink (`writtenAheadOf`, hazards.ts) */
-  exitCopyCalls: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
   /** where a value's expression ultimately renders — the anchored consumer it inlines into,
@@ -1429,7 +1427,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     return back && L.body.size === 1 ? [{ ...L, back }] : [];
   });
   const preUpdateHomes = new Set<Op>();
-  const exitCopyCalls = new Set<Op>();
   const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
     escapeLoops.some((L) => {
       if (!L.body.has(opBlock.get(op)!) || consumers.every((c) => L.body.has(opBlock.get(c)!))) {
@@ -1456,9 +1453,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  the latch hands the exit EDGE rather than one read after it: `do { r = *q + cb(q); q = q - 1;
    *  } while (--n); return r;`. Post-loop that arg reads `q` one iteration late, so the structurer
    *  rebuilds its tree inside the body, at the op that computed it (`sinkablePreUpdateSlots`,
-   *  hazards.ts). agbcc ran `bl cb; ldr r1,[q]; add` — the call FIRST — and a call inlined into
-   *  the add is rebuilt at the add, behind the load: `arg-safe-to-reevaluate` refuses that motion
-   *  and the loop declines.
+   *  hazards.ts). agbcc ran `bl cb; ldr r1,[q]; add` — the call FIRST — and inlined into the add
+   *  the call would be rebuilt there with the load between it and its home, which
+   *  `arg-safe-to-reevaluate` refuses (its between-scan does not exempt the rebuilt tree's own
+   *  members), and the loop declines.
    *
    *  Naming the call where it ran is the asm's own order, and C can say it: agbcc compiles `t =
    *  cb(q); r = *q + t;` to the same object as `r = *q + cb(q)`. The name removes the call from
@@ -1466,9 +1464,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  is the sink's to decide (`arg-reads-current-names`).
    *
    *  Only where the motion is real: an order-sensitive op strictly between the call and the arg's
-   *  def, both in the latch. A call adjacent to its consumer moves past nothing, and a READ the
-   *  rebuild carries past a call (`t = *q; r = t + cb(q)`, agbcc's `ldr; bl; add`) is not a call —
-   *  that refusal stands, and `preupdate_exit_load` is its row. Only where the pre-update hazard
+   *  def, both in the latch. A call adjacent to its consumer moves past nothing, and a READ ahead
+   *  of the call (`t = *q; r = t + cb(q)`, agbcc's `ldr; bl; add`) is the barrier scan's to name,
+   *  below, which it does wherever the two would share a statement. Only where the pre-update hazard
    *  is: the tree reads a loop variable the back edge updates, without which the arg renders after
    *  the loop and nothing is rebuilt. */
   const callsAheadOfExitCopy = (call: Op): boolean =>
@@ -1918,7 +1916,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // (`callsAheadOfExitCopy` above). Asked in the escape phase, for the reason that rule is.
         if (isCall && escapePhase && callsAheadOfExitCopy(op)) {
           materialize.add(op);
-          exitCopyCalls.add(op);
           continue;
         }
         // Live across a LOOP neither side belongs to: the access ran before the loop and the
@@ -2085,7 +2082,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     liveIn,
     materialize,
     preUpdateHomes,
-    exitCopyCalls,
     reachFrom,
     emitPos,
     memWriteBetween,

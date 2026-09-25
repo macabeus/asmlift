@@ -1543,23 +1543,27 @@ export const SYNTHETIC: SynthSpec[] = [
   // it, which is also what lets the memory-read tier through — `preupdate_exit` and
   // `preupdate_exit_pure` both MATCH.
   //
-  // WHAT THE SINK STILL REFUSES IS ORDER, and two rows sit on either side of it, one per order of
-  // a READ and a CALL under one `+`. `preupdate_exit_order` is `*q + cb(q)`, where agbcc calls
-  // first and loads second: rebuilt at the add, the tree would carry the call past the load. The
-  // call is named where it ran instead (`callsAheadOfExitCopy`, structure/analysis.ts), which C
-  // can say — compiled, `t = cb(q); r = *q + t;` is byte-identical to `*q + cb(q)` — and the sink
-  // takes the name as current because its statement runs in the latch ahead of the copy
-  // (`writtenAheadOf`, structure/hazards.ts). So that row lifts, and what stands between it and the
-  // bytes is not the pre-update read: the counter is spelled as a fresh copy of `n` where agbcc's
-  // own callee-saved copy spells as the parameter itself — the residual `preupdate_exit_call`
-  // shares. `preupdate_exit_load` is `t = *q; r = t + cb(q)`, where agbcc loads first (into a
-  // callee-saved register) and calls second, so the rebuild would carry the LOAD past the call and
-  // nothing names the read where it ran. That is the shape `arg-safe-to-reevaluate`
-  // (PREUPDATE_SINK_GATES, structure/hazards.ts) turns away — an op the copy must not cross sits
-  // BETWEEN a member of the tree and the point it would be rebuilt at — and without that row the
-  // gate would refuse nothing a command can show.
+  // WHAT THE SINK STILL REFUSES IS ORDER, and three rows carry it. Two sit on either side of a READ
+  // and a CALL under one `+`, and both lift. `preupdate_exit_order` is `*q + cb(q)`, where agbcc
+  // calls first and loads second: rebuilt at the add, the call would have the load between it and
+  // its home. The call is named where it ran instead (`callsAheadOfExitCopy`,
+  // structure/analysis.ts), which C can say — compiled, `t = cb(q); r = *q + t;` is byte-identical
+  // to `*q + cb(q)` — and the sink takes the name as current because its statement runs in the
+  // latch ahead of the copy (`writtenAheadOf`, structure/hazards.ts). What stands between that row
+  // and the bytes is not the pre-update read: the counter is spelled as a fresh copy of `n` where
+  // agbcc's own callee-saved copy spells as the parameter itself — the residual
+  // `preupdate_exit_call` shares. `preupdate_exit_load` is `t = *q; r = t + cb(q)`, where agbcc
+  // loads first and calls second — an order no single expression gives back, since every compiler
+  // here calls before it reads — so the read is named where it ran (the barrier scan in
+  // structure/analysis.ts), and the copy is rebuilt at the add behind it by the same name rule.
   //
-  // AND BESIDE THE THREE, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
+  // `preupdate_exit_foot` is the one `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES,
+  // structure/hazards.ts) turns away: `t = cb(q); r = *q ^ n; s = s ^ t;`, where the call runs
+  // ahead of the read but is inlined into `s`'s update copy at the foot of the body, so the read
+  // rebuilt at the `eor` would overtake it. Nothing lies BETWEEN the read and its home; the crossing
+  // is where the call RENDERS. Without that row the gate would refuse nothing a command can show.
+  //
+  // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
   // so everything else in the test rides along: the CALL the body's value comes from would land in an
   // arm the emitted `&&` skips on every iteration the counter's arm answers true, while agbcc ran the
@@ -1667,9 +1671,24 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { cb: { params: 1 } },
     note:
       'the same exiting edge with the READ first (`t = *q; r = t + cb(q)`): agbcc loads into a ' +
-      'callee-saved register, calls, then adds, so rebuilding the tree at the add would move the ' +
-      'load past the call. Nothing names the read where it ran, so the sink refuses rather than ' +
-      'move it, and the decline is what the row measures',
+      'callee-saved register, calls, then adds, an order `*q + cb(q)` would not give back, so the ' +
+      'read is named where it ran and the copy is rebuilt at the add behind it',
+  },
+  {
+    sym: 'preupdate_exit_foot',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit_foot(int *p, int n, int m, int k){ int r = m; int s = k; int t; int *q;' +
+      ' if (n > 0) { q = p; do { q = q - 1; t = cb(q); r = *q ^ n; s = s ^ t; } while (--n); }' +
+      ' return r - s; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note:
+      "the call runs ahead of the exit value's read (`bl cb; ldr; eor`) but is inlined into the " +
+      'update of `s`, which renders at the foot of the body; the read rebuilt at the `eor` would ' +
+      'overtake it, so the sink refuses, and the decline is what the row measures',
   },
   {
     sym: 'preupdate_escape',

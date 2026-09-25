@@ -25,8 +25,8 @@
 // WHICH OF THE TWO APPLIES IS A FACT ABOUT THE POSITION, so `arg-safe-to-reevaluate` asks per slot
 // rather than refusing the opcode. At the def's own position nothing is speculated at all: every op
 // under the arg dominates that point, so the copy runs only on iterations that evaluated the whole
-// tree — the question reduces to ORDER, and to ORDER only against the ops lying strictly between
-// each one and the copy (`movesPast`). Opening the body instead, both hazards are live for the
+// tree — the question reduces to ORDER, and to ORDER only against the ops that run between each
+// one and the copy in the asm but on the other side of it in the C (`movesPast`). Opening the body instead, both hazards are live for the
 // whole body, and the blanket refusal is the answer.
 //
 // And every name the rebuilt expression reads must still denote the same value there. A loop
@@ -72,10 +72,6 @@ export interface LoopHazardDeps {
    *  over the operands cannot see what such an op will render, so predicates that reason about
    *  the rendered expression have to treat it as opaque. LIVE, like `varName`. */
   respelledDefs: ReadonlyMap<Op, unknown>;
-  /** the calls the analysis named because a pre-update exit copy would carry them past a read
-   *  (`callsAheadOfExitCopy`, analysis.ts) — the one kind of body-defined name `writtenAheadOf`
-   *  takes as current */
-  exitCopyCalls: ReadonlySet<Op>;
 }
 
 export interface LoopHazards {
@@ -410,7 +406,7 @@ function sameAtEntry(defs: Map<Value, Op>, a: Value, b: Value, entry: Map<Value,
 }
 
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs, exitCopyCalls } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs } = deps;
 
   // The names one loop iteration writes under its VARIABLES' names: the update copies, plus a
   // loop-variable name a materialized body def writes IN PLACE. Adoption (seedLoopParams) makes
@@ -758,7 +754,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // slot's destination — needs no rule, and the copies are emitted sequentially because of it.
   // Every leaf such an expression could read is already refused by a per-candidate gate: a header
   // param makes the other slot fail `dest-not-loop-variable`; a body-defined value is
-  // `stale-name`, or — the one it takes as current, a call named ahead of the home — a body value
+  // `stale-name`, or — the one it takes as current, a def named ahead of the home — a body value
   // under the other slot's destination, which fails `dest-free-inside-loop`; and a value defined
   // outside the loop but read on the exit edge is live-in at the header (analysis.ts counts a
   // successor arg as a use at the predecessor's end), which makes the other slot fail
@@ -901,13 +897,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // the loop also answers to (`busyInLoop`) still refuse. So does every other body-defined name —
     // one defined AFTER the home, in another body block, or not named by a def at all (a block
     // param) — and the copy that opens the body (`home === null`) has no position to be behind.
-    //
-    // AND ONLY A CALL THE ANALYSIS NAMED FOR THIS SINK (`callsAheadOfExitCopy`, analysis.ts), which
-    // is `preupdate_exit_order`'s shape, and not every materialized def the position argument would
-    // cover.
     const writtenAheadOf = (x: Value, home: Op | null): boolean => {
       const d = defs.get(x);
-      if (home === null || d === undefined || !materialize.has(d) || !exitCopyCalls.has(d)) {
+      if (home === null || d === undefined || !materialize.has(d)) {
         return false;
       }
       const i = latch.ops.indexOf(d);
