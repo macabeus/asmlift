@@ -99,9 +99,11 @@ export function floatAwareRank(fpu: Fpu | undefined, argRegs: readonly string[])
 }
 
 /** Whether a function RETURNS a float: some instruction the frontend decodes writes the float return
- *  register. Decided over the whole function, before any `ret` is emitted, because a function has
- *  one return type on every path — a path that leaves the register untouched returns the float
- *  argument that arrived there (PowerPC's `f1` is both), or refuses by rule 1 above.
+ *  register, in a block the entry REACHES. Decided over the whole function, before any `ret` is
+ *  emitted, because a function has one return type on every path — a path that leaves the register
+ *  untouched returns the float argument that arrived there (PowerPC's `f1` is both), or refuses by
+ *  rule 1 above. Reachable blocks only: `addi r3,r3,1; blr; fmr f1,f2` returns `r3`, and the `fmr`
+ *  past the `blr` is not a path of it.
  *
  *  And then the INTEGER return register is scratch, even where the function writes it. Both halves
  *  rest on one fact: the arithmetic is ALL the decode admits, so a float reaches nothing but another
@@ -109,7 +111,13 @@ export function floatAwareRank(fpu: Fpu | undefined, argRegs: readonly string[])
  *  conversion is refused. A write to the float return register that did not feed the return would
  *  therefore be dead in the source, and the compiler does not emit dead arithmetic; an integer
  *  result, meanwhile, could only have come from a float by a conversion, which refuses. IDO's
- *  unrolled `float pw(float a, int n)` is the witness for the second half: it counts in `v0`. */
+ *  unrolled `float pw(float a, int n)` is the witness for the second half: it counts in `v0`.
+ *
+ *  THAT FACT IS WHAT HOLDS THIS RULE UP, and the next layer removes it. `int st3(float a, float b,
+ *  float *p, float *q){ *p = a * b; *q = a + b; return 2; }` writes `$f0` and returns `v0`; only the
+ *  `swc1` refusal keeps it from lifting as a float return that drops the `2` (`fpu-lift.test.ts`
+ *  pins it). A layer that lets a float reach memory, the integer file or a compare must first decide
+ *  the return from the value that reaches each `ret`, not from a mnemonic scan. */
 export function writesFloatReturn(
   instrs: readonly { mnemonic: string; ops: string[] }[],
   decodes: ReadonlySet<string>,

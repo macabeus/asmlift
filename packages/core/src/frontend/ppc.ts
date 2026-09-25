@@ -489,7 +489,12 @@ export function lift(
   // float arguments and which it returns in are all unmodelled, so a float live across a call — or
   // handed to one in f1 — would resolve to a value the callee overwrote or be dropped.
   const callInsn = instrs.find((ins) => ins.mnemonic === 'bl');
-  const floatReturn = writesFloatReturn(instrs, FP_SINGLE_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
+  const floatReturn = writesFloatReturn(
+    blocks.flatMap((b) => b.body),
+    FP_SINGLE_MNEMONICS,
+    (t) => (isFpKey(t) ? t : null),
+    fpu,
+  );
 
   const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
