@@ -463,14 +463,11 @@ export function lift(
   // A CALL IN A FUNCTION THAT COMPUTES ON FLOATS refuses — at the float instruction, so a refusal
   // the stream reaches first keeps its own reason: which FPRs a callee destroys, which it reads as
   // float arguments and which it returns in are all unmodelled, so a float live across a call — or
-  // handed to one in f1 — would resolve to a value the callee overwrote or be dropped.
-  const callInsn = instrs.find((ins) => ins.mnemonic === 'bl');
-  const floatReturn = writesFloatReturn(
-    blocks.flatMap((b) => b.body),
-    FP_SINGLE_MNEMONICS,
-    (t) => (isFpKey(t) ? t : null),
-    fpu,
-  );
+  // handed to one in f1 — would resolve to a value the callee overwrote or be dropped. Both scans
+  // read the blocks the entry reaches: a `bl` on no path makes no call.
+  const reached = blocks.flatMap((b) => b.body);
+  const callInsn = reached.find((ins) => ins.mnemonic === 'bl');
+  const floatReturn = writesFloatReturn(reached, FP_SINGLE_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
 
   const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;

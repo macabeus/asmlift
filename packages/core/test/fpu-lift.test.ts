@@ -292,6 +292,13 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
       's32 f(s32 a0) {\n    return a0 + 1;\n}\n',
     );
   });
+
+  // …and so is the call the float-and-call refusal looks for: a `bl` past the `blr` makes none.
+  test('an unreachable call does not refuse a float function', () => {
+    expect(ppc('f', '   0:\tfadds   f1,f1,f2\n   4:\tblr\n   8:\tbl      0 <f>\n   c:\tblr\n')).toBe(
+      'float f(float a0, float a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
 });
 
 // ONE SLOT READING FOR BOTH FILES (frontend/fpu.ts `argSlots`, `settleArgSlots`). Compiled from
