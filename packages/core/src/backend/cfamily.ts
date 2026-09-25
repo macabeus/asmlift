@@ -80,6 +80,12 @@ export function cType(t: IrType): string {
   if (t.kind === 'array') {
     return `${cType(t.elem)}[${t.count}]`;
   } // ill-formed as a prefix; use cDeclare
+  // The C89 KEYWORDS, not the `f32`/`f64` typedefs a decomp project declares: the candidate prelude
+  // (`C_TYPEDEFS`) holds the integer family only, and a keyword needs no declaration in any
+  // translation unit — so no project context that already typedefs `f32` can collide with it.
+  if (t.kind === 'float') {
+    return t.width === 32 ? 'float' : 'double';
+  }
   return typeToString(t); // s32 / u32 / u8 / unk32 (treated as s32 upstream)
 }
 
