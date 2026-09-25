@@ -528,18 +528,24 @@ describe('sinkablePreUpdateSlots', () => {
   // in the asm: the call runs first, and is inlined into the store two statements down. The load
   // rebuilt at the add would run ahead of it — nothing lies BETWEEN the load and the home, and the
   // crossing is only visible where the call renders. Named, the call renders at its own index and
-  // the order holds.
-  const aheadRendersBehind = (callNamed: boolean) => {
+  // the order holds. Two READS commute: a load ahead of a rebuilt load crosses nothing, while the
+  // same load ahead of a rebuilt call still does.
+  const aheadRendersBehind = (
+    callNamed: boolean,
+    ahead: 'call' | 'load' = 'call',
+    member: 'call' | 'load' = 'load',
+  ) => {
     const { p, q, header, exit, latch, body } = scaffold();
     const c = v();
     const rd = v();
     const e = v();
     const s = v();
-    const cOp = bodyOp(header, mkOp('call', { operands: [p], results: [c], attrs: { target: 'cb' } }));
-    const rdOp = bodyOp(
-      header,
-      mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
-    );
+    const access = (kind: 'call' | 'load', r: Value, off: number) =>
+      kind === 'call'
+        ? mkOp('call', { operands: [p], results: [r], attrs: { target: 'cb' } })
+        : mkOp('load', { operands: [p], results: [r], attrs: { off, width: 4, signed: true } });
+    const cOp = bodyOp(header, access(ahead, c, 4));
+    const rdOp = bodyOp(header, access(member, rd, 0));
     const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
     const sOp = bodyOp(header, mkOp('add', { operands: [c], results: [s] }));
     const stOp = bodyOp(header, mkOp('store', { operands: [p, s], attrs: { off: 0, width: 4 } }));
@@ -578,6 +584,12 @@ describe('sinkablePreUpdateSlots', () => {
     expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Map([[0, op]]));
     const named = aheadRendersBehind(true);
     expect(named.run()).toEqual(new Map([[0, named.op]]));
+  });
+
+  test('a read ahead of a rebuilt read crosses nothing, and ahead of a rebuilt call it does', () => {
+    const reads = aheadRendersBehind(false, 'load', 'load');
+    expect(reads.run()).toEqual(new Map([[0, reads.op]]));
+    expect(aheadRendersBehind(false, 'load', 'call').run()).toEqual(new Map());
   });
 
   test('a latch def ahead of the home under a LOOP VARIABLE name still refuses', () => {

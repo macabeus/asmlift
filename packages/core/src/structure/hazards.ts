@@ -845,9 +845,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // AND NOT ONLY BETWEEN. An order-sensitive op AHEAD of `d` that the rebuilt tree does not hold
     // is crossed too when it RENDERS after the home (`rendersAfter`): inlined into an update copy at
     // the foot of the body, it runs after the member the asm ran it before. A call there is named
-    // by the analysis (a call that rides an edge copy), so what still reaches this arm is a read —
-    // `preupdate_exit_reads`, refused although two plain reads commute, which is the conservative
-    // side of weighing every order-sensitive op alike.
+    // by the analysis (a call that rides an edge copy), so what still reaches this arm is a read,
+    // and a read crosses only a member that is not one: two reads commute, whichever runs first
+    // (`preupdate_exit_reads`: `u = q[1]; r = *q + 1; s = s + u;`).
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
@@ -880,8 +880,14 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       if (i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode))) {
         return true;
       }
-      return latch.ops.slice(0, i).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode) && !tree.has(o) && rendersAfter(o, p));
+      return latch.ops
+        .slice(0, i)
+        .some(
+          (o) => ORDER_SENSITIVE_OPS.has(o.opcode) && !tree.has(o) && !(isRead(o) && isRead(d)) && rendersAfter(o, p),
+        );
     };
+    // A memory read and nothing else: two of them commute, whichever runs first.
+    const isRead = (o: Op): boolean => ORDER_SENSITIVE_OPS.has(o.opcode) && !EFFECTFUL_OPS.has(o.opcode);
     // Does latch op `o` RENDER after index `p`? Where it renders is its own index when it is a
     // statement — a store, a named def, a dead one — and otherwise the one consumer it is inlined
     // into, followed down. The terminator's index stands for every copy it carries, and those land
