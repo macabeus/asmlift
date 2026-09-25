@@ -1996,8 +1996,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // the read, which is named where it ran. Unless the read is only the call's argument,
         // which every compiler evaluates first; read a second time beside the call (`G & cg(G)`
         // for one `ldr`), that second read comes back after it.
+        //
+        // TWO CALLS in one statement have no such order: agbcc calls `cg(k) - cb(p)` in operand
+        // order and mwcc in its own, so `bl cb; bl cg` inlined as that comes back reversed. A call
+        // ahead of another is named too, unless its value is only the later call's argument.
         const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
-        // Is every use of the read inside `call`'s arguments, as rendered?
+        // Is every use of the def inside `call`'s arguments, as rendered?
         const onlyFeedsCall = (call: Op): boolean => {
           const cone = new Set<Op>([call]);
           const walk = (v: Value): void => {
@@ -2033,7 +2037,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !useSitesOf.has(x.results[0]) ||
               materialize.has(x) ||
               !samePos(emitPos(x)) ||
-              (!isCall && !onlyFeedsCall(x))
+              !onlyFeedsCall(x)
             );
           }
           if (!isCall) {

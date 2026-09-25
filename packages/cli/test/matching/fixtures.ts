@@ -128,12 +128,14 @@ export const FIXTURES: DecompFixture[] = [
     note: 'call — a parameter preserved across the call, not passed to it',
   },
   {
-    // Two sequential calls, both results live at once (`g(x) + g(x+1)`). Each call result
-    // inlines into the final sum; agbcc saves the first result in r5 across the second call.
+    // Two sequential calls, both results live at once (`g(x) + g(x+1)`). The first is named where
+    // it ran: which of two calls in one expression runs first is the compiler's choice (agbcc's
+    // operand order, mwcc's own), so only a statement pins the asm's. agbcc saves the first
+    // result in r5 across the second call either way, and the named spelling is the same object.
     symbol: 'calltwice',
     referenceC: 'int g(int); int calltwice(int x){ return g(x) + g(x+1); }',
     prototypes: { g: { params: 1 } },
-    expectSource: 's32 calltwice(s32 a0) {\n    return g(a0) + g(a0 + 1);\n}\n',
+    expectSource: 's32 calltwice(s32 a0) {\n    s32 v0;\n    v0 = g(a0);\n    return v0 + g(a0 + 1);\n}\n',
     note: 'call — two sequential calls, both results live',
   },
   {

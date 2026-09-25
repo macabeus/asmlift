@@ -415,11 +415,8 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
 }
 
 /** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
- *  bill. Each one is a real emission defect, measured and not fixed here:
- *
- *    • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
- *      (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
- *    • a call rendered at two positions, so it executes twice.
+ *  bill. Each one is a real emission defect, measured and not fixed here: a call rendered at two
+ *  positions, so it executes twice (`fz463`: `f1(f0(a1))` in both operands of one test).
  *
  *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
  *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
@@ -433,13 +430,10 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
  *  — is already paid by `JUDGED`, which is exact per depth in both files. Re-derive with the probe
  *  in each file's `JUDGED` docblock. */
 export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
-  0: [
-    299, 399, 425, 463, 715, 862, 1248, 1330, 1464, 1543, 1656, 1794, 1902, 1938, 1962, 2267, 2493, 2546, 3021, 3072,
-    3669, 3798, 3977,
-  ],
-  1: [601, 1155, 1330, 1475, 1543, 1610, 1950, 1970, 2006, 2270, 2965, 3324],
-  2: [659, 2176, 3324, 3928],
-  3: [1130, 1354, 2836, 3249],
+  0: [463, 862, 1902, 1938, 1962, 2546, 3798, 3977],
+  1: [1475, 2006, 2965, 3324],
+  2: [3324, 3928],
+  3: [],
 };
 
 // A position where EITHER side is UNDEF constrains nothing: the original read a local no path had

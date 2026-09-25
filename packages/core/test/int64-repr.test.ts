@@ -177,16 +177,16 @@ describe('the high half shifts by 32, so its operand must render 64 bits wide', 
     ],
     [
       'an unsigned 64-bit divide',
-      'fn f {\n^bb0():\n  %0: u64 = call {target = "llsrc"}\n  %1: u64 = call {target = "llb"}\n' +
+      'fn f {\n^bb0():\n  %0: u64 = call {target = "llsrc"}\n  %1: u64 = const {value=3}\n' +
         '  %2: u64 = udiv %0, %1\n  %3: u32 = lo32 %2\n  ret %3\n}\n',
-      '(u64)llsrc() / llb()',
+      '(u64)llsrc() / 3',
       '(u32)llsrc()',
     ],
     [
       'a signed 64-bit divide',
-      'fn f {\n^bb0():\n  %0: s64 = call {target = "llsrc"}\n  %1: s64 = call {target = "llb"}\n' +
+      'fn f {\n^bb0():\n  %0: s64 = call {target = "llsrc"}\n  %1: s64 = const {value=3}\n' +
         '  %2: s64 = sdiv %0, %1\n  %3: s32 = lo32 %2\n  ret %3\n}\n',
-      '(s64)llsrc() / (s64)llb()',
+      '(s64)llsrc() / 3',
       '(s32)llsrc()',
     ],
   ])('%s over a call keeps the call at 64 bits', (_label, ir, wanted, truncated) => {

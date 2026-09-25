@@ -206,3 +206,26 @@ test('a read that is the call`s own argument stays inline', () => {
   expect(argument).not.toBe(READ_THEN_CALL);
   expect(emit(argument)).toContain('    return cb(*a0);\n');
 });
+
+// TWO CALLS IN ONE STATEMENT. Their order is the compiler's and no two compilers agree on it: agbcc
+// calls `cg(k) - cb(p)` in operand order, mwcc in its own. So `bl cb; bl cg; sub` inlined as that
+// expression comes back `bl cg; bl cb`, and the call that ran first is named where it ran. The
+// one-fact edit keeps it inline: the first call's value as the second call's own argument, which
+// every compiler evaluates before the call.
+const CALL_THEN_CALL = `fn twocalls {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="cb"}
+  %3: s32 = call %1 {target="cg"}
+  %4: s32 = sub %3, %2
+  ret %4
+}`;
+
+test('a call ahead of another call in one statement is named where it ran', () => {
+  expect(emit(CALL_THEN_CALL)).toContain('    v0 = cb(a0);\n    return cg(a1) - v0;\n');
+  const nested = CALL_THEN_CALL.replace('%3: s32 = call %1 {target="cg"}', '%3: s32 = call %2 {target="cg"}').replace(
+    '  %4: s32 = sub %3, %2\n  ret %4\n',
+    '  ret %3\n',
+  );
+  expect(nested).not.toBe(CALL_THEN_CALL);
+  expect(emit(nested)).toContain('    return cg(cb(a0));\n');
+});

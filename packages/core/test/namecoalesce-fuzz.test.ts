@@ -88,7 +88,7 @@ function spellings(
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
 // step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)
-// because depth 3 judges 647: another 250 seeds over the cap would leave both arms green over
+// because depth 3 judges 648: another 250 seeds over the cap would leave both arms green over
 // nothing.
 //
 // DIFFERENT FROM `carrier-name-fuzz`'s BY SIX AT DEPTH 1 (2,508 here, 2,502 there), and the six are
@@ -98,7 +98,7 @@ function spellings(
 // `coalesceMergeNames` declines on exactly the set the shipped spelling does — 1,349/1,349 at depth
 // 1, 224/224 at depth 2, 551/551 at depth 3 — and there is no seed this file judges that the sibling
 // does not.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2508, 2: 1556, 3: 647 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2508, 2: 1556, 3: 648 };
 
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
 // the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
