@@ -135,3 +135,11 @@ test('a call under a pure op of a back-edge copy runs where the asm ran it', () 
   expect(body.indexOf('f0(')).toBeGreaterThanOrEqual(0);
   expect(body.indexOf('f0(')).toBeLessThan(body.indexOf('f1('));
 });
+
+test('a call under a back-edge copy with nothing order-sensitive behind it stays inline', () => {
+  // The one-fact edit: the exit value no longer calls `f1`, so nothing the latch runs after `f0`
+  // can be overtaken at the foot, and the update keeps its inline spelling (`s = s + g(i)`).
+  const alone = BACK_EDGE_CALL.replace('  %13: s32 = call %6 {target="f1"}\n', '  %13: s32 = add %6, %11\n');
+  expect(alone).not.toBe(BACK_EDGE_CALL);
+  expect(emit(alone)).toMatch(/v\d+ = f0\(v\d+\) \+ /);
+});

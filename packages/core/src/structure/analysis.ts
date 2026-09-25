@@ -1242,6 +1242,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
   const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
+  // How many times each value rides a BACKWARD edge (to a block at or above its own), which
+  // `ridesEdge` weighs apart.
+  const backArgFed = new Map<Value, number>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.successors.length > 1) {
@@ -1250,6 +1253,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             branchArgFed.add(a);
             if (op.opcode === 'cond_br') {
               condBrArgFed.add(a);
+            }
+            if (blockPos.get(s.block)! <= blockPos.get(b)!) {
+              backArgFed.set(a, (backArgFed.get(a) ?? 0) + 1);
             }
           }
         }
@@ -1301,26 +1307,40 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
-  /** Does `v` reach a `branchArgFed` edge argument, itself or through the ops it would be inlined
-   *  into? Such an op renders where its consumer does, so a call under `f(x) + 1` or `*f(x)` rides
-   *  the edge copy exactly as a bare `f(x)` does. The walk stops at a named op, which renders at its
-   *  own position, and at another effect, which these same rules place. */
-  const ridesEdge = (v: Value, seen: Set<Value> = new Set()): boolean => {
-    if (branchArgFed.has(v)) {
-      return true;
-    }
-    if (seen.has(v)) {
-      return false;
-    }
-    seen.add(v);
-    return (useSitesOf.get(v) ?? []).some(
-      (u) =>
-        !EFFECTFUL_OPS.has(u.op.opcode) &&
-        u.op.successors.length === 0 &&
-        !materialize.has(u.op) &&
-        u.op.results.length > 0 &&
-        ridesEdge(u.op.results[0], seen),
-    );
+  /** Does a call's value `v` reach an edge argument through the ops it would be inlined into, and
+   *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
+   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does. The walk stops at a named op,
+   *  which renders at its own position, and at another effect, which these same rules place.
+   *
+   *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
+   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once,
+   *  in the update copy at the foot of the body — and a forward edge carrying it too reads the loop
+   *  variable that copy wrote — which moves the call only past what the latch runs after it:
+   *  `s = s + g(i)` with nothing order-sensitive behind the call stays inline (`for (…) s = s +
+   *  g(i);`), and `after` is that question, asked by the caller. */
+  const ridesEdge = (v: Value, after: () => boolean): boolean => {
+    let back = false;
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const carried = backArgFed.get(x) ?? 0;
+      if (carried > 1 || (carried === 0 && branchArgFed.has(x))) {
+        return true;
+      }
+      back ||= carried === 1;
+      return (useSitesOf.get(x) ?? []).some(
+        (u) =>
+          !EFFECTFUL_OPS.has(u.op.opcode) &&
+          u.op.successors.length === 0 &&
+          !materialize.has(u.op) &&
+          u.op.results.length > 0 &&
+          walk(u.op.results[0]),
+      );
+    };
+    return walk(v) || (back && after());
   };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
@@ -1857,7 +1877,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // do-while's exit edge renders the call after the loop, once, where the body ran it every
         // iteration; riding the back edge it renders in the update copy at the foot of the body,
         // behind statements the asm ran after it; riding two edge args it renders twice.
-        if (isCall && ridesEdge(r)) {
+        const orderSensitiveAfter = (): boolean =>
+          b.ops.slice(oi + 1).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) && x.successors.length === 0);
+        if (isCall && (branchArgFed.has(r) || ridesEdge(r, orderSensitiveAfter))) {
           materialize.add(op);
           continue;
         }
