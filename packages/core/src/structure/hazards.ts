@@ -787,6 +787,23 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // that check plus the body's own defs and params covers every way the name is still in use.
     // The loop's OWN variables are left to `dest-not-loop-variable` — a header param is also a
     // body param, so the two gates partition the names instead of overlapping.
+    //
+    // A value with NO name is in use under the name too when it renders through it: live into the
+    // header, it is inlined inside the loop and spells its operands' names there. agbcc hoists `k &
+    // 3` of `H[k & 3] = …` ahead of a loop that reuses `k`'s register for `s`, and the exit copy of
+    // `s`, offered `k`'s name and sunk into the body, would overwrite the `a3` that `H[a3 & 3]` reads.
+    // Reading `self` is reading the same value, not another one under its name.
+    const rendersName = (w: Value, name: string, self: Value, seen: Set<Value>): boolean => {
+      if (seen.has(w)) {
+        return false;
+      }
+      seen.add(w);
+      const n = varName.get(w);
+      if (n !== undefined) {
+        return n === name && w !== self;
+      }
+      return (defs.get(w)?.operands ?? []).some((o) => rendersName(o, name, self, seen));
+    };
     const busyInLoop = (name: string, self: Value): boolean => {
       for (const [v, n] of varName) {
         if (n !== name || v === self || header.params.includes(v)) {
@@ -796,7 +813,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
           return true;
         }
       }
-      return false;
+      return [...liveIn.get(header)!].some((w) => !varName.has(w) && rendersName(w, name, self, new Set()));
     };
     // Everything that stops `a` from being REBUILT inside the body. Walks the def-tree
     // where `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which

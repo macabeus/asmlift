@@ -809,6 +809,27 @@ describe('sinkablePreUpdateSlots', () => {
     );
   });
 
+  test('an UNNAMED value live into the header that renders through the destination name is busy', () => {
+    // `k & 3`, hoisted ahead of the loop: it has no name of its own, so it is inlined inside the
+    // body and reads `v1` there — a copy into `v1` sunk into the body would change what it reads.
+    const { p, q, header, exit, latch, body } = scaffold();
+    const k = v();
+    const hoisted = v();
+    const op = mkOp('and', { operands: [k], results: [hoisted] });
+    const pre: Block = { params: [], ops: [op] };
+    const h = make({
+      defs: new Map([[hoisted, op]]),
+      opBlock: new Map([[op, pre]]),
+      varName: names([p, 'v0'], [q, 'v1'], [k, 'v1']),
+      liveIn: new Map([[header, new Set([hoisted])]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']), ablated)).toEqual(
+      new Map([[0, null]]),
+    );
+  });
+
   test('a value under the destination name DEFINED in the body counts as busy too', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const other = v();

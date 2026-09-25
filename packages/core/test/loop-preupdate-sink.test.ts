@@ -591,3 +591,46 @@ test('the named call is current at the copy, and the exit value is rebuilt behin
       '        } while (v3 != 0);\n        a2 = v0 + v1;\n',
   );
 });
+
+// A NAME THE BODY STILL READS THROUGH A HOISTED VALUE. agbcc, `int s = k; … do { t = H[n & 3]; s =
+// t + u; H[k & 3] = t ^ s; u = p[n & 3]; } while (--n); return m - u + s;`: `k & 3` is computed once
+// ahead of the loop (%9), and the loop reuses `k`'s register for `s`, so the exit merge is offered
+// `k`'s name `a3`. The unnamed %9 is inlined into the body as `a3 & 3`, and a copy of `s` sunk
+// there would overwrite the `a3` it reads on the next iteration. The control indexes the store
+// by `n & 3` instead — one operand — so nothing hoisted reads `a3` and the copy sinks.
+const HOISTED_READS_DEST = `fn hoistdest {
+^bb0(%0: s32*, %1: s32, %2: s32, %3: s32):
+  %4: s32 = const {value=0}
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_sle %1, %5
+  cond_br %6, ^bb3(%4, %3), ^bb1()
+^bb1():
+  %7: s32* = gaddr {sym="H"}
+  %8: s32 = const {value=3}
+  %9: s32 = and %3, %8
+  br ^bb2(%1, %4)
+^bb2(%10: s32, %11: s32):
+  %12: s32 = and %10, %8
+  %13: s32 = aload %7, %12 {elemSize=4, signed=true}
+  %14: s32 = add %13, %11
+  %15: s32 = xor %13, %14
+  astore %7, %9, %15 {elemSize=4}
+  %16: s32 = aload %0, %12 {elemSize=4, signed=true}
+  %17: s32 = const {value=1}
+  %18: s32 = sub %10, %17
+  %19: s32 = const {value=0}
+  %20: u32 = icmp_ne %18, %19
+  cond_br %20, ^bb2(%18, %16), ^bb3(%16, %14)
+^bb3(%21: s32, %22: s32):
+  %23: s32 = sub %2, %21
+  %24: s32 = add %23, %22
+  ret %24
+}
+`;
+
+test('a copy is not sunk into a name a hoisted value still reads inside the loop', () => {
+  expect(() => emit(HOISTED_READS_DEST)).toThrow(/reads a pre-update loop variable/);
+  const control = HOISTED_READS_DEST.replace('astore %7, %9, %15', 'astore %7, %12, %15');
+  expect(control).not.toBe(HOISTED_READS_DEST);
+  expect(emit(control)).toMatch(/do \{[^}]*\n\s+a3 = v\d+ \+ v\d+;[^}]*\} while/);
+});
