@@ -118,3 +118,51 @@ test('parseSpec rejects malformed specs with readable messages', () => {
     parseSpec('{"method":"f","retType":{"base":"int","ptr":0},"params":[],"classes":{"V":{"fields":[{}]}}}'),
   ).toThrow(/class "V"/);
 });
+
+// A FLOAT, in both auto-derived paths. The C-symbol path spells the lifted types, and a float is not
+// the `int` default; the demangled path binds by register FILE, because the PowerPC lift puts every
+// float after the integers (`float g(float x, int n)` lifts as `(s32 a0, float a1)`).
+const FADD_MWCC = '00000000 <fadd>:\n   0:\tfadds\tf1,f1,f2\n   4:\tblr\n';
+const FADD_IDO = '00000000 <fadd>:\n   0:\tjr\tra\n   4:\tadd.s\t$f0,$f12,$f14\n';
+const G_FFI = '00000000 <g__Ffi>:\n   0:\tcmpwi\tr3,0\n   4:\tbnelr\n   8:\tfneg\tf1,f1\n   c:\tblr\n';
+const cpp = (sym: string, asm: string, target: typeof PPC_MWCC) => {
+  const spec = deriveSpec(sym, decompile(sym, asm, target, { onGap: 'annotate' }).sfn);
+  return decompile(sym, asm, target, { backend: cppBackend(spec), onGap: 'annotate' }).source;
+};
+
+test.each([
+  ['mwcc', FADD_MWCC, PPC_MWCC],
+  ['ido', FADD_IDO, MIPS_IDO],
+])('a float free function is declared float, not int (%s)', (_tc, asm, target) => {
+  expect(irToCpp(T.f32())).toEqual({ base: 'float', ptr: 0 });
+  expect(cpp('fadd', asm, target)).toBe('float fadd(float a0, float a1) {\n    return a0 + a1;\n}\n');
+});
+
+test('a demangled signature binds its float to the lifted float, whatever the ABI sort did', () => {
+  expect(cpp('g__Ffi', G_FFI, PPC_MWCC)).toBe(
+    'float g(float a, int b) {\n    if (b == 0) {\n        return -a;\n    } else {\n        return a;\n    }\n}\n',
+  );
+});
+
+// A demangle whose float count is not the lift's is a false positive, like an arity mismatch.
+test('a demangled float count the lift does not have falls back to the free function', () => {
+  const spec = deriveSpec('g__Fii', decompile('g__Fii', G_FFI.replace('g__Ffi', 'g__Fii'), PPC_MWCC).sfn);
+  expect(spec.method).toBe('g__Fii');
+  expect(spec.params.map((p) => p.type.base)).toEqual(['int', 'float']);
+});
+
+test('a user spec that disagrees with the lift on the float parameters is refused', () => {
+  const spec = parseSpec(
+    JSON.stringify({
+      method: 'g',
+      retType: { base: 'float', ptr: 0 },
+      params: [
+        { name: 'x', type: { base: 'int', ptr: 0 } },
+        { name: 'n', type: { base: 'int', ptr: 0 } },
+      ],
+    }),
+  );
+  expect(() => decompile('g__Ffi', G_FFI, PPC_MWCC, { backend: cppBackend(spec) })).toThrow(
+    /the spec's floating-point parameters do not match the lifted function's/,
+  );
+});
