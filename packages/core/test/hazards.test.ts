@@ -637,8 +637,8 @@ describe('sinkablePreUpdateSlots', () => {
 
   // TWO SLOTS, ONE TREE. The exit edge hands `e = cb(p) + p` to two merge params, so each sunk copy
   // rebuilds it: for a READ that is one extra load, for a CALL it is `cb` run twice per iteration.
-  // Nothing here refuses the call: the effects contract counts it and declines the loop
-  // (loop-preupdate-sink.test.ts), so both kinds sink both slots at this level.
+  // Nothing here refuses the call: the analysis names a call that rides an edge copy, so it never
+  // reaches the sink inlined (loop-preupdate-sink.test.ts), and both kinds sink both slots here.
   const twoSlots = (opcode: 'call' | 'load') => {
     const { p, q, header, exit, latch, body } = scaffold();
     const q2 = v();

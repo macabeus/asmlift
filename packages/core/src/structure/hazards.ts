@@ -26,8 +26,8 @@
 // rather than refusing the opcode. At the def's own position nothing is speculated at all: every op
 // under the arg dominates that point, so the copy runs only on iterations that evaluated the whole
 // tree — the question reduces to ORDER, and to ORDER only against the ops that run between each
-// one and the copy in the asm but on the other side of it in the C (`movesPast`). Opening the body instead, both hazards are live for the
-// whole body, and the blanket refusal is the answer.
+// one and the copy in the asm but on the other side of it in the C (`movesPast`). Opening the body
+// instead, both hazards are live for the whole body, and the blanket refusal is the answer.
 //
 // And every name the rebuilt expression reads must still denote the same value there. A loop
 // variable does: the update sits at the bottom, so anywhere ahead of it the name holds exactly the
@@ -854,8 +854,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // either nothing order-sensitive lies between the two homes, or the second slot is refused and
     // the edge stands down whole. It costs a spelling; only a `volatile` qualifier would make the
     // extra access observable, and that qualifier is minted by a variation the differ referees
-    // (l3/volatileptr.ts), never by the default candidate. For a CALL it is a second execution,
-    // which `assertEffectsPreserved` (contracts.ts) counts on the path and declines.
+    // (l3/volatileptr.ts), never by the default candidate. For a CALL it would be a second
+    // execution; the analysis names a call that rides an edge copy, and `assertEffectsPreserved`
+    // (contracts.ts) counts on the path whatever reaches here anyway.
     const movesPast = (d: Op, home: Op, tree: ReadonlySet<Op>): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);

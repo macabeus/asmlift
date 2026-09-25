@@ -1851,15 +1851,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // return t; } return 0;` gives `bl f2` ahead of the `cmp`, and inlined at the edge the
         // recovered C calls `f2` only in the `else`; a `switch_br` arm hides it the same way.
         // Materializing puts it back at the position the asm executed it. Sole-use only in
-        // practice — a second use already materialized above — and it is 0 of 2288 sa3 functions,
-        // 2 of 412 klonoa ones.
+        // practice — a second use already materialized above.
         //
-        // And the same under a pure op (`ridesEdge`): `f1(a0) - v` riding a do-while's exit edge
-        // renders the call after the loop, once, where the body ran it every iteration; riding
-        // the back edge it renders in the update copy at the foot, behind statements the asm ran
-        // after it — `do { r = *q + cb(q); … } while (--n);` rebuilt ahead of the update would
-        // otherwise spell the call with the load it preceded; and riding two edge args it renders
-        // twice.
+        // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
+        // do-while's exit edge renders the call after the loop, once, where the body ran it every
+        // iteration; riding the back edge it renders in the update copy at the foot of the body,
+        // behind statements the asm ran after it; riding two edge args it renders twice.
         if (isCall && ridesEdge(r)) {
           materialize.add(op);
           continue;
