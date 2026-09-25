@@ -749,12 +749,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // other, so an emitter free to re-derive its own would be free to place a copy where nothing
   // cleared it — silently, since the statement is still emitted and still reads names that resolve.
   //
-  // `PREUPDATE_SINK_GATES` holds the per-candidate refusals, ablatable one at a time. Three rules
-  // are properties of the EDGE rather than of a candidate and stay here. Two because the exit edge
-  // is a PARALLEL copy, so splitting it across two program points must not let two slots claim one
-  // name, nor let a slot that stays behind read a name the body now writes first. And one because
-  // of how often the copies RUN: two sunk slots must not spell one inlined effect, which would run
-  // once per copy.
+  // `PREUPDATE_SINK_GATES` holds the per-candidate refusals, ablatable one at a time. Two rules are
+  // properties of the EDGE rather than of a candidate and stay here: the exit edge is a PARALLEL
+  // copy, so splitting it across two program points must not let two slots claim one name, nor let
+  // a slot that stays behind read a name the body now writes first.
   //
   // The third parallel-copy question — one sunk slot's REBUILT expression reading another sunk
   // slot's destination — needs no rule, and the copies are emitted sequentially because of it.
@@ -827,14 +825,14 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // NOT A RESTATEMENT OF WHAT `materialize` ALREADY BOUNDS, which is the reading to guard against.
     // That pass NAMES an order-sensitive value whose consumer is not adjacent to it, and a named
-    // leaf is refused by `arg-reads-current-names` before this scan runs — so on a ONE-op tree the
-    // two bounds do coincide. They part as soon as the tree has two ops, because a sibling effect
-    // inlined into the SAME statement is no barrier to that pass: `t = *q; r = t + cb(q)` compiles
-    // to `load, call, add`, where the call IS adjacent to its consumer and the LOAD is what this
-    // turns away. That is the `preupdate_exit_load` row, and the only refusal this arm has. The
-    // other order, `*q + cb(q)` as `call, load, add`, no longer reaches here: the analysis names a
-    // call the rebuild would carry past a read at its own position (`callsAheadOfExitCopy`), and
-    // the tree then reads it by name.
+    // leaf is refused by `arg-reads-current-names` before this scan runs. But it measures the
+    // distance to the TERMINATOR, which it takes for one statement holding every edge copy, and the
+    // copy is rebuilt at `home`, ahead of the others: a call ahead of a load, both inlined into the
+    // terminator's copies, bars nothing there and is a crossing here.
+    //
+    // AND NOT ONLY BETWEEN. An order-sensitive op AHEAD of `d` that the rebuilt tree does not hold
+    // is crossed too when it RENDERS after the home (`rendersAfter`) — a call inlined into an update
+    // copy at the foot of the body, which the asm ran before the read the copy now spells at `home`.
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that
@@ -847,45 +845,52 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // THE BETWEEN-SET DOES NOT EXEMPT THE TREE BEING REBUILT, where `pattern/engine.ts`'s
     // index-order scan does exempt its own cone — a cone member is inlined into the very expression
-    // that moves, so it is no barrier to it. Two order-sensitive ops under one arg move together
-    // and keep their internal order, so the reading here is the narrower one. Left narrow on
-    // purpose: the exemption is a claim about a tree moving as a unit and no row offers a witness,
-    // while the whole between-scan refuses exactly one corpus row as it stands.
+    // that moves, so it is no barrier to it. Two order-sensitive ops under one arg move together,
+    // but the compiler orders them inside the expression, not the asm: every corpus compiler calls
+    // before it reads (analysis.ts, the barrier scan), so a read ahead of a call in one tree comes
+    // back behind it. Left narrow on purpose; the AHEAD arm does exempt the tree, because a member
+    // ahead of `d` is weighed by this same scan from its own side.
     //
     // PER SLOT, and two slots sharing one order-sensitive def spell it TWICE — one `ldr` feeding
     // two exit args becomes two reads in the emitted C. For a READ that is legal by this same scan:
     // either nothing order-sensitive lies between the two homes, or the second slot is refused and
     // the edge stands down whole. It costs a spelling; only a `volatile` qualifier would make the
     // extra access observable, and that qualifier is minted by a variation the differ referees
-    // (l3/volatileptr.ts), never by the default candidate. For an EFFECT it is not a spelling: a
-    // call spelled in two copies runs twice per iteration, so an edge whose sunk slots share an
-    // inlined effect stands down whole (`effectsOf`, below).
-    const movesPast = (d: Op, home: Op): boolean => {
+    // (l3/volatileptr.ts), never by the default candidate. For a CALL it is a second execution,
+    // which `assertEffectsPreserved` (contracts.ts) counts on the path and declines.
+    const movesPast = (d: Op, home: Op, tree: ReadonlySet<Op>): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
-      return i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+      if (i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode))) {
+        return true;
+      }
+      return latch.ops.slice(0, i).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode) && !tree.has(o) && rendersAfter(o, p));
     };
-    // The EFFECTS a rebuilt tree spells inline — walked where `blockersOf` walks, stopping at a
-    // loop variable and at a named value, which render as their names.
-    const effectsOf = (a: Value): Set<Op> => {
-      const seen = new Set<Value>();
-      const found = new Set<Op>();
-      const walk = (x: Value): void => {
-        if (seen.has(x) || header.params.includes(x) || varName.has(x)) {
-          return;
+    // Does latch op `o` RENDER after index `p`? Where it renders is its own index when it is a
+    // statement — a store, a named def, a dead one — and otherwise the one consumer it is inlined
+    // into, followed down. The terminator's index stands for every copy it carries, and those land
+    // at or after the foot of the body; an op with several consumers, or none in the latch, has no
+    // one position, and counts as after.
+    const rendersAfter = (o: Op, p: number): boolean => {
+      let cur = o;
+      for (;;) {
+        const r = cur.results[0];
+        const uses = r === undefined ? [] : (useSitesOf.get(r) ?? []);
+        if (
+          cur.successors.length > 0 ||
+          cur.opcode === 'store' ||
+          cur.opcode === 'astore' ||
+          materialize.has(cur) ||
+          uses.length === 0
+        ) {
+          return opBlock.get(cur) !== latch || latch.ops.indexOf(cur) > p;
         }
-        seen.add(x);
-        const d = defs.get(x);
-        if (!d) {
-          return;
+        const consumers = new Set(uses.map((u) => u.op));
+        if (consumers.size !== 1) {
+          return true;
         }
-        if (EFFECTFUL_OPS.has(d.opcode)) {
-          found.add(d);
-        }
-        d.operands.forEach(walk);
-      };
-      walk(a);
-      return found;
+        cur = [...consumers][0];
+      }
     };
     // A body-defined name that IS current where the copy lands: a def the analysis NAMED (so it
     // renders as a statement at its own index), in the latch, strictly ahead of the copy's home.
@@ -899,16 +904,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     //
     // AND ONLY A CALL THE ANALYSIS NAMED FOR THIS SINK (`callsAheadOfExitCopy`, analysis.ts), which
     // is `preupdate_exit_order`'s shape, and not every materialized def the position argument would
-    // cover. A differential fuzz over generated self-loops (base vs head, 14 structure variations)
-    // found the wider reading unlocking loops that other rules then spell wrong — a loop variable
-    // adopted in place while a read of its old value still renders after it, a call spelled in two
-    // update copies — so the name this admits is the one whose rule was built with the sink. And
-    // only into a tree that spells no effect of its own (`effectsOf`): the between-scan orders the
-    // tree against the latch ops between its members and the home, but an inlined CALL in it is
-    // also ordered against the calls the analysis inlined into the terminator's OTHER copies —
-    // the update copies at the foot of the body — which the scan does not see, and the same fuzz
-    // found a sunk `f1(v5)` overtaking an update's `f1(a0)` that the asm called first. The row's
-    // tree, `*v1 + v0`, reads memory and a name and calls nothing.
+    // cover.
     const writtenAheadOf = (x: Value, home: Op | null): boolean => {
       const d = defs.get(x);
       if (home === null || d === undefined || !materialize.has(d) || !exitCopyCalls.has(d)) {
@@ -920,7 +916,18 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
       const found = new Set<ArgBlocker>();
-      const effectFree = effectsOf(a).size === 0;
+      const tree = new Set<Op>();
+      const collect = (x: Value): void => {
+        const d = defs.get(x);
+        if (seen.has(x) || header.params.includes(x) || varName.has(x) || d === undefined) {
+          return;
+        }
+        seen.add(x);
+        tree.add(d);
+        d.operands.forEach(collect);
+      };
+      collect(a);
+      seen.clear();
       const walk = (x: Value): void => {
         if (seen.has(x)) {
           return;
@@ -931,11 +938,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         }
         const n = varName.get(x);
         if (n !== undefined) {
-          if (
-            (definedInBody(x) && !(effectFree && writtenAheadOf(x, home))) ||
-            headerNames.has(n) ||
-            busyInLoop(n, x)
-          ) {
+          if ((definedInBody(x) && !writtenAheadOf(x, home)) || headerNames.has(n) || busyInLoop(n, x)) {
             found.add('stale-name');
           }
           return;
@@ -947,7 +950,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         }
         // A respelled def is opaque — what it renders is a memory read this walk never sees — so it
         // is refused at every position rather than measured.
-        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home)))) {
+        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home, tree)))) {
           found.add('order-sensitive');
         }
         d.operands.forEach(walk);
@@ -976,15 +979,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     const names = new Set([...cleared.values()].map((c) => c.name));
     if (cleared.size === 0 || names.size !== cleared.size) {
       return none;
-    }
-    const spelled = new Set<Op>();
-    for (const j of cleared.keys()) {
-      for (const e of effectsOf(exitArgs[j])) {
-        if (spelled.has(e)) {
-          return none;
-        }
-        spelled.add(e);
-      }
     }
     return exitArgs.some((a, j) => !cleared.has(j) && readsClobbered(a, sub, names))
       ? none

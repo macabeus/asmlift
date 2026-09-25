@@ -488,10 +488,10 @@ describe('sinkablePreUpdateSlots', () => {
     expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
   });
 
-  test('a tree that also spells a call of its own still refuses at arg-reads-current-names', () => {
-    // The same name ahead of the home, under a tree that inlines a second call: that call is
-    // rebuilt at the home, and the analysis ordered it against the terminator's other copies, which
-    // the between-scan does not see. The position argument covers the name, not the tree.
+  test('a tree that spells a call of its own is ordered like any other member', () => {
+    // The same name ahead of the home, under a tree that inlines a second call: `v2 = cb(v0); v1 =
+    // v2 + cb2(v0) + v0;`. The second call is rebuilt at the home with nothing order-sensitive
+    // between it and there, and the first renders at its own index, ahead of both — the asm's order.
     const { p, q, header, exit, latch } = scaffold();
     const mid = v();
     const c2 = v();
@@ -519,10 +519,65 @@ describe('sinkablePreUpdateSlots', () => {
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
-      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
+  });
+
+  // AN OP AHEAD OF A MEMBER THAT RENDERS BEHIND THE HOME. `c = cb(v0); r = *v0 + v0; *v0 = c + 1;`
+  // in the asm: the call runs first, and is inlined into the store two statements down. The load
+  // rebuilt at the add would run ahead of it — nothing lies BETWEEN the load and the home, and the
+  // crossing is only visible where the call renders. Named, the call renders at its own index and
+  // the order holds.
+  const aheadRendersBehind = (callNamed: boolean) => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const c = v();
+    const rd = v();
+    const e = v();
+    const s = v();
+    const cOp = bodyOp(header, mkOp('call', { operands: [p], results: [c], attrs: { target: 'cb' } }));
+    const rdOp = bodyOp(
+      header,
+      mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
+    );
+    const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
+    const sOp = bodyOp(header, mkOp('add', { operands: [c], results: [s] }));
+    const stOp = bodyOp(header, mkOp('store', { operands: [p, s], attrs: { off: 0, width: 4 } }));
+    const h = make({
+      defs: new Map([
+        [c, cOp],
+        [rd, rdOp],
+        [e, op],
+        [s, sOp],
+      ]),
+      opBlock: new Map([
+        [cOp, header],
+        [rdOp, header],
+        [op, header],
+        [sOp, header],
+        [stOp, header],
+      ]),
+      useSitesOf: new Map([
+        [c, [{ blk: header, idx: 3, op: sOp }]],
+        [s, [{ blk: header, idx: 4, op: stOp }]],
+      ]),
+      materialize: callNamed ? new Set([cOp]) : new Set(),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    return {
+      op,
+      run: (gates?: readonly Gate<SinkCandidate>[]) =>
+        h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']), gates),
+    };
+  };
+
+  test('a member is refused when an op ahead of it renders behind the home', () => {
+    const { op, run } = aheadRendersBehind(false);
     expect(run()).toEqual(new Map());
-    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Map([[0, op]]));
+    const named = aheadRendersBehind(true);
+    expect(named.run()).toEqual(new Map([[0, named.op]]));
   });
 
   test('a latch def ahead of the home under a LOOP VARIABLE name still refuses', () => {
@@ -584,7 +639,8 @@ describe('sinkablePreUpdateSlots', () => {
 
   // TWO SLOTS, ONE TREE. The exit edge hands `e = cb(p) + p` to two merge params, so each sunk copy
   // rebuilds it: for a READ that is one extra load, for a CALL it is `cb` run twice per iteration.
-  // The edge stands down whole for an effect; the control swaps the call for a load and sinks both.
+  // Nothing here refuses the call: the effects contract counts it and declines the loop
+  // (loop-preupdate-sink.test.ts), so both kinds sink both slots at this level.
   const twoSlots = (opcode: 'call' | 'load') => {
     const { p, q, header, exit, latch, body } = scaffold();
     const q2 = v();
@@ -613,9 +669,8 @@ describe('sinkablePreUpdateSlots', () => {
     return { op, run: () => h.sinkablePreUpdateSlots(header, exit, [e, e], body, latch, empty, new Set(['v0'])) };
   };
 
-  test('two sunk slots sharing one inlined CALL stand the edge down', () => {
-    expect(twoSlots('call').run()).toEqual(new Map());
-    const { op, run } = twoSlots('load');
+  test.each(['call', 'load'] as const)('two slots sharing one inlined %s both sink', (opcode) => {
+    const { op, run } = twoSlots(opcode);
     expect(run()).toEqual(
       new Map([
         [0, op],

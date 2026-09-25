@@ -30,6 +30,8 @@ import { cBackend } from '../src/backend/c';
 import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import type { SFn } from '../src/l3/ast';
+import { structureChecked } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { StructureError, structure } from '../src/structure/structure';
@@ -479,9 +481,10 @@ test('a latch store of a loop variable reads it ahead of the update, with no arm
 });
 
 // ONE CALL, TWO EXIT SLOTS. The exit edge hands `f1(v2) + v2` to two merge params; sunk, each copy
-// rebuilds the tree and `f1` runs twice per iteration where the asm ran it once. The edge declines
-// instead. The control reads memory where the call was: two copies of a READ are two loads, a
-// spelling rather than a different program, and both slots sink.
+// rebuilds the tree and `f1` runs twice per iteration where the asm ran it once. The effects
+// contract counts the calls on the path and declines. The control reads memory where the call was:
+// two copies of a READ are two loads, a spelling rather than a different program, and both slots
+// sink.
 const ONE_CALL_TWO_SLOTS = `fn dupcall {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -504,7 +507,13 @@ const ONE_CALL_TWO_SLOTS = `fn dupcall {
 `;
 
 test('two sunk exit slots never spell one call twice', () => {
-  expect(() => emit(ONE_CALL_TWO_SLOTS)).toThrow(/reads a pre-update loop variable/);
+  const checked = (ir: string): SFn => {
+    const fn = parse(ir);
+    verify(fn);
+    recoverTypes(fn);
+    return structureChecked(fn, {});
+  };
+  expect(() => checked(ONE_CALL_TWO_SLOTS)).toThrow(/emitted 2 calls to 'f1' on one path/);
   const read = ONE_CALL_TWO_SLOTS.replace('call %5 {target="f1"}', 'load %5 {off=0, signed=true, width=4}');
   expect(read).not.toBe(ONE_CALL_TWO_SLOTS);
   const body = emit(read).split('do {')[1].split('} while')[0];
