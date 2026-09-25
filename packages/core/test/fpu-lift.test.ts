@@ -301,7 +301,7 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
   });
 });
 
-// ONE SLOT READING FOR BOTH FILES (frontend/fpu.ts `argSlots`, `settleArgSlots`). Compiled from
+// ONE SLOT READING FOR BOTH FILES (frontend/fpu.ts `fpuArgSlots`). Compiled from
 //   float hole4(float a, float b, int c, int d){ return d ? a : b; }
 //   float hole2(float a, int b, int c){ return c ? a : -a; }
 //   int gap(int a, int b, int c){ return a + c; }
@@ -385,6 +385,80 @@ describe('an unread argument keeps its slot, in the file the ABI puts it in', ()
     const src = lift(sym, asm, target);
     expect(src).toContain(signature);
     expect(src).toContain(body);
+  });
+});
+
+// WHICH FILE A HOLE COMES FROM DEPENDS ON WHAT IS READ, not on the slot alone (frontend/fpu.ts
+// `fpuArgSlots`, rule 3). Compiled with GCC_KMC_TOOLCHAIN's flags from
+//   float fb(float a, float b){ return b; }
+//   int ib(int a, int b){ return b; }
+// Slot 0 is `$f12` for the first and `a0` for the second. Either fixed choice mis-signs one of them,
+// and `s32 ib(float a0, s32 a1)` still recompiles to `ib`'s bytes. And with the synthetic tier's
+// mwcc_242_81 flags,
+//   float lpf(int *p, int n, float a){ int i, v; for (i = 0; i < n; i++) { v = p[i]; if (v <= 0) break; }
+//                                      return v == 0 ? a : a * a; }
+// reads `r0` before writing it on the zero-trip path. A live-in no argument arrives in sorts after
+// every argument: ranked first it takes `a0`, and `p` becomes `a1` — the pointer read would be `n`.
+describe('a hole takes its file from the reads around it', () => {
+  test.each([
+    [
+      'o32: slot 0 below a float read is a float',
+      'fb',
+      '   0:\tjr\tra\n   4:\tmov.s\t$f0,$f14\n',
+      'float fb(float a0, float a1)',
+    ],
+    [
+      'o32: slot 0 below an integer read is an integer',
+      'ib',
+      '   0:\tjr\tra\n   4:\tmove\tv0,a1\n',
+      's32 ib(s32 a0, s32 a1)',
+    ],
+  ])('%s', (_label, sym, body, signature) => {
+    expect(lift(sym, objdump(sym, body), MIPS_GCC)).toContain(signature);
+  });
+
+  test('EABI: a non-argument live-in sorts after the float argument', () => {
+    const LPF = objdump(
+      'lpf',
+      '   0:\tmtctr\tr4\n   4:\tcmpwi\tr4,0\n   8:\tble\t20 <lpf+0x20>\n   c:\tlwz\tr0,0(r3)\n' +
+        '  10:\tcmpwi\tr0,0\n  14:\tble\t20 <lpf+0x20>\n  18:\taddi\tr3,r3,4\n  1c:\tbdnz\tc <lpf+0xc>\n' +
+        '  20:\tcmpwi\tr0,0\n  24:\tbeqlr\n  28:\tfmuls\tf1,f1,f1\n  2c:\tblr\n',
+    );
+    expect(lift('lpf', LPF, PPC_MWCC)).toContain('float lpf(s32 *a0, s32 a1, float a2, s32 a3)');
+  });
+});
+
+// A FUNCTION WHOSE FIRST INSTRUCTION HEADS A LOOP takes its arguments at the preheader the frontend
+// inserts ahead of it, so float arguments are completed and ordered there like any other. Compiled
+// with GCC_KMC_TOOLCHAIN's flags from
+//   int si(int a, int b, int c, int d){ while (d-- > 0) { } return a * b; }
+//   float sf2(float a, float b, int c, int d){ while (d-- > 0) { } return a * b; }
+// and with the synthetic tier's mwcc_242_81 flags from
+//   float lh(float a, int n){ do a = a * a; while (--n); return a; }
+describe('an entry block that heads a loop', () => {
+  test.each([
+    [
+      'si',
+      MIPS_GCC,
+      '   0:\tmove\tv0,a3\n   4:\tbgtz\tv0,0 <si>\n   8:\taddiu\ta3,a3,-1\n   c:\tnop\n' +
+        '  10:\tmult\ta0,a1\n  14:\tmflo\tv0\n  18:\tjr\tra\n  1c:\tnop\n',
+      's32 si(s32 a0, s32 a1, s32 a2, s32 a3) {\n    do {\n    } while (a3-- > 0);\n    return a0 * a1;\n}\n',
+    ],
+    [
+      'sf2',
+      MIPS_GCC,
+      '   0:\tmove\tv0,a3\n   4:\tbgtz\tv0,0 <sf2>\n   8:\taddiu\ta3,a3,-1\n   c:\tjr\tra\n  10:\tmul.s\t$f0,$f12,$f14\n',
+      'float sf2(float a0, float a1, s32 a2, s32 a3) {\n    do {\n    } while (a3-- > 0);\n    return a0 * a1;\n}\n',
+    ],
+    [
+      'lh',
+      PPC_MWCC,
+      '   0:\tfmuls\tf1,f1,f1\n   4:\taddic.\tr3,r3,-1\n   8:\tbne\t0 <lh>\n   c:\tblr\n',
+      'float lh(s32 a0, float a1) {\n    float v0;\n    s32 v1;\n    v0 = a1;\n    v1 = a0;\n    do {\n' +
+        '        v0 = v0 * v0;\n        v1 = v1 + -1;\n    } while (v1 != 0);\n    return v0;\n}\n',
+    ],
+  ])('%s lifts', (sym, target, body, expected) => {
+    expect(lift(sym, objdump(sym, body), target)).toBe(expected);
   });
 });
 

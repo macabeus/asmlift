@@ -37,7 +37,7 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  `this` (SFn.params[0]). Bound by register FILE, then by position within it — not by position
  *  alone, because the lifted order is the ABI sort's and a float does not always sort where the
  *  source put it: under the PowerPC EABI the files count independently and every float argument
- *  ranks after the integers (frontend/fpu.ts `argSlots`), so `float g(float x, int n)` lifts as
+ *  ranks after the integers (frontend/fpu.ts `fpuArgSlots`), so `float g(float x, int n)` lifts as
  *  `(s32 a0, float a1)`. Under o32 a lifted float argument always leads, so the two bindings agree.
  *  NULL when the spec and the lift disagree on how many floating-point parameters there are: no
  *  binding of the rest is then trustworthy. */

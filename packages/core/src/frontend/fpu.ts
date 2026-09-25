@@ -10,17 +10,18 @@
 // add. `docs/floating-point.md` §2 measures that.
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
-import type { SsaBuilder } from './ssa';
+import type { ArgSlots } from './ssa';
 
 export type Fpu = NonNullable<TargetDescription['fpu']>;
 
-/** THE ARGUMENT SLOTS, read once per target for both register files: which slot an argument register
- *  is, and which register a slot is. Naming is positional (`a0`, `a1`, … in `abiSortEntryParams`
- *  order), so the ORDER below and the HOLES `settleArgSlots` fills are two uses of one reading — kept
- *  in one place because under `'leading'` the files share a slot sequence, and a hole filled from
- *  the wrong file is a signature that compiles and binds its caller's arguments one slot off.
+/** THE ARGUMENT SLOTS OF BOTH REGISTER FILES, as the one `ArgSlots` the MIPS and PowerPC frontends
+ *  hand to `mintArgSlotHoles` and `abiSortEntryParams` (frontend/ssa.ts). Naming is positional
+ *  (`a0`, `a1`, … in sort order), so the ORDER `slotOf` gives and the HOLES `holes` fills are two
+ *  uses of one reading — kept in one place because under `'leading'` the files share a slot
+ *  sequence, and a hole filled from the wrong file is a signature that compiles and binds its
+ *  caller's arguments one slot off.
  *
- *  `rank` is the slot, with one exception: under `'separate'` a float argument ranks after every
+ *  `slotOf` is the slot, with one exception: under `'separate'` a float argument ranks after every
  *  integer one. THAT ORDER IS A SPELLING, NOT A READING. Under the PowerPC EABI the two files count
  *  independently, so `float g(int *p, float b)` and `float g(float b, int *p)` compile to one object
  *  and nothing in it says which the source wrote. Either spelling reproduces the bytes in a unit
@@ -29,37 +30,10 @@ export type Fpu = NonNullable<TargetDescription['fpu']>;
  *  reads that declaration (`bindSpecParams`). In C the int-first spelling of
  *  `float mix(float a, int n);` is a redeclaration mwcc refuses: a noncompile, not a wrong program.
  *  Ranking by the function's own declared parameters here would close it, once `proto.ts` can
- *  size a float. A key in neither file ranks first (-1), the tie-break both of these frontends
- *  already give a non-ABI live-in. */
-export function argSlots(
-  fpu: Fpu | undefined,
-  argRegs: readonly string[],
-): {
-  slotOf(key: string): { slot: number; float: boolean } | null;
-  rank(key: string): number;
-} {
-  const slotOf = (key: string) => {
-    const gpr = argRegs.indexOf(key);
-    if (gpr >= 0) {
-      return { slot: gpr, float: false };
-    }
-    const fp = fpu?.argRegs.indexOf(key) ?? -1;
-    return fp >= 0 ? { slot: fp, float: true } : null;
-  };
-  return {
-    slotOf,
-    rank: (key) => {
-      const s = slotOf(key);
-      return s === null ? -1 : s.float && fpu?.slots === 'separate' ? argRegs.length + s.slot : s.slot;
-    },
-  };
-}
-
-/** Settle the entry block's argument parameters — both files. Call it after every block is filled
- *  and BEFORE `ssa.finish()`, because it may add a parameter (`ensureParam`), and `finish` records
- *  evidence for every entry parameter.
+ *  size a float. A key in neither file is no slot (null), and sorts after every argument.
  *
- *  FOUR RULES, each a refusal or a parameter the ABI proves:
+ *  `holes` applies FOUR RULES to the keys the entry reads, each a refusal or a parameter the ABI
+ *  proves:
  *   1. A register of the FPU file that arrives at the entry is a float ARGUMENT, or the lift is
  *      refused. Nothing else in that file carries a caller's value: a read of `$f4` before any write
  *      is uninitialised storage or code this frontend has not followed, and minting a parameter for
@@ -71,75 +45,68 @@ export function argSlots(
  *      its own holes. Under `'leading'` (MIPS o32) a float argument is in `argRegs[k]` only while
  *      arguments 0..k are all floating, so a hole below the highest float read is a float, and one
  *      above it an integer — `float f(float a, float b, int c, int d){ return d ? a : b; }` reads
- *      `$f12`, `$f14` and `a3`, and its third argument is `a2`.
+ *      `$f12`, `$f14` and `a3`, and its third argument is `a2`. Which file a hole comes from thus
+ *      depends on what the function reads, which is why `ArgSlots` asks for the holes of a read
+ *      set rather than for the key of a slot: `int ib(int a, int b){ return b; }` reads only `a1`,
+ *      and its first argument is `a0`, not `$f12`.
  *   4. Under `'leading'` a float argument still takes the INTEGER slot it shadows, so an integer
  *      argument register read in one of those slots is a contradiction the ABI does not produce,
- *      and is refused rather than ranked.
- *
- *  An entry block that is itself a loop header takes its arguments as phis, which can be neither
- *  completed (`ensureParam`) nor ordered (`abiSortEntryParams`). An integer entry there is left as
- *  it arrived — KNOWN GAP: `int gh(int a, int b, int n){ do b = b * b; while (--n); return b; }` on
- *  mwcc binds `r4` as `a0` — and a float argument there refuses. That is not rare: it is mwcc's
- *  layout for the simplest float do-while (`float lh(float a, int n){ do a = a * a; while (--n);
- *  return a; }`). What closes both is a predecessor-less entry block carrying the parameters. */
-export function settleArgSlots(
+ *      and is refused rather than ranked. */
+export function fpuArgSlots(
   name: string,
-  ssa: Pick<SsaBuilder, 'irBlocks' | 'keyOf' | 'ensureParam'>,
   fpu: Fpu | undefined,
   argRegs: readonly string[],
   isFpKey: (key: string) => boolean,
-  entryHasPreds: boolean,
-): void {
-  const keys = ssa.irBlocks[0].params.map((p) => ssa.keyOf(p)).filter((k): k is string => k !== undefined);
-  const fpKeys = keys.filter(isFpKey);
-  for (const k of fpKeys) {
-    if (!fpu?.argRegs.includes(k)) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${k} is read before this function writes it, and no floating-point argument ` +
-          `arrives there — not modelled`,
-      );
+): ArgSlots {
+  const slotOf = (key: string): { slot: number; float: boolean } | null => {
+    const gpr = argRegs.indexOf(key);
+    if (gpr >= 0) {
+      return { slot: gpr, float: false };
     }
-  }
-  if (entryHasPreds) {
-    if (fpKeys.length > 0) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': a floating-point argument arrives at an entry block that is a loop header — not modelled`,
-      );
-    }
-    return;
-  }
-  const { slotOf } = argSlots(fpu, argRegs);
-  const read = keys.map(slotOf).filter((s) => s !== null);
-  const top = (float: boolean) => Math.max(-1, ...read.filter((s) => s.float === float).map((s) => s.slot));
-  const floatTop = top(true);
-  const intTop = top(false);
-  if (fpu?.slots === 'leading') {
-    const shadowed = read.find((s) => !s.float && s.slot <= floatTop);
-    if (shadowed) {
-      const k = shadowed.slot;
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${argRegs[k]} and ${fpu.argRegs[k]} both carry argument ${k} — a floating-point ` +
-          `argument takes the integer slot it shadows, so the ABI does not produce this — not modelled`,
-      );
-    }
-    for (let k = 0; k < Math.max(floatTop, intTop); k++) {
-      ssa.ensureParam(k <= floatTop ? fpu.argRegs[k] : argRegs[k], 0);
-    }
-    return;
-  }
-  for (let k = 0; k < floatTop; k++) {
-    ssa.ensureParam(fpu!.argRegs[k], 0);
-  }
-  for (let k = 0; k < intTop; k++) {
-    ssa.ensureParam(argRegs[k], 0);
-  }
+    const fp = fpu?.argRegs.indexOf(key) ?? -1;
+    return fp >= 0 ? { slot: fp, float: true } : null;
+  };
+  return {
+    slotOf: (key) => {
+      const s = slotOf(key);
+      return s === null ? null : s.float && fpu?.slots === 'separate' ? argRegs.length + s.slot : s.slot;
+    },
+    holes: (readKeys) => {
+      for (const k of readKeys.filter(isFpKey)) {
+        if (!fpu?.argRegs.includes(k)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': ${k} is read before this function writes it, and no floating-point argument ` +
+              `arrives there — not modelled`,
+          );
+        }
+      }
+      const read = readKeys.map(slotOf).filter((s) => s !== null);
+      const top = (float: boolean) => Math.max(-1, ...read.filter((s) => s.float === float).map((s) => s.slot));
+      const floatTop = top(true);
+      const intTop = top(false);
+      if (fpu?.slots === 'leading') {
+        const shadowed = read.find((s) => !s.float && s.slot <= floatTop);
+        if (shadowed) {
+          const k = shadowed.slot;
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': ${argRegs[k]} and ${fpu.argRegs[k]} both carry argument ${k} — a floating-point ` +
+              `argument takes the integer slot it shadows, so the ABI does not produce this — not modelled`,
+          );
+        }
+        return Array.from({ length: Math.max(0, floatTop, intTop) }, (_, k) =>
+          k <= floatTop ? fpu.argRegs[k] : argRegs[k],
+        );
+      }
+      return [...(fpu?.argRegs.slice(0, Math.max(0, floatTop)) ?? []), ...argRegs.slice(0, Math.max(0, intTop))];
+    },
+  };
 }
 
 /** Whether a function RETURNS a float: some instruction the frontend decodes writes the float return
  *  register, in a block the entry REACHES. Decided over the whole function, before any `ret` is
  *  emitted, because a function has one return type on every path — a path that leaves the register
  *  untouched returns the float argument that arrived there (PowerPC's `f1` is both), or refuses by
- *  `settleArgSlots`' rule 1. Reachable blocks only: `addi r3,r3,1; blr; fmr f1,f2` returns `r3`, and
+ *  `fpuArgSlots`' rule 1. Reachable blocks only: `addi r3,r3,1; blr; fmr f1,f2` returns `r3`, and
  *  the `fmr` past the `blr` is on no path of it.
  *
  *  And then the INTEGER return register is scratch, even where the function writes it. Both halves
