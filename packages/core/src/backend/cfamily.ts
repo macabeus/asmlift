@@ -29,6 +29,10 @@ import {
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
 const PREC: Record<BinOp, number> = {
+  'f*': 3,
+  'f/': 3,
+  'f+': 4,
+  'f-': 4,
   '*': 3,
   '/': 3,
   '/u': 3, // the unsigned twins spell as C's `/` and `%` (see C_SPELLING) — same precedence
@@ -64,6 +68,10 @@ const C_SPELLING: Partial<Record<BinOp, { token: string; signed: boolean }>> = {
   '%': { token: '%', signed: true },
   '%u': { token: '%', signed: false },
 };
+
+/** The float operators (l3/ast.ts BinOp) spell as C's own tokens and take no operand pin: C's
+ *  arithmetic over two floats is the IEEE operation the machine did. */
+const FLOAT_TOKEN: Partial<Record<BinOp, string>> = { 'f+': '+', 'f-': '-', 'f*': '*', 'f/': '/' };
 
 /** Spell a recovered type in the decomp C-family typedef vocabulary (`s32`/`u32`/`u8`/`T *`). */
 export function cType(t: IrType): string {
@@ -342,7 +350,8 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // A prefix operator: parenthesize under a POSTFIX parent (`(-a)[1]`), and parenthesize a
       // same-op nested `-` (`-(-a)`, never `--a` — C lexes that as predecrement).
       const inner = rec(e.e, 2);
-      const s = `${e.op}${e.op === '-' && inner.startsWith('-') ? `(${inner})` : inner}`;
+      const op = e.op === 'f-' ? '-' : e.op;
+      const s = `${op}${op === '-' && inner.startsWith('-') ? `(${inner})` : inner}`;
       return parentPrec < 2 ? `(${s})` : s;
     }
     // A gap marker spells as a call to the UNDEFINED macro ASMLIFT_ERROR("reason", args…) — the
@@ -367,7 +376,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // operand cast that says which of the pair it is.
       const pair = C_SPELLING[e.op];
       const [l, r] = pair ? pinnedOperands(e, pair.signed, vt) : [e.l, e.r];
-      const s = `${rec(l, p)} ${pair ? pair.token : e.op} ${rec(r, p - 1)}`;
+      const s = `${rec(l, p)} ${pair ? pair.token : (FLOAT_TOKEN[e.op] ?? e.op)} ${rec(r, p - 1)}`;
       return p > parentPrec ? `(${s})` : s;
     }
   }
