@@ -1310,7 +1310,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
-  /** Does a call's value `v` reach an edge argument through the ops it would be inlined into, and
+  /** Does `call`'s value reach an edge argument through the ops it would be inlined into, and
    *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
    *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does. The walk stops at a named op,
    *  which renders at its own position, and at another effect, which these same rules place.
@@ -1320,8 +1320,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  in the update copy at the foot of the body — and a forward edge carrying it too reads the loop
    *  variable that copy wrote — which moves the call only past what the latch runs after it:
    *  `s = s + g(i)` with nothing order-sensitive behind the call stays inline (`for (…) s = s +
-   *  g(i);`), and `after` is that question, asked by the caller. */
-  const ridesEdge = (v: Value, after: () => boolean): boolean => {
+   *  g(i);`). */
+  const ridesEdge = (call: Op): boolean => {
+    const blk = opBlock.get(call)!;
+    const after = (): boolean =>
+      blk.ops.slice(opIndex.get(call)! + 1).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) && x.successors.length === 0);
     let back = false;
     const seen = new Set<Value>();
     const walk = (x: Value): boolean => {
@@ -1343,7 +1346,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           walk(u.op.results[0]),
       );
     };
-    return walk(v) || (back && after());
+    return walk(call.results[0]) || (back && after());
   };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
@@ -1880,9 +1883,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // do-while's exit edge renders the call after the loop, once, where the body ran it every
         // iteration; riding the back edge it renders in the update copy at the foot of the body,
         // behind statements the asm ran after it; riding two edge args it renders twice.
-        const orderSensitiveAfter = (): boolean =>
-          b.ops.slice(oi + 1).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) && x.successors.length === 0);
-        if (isCall && (branchArgFed.has(r) || ridesEdge(r, orderSensitiveAfter))) {
+        if (isCall && (branchArgFed.has(r) || ridesEdge(op))) {
           materialize.add(op);
           continue;
         }

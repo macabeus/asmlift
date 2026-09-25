@@ -92,7 +92,7 @@ import {
   globalOf,
   subscriptsFromExtents,
 } from './globalaccess';
-import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
+import { makeLoopHazards, preUpdateCopyHome, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -3021,9 +3021,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       if (cons[0] === term) {
         const root = cur.results[0];
-        return term.successors.some((sc) => sc.block === header && sc.args.includes(root))
-          ? pos.idx
-          : opIndex.get(cur)!;
+        if (term.successors.some((sc) => sc.block === header && sc.args.includes(root))) {
+          return pos.idx;
+        }
+        const home = preUpdateCopyHome(defs, opBlock, root, header);
+        return home === null ? null : opIndex.get(home)!;
       }
       cur = cons[0];
     }
@@ -4125,6 +4127,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     materialize,
     respelledDefs: bitfieldSpelling,
+    emitPos,
   });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a

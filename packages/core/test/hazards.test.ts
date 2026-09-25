@@ -33,16 +33,47 @@ interface Fixture {
   materialize?: Set<Op>;
   respelledDefs?: Map<Op, unknown>;
 }
-const make = (f: Fixture = {}) =>
-  makeLoopHazards({
+// `emitPos` as analysis.ts answers it, over the fixture's maps: an op renders at its own index when
+// it is a statement — a store, a terminator, a named def, a dead one — and otherwise at the one
+// consumer it is inlined into.
+const emitPosOver =
+  (useSitesOf: Map<Value, UseSite[]>, opBlock: Map<Op, Block>, materialize: Set<Op>) =>
+  (op: Op): { blk: Block; idx: number } | null => {
+    for (let cur = op; ;) {
+      const r = cur.results[0];
+      const uses = r === undefined ? [] : (useSitesOf.get(r) ?? []);
+      if (
+        cur.successors.length > 0 ||
+        cur.opcode === 'store' ||
+        cur.opcode === 'astore' ||
+        materialize.has(cur) ||
+        !uses.length
+      ) {
+        const blk = opBlock.get(cur);
+        return blk === undefined ? null : { blk, idx: blk.ops.indexOf(cur) };
+      }
+      const consumers = new Set(uses.map((u) => u.op));
+      if (consumers.size !== 1) {
+        return null;
+      }
+      cur = [...consumers][0];
+    }
+  };
+const make = (f: Fixture = {}) => {
+  const useSitesOf = f.useSitesOf ?? new Map();
+  const opBlock = f.opBlock ?? new Map();
+  const materialize = f.materialize ?? new Set();
+  return makeLoopHazards({
     defs: f.defs ?? new Map(),
     varName: f.varName ?? new Map(),
-    useSitesOf: f.useSitesOf ?? new Map(),
+    useSitesOf,
     liveIn: f.liveIn ?? new Map(),
-    opBlock: f.opBlock ?? new Map(),
-    materialize: f.materialize ?? new Set(),
+    opBlock,
+    materialize,
     respelledDefs: f.respelledDefs ?? new Map(),
+    emitPos: emitPosOver(useSitesOf, opBlock, materialize),
   });
+};
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
 

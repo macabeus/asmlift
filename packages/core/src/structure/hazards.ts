@@ -72,6 +72,9 @@ export interface LoopHazardDeps {
    *  over the operands cannot see what such an op will render, so predicates that reason about
    *  the rendered expression have to treat it as opaque. LIVE, like `varName`. */
   respelledDefs: ReadonlyMap<Op, unknown>;
+  /** where an op's expression is emitted: its own position when it renders as a statement, the one
+   *  consumer it is inlined into otherwise, null when it has no one position (analysis.ts) */
+  emitPos: (op: Op) => { blk: Block; idx: number } | null;
 }
 
 export interface LoopHazards {
@@ -405,8 +408,36 @@ function sameAtEntry(defs: Map<Value, Op>, a: Value, b: Value, entry: Map<Value,
   return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
 }
 
+// WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
+// there, so the point it belongs at is the one its value was computed at: the arg's own defining
+// op, when that op is one of `latch`'s — the block whose statements both loop emitters render
+// inline, ahead of the update. Null for every other arg, and the copy opens the body instead.
+// THREE args get that answer, not two: one with no position in the body at all (a block param, or
+// a def outside the loop), and one the body DID compute, in a body block that is not the latch.
+// The last is the narrow case and the one a wider sink would widen — the value has a position, it
+// is just not in the block whose `sideEffects` walk is handed the copies.
+//
+// READING AN OP'S INDEX AS THE SOURCE'S STATEMENT ORDER IS A COMPILER CLAIM, and the project
+// names the direction next door: target.ts's `readsStayWhereWritten` declares from compiled pairs
+// that a compiler EMITS a read in the block the source spelled it in, and states outright that
+// the converse — the asm's block is where the source read — is false and may not be defaulted.
+// This is that inference one level down, inside a block, and it consults no target: on a
+// scheduling compiler an op's index is the scheduler's order, not the source's.
+//
+// It owes no declaration because it buys a SPELLING, not an answer. `sideEffects` renders the
+// whole block in that same index order, so a copy placed among those statements agrees with every
+// one of them whatever the compiler did; and the motion that would change an ANSWER is the one
+// `movesPast` measures, in the order it renders. Where the asm's order is not the source's, the
+// failure is a candidate that does not match. Nothing off agbcc reaches it today — 0 sunk copies
+// over the whole `--tier synthetic --toolchain ido7.1` run (163 rows), and the four non-agbcc
+// `loop-preupdate` rows are all mwcc.
+export function preUpdateCopyHome(defs: Map<Value, Op>, opBlock: Map<Op, Block>, a: Value, latch: Block): Op | null {
+  const d = defs.get(a);
+  return d !== undefined && opBlock.get(d) === latch ? d : null;
+}
+
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs, emitPos } = deps;
 
   // The names one loop iteration writes under its VARIABLES' names: the update copies, plus a
   // loop-variable name a materialized body def writes IN PLACE. Adoption (seedLoopParams) makes
@@ -699,34 +730,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     return { name, by: c.step };
   };
 
-  // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
-  // there, so the point it belongs at is the one its value was computed at: the arg's own defining
-  // op, when that op is one of `latch`'s — the block whose statements both loop emitters render
-  // inline, ahead of the update. Null for every other arg, and the copy opens the body instead.
-  // THREE args get that answer, not two: one with no position in the body at all (a block param, or
-  // a def outside the loop), and one the body DID compute, in a body block that is not the latch.
-  // The last is the narrow case and the one a wider sink would widen — the value has a position, it
-  // is just not in the block whose `sideEffects` walk is handed the copies.
-  //
-  // READING AN OP'S INDEX AS THE SOURCE'S STATEMENT ORDER IS A COMPILER CLAIM, and the project
-  // names the direction next door: target.ts's `readsStayWhereWritten` declares from compiled pairs
-  // that a compiler EMITS a read in the block the source spelled it in, and states outright that
-  // the converse — the asm's block is where the source read — is false and may not be defaulted.
-  // This is that inference one level down, inside a block, and it consults no target: on a
-  // scheduling compiler an op's index is the scheduler's order, not the source's.
-  //
-  // It owes no declaration because it buys a SPELLING, not an answer. `sideEffects` renders the
-  // whole block in that same index order, so a copy placed among those statements agrees with every
-  // one of them whatever the compiler did; and the motion that would change an ANSWER is the one
-  // `movesPast` measures, in the order it renders. Where the asm's order is not the source's, the
-  // failure is a candidate that does not match. Nothing off agbcc reaches it today — 0 sunk copies
-  // over the whole `--tier synthetic --toolchain ido7.1` run (163 rows), and the four non-agbcc
-  // `loop-preupdate` rows are all mwcc.
-  const preUpdateCopyHome = (a: Value, latch: Block): Op | null => {
-    const d = defs.get(a);
-    return d !== undefined && opBlock.get(d) === latch ? d : null;
-  };
-
   // Which pre-update exit copies can be REPAIRED instead of declined. The exiting edge hands a
   // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on
   // one iteration; emitting the copy inside the body, AHEAD of the update, restores it — the
@@ -888,31 +891,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     // A memory read and nothing else: two of them commute, whichever runs first.
     const isRead = (o: Op): boolean => ORDER_SENSITIVE_OPS.has(o.opcode) && !EFFECTFUL_OPS.has(o.opcode);
-    // Does latch op `o` RENDER after index `p`? Where it renders is its own index when it is a
-    // statement — a store, a named def, a dead one — and otherwise the one consumer it is inlined
-    // into, followed down. The terminator's index stands for every copy it carries, and those land
-    // at or after the foot of the body; an op with several consumers, or none in the latch, has no
-    // one position, and counts as after.
+    // Does latch op `o` RENDER after index `p`? Where it renders is `emitPos`: the terminator's
+    // index stands for every copy it carries, and those land at or after the foot of the body; an
+    // op with no one position, or none in the latch, counts as after.
     const rendersAfter = (o: Op, p: number): boolean => {
-      let cur = o;
-      for (;;) {
-        const r = cur.results[0];
-        const uses = r === undefined ? [] : (useSitesOf.get(r) ?? []);
-        if (
-          cur.successors.length > 0 ||
-          cur.opcode === 'store' ||
-          cur.opcode === 'astore' ||
-          materialize.has(cur) ||
-          uses.length === 0
-        ) {
-          return opBlock.get(cur) !== latch || latch.ops.indexOf(cur) > p;
-        }
-        const consumers = new Set(uses.map((u) => u.op));
-        if (consumers.size !== 1) {
-          return true;
-        }
-        cur = [...consumers][0];
-      }
+      const q = emitPos(o);
+      return q === null || q.blk !== latch || q.idx > p;
     };
     // A body-defined name that IS current where the copy lands: a def the analysis NAMED (so it
     // renders as a statement at its own index), in the latch, strictly ahead of the copy's home.
@@ -935,17 +919,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       const seen = new Set<Value>();
       const found = new Set<ArgBlocker>();
       const tree = new Set<Op>();
-      const collect = (x: Value): void => {
-        const d = defs.get(x);
-        if (seen.has(x) || header.params.includes(x) || varName.has(x) || d === undefined) {
-          return;
-        }
-        seen.add(x);
-        tree.add(d);
-        d.operands.forEach(collect);
-      };
-      collect(a);
-      seen.clear();
       const walk = (x: Value): void => {
         if (seen.has(x)) {
           return;
@@ -966,14 +939,18 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
           found.add('no-definition');
           return;
         }
-        // A respelled def is opaque — what it renders is a memory read this walk never sees — so it
-        // is refused at every position rather than measured.
-        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home, tree)))) {
-          found.add('order-sensitive');
-        }
+        tree.add(d);
         d.operands.forEach(walk);
       };
       walk(a);
+      // Weighed once the whole tree is known, because `movesPast` exempts its members. A respelled
+      // def is opaque — what it renders is a memory read this walk never sees — so it is refused at
+      // every position rather than measured.
+      for (const d of tree) {
+        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home, tree)))) {
+          found.add('order-sensitive');
+        }
+      }
       return found;
     };
     const cleared = new Map<number, { name: string; home: Op | null }>();
@@ -982,7 +959,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         return; // no hazard on this slot — nothing to repair
       }
       const destName = varName.get(exit.params[j]);
-      const home = preUpdateCopyHome(a, latch);
+      const home = preUpdateCopyHome(defs, opBlock, a, latch);
       const c: SinkCandidate = {
         argBlockers: blockersOf(a, home),
         destName,
