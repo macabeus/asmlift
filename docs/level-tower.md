@@ -713,8 +713,12 @@ a float.
 C writes both with one token, but `/` at L3 is the SIGNED integer divide the C backend pins with
 `(s32)` casts, and `+`/`-` are what the pointer walks and the constant folds match — so the split is
 earned by what the integer operators MEAN to passes, the rule `BinOp`'s own note gives for the splits
-before it. **The backend** spells the C89 keyword `float`, which no translation unit has to
-declare, so the candidate prelude and every project context that already typedefs `f32` are untouched.
+before it. A float product read by a float add or subtract is always NAMED (`structure/analysis.ts`):
+a contracting compiler (mwcc `-fp_contract on`) fuses a multiply into an add only within one
+expression, so the inline spelling recompiles to a fused multiply-add that rounds once, where the
+temp compiles to the unfused pair under either setting. **The backend** spells the C89 keyword
+`float`, which no translation unit has to declare, so the candidate prelude and every project context
+that already typedefs `f32` are untouched.
 
 **What refuses, and why each refusal is where it is.**
 
