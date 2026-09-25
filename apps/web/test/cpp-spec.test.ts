@@ -153,7 +153,7 @@ test('a demangled signature binds its float to the lifted float, whatever the AB
   );
 });
 
-// A demangle whose float count is not the lift's is a false positive, like an arity mismatch.
+// A demangle with fewer floats than the lift is a false positive, like an arity mismatch.
 test('a demangled float count the lift does not have falls back to the free function', () => {
   const spec = deriveSpec(
     'g__Fii',

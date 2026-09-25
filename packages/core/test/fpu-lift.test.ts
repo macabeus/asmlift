@@ -1,9 +1,9 @@
 // Hardware floating point, lifted: the single-precision arithmetic, through the ABI's float homes
 // (`TargetDescription.fpu`, frontend/fpu.ts). What still refuses, and by which message, is
-// `fp-refusal.test.ts`'s; this file pins what now lifts and the refusals the homes themselves add.
+// `fp-refusal.test.ts`'s; this file pins what lifts and the refusals the homes themselves add.
 //
-// THE SHAPE THIS REPLACES is the ablation `docs/floating-point.md` §2 measures: the arithmetic
-// decoded with no homes lifts `float fadd(float a, float b){ return a + b; }` as
+// WITHOUT THE HOMES — the ablation `docs/floating-point.md` §2 measures — the decoded arithmetic
+// lifts `float fadd(float a, float b){ return a + b; }` as
 // `void fadd(s32 a0, s32 a1) { return; }` — phantom integer parameters and a dead add. Every
 // positive case below would be that, or a decline, without the homes. Toolchain-free.
 import { describe, expect, test } from 'vitest';

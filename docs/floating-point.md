@@ -119,13 +119,13 @@ A `float fadd(float a, float b){ return a+b; }` compiles on MIPS to two instruct
 (`jr ra` / `add.s $f0,$f12,$f14`). Matching it needs all four of:
 
 1. **A register file.** Neither frontend's integer register predicate takes one. PowerPC's `isReg`
-   is `/^r\d+$/`, so an `f1` is not a register to it at all. MIPS is the worse half and in the other direction: `isMipsReg` is
-   `/^(\$\d+|[a-z][a-z0-9]*)$/i`, which REJECTS the objdump spelling `$f12` and ACCEPTS a bare
+   is `/^r\d+$/`, so an `f1` is not a register to it at all. MIPS is the worse half and in the other
+   direction: `isMipsReg` is `/^(\$\d+|[a-z][a-z0-9]*)$/i`, which REJECTS the objdump spelling `$f12` and ACCEPTS a bare
    `f12` — so on the Splat dialect, which strips the `$` sigil, an FPU register passes for a GPR
    and an `add.s` becomes an opaque on a register in a file nothing models. This is the layer the
    decline names (`unmodelled floating-point instruction … the floating-point register file`) for
-   every FPU instruction outside the decoded arithmetic (§6). `frontend/splat.ts` keeps the sigil on an FPU
-   register for exactly this reason — objdump writes a GPR bare and an FPU register with the sigil,
+   every FPU instruction outside the decoded arithmetic (§6). `frontend/splat.ts` keeps the sigil on
+   an FPU register for exactly this reason — objdump writes a GPR bare and an FPU register with the sigil,
    so preserving it is what the reader's own header promises, and the bare form is indistinguishable
    from an objdump branch target, which is also bare lower-case hex (`f4`, `fa0`).
 
@@ -234,9 +234,8 @@ grep -rn "\.kind === 'int'\|\.kind === 'ptr'\|\.kind === 'unknown'\|\.kind === '
 grep -rln "kind === 'int'\|kind: 'int'\|case 'int':" packages/core/src | wc -l
 ```
 
-**107 discrimination sites across 17 files** (re-counted at `e8db01a0`; the document first
-measured 102). Two of them are named in `ir/types.ts` as the reason
-`intWidth` has exactly one copy: `ir/verify.ts` reads a null width as "not subject to the rule, so
+**107 discrimination sites across 17 files**, counted at `e8db01a0`. Two of them are named in
+`ir/types.ts` as the reason `intWidth` has exactly one copy: `ir/verify.ts` reads a null width as "not subject to the rule, so
 pass" and `raise/runtime-helpers.ts` reads it as "refuse to fold". A float kind is null-width under
 both readings and lands on opposite policies, so **a new kind reaches the verifier and the
 recogniser together or neither** — the file says so, and this is the first kind that would test it.
@@ -244,14 +243,14 @@ recogniser together or neither** — the file says so, and this is the first kin
 ## 5. The recommendation
 
 **Do not build hardware floating point before MIPS calls — for MIPS remaining work.** The ordering
-is not a preference there; it is the 87% above. A float model landed first reaches 39 functions per 1,000 of remaining MIPS work and
-turns 69 corpus declines into candidates, most of which would then decline one guard later on the
+is not a preference there; it is the 87% above. A float model landed first reaches 39 functions per
+1,000 of remaining MIPS work and turns 69 corpus declines into candidates, most of which would then decline one guard later on the
 call they also contain. Board 004 reached the same ordering from the 64-bit side; two independent
 gaps now point at the same missing capability.
 
 It does not bind the corpus or PowerPC, which is why §6 exists: every MIPS row that declines on the
-FPU is a leaf. And when it is built, build it **downwards, not upwards**: the type and its spelling (layer 4) are what
-decide whether any of it matches, the ABI homes (layer 3) are what make a value reach a return, and
+FPU is a leaf. And when it is built, build it **downwards, not upwards**: the type and its spelling
+(layer 4) are what decide whether any of it matches, the ABI homes (layer 3) are what make a value reach a return, and
 the decode (layer 2) is the cheapest and the only one that produces a wrong answer on its own.
 
 Layer 1's honesty came first: the refusal now names the register file rather

@@ -117,11 +117,10 @@ export function fpuArgSlots(
  *  result, meanwhile, could only have come from a float by a conversion, which refuses. IDO's
  *  unrolled `float pw(float a, int n)` is the witness for the second half: it counts in `v0`.
  *
- *  THAT FACT IS WHAT HOLDS THIS RULE UP, and the next layer removes it. `int st3(float a, float b,
- *  float *p, float *q){ *p = a * b; *q = a + b; return 2; }` writes `$f0` and returns `v0`; only the
- *  `swc1` refusal keeps it from lifting as a float return that drops the `2` (`fpu-lift.test.ts`
- *  pins it). A layer that lets a float reach memory, the integer file or a compare must first decide
- *  the return from the value that reaches each `ret`, not from a mnemonic scan. */
+ *  THAT FACT IS WHAT HOLDS THIS RULE UP, and the next layer removes it: a layer that lets a float
+ *  reach memory, the integer file or a compare must first decide the return from the value that
+ *  reaches each `ret`, not from a mnemonic scan (`fpu-lift.test.ts` pins the function that breaks
+ *  it, `docs/floating-point.md` §6). */
 export function writesFloatReturn(
   instrs: readonly { mnemonic: string; ops: string[] }[],
   decodes: ReadonlySet<string>,

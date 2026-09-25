@@ -207,9 +207,7 @@ export function verify(fn: Fn): void {
           if (FLOAT_OPS.has(op.opcode)) {
             const all = [...op.operands, ...op.results].map((v) => v.type);
             if (floats.length !== all.length || all.some((t) => !typeEquals(t, all[0]))) {
-              throw new VerifyError(
-                `'${op.opcode}' computes on floats only, got ${all.map(typeToString).join(', ')}`,
-              );
+              throw new VerifyError(`'${op.opcode}' computes on floats only, got ${all.map(typeToString).join(', ')}`);
             }
           } else if (floats.length > 0 && op.opcode !== 'ret') {
             throw new VerifyError(`a float value reaches '${op.opcode}', which does not compute on floats`);

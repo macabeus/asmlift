@@ -1736,14 +1736,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
-          // A float PRODUCT read by a float add or subtract is named, on a compiler that can
-          // contract. One that does (mwcc `-fp_contract on`, set on some pikmin, marioparty4 and
-          // ac-decomp units) fuses a multiply into an add only WITHIN one expression, so `a * b + c`
-          // recompiles to one `fmadds` — one rounding, a different value — where the object holds
-          // `fmuls` then `fadds`, and `t = a * b; t + c` compiles to that pair under either setting.
-          // Read through a negation too: `-(a * b) + c` fuses to one `fnmsubs`, and `c - -(a * b)`
-          // to `fmadds`. KNOWN GAP: not at a multi-block loop header, the seat the scopes below
-          // refuse too.
+          // A float PRODUCT read by a float add or subtract, directly or through a negation, is named
+          // on a compiler that contracts (target.ts `contractsFloatProducts`): it fuses only WITHIN
+          // one expression, so the inline `a * b + c` recompiles to one `fmadds` — one rounding, a
+          // different value — while `t = a * b; t + c` is the unfused pair the object holds.
+          // KNOWN GAP: not at a multi-block loop header, the seat the scopes below refuse too.
           if (contractsFloatProducts && op.opcode === 'fmul' && feedsFloatAdd(op) && !multiBlockHeaders.has(b)) {
             materialize.add(op);
           }

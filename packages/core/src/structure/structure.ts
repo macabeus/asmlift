@@ -2862,7 +2862,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // body (`preUpdateCopies`), so what is live into the loop header is live at the copy. A
     // predecessor all of whose edges hand the slot a value already under `name` writes nothing.
     // Without it, `t = b * b` hoisted ahead of a do-while that reassigns `b` and exits into
-    // `return b` inlines as `a1 * a1` past the sunk copy `a1 = …` (hw1 on ido and kmc). A `while`
+    // `return b` inlines as `a1 * a1` past the sunk copy `a1 = …` (`name-clobber.test.ts`). A `while`
     // exiting from its header puts the copy in the exit arm, and keeps the name.
     let landed: Set<Value> | undefined;
     const landing = (): Set<Value> => {
