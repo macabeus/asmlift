@@ -2005,10 +2005,30 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const pos = poss[0]!;
         // A between-op is a BARRIER when it renders as a sequenced statement the def would cross:
         // stores/opaque always; a call/load that is dead (statement), materialized (statement), or
-        // inlined into a DIFFERENT statement. A sibling effect inlined into the SAME statement is
-        // not a reorder — the recompiling compiler orders unsequenced operands of one expression
-        // exactly as it originally chose to. Loads never bar a load (reads don't conflict).
+        // inlined into a DIFFERENT statement. Loads never bar a load (reads don't conflict).
+        //
+        // Inside ONE statement the order is the compiler's, and every compiler the corpus builds
+        // with evaluates a call before the memory reads beside it — agbcc, IDO 7.1, both gcc 2.7.2
+        // builds and mwcc all compile `*p + cb(p)`, `cb(p) - *p`, `(*p ^ 3) * cb(p)` and `*p <<
+        // cb(p)` to the call, then the load. So a CALL ahead of a read it shares a statement with
+        // is the order the recompile gives back, and bars nothing. A READ ahead of such a call is
+        // the order no single expression gives back — `int t = *p; return t + cb(p);` compiles
+        // `ldr; bl; add`, and inlined as `*p + cb(p)` it recompiles `bl; ldr` — so that call bars
+        // the read, which is named where it ran. Unless the read is the call's own argument, which
+        // every compiler evaluates first.
         const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
+        const feedsCall = (call: Op): boolean => {
+          const seen = new Set<Value>();
+          const walk = (v: Value): boolean => {
+            if (seen.has(v)) {
+              return false;
+            }
+            seen.add(v);
+            const d = defOf.get(v);
+            return d === op || (d !== undefined && !materialize.has(d) && d.operands.some(walk));
+          };
+          return call.operands.some(walk);
+        };
         const isBarrier = (x: Op): boolean => {
           // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
           // global) does not sequence against it, so the read may still render at its use.
@@ -2027,7 +2047,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             return true;
           }
           if (x.opcode === 'call') {
-            return !x.results.length || !useSitesOf.has(x.results[0]) || materialize.has(x) || !samePos(emitPos(x));
+            return (
+              !x.results.length ||
+              !useSitesOf.has(x.results[0]) ||
+              materialize.has(x) ||
+              !samePos(emitPos(x)) ||
+              (!isCall && !feedsCall(x))
+            );
           }
           if (!isCall) {
             return false;

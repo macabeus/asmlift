@@ -169,3 +169,40 @@ test('LOOP-CARRIED operand pairs do not swap: they render as loop names, evaluat
   // the two machine orders keep DISTINCT spellings (no collapse to one canonical order)
   expect(desc).not.toBe(asc);
 });
+
+// A READ AND A CALL IN ONE STATEMENT. Every compiler the corpus builds with evaluates the call
+// first (analysis.ts, the barrier scan), so the asm's load-then-call order is one no single
+// expression gives back: `int t = *p; return t + cb(p);` is `ldr; bl; add` on agbcc, and spelled
+// `*a0 + cb(a0)` it recompiles `bl; ldr`. The read is named where it ran. The two one-fact edits
+// keep it inline: the call first (the order the expression gives back), and the read as the call's
+// own argument (evaluated before the call by every compiler).
+const READ_THEN_CALL = `fn readfirst {
+^bb0(%0: s32*):
+  %1: s32 = load %0 {off=0, signed=true, width=4}
+  %2: s32 = call %0 {target="cb"}
+  %3: s32 = add %1, %2
+  ret %3
+}`;
+
+test('a read ahead of a call it shares a statement with is named where it ran', () => {
+  const src = emit(READ_THEN_CALL);
+  expect(src).toContain('    v0 = *a0;\n    return v0 + cb(a0);\n');
+});
+
+test('a call ahead of the read is the order one expression gives back, and stays inline', () => {
+  const callFirst = READ_THEN_CALL.replace(
+    '  %1: s32 = load %0 {off=0, signed=true, width=4}\n  %2: s32 = call %0 {target="cb"}\n',
+    '  %2: s32 = call %0 {target="cb"}\n  %1: s32 = load %0 {off=0, signed=true, width=4}\n',
+  );
+  expect(callFirst).not.toBe(READ_THEN_CALL);
+  expect(emit(callFirst)).toContain('    return *a0 + cb(a0);\n');
+});
+
+test('a read that is the call`s own argument stays inline', () => {
+  const argument = READ_THEN_CALL.replace('%2: s32 = call %0 {target="cb"}', '%2: s32 = call %1 {target="cb"}').replace(
+    '  %3: s32 = add %1, %2\n  ret %3\n',
+    '  ret %2\n',
+  );
+  expect(argument).not.toBe(READ_THEN_CALL);
+  expect(emit(argument)).toContain('    return cb(*a0);\n');
+});
