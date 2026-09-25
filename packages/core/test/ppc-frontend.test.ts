@@ -327,6 +327,67 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /reload of '8\(r1\)' into r29, a slot r30 was saved into/,
     );
   });
+  // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
+  // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
+  // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore finds no slot, and every
+  // non-leaf function that compiler produced declined on its own epilogue.
+  const frameBody = (sym: string) =>
+    `10:\tmr      r31,r3\n14:\tbl      14 <${sym}+0x14>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tadd     r3,r3,r31\n`;
+  test('the link register saved BEFORE the frame push is restored from the same slot after it', () => {
+    const pre233 =
+      '0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-16(r1)\nc:\tstw     r31,12(r1)\n' +
+      frameBody('lr233') +
+      '1c:\tlwz     r0,20(r1)\n20:\tlwz     r31,12(r1)\n24:\taddi    r1,r1,16\n28:\tmtlr    r0\n2c:\tblr\n';
+    expect(dis('lr233', pre233)).toBe('s32 lr233(s32 a0) {\n    return callee(a0) + a0;\n}\n');
+  });
+  test('control: the push-first prologue lifts to the same function', () => {
+    const post242 =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tstw     r31,12(r1)\n' +
+      frameBody('lr242') +
+      '1c:\tlwz     r0,20(r1)\n20:\tlwz     r31,12(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
+    expect(dis('lr242', post242)).toBe('s32 lr242(s32 a0) {\n    return callee(a0) + a0;\n}\n');
+  });
+  test('one printed offset on both sides of the push is two different words', () => {
+    // `4(r1)` before the push is the caller's LR word; after it, it is a word of this frame that
+    // nothing saved. Named by the current r1 the load looked like the restore and was dropped.
+    const asm =
+      '0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-16(r1)\nc:\tlwz     r0,4(r1)\n' +
+      '10:\taddi    r1,r1,16\n14:\tmtlr    r0\n18:\tblr\n';
+    expect(() => dis('twowords', asm)).toThrow(/reload of a stack local \('4\(r1\)'\)/);
+  });
+  test('a local nobody saved, and an argument the caller passed on the stack, still refuse', () => {
+    expect(() =>
+      dis('unsaved', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,8(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of a stack local \('8\(r1\)'\)/);
+    expect(() =>
+      dis('stkarg', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,24(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of a stack local \('24\(r1\)'\)/);
+  });
+  test('an argument spilled before the push and read back into another register after it still refuses', () => {
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tstwu    r1,-16(r1)\n8:\tlwz     r4,24(r1)\nc:\tmr      r3,r4\n' +
+      '10:\taddi    r1,r1,16\n14:\tblr\n';
+    expect(() => dis('spillback', asm)).toThrow(/reload of '24\(r1\)' into r4, a slot r3 was saved into/);
+  });
+  test('where r1 is not at a known depth, a frame access refuses instead of naming a slot', () => {
+    expect(() =>
+      dis('twopush', '0:\tstwu    r1,-16(r1)\n4:\tstwu    r1,-16(r1)\n8:\taddi    r1,r1,32\nc:\tblr\n'),
+    ).toThrow(/at 0x4 is not the one frame push from the entry stack pointer — r1 had already moved \(-16\)/);
+    expect(() => dis('notchain', '0:\tstwu    r31,-16(r1)\n4:\taddi    r1,r1,16\n8:\tblr\n')).toThrow(
+      /it stores r31, not the back chain/,
+    );
+    expect(() =>
+      dis(
+        'mrr1',
+        '0:\tstw     r31,-4(r1)\n4:\tstwu    r1,-16(r1)\n8:\tmr      r1,r11\nc:\tlwz     r31,-4(r1)\n10:\tblr\n',
+      ),
+    ).toThrow(/'-4\(r1\)' at 0xc — .* 'mr r1,r11' at 0x8 sets r1 to a value this frontend does not track/);
+    // Two paths meet at 0x10, one through the push and one around it.
+    const depths =
+      '0:\tstw     r31,-4(r1)\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <depths+0x10>\nc:\tstwu    r1,-16(r1)\n' +
+      '10:\tlwz     r31,-4(r1)\n14:\tblr\n';
+    expect(() => dis('depths', depths)).toThrow(/arrive with r1 at two depths \(0 and -16 bytes/);
+  });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {
     // `stw r0,0(0)` — the base field is a 0 placeholder an SDA relocation fills at link. Lifting it
     // as a store to a fabricated first pointer parameter loses the global write.
