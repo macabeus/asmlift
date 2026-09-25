@@ -1543,10 +1543,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // it, which is also what lets the memory-read tier through — `preupdate_exit` and
   // `preupdate_exit_pure` both MATCH.
   //
-  // WHAT THE SINK STILL REFUSES IS ORDER, and three rows carry it. Two sit on either side of a READ
-  // and a CALL under one `+`, and both lift. `preupdate_exit_order` is `*q + cb(q)`, where agbcc
-  // calls first and loads second: rebuilt at the add, the call would have the load between it and
-  // its home. The call is named where it ran instead (`callsAheadOfExitCopy`,
+  // WHAT THE SINK WEIGHS NEXT IS ORDER: a rebuilt tree lands at its home, and the order-sensitive
+  // ops around it must keep their order there. Three rows put a CALL beside the READ.
+  // `preupdate_exit_order` is `*q + cb(q)`, where agbcc calls first and loads second: rebuilt at the
+  // add, the call would have the load between it and its home. But a call that rides an edge copy
+  // — bare or under the ops it is inlined into — is named where it ran (`ridesEdge`,
   // structure/analysis.ts), which C can say — compiled, `t = cb(q); r = *q + t;` is byte-identical
   // to `*q + cb(q)` — and the sink takes the name as current because its statement runs in the
   // latch ahead of the copy (`writtenAheadOf`, structure/hazards.ts). What stands between that row
@@ -1554,14 +1555,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc's own callee-saved copy spells as the parameter itself — the residual
   // `preupdate_exit_call` shares. `preupdate_exit_load` is `t = *q; r = t + cb(q)`, where agbcc
   // loads first and calls second — an order no single expression gives back, since every compiler
-  // here calls before it reads — so the read is named where it ran (the barrier scan in
-  // structure/analysis.ts), and the copy is rebuilt at the add behind it by the same name rule.
+  // here calls before it reads — so the read is named too (the barrier scan in
+  // structure/analysis.ts), and the exit value reads no loop variable at all. `preupdate_exit_foot`
+  // is `t = cb(q); r = *q ^ n; s = s ^ t;`, where the call runs ahead of the read but, inlined, would
+  // render in `s`'s update copy at the foot of the body, behind the read rebuilt at the `eor` — the
+  // spelling main shipped, wrong on 68 of 100 inputs. Named, it runs where the asm ran it.
   //
-  // `preupdate_exit_foot` is the one `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES,
-  // structure/hazards.ts) turns away: `t = cb(q); r = *q ^ n; s = s ^ t;`, where the call runs
-  // ahead of the read but is inlined into `s`'s update copy at the foot of the body, so the read
-  // rebuilt at the `eor` would overtake it. Nothing lies BETWEEN the read and its home; the crossing
-  // is where the call RENDERS. Without that row the gate would refuse nothing a command can show.
+  // `preupdate_exit_reads` is what `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES,
+  // structure/hazards.ts) still turns away once the calls are named: `u = q[1]; r = *q + 1; s = s +
+  // u;`, a read ahead of the tree's read that renders in the update copy behind it. Two plain reads
+  // commute, so this refusal is CONSERVATIVE — the gate weighs every order-sensitive op, reads
+  // included, and only a `volatile` access would make the swap observable. It is the row that shows
+  // the gate refusing at all; a change that proves two reads commute may lift it.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1672,7 +1677,7 @@ export const SYNTHETIC: SynthSpec[] = [
     note:
       'the same exiting edge with the READ first (`t = *q; r = t + cb(q)`): agbcc loads into a ' +
       'callee-saved register, calls, then adds, an order `*q + cb(q)` would not give back, so the ' +
-      'read is named where it ran and the copy is rebuilt at the add behind it',
+      'read is named where it ran as well as the call, and the exit value reads only their names',
   },
   {
     sym: 'preupdate_exit_foot',
@@ -1686,9 +1691,22 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int cb(int*);',
     proto: { cb: { params: 1 } },
     note:
-      "the call runs ahead of the exit value's read (`bl cb; ldr; eor`) but is inlined into the " +
-      'update of `s`, which renders at the foot of the body; the read rebuilt at the `eor` would ' +
-      'overtake it, so the sink refuses, and the decline is what the row measures',
+      "the call runs ahead of the exit value's read (`bl cb; ldr; eor`) and feeds the update of `s`; " +
+      'inlined there it would render at the foot of the body, behind the read rebuilt at the `eor`, ' +
+      'so it is named where it ran',
+  },
+  {
+    sym: 'preupdate_exit_reads',
+    src:
+      'int preupdate_exit_reads(int *p, int n, int m, int k){ int r = m; int s = k; int u; int *q;' +
+      ' if (n > 0) { q = p + n; do { u = q[1]; r = *q + 1; s = s + u; q = q - 1; } while (--n); }' +
+      ' return r + s; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note:
+      "a read ahead of the exit value's read, inlined into the update of `s` at the foot of the " +
+      'body; the sink refuses to rebuild the exit read ahead of it although two plain reads commute ' +
+      '(a conservative refusal of `arg-safe-to-reevaluate`), and the decline is what the row measures',
   },
   {
     sym: 'preupdate_escape',

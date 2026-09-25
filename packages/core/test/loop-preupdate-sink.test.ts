@@ -30,8 +30,6 @@ import { cBackend } from '../src/backend/c';
 import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import type { SFn } from '../src/l3/ast';
-import { structureChecked } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { StructureError, structure } from '../src/structure/structure';
@@ -481,10 +479,11 @@ test('a latch store of a loop variable reads it ahead of the update, with no arm
 });
 
 // ONE CALL, TWO EXIT SLOTS. The exit edge hands `f1(v2) + v2` to two merge params; sunk, each copy
-// rebuilds the tree and `f1` runs twice per iteration where the asm ran it once. The effects
-// contract counts the calls on the path and declines. The control reads memory where the call was:
-// two copies of a READ are two loads, a spelling rather than a different program, and both slots
-// sink.
+// would rebuild the tree and run `f1` twice per iteration where the asm ran it once. A call riding
+// an edge through the ops it is inlined into is named where it ran (`ridesEdge`,
+// structure/analysis.ts), so both copies read the name. The control reads memory where the call
+// was: two copies of a READ are two loads, a spelling rather than a different program, and both
+// slots sink with the read inline.
 const ONE_CALL_TWO_SLOTS = `fn dupcall {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -507,13 +506,9 @@ const ONE_CALL_TWO_SLOTS = `fn dupcall {
 `;
 
 test('two sunk exit slots never spell one call twice', () => {
-  const checked = (ir: string): SFn => {
-    const fn = parse(ir);
-    verify(fn);
-    recoverTypes(fn);
-    return structureChecked(fn, {});
-  };
-  expect(() => checked(ONE_CALL_TWO_SLOTS)).toThrow(/emitted 2 calls to 'f1' on one path/);
+  const calls = emit(ONE_CALL_TWO_SLOTS).split('do {')[1].split('} while')[0];
+  expect(calls.match(/f1\(/g)).toHaveLength(1);
+  expect(calls.match(/= v1 \+ v3;/g)).toHaveLength(2);
   const read = ONE_CALL_TWO_SLOTS.replace('call %5 {target="f1"}', 'load %5 {off=0, signed=true, width=4}');
   expect(read).not.toBe(ONE_CALL_TWO_SLOTS);
   const body = emit(read).split('do {')[1].split('} while')[0];
@@ -521,13 +516,13 @@ test('two sunk exit slots never spell one call twice', () => {
 });
 
 // THE CALL AHEAD OF A READ, `r = *q + cb(q)`: agbcc runs `bl cb; ldr r1,[q]; add`, so the exit
-// arg's tree holds a call with the load between it and the add the copy is rebuilt at. Inlined, the
-// call would move past that load, which `arg-safe-to-reevaluate` refuses; the analysis names it at
-// its own position instead (`callsAheadOfExitCopy`), the order `t = cb(q); r = *q + t;` spells —
-// byte-identical to the original on agbcc. The control swaps ONE fact, the order of the load and
-// the call: `int t = *q; r = t + cb(q);` compiles to `ldr; bl; add`, the call is adjacent to its
-// consumer and moves past nothing, and it is left inline. What would move there is the READ, which
-// the barrier scan names on its own (a read ahead of a call it shares a statement with).
+// arg's tree holds a call with the load between it and the add the copy is rebuilt at. The call rides
+// the exit edge under the `add`, so the analysis names it where it ran — the order `t = cb(q); r =
+// *q + t;` spells, byte-identical to the original on agbcc — and the sink rebuilds `*v1 + v0` at the
+// add, behind the name. The control swaps ONE fact, the order of the load and the call: `int t =
+// *q; r = t + cb(q);` compiles to `ldr; bl; add`, and the barrier scan names the read too (a read
+// ahead of a call it shares a statement with). With both named the exit value reads no loop
+// variable, so nothing is rebuilt in the body and the copy stays after the loop.
 const CALL_THEN_LOAD = `fn calllast {
 ^bb0(%0: s32*, %1: s32, %2: s32):
   %3: s32 = const {value=0}
@@ -563,28 +558,16 @@ const homedCalls = (ir: string): string[] => {
   return fn.blocks.flatMap((b) => b.ops).flatMap((op) => (op.opcode === 'call' && materialize.has(op) ? ['cb'] : []));
 };
 
-test('a call the exit copy would rebuild behind a read is named where it ran', () => {
+test('a call riding the exit edge under a read is named where it ran, in either order', () => {
   expect(LOAD_THEN_CALL).not.toBe(CALL_THEN_LOAD);
   expect(homedCalls(CALL_THEN_LOAD)).toEqual(['cb']);
-  expect(homedCalls(LOAD_THEN_CALL)).toEqual([]);
-});
-
-test('the call is named only where the exit copy has a pre-update hazard to repair', () => {
-  // The one-fact edit: the call and the read take the loop-INVARIANT pointer `%0` instead of the
-  // loop variable, so the arg reads nothing the update writes, no copy is rebuilt in the body, and
-  // the call is left to the rules that place it after the loop.
-  const noHazard = CALL_THEN_LOAD.replace('%9: s32 = call %7', '%9: s32 = call %0').replace(
-    '%10: s32 = load %7',
-    '%10: s32 = load %0',
-  );
-  expect(noHazard).not.toBe(CALL_THEN_LOAD);
-  expect(homedCalls(noHazard)).toEqual([]);
+  expect(homedCalls(LOAD_THEN_CALL)).toEqual(['cb']);
 });
 
 test('the named call is current at the copy, and the exit value is rebuilt behind it', () => {
   // `a2 = *v1 + v0` reads `v0` one statement after `v0 = cb(v1)` wrote it, on the same iteration,
-  // and `v1` ahead of its update: the value the exit edge carried. The load-first order is the
-  // mirror image: the read is named where it ran, and the call is rebuilt at the add behind it.
+  // and `v1` ahead of its update: the value the exit edge carried. In the load-first order both
+  // are named and the copy after the loop reads only their names.
   expect(emit(CALL_THEN_LOAD)).toBe(
     's32 calllast(s32 *a0, s32 a1, s32 a2) {\n' +
       '    s32 v0;\n' +
@@ -603,5 +586,8 @@ test('the named call is current at the copy, and the exit value is rebuilt behin
       '    return a2;\n' +
       '}\n',
   );
-  expect(emit(LOAD_THEN_CALL)).toContain('            v0 = *v1;\n            a2 = v0 + cb(v1);\n');
+  expect(emit(LOAD_THEN_CALL)).toContain(
+    '            v0 = *v2;\n            v1 = cb(v2);\n            v2 = v2 - 1;\n            v3 = v3 - 1;\n' +
+      '        } while (v3 != 0);\n        a2 = v0 + v1;\n',
+  );
 });

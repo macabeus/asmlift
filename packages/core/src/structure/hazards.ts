@@ -823,12 +823,14 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // That pass NAMES an order-sensitive value whose consumer is not adjacent to it, and a named
     // leaf is refused by `arg-reads-current-names` before this scan runs. But it measures the
     // distance to the TERMINATOR, which it takes for one statement holding every edge copy, and the
-    // copy is rebuilt at `home`, ahead of the others: a call ahead of a load, both inlined into the
-    // terminator's copies, bars nothing there and is a crossing here.
+    // copy is rebuilt at `home`, ahead of the others — and it lets a read pass a read.
     //
     // AND NOT ONLY BETWEEN. An order-sensitive op AHEAD of `d` that the rebuilt tree does not hold
-    // is crossed too when it RENDERS after the home (`rendersAfter`) — a call inlined into an update
-    // copy at the foot of the body, which the asm ran before the read the copy now spells at `home`.
+    // is crossed too when it RENDERS after the home (`rendersAfter`): inlined into an update copy at
+    // the foot of the body, it runs after the member the asm ran it before. A call there is named
+    // by the analysis (a call that rides an edge copy), so what still reaches this arm is a read —
+    // `preupdate_exit_reads`, refused although two plain reads commute, which is the conservative
+    // side of weighing every order-sensitive op alike.
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that

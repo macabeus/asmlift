@@ -5987,42 +5987,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // would render once, after it. Nothing can re-place it here — `materialize` was decided before
     // emission — so decline LOUD rather than emit a plausible loop that calls the wrong number of
     // times.
-    //
-    // Not only as the copy's own def: an effect under a PURE op the copy inlines renders there too
-    // (`a0 = f1(a0) - v3;` after the loop, for a `sub` of a call the body ran every iteration). So
-    // a KEPT copy's tree is walked the way it renders — stopping at a name, which holds a value the
-    // loop already assigned, at a back-edge arg, which renders as its loop variable's name (`sub`),
-    // and at a def outside the body. A SUNK copy is not walked: it renders inside the body, at the
-    // home `sinkablePreUpdateSlots` cleared its tree against. The copy's own def keeps the direct
-    // check it always had.
-    const inlinedEffect = (v: Value, seen: Set<Value>): Op | undefined => {
-      if (seen.has(v) || varName.has(v) || sub.has(v)) {
-        return undefined;
-      }
-      seen.add(v);
+    const movedEffect = exitArgs.find((v) => {
       const d = defs.get(v);
-      if (!d || !dw.body.has(opBlock.get(d)!) || materialize.has(d)) {
-        return undefined;
-      }
-      return REPEATED_EFFECT.has(d.opcode) ? d : d.operands.map((x) => inlinedEffect(x, seen)).find((x) => x);
-    };
-    const movedEffect = exitArgs
-      .map((v, j) => {
-        const d = defs.get(v);
-        if (
-          d &&
-          REPEATED_EFFECT.has(d.opcode) &&
-          dw.body.has(opBlock.get(d)!) &&
-          !materialize.has(d) &&
-          !varName.has(v)
-        ) {
-          return d;
-        }
-        return sunk.has(j) ? undefined : inlinedEffect(v, new Set());
-      })
-      .find((d) => d !== undefined);
+      return (
+        d && REPEATED_EFFECT.has(d.opcode) && dw.body.has(opBlock.get(d)!) && !materialize.has(d) && !varName.has(v)
+      );
+    });
     if (movedEffect) {
-      const d = movedEffect;
+      const d = defs.get(movedEffect)!;
       throw new StructureError(
         `cannot structure '${fn.name}': a post-loop value inlines a '${d.opcode}' from inside the loop, ` +
           `which would move that effect out of it`,

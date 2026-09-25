@@ -13,8 +13,8 @@
 //
 // REACH IS NOT COVERAGE, and this file reports the larger of the two numbers. `structured` counts
 // the seeds that produce a tree at all; how many any ASSERTION is then made about is the `judged`
-// count the fuzz arms pin, and at depth 3 that is 636 of 4,000 — 5.4x below the 3,413 asserted
-// here, because the tree interpreter's step cap eats 2,777 of them. Cite 636, not 3,413, for what
+// count the fuzz arms pin, and at depth 3 that is 647 of 4,000 — 5.3x below the 3,449 asserted
+// here, because the tree interpreter's step cap eats 2,802 of them. Cite 647, not 3,449, for what
 // the multi-child sweeps actually judge. Nor does reaching a rule witness it: all three
 // `latchInnerSub` child rules are reached on every depth-3 seed and are byte-inert under mutation
 // (`helpers.ts`'s generator docblock carries the measurement).
@@ -51,15 +51,15 @@ const census = (depth: 0 | 1 | 2 | 3, want: number): { structured: number; loops
 };
 
 // PINNED, not floored, and that is the point of the file. The consumers one level downstream pin
-// `judged` to the unit; a producer asserted at `> 3000` against a measured 3,753 has 20% of slack in
+// `judged` to the unit; a producer asserted at `> 3000` against a measured 3,776 has 21% of slack in
 // which the generator can quietly stop building a shape while every sibling fuzz stays green with a
 // smaller population — the exact vacuity this file exists to refuse, held to a looser bar at the
 // place it is PRODUCED than at the place it is read. Re-derive by running this file: the assertion
 // message carries the number.
 test('depth 2 reaches a loop inside a loop', () => {
   const { structured, loops } = census(2, 2);
-  expect(structured, 'seeds that structure at depth 2').toBe(3753);
-  expect(loops, 'of those, seeds emitting >= 2 bottom-tested loops').toBe(3753);
+  expect(structured, 'seeds that structure at depth 2').toBe(3776);
+  expect(loops, 'of those, seeds emitting >= 2 bottom-tested loops').toBe(3776);
 });
 
 // The shape depth 3 exists for. `latchInnerSub` filters a do-while's child loops and then applies
@@ -69,6 +69,6 @@ test('depth 2 reaches a loop inside a loop', () => {
 // which is reach, and reach only: see this file's header.
 test('depth 3 reaches a do-while with SEVERAL child loops', () => {
   const { structured, loops } = census(3, 3);
-  expect(structured, 'seeds that structure at depth 3').toBe(3413);
-  expect(loops, 'of those, seeds emitting >= 3 bottom-tested loops — every one').toBe(3413);
+  expect(structured, 'seeds that structure at depth 3').toBe(3449);
+  expect(loops, 'of those, seeds emitting >= 3 bottom-tested loops — every one').toBe(3449);
 });

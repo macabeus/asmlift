@@ -1301,6 +1301,27 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
+  /** Does `v` reach a `branchArgFed` edge argument, itself or through the ops it would be inlined
+   *  into? Such an op renders where its consumer does, so a call under `f(x) + 1` or `*f(x)` rides
+   *  the edge copy exactly as a bare `f(x)` does. The walk stops at a named op, which renders at its
+   *  own position, and at another effect, which these same rules place. */
+  const ridesEdge = (v: Value, seen: Set<Value> = new Set()): boolean => {
+    if (branchArgFed.has(v)) {
+      return true;
+    }
+    if (seen.has(v)) {
+      return false;
+    }
+    seen.add(v);
+    return (useSitesOf.get(v) ?? []).some(
+      (u) =>
+        !EFFECTFUL_OPS.has(u.op.opcode) &&
+        u.op.successors.length === 0 &&
+        !materialize.has(u.op) &&
+        u.op.results.length > 0 &&
+        ridesEdge(u.op.results[0], seen),
+    );
+  };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
@@ -1448,68 +1469,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         return d.operands.some(readsUpdated);
       };
       return readsUpdated(r);
-    });
-  /** THE CALL A PRE-UPDATE EXIT COPY WOULD CARRY PAST A READ. The same self-loops, and the value
-   *  the latch hands the exit EDGE rather than one read after it: `do { r = *q + cb(q); q = q - 1;
-   *  } while (--n); return r;`. Post-loop that arg reads `q` one iteration late, so the structurer
-   *  rebuilds its tree inside the body, at the op that computed it (`sinkablePreUpdateSlots`,
-   *  hazards.ts). agbcc ran `bl cb; ldr r1,[q]; add` — the call FIRST — and inlined into the add
-   *  the call would be rebuilt there with the load between it and its home, which
-   *  `arg-safe-to-reevaluate` refuses (its between-scan does not exempt the rebuilt tree's own
-   *  members), and the loop declines.
-   *
-   *  Naming the call where it ran is the asm's own order, and C can say it: agbcc compiles `t =
-   *  cb(q); r = *q + t;` to the same object as `r = *q + cb(q)`. The name removes the call from
-   *  the rebuilt tree, which then reads it by name, and whether that name is current at the copy
-   *  is the sink's to decide (`arg-reads-current-names`).
-   *
-   *  Only where the motion is real: an order-sensitive op strictly between the call and the arg's
-   *  def, both in the latch. A call adjacent to its consumer moves past nothing, and a READ ahead
-   *  of the call (`t = *q; r = t + cb(q)`, agbcc's `ldr; bl; add`) is the barrier scan's to name,
-   *  below, which it does wherever the two would share a statement. Only where the pre-update hazard
-   *  is: the tree reads a loop variable the back edge updates, without which the arg renders after
-   *  the loop and nothing is rebuilt. */
-  const callsAheadOfExitCopy = (call: Op): boolean =>
-    escapeLoops.some((L) => {
-      if (!L.body.has(opBlock.get(call)!)) {
-        return false;
-      }
-      const latch = L.latch.ops;
-      const term = latch[latch.length - 1];
-      return term.successors.some(
-        (sc) =>
-          sc !== L.back &&
-          sc.args.some((a) => {
-            const home = defOf.get(a);
-            if (!home || opBlock.get(home) !== L.latch || materialize.has(home)) {
-              return false;
-            }
-            let holds = false;
-            let readsUpdated = false;
-            const seen = new Set<Value>();
-            const walk = (x: Value): void => {
-              if (seen.has(x) || L.back.args.includes(x)) {
-                return;
-              }
-              seen.add(x);
-              const pi = L.header.params.indexOf(x);
-              if (pi >= 0) {
-                readsUpdated ||= L.back.args[pi] !== x;
-                return;
-              }
-              const d = defOf.get(x);
-              if (!d || opBlock.get(d) !== L.latch || (d !== home && materialize.has(d))) {
-                return;
-              }
-              holds ||= d === call;
-              d.operands.forEach(walk);
-            };
-            walk(a);
-            const i = opIndex.get(call)!;
-            const p = opIndex.get(home)!;
-            return holds && readsUpdated && latch.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
-          }),
-      );
     });
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
@@ -1894,7 +1853,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // Materializing puts it back at the position the asm executed it. Sole-use only in
         // practice — a second use already materialized above — and it is 0 of 2288 sa3 functions,
         // 2 of 412 klonoa ones.
-        if (isCall && branchArgFed.has(r)) {
+        //
+        // And the same under a pure op (`ridesEdge`): `f1(a0) - v` riding a do-while's exit edge
+        // renders the call after the loop, once, where the body ran it every iteration; riding
+        // the back edge it renders in the update copy at the foot, behind statements the asm ran
+        // after it — `do { r = *q + cb(q); … } while (--n);` rebuilt ahead of the update would
+        // otherwise spell the call with the load it preceded; and riding two edge args it renders
+        // twice.
+        if (isCall && ridesEdge(r)) {
           materialize.add(op);
           continue;
         }
@@ -1909,12 +1875,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // which is that guard's remaining population. What this clause reaches is the row that pins
         // it, 1 of the corpus's 1,203, swept in both map modes.
         if (isCall && shortCircuitGuarded.has(r)) {
-          materialize.add(op);
-          continue;
-        }
-        // …and a call the pre-update sink would rebuild AFTER a read or an effect it ran ahead of
-        // (`callsAheadOfExitCopy` above). Asked in the escape phase, for the reason that rule is.
-        if (isCall && escapePhase && callsAheadOfExitCopy(op)) {
           materialize.add(op);
           continue;
         }

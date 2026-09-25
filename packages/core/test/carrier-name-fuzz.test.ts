@@ -115,12 +115,12 @@ function spellings(
 
 // WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
 // `namecoalesce-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
-// file. Its docblock carries the three defects behind it and the measurement that folded the two
+// file. Its docblock carries the two defects behind it and the measurement that folded the two
 // copies together.
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
-// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 636: a change
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 647: a change
 // that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
@@ -134,14 +134,14 @@ function spellings(
 // seed this file judges that `namecoalesce-fuzz` does not (onlyC = 0 at all four depths).
 //
 // The sibling's extra `structure()` call costs it NOTHING: `coalesceMergeNames` declines on exactly
-// the set the shipped spelling does — 1,349/1,349 at depth 1, 247/247 at depth 2, 587/587 at
+// the set the shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at
 // depth 3.
 //
 // RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1548, 3: 636 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1556, 3: 647 };
 
 describe.each([
   ['acyclic', 0],
@@ -232,15 +232,15 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
       adopted++;
     }
   }
-  // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,548:
+  // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
   // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
   // declines on.
-  expect(judged, 'the measured arm judges the population it measured').toBe(1091);
+  expect(judged, 'the measured arm judges the population it measured').toBe(1093);
   // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
   // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
   // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
-  // from 252 firings to 1 would leave both arms green, with `judged` still at 1,091 vouching for it.
-  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(252);
+  // from 253 firings to 1 would leave both arms green, with `judged` still at 1,093 vouching for it.
+  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(253);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 

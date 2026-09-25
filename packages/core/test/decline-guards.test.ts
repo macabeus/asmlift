@@ -6,16 +6,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
-import { cBackend } from '../src/backend/c';
 import { sliceSymbol } from '../src/frontend/disasm';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { parse } from '../src/ir/parse';
-import { verify } from '../src/ir/verify';
 import { demangle } from '../src/mangle';
 import { decompile } from '../src/pipeline';
 import { PRE_RECOVERY_PASSES } from '../src/raise/pre-recovery';
-import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
@@ -342,46 +337,4 @@ test('agbcc .s text into the MIPS target declines (was a raw TypeError)', () => 
 
 test('unclassifiable garbage into MIPS declines on the empty parse, not a crash', () => {
   expect(() => decompile('f', 'hello world\nthis is not asm\n', MIPS_IDO)).toThrow(/no instructions found/);
-});
-
-// A CALL UNDER A PURE OP OF A POST-LOOP COPY. The do-while's exit edge carries `f1(a0) - %6`, a
-// call the body makes every iteration under a `sub` it feeds nothing else. The copy renders after
-// the loop, and the call with it: `a0 = f1(a0) - v2;`, once instead of once per iteration. The
-// guard named the copy's own def and nothing under it; it walks the tree the copy renders now. The
-// control names the call (a second consumer), which keeps it in the body and lifts.
-const CALL_UNDER_EXIT_COPY = `fn movedcall {
-^bb0(%0: s32, %1: s32):
-  %2: s32 = const {value=0}
-  %3: u32 = icmp_slt %2, %1
-  cond_br %3, ^bb1(), ^bb3(%0)
-^bb1():
-  br ^bb2(%1, %2, %2)
-^bb2(%4: s32, %5: s32, %6: s32):
-  %7: s32 = call %0 {target="f1"}
-  %8: s32 = sub %7, %6
-  %9: s32 = const {value=1}
-  %10: s32 = sub %4, %9
-  %11: u32 = icmp_slt %2, %10
-  cond_br %11, ^bb2(%10, %6, %5), ^bb3(%8)
-^bb3(%12: s32):
-  ret %12
-}
-`;
-
-test('a call under a pure op of a post-loop copy declines instead of leaving the loop', () => {
-  const emitIr = (ir: string): string => {
-    const fn = parse(ir);
-    verify(fn);
-    recoverTypes(fn);
-    return cBackend.emit(structure(fn));
-  };
-  expect(() => emitIr(CALL_UNDER_EXIT_COPY)).toThrow(/a post-loop value inlines a 'call' from inside the loop/);
-  const named = CALL_UNDER_EXIT_COPY.replace(
-    '  %8: s32 = sub %7, %6\n',
-    '  %8: s32 = sub %7, %6\n  %13: s32 = call %7 {target="g"}\n',
-  );
-  expect(named).not.toBe(CALL_UNDER_EXIT_COPY);
-  const out = emitIr(named);
-  expect(out).toMatch(/do \{\s*\n\s*v1 = f1\(a0\);/);
-  expect(out.match(/f1\(/g)).toHaveLength(1);
 });

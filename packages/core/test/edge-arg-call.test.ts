@@ -72,3 +72,66 @@ test('the same call with a second consumer still materializes — the older rule
   const ir = EDGE_CALL.replace('  ret %4', '  %5: unk32 = add %4, %1\n  ret %5');
   expect(emit(ir).match(/f2\(/g)).toHaveLength(1);
 });
+
+// A CALL UNDER A PURE OP OF A POST-LOOP COPY. The do-while's exit edge carries `f1(a0) - %6`, a
+// call the body makes every iteration under a `sub` it feeds nothing else. Inlined, the copy
+// renders after the loop and the call with it — `a0 = f1(a0) - v2;`, once instead of once per
+// iteration — so the analysis names a call that rides an edge through the ops it is inlined into
+// (`ridesEdge`, structure/analysis.ts), exactly as it names one that rides it bare.
+const CALL_UNDER_EXIT_COPY = `fn movedcall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(), ^bb3(%0)
+^bb1():
+  br ^bb2(%1, %2, %2)
+^bb2(%4: s32, %5: s32, %6: s32):
+  %7: s32 = call %0 {target="f1"}
+  %8: s32 = sub %7, %6
+  %9: s32 = const {value=1}
+  %10: s32 = sub %4, %9
+  %11: u32 = icmp_slt %2, %10
+  cond_br %11, ^bb2(%10, %6, %5), ^bb3(%8)
+^bb3(%12: s32):
+  ret %12
+}
+`;
+
+test('a call under a pure op of a post-loop copy is named in the loop', () => {
+  const out = emit(CALL_UNDER_EXIT_COPY);
+  expect(out).toMatch(/do \{\s*\n\s*v1 = f1\(a0\);/);
+  expect(out.match(/f1\(/g)).toHaveLength(1);
+  expect(out).toContain('    a0 = v1 - v3;\n');
+});
+
+// A CALL RIDING THE BACK EDGE under a pure op renders in the update copy at the foot of the body,
+// behind everything the latch ran after it — here a second call the exit copy rebuilds ahead of the
+// update, so inlined the two ran `f1` then `f0` where the asm ran `f0` then `f1`. Named, each call
+// is a statement at the position the asm ran it.
+const BACK_EDGE_CALL = `fn backcall {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(), ^bb3(%2)
+^bb1():
+  br ^bb2(%1, %0)
+^bb2(%6: s32, %7: s32):
+  %10: s32 = call %7 {target="f0"}
+  %11: s32 = const {value=1}
+  %12: s32 = add %10, %11
+  %13: s32 = call %6 {target="f1"}
+  %14: s32 = add %13, %7
+  %15: s32 = sub %6, %11
+  %16: s32 = const {value=0}
+  %17: u32 = icmp_slt %16, %15
+  cond_br %17, ^bb2(%15, %12), ^bb3(%14)
+^bb3(%18: s32):
+  ret %18
+}
+`;
+
+test('a call under a pure op of a back-edge copy runs where the asm ran it', () => {
+  const body = emit(BACK_EDGE_CALL).split('do {')[1].split('} while')[0];
+  expect(body.indexOf('f0(')).toBeGreaterThanOrEqual(0);
+  expect(body.indexOf('f0(')).toBeLessThan(body.indexOf('f1('));
+});
