@@ -434,9 +434,9 @@ describe('sinkablePreUpdateSlots', () => {
 
   // A DEF NAMED AHEAD OF THE HOME IS CURRENT THERE. The shape is `preupdate_exit_order`'s once the
   // analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the copy homed at the add, and the
-  // statement writing `v2` rendered one index earlier on the same iteration — and
-  // `preupdate_exit_load`'s with a read in the call's place. Each control changes ONE fact and is
-  // refused at `arg-reads-current-names`, which its own ablation then admits.
+  // statement writing `v2` rendered one index earlier on the same iteration; a read named there is
+  // current the same way. Each control changes ONE fact and is refused at `arg-reads-current-names`,
+  // which its own ablation then admits.
   const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherBlock?: boolean; load?: boolean } = {}) => {
     const { p, q, header, exit, latch } = scaffold();
     const mid = v();
