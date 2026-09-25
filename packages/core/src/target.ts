@@ -521,6 +521,19 @@ export interface TargetDescription {
     // value is safe to assume, since one too small mislays the fields after it on agbcc and one too
     // large drops the pad in front of them everywhere else.
     aggregateBoundary?: number;
+    // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
+    // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
+    // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
+    // `fnmsubs`, but only within one expression, so the structurer names every such product
+    // (StructureOptions.contractsFloatProducts) and the spelling compiles to the unfused pair under
+    // either setting. The MIPS targets cannot: MIPS II (ido7.1 `-mips2`) and MIPS III (kmc `-mips3`)
+    // have no fused multiply-add, and naming the product there only costs matches — over 80
+    // generated two-float expressions recompiled at each row's flags, 44 lifts reproduce their
+    // object on ido7.1 without the naming and 38 with it, 80 against 78 on gcc2.7.2kmc.
+    //
+    // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
+    // compute on a float at all.
+    contractsFloatProducts?: boolean;
   };
 }
 
@@ -654,6 +667,7 @@ export const MIPS_IDO: TargetDescription = {
   // `switchAllowsNeqCase: false` — IDO's switch dispatch uses `==`/`<`, never `!=` cases;
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
   compilerBehaviors: {
+    contractsFloatProducts: false,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -737,6 +751,7 @@ export const MIPS_GCC: TargetDescription = {
   fpu: O32_FPU,
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
+    contractsFloatProducts: false,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -821,6 +836,7 @@ export const PPC_MWCC: TargetDescription = {
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
+    contractsFloatProducts: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,

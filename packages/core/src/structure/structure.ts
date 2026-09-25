@@ -1672,6 +1672,11 @@ export interface StructureOptions {
   // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` variation —
   // see analysis.ts AnalyzeOptions.
   homeDerivedReads?: boolean;
+  // Can this compiler FUSE a float multiply into the add or subtract that reads it, when both are
+  // written in one expression? Then every such product is named (analysis.ts), so the spelling
+  // compiles to the unfused pair the object holds. A compiler opts in; the target says which
+  // (`compilerBehaviors.contractsFloatProducts`).
+  contractsFloatProducts?: boolean;
   // Materialize a pure value that one join's incoming edges render into the SAME parameter slot
   // from 2+ places — the value the source computed once above the branch and the copy machinery
   // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
@@ -2029,6 +2034,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds = false,
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
+    contractsFloatProducts = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     freshParamMerge = false,
@@ -2130,6 +2136,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds,
     homeEscapingExtensions,
     readsStayWhereWritten,
+    contractsFloatProducts,
     // the map's own declaration truth: a volatile object's read may not be duplicated or moved.
     // A qualified MEMBER answers only for the bytes it spans — the `vu16 field;` idiom puts one in
     // a struct whose other members are ordinary cells — and a field of unknown extent spans
