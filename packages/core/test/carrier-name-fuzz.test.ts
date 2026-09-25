@@ -120,28 +120,24 @@ function spellings(
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
-// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 647: a change
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 652: a change
 // that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
 //
-// THESE NUMBERS ARE THIS FILE'S, not a shared quantity, and THIS FILE IS THE OUTLIER. It judges
-// 2,502 at depth 1 where `namecoalesce-fuzz` judges 2,508 — six FEWER, not six more — and the cause
-// is the REFERENCE table above, not the sibling. `ADMIT_NOTHING` declines on 6 seeds the shipped
-// spelling structures (291, 1089, 1489, 1724, 3021, 3923, each `unrecovered back-edge into block
-// #k`), and `spellings` needs both, so those six leave here and stay there. Instrumented per depth:
-// declines are 1,337 for `ADMIT_NOTHING` against 1,349 for the shipped spelling, and there is no
-// seed this file judges that `namecoalesce-fuzz` does not (onlyC = 0 at all four depths).
-//
-// The sibling's extra `structure()` call costs it NOTHING: `coalesceMergeNames` declines on exactly
-// the set the shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at
-// depth 3.
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,504 at depth 1 where
+// `namecoalesce-fuzz` judges 2,508 — four FEWER — and the two files lose different seeds.
+// `ADMIT_NOTHING` declines on 6 seeds the shipped spelling structures (291, 1089, 1489, 1724, 3021,
+// 3923, each `unrecovered back-edge into block #k`), and `spellings` needs both, so those six leave
+// here and stay there. `coalesceMergeNames` declines on 2 the shipped spelling structures (3601,
+// 3947), which stay here and leave there. Instrumented at depth 1: declines are 1,337 for
+// `ADMIT_NOTHING`, 1,347 for the shipped spelling and 1,349 for `coalesceMergeNames`.
 //
 // RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1556, 3: 647 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2504, 2: 1556, 3: 652 };
 
 describe.each([
   ['acyclic', 0],
@@ -244,14 +240,19 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 
-// The three rules this generator cannot reach, and why — each with the file that carries its
-// evidence instead. Two are about a DECLARED WIDTH: every value here is `s32`, so no carrier can be
+// The four rules this generator cannot show load-bearing, and why — each with the file that carries
+// its evidence instead. Two are about a DECLARED WIDTH: every value here is `s32`, so no carrier can be
 // narrower than its taker and no pair can disagree about a signedness that only exists below 32
 // bits (`fresh-merge.test.ts`, `carrier-name.test.ts`). The third needs a loop whose body holds a
 // merge that OUTLIVES it, which this generator's back edges never build — 0 firings over the whole
-// sweep, in both arms (`carrier-name.test.ts`). Naming them HERE rather than dropping the assertion
-// is the point: exempting a gate is a visible act with a reason attached.
-const OUT_OF_REACH = new Set(['carrier-width', 'carrier-sign', 'carrier-write']);
+// sweep, in both arms (`carrier-name.test.ts`). The fourth, `back-arg-live`, does fire here (29 more
+// depth-3 seeds structure with it), but every merge it refuses declines at a later refusal once it is
+// dropped — the latch's rewritten-name check, or the pre-update loop-variable check — so dropping it
+// costs reach and no wrong answer. Its wrong answer is mwcc's own output (`name-clobber.test.ts`),
+// and the two refusals behind it are pinned with it dropped (`latch-inner-sub.test.ts`,
+// `loop-preupdate-escape.test.ts`). Naming them HERE rather than dropping the assertion is the point:
+// exempting a gate is a visible act with a reason attached.
+const OUT_OF_REACH = new Set(['carrier-width', 'carrier-sign', 'carrier-write', 'back-arg-live']);
 
 // AGAINST THE IR, not against the reference spelling. "Dropping it changes what some function does"
 // was measured as "the two spellings differ", which a rule could satisfy by making the function a
