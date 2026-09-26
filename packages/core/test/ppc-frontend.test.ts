@@ -392,6 +392,17 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /'8\(r1\)' is stored at 0x4 and never read back/,
     );
   });
+  test('the frame push stores the back chain: its word holds the caller r1, not a value stored there before', () => {
+    expect(() =>
+      dis(
+        'bchain',
+        '0:\tstw     r3,-16(r1)\n4:\tstwu    r1,-16(r1)\n8:\tlwz     r3,0(r1)\nc:\taddi    r1,r1,16\n10:\tblr\n',
+      ),
+    ).toThrow(/'-16\(r1\)' at 0x4 is a word this function both saves a register in and stores a value to/);
+    expect(() =>
+      dis('bchain2', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,0(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of '0\(r1\)' into r3, a slot r1 was saved into/);
+  });
   test('a return address read as a value refuses, whichever register `mflr` put it in', () => {
     // MP4 `HuMemDirectMalloc` reads it with `asm { mflr retaddr }` and passes it on. Were `mflr` a
     // no-op, r3 would lift as nothing (`void getpc(void)`) and r31 as a phantom parameter.
