@@ -21,9 +21,9 @@
 //  • CALLS (`bl`) — the callee symbol comes from the interleaved `R_PPC_REL24` relocation (an
 //    unresolved `bl` in a .o encodes a 0 placeholder); arguments come from r3.. per the callee
 //    prototype (falling back to argument-register liveness). The frame bookkeeping — `stwu r1`,
-//    `mflr`/`mtlr`, callee-saved saves — is transparent to dataflow, so a value in a callee-saved
-//    register survives the call; a word stored to the frame with a value is a stack-slot variable
-//    (`frameStore`).
+//    the link-register save, callee-saved saves — is transparent to dataflow, so a value in a
+//    callee-saved register survives the call; a word stored to the frame with a value is a
+//    stack-slot variable (`frameStore`).
 //  • RECORD FORM (`.` = the Rc bit, e.g. `andi.`/`add.`) also sets cr0 from a signed compare of
 //    the result against 0; that implicit compare is wired so a following `beq`/`bne` fuses.
 //
@@ -552,6 +552,14 @@ export function lift(
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
   const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
+  /** The return address `mflr rD` copies out of the link register, per value standing for one, with
+   *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
+   *  the frame is the LR save (`frameStore`), and moving it back with `mtlr` is the return. Any other
+   *  use is a function reading its own return address (MP4's `asm { mflr retaddr }` does, to tag
+   *  an allocation with its caller), which no C expression spells, so that use refuses once the
+   *  function is built. A no-op `mflr` would leave rD holding its previous value, and the body's
+   *  read of it would lift as that value: a phantom parameter for r31, nothing at all for r3. */
+  const returnAddresses = new Map<Value, number>();
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
   const CALL_CLOBBERS = clobberedByCall(target);
@@ -705,7 +713,11 @@ export function lift(
       }
       const off = entryOffset(ins, mem);
       const isArg = ARG_REGS.includes(srcReg);
-      if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
+      // A save stores what the register held at entry (nothing defined it on any path) or the
+      // return address `mflr` copied into it (the only definition on every path). An argument
+      // register nothing defined holds the argument, which is a value.
+      const noValueReaches = !ssa.hasReachingDef(srcReg, bi, (v) => !returnAddresses.has(v));
+      if (noValueReaches && (!isArg || ssa.hasReachingDef(srcReg, bi))) {
         refuseMixedSlot(ins, mem, off, 'save');
         saveSlots.set(off, srcReg);
         return true;
@@ -1041,8 +1053,9 @@ export function lift(
           break;
         }
         // Stack-frame + link-register bookkeeping. `stwu r1,-N(r1)` / `addi r1,r1,N` adjust the frame
-        // pointer; `mflr`/`mtlr` save/restore the return address. Transparent. A word store or load
-        // on r1 is a save or a value slot (`frameStore`/`frameLoad`); `stmw` records save slots.
+        // pointer; `mflr` copies the return address out (`returnAddresses`) and `mtlr` puts it back.
+        // A word store or load on r1 is a save or a value slot (`frameStore`/`frameLoad`); `stmw`
+        // records save slots.
         // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a real store-with-BASE-UPDATE
         // (`*(rA+D)=rS; rA+=D`) — neither effect is modelled here, so loud-fail rather than drop both.
         // The push itself must be the only one, taken from the entry r1: every slot is named by its
@@ -1061,7 +1074,12 @@ export function lift(
           throw new PpcUnsupportedError(
             `cannot lift '${name}': stwu with update on ${parseMem(s).base} (store-with-base-update) not modelled`,
           );
-        case 'mflr':
+        case 'mflr': {
+          const lr = mkValue(T.unk(32));
+          returnAddresses.set(lr, ins.addr);
+          write(d, lr);
+          break;
+        }
         case 'mtlr':
           break;
         // `mtctr rS` initialises the CTR loop counter — track it as the `ctr` pseudo-register so
@@ -1579,6 +1597,19 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
+  // Checked on the finished function, after `finish` pruned the joins nothing reads, because a
+  // return address reaches a use through a join's incoming arguments as well as directly.
+  for (const b of irBlocks) {
+    for (const op of b.ops) {
+      const lr = [...op.operands, ...op.successors.flatMap((s) => s.args)].find((v) => returnAddresses.has(v));
+      if (lr !== undefined) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': the return address the 'mflr' at 0x${returnAddresses.get(lr)!.toString(16)} ` +
+            `copies out is used as a value — a function reading its own return address has no C spelling`,
+        );
+      }
+    }
+  }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
