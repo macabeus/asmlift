@@ -1569,8 +1569,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // What `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) still turns away once every read and call
   // that something would cross is named is a TRAPPING op, which the analysis does not name:
   // `preupdate_exit_div` is `t = k / n; *q = n; r = t + 1;`, where agbcc calls `__divsi3` ahead of
-  // the store. Rebuilt at the add, the divide would run behind the store — where division by zero
-  // traps, after the store has landed — so the row declines, and the decline is what it measures.
+  // the store. Rebuilt at the add, the divide would run behind the store, so the row declines. It is
+  // a REACH row, not a soundness witness: the divisor is the loop counter, never 0 where the divide
+  // runs, so the program the gate refuses is correct on every input.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1721,8 +1722,8 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     note:
       "the exit value's tree holds a DIVIDE the asm runs ahead of a store; rebuilt at the add it would " +
-      'run behind it, which a trapping divide can tell, so the sink refuses (`arg-safe-to-reevaluate`) ' +
-      'and the decline is what the row measures',
+      'run behind it, so the sink refuses (`arg-safe-to-reevaluate`); the divisor is the loop counter, ' +
+      'never 0, so the refused program would be correct: the row measures where the gate is reached',
   },
   {
     sym: 'preupdate_escape',
