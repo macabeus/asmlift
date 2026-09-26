@@ -284,33 +284,41 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('stwxframe', '0:\tstwx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
     expect(() => dis('lwzxindex', '0:\tlwzx    r3,r4,r1\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
-  test('spill of a LIVE (computed) value to the stack FAILS LOUD, not a dropped spill', () => {
-    // `addi r0,r3,1` computes a value; `stw r0,8(r1)` spills it. A callee-saved SAVE stores an
-    // unchanged entry value (no reaching def) and stays transparent — this stores a live value.
-    expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
-      /spill of a live value/,
+  // A word stored to the frame with a VALUE is a stack-slot variable, as on MIPS and Thumb: a
+  // reload into any register reads it back, whichever register stored it.
+  test('a live value spilled to the frame is read back by its reload', () => {
+    expect(
+      dis('ls', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tli      r0,0\nc:\tlwz     r3,8(r1)\n10:\tblr\n'),
+    ).toBe('s32 ls(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+  test('an argument read back into another register is the argument', () => {
+    // `pikmin:__ct__7ActFreeFP4Piki` reads `this` back into r4 this way.
+    expect(dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n')).toBe(
+      's32 crossreload(s32 a0) {\n    return a0;\n}\n',
     );
   });
-  // A save slot is a register AND an offset. `stw r3,8(r1)` / `lwz r4,8(r1)` is mwcc reading an
-  // incoming argument back into a different register, not a callee-saved save/restore pair: an
-  // offset-only record calls it transparent, drops the load, leaves r4 with no definition, and the
-  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured
-  // on `pikmin:__ct__7ActFreeFP4Piki`, which reads `this` back into r4, and on 28 Mario Party 4
-  // checkout functions that each lose an address the relocation fold recovered.
-  test('a reload into a register the slot was NOT saved from FAILS LOUD, not a dropped value', () => {
-    expect(() =>
-      dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n'),
-    ).toThrow(/reload of '8\(r1\)' into r4, a slot r3 was saved into/);
-  });
-  test('and the call argument an offset-only record carries away is the reason', () => {
-    // Without the register in the slot this lifts to `return callee(1);` — r4's reload dropped, so
-    // the recovered `&gObj` in r5 goes with it.
+  test('and it keeps every later argument of the call it sets up', () => {
+    // Dropped, the reload would leave r4 undefined, and the contiguous arity guess would take the
+    // recovered `&gObj` in r5 with it: `callee(1)`.
     const asm =
       '0:\tstw     r3,8(r1)\n4:\tli      r3,1\n8:\tlwz     r4,8(r1)\n' +
       'c:\tlis     r5,0\n\t\t\te: R_PPC_ADDR16_HA\tgObj\n' +
       '10:\taddi    r5,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tgObj\n' +
       '14:\tbl      18 <argdrop+0x18>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tblr\n';
-    expect(() => dis('argdrop', asm)).toThrow(/reload of '8\(r1\)' into r4/);
+    expect(dis('argdrop', asm)).toBe('s32 argdrop(s32 a0) {\n    return callee(1, a0, &gObj);\n}\n');
+  });
+  test('a slot stored on one path and reloaded at the join refuses: the other path reads nothing', () => {
+    // The reload at 0x14 reads uninitialised stack when r3 (or r4) is 0.
+    const join = (reg: string) =>
+      `0:\tstwu    r1,-24(r1)\n4:\tcmpwi   ${reg},0\n8:\tbeq-    10 <join+0x10>\nc:\tstw     r3,16(r1)\n` +
+      '10:\tli      r3,5\n14:\tlwz     r3,16(r1)\n18:\taddi    r3,r3,1\n1c:\taddi    r1,r1,24\n20:\tblr\n';
+    expect(() => dis('join', join('r3'))).toThrow(/sp@-8 is read on a path that never stores it/);
+    expect(() => dis('join', join('r4'))).toThrow(/sp@-8 is read on a path that never stores it/);
+  });
+  test('a word both saved and stored with a value refuses', () => {
+    expect(() =>
+      dis('mixed', '0:\tstw     r31,12(r1)\n4:\tstw     r3,12(r1)\n8:\tlwz     r31,12(r1)\nc:\tblr\n'),
+    ).toThrow(/'12\(r1\)' at 0x4 is a word this function both saves a register in and stores a value to/);
   });
   test('control: a save and restore of the SAME register stays transparent', () => {
     expect(dis('saverestore', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r4\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
@@ -375,7 +383,14 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       asm += `${(0xc + 4 * k).toString(16)}:\tli      r${k + 2},${k}\n`;
     }
     asm += '30:\tbl      30 <s9+0x30>\n\t\t\t30: R_PPC_REL24\tg9\n' + epi(0x34, 24);
-    expect(() => dis('s9', asm)).toThrow(/argument register r3 is stored to '8\(r1\)' at 0xc and never read back/);
+    // The class phrase leads, because the benchmark publishes a reason cut at 200 characters and a
+    // long C++ name alone can push a later phrase past the cut (apps/web declines.ts).
+    expect(() => dis('s9', asm)).toThrow(
+      /^cannot lift 's9': local stack frames not supported — '8\(r1\)' is stored at 0xc and never read back/,
+    );
+    expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
+      /'8\(r1\)' is stored at 0x4 and never read back/,
+    );
   });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
@@ -412,11 +427,11 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       dis('stkarg', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,24(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
     ).toThrow(/reload of a stack local \('24\(r1\)'\)/);
   });
-  test('an argument spilled before the push and read back into another register after it still refuses', () => {
+  test('an argument stored before the push is read back after it from the same word', () => {
     const asm =
       '0:\tstw     r3,8(r1)\n4:\tstwu    r1,-16(r1)\n8:\tlwz     r4,24(r1)\nc:\tmr      r3,r4\n' +
       '10:\taddi    r1,r1,16\n14:\tblr\n';
-    expect(() => dis('spillback', asm)).toThrow(/reload of '24\(r1\)' into r4, a slot r3 was saved into/);
+    expect(dis('spillback', asm)).toBe('s32 spillback(s32 a0) {\n    return a0;\n}\n');
   });
   test('where r1 is not at a known depth, a frame access refuses instead of naming a slot', () => {
     expect(() =>
