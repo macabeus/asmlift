@@ -375,22 +375,63 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '0:\tstw     r3,8(r1)\n4:\tstw     r3,12(r1)\n8:\tli      r3,0\nc:\tlwz     r3,12(r1)\n10:\tlwz     r3,8(r1)\n14:\tblr\n';
     expect(dis('twice', asm)).toBe('s32 twice(s32 a0) {\n    return a0;\n}\n');
   });
-  test('an argument stored to the frame and never read back refuses: it may be an outgoing stack argument', () => {
-    // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
-    // ninth argument, in g9's parameter area.
-    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n';
-    for (let k = 1; k <= 8; k++) {
-      asm += `${(0xc + 4 * k).toString(16)}:\tli      r${k + 2},${k}\n`;
-    }
-    asm += '30:\tbl      30 <s9+0x30>\n\t\t\t30: R_PPC_REL24\tg9\n' + epi(0x34, 24);
+  test('a value stored to the frame and never read back refuses', () => {
     // The class phrase leads, because the benchmark publishes a reason cut at 200 characters and a
     // long C++ name alone can push a later phrase past the cut (apps/web declines.ts).
-    expect(() => dis('s9', asm)).toThrow(
-      /^cannot lift 's9': local stack frames not supported — '8\(r1\)' is stored at 0xc and never read back/,
-    );
     expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
-      /'8\(r1\)' is stored at 0x4 and never read back/,
+      /^cannot lift 'livespill': local stack frames not supported — '8\(r1\)' is stored at 0x4 and never read back/,
     );
+  });
+  // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
+  // ninth argument, in g9's parameter area 8 bytes above the pushed r1. `tail` follows the eight
+  // `li`s; `head` goes between the store and them.
+  const s9 = (sym: string, head: string, tail: (at: number) => string) => {
+    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n' + head;
+    let at = 0x10 + (head ? 4 : 0);
+    for (let k = 1; k <= 8; k++, at += 4) {
+      asm += `${at.toString(16)}:\tli      r${k + 2},${k}\n`;
+    }
+    const bl = at.toString(16);
+    return asm + `${bl}:\tbl      ${bl} <${sym}+0x${bl}>\n\t\t\t${bl}: R_PPC_REL24\tg9\n` + tail(at + 4);
+  };
+  test('a store in the parameter area of a call that fills all eight argument registers refuses, read back or not', () => {
+    const ninth =
+      /^cannot lift '\w+': outgoing stack arguments not modelled — the undeclared call to 'g9' at 0x\w+ fills all 8/;
+    expect(() =>
+      dis(
+        's9',
+        s9('s9', '', (at) => epi(at, 24)),
+      ),
+    ).toThrow(ninth);
+    // Reading the word back, after the call or before it, does not make it any less the ninth argument.
+    const after = s9('s9a', '', (at) => `${at.toString(16)}:\tlwz     r3,8(r1)\n` + epi(at + 4, 24));
+    expect(() => dis('s9a', after)).toThrow(ninth);
+    const before = s9(
+      's9b',
+      '10:\tlwz     r31,8(r1)\n',
+      (at) => `${at.toString(16)}:\tmr      r3,r31\n` + epi(at + 4, 24),
+    );
+    expect(() => dis('s9b', before)).toThrow(ninth);
+    // A declaration says where the list ends: eight parameters, and the word is a local.
+    expect(
+      decompile('s9a', `0 <s9a>:\n${after}`, PPC_MWCC, { prototypes: { g9: { params: Array(8).fill('int') } } }).source,
+    ).toBe('s32 s9a(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
+    // Nine parameters are more than the argument registers carry, and refuse by name.
+    expect(() =>
+      decompile('s9', `0 <s9>:\n${s9('s9', '', (at) => epi(at, 24))}`, PPC_MWCC, {
+        prototypes: { g9: { params: Array(9).fill('int') } },
+      }),
+    ).toThrow(
+      "outgoing stack arguments not modelled — 'g9' is declared with 9 parameters and the argument registers carry 8",
+    );
+  });
+  test('control: a call that leaves an argument register free has no ninth argument to hide', () => {
+    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n';
+    for (let k = 1; k <= 7; k++) {
+      asm += `${(0xc + 4 * k).toString(16)}:\tli      r${k + 2},${k}\n`;
+    }
+    asm += '2c:\tbl      2c <s7+0x2c>\n\t\t\t2c: R_PPC_REL24\tg7\n30:\tlwz     r3,8(r1)\n' + epi(0x34, 24);
+    expect(dis('s7', asm)).toBe('s32 s7(s32 a0) {\n    g7(1, 2, 3, 4, 5, 6, 7);\n    return a0;\n}\n');
   });
   test('the frame push stores the back chain: its word holds the caller r1, not a value stored there before', () => {
     expect(() =>
