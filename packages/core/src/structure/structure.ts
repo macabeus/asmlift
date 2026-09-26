@@ -2866,6 +2866,33 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       return d.operands.some((o) => reDerives(o, seen, viaBackArg));
     };
+    // `back-arg-live` looks where the in-edge copies LAND, which is more than `B`'s entry when the
+    // edge leaves a loop from its latch: the do-while and self-loop emitters sink that exit copy into
+    // the body, so what is live into that loop's header is live at the copy. A predecessor all of
+    // whose edges hand the slot a value already under `name` writes nothing. The sink gate
+    // (`dest-free-inside-loop`) refuses an unnamed value that renders the name through `varName`, but
+    // not one that renders it as an earlier loop's back-edge argument, so this rule is that case's
+    // only guard. `re-derives` is the sink gate's there, and reads `B`'s entry alone.
+    let landed: Set<Value> | undefined;
+    const landing = (): Set<Value> => {
+      if (landed) {
+        return landed;
+      }
+      landed = new Set(lin);
+      const slot = B.params.indexOf(p);
+      const writes = new Map<Block, boolean>();
+      for (const { pred, succ } of inEdgeRecords(preds, B)) {
+        writes.set(pred, (writes.get(pred) ?? false) || varName.get(succ.args[slot]) !== name);
+      }
+      for (const [pr, w] of writes) {
+        for (const s of w ? successorsOf(pr) : []) {
+          if (forest.byHeader.get(s)?.body.has(pr)) {
+            liveIn.get(s)!.forEach((v) => landed!.add(v));
+          }
+        }
+      }
+      return landed;
+    };
     return (
       firstRejection(hooks.carrierNameGates ?? CARRIER_NAME_GATES, {
         pureAlias,
@@ -2886,7 +2913,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set(), false));
         },
         get backArgReadsName() {
-          return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set(), true));
+          return [...landing()].some((w) => !varName.has(w) && reDerives(w, new Set(), true));
         },
       }) === null
     );
