@@ -596,23 +596,31 @@ export function lift(
     return n;
   };
 
-  // Frame slots (offsets from the ENTRY r1, see `r1Displacements`) that hold a TRANSPARENT save,
-  // and WHICH REGISTER each one holds — a callee-saved register's entry value or the saved link register. A reload is dropped
-  // (the value is unchanged, so the in-register SSA value already carries it) only when it restores
-  // the very register the slot was saved from. Function-scoped so a save in the prologue block
+  // Frame slots (offsets from the ENTRY r1, see `r1Displacements`) that hold a register's ENTRY
+  // value, and WHICH REGISTER each one was saved from. Function-scoped so a save in the prologue block
   // matches a restore in a different epilogue block. Any OTHER r1 access is a genuine local spill /
   // address-taken stack object this frontend cannot model — those fail LOUD (below), never silently
   // drop, because a dropped local spill is a silent miscompile.
   //
+  // WHAT A RESTORE WRITES depends on whose entry value it is. A callee-saved register's, or the link
+  // register's word, is no value of the C function: nothing after the restore reads it but the
+  // caller (or `mtlr`), so the restore is dropped. An ARGUMENT register's entry value is a parameter,
+  // and the restore writes it back — dropping it would leave whatever the body put in the register
+  // since (`stw r3,8(r1); lis r3,g@ha; addi r3,r3,g@l; lwz r3,8(r1); bl e1` would pass `&g`), and a
+  // reload into a register the body never touched is still the call's argument setup, which the
+  // prototype-less arity guess (`fallbackArgc`) counts by definition.
+  //
   // THE REGISTER IS PART OF THE SLOT, not bookkeeping about it. `stw r3,8(r1)` / `lwz r4,8(r1)` is
-  // mwcc spilling an incoming ARGUMENT and reading it back into another register — a real value
-  // moving through memory, not a save/restore pair, and an offset-only record cannot tell the two
-  // apart. Dropping that reload leaves the destination with no definition at all, and
-  // `fallbackArgc`'s contiguous scan then takes every LATER argument with it.
-  // `pikmin:__ct__7ActFreeFP4Piki` is the benchmark's inhabitant — it reads `this` back into r4 —
-  // and 28 Mario Party 4 checkout functions share the shape, each losing an argument the relocation
-  // fold recovered.
-  const savedSlots = new Map<number, string>();
+  // mwcc reading an incoming ARGUMENT back into another register, and a reload is transparent only
+  // into the register the slot was saved from; the other one refuses.
+  // `pikmin:__ct__7ActFreeFP4Piki` is the benchmark's inhabitant — it reads `this` back into r4.
+  interface FrameSave {
+    reg: string;
+    /** An argument register's entry value, and whether any reload read it back. */
+    arg?: { value: Value; readBack: boolean; addr: number; mem: string };
+  }
+  const savedSlots = new Map<number, FrameSave>();
+  const argSaves: Array<Required<FrameSave>> = [];
   /** The slot an r1-relative operand names: its offset from the entry r1. Where r1's displacement is
    *  not known, no offset can be named, and a save or restore there refuses rather than being
    *  matched against a slot it may not be. */
@@ -697,8 +705,27 @@ export function lift(
       if (parseMem(mem).base !== 'r1') {
         return false;
       }
-      if (!ssa.hasReachingDef(srcReg, bi)) {
-        savedSlots.set(entryOffset(ins, mem), srcReg);
+      // A read of the register's own entry value is a definition that still holds it: an argument
+      // stored to two slots is saved twice, not spilled.
+      if (!ssa.hasReachingDef(srcReg, bi, (v) => paramReg.get(v) !== srcReg)) {
+        const off = entryOffset(ins, mem);
+        if (!ARG_REGS.includes(srcReg)) {
+          savedSlots.set(off, { reg: srcReg });
+          return true;
+        }
+        // The value an argument register holds where nothing has written it is the parameter itself,
+        // unless a path this walk has not filled yet writes it — then it is a join, not the entry
+        // value, and nothing here can name what the slot holds.
+        const value = readReg(srcReg, bi);
+        if (paramReg.get(value) !== srcReg) {
+          throw new PpcUnsupportedError(
+            `cannot lift '${name}': '${srcReg}' stored to '${mem}' at 0x${ins.addr.toString(16)} is not ` +
+              `known to hold its entry value there — local stack frames not supported`,
+          );
+        }
+        const save = { reg: srcReg, arg: { value, readBack: false, addr: ins.addr, mem } };
+        savedSlots.set(off, save);
+        argSaves.push(save);
         return true;
       }
       throw new PpcUnsupportedError(
@@ -710,13 +737,17 @@ export function lift(
         return false;
       }
       const saved = savedSlots.get(entryOffset(ins, mem));
-      if (saved === dstReg) {
+      if (saved?.reg === dstReg) {
+        if (saved.arg) {
+          saved.arg.readBack = true;
+          write(dstReg, saved.arg.value);
+        }
         return true;
       }
       throw new PpcUnsupportedError(
         saved === undefined
           ? `cannot lift '${name}': reload of a stack local ('${mem}') — local stack frames not supported`
-          : `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved} was saved into — ` +
+          : `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved.reg} was saved into — ` +
               `a load that does not restore the register the slot holds is a value read back through the ` +
               `stack, which is a local stack frame this frontend does not model`,
       );
@@ -1053,7 +1084,7 @@ export function lift(
         case 'stmw':
           if (parseMem(s).base === 'r1') {
             for (const slot of frameRange(d, entryOffset(ins, s))) {
-              savedSlots.set(slot.off, slot.reg);
+              savedSlots.set(slot.off, { reg: slot.reg });
             }
             break;
           }
@@ -1533,6 +1564,19 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
+  // An argument stored to the frame and never read back is either a home the body never reads or
+  // an OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
+  // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same
+  // store, and dropping the second loses an argument.
+  for (const { reg, arg } of argSaves) {
+    if (!arg.readBack) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': argument register ${reg} is stored to '${arg.mem}' at 0x${arg.addr.toString(16)} ` +
+          `and never read back: an unread home and a call's argument passed on the stack are the same store — ` +
+          `local stack frames not supported`,
+      );
+    }
+  }
   const argSlots = registerArgSlots(ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
