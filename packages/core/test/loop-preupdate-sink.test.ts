@@ -642,11 +642,11 @@ test('a copy is not sunk into a name a hoisted value still reads inside the loop
 
 // WHERE `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory
 // read or a call never reaches it: the analysis names a read or a call wherever something would cross
-// it (the barrier scan, `ridesEdge`), and a named leaf is current at the copy (`writtenAheadOf`), so
-// that half is guarded by a hand-built analysis (hazards.test.ts). What the analysis does not name is
-// a TRAPPING op. agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl
-// __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the store, and the exit value
-// rebuilt at the add would divide after it. So the edge declines; with the gate dropped the copy sinks
+// it (the barrier scan, `ridesEdge`), and a named leaf is not rebuilt, so that half is guarded by a
+// hand-built analysis (hazards.test.ts). What the analysis does not name is a TRAPPING op. agbcc,
+// `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl __divsi3` (a `sdiv` once
+// raise/softdiv.ts folds it) runs ahead of the store, and the exit value rebuilt at the add would
+// divide after it. So the edge declines; with the gate dropped the copy sinks
 // and spells the divide behind the store. This test shows the gate FIRES, not that it is needed here:
 // the divisor is the loop counter, in [1, n] wherever the divide runs, so the sunk program never
 // traps and is correct on every input.

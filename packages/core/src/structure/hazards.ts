@@ -156,8 +156,8 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
     // Sound for a read or a call: rebuilt behind a store, a read answers with what the store wrote.
-    // The analysis names every read and call something would cross, and a named leaf is current at
-    // the copy, so that half reaches the gate only from a hand-built analysis, which is its guard.
+    // The analysis names every read and call something would cross, and a named leaf is not
+    // rebuilt, so that half reaches the gate only from a hand-built analysis, which is its guard.
     // What reaches it through the pipeline is a divide the asm ran ahead of a store
     // (loop-preupdate-sink.test.ts, the preupdate_exit_div row). That is REACH and not a witness: the
     // divisor there is the loop counter, never 0, so the refused program is correct on every input.
@@ -839,24 +839,25 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // are position-independent — an `undef` is never assigned, a `laddr` is an address.
     //
     // Does re-evaluating `d` at the copy's position answer differently? `home` is that position
-    // (`preUpdateCopyHome`), so the only ops that can tell are the ones STRICTLY BETWEEN the two —
-    // and only when both are the latch's, because a def in any other block is separated from the
-    // copy by whole blocks this does not walk. `ORDER_SENSITIVE_OPS` is the between-set for all
-    // three ways `d` can care: a read wants no store crossed, an effect no other effect or read,
-    // and a trap none of those performed ahead of the fault.
+    // (`preUpdateCopyHome`), so the ops that can tell are the ones STRICTLY BETWEEN the two, and one
+    // ahead of `d` that renders after the home (below) — and only when both are the latch's, because
+    // a def in any other block is separated from the copy by whole blocks this does not walk.
+    // `ORDER_SENSITIVE_OPS` is the between-set for all three ways `d` can care: a read wants no store
+    // crossed, an effect no other effect or read, and a trap none of those performed ahead of the fault.
     //
     // NOT A RESTATEMENT OF WHAT `materialize` ALREADY BOUNDS, which is the reading to guard against.
     // That pass NAMES an order-sensitive value whose consumer is not adjacent to it, and a named
-    // leaf is refused by `arg-reads-current-names` before this scan runs. But it measures the
-    // distance to the TERMINATOR, which it takes for one statement holding every edge copy, and the
-    // copy is rebuilt at `home`, ahead of the others — and it lets a read pass a read.
+    // leaf is not rebuilt, so this scan never weighs it. But it measures the distance to the edge
+    // copy's own part of the TERMINATOR and lets pass what shares that statement, while the copy is
+    // rebuilt at `home`, ahead of every part — and it lets a read pass a read.
     //
     // AND NOT ONLY BETWEEN. An order-sensitive op AHEAD of `d` that the rebuilt tree does not hold
     // is crossed too when it RENDERS after the home (`rendersAfter`): inlined into an update copy at
     // the foot of the body, it runs after the member the asm ran it before. A call there is named
-    // by the analysis (a call that rides an edge copy), so what still reaches this arm is a read,
-    // and a read crosses only a member that is not one: two reads commute, whichever runs first
-    // (`preupdate_exit_reads`: `u = q[1]; r = *q + 1; s = s + u;`).
+    // by the analysis (the member lies between it and its copy, in another part of the terminator,
+    // and bars it), so what still reaches this arm is a read, and a read crosses only a member that
+    // is not one: two reads commute, whichever runs first (`preupdate_exit_reads`: `u = q[1]; r = *q
+    // + 1; s = s + u;`).
     //
     // `latch.ops` INDEX ORDER IS EXECUTION ORDER — what `slice` reads. The one ISA fact that bends
     // it cannot reach here: a MIPS branch-likely NULLIFIES its delay slot, so placement gives that

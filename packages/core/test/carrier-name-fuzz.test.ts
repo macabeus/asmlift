@@ -115,8 +115,8 @@ function spellings(
 
 // WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
 // `namecoalesce-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
-// file. Its docblock carries the two defects behind it and the measurement that folded the two
-// copies together.
+// file. Its docblock carries the defect behind it and the measurement that folded the two copies
+// together.
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips

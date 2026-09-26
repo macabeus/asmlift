@@ -83,8 +83,8 @@ function spellings(
 
 // WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
 // `carrier-name-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
-// file. Its docblock carries the two defects behind it and the measurement that folded the two
-// copies together.
+// file. Its docblock carries the defect behind it and the measurement that folded the two copies
+// together.
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
 // step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)

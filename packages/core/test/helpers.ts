@@ -415,7 +415,7 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
 }
 
 /** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
- *  bill. Each one is a real emission defect, measured and not fixed here: a call rendered at two
+ *  bill. Every one is the same emission defect, measured and not fixed here: a call rendered at two
  *  positions, so it executes twice (`fz463`: `f1(f0(a1))` in both operands of one test).
  *
  *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists

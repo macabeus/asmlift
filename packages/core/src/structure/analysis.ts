@@ -1891,8 +1891,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         //
         // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
         // do-while's exit edge renders the call after the loop, once, where the body ran it every
-        // iteration; riding the back edge it renders in the update copy at the foot of the body,
-        // behind statements the asm ran after it; riding two edge args it renders twice.
+        // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
+        // riding two edge args it renders twice.
         if (isCall && (branchArgFed.has(r) || ridesEdge(op))) {
           materialize.add(op);
           continue;

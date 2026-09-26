@@ -3013,7 +3013,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  loop, where the hazard checks already count the in-place write (`loopWriteSet`). A tree the
    *  back edge also carries is an update copy, and renders at the bottom. So a read never renders
    *  EARLIER than its SSA position says, and the rule only ever refuses more. Null — refuse — where
-   *  the read renders in several places or outside the header. */
+   *  the read renders in several places or outside the header, or in an exit arg with no home. */
   const readRenderIdx = (op: Op, header: Block): number | null => {
     const pos = emitPos(op);
     if (pos === null || pos.blk !== header) {

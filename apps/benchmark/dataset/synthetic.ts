@@ -1558,8 +1558,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // here calls before it reads — so the read is named too (the barrier scan in
   // structure/analysis.ts), and the exit value reads no loop variable at all. `preupdate_exit_foot`
   // is `t = cb(q); r = *q ^ n; s = s ^ t;`, where the call runs ahead of the read but, inlined, would
-  // render in `s`'s update copy at the foot of the body, behind the read rebuilt at the `eor` —
-  // wrong on 68 of 100 inputs under an agbcc+unicorn judge. Named, it runs where the asm ran it.
+  // render in `s`'s update copy at the foot of the body, behind the read rebuilt at the `eor`, which
+  // would then read `*q` before `cb` could write it. Named, it runs where the asm ran it.
   //
   // `preupdate_exit_reads` is `u = q[1]; r = *q + 1; s = s + u;`: a read ahead of the tree's read
   // that renders in the update copy behind it. Two reads commute, so the sink rebuilds the exit read
