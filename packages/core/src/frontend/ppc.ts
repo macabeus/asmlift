@@ -379,8 +379,7 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
  *  which side of the push they save the link register. mwcc 2.4.x pushes first and saves at
  *  `N+4(r1)`; mwcc 2.3.3 saves at `4(r1)` BEFORE `stwu r1,-N(r1)` and restores from `N+4(r1)`. That is
  *  one word of the caller's frame spelled at two offsets, and an offset from the CURRENT r1 reads it
- *  as two different words. All 26 non-leaf `mwcc_233_163n` rows in the benchmark save the link
- *  register before the push.
+ *  as two different words.
  *
  *  Forward dataflow over the block graph, per instruction. Only the two forms a compiler uses to
  *  move r1 are counted: `stwu r1,-N(r1)` from the entry value, and `addi r1,r1,N`. Anything else
@@ -1182,10 +1181,10 @@ export function lift(
             write(d, constVal(parseImm(t)));
             break;
           }
-          // mwcc 2.3.3's register MOVE: it prints `addi rD,rS,0` where 2.4.x prints `mr` (17 of the 42
-          // `mwcc_233_163n` rows carry one, no 2.4.x row does). Lifted as an add, the `+ 0` turns a
-          // pointer into an integer sum, and C++ will not pass `(u32)&table + 0` as a `const char *`.
-          // `addic` sets the carry and is not a move.
+          // `addi rD,rS,0` is a register move: rS + 0 is rS, as Thumb's `add rD,rS,#0` is
+          // (frontend/thumb.ts). mwcc 2.3.3 spells its moves this way. Lifted as an add, the `+ 0`
+          // makes a pointer an integer sum, and C++ will not pass `(u32)&table + 0` as a
+          // `const char *`. `addic` sets the carry and is not a move.
           if (mnem === 'addi' && parseImm(t) === 0) {
             write(d, read(s));
             break;
