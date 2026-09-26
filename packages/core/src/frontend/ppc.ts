@@ -1004,6 +1004,13 @@ export function lift(
             // Every width here is a single register — the refusal above is what makes that true —
             // so the parameter count and the argument-register count are the same number.
             declared = widths.length;
+            if (declared > ARG_REGS.length) {
+              throw new PpcUnsupportedError(
+                `cannot lift '${name}': outgoing stack arguments not modelled — '${sym}' is declared with ` +
+                  `${declared} parameters and the argument registers carry ${ARG_REGS.length}, so the rest ` +
+                  `travel in its parameter area on the stack`,
+              );
+            }
           }
           // THE SAME RULE ON THE WAY BACK, and it needs its own refusal because the declaration
           // reaches the candidate whether or not this frontend can act on it. `FnProto.returns`
@@ -1026,6 +1033,26 @@ export function lift(
             );
           }
           const argc = declared ?? fallbackArgc(bi, ins.addr);
+          // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
+          // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
+          // back chain and the LR save word), and a value stored there that reaches the call is that
+          // argument or a local the compiler put in the same words. Reading the word back, before or
+          // after the call, does not decide it, so the end-of-lift check for a store nothing reloads
+          // is not enough here. Without a prototype this refuses; a declared arity says which.
+          if (declared === undefined && argc === ARG_REGS.length) {
+            const depth = r1At.get(ins);
+            for (const [off, slot] of valueSlots) {
+              const inParamArea = typeof depth !== 'number' || (off >= depth + 8 && off < 0);
+              if (inParamArea && ssa.hasReachingDef(stackSlotKey(off), bi)) {
+                throw new PpcUnsupportedError(
+                  `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${sym}' at ` +
+                    `0x${ins.addr.toString(16)} fills all ${ARG_REGS.length} argument registers, and the value ` +
+                    `stored to '${slot.mem}' at 0x${slot.addr.toString(16)} reaches it in the callee's ` +
+                    `parameter area, where a ninth argument travels`,
+                );
+              }
+            }
+          }
           const args: Value[] = [];
           // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by
           // dropping the ones a call has been through; a DECLARED one asserts it, so a destroyed
