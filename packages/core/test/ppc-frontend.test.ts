@@ -327,6 +327,47 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /reload of '8\(r1\)' into r29, a slot r30 was saved into/,
     );
   });
+  // An argument register's saved entry value is a parameter, and its restore writes it back.
+  const epi = (at: number, frame: number) =>
+    `${at.toString(16)}:\tlwz     r0,${frame + 4}(r1)\n${(at + 4).toString(16)}:\taddi    r1,r1,${frame}\n` +
+    `${(at + 8).toString(16)}:\tmtlr    r0\n${(at + 12).toString(16)}:\tblr\n`;
+  const pro = (frame: number) => `0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-${frame}(r1)\n`;
+  test('an argument reloaded after the body reused its register is the argument, not the reuse', () => {
+    // mwcc 2.3.3 -O0, `int h(int a) { g[1] = 0; return e1(a); }`: r3 carries &g between the home
+    // store and its reload.
+    const asm =
+      pro(16) +
+      'c:\tstw     r3,8(r1)\n10:\tli      r0,0\n14:\tlis     r3,0\n\t\t\t16: R_PPC_ADDR16_HA\tg\n' +
+      '18:\taddi    r3,r3,0\n\t\t\t1a: R_PPC_ADDR16_LO\tg\n1c:\tstw     r0,4(r3)\n20:\tlwz     r3,8(r1)\n' +
+      '24:\tbl      24 <h+0x24>\n\t\t\t24: R_PPC_REL24\te1\n' +
+      epi(0x28, 16);
+    expect(dis('h', asm)).toBe('s32 h(s32 a0) {\n    ((s32 *)&g)[1] = 0;\n    return e1(a0);\n}\n');
+  });
+  test('a reload into a register nothing touched is still the argument a call is passed', () => {
+    // pikmin `getCollPartPtr__9@unnamed@FR4TekiUl`: the reload is the only write of r4 before the
+    // `bl`, and the prototype-less arity guess counts arguments by definition.
+    const asm =
+      pro(16) +
+      'c:\tstw     r4,12(r1)\n10:\tlwz     r3,544(r3)\n14:\tlwz     r4,12(r1)\n' +
+      '18:\tbl      18 <gcp+0x18>\n\t\t\t18: R_PPC_REL24\tgetSphere\n' +
+      epi(0x1c, 16);
+    expect(dis('gcp', asm)).toBe('s32 gcp(s32 *a0, s32 a1) {\n    return getSphere(a0[136], a1);\n}\n');
+  });
+  test('an argument saved to two slots is saved twice, not spilled, and either reload is the argument', () => {
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tstw     r3,12(r1)\n8:\tli      r3,0\nc:\tlwz     r3,12(r1)\n10:\tlwz     r3,8(r1)\n14:\tblr\n';
+    expect(dis('twice', asm)).toBe('s32 twice(s32 a0) {\n    return a0;\n}\n');
+  });
+  test('an argument stored to the frame and never read back refuses: it may be an outgoing stack argument', () => {
+    // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
+    // ninth argument, in g9's parameter area.
+    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n';
+    for (let k = 1; k <= 8; k++) {
+      asm += `${(0xc + 4 * k).toString(16)}:\tli      r${k + 2},${k}\n`;
+    }
+    asm += '30:\tbl      30 <s9+0x30>\n\t\t\t30: R_PPC_REL24\tg9\n' + epi(0x34, 24);
+    expect(() => dis('s9', asm)).toThrow(/argument register r3 is stored to '8\(r1\)' at 0xc and never read back/);
+  });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
   // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore finds no slot, and every
