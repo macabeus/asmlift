@@ -1245,9 +1245,23 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // How many times each value rides a BACK edge (to a block that dominates its own: a loop's
   // header), which `ridesEdge` weighs apart. Decided by dominance, not layout: a return tail laid
   // out above the branch into it is still a forward edge, and its copy renders in the arm.
+  //
+  // And only from a latch that is its loop's ONLY exit. Then the latch's test is the bottom test
+  // and its back-edge copy is the update the body runs on every iteration. When another block
+  // leaves the loop too, the structurer may keep that exit as the loop's own test and render the
+  // latch's branch as an `if` in the body, with the copy in one arm: agbcc's `while (n-- > 0) { q
+  // = q - 1; if (u == k) return *q; t = cg(t) + H[n & 3] & cb(q + 1); }` (with `u` 0) runs `bl
+  // cb` ahead of the latch's `bgt`, and inlined into the copy it ran only on the iterations that
+  // went round again. Such an edge weighs as a forward one.
   const backArgFed = new Map<Value, number>();
   const domOf = dom ?? dominators(fn);
-  const backEdge = (from: Block, to: Block): boolean => domOf.get(from)?.has(to) ?? false;
+  const soleExitLatch = new Set<Block>();
+  for (const L of naturalLoops(fn, domOf, predecessors(fn))) {
+    if (![...L.body].some((x) => x !== L.latch && successorsOf(x).some((t) => !L.body.has(t)))) {
+      soleExitLatch.add(L.latch);
+    }
+  }
+  const backEdge = (from: Block, to: Block): boolean => (domOf.get(from)?.has(to) ?? false) && soleExitLatch.has(from);
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.successors.length > 1) {
@@ -1316,16 +1330,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  which renders at its own position, and at another effect, which these same rules place.
    *
    *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
-   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once,
-   *  in the update copy at the foot of the body — and a forward edge carrying it too reads the loop
-   *  variable that copy wrote — which moves the call only past what the latch runs after it:
-   *  `s = s + g(i)` with nothing order-sensitive behind the call stays inline (`for (…) s = s +
-   *  g(i);`). */
+   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once, in
+   *  the update copy at the foot of the body, and a forward edge carrying it too reads the loop
+   *  variable that copy wrote. That copy moves the call only past what the latch runs after it, and
+   *  the barrier scan below already weighs exactly that: a store, a call or a read in another part of
+   *  the terminator bars the call and names it, and a read in the same copy renders after the call,
+   *  as every compiler evaluates it. So `s = s + g(i)` stays inline (`for (…) s = s + g(i);`). */
   const ridesEdge = (call: Op): boolean => {
-    const blk = opBlock.get(call)!;
-    const after = (): boolean =>
-      blk.ops.slice(opIndex.get(call)! + 1).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) && x.successors.length === 0);
-    let back = false;
     const seen = new Set<Value>();
     const walk = (x: Value): boolean => {
       if (seen.has(x)) {
@@ -1336,7 +1347,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       if (carried > 1 || (carried === 0 && branchArgFed.has(x))) {
         return true;
       }
-      back ||= carried === 1;
       return (useSitesOf.get(x) ?? []).some(
         (u) =>
           !EFFECTFUL_OPS.has(u.op.opcode) &&
@@ -1346,7 +1356,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           walk(u.op.results[0]),
       );
     };
-    return walk(call.results[0]) || (back && after());
+    return walk(call.results[0]);
   };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
