@@ -370,8 +370,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
-  // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore finds no slot, and every
-  // non-leaf function that compiler produced declined on its own epilogue.
+  // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore would find no slot.
   const frameBody = (sym: string) =>
     `10:\tmr      r31,r3\n14:\tbl      14 <${sym}+0x14>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tadd     r3,r3,r31\n`;
   test('the link register saved BEFORE the frame push is restored from the same slot after it', () => {

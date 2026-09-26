@@ -165,9 +165,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // and "used" reads as ISA-neutral and is not: a space on both sides requires a word there, so
     // it takes the PPC form alone.
     //
-    // `stack-frame access` and `not the one frame push` are PPC's refusals where r1's depth below its
-    // entry value is not known (`r1Displacements` in `frontend/ppc.ts`): a slot cannot be named
-    // there, which is this class's gap seen one step earlier.
+    // `stack-frame access` is PPC's refusal where r1's depth below its entry value is not known
+    // (`r1Displacements` in `frontend/ppc.ts`), so no slot can be named there: this class's gap seen
+    // one step earlier. `not the one frame push` refuses a push that is not `stwu r1,-N(r1)` from the
+    // entry r1 — a second push, or `stwu` storing another register, whose store and r1 move are both
+    // unmodelled.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
