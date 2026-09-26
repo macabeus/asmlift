@@ -11,12 +11,11 @@
 // a marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in
 // `apps/benchmark/src/eval/asmlift.ts` is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the
 // tail of a long message tests a string the artifact does not carry. 18 markers in the published
-// artifact sit at that cap. The reload refusal in `packages/core/src/frontend/ppc.ts` is the shape
-// that pays for it: one throw with two arms, and on `pikmin:__ct__7ActFreeFP4Piki:mwcc_233_163n`
-// the second arm's "a local stack frame this frontend does not model" begins at character 197 —
-// the published marker ends "which is a l". `stack-frames` keys on `a slot … was saved into`
-// instead, which that message reaches at character 64. A reason opens with the function's own
-// name, so a long C++ name pushes every later phrase toward the cap on its own.
+// artifact sit at that cap. A reason opens with the function's own name, so a long C++ name pushes
+// every later phrase toward the cap on its own — which is why `packages/core/src/frontend/ppc.ts`
+// puts `local stack frames not supported` straight after the name in its unread-store and
+// mixed-slot refusals, and why `stack-frames` keys its cross-register reload refusal on the early
+// `a slot … was saved into` rather than on anything later in that message.
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
