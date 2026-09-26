@@ -715,7 +715,8 @@ export function lift(
         // The value an argument register holds where nothing has written it is the parameter itself,
         // unless a path this walk has not filled yet writes it — then it is a join, not the entry
         // value, and nothing here can name what the slot holds.
-        const value = readReg(srcReg, bi);
+        // An argument moved to its home is not an argument set up for the next call.
+        const value = ssa.entryValue(srcReg, bi) ?? readReg(srcReg, bi);
         if (paramReg.get(value) !== srcReg) {
           throw new PpcUnsupportedError(
             `cannot lift '${name}': '${srcReg}' stored to '${mem}' at 0x${ins.addr.toString(16)} is not ` +

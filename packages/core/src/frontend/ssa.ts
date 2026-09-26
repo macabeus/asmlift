@@ -85,6 +85,12 @@ export interface SsaBuilder {
    *  "a def reaches here" and "a value reaches here" are the same question only when every def is
    *  a value. */
   hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** The entry parameter `reg` still holds at this point of block `b`, taken WITHOUT a read. A read
+   *  leaves a definition behind, and `hasReachingDef` counts it as argument setup, so a frontend that
+   *  only moves the argument somewhere (a frame store) would raise the guessed arity of every later
+   *  prototype-less call. `undefined` where "still the entry value" is not shown: a definition or a
+   *  call reaches from some path, or a block on the way is not filled yet. */
+  entryValue(reg: string, b: number): Value | undefined;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
@@ -650,6 +656,34 @@ export function makeSsaBuilder(
     return walk(b, new Set<number>());
   };
 
+  const entryValue = (reg: string, b: number): Value | undefined => {
+    // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
+    // back round to `b` carries writes this walk has not seen.
+    const untouched = (at: number, seen: Set<number>): boolean => {
+      if (at === b || !filled[at]) {
+        return false;
+      }
+      if (seen.has(at)) {
+        return true;
+      }
+      seen.add(at);
+      return clean(at, seen);
+    };
+    // `decidedLocal` holds a register a call destroyed as well as one this block wrote.
+    const clean = (at: number, seen: Set<number>): boolean => {
+      if (defs[at].has(reg) || decidedLocal[at].has(reg)) {
+        return false;
+      }
+      const ps = distinctPreds(at);
+      return ps.length === 0 ? at === 0 : ps.every((p) => untouched(p, seen));
+    };
+    if (!clean(b, new Set())) {
+      return undefined;
+    }
+    ensureParam(reg, 0);
+    return irBlocks[0].params.find((p) => paramReg.get(p) === reg);
+  };
+
   /** REFUSE a value the ABI destroyed. The builder is RIGHT that a caller-saved register has a
    *  reaching definition after a call; what it cannot see is that the call destroyed the bytes, so
    *  that definition names something the callee overwrote. Resolving the read to it is a silently
@@ -725,6 +759,7 @@ export function makeSsaBuilder(
     paramReg,
     ensureParam,
     hasReachingDef,
+    entryValue,
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see

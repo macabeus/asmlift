@@ -353,6 +353,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       epi(0x1c, 16);
     expect(dis('gcp', asm)).toBe('s32 gcp(s32 *a0, s32 a1) {\n    return getSphere(a0[136], a1);\n}\n');
   });
+  test('an argument stored to its home is not set up for the call before its reload', () => {
+    // mwcc 2.3.3 -O0, `int q1(int a) { e0(); return a; }`. Counted as setup, the store would make it
+    // `e0(a0)`.
+    const asm =
+      pro(16) +
+      'c:\tstw     r3,8(r1)\n10:\tbl      10 <q1+0x10>\n\t\t\t10: R_PPC_REL24\te0\n14:\tlwz     r3,8(r1)\n' +
+      epi(0x18, 16);
+    expect(dis('q1', asm)).toBe('s32 q1(s32 a0) {\n    e0();\n    return a0;\n}\n');
+  });
   test('an argument saved to two slots is saved twice, not spilled, and either reload is the argument', () => {
     const asm =
       '0:\tstw     r3,8(r1)\n4:\tstw     r3,12(r1)\n8:\tli      r3,0\nc:\tlwz     r3,12(r1)\n10:\tlwz     r3,8(r1)\n14:\tblr\n';
