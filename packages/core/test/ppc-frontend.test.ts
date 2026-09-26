@@ -443,6 +443,14 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       's32 mvp(s32 *a0) {\n    return a0[1];\n}\n',
     );
   });
+  test('an rA field of 0 is the literal 0: `addi rD,r0,SIMM` is `li`, not a read of r0', () => {
+    expect(dis('mvr0', '0:\tli      r0,7\n4:\taddi    r3,r0,0\n8:\tblr\n')).toBe(
+      's32 mvr0(void) {\n    return 0;\n}\n',
+    );
+    expect(dis('adr0', '0:\tli      r0,7\n4:\taddis   r3,r0,1\n8:\tblr\n')).toBe(
+      's32 adr0(void) {\n    return 65536;\n}\n',
+    );
+  });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {
     // `stw r0,0(0)` — the base field is a 0 placeholder an SDA relocation fills at link. Lifting it
     // as a store to a fabricated first pointer parameter loses the global write.

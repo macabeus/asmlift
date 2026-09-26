@@ -1186,6 +1186,12 @@ export function lift(
             }
             break;
           }
+          // An rA field of 0 is the literal 0, not r0: `addi rD,0,SIMM` is `li`. A disassembler that
+          // prints it as `addi rD,r0,SIMM` still means the constant.
+          if (mnem === 'addi' && s === 'r0') {
+            write(d, constVal(parseImm(t)));
+            break;
+          }
           // mwcc 2.3.3's register MOVE: it prints `addi rD,rS,0` where 2.4.x prints `mr` (17 of the 42
           // `mwcc_233_163n` rows carry one, no 2.4.x row does). Lifted as an add, the `+ 0` turns a
           // pointer into an integer sum, and C++ will not pass `(u32)&table + 0` as a `const char *`.
@@ -1202,6 +1208,10 @@ export function lift(
         // arithmetic, and a reloc-carrying one never gets here — the choke point in `decode` takes
         // it.
         case 'addis':
+          if (s === 'r0') {
+            write(d, constVal((parseImm(t) << 16) >> 0)); // `addis rD,0,SIMM` is `lis`, as for `addi`
+            break;
+          }
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':
