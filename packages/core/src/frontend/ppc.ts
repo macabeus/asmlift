@@ -378,9 +378,8 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
  *  which side of the push they save the link register. mwcc 2.4.x pushes first and saves at
  *  `N+4(r1)`; mwcc 2.3.3 saves at `4(r1)` BEFORE `stwu r1,-N(r1)` and restores from `N+4(r1)`. That is
  *  one word of the caller's frame spelled at two offsets, and an offset from the CURRENT r1 reads it
- *  as two different words: every non-leaf function Pikmin's compiler produced declined on its own
- *  epilogue. Measured over the committed artifact: all 26 non-leaf `mwcc_233_163n` rows save the
- *  link register before the push, and none lifted.
+ *  as two different words. All 26 non-leaf `mwcc_233_163n` rows in the benchmark save the link
+ *  register before the push.
  *
  *  Forward dataflow over the block graph, per instruction. Only the two forms a compiler uses to
  *  move r1 are counted: `stwu r1,-N(r1)` from the entry value, and `addi r1,r1,N`. Anything else
