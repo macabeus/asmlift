@@ -825,7 +825,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       compiler: 'agbcc',
       unit:
         CALLS +
-        's32 example(s32 a0, s32 a1, s32 c) { s32 v1; s32 v2; if (c) { v1 = f(); v2 = g(); } else { @ } return h(v1, v2); }',
+        's32 example(s32 a0, s32 a1, s32 c) { s32 v1; s32 v2; if (c) { v1 = f() + 1; v2 = g(); } else { @ } return h(v1, v2); }',
       before: 'v2 = a1; v1 = a0;',
       after: 'v1 = a0; v2 = a1;',
       note: 'the copies at the end of one path into a merge',

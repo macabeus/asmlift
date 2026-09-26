@@ -27,10 +27,17 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { frontendFor } from '../src/frontend/registry';
+import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
+import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { analyze } from '../src/structure/analysis';
+import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { StructureError, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -474,4 +481,209 @@ test('a latch store of a loop variable reads it ahead of the update, with no arm
       '    return v3;\n' +
       '}\n',
   );
+});
+
+// ONE CALL, TWO EXIT SLOTS. The exit edge hands `f1(v2) + v2` to two merge params; sunk, each copy
+// would rebuild the tree and run `f1` twice per iteration where the asm ran it once. A call riding
+// an edge through the ops it is inlined into is named where it ran (`ridesEdge`,
+// structure/analysis.ts), so both copies read the name. The control reads memory where the call
+// was: two copies of a READ are two loads, a spelling rather than a different program, and both
+// slots sink with the read inline.
+const ONE_CALL_TWO_SLOTS = `fn dupcall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(), ^bb3(%0, %0)
+^bb1():
+  br ^bb2(%1, %0)
+^bb2(%4: s32, %5: s32):
+  %6: s32 = call %5 {target="f1"}
+  %7: s32 = add %6, %5
+  %8: s32 = const {value=1}
+  %9: s32 = sub %4, %8
+  %10: s32 = add %5, %8
+  %11: u32 = icmp_slt %2, %9
+  cond_br %11, ^bb2(%9, %10), ^bb3(%7, %7)
+^bb3(%12: s32, %13: s32):
+  %14: s32 = add %12, %13
+  ret %14
+}
+`;
+
+test('two sunk exit slots never spell one call twice', () => {
+  const calls = emit(ONE_CALL_TWO_SLOTS).split('do {')[1].split('} while')[0];
+  expect(calls.match(/f1\(/g)).toHaveLength(1);
+  expect(calls.match(/= v1 \+ v3;/g)).toHaveLength(2);
+  const read = ONE_CALL_TWO_SLOTS.replace('call %5 {target="f1"}', 'load %5 {off=0, signed=true, width=4}');
+  expect(read).not.toBe(ONE_CALL_TWO_SLOTS);
+  const body = emit(read).split('do {')[1].split('} while')[0];
+  expect(body.match(/= \*\(s32 \*\)v\d+ \+ v\d+;/g)).toHaveLength(2);
+});
+
+// THE CALL AHEAD OF A READ, `r = *q + cb(q)`: agbcc runs `bl cb; ldr r1,[q]; add`, so the exit
+// arg's tree holds a call with the load between it and the add the copy is rebuilt at. The call rides
+// the exit edge under the `add`, so the analysis names it where it ran — the order `t = cb(q); r =
+// *q + t;` spells, byte-identical to the original on agbcc — and the sink rebuilds `*v1 + v0` at the
+// add, behind the name. The control swaps ONE fact, the order of the load and the call: `int t =
+// *q; r = t + cb(q);` compiles to `ldr; bl; add`, and the barrier scan names the read too (a read
+// ahead of a call it shares a statement with). With both named the exit value reads no loop
+// variable, so nothing is rebuilt in the body and the copy stays after the loop.
+const CALL_THEN_LOAD = `fn calllast {
+^bb0(%0: s32*, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sle %1, %3
+  cond_br %4, ^bb3(%2), ^bb1()
+^bb1():
+  br ^bb2(%0, %1)
+^bb2(%7: s32*, %8: s32):
+  %9: s32 = call %7 {target="cb"}
+  %10: s32 = load %7 {off=0, signed=true, width=4}
+  %11: s32 = add %10, %9
+  %12: s32 = const {value=4}
+  %13: s32* = sub %7, %12
+  %14: s32 = const {value=1}
+  %15: s32 = sub %8, %14
+  %16: s32 = const {value=0}
+  %17: u32 = icmp_ne %15, %16
+  cond_br %17, ^bb2(%13, %15), ^bb3(%11)
+^bb3(%18: s32):
+  ret %18
+}
+`;
+const LOAD_THEN_CALL = CALL_THEN_LOAD.replace(
+  '  %9: s32 = call %7 {target="cb"}\n  %10: s32 = load %7 {off=0, signed=true, width=4}\n',
+  '  %10: s32 = load %7 {off=0, signed=true, width=4}\n  %9: s32 = call %7 {target="cb"}\n',
+);
+
+const homedCalls = (ir: string): string[] => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const { materialize } = analyze(fn, false, { defs: defOpMap(fn), dom: dominators(fn) });
+  return fn.blocks.flatMap((b) => b.ops).flatMap((op) => (op.opcode === 'call' && materialize.has(op) ? ['cb'] : []));
+};
+
+test('a call riding the exit edge under a read is named where it ran, in either order', () => {
+  expect(LOAD_THEN_CALL).not.toBe(CALL_THEN_LOAD);
+  expect(homedCalls(CALL_THEN_LOAD)).toEqual(['cb']);
+  expect(homedCalls(LOAD_THEN_CALL)).toEqual(['cb']);
+});
+
+test('the named call is current at the copy, and the exit value is rebuilt behind it', () => {
+  // `a2 = *v1 + v0` reads `v0` one statement after `v0 = cb(v1)` wrote it, on the same iteration,
+  // and `v1` ahead of its update: the value the exit edge carried. In the load-first order both
+  // are named and the copy after the loop reads only their names.
+  expect(emit(CALL_THEN_LOAD)).toBe(
+    's32 calllast(s32 *a0, s32 a1, s32 a2) {\n' +
+      '    s32 v0;\n' +
+      '    s32 *v1;\n' +
+      '    s32 v2;\n' +
+      '    if (a1 > 0) {\n' +
+      '        v1 = a0;\n' +
+      '        v2 = a1;\n' +
+      '        do {\n' +
+      '            v0 = cb(v1);\n' +
+      '            a2 = *v1 + v0;\n' +
+      '            v1 = v1 - 1;\n' +
+      '            v2 = v2 - 1;\n' +
+      '        } while (v2 != 0);\n' +
+      '    }\n' +
+      '    return a2;\n' +
+      '}\n',
+  );
+  expect(emit(LOAD_THEN_CALL)).toContain(
+    '            v0 = *v2;\n            v1 = cb(v2);\n            v2 = v2 - 1;\n            v3 = v3 - 1;\n' +
+      '        } while (v3 != 0);\n        a2 = v0 + v1;\n',
+  );
+});
+
+// A NAME THE BODY STILL READS THROUGH A HOISTED VALUE. agbcc, `int s = k; … do { t = H[n & 3]; s =
+// t + u; H[k & 3] = t ^ s; u = p[n & 3]; } while (--n); return m - u + s;`: `k & 3` is computed once
+// ahead of the loop (%9), and the loop reuses `k`'s register for `s`, so the exit merge is offered
+// `k`'s name `a3`. The unnamed %9 is inlined into the body as `a3 & 3`, and a copy of `s` sunk
+// there would overwrite the `a3` it reads on the next iteration. The control indexes the store
+// by `n & 3` instead — one operand — so nothing hoisted reads `a3` and the copy sinks.
+const HOISTED_READS_DEST = `fn hoistdest {
+^bb0(%0: s32*, %1: s32, %2: s32, %3: s32):
+  %4: s32 = const {value=0}
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_sle %1, %5
+  cond_br %6, ^bb3(%4, %3), ^bb1()
+^bb1():
+  %7: s32* = gaddr {sym="H"}
+  %8: s32 = const {value=3}
+  %9: s32 = and %3, %8
+  br ^bb2(%1, %4)
+^bb2(%10: s32, %11: s32):
+  %12: s32 = and %10, %8
+  %13: s32 = aload %7, %12 {elemSize=4, signed=true}
+  %14: s32 = add %13, %11
+  %15: s32 = xor %13, %14
+  astore %7, %9, %15 {elemSize=4}
+  %16: s32 = aload %0, %12 {elemSize=4, signed=true}
+  %17: s32 = const {value=1}
+  %18: s32 = sub %10, %17
+  %19: s32 = const {value=0}
+  %20: u32 = icmp_ne %18, %19
+  cond_br %20, ^bb2(%18, %16), ^bb3(%16, %14)
+^bb3(%21: s32, %22: s32):
+  %23: s32 = sub %2, %21
+  %24: s32 = add %23, %22
+  ret %24
+}
+`;
+
+test('a copy is not sunk into a name a hoisted value still reads inside the loop', () => {
+  expect(() => emit(HOISTED_READS_DEST)).toThrow(/reads a pre-update loop variable/);
+  const control = HOISTED_READS_DEST.replace('astore %7, %9, %15', 'astore %7, %12, %15');
+  expect(control).not.toBe(HOISTED_READS_DEST);
+  expect(emit(control)).toMatch(/do \{[^}]*\n\s+a3 = v\d+ \+ v\d+;[^}]*\} while/);
+});
+
+// WHERE `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory
+// read or a call never reaches it: the analysis names a read or a call wherever something would cross
+// it (the barrier scan, `ridesEdge`), and a named leaf is not rebuilt, so that half is guarded by a
+// hand-built analysis (hazards.test.ts). What the analysis does not name is a TRAPPING op. agbcc,
+// `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl __divsi3` (a `sdiv` once
+// raise/softdiv.ts folds it) runs ahead of the store, and the exit value rebuilt at the add would
+// divide after it. So the edge declines; with the gate dropped the copy sinks
+// and spells the divide behind the store. This test shows the gate FIRES, not that it is needed here:
+// the divisor is the loop counter, in [1, n] wherever the divide runs, so the sunk program never
+// traps and is correct on every input.
+const DIVIDE_AHEAD_OF_STORE = `dv:
+	push	{r4, r5, r6, lr}
+	add	r5, r0, #0
+	add	r4, r1, #0
+	add	r6, r3, #0
+	add	r0, r2, #0
+	cmp	r4, #0
+	ble	.L3	@cond_branch
+	lsl	r0, r4, #0x2
+	add	r5, r5, r0
+.L4:
+	add	r0, r6, #0
+	add	r1, r4, #0
+	bl	__divsi3
+	str	r4, [r5]
+	add	r0, r0, #0x1
+	sub	r5, r5, #0x4
+	sub	r4, r4, #0x1
+	cmp	r4, #0
+	bne	.L4	@cond_branch
+.L3:
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+`;
+
+test('a divide the asm ran ahead of a store reaches arg-safe-to-reevaluate through the pipeline', () => {
+  const run = (hooks = {}): string => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
+    return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false), hooks));
+  };
+  expect(() => run()).toThrow(/reads a pre-update loop variable/);
+  const ablated = run({ preUpdateSinkGates: without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate') });
+  expect(ablated).toMatch(/\*v\d+ = v\d+;\n\s+a2 = a3 \/ v\d+ \+ 1;/);
 });

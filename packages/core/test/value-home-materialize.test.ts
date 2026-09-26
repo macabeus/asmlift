@@ -134,6 +134,51 @@ test('a bottom test reading the pre-update adopted variable declines', () => {
   expect(() => emit(ADOPTED_COND)).toThrow(/reads a pre-update loop variable/);
 });
 
+// The adoption asks where a read of the OLD value RENDERS, not where SSA put it. Both fixtures read
+// the loop variable `%4` AHEAD of the call its back edge adopts, and both reads render after it:
+// inlined into a later statement call (`g(v2 - v1)`), and inlined into another variable's update
+// copy at the foot of the body (`v3 = v1 - v2`). Adopted in place, both read the call's result
+// where the IR read the variable's previous value; refused, the call gets its own name and the
+// update copy moves the value over at the bottom.
+const ADOPTED_READ_INLINED_LATER = `fn adoptlate {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%0, %2)
+^bb1(%3: s32, %4: s32):
+  %5: s32 = sub %3, %4
+  %6: s32 = call %3 {target="f1"}
+  %7: s32 = call %5 {target="g"}
+  %8: s32 = const {value=1}
+  %9: s32 = sub %3, %8
+  %10: u32 = icmp_slt %2, %9
+  cond_br %10, ^bb1(%9, %6), ^bb2(%3)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+const ADOPTED_READ_IN_AN_UPDATE = `fn adoptupd {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%0, %1, %2)
+^bb1(%3: s32, %4: s32, %5: s32):
+  %6: s32 = sub %4, %3
+  %7: s32 = call %4 {target="f0"}
+  %8: s32 = const {value=1}
+  %9: s32 = sub %3, %8
+  %10: u32 = icmp_slt %2, %9
+  cond_br %10, ^bb1(%9, %7, %6), ^bb2(%5)
+^bb2(%11: s32):
+  ret %11
+}
+`;
+
+test('a read of the old value that renders after the adopted def refuses the adoption', () => {
+  const late = emit(ADOPTED_READ_INLINED_LATER);
+  expect(late).toContain('    v1 = f1(v2);\n        g(v2 - v3);\n        v3 = v1;\n');
+  const upd = emit(ADOPTED_READ_IN_AN_UPDATE);
+  expect(upd).toContain('    v1 = f0(v3);\n        v4 = v3 - v2;\n        v3 = v1;\n');
+});
+
 // liveAcrossLoop must not fire for a def in a MULTI-BLOCK loop header: a test-at-top while's
 // condition has no seat for a materialized temp (headerPure), so the whole function would
 // decline. The header load here also feeds a use past the second loop — it stays inline.

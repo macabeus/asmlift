@@ -415,13 +415,8 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
 }
 
 /** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
- *  bill. Each one is a real emission defect, measured and not fixed here:
- *
- *    • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
- *      (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
- *    • a call whose value reaches a merge, rendered as the edge copy INSIDE one arm, so an
- *      unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
- *    • a call rendered at two positions, so it executes twice.
+ *  bill. Every one is the same emission defect, measured and not fixed here: a call rendered at two
+ *  positions, so it executes twice (`fz463`: `f1(f0(a1))` in both operands of one test).
  *
  *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
  *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
@@ -435,17 +430,10 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
  *  — is already paid by `JUDGED`, which is exact per depth in both files. Re-derive with the probe
  *  in each file's `JUDGED` docblock. */
 export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
-  0: [
-    27, 84, 226, 299, 399, 420, 425, 463, 661, 715, 862, 1036, 1073, 1147, 1248, 1279, 1330, 1367, 1464, 1543, 1612,
-    1656, 1778, 1781, 1794, 1902, 1938, 1962, 2046, 2178, 2267, 2318, 2493, 2546, 2608, 2758, 2927, 2979, 3021, 3047,
-    3072, 3151, 3162, 3334, 3669, 3719, 3798, 3977,
-  ],
-  1: [
-    76, 84, 253, 299, 354, 420, 421, 435, 497, 601, 612, 899, 940, 967, 1155, 1239, 1330, 1475, 1543, 1610, 1950, 1959,
-    1970, 2006, 2270, 2912, 2965, 3274, 3324, 3392, 3956,
-  ],
-  2: [659, 1853, 2176, 3324, 3928, 3943],
-  3: [1130, 1354, 1841, 2836, 3249],
+  0: [463, 862, 1902, 1938, 1962, 2546, 3798, 3977],
+  1: [1475, 2006, 2965, 3324],
+  2: [3324, 3928],
+  3: [],
 };
 
 // A position where EITHER side is UNDEF constrains nothing: the original read a local no path had

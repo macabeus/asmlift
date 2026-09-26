@@ -122,6 +122,26 @@ describe('adversarial-round pins — the cast must never legitimize wrong addres
     expect(src).toContain('3 & (s32)a0');
   });
 
+  test('a pointer difference subtracts BYTES, as the asm did — C would divide it by the stride', () => {
+    // agbcc, `int *q = p; while (*q != k) q++; return (q - p) + m;`: `sub; asr #2; add`. The shift
+    // is C's own division by sizeof(int), so the `sub` it reads is a byte count; spelled `v0 - a0`
+    // on two `s32 *` it is already an element count, and the lift divided by 4 twice. The control
+    // is the same walk over bytes, where both spellings are one count.
+    const asm = (step: number, shift: string, ld = step === 4 ? 'ldr' : 'ldrb'): string =>
+      `pd:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr1, r4, #0\n\t${ld}\tr0, [r4]\n\tcmp\tr0, r3\n` +
+      `\tbeq\t.L4\n.L5:\n\tadd\tr1, r1, #${step}\n\t${ld}\tr0, [r1]\n\tcmp\tr0, r3\n\tbne\t.L5\n` +
+      '.L4:\n\tsub\tr0, r1, r4\n' +
+      shift +
+      '\tadd\tr0, r0, r2\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const words = decompile('pd', asm(4, '\tasr\tr0, r0, #0x2\n'), ARMV4T_AGBCC, {
+      prototypes: { pd: { params: 4 } },
+    }).source;
+    expect(words).toContain('(u8 *)v0 - (u8 *)a0');
+    expect(words).not.toMatch(/\(v0 - a0\)/);
+    const bytes = decompile('pd', asm(1, ''), ARMV4T_AGBCC, { prototypes: { pd: { params: 4 } } }).source;
+    expect(bytes).toMatch(/return v0 - a0 \+ a\d;/);
+  });
+
   test('exprCType reports ptr + ptr as unknowable (not C), ptr - ptr as int', () => {
     const env = new Map([['p', T.ptr(T.s(32))]]);
     const ct = (e: Expr) => exprCType(e, (n) => env.get(n));

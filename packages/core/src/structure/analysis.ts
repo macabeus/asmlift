@@ -1242,6 +1242,26 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
   const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
+  // How many times each value rides a BACK edge (to a block that dominates its own: a loop's
+  // header), which `ridesEdge` weighs apart. Decided by dominance, not layout: a return tail laid
+  // out above the branch into it is still a forward edge, and its copy renders in the arm.
+  //
+  // And only from a latch that is its loop's ONLY exit. Then the latch's test is the bottom test
+  // and its back-edge copy is the update the body runs on every iteration. When another block
+  // leaves the loop too, the structurer may keep that exit as the loop's own test and render the
+  // latch's branch as an `if` in the body, with the copy in one arm: agbcc's `while (n-- > 0) { q
+  // = q - 1; if (u == k) return *q; t = cg(t) + H[n & 3] & cb(q + 1); }` (with `u` 0) runs `bl
+  // cb` ahead of the latch's `bgt`, and inlined into the copy it ran only on the iterations that
+  // went round again. Such an edge weighs as a forward one.
+  const backArgFed = new Map<Value, number>();
+  const domOf = dom ?? dominators(fn);
+  const soleExitLatch = new Set<Block>();
+  for (const L of naturalLoops(fn, domOf, predecessors(fn))) {
+    if (![...L.body].some((x) => x !== L.latch && successorsOf(x).some((t) => !L.body.has(t)))) {
+      soleExitLatch.add(L.latch);
+    }
+  }
+  const backEdge = (from: Block, to: Block): boolean => (domOf.get(from)?.has(to) ?? false) && soleExitLatch.has(from);
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.successors.length > 1) {
@@ -1250,6 +1270,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             branchArgFed.add(a);
             if (op.opcode === 'cond_br') {
               condBrArgFed.add(a);
+            }
+            if (backEdge(b, s.block)) {
+              backArgFed.set(a, (backArgFed.get(a) ?? 0) + 1);
             }
           }
         }
@@ -1301,6 +1324,40 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
+  /** Does `call`'s value reach an edge argument through the ops it would be inlined into, and
+   *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
+   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does. The walk stops at a named op,
+   *  which renders at its own position, and at another effect, which these same rules place.
+   *
+   *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
+   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once, in
+   *  the update copy at the foot of the body, and a forward edge carrying it too reads the loop
+   *  variable that copy wrote. That copy moves the call only past what the latch runs after it, and
+   *  the barrier scan below already weighs exactly that: a store, a call or a read in another part of
+   *  the terminator bars the call and names it, and a read in the same copy renders after the call,
+   *  as every compiler evaluates it. So `s = s + g(i)` stays inline (`for (…) s = s + g(i);`). */
+  const ridesEdge = (call: Op): boolean => {
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const carried = backArgFed.get(x) ?? 0;
+      if (carried > 1 || (carried === 0 && branchArgFed.has(x))) {
+        return true;
+      }
+      return (useSitesOf.get(x) ?? []).some(
+        (u) =>
+          !EFFECTFUL_OPS.has(u.op.opcode) &&
+          u.op.successors.length === 0 &&
+          !materialize.has(u.op) &&
+          u.op.results.length > 0 &&
+          walk(u.op.results[0]),
+      );
+    };
+    return walk(call.results[0]);
+  };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
@@ -1830,9 +1887,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // return t; } return 0;` gives `bl f2` ahead of the `cmp`, and inlined at the edge the
         // recovered C calls `f2` only in the `else`; a `switch_br` arm hides it the same way.
         // Materializing puts it back at the position the asm executed it. Sole-use only in
-        // practice — a second use already materialized above — and it is 0 of 2288 sa3 functions,
-        // 2 of 412 klonoa ones.
-        if (isCall && branchArgFed.has(r)) {
+        // practice — a second use already materialized above.
+        //
+        // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
+        // do-while's exit edge renders the call after the loop, once, where the body ran it every
+        // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
+        // riding two edge args it renders twice.
+        if (isCall && (branchArgFed.has(r) || ridesEdge(op))) {
           materialize.add(op);
           continue;
         }
@@ -1934,10 +1995,70 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const pos = poss[0]!;
         // A between-op is a BARRIER when it renders as a sequenced statement the def would cross:
         // stores/opaque always; a call/load that is dead (statement), materialized (statement), or
-        // inlined into a DIFFERENT statement. A sibling effect inlined into the SAME statement is
-        // not a reorder — the recompiling compiler orders unsequenced operands of one expression
-        // exactly as it originally chose to. Loads never bar a load (reads don't conflict).
-        const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
+        // inlined into a DIFFERENT statement. Loads never bar a load (reads don't conflict).
+        //
+        // Inside ONE statement the order is the compiler's, and every compiler the corpus builds
+        // with evaluates a call before the memory reads beside it — agbcc, IDO 7.1, both gcc 2.7.2
+        // builds and mwcc all compile `*p + cb(p)`, `cb(p) - *p`, `(*p ^ 3) * cb(p)` and `*p <<
+        // cb(p)` to the call, then the load. So a CALL ahead of a read it shares a statement with
+        // is the order the recompile gives back, and bars nothing. A READ ahead of such a call is
+        // the order no single expression gives back — `int t = *p; return t + cb(p);` compiles
+        // `ldr; bl; add`, and inlined as `*p + cb(p)` it recompiles `bl; ldr` — so that call bars
+        // the read, which is named where it ran. Unless the read is only the call's argument,
+        // which every compiler evaluates first; read a second time beside the call (`G & cg(G)`
+        // for one `ldr`), that second read comes back after it.
+        //
+        // TWO CALLS in one statement have no such order: agbcc calls `cg(k) - cb(p)` in operand
+        // order and mwcc in its own, so `bl cb; bl cg` inlined as that comes back reversed. A call
+        // ahead of another is named too, unless its value is only the later call's argument.
+        //
+        // AND A TERMINATOR IS NOT ONE STATEMENT. It renders in parts — its own operands, then one
+        // copy per edge argument, each a statement of its own — so a read in one edge copy and a
+        // call in its sibling are sequenced, whatever order the copies come out in: agbcc's `bl cb;
+        // ldr r1, [r5]` into a merge came back `a1 = *a0; a2 = cb(a0) + a2;`. Two ops share a
+        // statement only when they render in the same part.
+        //
+        // Which part of its anchor `x` renders in: '' when the anchor is not a terminator, null
+        // when it has no one part.
+        const partOf = (x: Op): string | null => {
+          for (let cur = x; ;) {
+            const cons = consumersOf(cur);
+            if (cons.length !== 1) {
+              return null;
+            }
+            const [c] = cons;
+            if (c.successors.length > 0) {
+              const v = cur.results[0];
+              const parts = [
+                ...c.operands.flatMap((o, i) => (o === v ? [`op${i}`] : [])),
+                ...c.successors.flatMap((sc, si) => sc.args.flatMap((a, ai) => (a === v ? [`${si}:${ai}`] : []))),
+              ];
+              return parts.length === 1 ? parts[0] : null;
+            }
+            if (anchored(c)) {
+              return '';
+            }
+            cur = c;
+          }
+        };
+        const ownPart = partOf(op);
+        const sameStatement = (x: Op): boolean => {
+          const q = emitPos(x);
+          return q !== null && q.blk === pos.blk && q.idx === pos.idx && ownPart !== null && partOf(x) === ownPart;
+        };
+        // Is every use of the def inside `call`'s arguments, as rendered?
+        const onlyFeedsCall = (call: Op): boolean => {
+          const cone = new Set<Op>([call]);
+          const walk = (v: Value): void => {
+            const d = defOf.get(v);
+            if (d !== undefined && d !== op && !cone.has(d) && !materialize.has(d)) {
+              cone.add(d);
+              d.operands.forEach(walk);
+            }
+          };
+          call.operands.forEach(walk);
+          return sites.every((u) => cone.has(u.op));
+        };
         const isBarrier = (x: Op): boolean => {
           // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
           // global) does not sequence against it, so the read may still render at its use.
@@ -1956,7 +2077,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             return true;
           }
           if (x.opcode === 'call') {
-            return !x.results.length || !useSitesOf.has(x.results[0]) || materialize.has(x) || !samePos(emitPos(x));
+            return (
+              !x.results.length ||
+              !useSitesOf.has(x.results[0]) ||
+              materialize.has(x) ||
+              !sameStatement(x) ||
+              !onlyFeedsCall(x)
+            );
           }
           if (!isCall) {
             return false;
@@ -1964,7 +2091,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           if (x.opcode === 'load' || x.opcode === 'aload') {
             return !x.results.length || !useSitesOf.has(x.results[0])
               ? false // dead load: never emitted at all
-              : materialize.has(x) || !samePos(emitPos(x));
+              : materialize.has(x) || !sameStatement(x);
           }
           return false;
         };

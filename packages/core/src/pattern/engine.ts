@@ -589,11 +589,11 @@ function validatePattern(pat: RewritePattern): void {
  *  just its def, and the question has to be asked over the cones: one pure `+ 1` between an effect
  *  and the fold's operand is the difference between `f() % g()` and `(f() + 1) % g()`, and the
  *  second one reorders exactly as the first does. Both cones become operands of ONE expression,
- *  where C leaves their order unspecified. asmlift's inline-at-use model (structure/analysis.ts)
- *  exempts exactly this case — "a sibling effect inlined into the SAME statement is not a reorder,
- *  the recompiling compiler orders unsequenced operands of one expression exactly as it originally
- *  chose to". That premise holds only when the expression asmlift re-spells is the one the source
- *  wrote. A fold INVENTS an expression, so it must check.
+ *  where C leaves their order unspecified. asmlift's inline-at-use model (structure/analysis.ts,
+ *  the barrier scan) keeps two operands of one statement inline only in the order every corpus
+ *  compiler gives back — a call before the reads beside it — but it judges the program the fold
+ *  leaves, after the idiom's own ops are gone. The fold INVENTS the expression, so it checks the
+ *  cones it joins itself.
  *
  *  A cone's members are weighed by ORDER_SENSITIVE_OPS, not EFFECTFUL_OPS: a memory read answers
  *  whichever stores ran before it, so hoisting a `load` over a `call` — one asmlift may itself be

@@ -92,7 +92,14 @@ import {
   globalOf,
   subscriptsFromExtents,
 } from './globalaccess';
-import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
+import {
+  PREUPDATE_SINK_GATES,
+  type SinkCandidate,
+  makeLoopHazards,
+  preUpdateCopyHome,
+  sunkCopyOverDroppedUndef,
+  updateWriteSet,
+} from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -1779,6 +1786,8 @@ export interface StructureHooks {
   /** `enclosingCarrierName`'s admission rules (`ENCLOSING_CARRIER_GATES`), ablatable the same way —
    *  and, wrapped in `tallying`, the census of which rule refuses a nest. */
   enclosingCarrierGates?: readonly Gate<EnclosingCarrier>[];
+  /** `sinkablePreUpdateSlots`'s per-slot rules (`PREUPDATE_SINK_GATES`), ablatable the same way. */
+  preUpdateSinkGates?: readonly Gate<SinkCandidate>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -2995,6 +3004,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const nm = a === undefined ? undefined : varName.get(a);
     return refused === null && nm !== undefined && canTakeName(p, header, nm) ? nm : undefined;
   };
+  /** Where in `header` an op reading a loop variable RENDERS, for the in-place adoption below: at
+   *  its own index when it is a statement, at the consumer it inlines into otherwise (`emitPos`) —
+   *  `%t = v1 - v0` ahead of the adopted def, inlined into a call after it, reads the name after
+   *  the assignment has overwritten it. A tree the header's TERMINATOR carries renders there, at the
+   *  bottom, with one exception: a self-loop's EXIT arg renders at its ROOT's own index, which is
+   *  where a sunk exit copy is rebuilt (`preUpdateCopyHome`), while a kept one renders after the
+   *  loop, where the hazard checks already count the in-place write (`loopWriteSet`). A tree the
+   *  back edge also carries is an update copy, and renders at the bottom. So a read never renders
+   *  EARLIER than its SSA position says, and the rule only ever refuses more. Null — refuse — where
+   *  the read renders in several places or outside the header, or in an exit arg with no home. */
+  const readRenderIdx = (op: Op, header: Block): number | null => {
+    const pos = emitPos(op);
+    if (pos === null || pos.blk !== header) {
+      return null;
+    }
+    const term = header.ops[header.ops.length - 1];
+    if (pos.idx !== opIndex.get(term) || !term.successors.some((sc) => sc.block === header)) {
+      return pos.idx;
+    }
+    for (let cur = op; cur !== term;) {
+      const cons = [...new Set((useSitesOf.get(cur.results[0]) ?? []).map((u) => u.op))];
+      if (cons.length !== 1) {
+        return null;
+      }
+      if (cons[0] === term) {
+        const root = cur.results[0];
+        if (term.successors.some((sc) => sc.block === header && sc.args.includes(root))) {
+          return pos.idx;
+        }
+        const home = preUpdateCopyHome(defs, opBlock, root, header);
+        return home === null ? null : opIndex.get(home)!;
+      }
+      cur = cons[0];
+    }
+    return pos.idx;
+  };
   // ONE seeding routine for self-loop and structured-loop headers. On a coalesceLoopInit target,
   // keep the induction variable in its entry (forward-edge) value's register — reproducing a
   // compiler that mutates the arg register across the loop instead of copying to a fresh local,
@@ -3028,7 +3073,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // param sits at-or-before the def in the header (the def's own operands included): the
         // assignment splits the iteration into old-value-before / new-value-after, and a later
         // read of the OLD value would silently get the new one — position-granular, because
-        // liveness is block-granular and the param is killed from its own block's liveIn.
+        // liveness is block-granular and the param is killed from its own block's liveIn. And the
+        // position is where the read RENDERS, not where SSA put it (`readRenderIdx`).
         if (name === undefined) {
           const ba = backArgs?.[i];
           const d = ba !== undefined ? defs.get(ba) : undefined;
@@ -3039,7 +3085,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             d !== undefined &&
             materialize.has(d) &&
             opBlock.get(d) === header &&
-            (useSitesOf.get(p) ?? []).every((s) => s.blk === header && s.idx <= opIndex.get(d)!) &&
+            (useSitesOf.get(p) ?? []).every((s) => {
+              const at = s.op === d ? s.idx : readRenderIdx(s.op, header);
+              return at !== null && at <= opIndex.get(d)!;
+            }) &&
             canTakeName(p, header, nm)
           ) {
             name = nm;
@@ -3680,11 +3729,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // computed offset addresses TWICE the intended byte, and nothing downstream can see the
       // error — in the sa3 decomp that address is what a `CpuSet` call writes THROUGH.
       //
-      // KNOWN GAP: `ptr ± ptr` is excluded, and the intify rules below do not make it right
-      // either — `ptr + ptr` becomes `l + (s32)r`, which C scales, and a same-pointee `ptr - ptr`
-      // is C's ELEMENT difference where the asm subtracted bytes. Both want the same cast-then-add
-      // treatment; both are byte-identical to what this emitted before, and three functions in the
-      // agbcc corpus carry one.
+      // `ptr - ptr` is C's ELEMENT difference, where the asm subtracted bytes: agbcc compiles `(q -
+      // p) + m` on an `int *` to `sub; asr #2; add`, and spelled `(v0 - a0) >> 2` the lift divided
+      // by 4 twice. Both sides go byte pointers, `(u8 *)v0 - (u8 *)a0`, the byte count in every
+      // world — unless both already are.
+      //
+      // KNOWN GAP: `ptr + ptr` becomes `l + (s32)r` in the intify rules below, which C scales. It
+      // wants the same cast-then-add, but which side is the base, and so which type the sum is cast
+      // back to, is not knowable from the op.
       //
       // KNOWN GAP: the inexact-CONSTANT branch above casts its base and does NOT cast the sum
       // back, so `v1 = (u8 *)a0 + 2` still lands in an `s32 *` slot. Copying the restore up churns
@@ -3705,7 +3757,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // the shape from them.
         const lp = ctype(l)?.kind === 'ptr';
         const rp = d.operands.length === 2 && ctype(r)?.kind === 'ptr';
-        if (lp && !rp) {
+        if (lp && rp && d.opcode === 'sub') {
+          if (walkVar(l) || walkVar(r)) {
+            l = bytePtr(l);
+            r = bytePtr(r);
+          }
+        } else if (lp && !rp) {
           restoreTo = walkVar(l);
           l = restoreTo ? bytePtr(l) : l;
         } else if (rp && !lp && d.opcode === 'add') {
@@ -4087,6 +4144,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     opBlock,
     materialize,
     respelledDefs: bitfieldSpelling,
+    emitPos,
   });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a
@@ -5109,7 +5167,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // seed — the only edge holding the never-entered value. That is why the sink demands the
         // proof above: it makes the fused zero-trip path load-bearing.
         const sunk = guardProven
-          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), li.header, sub, updateWrites)
+          ? sinkablePreUpdateSlots(
+              li.header,
+              li.exit,
+              hexitArgs,
+              new Set([li.header]),
+              li.header,
+              sub,
+              updateWrites,
+              hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+            )
           : new Map<number, Op | null>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
         // too — where the loop variables still hold their init values. It must therefore produce
@@ -5873,7 +5940,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already emits.
     const sunk = rebindHazard
       ? new Map<number, Op | null>()
-      : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, dw.latch, sub, updateWrites);
+      : sinkablePreUpdateSlots(
+          dw.header,
+          dw.exit,
+          exitArgs,
+          dw.body,
+          dw.latch,
+          sub,
+          updateWrites,
+          hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+        );
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline

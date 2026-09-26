@@ -33,16 +33,47 @@ interface Fixture {
   materialize?: Set<Op>;
   respelledDefs?: Map<Op, unknown>;
 }
-const make = (f: Fixture = {}) =>
-  makeLoopHazards({
+// `emitPos` as analysis.ts answers it, over the fixture's maps: an op renders at its own index when
+// it is a statement — a store, a terminator, a named def, a dead one — and otherwise at the one
+// consumer it is inlined into.
+const emitPosOver =
+  (useSitesOf: Map<Value, UseSite[]>, opBlock: Map<Op, Block>, materialize: Set<Op>) =>
+  (op: Op): { blk: Block; idx: number } | null => {
+    for (let cur = op; ;) {
+      const r = cur.results[0];
+      const uses = r === undefined ? [] : (useSitesOf.get(r) ?? []);
+      if (
+        cur.successors.length > 0 ||
+        cur.opcode === 'store' ||
+        cur.opcode === 'astore' ||
+        materialize.has(cur) ||
+        !uses.length
+      ) {
+        const blk = opBlock.get(cur);
+        return blk === undefined ? null : { blk, idx: blk.ops.indexOf(cur) };
+      }
+      const consumers = new Set(uses.map((u) => u.op));
+      if (consumers.size !== 1) {
+        return null;
+      }
+      cur = [...consumers][0];
+    }
+  };
+const make = (f: Fixture = {}) => {
+  const useSitesOf = f.useSitesOf ?? new Map();
+  const opBlock = f.opBlock ?? new Map();
+  const materialize = f.materialize ?? new Set();
+  return makeLoopHazards({
     defs: f.defs ?? new Map(),
     varName: f.varName ?? new Map(),
-    useSitesOf: f.useSitesOf ?? new Map(),
+    useSitesOf,
     liveIn: f.liveIn ?? new Map(),
-    opBlock: f.opBlock ?? new Map(),
-    materialize: f.materialize ?? new Set(),
+    opBlock,
+    materialize,
     respelledDefs: f.respelledDefs ?? new Map(),
+    emitPos: emitPosOver(useSitesOf, opBlock, materialize),
   });
+};
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
 
@@ -372,12 +403,12 @@ describe('sinkablePreUpdateSlots', () => {
     const { p, q, header, exit, latch, body } = scaffold();
     const mid = v();
     const e = v();
-    // `mid` is NAMED and defined in the body, which is all the gate asks: it refuses on the NAME and
-    // never on the place. Here the place would have been safe — the copy lands at `op`, one
-    // statement after `v2` is written — so what the ablation admits is a conservative refusal, not a
-    // wrong value. The fixture below is the one where the admitted copy really does read the
-    // previous iteration. The loop variable is in the tree as well, which is what makes the slot a
-    // repair candidate in the first place.
+    // `mid` is NAMED and defined in the body, and its def is not one the analysis materialized, so
+    // nothing says a statement writing `v2` renders at its index — the gate refuses on the NAME. Here
+    // the place would have been safe — the copy lands at `op`, one op after `mid` is computed — so
+    // what the ablation admits is a conservative refusal, not a wrong value. The fixture below is
+    // the one where the admitted copy really does read the previous iteration. The loop variable is
+    // in the tree as well, which is what makes the slot a repair candidate in the first place.
     const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
     const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
     const h = make({
@@ -429,6 +460,263 @@ describe('sinkablePreUpdateSlots', () => {
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, latch, empty, new Set(['v0']), ablated)).toEqual(
       new Map([[0, null]]),
+    );
+  });
+
+  // A DEF NAMED AHEAD OF THE HOME IS CURRENT THERE. The shape is `preupdate_exit_order`'s once the
+  // analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the copy homed at the add, and the
+  // statement writing `v2` rendered one index earlier on the same iteration; a read named there is
+  // current the same way. Each control changes ONE fact and is refused at `arg-reads-current-names`,
+  // which its own ablation then admits.
+  const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherBlock?: boolean; load?: boolean } = {}) => {
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const e = v();
+    const midOp = edit.load
+      ? mkOp('load', { operands: [p], results: [mid], attrs: { off: 0, width: 4, signed: true } })
+      : mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } });
+    const op = mkOp('add', { operands: [mid, p], results: [e] });
+    const arm: Block = { params: [], ops: [] };
+    if (edit.otherBlock) {
+      arm.ops.push(midOp);
+      header.ops.push(op);
+    } else {
+      header.ops.push(...(edit.after ? [op, midOp] : [midOp, op]));
+    }
+    const body = new Set([header, arm]);
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, edit.otherBlock ? arm : header],
+        [op, header],
+      ]),
+      materialize: edit.unnamed ? new Set() : new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']), gates);
+    return { op, run };
+  };
+
+  test.each([
+    ['a call', {}],
+    ['a read', { load: true }],
+  ])('%s named ahead of the home is current there', (_, edit) => {
+    const { op, run } = namedAhead(edit);
+    expect(run()).toEqual(new Map([[0, op]]));
+  });
+
+  test.each([
+    ['written AFTER the home', { after: true }],
+    ['not a def the analysis named', { unnamed: true }],
+    ['written in another body block', { otherBlock: true }],
+  ])('a body name %s still refuses at arg-reads-current-names', (_, edit) => {
+    const { op, run } = namedAhead(edit);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  test('a tree that spells a call of its own is ordered like any other member', () => {
+    // The same name ahead of the home, under a tree that inlines a second call: `v2 = cb(v0); v1 =
+    // v2 + cb2(v0) + v0;`. The second call is rebuilt at the home with nothing order-sensitive
+    // between it and there, and the first renders at its own index, ahead of both — the asm's order.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const c2 = v();
+    const s2 = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const c2Op = bodyOp(header, mkOp('call', { operands: [p], results: [c2], attrs: { target: 'cb2' } }));
+    const s2Op = bodyOp(header, mkOp('add', { operands: [mid, c2], results: [s2] }));
+    const op = bodyOp(header, mkOp('add', { operands: [s2, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [c2, c2Op],
+        [s2, s2Op],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [c2Op, header],
+        [s2Op, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']))).toEqual(
+      new Map([[0, op]]),
+    );
+  });
+
+  // AN OP AHEAD OF A MEMBER THAT RENDERS BEHIND THE HOME. `c = cb(v0); r = *v0 + v0; *v0 = c + 1;`
+  // in the asm: the call runs first, and is inlined into the store two statements down. The load
+  // rebuilt at the add would run ahead of it — nothing lies BETWEEN the load and the home, and the
+  // crossing is only visible where the call renders. Named, the call renders at its own index and
+  // the order holds. Two READS commute: a load ahead of a rebuilt load crosses nothing, while the
+  // same load ahead of a rebuilt call still does.
+  const aheadRendersBehind = (
+    callNamed: boolean,
+    ahead: 'call' | 'load' = 'call',
+    member: 'call' | 'load' = 'load',
+  ) => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const c = v();
+    const rd = v();
+    const e = v();
+    const s = v();
+    const access = (kind: 'call' | 'load', r: Value, off: number) =>
+      kind === 'call'
+        ? mkOp('call', { operands: [p], results: [r], attrs: { target: 'cb' } })
+        : mkOp('load', { operands: [p], results: [r], attrs: { off, width: 4, signed: true } });
+    const cOp = bodyOp(header, access(ahead, c, 4));
+    const rdOp = bodyOp(header, access(member, rd, 0));
+    const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
+    const sOp = bodyOp(header, mkOp('add', { operands: [c], results: [s] }));
+    const stOp = bodyOp(header, mkOp('store', { operands: [p, s], attrs: { off: 0, width: 4 } }));
+    const h = make({
+      defs: new Map([
+        [c, cOp],
+        [rd, rdOp],
+        [e, op],
+        [s, sOp],
+      ]),
+      opBlock: new Map([
+        [cOp, header],
+        [rdOp, header],
+        [op, header],
+        [sOp, header],
+        [stOp, header],
+      ]),
+      useSitesOf: new Map([
+        [c, [{ blk: header, idx: 3, op: sOp }]],
+        [s, [{ blk: header, idx: 4, op: stOp }]],
+      ]),
+      materialize: callNamed ? new Set([cOp]) : new Set(),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    return {
+      op,
+      run: (gates?: readonly Gate<SinkCandidate>[]) =>
+        h.sinkablePreUpdateSlots(header, exit, [e], body, latch, empty, new Set(['v0']), gates),
+    };
+  };
+
+  test('a member is refused when an op ahead of it renders behind the home', () => {
+    const { op, run } = aheadRendersBehind(false);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Map([[0, op]]));
+    const named = aheadRendersBehind(true);
+    expect(named.run()).toEqual(new Map([[0, named.op]]));
+  });
+
+  test('a read ahead of a rebuilt read crosses nothing, and ahead of a rebuilt call it does', () => {
+    const reads = aheadRendersBehind(false, 'load', 'load');
+    expect(reads.run()).toEqual(new Map([[0, reads.op]]));
+    expect(aheadRendersBehind(false, 'load', 'call').run()).toEqual(new Map());
+  });
+
+  test('a latch def ahead of the home under a LOOP VARIABLE name still refuses', () => {
+    // The in-place adoption: the def writes the loop variable's own name, which the update also
+    // writes — the other conjunct of the gate, which the position does not answer.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v0']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  test('a latch def ahead of the home under a name ANOTHER loop value answers to still refuses', () => {
+    // `other` is live into the loop under `v2`, so the name has two writers and the position of
+    // one of them says nothing about which value it holds at the copy.
+    const { p, q, header, exit, latch } = scaffold();
+    const mid = v();
+    const other = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } }));
+    const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [op, header],
+      ]),
+      materialize: new Set([midOp]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2'], [other, 'v2']),
+      liveIn: new Map([[header, new Set<Value>([other])]]),
+    });
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, [e], new Set([header]), latch, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Map());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Map([[0, op]]));
+  });
+
+  // TWO SLOTS, ONE TREE. The exit edge hands `e = cb(p) + p` to two merge params, so each sunk copy
+  // rebuilds it: for a READ that is one extra load, for a CALL it is `cb` run twice per iteration.
+  // Nothing here refuses the call: the analysis names a call that rides an edge copy, so it never
+  // reaches the sink inlined (loop-preupdate-sink.test.ts), and both kinds sink both slots here.
+  const twoSlots = (opcode: 'call' | 'load') => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const q2 = v();
+    exit.params.push(q2);
+    const rd = v();
+    const e = v();
+    const rdOp = bodyOp(
+      header,
+      opcode === 'call'
+        ? mkOp('call', { operands: [p], results: [rd], attrs: { target: 'cb' } })
+        : mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
+    );
+    const op = bodyOp(header, mkOp('add', { operands: [rd, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [rd, rdOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [rdOp, header],
+        [op, header],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [q2, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    return { op, run: () => h.sinkablePreUpdateSlots(header, exit, [e, e], body, latch, empty, new Set(['v0'])) };
+  };
+
+  test.each(['call', 'load'] as const)('two slots sharing one inlined %s both sink', (opcode) => {
+    const { op, run } = twoSlots(opcode);
+    expect(run()).toEqual(
+      new Map([
+        [0, op],
+        [1, op],
+      ]),
     );
   });
 
@@ -556,6 +844,27 @@ describe('sinkablePreUpdateSlots', () => {
     const h = make({
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set([other])]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']), ablated)).toEqual(
+      new Map([[0, null]]),
+    );
+  });
+
+  test('an UNNAMED value live into the header that renders through the destination name is busy', () => {
+    // `k & 3`, hoisted ahead of the loop: it has no name of its own, so it is inlined inside the
+    // body and reads `v1` there — a copy into `v1` sunk into the body would change what it reads.
+    const { p, q, header, exit, latch, body } = scaffold();
+    const k = v();
+    const hoisted = v();
+    const op = mkOp('and', { operands: [k], results: [hoisted] });
+    const pre: Block = { params: [], ops: [op] };
+    const h = make({
+      defs: new Map([[hoisted, op]]),
+      opBlock: new Map([[op, pre]]),
+      varName: names([p, 'v0'], [q, 'v1'], [k, 'v1']),
+      liveIn: new Map([[header, new Set([hoisted])]]),
     });
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v0']))).toEqual(new Map());
     const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');

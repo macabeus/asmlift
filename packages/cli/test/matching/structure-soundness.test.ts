@@ -95,6 +95,17 @@ describe('C4 — inline-at-use has multi-use and memory-ordering barriers', () =
     expect(scoreC(src, 'xchg0', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
+  test('a load never sinks past a call it shares a statement with, byte-exact (end-to-end)', () => {
+    // agbcc evaluates the call in `*p + cb(p)` first, so the load-first source has no one-statement
+    // spelling (miscompile shape: `return *a0 + cb(a0);`, which recompiles `bl cb; ldr`)
+    const c = 'int cb(int *p); int rdcall(int *p){ int t = *p; return t + cb(p); }';
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    const src = decompile('rdcall', asm, ARMV4T_AGBCC, { prototypes: { cb: { params: 1 } } }).source;
+    expect(src).toContain('v0 = *a0;');
+    expect(src.indexOf('v0 = *a0;')).toBeLessThan(src.indexOf('cb('));
+    expect(scoreC(src, 'rdcall', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
+
   test('a store to a provably-disjoint field is NOT a barrier (no spurious temp)', () => {
     // same-base, non-overlapping offsets: load field_0 may still inline past store field_4
     const src = emit(`fn disj {

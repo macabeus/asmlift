@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=170.6s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=99.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,27 +136,24 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-25**, taken at `a9f22e79` (`match/utag-mwcc`
-after its merge review, on #259: a PowerPC frontend capability, a switch-recovery one, one
-argument-slot rule for all three frontends, 17 rows gained): the ranked pass alone is **2,059 s
-over 195 real rows** and **1,160 s over 782 synthetic rows**; wall clock was 591.0 s and 400.5 s on
-tiers that overlap, and **591.3 s** end to end (the CLI's own `Done in` line). Against
-`origin/main` it is **205 field changes over 55 rows**, fan **69,855 → 68,912 (0.99×)** over 960
-comparable rows, while its ranked pass reads **1,743.9 s → 2,896.8 s (1.66×)**, and 17 rows
-(322.7 s) rank here that declined at `origin/main`. The dearest single row is **248 s** on
-`marioparty4:SceneMain:mwcc_242_81`, **12% of the tier** on its own — one of those 17, and a
-`noncompile` with a fan of 162. The previous artifact of this branch, at `df0044d5`, read 1,875 s
-and 1,075 s over the same rows with the same fan, and 0 field changes against this one: the ranked
-pass is wall clock on a shared machine.
+Summed out of the committed artifact of **2026-09-26**, taken at `ca797b50`
+(`match/preupdate-exit-order`, on #261: calls and reads kept in the order the asm ran them, one row
+lifted, one gained, four added): the ranked pass alone is **1,090 s over 195 real rows** and
+**653 s over 786 synthetic rows**; wall clock was 363.4 s and 214.8 s on tiers that overlap, and
+**363.6 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is **29 field
+changes over 7 rows** and 4 added rows, fan **69,204 → 69,490 (1.00×)** over 977 comparable rows,
+while its ranked pass reads **3,219.5 s → 1,743.0 s (0.54×)**. The dearest single row is
+**132 s** on `kleod:PauseMenuScreenHandler:agbcc`, **12% of the tier** on its own — a `noncompile`
+with a fan of 30,240, which is the figure to reach for when a scoped run looks cheap.
 
-The artifact `origin/main` carried before this one, taken 2026-09-24 at `b7857a14`
-(`match/stkwide`, #259), read **1,154 s over 192 real rows** and **590 s over 768 synthetic rows**;
-wall clock was 291.2 s and 212.7 s, **306.9 s** end to end, and its dearest row was **148 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it, taken at `0ff9a625`
-(#258), read 1,548 s over 192 real rows and 805 s over 768 synthetic rows; wall clock was 385.8 s
-and 284.4 s, 403.7 s end to end, and its dearest row was 205 s on
-`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. So an unmoved fan has been priced 1.32×,
-0.74× and 1.36× on consecutive artifacts: the seconds are the box, not the branch.
+The artifact `origin/main` carried before this one, taken 2026-09-25 at `a9f22e79`
+(`match/utag-mwcc`, #261), read **2,059 s over 195 real rows** and **1,160 s over 782 synthetic
+rows**; wall clock was 591.0 s and 400.5 s, **591.3 s** end to end, and its dearest row was
+**248 s** on `marioparty4:SceneMain:mwcc_242_81`, 12% of the tier — 114 s in this one. The one
+before it, taken at `b7857a14` (#259), read 1,154 s over 192 real rows and 590 s over 768 synthetic
+rows; wall clock was 291.2 s and 212.7 s, 306.9 s end to end, and its dearest row was 148 s on
+`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. So fans that moved by at most 1% have been
+priced 0.74×, 1.66× and 0.54× on consecutive artifacts: the seconds are the box, not the branch.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
