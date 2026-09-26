@@ -120,7 +120,7 @@ function spellings(
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
-// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 652: a change
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 653: a change
 // that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
@@ -137,7 +137,7 @@ function spellings(
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2504, 2: 1556, 3: 652 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2504, 2: 1556, 3: 653 };
 
 describe.each([
   ['acyclic', 0],
@@ -231,11 +231,11 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
   // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
   // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
   // declines on.
-  expect(judged, 'the measured arm judges the population it measured').toBe(1094);
+  expect(judged, 'the measured arm judges the population it measured').toBe(1095);
   // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
   // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
   // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
-  // from 254 firings to 1 would leave both arms green, with `judged` still at 1,094 vouching for it.
+  // from 254 firings to 1 would leave both arms green, with `judged` still at 1,095 vouching for it.
   expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(254);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
