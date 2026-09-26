@@ -606,10 +606,11 @@ export function lift(
   // THE FRAME, as two kinds of word slot, each named by its offset from the ENTRY r1
   // (`r1Displacements`).
   //
-  // A SAVE holds an entry value that is no C value: a callee-saved register's, or the link
-  // register's word. Nothing but the caller reads it back, so its restore — a load into the register
-  // it was saved from — is dropped, and a load into any other register refuses. Function-scoped, so
-  // a save in the prologue matches a restore in any epilogue.
+  // A SAVE holds an entry value that is no C value: a callee-saved register's, the link register's
+  // word, or the back chain the frame push stores (the caller's r1). Nothing but the caller reads it
+  // back, so its restore — a load into the register it was saved from — is dropped, and a load into
+  // any other register refuses. Function-scoped, so a save in the prologue matches a restore in any
+  // epilogue.
   //
   // Every other word store is a VALUE — an argument's home, or a live value spilled — and it is the
   // shared stack-slot variable (`stackSlotKey`, frontend/ssa.ts) MIPS and Thumb use. A reload into
@@ -1069,6 +1070,11 @@ export function lift(
                   `${d !== 'r1' ? `it stores ${d}, not the back chain` : `r1 had already moved (${r1At.get(ins)})`}`,
               );
             }
+            // The push also STORES: the entry r1, at its new top, which is the entry offset of `s`
+            // because r1 has not moved yet. A value stored there before the push is overwritten, and
+            // a load from it afterwards reads the caller's r1.
+            refuseMixedSlot(ins, s, parseMem(s).off, 'save');
+            saveSlots.set(parseMem(s).off, 'r1');
             break;
           }
           throw new PpcUnsupportedError(
