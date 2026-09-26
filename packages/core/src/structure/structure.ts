@@ -3729,11 +3729,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // computed offset addresses TWICE the intended byte, and nothing downstream can see the
       // error — in the sa3 decomp that address is what a `CpuSet` call writes THROUGH.
       //
-      // KNOWN GAP: `ptr ± ptr` is excluded, and the intify rules below do not make it right
-      // either — `ptr + ptr` becomes `l + (s32)r`, which C scales, and a same-pointee `ptr - ptr`
-      // is C's ELEMENT difference where the asm subtracted bytes. Both want the same cast-then-add
-      // treatment; both are byte-identical to what this emitted before, and three functions in the
-      // agbcc corpus carry one.
+      // `ptr - ptr` is C's ELEMENT difference, where the asm subtracted bytes: agbcc compiles `(q -
+      // p) + m` on an `int *` to `sub; asr #2; add`, and spelled `(v0 - a0) >> 2` the lift divided
+      // by 4 twice. Both sides go byte pointers, `(u8 *)v0 - (u8 *)a0`, the byte count in every
+      // world — unless both already are.
+      //
+      // KNOWN GAP: `ptr + ptr` becomes `l + (s32)r` in the intify rules below, which C scales. It
+      // wants the same cast-then-add, but which side is the base, and so which type the sum is cast
+      // back to, is not knowable from the op.
       //
       // KNOWN GAP: the inexact-CONSTANT branch above casts its base and does NOT cast the sum
       // back, so `v1 = (u8 *)a0 + 2` still lands in an `s32 *` slot. Copying the restore up churns
@@ -3754,7 +3757,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // the shape from them.
         const lp = ctype(l)?.kind === 'ptr';
         const rp = d.operands.length === 2 && ctype(r)?.kind === 'ptr';
-        if (lp && !rp) {
+        if (lp && rp && d.opcode === 'sub') {
+          if (walkVar(l) || walkVar(r)) {
+            l = bytePtr(l);
+            r = bytePtr(r);
+          }
+        } else if (lp && !rp) {
           restoreTo = walkVar(l);
           l = restoreTo ? bytePtr(l) : l;
         } else if (rp && !lp && d.opcode === 'add') {
