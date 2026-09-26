@@ -392,6 +392,17 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       /'8\(r1\)' is stored at 0x4 and never read back/,
     );
   });
+  test('a return address read as a value refuses, whichever register `mflr` put it in', () => {
+    // MP4 `HuMemDirectMalloc` reads it with `asm { mflr retaddr }` and passes it on. Were `mflr` a
+    // no-op, r3 would lift as nothing (`void getpc(void)`) and r31 as a phantom parameter.
+    const used = /the return address the 'mflr' at 0x\w+ copies out is used as a value/;
+    expect(() => dis('getpc', '0:\tmflr    r3\n4:\tblr\n')).toThrow(used);
+    const passed =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tstw     r31,12(r1)\n10:\tmflr    r31\n' +
+      '14:\tmr      r3,r31\n18:\tbl      18 <passed+0x18>\n\t\t\t18: R_PPC_REL24\tHuMemMemoryFree\n' +
+      '1c:\tlwz     r31,12(r1)\n20:\tlwz     r0,20(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
+    expect(() => dis('passed', passed)).toThrow(used);
+  });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
   // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore would find no slot.
