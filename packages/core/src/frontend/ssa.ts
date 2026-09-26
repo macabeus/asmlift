@@ -346,10 +346,11 @@ export function makeSsaBuilder(
   fn.writeOrder = writeOrder;
 
   // SLOT HOMES (ir/core.ts `SlotHomes`). Measured HERE, in the shared builder, for the same
-  // reason the clobber set and the write order are: BOTH frontends already spell a word spill as
-  // a write to the key `sp@k` (`stackSlotKey`, below), so the frontend supplies the coordinate
-  // and one rule applies it — a per-frontend stamp would be right only while each remembered to
-  // route every slot write past a wrapper, and a missed write is a local with no frame order.
+  // reason the clobber set and the write order are: every slot-modelling frontend (MIPS, Thumb,
+  // PowerPC) spells a word spill as a write to the key `sp@k` (`stackSlotKey`, below), so the
+  // frontend supplies the coordinate and one rule applies it — a per-frontend stamp would be right
+  // only while each remembered to route every slot write past a wrapper, and a missed write is a
+  // local with no frame order.
   // Empty rather than absent on a function that spills nothing: this builder measured it.
   const slotHomes: SlotHomes = new Map();
   fn.slotHomes = slotHomes;
@@ -360,7 +361,7 @@ export function makeSsaBuilder(
     }
     // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says below of a def-less
     // read: `sp@40` is a local on one ABI and the caller's fifth argument on another. So the stamp
-    // asks the frontend for a partition and refuses where no answer exists. The two frontends
+    // asks the frontend for a partition and refuses where no answer exists. The frontends
     // differ here and the refusal is what makes that safe: Thumb declares a range; MIPS declares NO
     // partition (frontend/mips.ts: `addiu sp,sp,±N` is transparent, so its slot keys span O32's
     // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above
@@ -417,7 +418,7 @@ export function makeSsaBuilder(
   };
   // PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`), measured HERE for the same reason the clobber
   // set, the write order and the slot homes are: a slot write is a `writeVar` and a slot read is a
-  // `readVar` in BOTH slot-modelling frontends, so one rule covers them and no frontend can forget
+  // `readVar` in every slot-modelling frontend, so one rule covers them and no frontend can forget
   // to route a store past a wrapper. The two directions are NOT symmetric: raise/paramwidth.ts reads
   // an absent observation as proof the declaration was wide, so a missed one costs a narrowing while
   // a spurious one retypes a parameter the machine never declared narrow.
@@ -1103,9 +1104,9 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   return changed;
 }
 
-/** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
- *  function's own frame. Shared so the two spell it identically and the frame-partition rule can
- *  recognise either frontend's slots. See the virtual-key note in the module header. */
+/** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
+ *  function's own frame. Shared so they spell it identically and the frame-partition rule can
+ *  recognise any frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 /** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary

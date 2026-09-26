@@ -67,9 +67,11 @@ export interface Fn {
  *  `compilerBehaviors.narrowParamWitness` decides what the pair means, and the disassemblies for
  *  each value live there.
  *
- *  `deadHome` — THE STORE DOES NOT REACH THE IR. Both slot-modelling frontends spell a word
+ *  `deadHome` — THE STORE DOES NOT REACH THE IR. Every slot-modelling frontend spells a word
  *  sp-relative store as a write to the SSA key `sp@k` instead of a `store` op (`stackSlotKey`), so
- *  a slot nothing reloads has no reader, no op and no value: it simply is not there by L1. A
+ *  a slot nothing reloads has no reader, no op and no value: it simply is not there by L1. MIPS and
+ *  Thumb lift such a store. PowerPC refuses it, because an unread store may be a call's outgoing
+ *  stack argument (frontend/ppc.ts), so a PowerPC lift never reports a dead home. A
  *  parameter stored to two slots, one of them reloaded, still counts — the dead store happened —
  *  and the reader's own gates decide what a parameter with that much traffic may become.
  *
