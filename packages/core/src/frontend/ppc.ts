@@ -412,7 +412,7 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
 function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, number | string> {
   const at = new Map<Instr, number | string>();
   const into: Array<number | string | undefined> = blocks.map(() => undefined);
-  // The first reason a block's displacement became unknown is the one kept: it is the earliest cause.
+  // A block whose displacement is unknown stays unknown, under the first reason found.
   const meet = (bi: number, d: number | string): boolean => {
     const old = into[bi];
     let next = d;
@@ -646,9 +646,8 @@ export function lift(
   //
   // Every other word store is a VALUE — an argument's home, or a live value spilled — and it is the
   // shared stack-slot variable (`stackSlotKey`, frontend/ssa.ts) MIPS and Thumb use. A reload into
-  // any register reads it; a reload on a path that never stored it refuses in the builder, which
-  // is path-sensitive where a table filled in walk order is not; a store nothing reloads refuses at
-  // the end of `lift`.
+  // any register reads it; a reload on a path that never stored it refuses in the builder; a store
+  // nothing reloads refuses at the end of `lift`.
   //
   // A slot is one kind for the whole function: a word both saved and stored with a value has no
   // single reading, and refuses.
@@ -751,9 +750,9 @@ export function lift(
       }
       const off = entryOffset(ins, mem);
       const isArg = ARG_REGS.includes(srcReg);
-      // A save stores what the register held at entry (nothing defined it on any path) or the
-      // return address `mflr` copied into it (the only definition on every path). An argument
-      // register nothing defined holds the argument, which is a value.
+      // A save stores what the register held at entry, or the return address `mflr` copied into
+      // it: no other definition reaches it on any path. An argument register nothing defined holds
+      // the argument, which is a value.
       const noValueReaches = !ssa.hasReachingDef(srcReg, bi, (v) => !returnAddresses.has(v));
       if (noValueReaches && (!isArg || ssa.hasReachingDef(srcReg, bi))) {
         refuseMixedSlot(ins, mem, off, 'save');

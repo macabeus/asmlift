@@ -445,8 +445,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     ).toThrow(/reload of '0\(r1\)' into r3, a slot r1 was saved into/);
   });
   test('a return address read as a value refuses, whichever register `mflr` put it in', () => {
-    // MP4 `HuMemDirectMalloc` reads it with `asm { mflr retaddr }` and passes it on. Were `mflr` a
-    // no-op, r3 would lift as nothing (`void getpc(void)`) and r31 as a phantom parameter.
+    // MP4 `HuMemDirectMalloc` reads it with `asm { mflr retaddr }` and passes it on.
     const used = /the return address the 'mflr' at 0x\w+ copies out is used as a value/;
     expect(() => dis('getpc', '0:\tmflr    r3\n4:\tblr\n')).toThrow(used);
     const passed =
@@ -476,7 +475,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
   test('one printed offset on both sides of the push is two different words', () => {
     // `4(r1)` before the push is the caller's LR word; after it, it is a word of this frame that
-    // nothing saved. Named by the current r1 the load looked like the restore and was dropped.
+    // nothing saved.
     const asm =
       '0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-16(r1)\nc:\tlwz     r0,4(r1)\n' +
       '10:\taddi    r1,r1,16\n14:\tmtlr    r0\n18:\tblr\n';
@@ -515,9 +514,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '10:\tlwz     r31,-4(r1)\n14:\tblr\n';
     expect(() => dis('depths', depths)).toThrow(/arrive with r1 at two depths \(0 and -16 bytes/);
   });
-  // mwcc 2.3.3 moves a register with `addi rD,rS,0` where 2.4.x prints `mr`. Lifted as an add, the
-  // `+ 0` makes the table's address an integer sum, and mwcc's C++ refuses to pass
-  // `(u32)&gTable + 0` to a `const char *` parameter.
+  // mwcc 2.3.3 moves a register with `addi rD,rS,0` where 2.4.x prints `mr`.
   test('`addi rD,rS,0` with no relocation is a move: the address it carries keeps its type', () => {
     const asm =
       '0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgTable\n4:\taddi    r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgTable\n' +
