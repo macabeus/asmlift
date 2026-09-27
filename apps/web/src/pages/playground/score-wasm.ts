@@ -1,8 +1,8 @@
 // asmlift webapp — the in-browser objdiff scorer, agbcc/ARMv4T only. The playground's own match
 // verification: assemble the pasted `.s` to a target object, compile each
 // recovered-C candidate with agbcc, and score target-vs-candidate with @matchkit/scoring — the
-// same scorer, at the same pinned objdiff-wasm, that the CLI and the benchmark use. Never a
-// hand-rolled asm/text compare. FAIL-CLOSED: nothing here is caught and turned into a score.
+// same scorer, at the same pinned objdiff-wasm, the CLI and the benchmark use. Never a
+// hand-rolled asm/text compare. FAIL-CLOSED: no error is ever turned into a score.
 import { cBackend } from '@asmlift/core/backend/c';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
@@ -83,7 +83,7 @@ export type RankMessage = RankProgressMessage | RankResponse;
 
 export type { DiffBreakdown, MatchScore } from '@matchkit/scoring';
 
-// one scorer per worker, created with the engine the first time either is asked for
+// one scorer per worker, loaded with its engine on first use
 let scorerPromise: Promise<Scorer> | null = null;
 const loadScorer = (): Promise<Scorer> => (scorerPromise ??= loadEngine().then((engine) => createScorer(engine)));
 
@@ -180,8 +180,8 @@ export async function rankCandidatesInBrowser(
   // been 76 % wrong) — until a stillborn verdict says the rest will not be, whereupon it is the
   // number compiled, so the phase still ends on a full bar rather than a bar that stops short.
   let total = candidates.length;
-  // The target is parsed ONCE and every candidate is scored against it. A target the engine cannot
-  // parse would fail every candidate with the same error, so the ranking ends before compiling any.
+  // Parsed ONCE, before any compile: a target the engine cannot parse would fail every candidate
+  // alike, so it ends the ranking here.
   const scorer = await loadScorer();
   const parsedTarget: Target | null = total > 0 ? scorer.parseTarget(t.obj) : null;
   const score = async (i: number): Promise<void> => {
@@ -206,7 +206,7 @@ export async function rankCandidatesInBrowser(
       }
       outcomes.set(c.source, scorer.score(parsedTarget!, cc.obj, name));
     } catch (e) {
-      // a dead engine is no candidate's fault, and it fails every score after it: it ends the ranking
+      // a dead engine fails every score after it and is no candidate's fault: it ends the ranking
       if (e instanceof EngineFailedError) {
         throw e;
       }

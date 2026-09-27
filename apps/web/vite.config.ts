@@ -5,9 +5,9 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { defineConfig } from 'vite';
 
-// Where objdiff-wasm really is, resolved the way @matchkit/scoring resolves it. With a local matchkit
-// linked in (its CONTRIBUTING.md), that is inside the matchkit checkout, outside this workspace, and
-// the dev server would refuse to serve the .wasm.
+// objdiff-wasm's real directory, resolved from @matchkit/scoring as the scorer resolves it. With
+// matchkit linked from a local checkout (its CONTRIBUTING.md), that is outside this workspace, and
+// the dev server refuses to serve the .wasm from a directory `fs.allow` does not list.
 const scoring = realpathSync(join(import.meta.dirname, 'node_modules/@matchkit/scoring'));
 const objdiffWasm = dirname(createRequire(join(scoring, 'package.json')).resolve('objdiff-wasm'));
 
@@ -30,7 +30,7 @@ export default defineConfig({
   // The production bundle must allow top-level await (objdiff-wasm) — ES2022 is the TLA baseline
   // and is satisfied by every browser that can run WebAssembly components anyway.
   build: { target: 'es2022' },
-  // Dev server reads the symlinked core sources + the corpus examples outside the app root, and the
-  // objdiff wasm wherever it is.
+  // Dev server reads the symlinked core sources + the corpus examples outside the app root, and
+  // objdiff-wasm from wherever it resolves.
   server: { fs: { allow: ['../..', objdiffWasm] } },
 });

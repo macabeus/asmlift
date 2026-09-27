@@ -4,8 +4,8 @@
 //
 // It imports only core's variation registry, for the one join a candidate's name prints through.
 // That leafness buys nothing today: both consumers already pull `./score` (and the objdiff engine
-// behind it). What this module owns is the SPELLING — the same line rendered by two commands — and that
-// is the property to preserve when adding to it.
+// behind it). What this module owns is the SPELLING — the same line rendered by two commands — and
+// that is the property to preserve when adding to it.
 import { joinVariations } from '@asmlift/core/variation-tokens';
 
 /** What a `[threw]` line says threw: the variations the throwing step applied, as core's

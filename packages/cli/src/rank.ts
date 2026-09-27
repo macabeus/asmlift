@@ -138,8 +138,8 @@ export function decompileRanked(
       : opts.compile;
   let done = 0;
   let best: MatchScore | undefined;
-  // `rankBy` records every throw as a dropped candidate. A dead engine is no candidate's fault: it
-  // fails every score after it, so it ends the ranking instead of emptying it one compile at a time.
+  // `rankBy` records every throw as a dropped candidate, but a dead engine is no candidate's fault
+  // and fails every score after it: it ends the ranking instead of emptying it one compile at a time.
   let engineFailure: unknown;
   try {
     const ranked = rankBy(candidates, name, (source, symbol, cand) => {

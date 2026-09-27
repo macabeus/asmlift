@@ -1,6 +1,6 @@
 // The playground's ranking ends at a failure every candidate would share: a dead objdiff engine,
-// or a target it cannot parse. Recorded per candidate, either one compiled the rest of the fan in
-// the browser for nothing, then reported "no scorable candidate".
+// or a target it cannot parse. Recorded per candidate, either would compile the rest of the fan
+// for nothing and then report "no scorable candidate".
 // `agbcc` is replaced whole: the real package cannot be imported under vitest's ESM loader
 // (candidate-compile.test.ts says why).
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
