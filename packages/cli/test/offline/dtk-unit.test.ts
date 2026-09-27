@@ -2,6 +2,7 @@
 // defines the function. The fixtures under fixtures/dtk are units cut verbatim from the three GameCube
 // checkouts' objdiff.json (Mario Party 4 147b165a, Animal Crossing 09ca8e8b, Pikmin 35e28e7c); the
 // target objects are written here, since the real ones are split from game binaries.
+import { tokenizeFlags } from '@asmlift/core/codegen-flags';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -220,6 +221,21 @@ describe('the flags a dtk unit gives', () => {
     );
     expect(taken.ok && taken.lines).toContain(`-pragma 'scheduling 7400'`);
     expect(taken.ok && taken.lines).toContain(`(objdiff.json unit main/jaudio/dummyprobe)\n`);
+  });
+
+  test("a unit's error limit is left out of a ranked run's candidate compiles, and said so", () => {
+    // every dtk GameCube project's units carry `-maxerrors 1`, under which mwcc ends every rejection
+    // `User break, cancelled...` — read as a verdict, it says nothing (core stillborn.ts)
+    const boot = unit('ac-decomp', 'static/boot');
+    expect(boot.cflags).toContain('-maxerrors 1');
+    const command = 'wibo mwcceppc.exe -c {{cflags}} -o {{outputPath}} {{inputPath}}';
+    const ranked = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: boot }, command, ranked: true }));
+    expect(ranked.ok && ranked.fill).toEqual(tokenizeFlags(boot.cflags.replace(' -maxerrors 1', '')));
+    expect(ranked.ok && ranked.lines).toContain(
+      'asmlift: [flags] note: -maxerrors 1 is left out of every candidate compile: a rejection cut short cannot be read\n',
+    );
+    const plain = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: boot }, command }));
+    expect(plain.ok && plain.lines).not.toContain('-maxerrors');
   });
 
   test('several defining units are listed by module, at most five, with the ways to choose', () => {

@@ -228,6 +228,13 @@ describe('parsing', () => {
     expect(parseFlags('agbcc', ['-Wimplicit', '-Werror']).inertAt).toEqual([0, 1]);
   });
 
+  test('an error limit is inert, and named apart from the other inert words', () => {
+    const argv = ['-O4,p', '-maxerrors', '1', '-nosyspath', '-d', 'MUST_MATCH', '-lang=c'];
+    expect(parseFlags('mwcc', argv).errorLimitAt).toEqual([1, 2]);
+    expect(parseFlags('mwcc', argv).inertAt).toEqual([1, 2, 3, 4, 5]);
+    expect(parseFlags('agbcc', ['-O2', '-Werror']).errorLimitAt).toEqual([]);
+  });
+
   test('a slot keeps the build’s own words', () => {
     expect(parseFlags('agbcc', ['-mthumb-interwork', '-O2', '-fno-hex-asm', '-fhex-asm']).spelled).toEqual({
       '-mthumb-interwork': '-mthumb-interwork',

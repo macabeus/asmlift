@@ -167,7 +167,10 @@ function's unit. A unit's `scratch.compiler` must be the target's compiler, or t
 unit's own; a function several units define is refused, naming them. With flags from `--cflags`
 or a unit and `--score-against`, the command must take them through `{{cflags}}`: one that has
 none is refused with a copy of it that does, and a codegen flag spelled beside `{{cflags}}` is
-refused as a second source. A command that runs no compiler asmlift can find is named in a note;
+refused as a second source. One word is left out of `{{cflags}}` on a ranked run, and a note says
+so: an error limit (`-maxerrors 1`, in every dtk GameCube project's units). Under it mwcc ends every
+rejection `User break, cancelled...`, and a ranked run reads its candidates' rejections to stop
+compiling a fan that cannot compile. A command that runs no compiler asmlift can find is named in a note;
 its candidates still compile as written. Every refusal exits `64` with only its message.
 
 ## The symbol map: `elf`
