@@ -120,6 +120,10 @@ describe('the pooled ranked run is the serial ranked run', () => {
   // reaches, and the two paths would disagree on how many were compiled.
   const asmOf = (src: string) => compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const IFOR = 'int ifor(int a, int b){ if (a || b) return 42; return 7; }';
+  // A fan with more candidates than probes: both signedness halves are probed as fans of their own
+  // (core stillborn.ts), and IFOR's four candidates are then all probes, leaving nothing to stop.
+  const ILOOP =
+    'int iloop(int a, int b){ int i, s = 0; for (i = 0; i < a; i++) { if (b) s += i; else s -= b; } return s; }';
   const stillbornOf = async (run: () => Promise<unknown> | unknown): Promise<NoScorableCandidateError> => {
     try {
       await run();
@@ -137,11 +141,11 @@ describe('the pooled ranked run is the serial ranked run', () => {
       throw new CompilerRejection("agbcc failed: c.c:4: too many arguments to function `g'");
     };
     let pooledCompiles = 0;
-    const asm = asmOf(IFOR);
+    const asm = asmOf(ILOOP);
     const obj = assembleTarget(asm);
     const ticks = { pooled: [] as [number, number][], serial: [] as [number, number][] };
     const pooled = await stillbornOf(() =>
-      decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, {
+      decompileRankedParallel('iloop', asm, ARMV4T_AGBCC, obj, {
         jobs: 4,
         worker: () => async () => {
           pooledCompiles++;
@@ -151,7 +155,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
       }),
     );
     const serial = await stillbornOf(() =>
-      decompileRanked('ifor', asm, ARMV4T_AGBCC, obj, {
+      decompileRanked('iloop', asm, ARMV4T_AGBCC, obj, {
         compile: refuse,
         onProgress: (done, total) => ticks.serial.push([done, total]),
       }),
@@ -167,6 +171,41 @@ describe('the pooled ranked run is the serial ranked run', () => {
     expect(ticks.pooled.at(-1)).toEqual([compiled, compiled]);
     expect(ticks.serial.at(-1)).toEqual([compiled, compiled]);
     expect(ticks.serial.at(-2)).toEqual([compiled, compiled + pooled.notCompiled.length]);
+  });
+
+  test('a fan whose refusals differ but keep ONE error per half stops after the probes, on the pool as on the serial path', async () => {
+    // every candidate is refused for one error of its own (a digest of its source) and for one
+    // error every candidate of its signedness half shares, worded by that half's types
+    const refuse = (source: string): never => {
+      const digest = createHash('sha256').update(source).digest('hex').slice(0, 8);
+      const half = /\bu32\b/.test(source) ? 'unsigned' : 'signed';
+      throw new CompilerRejection(
+        `agbcc failed: c.c:4: invalid operands to binary ${digest}`,
+        [
+          `c.c:4: invalid operands to binary ${digest}`,
+          `c.c:5: incompatible type for argument 1 of \`g' (${half} int)`,
+        ].join('\n'),
+      );
+    };
+    let pooledCompiles = 0;
+    const asm = asmOf(ILOOP);
+    const obj = assembleTarget(asm);
+    const pooled = await stillbornOf(() =>
+      decompileRankedParallel('iloop', asm, ARMV4T_AGBCC, obj, {
+        jobs: 4,
+        worker: () => async (source: string) => {
+          pooledCompiles++;
+          return refuse(source);
+        },
+      }),
+    );
+    const serial = await stillbornOf(() => decompileRanked('iloop', asm, ARMV4T_AGBCC, obj, { compile: refuse }));
+    expect(pooled.notCompiled.length).toBeGreaterThan(0);
+    expect(pooledCompiles).toBe(pooled.dropped.length);
+    expect(pooled.dropped).toEqual(serial.dropped);
+    expect(pooled.notCompiled).toEqual(serial.notCompiled);
+    // both halves were probed: the dropped list opens each half on its default
+    expect(new Set(pooled.dropped.map((d) => d.variations[0]))).toEqual(new Set(['unsigned', 'signed']));
   });
 
   test('a fan whose refusals DIFFER is compiled whole on the pool too', async () => {
