@@ -1,6 +1,6 @@
 // asmlift — the scoring seam. asmlift is a pure generator; it does NOT own the scorer.
-// Scoring is @matchkit/scoring: the community objdiff engine in-process (a pinned `objdiff-wasm`),
-// fail-closed, and the same scorer Transmuter uses. Never a hand-rolled diff.
+// Scoring is @matchkit/scoring, the community objdiff engine in-process (a pinned `objdiff-wasm`),
+// shared with Transmuter. Never a hand-rolled diff.
 //
 // This module holds ONLY the seam: the candidate-compile registry and the target-dispatched
 // scoreSource. It ships EMPTY — a compiler gets in exactly two ways: the `compile` override
@@ -14,9 +14,8 @@ import type { MatchScore } from '@matchkit/scoring';
 import type { CandidateCompiler } from './compile-command';
 
 // A DYNAMIC import, and it must stay one: the CLI bundle keeps @matchkit/scoring external, and
-// esbuild hoists an external's static import to the top of the bundle, where the engine would load
-// (and could fail) on every command. Here it loads with this module, which main.ts reaches through
-// a dynamic `import()` on the ranked path alone (bundle-lazy-scorer.test.ts guards it).
+// esbuild hoists an external's static import to the top of the bundle, loading the engine on every
+// command. bundle-lazy-scorer.test.ts guards it.
 const { releaseTarget, scoreFiles } = await import('@matchkit/scoring/node');
 const { EngineFailedError } = await import('@matchkit/scoring');
 

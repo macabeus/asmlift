@@ -1,6 +1,4 @@
-// A dead objdiff engine ends a ranking. It fails every score after it, so recording it as one
-// candidate's failure would compile the rest of the fan for nothing and report "no scorable
-// candidate", which blames the candidates for the engine.
+// A dead objdiff engine ends a ranking: it fails every later score, so no later candidate compiles.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { EngineFailedError } from '@matchkit/scoring';
 import { readFileSync } from 'node:fs';

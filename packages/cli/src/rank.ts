@@ -138,8 +138,8 @@ export function decompileRanked(
       : opts.compile;
   let done = 0;
   let best: MatchScore | undefined;
-  // `rankBy` records every throw as a dropped candidate, but a dead engine is no candidate's fault
-  // and fails every score after it: it ends the ranking instead of emptying it one compile at a time.
+  // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
+  // it ends the ranking instead.
   let engineFailure: unknown;
   try {
     const ranked = rankBy(candidates, name, (source, symbol, cand) => {
@@ -221,7 +221,7 @@ export async function decompileRankedParallel(
   let done = 0;
   let best: MatchScore | undefined;
   const workers = Array.from({ length: jobs }, () => opts.worker());
-  // as in `decompileRanked`: a dead engine ends the ranking, and no worker compiles past it
+  // as in `decompileRanked`, a dead engine ends the ranking
   let engineFailure: unknown;
   const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
     if (engineFailure) {

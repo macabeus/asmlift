@@ -1,8 +1,5 @@
 // The playground's ranking ends at a failure every candidate would share: a dead objdiff engine,
-// or a target it cannot parse. Recorded per candidate, either would compile the rest of the fan
-// for nothing and then report "no scorable candidate".
-// `agbcc` is replaced whole: the real package cannot be imported under vitest's ESM loader
-// (candidate-compile.test.ts says why).
+// or a target it cannot parse. `agbcc` is mocked whole, as candidate-compile.test.ts explains.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { EngineFailedError, UndiffableError } from '@matchkit/scoring';
 import { readFileSync } from 'node:fs';

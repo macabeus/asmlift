@@ -1,7 +1,5 @@
-// The CLI bundle must not load the objdiff engine on a plain decompile. scripts/build.mjs keeps
-// @matchkit/scoring external, and esbuild hoists an external's STATIC import to the top of the
-// bundle, where it runs on every command: the engine loads, and a failure to load it breaks
-// commands that never score. Only an `await import()` inside a lazily initialized module is safe.
+// The CLI bundle loads the objdiff engine on the scoring path alone: every import of the external
+// @matchkit/scoring is a lazy `await import()` (score.ts says why).
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
 import { expect, test } from 'vitest';

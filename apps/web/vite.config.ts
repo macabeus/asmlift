@@ -5,9 +5,8 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { defineConfig } from 'vite';
 
-// objdiff-wasm's real directory, resolved from @matchkit/scoring as the scorer resolves it. With
-// matchkit linked from a local checkout (its CONTRIBUTING.md), that is outside this workspace, and
-// the dev server refuses to serve the .wasm from a directory `fs.allow` does not list.
+// objdiff-wasm's real directory, for `server.fs.allow`: with matchkit linked from a local checkout,
+// it lies outside this workspace.
 const scoring = realpathSync(join(import.meta.dirname, 'node_modules/@matchkit/scoring'));
 const objdiffWasm = dirname(createRequire(join(scoring, 'package.json')).resolve('objdiff-wasm'));
 

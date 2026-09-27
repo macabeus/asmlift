@@ -73,8 +73,8 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
   }
 };
 
-/** A reload hint on a dead engine: it loads once per worker, and the worker lives as long as the
- *  page. Empty for every other error. */
+/** A reload hint for a dead engine, which lives as long as the page's worker. Empty for every other
+ *  error. */
 const engineHint = (err: Error): string =>
   err instanceof EngineFailedError ? '. Reload the page to load a new one.' : '';
 
