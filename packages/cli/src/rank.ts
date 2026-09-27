@@ -107,6 +107,18 @@ const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
   return { perSiteSenseBits: n };
 };
 
+/** ONE candidate compiled and scored as `decompileRanked` scores it, by the same compiler with the
+ *  same declarations. `bench fan --whole` compiles a stillborn fan's rest through this, so the check
+ *  and the ranked pass cannot compile one candidate two ways. */
+export const scoreCandidate = (
+  cand: Candidate,
+  name: string,
+  target: TargetDescription,
+  targetObj: string,
+  opts: RankOptions,
+): MatchScore =>
+  scoreSource(cand.source, name, targetObj, target, (opts.backend ?? cBackend).id, opts.compile, declarationsOf(cand));
+
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
 export function decompileRanked(
   name: string,

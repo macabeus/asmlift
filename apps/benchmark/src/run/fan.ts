@@ -27,11 +27,12 @@ import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
 import type { RankOptions, RankedCandidate, RankedResult } from '@asmlift/cli/rank';
-import { enumerateRanked } from '@asmlift/cli/rank';
+import { enumerateRanked, scoreCandidate } from '@asmlift/cli/rank';
+import type { MatchScore } from '@asmlift/cli/score';
 import { rankedSummaryLine, scoreOf, threwLine, threwStep } from '@asmlift/cli/score-format';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
-import type { Candidate, DroppedCandidate, WithheldCandidate } from '@asmlift/core/rank';
+import type { Candidate, DroppedCandidate, NotCompiledCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations, splitVariations } from '@asmlift/core/variation-tokens';
@@ -122,6 +123,11 @@ export interface FanOptions {
   enumerateOnly?: boolean;
   /** score a fan larger than FAN_SCORE_LIMIT anyway */
   force?: boolean;
+  /** Compile the REST of a fan the stillborn stop (core stillborn.ts) ended: every candidate the
+   *  ranked pass reports not compiled, each through that pass's own compiler (`checkStop`). The stop
+   *  is a bet that none of them compiles, and a ranked run never checks it — on a row that newly
+   *  lifts into a stopped fan, a false stop publishes exactly as a true `noncompile`. */
+  whole?: boolean;
   /** What the user typed for `--toolchain` and `--asm`. Carried here ONLY so `optionRefusal` can
    *  see the pair: the row path takes its toolchain from the row id and never reads either, which
    *  is the whole reason the refusal exists. */
@@ -497,6 +503,13 @@ export function optionRefusal(o: FanOptions): string | undefined {
       `fan and get a real winner, or pass --show <variations> for a candidate you can name.`
     );
   }
+  if (o.whole && o.enumerateOnly) {
+    return (
+      `--whole compiles the candidates a stillborn fan was not compiled for, and nothing is compiled ` +
+      `here (--enumerate lists the fan; --asm has no target object to score against). Drop ` +
+      `--enumerate, and name a row, to check its stop.`
+    );
+  }
   if (o.enumerateOnly && o.force) {
     return (
       `--force raises the ${FAN_SCORE_LIMIT}-candidate limit on COMPILING a fan, and nothing is ` +
@@ -628,6 +641,67 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
     );
   }
   return { fan: [...dropped.map(dropLine), ...withheld.map(withheldLine)], notes, harnessDefect };
+}
+
+/** WHAT `--whole` FOUND: the not-compiled rest of a stillborn fan, compiled. */
+export interface StopCheck {
+  /** every candidate of the rest that compiled and scored — each one a candidate the stop lost */
+  compiled: { variations: readonly string[]; score: MatchScore }[];
+  /** how many of the rest the compiler refused */
+  refused: number;
+}
+
+/** THE STOP, CHECKED. Compiles every candidate `notCompiled` names — found in `candidates` by its
+ *  variations, the one name a candidate has across two enumerations — through `score`, which is the
+ *  ranked pass's own compile. A name the enumeration no longer holds throws: the check would
+ *  otherwise pass over a candidate it never compiled. */
+export function checkStop(
+  notCompiled: readonly NotCompiledCandidate[],
+  candidates: readonly Candidate[],
+  score: (candidate: Candidate) => MatchScore,
+  onProgress?: (done: number, total: number) => void,
+): StopCheck {
+  const byName = new Map(candidates.map((c) => [joinVariations(c.variations), c]));
+  const check: StopCheck = { compiled: [], refused: 0 };
+  notCompiled.forEach((n, k) => {
+    const name = joinVariations(n.variations);
+    const candidate = byName.get(name);
+    if (candidate === undefined) {
+      throw new Error(`internal: the stopped fan's candidate ${name} is not in this enumeration`);
+    }
+    try {
+      check.compiled.push({ variations: n.variations, score: score(candidate) });
+    } catch {
+      check.refused++;
+    }
+    onProgress?.(k + 1, notCompiled.length);
+  });
+  return check;
+}
+
+/** `checkStop`'s answer as lines, and the exit code: 1 when any candidate of the rest compiled —
+ *  a FALSE STOP, each one named on stdout beside the fan — else 0. */
+export function stopCheckReport(rowId: string, check: StopCheck): { fan: string[]; notes: string[]; code: number } {
+  const total = check.compiled.length + check.refused;
+  if (check.compiled.length === 0) {
+    return {
+      fan: [],
+      notes: [
+        `asmlift: [whole] ${rowId}: all ${total} candidate(s) the stillborn stop did not compile were ` +
+          `compiled now, and the compiler refused every one — the stop held`,
+      ],
+      code: 0,
+    };
+  }
+  return {
+    fan: check.compiled.map((c) => `asmlift: [whole] COMPILED ${joinVariations(c.variations)}: ${scoreOf(c.score)}`),
+    notes: [
+      `asmlift: [whole] ${rowId}: ${check.compiled.length} of the ${total} candidate(s) the stillborn stop ` +
+        `did not compile COMPILED — a FALSE STOP (core stillborn.ts): the row publishes "noncompile" ` +
+        `where a ranked pass over the whole fan would have scored the lines above`,
+    ],
+    code: 1,
+  };
 }
 
 /** `noFanReport`, printed. Exit 2 — the command's own "I have no answer", distinct from the
@@ -1002,9 +1076,38 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     });
   } catch (e) {
     printThrows();
-    return noFanWithDiff(e);
+    const code = noFanWithDiff(e);
+    if (!o.whole) {
+      return code;
+    }
+    if (!(e instanceof NoScorableCandidateError) || e.notCompiled.length === 0) {
+      note(`asmlift: [whole] ${c.id}: no stillborn stop ended this fan, so there is no rest to compile`);
+      return code;
+    }
+    const check = checkStop(
+      e.notCompiled,
+      enumerateRanked(c.sym, asm, c.codegen.target, reportingOpts),
+      (cand) => scoreCandidate(cand, c.sym, c.codegen.target, obj, reportingOpts),
+      (done, total) => {
+        const every = Math.max(1, Math.floor(total / 10));
+        if (done === 1 || done === total || done % every === 0) {
+          note(`asmlift: [progress] ${done}/${total} not-compiled candidates compiled (--whole)`);
+        }
+      },
+    );
+    const report = stopCheckReport(c.id, check);
+    if (report.fan.length > 0) {
+      console.log(report.fan.join('\n'));
+    }
+    for (const n of report.notes) {
+      note(n);
+    }
+    return report.code;
   }
   printThrows();
+  if (o.whole) {
+    note(`asmlift: [whole] ${c.id}: no stillborn stop ended this fan, so there is no rest to compile`);
+  }
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.winner), stamp: stampFrom(treeBefore) }));
   // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
   // fan, refusals included, and comparing the published half against the whole would report a

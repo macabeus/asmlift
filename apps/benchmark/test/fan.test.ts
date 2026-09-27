@@ -9,6 +9,7 @@ import type { Case } from '../src/cases/types';
 import {
   FAN_SCORE_LIMIT,
   SCORE_SECONDS_PER_CANDIDATE,
+  checkStop,
   definedLabels,
   estimatedScoreTime,
   fanBaseStaleNote,
@@ -20,6 +21,7 @@ import {
   renderFan,
   scoreLine,
   selectCases,
+  stopCheckReport,
   synthesizedRefs,
   unshowable,
 } from '../src/run/fan';
@@ -289,6 +291,49 @@ describe('optionRefusal', () => {
 
   it('allows --toolchain with --asm, which is the pair it exists for', () => {
     expect(optionRefusal({ toolchain: 'ido7.1', asmPath: 'x.s', enumerateOnly: true })).toBeUndefined();
+  });
+
+  it('refuses --whole where nothing is compiled, and allows it on the scoring path', () => {
+    expect(optionRefusal({ enumerateOnly: true, whole: true })).toContain('--whole compiles');
+    expect(optionRefusal({ whole: true, force: true })).toBeUndefined();
+  });
+});
+
+// THE STOP, CHECKED. A stillborn fan's rest is never compiled by a ranked run, so a false stop and a
+// true `noncompile` publish alike; `--whole` compiles that rest through the ranked pass's compiler.
+describe('--whole compiles the rest of a stopped fan', () => {
+  const fan = ['unsigned', 'unsigned/flip-join', 'unsigned/unmerge', 'unsigned/flip-join/unmerge'].map((name) =>
+    cand(name, 0, 0),
+  );
+  const rest = [{ variations: ['unsigned', 'flip-join', 'unmerge'] }, { variations: ['unsigned', 'unmerge'] }];
+  const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
+    if (c.variations.join('/') !== name) {
+      throw new Error('mwcceppc failed: pointer/array required');
+    }
+    return cand(name, 3, 20).score;
+  };
+
+  it('holds when the compiler refuses every candidate of the rest, and exits 0', () => {
+    const check = checkStop(rest, fan, scoreOnly('none'));
+    expect(check).toEqual({ compiled: [], refused: 2 });
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(0);
+    expect(report.fan).toEqual([]);
+    expect(report.notes.join('\n')).toContain('all 2 candidate(s) the stillborn stop did not compile');
+  });
+
+  it('names every candidate of the rest that compiles as a FALSE STOP, and exits 1', () => {
+    const check = checkStop(rest, fan, scoreOnly('unsigned/flip-join/unmerge'));
+    expect(check.refused).toBe(1);
+    expect(check.compiled.map((c) => c.variations.join('/'))).toEqual(['unsigned/flip-join/unmerge']);
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(1);
+    expect(report.fan).toEqual(['asmlift: [whole] COMPILED unsigned/flip-join/unmerge: 3/20']);
+    expect(report.notes.join('\n')).toContain('1 of the 2 candidate(s) the stillborn stop did not compile COMPILED');
+  });
+
+  it('refuses to pass over a candidate the enumeration no longer holds', () => {
+    expect(() => checkStop([{ variations: ['signed'] }], fan, scoreOnly('none'))).toThrow(/not in this enumeration/);
   });
 });
 
