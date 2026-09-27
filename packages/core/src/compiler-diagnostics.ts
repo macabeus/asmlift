@@ -122,10 +122,12 @@ export function errorMessages(diagnostic: string): string[] {
 }
 
 /** A compiler that STOPPED REPORTING before it was done: IDO after 30 errors, clang at its
- *  `-ferror-limit`, gcc under `-fmax-errors`, mwcc under `-maxerrors`. What it printed is a
- *  prefix of its verdict, and two prefixes equal each other whatever follows them. */
+ *  `-ferror-limit`, gcc under `-fmax-errors` or `-Wfatal-errors`, mwcc under `-maxerrors`. What it
+ *  printed is a prefix of its verdict, and two prefixes equal each other whatever follows them.
+ *  clang under `-Wfatal-errors` prints no trailer at all, so the flag side (codegen-flags.ts
+ *  `limitsErrors`) is what keeps that one out of a ranked compile. */
 const TRUNCATED =
-  /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -fmax-errors|^User break, cancelled/im;
+  /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -(?:fmax-errors|Wfatal-errors)|^User break, cancelled/im;
 
 /** The error messages of a diagnostic that can be READ AS A VERDICT: `errorMessages`, or null when
  *  it recognises none, and null when the compiler stopped reporting — what an unfinished

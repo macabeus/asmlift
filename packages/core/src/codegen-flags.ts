@@ -143,6 +143,12 @@ const gccFamily: OptionSpec[] = [
   // -Os sets optimize_size beside level 2, so it is its own level: agbcc hoist.c differs at `-O2` and
   // `-Os`, where the address load moves above the branch.
   { match: '-Os', slot: 'O', value: () => 's' },
+  // Error limits, ahead of the `-W` diagnostics: gcc stops at the first error under
+  // `-Wfatal-errors` and at N under `-fmax-errors=N`; clang takes both and spells its own
+  // `-ferror-limit=N`, and under `-Wfatal-errors` prints the first error as `fatal error:` with no
+  // trailer, so what it printed never says whether it was all.
+  { match: '-Wfatal-errors', limitsErrors: true },
+  { match: /^-f(?:max-errors|error-limit)=\d+$/, limitsErrors: true },
   ...cppAndDiagnostics,
   // -B tells the driver where its own programs are: which compiler runs is the toolchain, not a flag
   { match: /^-B(.+)$/ },

@@ -189,6 +189,11 @@ test('a diagnostic the compiler stopped short has NO verdict: a prefix of a verd
   ).toBeNull();
   expect(
     verdictMessages(
+      "wf.c:2:15: error: too many arguments to function 'f'\ncompilation terminated due to -Wfatal-errors.",
+    ),
+  ).toBeNull();
+  expect(
+    verdictMessages(
       [
         '#      5: g(1, 1);',
         '#   Error:       ^',
