@@ -10,11 +10,13 @@ import {
   compareCost,
   compareFans,
   compareMeasurements,
+  compareStops,
   costLines,
   fanLines,
   flagsLines,
   groupByFlags,
   notRegenerated,
+  stopLines,
 } from '../src/report/diff';
 
 const res = (over: Partial<DecompilerResult> = {}): DecompilerResult =>
@@ -284,6 +286,53 @@ describe('the rows a branch added, compared against the branch own artifact', ()
     const fresh = out(row('a', { score: 99 }), row('b', { score: 0, outcome: 'match' as Outcome }));
     expect(compareMeasurements(base, fresh).changed.map((c) => c.id)).toEqual(['a']);
     expect(compareMeasurements(addedRows(base, self), fresh).changed).toEqual([]);
+  });
+});
+
+// WHERE THE STILLBORN STOP NEWLY FIRES. `fanNotCompiled` is a cost, out of the verdict, and a stop
+// leaves `fanSize` where it was — so a row that became stillborn moved no fan and at most one
+// `errorMarkers` line (`ac-decomp:aINS_destruct:mwcc_242_81`, absent → 4 of 12). The stop is a bet
+// no ranked run checks, and these rows are where it is newly placed.
+describe('compareStops', () => {
+  const noncompile = (fanSize: number, fanNotCompiled?: number) => ({
+    outcome: 'noncompile' as Outcome,
+    fanSize,
+    ...(fanNotCompiled === undefined ? {} : { fanNotCompiled }),
+  });
+
+  test('names a row whose stop appeared or grew, with the command that checks it', () => {
+    const r = compareStops(
+      out(row('new', noncompile(12)), row('grew', noncompile(40, 10)), row('held', noncompile(30240, 30205))),
+      out(row('new', noncompile(12, 4)), row('grew', noncompile(80, 50)), row('held', noncompile(30240, 30205))),
+    );
+    expect(r.newly).toEqual([
+      { id: 'new', from: 0, to: 4, fanSize: 12 },
+      { id: 'grew', from: 10, to: 50, fanSize: 80 },
+    ]);
+    expect(r.lifted).toEqual([]);
+    expect(stopLines(r, 'origin/main')).toEqual([
+      'STOP    new: 4 of 12 candidate(s) not compiled (none at origin/main) — check it: pnpm bench fan new --whole',
+      'STOP    grew: 50 of 80 candidate(s) not compiled (10 at origin/main) — check it: pnpm bench fan grew --whole',
+      'stops vs origin/main: 2 row(s) newly stopped, 0 no longer stopped',
+    ]);
+  });
+
+  test('a stop that left or shrank is counted, and a row this branch added stopped is newly stopped', () => {
+    const r = compareStops(
+      out(row('gone', noncompile(12, 4)), row('less', noncompile(40, 30))),
+      out(row('gone', noncompile(12)), row('less', noncompile(40, 20)), row('added', noncompile(9, 3))),
+    );
+    expect(r.newly.map((c) => c.id)).toEqual(['added']);
+    expect(r.lifted.map((c) => c.id)).toEqual(['gone', 'less']);
+    expect(stopLines(r, 'origin/main').at(-1)).toBe(
+      'stops vs origin/main: 1 row(s) newly stopped, 2 no longer stopped',
+    );
+  });
+
+  test('nothing stopped anywhere is one line', () => {
+    expect(stopLines(compareStops(out(row('a')), out(row('a'))), 'origin/main')).toEqual([
+      'stops vs origin/main: 0 row(s) newly stopped, 0 no longer stopped',
+    ]);
   });
 });
 
