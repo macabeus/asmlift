@@ -16,7 +16,7 @@ import {
   enumerateCandidates,
   rankBy,
 } from '@asmlift/core/rank';
-import { type ProbeOutcome, defaultIsKeyedRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
+import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
@@ -106,6 +106,18 @@ const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
   }
   return { perSiteSenseBits: n };
 };
+
+/** ONE candidate compiled and scored outside a ranking, with the `scoreSource` call and the
+ *  declarations `decompileRanked` scores it with — `bench fan --whole` compiles a stillborn fan's
+ *  rest through this, and a check that compiled a candidate another way would check another text. */
+export const scoreCandidate = (
+  cand: Candidate,
+  name: string,
+  target: TargetDescription,
+  targetObj: string,
+  opts: RankOptions,
+): MatchScore =>
+  scoreSource(cand.source, name, targetObj, target, (opts.backend ?? cBackend).id, opts.compile, declarationsOf(cand));
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
 export function decompileRanked(
@@ -230,7 +242,7 @@ export async function decompileRankedParallel(
   if (candidates.length > 0) {
     await pool([0]);
     let rest = candidates.map((_, i) => i).slice(1);
-    if (defaultIsKeyedRejection(outcomeOf(0)!)) {
+    if (defaultIsReadableRejection(outcomeOf(0)!)) {
       const probes = probeIndices(candidates);
       await pool(probes);
       const tried = new Set(probes);

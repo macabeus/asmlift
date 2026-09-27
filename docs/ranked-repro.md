@@ -179,7 +179,7 @@ that, the number is `bench run`'s.
 #### The whole FAN, and any candidate's source: `pnpm bench fan`
 
 ```sh
-pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>]
+pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>] [--whole]
 pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <variations>]
 ```
 
@@ -247,6 +247,20 @@ the field, or the row never ranked there). And this run enumerates 32; the serie
   each row's outcome and score, so the committed values are readable — under that verdict — with no
   comparison at all.
 
+- **`--whole` checks a stillborn stop.** A fan the stillborn stop (core `stillborn.ts`) ended is
+  published `noncompile` with `fanNotCompiled` of its candidates never compiled, and no ranked run
+  compiles them: the stop is a bet that none would. `--whole` runs the ranked pass as usual, then
+  compiles that rest through the pass's own compiler, and exits **1** naming every one that
+  compiled (`[whole] COMPILED …`, a false stop), **3** naming every one whose compile threw
+  something that is no readable refusal (`[whole] UNCHECKED …`: a killed compiler, a Docker
+  outage, a timeout, which say nothing about the candidate — core `stillborn.ts` `readableRefusal`), or
+  **0** when the compiler refused them all — the only exit that says the stop held. On a fan no
+  stop ended it says so, ranks the fan whole and exits non-zero. It raises the 2,000-candidate
+  limit as `--force` does: the rest of a stopped fan is exactly the compiles that limit asks about,
+  and the biggest stops are over it. `pnpm -s` reports every non-zero exit as 1, so read the
+  `[whole]` line for which. `bench diff`'s `STOP` lines print this command for each newly stopped row.
+  Measured on `ac-decomp:aINS_destruct:mwcc_242_81`: 8 compiled by the pass, the other 4 by
+  `--whole`, all refused, exit 0, in 12 s.
 - **`--toolchain` without `--asm` is refused.** A row carries its toolchain in its own id
   (`project:sym:toolchain`) and the row path never reads the flag, so `bench fan sub_806132C
 --toolchain ido7.1` would price **agbcc** — the toolchain in `sa3:sub_806132C:agbcc` — at exit 0.

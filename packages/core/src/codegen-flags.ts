@@ -117,6 +117,9 @@ interface OptionSpec {
   /** the value the compiler acts on, from the spelled one (the argument, else the pattern's last
    *  capture group, else empty) */
   value?: (spelled: string, m: Match) => string;
+  /** an inert word that makes the compiler STOP REPORTING after a number of errors; a run that
+   *  reads a rejection compiles without it (cli flags.ts) */
+  limitsErrors?: true;
 }
 
 const toggle = (_: string, m: Match) => (m[1] ? 'off' : 'on');
@@ -140,6 +143,12 @@ const gccFamily: OptionSpec[] = [
   // -Os sets optimize_size beside level 2, so it is its own level: agbcc hoist.c differs at `-O2` and
   // `-Os`, where the address load moves above the branch.
   { match: '-Os', slot: 'O', value: () => 's' },
+  // Error limits, ahead of the `-W` diagnostics: gcc stops at the first error under
+  // `-Wfatal-errors` and at N under `-fmax-errors=N`; clang takes both and spells its own
+  // `-ferror-limit=N`, and under `-Wfatal-errors` prints the first error as `fatal error:` with no
+  // trailer, so what it printed never says whether it was all.
+  { match: '-Wfatal-errors', limitsErrors: true },
+  { match: /^-f(?:max-errors|error-limit)=\d+$/, limitsErrors: true },
   ...cppAndDiagnostics,
   // -B tells the driver where its own programs are: which compiler runs is the toolchain, not a flag
   { match: /^-B(.+)$/ },
@@ -192,7 +201,10 @@ const TABLES: Record<FlagFamily, readonly OptionSpec[]> = {
     // both, and `mwccLevel` reads what a sequence of them compiles at.
     { match: /^-O((?:[0-4](?:,[ps])?|[ps])?)$/, slot: 'O' },
     { match: /^-[ID](.+)$/ },
-    { match: /^-(d|D|i|I|ir|maxerrors|w|msgstyle)$/, takesArg: true },
+    { match: /^-(d|D|i|I|ir|w|msgstyle)$/, takesArg: true },
+    // Under `-maxerrors 1` mwcc 2.3.3 and 2.4.2 end EVERY rejection with `User break, cancelled...`,
+    // a file with exactly one error included, so what they printed never says whether it was all.
+    { match: '-maxerrors', takesArg: true, limitsErrors: true },
     { match: /^-(nodefaults|nosyspath|nostdinc|stderr|c|multibyte|requireprotos)$/ },
     // `-dialect | -lang keyword` is one option under two names (mwcceppc -help), and all four
     // spellings compile the same source to the same object in the container.
@@ -307,6 +319,9 @@ export interface CodegenProfile {
   overriddenAt: readonly number[];
   /** argv indices of every inert word and its argument */
   inertAt: readonly number[];
+  /** argv indices of every error-limit word and its argument, a subset of `inertAt`: what a compiler
+   *  cut short printed is a prefix of its verdict (compiler-diagnostics.ts `verdictMessages`) */
+  errorLimitAt: readonly number[];
   /** argv indices of every word that is neither an option nor an option's argument, such as the file
    *  a compile command names or `-` for standard input; each is also unclassified */
   operandAt: readonly number[];
@@ -421,6 +436,7 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
   const lastAt = new Map<string, { at: number[]; spelled: string }>();
   const overriddenAt: number[] = [];
   const inertAt: number[] = [];
+  const errorLimitAt: number[] = [];
   const overrides: LevelReading['overrides'] = [];
   const mwccLevelWords: { at: number; word: string }[] = [];
   const spans: number[][] = [];
@@ -482,6 +498,9 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
     spans.push(at);
     if (hit.spec.slot === undefined) {
       inertAt.push(...at);
+      if (hit.spec.limitsErrors) {
+        errorLimitAt.push(...at);
+      }
       continue;
     }
     const slot = typeof hit.spec.slot === 'string' ? hit.spec.slot : hit.spec.slot(hit.m);
@@ -557,6 +576,7 @@ export function parseFlags(family: FlagFamily, argv: readonly string[]): Codegen
     unclassified,
     overriddenAt: overriddenAt.sort((a, b) => a - b),
     inertAt,
+    errorLimitAt,
     operandAt: unknown.filter((k) => isOperand(argv[k])),
     spans: grouped,
     overrides: overrides.sort((a, b) => a.at - b.at).map((o) => o.line),

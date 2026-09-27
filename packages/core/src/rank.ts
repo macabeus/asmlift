@@ -286,6 +286,9 @@ export interface WithheldCandidate {
  *  this one, and a count that folded the two would report compiles that never ran. */
 export interface NotCompiledCandidate {
   variations: readonly string[];
+  /** the text the stop bet the compiler would refuse: a stop is re-placed whenever it changes, and
+   *  the benchmark keys its STOP report on it (`fanNotCompiledDigest`) */
+  source: string;
 }
 
 /** EVERY candidate refused — `rankBy` has no ranked result to return, so it throws this.
@@ -2291,7 +2294,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
         `The default candidate's compile: ${fullMessage(thrownAt(0))}`,
       stillborn.compiled.map((i) => ({ variations: candidates[i].variations, error: firstLine(thrownAt(i)) })),
       [],
-      stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations })),
+      stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations, source: candidates[i].source })),
       { cause: thrownAt(0) },
     );
   }
@@ -2337,7 +2340,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
 }
 
 /** The sentence a stillborn fan's error OPENS on: how much of the fan was never compiled, on what
- *  evidence, and the reason every compiled candidate shared. The DEFAULT candidate's own
+ *  evidence, and the errors each half's compiled candidates kept. The DEFAULT candidate's own
  *  diagnostic — the spelling the rule is anchored on, rather than whichever was refused last —
  *  follows it, so that a printer bounding a long diagnostic keeps the verdict. */
 function stillbornNote(stillborn: Stillborn, fan: number): string {
@@ -2347,8 +2350,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
   }
   const shared = [...tally].map(([m, n]) => `  ${m}${n > 1 ? ` (x${n})` : ''}`).join('\n');
   return (
-    `${stillborn.notCompiled.length} of ${fan} candidates were NOT COMPILED: the default candidate and one probe per ` +
-    `variation (${stillborn.compiled.length} compiled) were all rejected for the same reason, which no variation changed:\n${shared}`
+    `${stillborn.notCompiled.length} of ${fan} candidates were NOT COMPILED: in each signedness half, the default ` +
+    `candidate and one probe per variation (${stillborn.compiled.length} compiled) were all rejected, every probe ` +
+    `keeping one of its default's errors:\n${shared}`
   );
 }
 

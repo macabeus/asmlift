@@ -1,6 +1,7 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
 import { rankedSummaryLine, threwLine, threwStep } from '@asmlift/cli/score-format';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +10,7 @@ import type { Case } from '../src/cases/types';
 import {
   FAN_SCORE_LIMIT,
   SCORE_SECONDS_PER_CANDIDATE,
+  checkStop,
   definedLabels,
   estimatedScoreTime,
   fanBaseStaleNote,
@@ -16,10 +18,12 @@ import {
   noFanReport,
   optionRefusal,
   pickCandidate,
+  raisesSizeLimit,
   renameWarning,
   renderFan,
   scoreLine,
   selectCases,
+  stopCheckReport,
   synthesizedRefs,
   unshowable,
 } from '../src/run/fan';
@@ -290,6 +294,130 @@ describe('optionRefusal', () => {
   it('allows --toolchain with --asm, which is the pair it exists for', () => {
     expect(optionRefusal({ toolchain: 'ido7.1', asmPath: 'x.s', enumerateOnly: true })).toBeUndefined();
   });
+
+  // `pnpm bench fan <row> --whole` is the command every STOP line prints, and the biggest stopped
+  // fans are over the limit: under the guard it would print the size refusal, compile nothing, and
+  // reach pnpm as exit 1 — the code a false stop exits with.
+  it('--whole raises the size limit, as --force does', () => {
+    expect(raisesSizeLimit({ whole: true })).toBe(true);
+    expect(raisesSizeLimit({ force: true })).toBe(true);
+    expect(raisesSizeLimit({})).toBe(false);
+  });
+
+  it('refuses --whole where nothing is compiled, and allows it on the scoring path', () => {
+    expect(optionRefusal({ enumerateOnly: true, whole: true })).toContain('--whole compiles');
+    expect(optionRefusal({ whole: true, force: true })).toBeUndefined();
+  });
+});
+
+// THE STOP, CHECKED. A stillborn fan's rest is never compiled by a ranked run, so a false stop and a
+// true `noncompile` publish alike; `--whole` compiles that rest through the ranked pass's compiler.
+describe('--whole compiles the rest of a stopped fan', () => {
+  const fan = ['unsigned', 'unsigned/flip-join', 'unsigned/unmerge', 'unsigned/flip-join/unmerge'].map((name) =>
+    cand(name, 0, 0),
+  );
+  const rest = [
+    { variations: ['unsigned', 'flip-join', 'unmerge'], source: '/* unsigned/flip-join/unmerge */' },
+    { variations: ['unsigned', 'unmerge'], source: '/* unsigned/unmerge */' },
+  ];
+  const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
+    if (c.variations.join('/') !== name) {
+      throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
+    }
+    return cand(name, 3, 20).score;
+  };
+
+  it('holds when the compiler refuses every candidate of the rest, and exits 0', () => {
+    const check = checkStop(rest, fan, scoreOnly('none'));
+    expect(check).toEqual({ compiled: [], refused: 2, unchecked: [] });
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(0);
+    expect(report.fan).toEqual([]);
+    expect(report.notes.join('\n')).toContain('all 2 candidate(s) the stillborn stop did not compile');
+  });
+
+  it('names every candidate of the rest that compiles as a FALSE STOP, and exits 1', () => {
+    const check = checkStop(rest, fan, scoreOnly('unsigned/flip-join/unmerge'));
+    expect(check.refused).toBe(1);
+    expect(check.compiled.map((c) => c.variations.join('/'))).toEqual(['unsigned/flip-join/unmerge']);
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(1);
+    expect(report.fan).toEqual(['asmlift: [whole] COMPILED unsigned/flip-join/unmerge: 3/20']);
+    expect(report.notes.join('\n')).toContain('1 of the 2 candidate(s) the stillborn stop did not compile COMPILED');
+  });
+
+  // A killed compiler, a Docker outage or a timeout throws too, and says nothing about the
+  // candidate: counted as a refusal, a check whose compiler died would print "the stop held", exit 0.
+  it('never counts a throw that is no refusal as refused: the stop is UNCHECKED, exit 3', () => {
+    const killed = () => {
+      throw new Error('mwcceppc (docker) did not run to completion (exit 137)\nkilled');
+    };
+    const check = checkStop(rest, fan, killed);
+    expect(check.refused).toBe(0);
+    expect(check.unchecked.map((u) => u.error)).toEqual([
+      'mwcceppc (docker) did not run to completion (exit 137)',
+      'mwcceppc (docker) did not run to completion (exit 137)',
+    ]);
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(3);
+    expect(report.fan).toEqual([
+      'asmlift: [whole] UNCHECKED unsigned/flip-join/unmerge: mwcceppc (docker) did not run to completion (exit 137)',
+      'asmlift: [whole] UNCHECKED unsigned/unmerge: mwcceppc (docker) did not run to completion (exit 137)',
+    ]);
+    expect(report.notes.join('\n')).toContain('the stop is NOT CHECKED');
+    expect(report.notes.join('\n')).not.toContain('the stop held');
+  });
+
+  // A Docker CLI that cannot reach its daemon exits 1, as a refusing compiler does, so the harness
+  // throws a CompilerRejection whose text holds no error: read as a refusal, a check run while the
+  // daemon was down would print "the stop held", exit 0.
+  it('never counts a rejection that prints no error as refused: the stop is UNCHECKED, exit 3', () => {
+    const daemonGone = () => {
+      throw new CompilerRejection(
+        'mwcceppc failed',
+        'failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if ' +
+          'the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory',
+      );
+    };
+    const check = checkStop(rest, fan, daemonGone);
+    expect(check.refused).toBe(0);
+    expect(check.unchecked).toHaveLength(2);
+    expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
+  });
+
+  it('one transient among refusals still leaves the stop unchecked', () => {
+    let n = 0;
+    const check = checkStop(rest, fan, () => {
+      if (n++ === 0) {
+        throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
+      }
+      throw new Error('spawnSync docker ETIMEDOUT');
+    });
+    expect(check.refused).toBe(1);
+    expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
+  });
+
+  it('a false stop is named first, with the unchecked beside it, and exits 1', () => {
+    let n = 0;
+    const check = checkStop(rest, fan, (c) => {
+      if (n++ === 0) {
+        return cand(c.variations.join('/'), 3, 20).score;
+      }
+      throw new Error('spawnSync docker ETIMEDOUT');
+    });
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(1);
+    expect(report.fan).toEqual([
+      'asmlift: [whole] COMPILED unsigned/flip-join/unmerge: 3/20',
+      'asmlift: [whole] UNCHECKED unsigned/unmerge: spawnSync docker ETIMEDOUT',
+    ]);
+  });
+
+  it('refuses to pass over a candidate the enumeration no longer holds', () => {
+    expect(() => checkStop([{ variations: ['signed'], source: '' }], fan, scoreOnly('none'))).toThrow(
+      /not in this enumeration/,
+    );
+  });
 });
 
 // WHICH FUNCTION A `.s` FAN IS OF. The frontend refuses an unknown name on a multi-function file
@@ -473,6 +601,39 @@ describe('noFanReport', () => {
     expect(r.fan).toEqual(['asmlift: [dropped] unsigned: agbcc failed: c.c:12']);
     expect(r.notes.join('\n')).toContain('"noncompile"');
     expect(r.harnessDefect).toBe(false);
+  });
+
+  // A stillborn fan's survivors are the lines after its first, and they are the stop's evidence,
+  // which the sentence ends by promising ("…every probe keeping one of its default's errors:"). The
+  // default's own diagnostic after them is not repeated.
+  it('prints a stillborn fan`s survivors under its sentence, and not the default`s diagnostic', () => {
+    const e = new NoScorableCandidateError(
+      "no scorable candidate for 'f': 4 of 12 candidates were NOT COMPILED: … keeping one of its default's errors:\n" +
+        "  function call 'g(unsigned long)' does not match\n" +
+        "  function call 'g(long)' does not match (x2)\n" +
+        "The default candidate's compile: mwcceppc failed: #   Error:\n  indented compiler text",
+      dropped,
+      [],
+      [{ variations: ['unsigned', 'flip-join'], source: '' }],
+    );
+    const first = noFanReport('ac-decomp:f:mwcc_242_81', e).notes[0];
+    expect(first.split('\n')).toEqual([
+      "asmlift: [fan] no fan for ac-decomp:f:mwcc_242_81: no scorable candidate for 'f': 4 of 12 candidates were NOT COMPILED: … keeping one of its default's errors:",
+      "  function call 'g(unsigned long)' does not match",
+      "  function call 'g(long)' does not match (x2)",
+    ]);
+  });
+
+  it('keeps one line for a fan every candidate of which was compiled', () => {
+    const e = new NoScorableCandidateError(
+      "no scorable candidate for 'f': agbcc failed\n  c.c:3: error",
+      dropped,
+      [],
+      [],
+    );
+    expect(noFanReport('sa3:f:agbcc', e).notes[0]).toBe(
+      "asmlift: [fan] no fan for sa3:f:agbcc: no scorable candidate for 'f': agbcc failed",
+    );
   });
 
   // The all-withheld branch of core's `rankBy` ("N candidate(s) withheld, none scored") is

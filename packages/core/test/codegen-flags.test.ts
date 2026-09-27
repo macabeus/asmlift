@@ -228,6 +228,26 @@ describe('parsing', () => {
     expect(parseFlags('agbcc', ['-Wimplicit', '-Werror']).inertAt).toEqual([0, 1]);
   });
 
+  test('an error limit is inert, and named apart from the other inert words', () => {
+    const argv = ['-O4,p', '-maxerrors', '1', '-nosyspath', '-d', 'MUST_MATCH', '-lang=c'];
+    expect(parseFlags('mwcc', argv).errorLimitAt).toEqual([1, 2]);
+    expect(parseFlags('mwcc', argv).inertAt).toEqual([1, 2, 3, 4, 5]);
+    expect(parseFlags('agbcc', ['-O2', '-Werror']).errorLimitAt).toEqual([]);
+  });
+
+  // `-Wfatal-errors` read as one more harmless `-W` word would be compiled into every candidate:
+  // clang then reports only the FIRST error, with no trailer, and a fan whose default and probes
+  // each stop at a different first site would read as one surviving error — declared stillborn
+  // while the product of its probes compiles.
+  test('gcc and clang error limits are error limits, not harmless diagnostics', () => {
+    for (const family of ['gcc', 'agbcc'] as const) {
+      const argv = ['-O2', '-Wfatal-errors', '-fmax-errors=1', '-ferror-limit=5', '-Wall'];
+      expect(parseFlags(family, argv).errorLimitAt).toEqual([1, 2, 3]);
+      expect(parseFlags(family, argv).inertAt).toEqual([1, 2, 3, 4]);
+      expect(parseFlags(family, argv).unclassified).toEqual([]);
+    }
+  });
+
   test('a slot keeps the build’s own words', () => {
     expect(parseFlags('agbcc', ['-mthumb-interwork', '-O2', '-fno-hex-asm', '-fhex-asm']).spelled).toEqual({
       '-mthumb-interwork': '-mthumb-interwork',

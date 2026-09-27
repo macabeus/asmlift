@@ -122,20 +122,73 @@ export function errorMessages(diagnostic: string): string[] {
 }
 
 /** A compiler that STOPPED REPORTING before it was done: IDO after 30 errors, clang at its
- *  `-ferror-limit`, gcc under `-fmax-errors`, mwcc under `-maxerrors`. What it printed is a
- *  prefix of its verdict, and two prefixes equal each other whatever follows them. */
+ *  `-ferror-limit`, gcc under `-fmax-errors` or `-Wfatal-errors`, mwcc under `-maxerrors`. What it
+ *  printed is a prefix of its verdict, and two prefixes equal each other whatever follows them.
+ *  clang under `-Wfatal-errors` prints no trailer at all, so the flag side (codegen-flags.ts
+ *  `limitsErrors`) is what keeps that one out of a ranked compile. */
 const TRUNCATED =
-  /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -fmax-errors|^User break, cancelled/im;
+  /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -(?:fmax-errors|Wfatal-errors)|^User break, cancelled/im;
 
-/** WHAT a failed compile failed ON, as a value two compiles can be compared by: the MULTISET of
- *  its error messages, positions normalised away. A multiset, not a set — two calls with too many
- *  arguments are two errors, and a variation that repairs one of them has changed the answer.
- *  Null when no error is recognised, and null when the compiler stopped reporting: an unreadable
- *  or unfinished diagnostic equals nothing, itself included. */
-export function errorKey(diagnostic: string): string | null {
+/** The error messages of a diagnostic that can be READ AS A VERDICT: `errorMessages`, or null when
+ *  it recognises none, and null when the compiler stopped reporting — what an unfinished
+ *  diagnostic printed is a prefix of its verdict, and two prefixes agree whatever follows them. */
+export function verdictMessages(diagnostic: string): string[] | null {
   if (TRUNCATED.test(diagnostic)) {
     return null;
   }
   const messages = errorMessages(diagnostic);
-  return messages.length === 0 ? null : JSON.stringify([...messages].sort());
+  return messages.length === 0 ? null : messages;
+}
+
+/** One compile ATTEMPT inside a diagnostic that holds several: what the harness called the
+ *  attempt, and what the compiler printed for it. */
+export interface Attempt {
+  label: string;
+  diagnostic: string;
+}
+
+/** The line that opens an attempt. Owned here because it is read here: a harness that spelled its
+ *  own could not be split back, and every one of its rejections would read as a single attempt. */
+const ATTEMPT_HEADER = /^--- (.+) ---$/;
+
+/** ONE REJECTION, SEVERAL COMPILES. A harness that tries a candidate in more than one world before
+ *  it gives up — the benchmark's real tier climbs a ladder of contexts, in two dialects — throws one
+ *  rejection for all of them, and whoever compares two rejections has to ask what EACH attempt
+ *  said: a world no candidate can compile in prints the same sentence for every candidate, and read
+ *  as one text that sentence would say the whole fan fails alike. So the attempts travel under a
+ *  header line per attempt, in the order they were tried, and `attemptsOf` splits them back.
+ *
+ *  The header is no error line to `errorMessages`, so the joined text reads as the whole of what
+ *  every attempt printed, which is what a store of rejections keeps and a printer prints. A label
+ *  holds no line break; a compiler line that happens to read as a header would split its attempt
+ *  in two, alike in every candidate that printed it. */
+export function joinAttempts(attempts: readonly Attempt[]): string {
+  return attempts.map((a) => `--- ${a.label} ---\n${a.diagnostic}`).join('\n');
+}
+
+/** The attempts `joinAttempts` joined, in order. A diagnostic with no header is ONE attempt,
+ *  labelled `''`: a single compile is the ordinary case, not a degenerate one. Text ahead of the
+ *  first header is an attempt of its own when it holds anything, because dropping it would drop
+ *  what it said. */
+export function attemptsOf(diagnostic: string): Attempt[] {
+  const out: Attempt[] = [];
+  let label: string | null = null;
+  let lines: string[] = [];
+  const close = () => {
+    if (label !== null || lines.some((l) => l.trim() !== '')) {
+      out.push({ label: label ?? '', diagnostic: lines.join('\n') });
+    }
+  };
+  for (const line of diagnostic.split('\n')) {
+    const header = ATTEMPT_HEADER.exec(line);
+    if (header === null) {
+      lines.push(line);
+      continue;
+    }
+    close();
+    label = header[1];
+    lines = [];
+  }
+  close();
+  return out.length > 0 ? out : [{ label: '', diagnostic }];
 }

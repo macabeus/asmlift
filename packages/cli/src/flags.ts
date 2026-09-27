@@ -1,8 +1,9 @@
 // asmlift — the compiler flags a run is about, and where they came from.
 //
 // One resolver serves both halves of a run. The flags it finds fill the compile command's
-// `{{cflags}}` word for word, and core parses the same words into the profile the run reports. The
-// first source that gives flags wins, and the `[flags]` line names it:
+// `{{cflags}}` word for word, save an error limit (`-maxerrors 1`) that would cut short the
+// rejections a ranked run reads, and core parses the same words into the profile the run reports.
+// The first source that gives flags wins, and the `[flags]` line names it:
 //   1. --cflags "<flags>"
 //   2. the dtk unit whose target object defines the function, in the `objdiff.json` beside
 //      decomp.yaml (dtk-unit.ts): its `scratch.c_flags`, compiled by its `scratch.compiler`
@@ -467,10 +468,24 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
         ? `no codegen flags (${source})`
         : `${shellJoinFlags(effectiveFlags(family, storedFlags(family, cflags)))} (${source})`;
   const { overrides, implied, unclassified } = resolved.profile;
+  // A candidate's rejection is READ (core stillborn.ts), and a compiler under an error limit ends
+  // every rejection cut short: mwcc under `-maxerrors 1` ends even a one-error file `User break,
+  // cancelled...`, so a dtk unit's own flags would compile every candidate of a fan that cannot
+  // compile. The limit is inert, so leaving it out changes nothing a candidate compiles to.
+  const limitAt = new Set(cflags === undefined ? [] : parseFlags(family, cflags).errorLimitAt);
+  const fill = takesCflags && given ? cflags?.filter((_, i) => !limitAt.has(i)) : undefined;
+  const limit =
+    ranked && fill !== undefined && limitAt.size > 0
+      ? [
+          `note: ${shellJoinFlags(cflags!.filter((_, i) => limitAt.has(i)))} is left out of every candidate ` +
+            'compile: a rejection cut short cannot be read',
+        ]
+      : [];
   const lines = [
     head,
     ...notes,
     ...[...overrides, ...implied].map((o) => `note: ${o}`),
+    ...limit,
     ...advice,
     ...(unclassified.length === 0
       ? []
@@ -480,7 +495,7 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
   ];
   return {
     ok: true,
-    fill: takesCflags && given ? cflags : undefined,
+    fill,
     cc,
     resolved,
     lines: lines.map((l) => `asmlift: [flags] ${l}\n`).join(''),

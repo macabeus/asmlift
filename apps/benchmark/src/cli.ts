@@ -14,7 +14,7 @@
 //                                        # paths filled in, under the gitignored .local/repro/,
 //                                        # and with --run executes it and reports `[ranked]`
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
-//   pnpm bench fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>]
+//   pnpm bench fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>] [--whole]
 //   pnpm bench fan <sym> --asm <file.s> --toolchain <id>
 //                                        # ONE row's whole candidate fan — every spelling's variations
 //                                        # and score, not just the winner's — in the harness's own
@@ -23,7 +23,10 @@
 //                                        # --base <ref> adds the fan multiplier vs that artifact
 //                                        # (on a declined row, the count that LEFT), and --asm
 //                                        # prices a .s that is not a row, no scoring. --toolchain
-//                                        # belongs to --asm alone: a row names its own in its id
+//                                        # belongs to --asm alone: a row names its own in its id.
+//                                        # --whole compiles the rest of a fan the stillborn stop
+//                                        # ended, whatever its size, and exits 0 only when the
+//                                        # compiler refused all of it
 //   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
 //                    [--map-modes harness,nomap] [--fan] [--force] [--repeat N]
 //                    [--json <f>] [--compare <base.json> <head.json>] [--asm-dir <d> --toolchain <id>]
@@ -148,6 +151,7 @@ const { values: opts, positionals } = parseArgs({
     show: { type: 'string' },
     enumerate: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
+    whole: { type: 'boolean', default: false },
     asm: { type: 'string' },
     // gates only: which tabled pass to census (see run/gate-census.ts's registry).
     pass: { type: 'string' },
@@ -495,7 +499,7 @@ switch (command) {
     break;
   }
   case 'fan': {
-    // fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>] — print the ranked
+    // fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>] [--whole] — print the ranked
     // candidate fan the harness computes for this row and then discards (run/fan.ts). ROW-SCOPED
     // by construction, and that is the point rather than an omission: a tier-wide form would write
     // tens of thousands of sources to answer a question that is always about one function.
@@ -508,7 +512,7 @@ switch (command) {
     // exactly what a row carries and a bare `.s` does not.
     const rowId = positionals[1];
     const usage =
-      'usage: pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>]\n' +
+      'usage: pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>] [--whole]\n' +
       '   or: pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <variations>]';
     if (!rowId) {
       console.error(usage);
@@ -529,6 +533,7 @@ switch (command) {
       ...(opts.asm !== undefined ? { asmPath: opts.asm } : {}),
       enumerateOnly: opts.enumerate,
       force: opts.force,
+      whole: opts.whole,
     };
     if (opts.asm) {
       if (!opts.toolchain) {

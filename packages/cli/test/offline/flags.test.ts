@@ -229,6 +229,23 @@ describe('resolving the flags', () => {
     expect(ranked.ok && ranked.lines).toContain("not in asmlift's flag table, passed to the compiler verbatim: -ansi");
   });
 
+  // A gcc-family build's error limit is left out of a ranked fill exactly as mwcc's `-maxerrors` is:
+  // compiled into every candidate, clang under `-Wfatal-errors` prints only the first error, with no
+  // trailer to say it stopped, and the stillborn rule reads that prefix as the whole verdict.
+  test("a gcc-family error limit is left out of a ranked run's candidate compiles, and said so", () => {
+    const ranked = resolveFlags(
+      input({
+        cflags: '-O2 -Wfatal-errors -fmax-errors=1 -mthumb-interwork',
+        ranked: true,
+        command: 'agbcc {{cflags}} {{inputPath}} -o {{outputPath}}',
+      }),
+    );
+    expect(ranked).toMatchObject({ ok: true, fill: ['-O2', '-mthumb-interwork'] });
+    expect(ranked.ok && ranked.lines).toContain(
+      'asmlift: [flags] note: -Wfatal-errors -fmax-errors=1 is left out of every candidate compile: a rejection cut short cannot be read\n',
+    );
+  });
+
   test('what one flag makes of another is a note', () => {
     const r = resolveFlags(input({ toolchain: 'ido7.1', cflags: '-mips2 -O2 -g' }));
     expect(r.ok && r.lines).toContain(

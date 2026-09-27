@@ -85,7 +85,9 @@ import { rowsAddedSince } from './regression';
  *  a number recorded on 828 rows that nothing reads is bookkeeping.
  *
  *  `fanNotCompiled` is out for the same reason as `fanSize`: it is what a stillborn fan did NOT
- *  spend, a cost and never a verdict — the verdict is `outcome`, which is watched.
+ *  spend, a cost and never a verdict — the verdict is `outcome`, which is watched. Where it appears
+ *  or grows, or its `fanNotCompiledDigest` moves, is named anyway, by the STOP SECTION
+ *  (`compareStops`).
  *
  *  `fanVariations` is out because it is what the fan is made of: a cost, like `fanSize`. The parts of
  *  a fan a verdict rests on — the winner's variations and the refused counts — are watched above. A
@@ -450,6 +452,65 @@ const vanishedLines = (r: FanReport, base: string): string[] => {
   return lines;
 };
 
+/** WHERE THE STILLBORN STOP NEWLY FIRES, between two artifacts.
+ *
+ *  `fanNotCompiled` is a cost and stays out of the verdict (`FIELDS`), and the fan section reads
+ *  `fanSize`, which a stop does not move: a row that became stillborn is `fan 0 row(s) moved` and,
+ *  at most, an `errorMarkers` line. But a stop is a BET (core stillborn.ts) that no ranked run
+ *  checks, and the rows it newly ends are exactly where the bet is newly placed — where a false stop
+ *  would publish as a true `noncompile`. So they are named, each with the command that checks it:
+ *  `newly` holds every row whose not-compiled count appeared or grew, and `restaked` every row
+ *  stopped at both sides whose not-compiled SOURCES changed (`fanNotCompiledDigest`) while the count
+ *  did not grow. The count reads only the variation roster, so a re-lift that keeps the roster keeps
+ *  the count while every text under the stop is new — the same bet placed again, over candidates no
+ *  check has compiled. `lifted` holds every row whose count left or shrank. Informational, like the
+ *  fan and cost sections: no exit code. */
+export interface StopReport {
+  newly: (FanChange & { fanSize: number })[];
+  restaked: (FanChange & { fanSize: number })[];
+  lifted: FanChange[];
+}
+
+export function compareStops(base: BenchOutput, fresh: BenchOutput): StopReport {
+  const r = comparePerRow(base, fresh, (x) => x.asmlift.fanNotCompiled);
+  const join = joinArtifacts(base.results, fresh.results);
+  const baseByKey = new Map(base.results.map((x) => [join.baseKey(x), x]));
+  const freshById = new Map(fresh.results.map((x) => [x.id, x]));
+  const withFan = (c: FanChange) => ({ ...c, fanSize: freshById.get(c.id)?.asmlift.fanSize ?? 0 });
+  const sourcesMoved = (c: FanChange): boolean => {
+    const now = freshById.get(c.id);
+    const was = now === undefined ? undefined : baseByKey.get(join.headKey(now));
+    const from = was?.asmlift.fanNotCompiledDigest;
+    const to = now?.asmlift.fanNotCompiledDigest;
+    return from !== undefined && to !== undefined && from !== to;
+  };
+  return {
+    newly: [...r.appeared, ...r.pairs.filter((c) => c.to > c.from)].map(withFan),
+    restaked: r.pairs.filter((c) => c.to <= c.from && sourcesMoved(c)).map(withFan),
+    lifted: [...r.vanished, ...r.pairs.filter((c) => c.to < c.from)],
+  };
+}
+
+/** The stop section, as lines: every newly stopped or restaked row, uncapped — each is a check
+ *  owed — then one summary line. */
+export function stopLines(r: StopReport, base: string): string[] {
+  const check = (id: string) => `check it: pnpm bench fan ${id} --whole`;
+  return [
+    ...r.newly.map(
+      (c) =>
+        `STOP    ${c.id}: ${c.to} of ${c.fanSize} candidate(s) not compiled ` +
+        `(${c.from === 0 ? `none at ${base}` : `${c.from} at ${base}`}) — ${check(c.id)}`,
+    ),
+    ...r.restaked.map(
+      (c) =>
+        `STOP    ${c.id}: ${c.to} of ${c.fanSize} candidate(s) not compiled (${c.from} at ${base}, over ` +
+        `sources that changed) — ${check(c.id)}`,
+    ),
+    `stops vs ${base}: ${r.newly.length} row(s) newly stopped, ${r.restaked.length} stopped over changed ` +
+      `sources, ${r.lifted.length} no longer stopped`,
+  ];
+}
+
 /** The fan section, as lines. Pure — `diffGate` prints them.
  *
  *  `compared === 0` has TWO causes and they are opposite facts, so it has two sentences. The base
@@ -685,6 +746,10 @@ export function diffGate(base = 'HEAD'): number {
     base,
     fresh.results.filter((r) => r.asmlift.fanSize !== undefined).length,
   )) {
+    console.log(line);
+  }
+  // …where the stillborn stop newly fires: the rows a false stop would hide in, each with its check.
+  for (const line of stopLines(compareStops(committed, fresh), base)) {
     console.log(line);
   }
   // …and what it COST, in the same section and under the same rule: informational, no exit code.

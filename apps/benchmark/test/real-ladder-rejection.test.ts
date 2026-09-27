@@ -8,7 +8,7 @@
 //
 // Over a fake compile module: the corpus's nine dead-prelude rows all have their richest rung
 // alive, so no committed row can referee this, and a synthetic row has no ladder at all.
-import { CompilerRejection, errorKey } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, attemptsOf, errorMessages } from '@asmlift/core/compiler-diagnostics';
 import { NoScorableCandidateError, rankBy } from '@asmlift/core/rank';
 import { expect, test } from 'vitest';
 
@@ -62,27 +62,30 @@ const fan = () => [
   { variations: ['unsigned', 'fixg', 'fixh'], source: body('1', '3'), preference: 0 },
 ];
 
-const keyOf = (compile: (c: string, sym: string) => string, source: string): string | null => {
+/** What the manifest rung — alive whichever richest rung the row has — refused `source` with. */
+const manifestErrors = (compile: (c: string, sym: string) => string, source: string): string[] => {
   try {
     compile(source, 'f');
   } catch (e) {
-    return e instanceof CompilerRejection ? errorKey(e.diagnostic) : null;
+    const rung = attemptsOf((e as CompilerRejection).diagnostic).find((a) => a.label === '+ manifest prependC (c)');
+    return errorMessages(rung!.diagnostic);
   }
-  return null;
+  throw new Error('compiled');
 };
 
 test.each([
   ['dead', DEAD_CTX],
   ['alive', PREPEND_C],
-])('with the richest rung %s, a probe that cures one error changes the key and the product is found', (_, ctxI) => {
+])('with the richest rung %s, each probe cures one error in a live rung and the product is found', (_, ctxI) => {
   const compiled: string[] = [];
   const compile = ladderCompile(fakeAgbcc(compiled), [], 'assembled', PREPEND_C, ctxI, 'c');
   const candidates = fan();
-  const [dflt, fixg, fixh] = candidates.map((c) => keyOf(compile, c.source));
-  expect(dflt).not.toBeNull();
-  expect(fixg).not.toBe(dflt);
-  expect(fixh).not.toBe(dflt);
-  expect(fixg).not.toBe(fixh);
+  const [dflt, fixg, fixh] = candidates.slice(0, 3).map((c) => manifestErrors(compile, c.source));
+  const G = "too many arguments to function `g'";
+  const H = "too many arguments to function `h'";
+  expect(dflt).toEqual([G, H]);
+  expect(fixg).toEqual([H]);
+  expect(fixh).toEqual([G]);
 
   const scored: string[] = [];
   const ranked = rankBy(candidates, 'f', (source) => {
@@ -110,6 +113,34 @@ test('the published message stays the richest rung’s: the world the candidate 
   expect(e.diagnostic).toContain('--- + manifest prependC (c) ---');
   expect(e.diagnostic).toContain('--- vendored ctx (c) ---');
   expect(e.diagnostic).toContain("too many arguments to function `g'");
+});
+
+test('a C++ row’s rejection splits back into its six attempts, in the order the ladder tried them', () => {
+  const compile = ladderCompile(fakeAgbcc([]), [], 'assembled', PREPEND_C, DEAD_CTX, 'c++');
+  let thrown: unknown;
+  try {
+    compile(fan()[0].source, 'f');
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(CompilerRejection);
+  const attempts = attemptsOf((thrown as CompilerRejection).diagnostic);
+  expect(attempts.map((a) => a.label)).toEqual([
+    'bare typedefs (c++)',
+    '+ manifest prependC (c++)',
+    'vendored ctx (c++)',
+    'bare typedefs (c)',
+    '+ manifest prependC (c)',
+    'vendored ctx (c)',
+  ]);
+  // each attempt holds what ITS rung said, and nothing another rung said
+  expect(attempts.map((a) => errorMessages(a.diagnostic))).toEqual(
+    [0, 1].flatMap(() => [
+      ['dereferencing pointer to incomplete type'],
+      ["too many arguments to function `g'", "too many arguments to function `h'"],
+      ['global.h: No such file or directory'],
+    ]),
+  );
 });
 
 test('a fan whose every rung is dead for one reason is still stillborn', () => {
