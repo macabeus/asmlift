@@ -33,11 +33,15 @@ const rank = (candidates: Candidate[], scoreFn: (c: Candidate) => { score: numbe
   return { run, compiled };
 };
 
-test('a probe is the smallest carrier of each variation name, enumeration order breaking a tie', () => {
+test('a probe is the smallest carrier of each variation name IN ITS HALF, enumeration order breaking a tie', () => {
   const candidates = fan(['a', 'b']);
-  // unsigned, unsigned/a, unsigned/b, unsigned/a/b, signed, signed/a, signed/b, signed/a/b
-  expect(probeIndices(candidates)).toEqual([1, 2, 4]);
+  // unsigned, unsigned/a, unsigned/b, unsigned/a/b | signed, signed/a, signed/b, signed/a/b
+  expect(probeIndices(candidates)).toEqual([1, 2, 4, 5, 6]);
+  expect(probeIndices(candidates.slice(0, 4))).toEqual([1, 2]);
   expect(probeIndices(candidates.slice(0, 1))).toEqual([]);
+  // a half is found by the registry's kind, so a fan whose names hold no signedness is one half
+  const unsigned = candidates.map((c) => ({ ...c, variations: c.variations.slice(1) }));
+  expect(probeIndices(unsigned)).toEqual([1, 2]);
 });
 
 test('default and every probe rejected for ONE reason: the rest is not compiled, and says so', () => {
@@ -52,14 +56,23 @@ test('default and every probe rejected for ONE reason: the rest is not compiled,
   }
   expect(thrown).toBeInstanceOf(NoScorableCandidateError);
   const e = thrown as NoScorableCandidateError;
-  expect(compiled).toEqual(['unsigned', 'unsigned/a', 'unsigned/b', 'unsigned/c', 'signed']);
+  expect(compiled).toEqual([
+    'unsigned',
+    'unsigned/a',
+    'unsigned/b',
+    'unsigned/c',
+    'signed',
+    'signed/a',
+    'signed/b',
+    'signed/c',
+  ]);
   expect(e.dropped.map((d) => d.variations.join('/'))).toEqual(compiled);
   expect(e.withheld).toEqual([]);
   expect(e.notCompiled).toHaveLength(candidates.length - compiled.length);
   expect(e.dropped.length + e.notCompiled.length).toBe(candidates.length);
   // the verdict first, then the default candidate's own diagnostic: a printer that bounds the
   // text keeps the sentence that says the fan was not compiled to the end
-  expect(e.message.startsWith("no scorable candidate for 'f': 11 of 16 candidates were NOT COMPILED")).toBe(true);
+  expect(e.message.startsWith("no scorable candidate for 'f': 8 of 16 candidates were NOT COMPILED")).toBe(true);
   expect(e.message).toContain("too many arguments to function `HeapFree'");
   expect(e.message.split('\n').at(-1)).toMatch(/^The default candidate's compile: agbcc failed: c\.c:11: /);
   expect((e.cause as Error).message).toContain('agbcc failed');
@@ -195,7 +208,16 @@ test('one probe cures one of two errors and the other survives: stopped after th
     thrown = e;
   }
   const e = thrown as NoScorableCandidateError;
-  expect(compiled).toEqual(['unsigned', 'unsigned/setup-args', 'unsigned/b', 'unsigned/c', 'signed']);
+  expect(compiled).toEqual([
+    'unsigned',
+    'unsigned/setup-args',
+    'unsigned/b',
+    'unsigned/c',
+    'signed',
+    'signed/setup-args',
+    'signed/b',
+    'signed/c',
+  ]);
   expect(e.notCompiled).toHaveLength(candidates.length - compiled.length);
   // the note names the error that survived, not the one a probe cured
   const note = e.message.slice(0, e.message.indexOf("The default candidate's compile"));
@@ -247,7 +269,7 @@ test('every attempt keeps a survivor: stopped, whatever the probes cured elsewhe
     attempts([DEAD], c.variations.includes('a') ? [OPERANDS] : [ARITY, OPERANDS]),
   );
   expect(run).toThrow(NoScorableCandidateError);
-  expect(compiled).toEqual(['unsigned', 'unsigned/a', 'unsigned/b', 'signed']);
+  expect(compiled).toEqual(['unsigned', 'unsigned/a', 'unsigned/b', 'signed', 'signed/a', 'signed/b']);
 });
 
 test('a probe tried in other attempts than the default is not read against it: the fan is ranked whole', () => {
@@ -279,4 +301,52 @@ test('RESIDUAL: the surviving error needs two variations jointly, whatever the p
   });
   expect(run).toThrow(NoScorableCandidateError);
   expect(compiled).not.toContain('unsigned/setup-args/a/b');
+});
+
+// HALF BY HALF (stillborn.ts header): a signedness re-types the whole body, so the error that
+// survives is worded once per half. Each half is asked as a fan of its own.
+test('the signedness re-words the surviving error: each half keeps its own, and the fan stops', () => {
+  const candidates = fan(['setup-args', 'b']);
+  const mismatch = (c: Candidate) =>
+    `c.c:9: incompatible type for argument 1 of \`CARDGetSectorSize' (${c.variations[0]} long)`;
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('setup-args') ? reject(mismatch(c)) : reject(ARITY, mismatch(c)),
+  );
+  let thrown: unknown;
+  try {
+    run();
+  } catch (e) {
+    thrown = e;
+  }
+  const e = thrown as NoScorableCandidateError;
+  expect(e).toBeInstanceOf(NoScorableCandidateError);
+  expect(compiled).toEqual([
+    'unsigned',
+    'unsigned/setup-args',
+    'unsigned/b',
+    'signed',
+    'signed/setup-args',
+    'signed/b',
+  ]);
+  expect(e.notCompiled.map((n) => n.variations.join('/'))).toEqual(['unsigned/setup-args/b', 'signed/setup-args/b']);
+  // the note names the FIRST half's survivor, as that half worded it
+  expect(e.message).toContain('(unsigned long)');
+});
+
+test('one probe inside the signed half compiles: the whole fan is ranked', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations[0] === 'signed' && c.variations.includes('b') ? { score: 1 } : reject(OPERANDS),
+  );
+  expect(run().winner.source).toBe('signed/b');
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+test('the signed half without a survivor of its own ranks the whole fan, whatever the other half kept', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations[0] === 'signed' && c.variations.includes('a') ? reject(ARITY) : reject(OPERANDS),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toHaveLength(candidates.length);
 });

@@ -28,11 +28,24 @@
 // probe that prints it fewer times has cured one. Either one reached it, so neither vouches that
 // a product leaves it alone.
 //
-// This is the old rule's strict generalisation: a probe rejected with the default's whole
+// Over the same probes this generalises equal keys: a probe rejected with the default's whole
 // multiset of errors leaves every message a survivor. What it adds is a fan whose variations DO
 // reach some of its errors — `/setup-args` curing a call's arity — while another error stays where
 // it was in every probe: pikmin's C++ `setMatMatrices`, once it lifted, compiled all 768
 // candidates for a `GXLoadTexMtxImm` argument no variation re-types.
+//
+// HALF BY HALF. Every fan is enumerated at BOTH signednesses (variation-tokens.ts, kind
+// `signedness`), and a signedness re-types the whole body: every type a message quotes changes
+// with it, so the one error a statement no variation reaches is refused with is worded twice —
+// `CARDGetSectorSize(unsigned long, long *)` does not match, and `CARDGetSectorSize(long, long *)`
+// does not. Asked over the whole fan, no message survives the `signed` probe, and
+// pikmin's `getCardStatus` compiled all 1,408 candidates. So each signedness HALF is asked as a fan
+// of its own: its first candidate is its default, its probes are the smallest carrier of each
+// variation name INSIDE it, and the fan is stillborn only when every half is. A half is found by
+// the registry's kind, never by a name, and a fan with no signedness in its names is one half.
+// These are MORE probes than one per name over the whole fan — every signedness is paired with
+// every variation before anything is skipped — so a fan equal keys over the old probes stopped
+// can be ranked whole now, and a stopped fan pays its second half's probes.
 //
 // Anything else ranks the whole fan. A probe that compiles or is withheld: the fan is alive. An
 // attempt with no survivor: a product of variations may cure what no single one does. An attempt
@@ -59,36 +72,69 @@
 // compiles and ask the same question. Every driver finishes the probe phase before compiling
 // anything else, which is what keeps the verdict independent of a scheduler.
 import { CompilerRejection, attemptsOf, verdictMessages } from './compiler-diagnostics';
+import { VARIATION_TOKENS } from './variation-tokens';
 
 /** What compiling one candidate came to, as far as this rule reads it. `compiled` covers scored
  *  AND withheld: either way the compiler accepted the text. */
 export type ProbeOutcome = 'compiled' | { thrown: unknown };
 
-/** The candidates to compile once the default was rejected: for every variation name in the fan,
- *  the index of the candidate with the FEWEST variations that carries it, enumeration order
- *  breaking a tie. Ascending, and without the default itself.
+/** The signedness names, read off the registry by kind. */
+const SIGNEDNESS = new Set<string>(VARIATION_TOKENS.filter((t) => t.variationKind === 'signedness').map((t) => t.name));
+
+/** The fan's signedness HALVES: candidates grouped by the signedness their names carry, each in
+ *  enumeration order, the halves in the order of their first candidate. Index 0 opens the first. */
+function halvesOf(candidates: readonly { variations: readonly string[] }[]): number[][] {
+  const halves = new Map<string, number[]>();
+  candidates.forEach((c, i) => {
+    const key = c.variations.filter((v) => SIGNEDNESS.has(v)).join('/');
+    const half = halves.get(key);
+    if (half === undefined) {
+      halves.set(key, [i]);
+    } else {
+      half.push(i);
+    }
+  });
+  return [...halves.values()];
+}
+
+/** A half's probes: for every variation name in the half, the index of the candidate IN THE HALF
+ *  with the FEWEST variations that carries it, enumeration order breaking a tie. Ascending, and
+ *  without the half's own first candidate, which is its default.
  *
  *  A NAME is the whole part as the candidate carries it, subject included: `argcopy-a0@1.0` and
  *  `argcopy-a0@2.0` are two probes, because each re-spells a different statement and the rule asks
  *  whether ANY re-spelling reaches the failing one. Collapsing them to the registered name would
  *  probe one region and answer for both. */
-export function probeIndices(candidates: readonly { variations: readonly string[] }[]): number[] {
+function probesOf(candidates: readonly { variations: readonly string[] }[], half: readonly number[]): number[] {
   const smallest = new Map<string, number>();
-  candidates.forEach((c, i) => {
-    for (const v of c.variations) {
+  for (const i of half) {
+    for (const v of candidates[i].variations) {
       const held = smallest.get(v);
-      if (held === undefined || c.variations.length < candidates[held].variations.length) {
+      if (held === undefined || candidates[i].variations.length < candidates[held].variations.length) {
         smallest.set(v, i);
       }
     }
-  });
-  return [...new Set(smallest.values())].filter((i) => i !== 0).sort((a, b) => a - b);
+  }
+  return [...new Set(smallest.values())].filter((i) => i !== half[0]).sort((a, b) => a - b);
+}
+
+/** The candidates to compile once the default was rejected: every half's default and probes
+ *  (`halvesOf`, `probesOf`). Ascending, and without the default itself. */
+export function probeIndices(candidates: readonly { variations: readonly string[] }[]): number[] {
+  const probes = new Set<number>();
+  for (const half of halvesOf(candidates)) {
+    for (const i of [half[0], ...probesOf(candidates, half)]) {
+      probes.add(i);
+    }
+  }
+  probes.delete(0);
+  return [...probes].sort((a, b) => a - b);
 }
 
 /** A fan declared stillborn. */
 export interface Stillborn {
-  /** the default candidate's errors that survived every probe, as the compiler worded them: each
-   *  attempt's survivors, a message named once at the most times one attempt printed it */
+  /** the default candidate's errors that survived every probe of its half, as the compiler worded
+   *  them: each attempt's survivors, a message named once at the most times one attempt printed it */
   messages: string[];
   /** indices that WERE compiled — the default and the probes, ascending */
   compiled: number[];
@@ -164,8 +210,9 @@ function survivors(
  *  whole fan", which is every case but one (the module header states the rule).
  *
  *  `outcomeOf` is asked for index 0 and then, only while the answer can still be "stillborn", for
- *  the probes in order — so a synchronous driver may compile on demand inside it and pays for no
- *  probe past the first that ends it. It must answer whenever asked: a driver that skipped a
+ *  the probes of its half in order, then for each further half's default and probes — so a
+ *  synchronous driver may compile on demand inside it and pays for no probe past the first that
+ *  ends it. It must answer whenever asked: a driver that skipped a
  *  probe has not run the rule, and "stillborn" over the probes it happened to compile would be a
  *  different, weaker rule. */
 export function stillbornVerdict(
@@ -182,15 +229,18 @@ export function stillbornVerdict(
     }
     return outcome;
   };
-  const probes = probeIndices(candidates);
-  const left = survivors(0, probes, asked);
-  if (left === null) {
-    return null;
+  const perHalf: Map<string, number>[][] = [];
+  for (const half of halvesOf(candidates)) {
+    const left = survivors(half[0], probesOf(candidates, half), asked);
+    if (left === null) {
+      return null;
+    }
+    perHalf.push(left);
   }
-  const compiled = [0, ...probes];
+  const compiled = [0, ...probeIndices(candidates)];
   const tried = new Set(compiled);
   return {
-    messages: namedOnce(left),
+    messages: namedOnce(perHalf[0]),
     compiled,
     notCompiled: candidates.map((_, i) => i).filter((i) => !tried.has(i)),
   };
