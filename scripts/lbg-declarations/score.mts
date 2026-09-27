@@ -1,4 +1,4 @@
-import { scoreObjects } from '../../packages/cli/src/objdiff';
+import { scoreObjects } from '../../packages/cli/src/score';
 
 for (const path of process.argv.slice(3))
   console.log(JSON.stringify({ path, ...scoreObjects(process.argv[2], path, 'LoadBGTilemapData') }));

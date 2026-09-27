@@ -348,7 +348,7 @@ export interface RankedResult<S> {
  *  drivers over one enumeration (this module's sync `rankBy` and the webapp's async await-loop),
  *  and a filter written twice is how they come to publish different answers. Null ⇒ publish.
  *
- *  `score === 0` is objdiff's byte-exact match (cli objdiff.ts states the equivalence), which is
+ *  `score === 0` is objdiff's byte-exact match (@matchkit/scoring states the equivalence), which is
  *  why a bare `.score` suffices and the generic needs no `match` field. */
 export function withheldReason<S extends { score: number }>(c: Candidate, score: S): string | null {
   return c.matchOnly === true && score.score !== 0

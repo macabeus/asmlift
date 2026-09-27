@@ -9,11 +9,12 @@ export default defineConfig({
   optimizeDeps: {
     // @asmlift/core is a workspace symlink of plain .ts sources — serve/transform it directly
     // instead of prebundling (esbuild handles the TS in both dev and build).
-    // objdiff-wasm + agbcc are WASM packages: objdiff-wasm uses a module-level top-level `await`
-    // ($init) and both fetch their .wasm via `import.meta.url`. esbuild's dep pre-bundler targets
-    // old browsers (chrome87…) that reject TLA and can mangle the import.meta.url asset URLs, so
-    // exclude them and let Vite serve them as native ESM (workers/modern browsers do TLA natively).
-    exclude: ['@asmlift/core', 'objdiff-wasm', 'agbcc'],
+    // objdiff-wasm (reached through @matchkit/scoring) + agbcc are WASM packages: objdiff-wasm uses
+    // a module-level top-level `await` ($init) and both fetch their .wasm via `import.meta.url`.
+    // esbuild's dep pre-bundler targets old browsers (chrome87…) that reject TLA and can mangle the
+    // import.meta.url asset URLs, so exclude them and let Vite serve them as native ESM
+    // (workers/modern browsers do TLA natively).
+    exclude: ['@asmlift/core', '@matchkit/scoring', 'objdiff-wasm', 'agbcc'],
   },
   // The ranking worker is a module worker (dynamic-imports the wasm), so its chunk must be ESM.
   worker: { format: 'es' },

@@ -16,6 +16,7 @@
     "@asmlift/core": "workspace:*",
     "@codemirror/language": "^6.10.6",
     "@codemirror/legacy-modes": "^6.4.2",
+    "@matchkit/scoring": "link:../../../matchkit/packages/scoring",
     "@uiw/react-codemirror": "^4.23.7",
     "@wooorm/starry-night": "^3.10.0",
     "agbcc": "0.2.0",
@@ -23,7 +24,6 @@
     "echarts-for-react": "^3.0.2",
     "lz-string": "^1.5.0",
     "nuqs": "^2.10.1",
-    "objdiff-wasm": "3.8.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

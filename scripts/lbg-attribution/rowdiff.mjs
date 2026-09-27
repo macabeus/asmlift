@@ -1,22 +1,21 @@
 // One-off residual dumper for the LoadBGTilemapData attribution study: two objects and a symbol
 // in, objdiff's aligned display rows out.
 //
-// The `file://` fetch shim below is COPIED from `packages/cli/src/objdiff.ts`, which owns it —
-// objdiff-wasm pulls its sibling `objdiff.core.wasm` over fetch, and Node's fetch will not read a
-// `file://` URL. The copy is deliberate: `packages/cli/src` is one of the paths
-// `scripts/check-artifact-provenance.sh` invalidates the committed benchmark artifact on, so
-// importing from it to save nine lines would put a study script on the measurement path. Keeping
-// this a plain `.mjs` also keeps it runnable by `node` alone, which is how the attribution docs
-// hand it to a reader.
+// The `file://` fetch shim below is COPIED from @matchkit/scoring's Node engine loader, which owns
+// it — objdiff-wasm pulls its sibling `objdiff.core.wasm` over fetch, and Node's fetch will not
+// read a `file://` URL. The copy keeps this a plain `.mjs`, runnable by `node` alone, which is how
+// the attribution docs hand it to a reader. objdiff-wasm is resolved from @matchkit/scoring, the
+// package that pins it, so this reads the same engine the benchmark scores with.
 //
-// The engine's resource DISPOSAL that `objdiff.ts` does is deliberately omitted: the hazard it
+// The engine's resource DISPOSAL that the scorer does is deliberately omitted: the hazard it
 // exists for is a tight loop exhausting the wasm instance after a few hundred diffs in one
 // process, and this script does exactly one.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(new URL('../../packages/cli/package.json', import.meta.url));
+const fromCli = createRequire(new URL('../../packages/cli/package.json', import.meta.url));
+const require = createRequire(fromCli.resolve('@matchkit/scoring/package.json'));
 
 const objdiff = await (async () => {
   const originalFetch = globalThis.fetch;

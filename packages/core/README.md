@@ -115,7 +115,7 @@ injected via hooks, never copied. `verify()` runs after every IR-mutating pass;
 | `contracts.ts`, `proto.ts`, `mangle.ts`   | Boundary contracts; prototype tables; the CodeWarrior mangler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Scoring and ranking live across the package seam in [`@asmlift/cli`](../cli/README.md):
-`score.ts` + `objdiff.ts` (toolchain compiles → in-process pinned `objdiff-wasm`, fail-closed)
+`score.ts` (toolchain compiles → `@matchkit/scoring`, the in-process pinned objdiff engine, fail-closed)
 and `rank.ts` (ranked type candidates re-ranked by the differ).
 
 ### Honest coverage gaps

@@ -17,7 +17,7 @@
   "dependencies": {
     "@asmlift/core": "workspace:^",
     "@gba-kit/debug-info": "^0.5.0",
-    "objdiff-wasm": "3.8.1",
+    "@matchkit/scoring": "link:../../../matchkit/packages/scoring",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
