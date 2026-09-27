@@ -34,6 +34,7 @@ import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, NotCompiledCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
+import { refusedByCompiler } from '@asmlift/core/stillborn';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations, splitVariations } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
@@ -649,6 +650,11 @@ export interface StopCheck {
   compiled: { variations: readonly string[]; score: MatchScore }[];
   /** how many of the rest the compiler refused */
   refused: number;
+  /** every candidate of the rest whose compile threw something that is no refusal — a killed
+   *  compiler, a Docker outage, a timeout — with the first line of what it threw. The stop is not
+   *  checked on them: such a throw says nothing about the candidate (core stillborn.ts
+   *  `refusedByCompiler`, the test the rule itself reads a probe with). */
+  unchecked: { variations: readonly string[]; error: string }[];
 }
 
 /** THE STOP, CHECKED. Compiles every candidate `notCompiled` names — found in `candidates` by its
@@ -662,7 +668,7 @@ export function checkStop(
   onProgress?: (done: number, total: number) => void,
 ): StopCheck {
   const byName = new Map(candidates.map((c) => [joinVariations(c.variations), c]));
-  const check: StopCheck = { compiled: [], refused: 0 };
+  const check: StopCheck = { compiled: [], refused: 0, unchecked: [] };
   notCompiled.forEach((n, k) => {
     const name = joinVariations(n.variations);
     const candidate = byName.get(name);
@@ -671,36 +677,66 @@ export function checkStop(
     }
     try {
       check.compiled.push({ variations: n.variations, score: score(candidate) });
-    } catch {
-      check.refused++;
+    } catch (e) {
+      if (refusedByCompiler(e)) {
+        check.refused++;
+      } else {
+        check.unchecked.push({
+          variations: n.variations,
+          error: (e instanceof Error ? e.message : String(e)).split('\n')[0],
+        });
+      }
     }
     onProgress?.(k + 1, notCompiled.length);
   });
   return check;
 }
 
-/** `checkStop`'s answer as lines, and the exit code: 1 when any candidate of the rest compiled —
- *  a FALSE STOP, each one named on stdout beside the fan — else 0. */
+/** `checkStop`'s answer as lines, and the exit code. 0 only when the compiler refused every
+ *  candidate of the rest — the stop held. 1 when any of it compiled — a FALSE STOP, each one named
+ *  on stdout beside the fan. 3 when none compiled but some never reached the compiler's verdict —
+ *  UNCHECKED, each one named: a stop is not held on a candidate nothing refused. */
 export function stopCheckReport(rowId: string, check: StopCheck): { fan: string[]; notes: string[]; code: number } {
-  const total = check.compiled.length + check.refused;
-  if (check.compiled.length === 0) {
+  const total = check.compiled.length + check.refused + check.unchecked.length;
+  const unchecked = check.unchecked.map(
+    (u) => `asmlift: [whole] UNCHECKED ${joinVariations(u.variations)}: ${u.error}`,
+  );
+  const uncheckedNote =
+    `${check.unchecked.length} of the ${total} candidate(s) the stillborn stop did not compile never reached ` +
+    `the compiler's verdict: each threw something that is no refusal (a killed compiler, a Docker outage, a ` +
+    `timeout), which says nothing about the candidate`;
+  if (check.compiled.length > 0) {
     return {
-      fan: [],
-      notes: [
-        `asmlift: [whole] ${rowId}: all ${total} candidate(s) the stillborn stop did not compile were ` +
-          `compiled now, and the compiler refused every one — the stop held`,
+      fan: [
+        ...check.compiled.map((c) => `asmlift: [whole] COMPILED ${joinVariations(c.variations)}: ${scoreOf(c.score)}`),
+        ...unchecked,
       ],
-      code: 0,
+      notes: [
+        `asmlift: [whole] ${rowId}: ${check.compiled.length} of the ${total} candidate(s) the stillborn stop ` +
+          `did not compile COMPILED — a FALSE STOP (core stillborn.ts): the row publishes "noncompile" ` +
+          `where a ranked pass over the whole fan would have scored the lines above`,
+        ...(unchecked.length > 0 ? [`asmlift: [whole] ${rowId}: and ${uncheckedNote}`] : []),
+      ],
+      code: 1,
+    };
+  }
+  if (unchecked.length > 0) {
+    return {
+      fan: unchecked,
+      notes: [
+        `asmlift: [whole] ${rowId}: the stop is NOT CHECKED — ${uncheckedNote}. The compiler refused the ` +
+          `other ${check.refused}. Re-run once the compiler runs to completion.`,
+      ],
+      code: 3,
     };
   }
   return {
-    fan: check.compiled.map((c) => `asmlift: [whole] COMPILED ${joinVariations(c.variations)}: ${scoreOf(c.score)}`),
+    fan: [],
     notes: [
-      `asmlift: [whole] ${rowId}: ${check.compiled.length} of the ${total} candidate(s) the stillborn stop ` +
-        `did not compile COMPILED — a FALSE STOP (core stillborn.ts): the row publishes "noncompile" ` +
-        `where a ranked pass over the whole fan would have scored the lines above`,
+      `asmlift: [whole] ${rowId}: all ${total} candidate(s) the stillborn stop did not compile were ` +
+        `compiled now, and the compiler refused every one — the stop held`,
     ],
-    code: 1,
+    code: 0,
   };
 }
 

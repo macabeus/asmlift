@@ -1,6 +1,7 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
 import { rankedSummaryLine, threwLine, threwStep } from '@asmlift/cli/score-format';
+import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { describe, expect, it } from 'vitest';
@@ -308,14 +309,14 @@ describe('--whole compiles the rest of a stopped fan', () => {
   const rest = [{ variations: ['unsigned', 'flip-join', 'unmerge'] }, { variations: ['unsigned', 'unmerge'] }];
   const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
     if (c.variations.join('/') !== name) {
-      throw new Error('mwcceppc failed: pointer/array required');
+      throw new CompilerRejection('mwcceppc failed: pointer/array required');
     }
     return cand(name, 3, 20).score;
   };
 
   it('holds when the compiler refuses every candidate of the rest, and exits 0', () => {
     const check = checkStop(rest, fan, scoreOnly('none'));
-    expect(check).toEqual({ compiled: [], refused: 2 });
+    expect(check).toEqual({ compiled: [], refused: 2, unchecked: [] });
     const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
     expect(report.code).toBe(0);
     expect(report.fan).toEqual([]);
@@ -330,6 +331,56 @@ describe('--whole compiles the rest of a stopped fan', () => {
     expect(report.code).toBe(1);
     expect(report.fan).toEqual(['asmlift: [whole] COMPILED unsigned/flip-join/unmerge: 3/20']);
     expect(report.notes.join('\n')).toContain('1 of the 2 candidate(s) the stillborn stop did not compile COMPILED');
+  });
+
+  // A killed compiler, a Docker outage or a timeout throws too, and says nothing about the
+  // candidate: counted as a refusal, a check whose compiler died printed "the stop held", exit 0.
+  it('never counts a throw that is no refusal as refused: the stop is UNCHECKED, exit 3', () => {
+    const killed = () => {
+      throw new Error('mwcceppc (docker) did not run to completion (exit 137)\nkilled');
+    };
+    const check = checkStop(rest, fan, killed);
+    expect(check.refused).toBe(0);
+    expect(check.unchecked.map((u) => u.error)).toEqual([
+      'mwcceppc (docker) did not run to completion (exit 137)',
+      'mwcceppc (docker) did not run to completion (exit 137)',
+    ]);
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(3);
+    expect(report.fan).toEqual([
+      'asmlift: [whole] UNCHECKED unsigned/flip-join/unmerge: mwcceppc (docker) did not run to completion (exit 137)',
+      'asmlift: [whole] UNCHECKED unsigned/unmerge: mwcceppc (docker) did not run to completion (exit 137)',
+    ]);
+    expect(report.notes.join('\n')).toContain('the stop is NOT CHECKED');
+    expect(report.notes.join('\n')).not.toContain('the stop held');
+  });
+
+  it('one transient among refusals still leaves the stop unchecked', () => {
+    let n = 0;
+    const check = checkStop(rest, fan, () => {
+      if (n++ === 0) {
+        throw new CompilerRejection('mwcceppc failed: pointer/array required');
+      }
+      throw new Error('spawnSync docker ETIMEDOUT');
+    });
+    expect(check.refused).toBe(1);
+    expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
+  });
+
+  it('a false stop is named first, with the unchecked beside it, and exits 1', () => {
+    let n = 0;
+    const check = checkStop(rest, fan, (c) => {
+      if (n++ === 0) {
+        return cand(c.variations.join('/'), 3, 20).score;
+      }
+      throw new Error('spawnSync docker ETIMEDOUT');
+    });
+    const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
+    expect(report.code).toBe(1);
+    expect(report.fan).toEqual([
+      'asmlift: [whole] COMPILED unsigned/flip-join/unmerge: 3/20',
+      'asmlift: [whole] UNCHECKED unsigned/unmerge: spawnSync docker ETIMEDOUT',
+    ]);
   });
 
   it('refuses to pass over a candidate the enumeration no longer holds', () => {
