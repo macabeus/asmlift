@@ -67,7 +67,7 @@ export const READER_WORDS: readonly ReaderWord[] = [
   {
     word: 'not compiled',
     meaning:
-      'A candidate never handed to the scorer: its fan was stillborn — the default candidate and one probe per variation were all rejected, each for an error no variation changed, so the rest was not compiled.',
+      "A candidate never handed to the scorer: its fan was stillborn — in each signedness half, the default candidate and one probe per variation were all rejected, every probe keeping one of its default's errors, so the rest was not compiled.",
   },
 ];
 

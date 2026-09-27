@@ -158,8 +158,8 @@ export function probeIndices(candidates: readonly { variations: readonly string[
 
 /** A fan declared stillborn. */
 export interface Stillborn {
-  /** the default candidate's errors that survived every probe of its half, as the compiler worded
-   *  them: each attempt's survivors, a message named once at the most times one attempt printed it */
+  /** each half's default's errors that survived every probe of that half, as the compiler worded
+   *  them in that half: a message named at the most times one attempt printed it */
   messages: string[];
   /** indices that WERE compiled — the default and the probes, ascending */
   compiled: number[];
@@ -265,14 +265,14 @@ export function stillbornVerdict(
   const compiled = [0, ...probeIndices(candidates)];
   const tried = new Set(compiled);
   return {
-    messages: namedOnce(perHalf[0]),
+    messages: namedOnce(perHalf.flat()),
     compiled,
     notCompiled: candidates.map((_, i) => i).filter((i) => !tried.has(i)),
   };
 }
 
-/** Every attempt's survivors as one list: a message in the order it first appears, as many times
- *  as the attempt that printed it most. */
+/** Every half's and attempt's survivors as one list: a message in the order it first appears, as
+ *  many times as the attempt that printed it most. */
 function namedOnce(perAttempt: readonly Map<string, number>[]): string[] {
   const most = new Map<string, number>();
   for (const tally of perAttempt) {

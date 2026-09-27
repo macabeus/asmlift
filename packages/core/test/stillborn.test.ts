@@ -329,8 +329,11 @@ test('the signedness re-words the surviving error: each half keeps its own, and 
     'signed/b',
   ]);
   expect(e.notCompiled.map((n) => n.variations.join('/'))).toEqual(['unsigned/setup-args/b', 'signed/setup-args/b']);
-  // the note names the FIRST half's survivor, as that half worded it
-  expect(e.message).toContain('(unsigned long)');
+  // the note names each half's survivor, as that half worded it
+  const note = e.message.slice(0, e.message.indexOf("The default candidate's compile"));
+  expect(note).toContain('in each signedness half');
+  expect(note).toContain('(unsigned long)');
+  expect(note).toContain('(signed long)');
 });
 
 test('one probe inside the signed half compiles: the whole fan is ranked', () => {

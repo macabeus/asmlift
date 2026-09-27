@@ -279,8 +279,8 @@ export async function rankCandidatesInBrowser(
   // disagree about the same function, so none of them is spelled here.
   //
   // The ORDER is the stillborn rule's (core stillborn.ts): the default candidate alone, then — only
-  // if the compiler rejected it — one probe per variation, then the rest unless the verdict says the
-  // fan is stillborn. `rankBy` asks the same rule over the same outcomes and never reaches a
+  // if the compiler rejected it — each signedness half's default and probes (`probeIndices`), then
+  // the rest unless the verdict says the fan is stillborn. `rankBy` asks the same rule over the same outcomes and never reaches a
   // candidate this loop did not compile.
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const outcomes = new Map<string, MatchScore | Error>();

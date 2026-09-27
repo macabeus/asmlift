@@ -2337,7 +2337,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
 }
 
 /** The sentence a stillborn fan's error OPENS on: how much of the fan was never compiled, on what
- *  evidence, and the errors every compiled candidate kept. The DEFAULT candidate's own
+ *  evidence, and the errors each half's compiled candidates kept. The DEFAULT candidate's own
  *  diagnostic — the spelling the rule is anchored on, rather than whichever was refused last —
  *  follows it, so that a printer bounding a long diagnostic keeps the verdict. */
 function stillbornNote(stillborn: Stillborn, fan: number): string {
@@ -2347,8 +2347,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
   }
   const shared = [...tally].map(([m, n]) => `  ${m}${n > 1 ? ` (x${n})` : ''}`).join('\n');
   return (
-    `${stillborn.notCompiled.length} of ${fan} candidates were NOT COMPILED: the default candidate and one probe per ` +
-    `variation (${stillborn.compiled.length} compiled) were all rejected, each for an error no variation changed:\n${shared}`
+    `${stillborn.notCompiled.length} of ${fan} candidates were NOT COMPILED: in each signedness half, the default ` +
+    `candidate and one probe per variation (${stillborn.compiled.length} compiled) were all rejected, every probe ` +
+    `keeping one of its default's errors:\n${shared}`
   );
 }
 

@@ -585,13 +585,14 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
           `row's fan. This is what the published row's "noncompile" outcome means.`,
       );
     } else {
-      // A stillborn fan's lines above are what was COMPILED — the default and one probe per
-      // variation — and the fan is those plus the rest, which nothing refused: a reader counting
+      // A stillborn fan's lines above are what was COMPILED — each signedness half's default and
+      // its probes — and the fan is those plus the rest, which nothing refused: a reader counting
       // [dropped] lines against the row's fanSize must be told why they differ.
       notes.push(
         `asmlift: [fan] every compiled candidate was refused, so there is no ranking — the ` +
-          `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above are the default ` +
-          `candidate and one probe per variation, each rejected for an error no variation changed, so the fan was ` +
+          `${dropped.length} [dropped] and ${withheld.length} [withheld] line(s) above are, in each signedness ` +
+          `half, the default candidate and one probe per variation, every probe keeping one of its default's ` +
+          `errors, so the fan was ` +
           `declared stillborn (core stillborn.ts) and its other ${nsc.notCompiled.length} candidate(s) ` +
           `were NOT COMPILED. This row's fan is the ${dropped.length + withheld.length} above plus those ` +
           `${nsc.notCompiled.length}; its published "noncompile" outcome and fanSize count them all.`,

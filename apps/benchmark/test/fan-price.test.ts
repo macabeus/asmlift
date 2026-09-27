@@ -146,35 +146,37 @@ describe('the ranked row records its own price', () => {
     expect(typeof r.rankSeconds).toBe('number');
   });
 
-  // A STILLBORN fan (core stillborn.ts): the default and one probe per variation were compiled and
-  // the rest never was. The row says how many, on the row and per variation, and its markers are
-  // the default candidate's compiler lines — the error's own message opens on the verdict.
+  // A STILLBORN fan (core stillborn.ts): each signedness half's default and one probe per variation
+  // were compiled and the rest never was. The row says how many, on the row and per variation, and
+  // its markers are the default candidate's compiler lines — the error's own message opens on the
+  // verdict.
   test('a STILLBORN row publishes what was not compiled, and its markers are the compiler’s lines', () => {
     const ARITY = "agbcc failed: c.c:12: too many arguments to function `g'";
+    const probed = [[], ['raw-globals'], ['unreduce']];
     ranked.mockImplementation(() => {
       throw new NoScorableCandidateError(
-        "no scorable candidate for 'f': 3 of 5 candidates were NOT COMPILED: the default candidate and one probe " +
-          `per variation (2 compiled) were all rejected for the same reason, which no variation changed:\n` +
-          `  too many arguments to function \`g'\nThe default candidate's compile: ${ARITY}`,
-        [
-          { variations: ['unsigned'], error: ARITY },
-          { variations: ['unsigned', 'raw-globals'], error: ARITY },
-        ],
+        "no scorable candidate for 'f': 2 of 8 candidates were NOT COMPILED: in each signedness half, the default " +
+          "candidate and one probe per variation (6 compiled) were all rejected, every probe keeping one of its default's " +
+          `errors:\n  too many arguments to function \`g'\nThe default candidate's compile: ${ARITY}`,
+        ['unsigned', 'signed'].flatMap((sign) => probed.map((v) => ({ variations: [sign, ...v], error: ARITY }))),
         [],
-        [{ variations: ['signed'] }, { variations: ['signed', 'raw-globals'] }, { variations: ['signed', 'unreduce'] }],
+        [
+          { variations: ['unsigned', 'raw-globals', 'unreduce'] },
+          { variations: ['signed', 'raw-globals', 'unreduce'] },
+        ],
         { cause: new CompilerRejection(ARITY) },
       );
     });
     const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
-    expect(r.fanNotCompiled).toBe(3);
-    // the ENUMERATED count: the two that were compiled and the three that were not
-    expect(r.fanSize).toBe(2 + 0 + 3);
+    expect(r.fanNotCompiled).toBe(2);
+    // the ENUMERATED count: the six that were compiled and the two that were not
+    expect(r.fanSize).toBe(6 + 0 + 2);
     expect(r.fanVariations).toEqual({
-      unsigned: { candidates: 2, dropped: 2 },
-      signed: { candidates: 3, notCompiled: 3 },
-      'raw-globals': { candidates: 2, dropped: 1, notCompiled: 1 },
-      unreduce: { candidates: 1, notCompiled: 1 },
+      unsigned: { candidates: 4, dropped: 3, notCompiled: 1 },
+      signed: { candidates: 4, dropped: 3, notCompiled: 1 },
+      'raw-globals': { candidates: 4, dropped: 2, notCompiled: 2 },
+      unreduce: { candidates: 4, dropped: 2, notCompiled: 2 },
     });
     expect(r.errorMarkers).toEqual([ARITY]);
     expect(r.compileErrors).toBe(1);

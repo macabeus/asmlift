@@ -106,8 +106,9 @@ export interface DecompilerResult {
    *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
   fanSize?: number;
   /** asmlift only, `noncompile` rows: how many of `fanSize` were NEVER COMPILED, because the
-   *  ranking declared the fan stillborn (core stillborn.ts: the default candidate and one probe
-   *  per variation were all rejected, each for an error no variation changed). `fanSize` keeps counting them — they
+   *  ranking declared the fan stillborn (core stillborn.ts: in each signedness half, the default
+   *  candidate and one probe per variation were all rejected, every probe keeping one of its
+   *  default's errors). `fanSize` keeps counting them — they
    *  were enumerated — and `droppedCandidates` does not: nothing refused them. A cost, like
    *  `fanSize`, so it is out of `bench diff`'s watched fields. Absent when every candidate was
    *  compiled, which is every row that is not stillborn. */
