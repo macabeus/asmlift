@@ -294,10 +294,43 @@ describe('the rows a branch added, compared against the branch own artifact', ()
 // `errorMarkers` line (`ac-decomp:aINS_destruct:mwcc_242_81`, absent → 4 of 12). The stop is a bet
 // no ranked run checks, and these rows are where it is newly placed.
 describe('compareStops', () => {
-  const noncompile = (fanSize: number, fanNotCompiled?: number) => ({
+  const noncompile = (fanSize: number, fanNotCompiled?: number, fanNotCompiledDigest?: string) => ({
     outcome: 'noncompile' as Outcome,
     fanSize,
     ...(fanNotCompiled === undefined ? {} : { fanNotCompiled }),
+    ...(fanNotCompiledDigest === undefined ? {} : { fanNotCompiledDigest }),
+  });
+
+  // The count reads the variation ROSTER only: a re-lift that keeps the names keeps it, while every
+  // text the stop bet on is new. Keyed on the count alone, that re-placed bet printed no STOP line
+  // and owed no check.
+  test('names a row stopped at both sides whose not-compiled sources changed, whatever its count', () => {
+    const r = compareStops(
+      out(
+        row('relift', noncompile(1408, 1278, 'aaaa')),
+        row('same', noncompile(768, 748, 'bbbb')),
+        row('less', noncompile(40, 30, 'cccc')),
+        row('legacy', noncompile(12, 4)),
+      ),
+      out(
+        row('relift', noncompile(1408, 1278, 'dddd')),
+        row('same', noncompile(768, 748, 'bbbb')),
+        row('less', noncompile(40, 20, 'eeee')),
+        row('legacy', noncompile(12, 4, 'ffff')),
+      ),
+    );
+    expect(r.newly).toEqual([]);
+    expect(r.restaked).toEqual([
+      { id: 'relift', from: 1278, to: 1278, fanSize: 1408 },
+      { id: 'less', from: 30, to: 20, fanSize: 40 },
+    ]);
+    expect(stopLines(r, 'origin/main')).toEqual([
+      'STOP    relift: 1278 of 1408 candidate(s) not compiled (1278 at origin/main, over sources that changed) — ' +
+        'check it: pnpm bench fan relift --whole',
+      'STOP    less: 20 of 40 candidate(s) not compiled (30 at origin/main, over sources that changed) — ' +
+        'check it: pnpm bench fan less --whole',
+      'stops vs origin/main: 0 row(s) newly stopped, 2 stopped over changed sources, 1 no longer stopped',
+    ]);
   });
 
   test('names a row whose stop appeared or grew, with the command that checks it', () => {
@@ -313,7 +346,7 @@ describe('compareStops', () => {
     expect(stopLines(r, 'origin/main')).toEqual([
       'STOP    new: 4 of 12 candidate(s) not compiled (none at origin/main) — check it: pnpm bench fan new --whole',
       'STOP    grew: 50 of 80 candidate(s) not compiled (10 at origin/main) — check it: pnpm bench fan grew --whole',
-      'stops vs origin/main: 2 row(s) newly stopped, 0 no longer stopped',
+      'stops vs origin/main: 2 row(s) newly stopped, 0 stopped over changed sources, 0 no longer stopped',
     ]);
   });
 
@@ -325,13 +358,13 @@ describe('compareStops', () => {
     expect(r.newly.map((c) => c.id)).toEqual(['added']);
     expect(r.lifted.map((c) => c.id)).toEqual(['gone', 'less']);
     expect(stopLines(r, 'origin/main').at(-1)).toBe(
-      'stops vs origin/main: 1 row(s) newly stopped, 2 no longer stopped',
+      'stops vs origin/main: 1 row(s) newly stopped, 0 stopped over changed sources, 2 no longer stopped',
     );
   });
 
   test('nothing stopped anywhere is one line', () => {
     expect(stopLines(compareStops(out(row('a')), out(row('a'))), 'origin/main')).toEqual([
-      'stops vs origin/main: 0 row(s) newly stopped, 0 no longer stopped',
+      'stops vs origin/main: 0 row(s) newly stopped, 0 stopped over changed sources, 0 no longer stopped',
     ]);
   });
 });

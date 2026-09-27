@@ -113,6 +113,12 @@ export interface DecompilerResult {
    *  `fanSize`, so it is out of `bench diff`'s watched fields. Absent when every candidate was
    *  compiled, which is every row that is not stillborn. */
   fanNotCompiled?: number;
+  /** asmlift only, beside `fanNotCompiled`: a digest of the not-compiled candidates' sources, in
+   *  enumeration order, scratch paths scrubbed. The stop is a bet that the compiler refuses every
+   *  one of those TEXTS, so the bet is placed anew whenever one changes — including on a re-lift
+   *  that keeps the variation roster, and with it the count. `bench diff`'s STOP section reads it;
+   *  like the count it is a cost, never a verdict. */
+  fanNotCompiledDigest?: string;
   /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
    *  objdiff-score every candidate. The price `fanSize` predicts, as this machine actually
    *  paid it.

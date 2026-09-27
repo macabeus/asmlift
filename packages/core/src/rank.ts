@@ -286,6 +286,9 @@ export interface WithheldCandidate {
  *  this one, and a count that folded the two would report compiles that never ran. */
 export interface NotCompiledCandidate {
   variations: readonly string[];
+  /** the text the stop bet the compiler would refuse: a stop is re-placed whenever it changes, and
+   *  the benchmark keys its STOP report on it (`fanNotCompiledDigest`) */
+  source: string;
 }
 
 /** EVERY candidate refused — `rankBy` has no ranked result to return, so it throws this.
@@ -2291,7 +2294,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
         `The default candidate's compile: ${fullMessage(thrownAt(0))}`,
       stillborn.compiled.map((i) => ({ variations: candidates[i].variations, error: firstLine(thrownAt(i)) })),
       [],
-      stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations })),
+      stillborn.notCompiled.map((i) => ({ variations: candidates[i].variations, source: candidates[i].source })),
       { cause: thrownAt(0) },
     );
   }

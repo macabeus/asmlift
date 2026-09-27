@@ -284,7 +284,8 @@ what every gate this repo runs was blind to for three weeks. A row that stopped 
 as `vanished` with the count that left, not silently dropped from the total.
 
 Under them a **STOP** section names every row whose stillborn stop (core `stillborn.ts`) newly
-fires, or fires on more of its fan. The stop never compiles the rest of a fan it ends, so on those
+fires, fires on more of its fan, or fires over not-compiled sources that changed — a re-lift that
+keeps the variation roster keeps the count, and places the bet anew. The stop never compiles the rest of a fan it ends, so on those
 rows a false stop — a candidate that would have compiled, published as `noncompile` — looks exactly
 like a true one to every gate above. Run the command each `STOP` line prints,
 `pnpm bench fan <row> --whole`, and quote its `[whole]` line. Only exit 0 — `the stop held` —

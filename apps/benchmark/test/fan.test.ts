@@ -316,7 +316,10 @@ describe('--whole compiles the rest of a stopped fan', () => {
   const fan = ['unsigned', 'unsigned/flip-join', 'unsigned/unmerge', 'unsigned/flip-join/unmerge'].map((name) =>
     cand(name, 0, 0),
   );
-  const rest = [{ variations: ['unsigned', 'flip-join', 'unmerge'] }, { variations: ['unsigned', 'unmerge'] }];
+  const rest = [
+    { variations: ['unsigned', 'flip-join', 'unmerge'], source: '/* unsigned/flip-join/unmerge */' },
+    { variations: ['unsigned', 'unmerge'], source: '/* unsigned/unmerge */' },
+  ];
   const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
     if (c.variations.join('/') !== name) {
       throw new CompilerRejection('mwcceppc failed: pointer/array required');
@@ -394,7 +397,9 @@ describe('--whole compiles the rest of a stopped fan', () => {
   });
 
   it('refuses to pass over a candidate the enumeration no longer holds', () => {
-    expect(() => checkStop([{ variations: ['signed'] }], fan, scoreOnly('none'))).toThrow(/not in this enumeration/);
+    expect(() => checkStop([{ variations: ['signed'], source: '' }], fan, scoreOnly('none'))).toThrow(
+      /not in this enumeration/,
+    );
   });
 });
 
@@ -592,7 +597,7 @@ describe('noFanReport', () => {
         "The default candidate's compile: mwcceppc failed: #   Error:\n  indented compiler text",
       dropped,
       [],
-      [{ variations: ['unsigned', 'flip-join'] }],
+      [{ variations: ['unsigned', 'flip-join'], source: '' }],
     );
     const first = noFanReport('ac-decomp:f:mwcc_242_81', e).notes[0];
     expect(first.split('\n')).toEqual([

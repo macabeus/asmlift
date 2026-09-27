@@ -14,8 +14,9 @@ import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import type { ResolvedTarget } from '@asmlift/core/target';
 import { tallyFanVariations } from '@asmlift/core/variation-tokens';
 
-import { cachedExtractAsmData } from '../cache';
+import { cachedExtractAsmData, sha } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
+import { scrub } from '../report/committed';
 import type { Toolchain } from '../toolchains';
 import { compilerErrorLines } from './outcome';
 import { assessQuality } from './quality';
@@ -143,6 +144,14 @@ function refusedFan(e: unknown): RefusedFan | undefined {
     : undefined;
 }
 
+/** WHAT A STOP BET ON, as one short value: the not-compiled candidates' sources in enumeration
+ *  order, scratch paths scrubbed (a cold run re-mints them in embedded asm comments). The count
+ *  reads only the roster, so a re-lift that keeps the variation names keeps it too while every text
+ *  under the stop changes; this is what moves then. */
+export function notCompiledDigest(notCompiled: readonly NotCompiledCandidate[]): string {
+  return sha(notCompiled.map((n) => scrub(n.source)).join('\0')).slice(0, 16);
+}
+
 type RefusedFan = Pick<RankedResult, 'candidates' | 'dropped' | 'withheld'> & {
   notCompiled: NotCompiledCandidate[];
 };
@@ -247,7 +256,9 @@ export function runAsmlift(
       ...(fan === undefined ? {} : { fanSize: fanSize(fan), fanVariations: tallyFanVariations(fan) }),
       // …and how much of that fan was never compiled — a stillborn fan's cost is what it did NOT
       // spend, and `fanSize` alone would read as if every one of those had been.
-      ...(fan === undefined || fan.notCompiled.length === 0 ? {} : { fanNotCompiled: fan.notCompiled.length }),
+      ...(fan === undefined || fan.notCompiled.length === 0
+        ? {}
+        : { fanNotCompiled: fan.notCompiled.length, fanNotCompiledDigest: notCompiledDigest(fan.notCompiled) }),
       rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,

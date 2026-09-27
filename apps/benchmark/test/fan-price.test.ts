@@ -14,7 +14,7 @@ import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target
 import { parseVariation } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
-import { fanSize, fanSizeOfError, runAsmlift } from '../src/eval/asmlift';
+import { fanSize, fanSizeOfError, notCompiledDigest, runAsmlift } from '../src/eval/asmlift';
 import { comparableRow } from '../src/report/stale-check';
 import { costNote, rowLine } from '../src/run/runner';
 import type { Toolchain } from '../src/toolchains';
@@ -75,6 +75,26 @@ describe('fanSize (pure)', () => {
   });
 });
 
+// A stop is a bet over TEXTS, and the digest is what says the texts moved: a new source moves it, a
+// renamed variation with the same text does not, and neither does a scratch path a cold run
+// re-mints in an embedded asm comment.
+describe('notCompiledDigest (pure)', () => {
+  const rest = (a: string, b: string, names = ['x', 'y']) => [
+    { variations: [names[0]], source: a },
+    { variations: [names[1]], source: b },
+  ];
+  test('moves with any source, and with their order', () => {
+    const d = notCompiledDigest(rest('f(1);', 'f(2);'));
+    expect(notCompiledDigest(rest('f(1);', 'f(3);'))).not.toBe(d);
+    expect(notCompiledDigest(rest('f(2);', 'f(1);'))).not.toBe(d);
+    expect(notCompiledDigest(rest('f(1);f(2);', ''))).not.toBe(d);
+  });
+  test('reads neither the variation names nor a scratch path', () => {
+    const d = notCompiledDigest(rest('/* /tmp/asmlift-ranked-a1b2c3 */ f(1);', 'f(2);'));
+    expect(notCompiledDigest(rest('/* /tmp/asmlift-ranked-z9y8x7 */ f(1);', 'f(2);', ['p', 'q']))).toBe(d);
+  });
+});
+
 describe('fanSizeOfError (pure)', () => {
   // A row whose every spelling was refused is published `noncompile` and the ranking THREW — but
   // the fan is not unknown there, it rides on the error. Not recording it makes exactly the rows
@@ -84,7 +104,7 @@ describe('fanSizeOfError (pure)', () => {
       'no scorable candidate',
       [{ variations: ['a'], error: 'x' }],
       [{ variations: ['b'], score: 1, why: 'proof' }],
-      [{ variations: ['c'] }],
+      [{ variations: ['c'], source: 'void f(void) {}' }],
     );
     expect(fanSizeOfError(e)).toBe(3);
   });
@@ -161,8 +181,8 @@ describe('the ranked row records its own price', () => {
         ['unsigned', 'signed'].flatMap((sign) => probed.map((v) => ({ variations: [sign, ...v], error: ARITY }))),
         [],
         [
-          { variations: ['unsigned', 'raw-globals', 'unreduce'] },
-          { variations: ['signed', 'raw-globals', 'unreduce'] },
+          { variations: ['unsigned', 'raw-globals', 'unreduce'], source: 'void f(u32 a0) { g(a0, 1); }' },
+          { variations: ['signed', 'raw-globals', 'unreduce'], source: 'void f(s32 a0) { g(a0, 1); }' },
         ],
         { cause: new CompilerRejection(ARITY) },
       );
@@ -170,6 +190,14 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
     expect(r.fanNotCompiled).toBe(2);
+    // …and WHICH texts: the stop is re-placed whenever one of them changes, whatever the count
+    expect(r.fanNotCompiledDigest).toBe(
+      notCompiledDigest([
+        { variations: [], source: 'void f(u32 a0) { g(a0, 1); }' },
+        { variations: [], source: 'void f(s32 a0) { g(a0, 1); }' },
+      ]),
+    );
+    expect(r.fanNotCompiledDigest).toMatch(/^[0-9a-f]{16}$/);
     // the ENUMERATED count: the six that were compiled and the two that were not
     expect(r.fanSize).toBe(6 + 0 + 2);
     expect(r.fanVariations).toEqual({
@@ -189,6 +217,7 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.fanSize).toBe(1);
     expect(r).not.toHaveProperty('fanNotCompiled');
+    expect(r).not.toHaveProperty('fanNotCompiledDigest');
   });
 
   // A scorer that blew up is not a row that enumerated nothing.
