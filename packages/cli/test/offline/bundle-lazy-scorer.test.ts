@@ -22,7 +22,7 @@ test('the bundle reaches @matchkit/scoring only through a lazy dynamic import', 
   const lines = text.split('\n').filter((line) => line.includes('@matchkit/scoring'));
   expect(lines.length).toBeGreaterThan(0);
   for (const line of lines) {
-    expect(line).toMatch(/await import\("@matchkit\/scoring(\/node)?"\)/);
+    expect(line).toMatch(/await import\("@matchkit\/scoring(\/files)?"\)/);
     expect(line).toMatch(/^\s+/);
   }
 });

@@ -7,7 +7,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 import { decompileRanked, decompileRankedParallel, enumerateRanked } from '../../src/rank';
 
-vi.mock('@matchkit/scoring/node', async () => {
+vi.mock('@matchkit/scoring/files', async () => {
   const { EngineFailedError } = await import('@matchkit/scoring');
   return {
     releaseTarget: () => {},

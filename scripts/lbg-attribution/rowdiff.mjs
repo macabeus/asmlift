@@ -1,7 +1,7 @@
 // One-off residual dumper for the LoadBGTilemapData attribution study: two objects and a symbol
 // in, objdiff's aligned display rows out.
 //
-// The `file://` fetch shim below is COPIED from @matchkit/scoring's Node engine loader, which owns
+// The `file://` fetch shim below is COPIED from @matchkit/scoring's Node and Bun engine loader, which owns
 // it — objdiff-wasm pulls its sibling `objdiff.core.wasm` over fetch, and Node's fetch will not
 // read a `file://` URL. The copy keeps this a plain `.mjs`, runnable by `node` alone, which is how
 // the attribution docs hand it to a reader. objdiff-wasm is resolved from @matchkit/scoring, the

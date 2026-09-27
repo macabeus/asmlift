@@ -16,7 +16,7 @@ import type { CandidateCompiler } from './compile-command';
 // A DYNAMIC import, and it must stay one: the CLI bundle keeps @matchkit/scoring external, and
 // esbuild hoists an external's static import to the top of the bundle, loading the engine on every
 // command. bundle-lazy-scorer.test.ts guards it.
-const { releaseTarget, scoreFiles } = await import('@matchkit/scoring/node');
+const { releaseTarget, scoreFiles } = await import('@matchkit/scoring/files');
 const { EngineFailedError } = await import('@matchkit/scoring');
 
 export { EngineFailedError, releaseTarget, scoreFiles as scoreObjects };
