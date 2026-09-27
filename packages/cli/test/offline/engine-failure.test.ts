@@ -18,6 +18,8 @@ vi.mock('@matchkit/scoring/files', async () => {
 });
 
 const asm = readFileSync(join(import.meta.dirname, '../../../core/test/corpus/agbcc-clamp0.s'), 'utf8');
+// More than one candidate, so stopping after the first is observable.
+const fan = enumerateRanked('clamp0', asm, ARMV4T_AGBCC, {}).length;
 let compiles = 0;
 beforeEach(() => {
   compiles = 0;
@@ -27,12 +29,9 @@ const compile = (): string => {
   return '/nonexistent.o';
 };
 
-test('the fan has more than one candidate, so stopping at the first is observable', () => {
-  expect(enumerateRanked('clamp0', asm, ARMV4T_AGBCC, { compile }).length).toBeGreaterThan(1);
-});
-
 test('the serial ranking stops at the failure and throws it', () => {
   expect(() => decompileRanked('clamp0', asm, ARMV4T_AGBCC, '/nonexistent.o', { compile })).toThrow(EngineFailedError);
+  expect(fan).toBeGreaterThan(1);
   expect(compiles).toBe(1);
 });
 
@@ -43,5 +42,6 @@ test('the parallel ranking stops at the failure and throws it', async () => {
       worker: () => async () => compile(),
     }),
   ).rejects.toThrow(EngineFailedError);
+  expect(fan).toBeGreaterThan(1);
   expect(compiles).toBe(1);
 });
