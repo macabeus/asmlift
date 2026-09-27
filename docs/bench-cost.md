@@ -79,13 +79,13 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=105.8s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=109.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
   Use it before you launch a scoped run, not after. A `noncompile` row may carry
-  `fanNotCompiled` — its fan was declared stillborn (core `stillborn.ts`) and only the default and
-  one probe per variation were compiled — and prints as `fan=30240 (35 compiled)`: `fanSize` is
+  `fanNotCompiled` — its fan was declared stillborn (core `stillborn.ts`) and only each signedness
+  half's default and one probe per variation were compiled — and prints as `fan=30240 (35 compiled)`: `fanSize` is
   the enumerated count, `fanSize − fanNotCompiled` the compiled one, and the enumeration is the
   only part of `rank=` that scales with the first number.
 
@@ -136,24 +136,30 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-27**, taken at `0271538d`
-(`match/fadd-fpu-rebase`, on #260: single-precision hardware float on MIPS and PowerPC, 13 rows
-gained): the ranked pass alone is **1,107 s over 195 real rows** and **539 s over 799 synthetic
-rows**; wall clock was 370.9 s and 178.1 s on tiers that overlap, and **371.1 s** end to end (the
-CLI's own `Done in` line). Against `origin/main` it is **113 field changes over 18 rows**, fan
-**69,526 → 69,526 (1.00×)** over 981 comparable rows, while its ranked pass reads **1,743.3 s →
-1,643.6 s (0.94×)**, and 13 rows (2.1 s) rank here that declined at `origin/main`. The dearest
-single row is **141 s** on `kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own —
-a `noncompile` with a fan of 30,240, which is the figure to reach for when a scoped run looks cheap.
+Summed out of the committed artifact of **2026-09-27**, taken at `7d8c6c35`
+(`perf/noncompile-fan-stop`, on #262: the stillborn stop reads one surviving error per attempt and
+probes each signedness half as its own fan): the ranked pass alone is **1,168 s over 195 real
+rows** and **1,045 s over 799 synthetic rows**; wall clock was 462.5 s and 363.8 s on tiers that
+overlap, and **526.1 s** end to end (the CLI's own `Done in` line), at a load average of 7 to 17
+from neighbouring rounds. Against `origin/main` it is **1 field change over 1 row**, fan **69,539 →
+69,539 (1.00×)** over 994 comparable rows, while its ranked pass reads **1,645.6 s → 2,213.8 s
+(1.35×)** — the synthetic tier alone went 539 s → 1,045 s, on a branch that changes no candidate a
+synthetic row compiles, and the dearest synthetic row it named (`synthetic:sizebound:agbcc`, 1.8 s
+→ 60.0 s) ranks in 4.7 s scoped on the same tree. The dearest single row is **149 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — a `noncompile` with a fan
+of 30,240, which is the figure to reach for when a scoped run looks cheap.
 
-The artifact `origin/main` carried before this one, taken 2026-09-26 at `ca797b50`
-(`match/preupdate-exit-order`, #260), read **1,090 s over 195 real rows** and **653 s over 786
-synthetic rows**; wall clock was 363.4 s and 214.8 s, **363.6 s** end to end, and its dearest row
-was **132 s** on the same `kleod:PauseMenuScreenHandler:agbcc`, 12% of the tier. The one before it,
-taken at `a9f22e79` (#261), read 2,059 s over 195 real rows and 1,160 s over 782 synthetic rows;
-wall clock was 591.0 s and 400.5 s, 591.3 s end to end, and its dearest row was 248 s on
-`marioparty4:SceneMain:mwcc_242_81`, 12% of the tier. So fans that moved by at most 1% have been
-priced 1.66×, 0.54× and 0.94× on consecutive artifacts: the seconds are the box, not the branch.
+The artifact `origin/main` carried before this one, taken 2026-09-27 at `0271538d`
+(`match/fadd-fpu-rebase`, #262), read **1,107 s over 195 real rows** and **539 s over 799 synthetic
+rows**; wall clock was 370.9 s and 178.1 s, **371.1 s** end to end, and its dearest row was
+**141 s** on the same `kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. The one before it,
+taken 2026-09-26 at `ca797b50` (#260), read 1,090 s over 195 real rows and 653 s over 786 synthetic
+rows; wall clock was 363.4 s and 214.8 s, 363.6 s end to end, and its dearest row was 132 s on the
+same row, 12% of the tier. The one before that, taken at `a9f22e79` (#261), read 2,059 s over 195
+real rows and 1,160 s over 782 synthetic rows; wall clock was 591.0 s and 400.5 s, 591.3 s end to
+end, and its dearest row was 248 s on `marioparty4:SceneMain:mwcc_242_81`, 12% of the tier. So fans
+that moved by at most 1% have been priced 1.66×, 0.54×, 0.94× and 1.35× on consecutive artifacts:
+the seconds are the box, not the branch.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
