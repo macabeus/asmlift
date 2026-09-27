@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=135.2s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=107.8s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,14 +136,14 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-27**, taken at `71ac2409`
+Summed out of the committed artifact of **2026-09-27**, taken at `e3697562`
 (`perf/noncompile-fan-stop`, on #262: the stillborn stop reads one surviving error per attempt and
-probes each signedness half as its own fan): the ranked pass alone is **1,344 s over 195 real
-rows** and **664 s over 799 synthetic rows**; wall clock was 431.9 s and 218.7 s on tiers that
-overlap, and **432.1 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is
+probes each signedness half as its own fan): the ranked pass alone is **1,133 s over 195 real
+rows** and **598 s over 799 synthetic rows**; wall clock was 381.6 s and 197.2 s on tiers that
+overlap, and **381.7 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is
 **1 field change over 1 row**, fan **69,539 → 69,539 (1.00×)** over 994 comparable rows, while its
-ranked pass reads **1,645.6 s → 2,008.8 s (1.22×)**. The dearest single row is **179 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — a `noncompile` with a fan of
+ranked pass reads **1,645.6 s → 1,731.0 s (1.05×)**. The dearest single row is **141 s** on
+`kleod:PauseMenuScreenHandler:agbcc`, **12% of the tier** on its own — a `noncompile` with a fan of
 30,240, which is the figure to reach for when a scoped run looks cheap. That row compiled 35
 candidates at `origin/main` too and read 141 s there, which prices the box rather than the branch.
 
