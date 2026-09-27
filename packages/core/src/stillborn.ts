@@ -88,9 +88,15 @@
 // Asking one surviving message per attempt, rather than every message, leaves these the same cases
 // in more fans: whatever the probes did to the other errors, the survivor is the one a product
 // would have to move, and the stop can rest on a single message — pikmin's `getCardStatus` stops on
-// one survivor in its vendored C++ attempt, the only one a C++ candidate can compile in. No
-// variation in the vocabulary re-types an operand or cures half a statement today; a variation that
-// does must revisit this rule.
+// one survivor in its vendored C++ attempt, the only one a C++ candidate can compile in.
+//
+// Signedness re-types operands, and on that same row it cures half a statement: the declared
+// prototype is `CARDGetSectorSize(long, unsigned long *)`, and `signed` turns the call's
+// `(unsigned long, long *)` into `(long, long *)` — the first argument cured, the second kept, one
+// message either way. That is the JOINT CURE shape, and HALF BY HALF is what closes it for
+// signedness: a half holds its signedness fixed, so no probe or product in it re-types by
+// signedness. Any OTHER variation that re-types an operand or cures half a statement must revisit
+// this rule.
 //
 // ONE COPY. Probe selection and the verdict are pure functions over indices, so the sync driver
 // (rank.ts `rankBy`), the pooled CLI driver and the webapp's async loop all sequence their own
