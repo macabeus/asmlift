@@ -322,7 +322,7 @@ describe('--whole compiles the rest of a stopped fan', () => {
   ];
   const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
     if (c.variations.join('/') !== name) {
-      throw new CompilerRejection('mwcceppc failed: pointer/array required');
+      throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
     }
     return cand(name, 3, 20).score;
   };
@@ -368,11 +368,28 @@ describe('--whole compiles the rest of a stopped fan', () => {
     expect(report.notes.join('\n')).not.toContain('the stop held');
   });
 
+  // A Docker CLI that cannot reach its daemon exits 1, as a refusing compiler does, so the harness
+  // throws a CompilerRejection whose text holds no error: read as a refusal, a check run while the
+  // daemon was down would print "the stop held", exit 0.
+  it('never counts a rejection that prints no error as refused: the stop is UNCHECKED, exit 3', () => {
+    const daemonGone = () => {
+      throw new CompilerRejection(
+        'mwcceppc failed',
+        'failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if ' +
+          'the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory',
+      );
+    };
+    const check = checkStop(rest, fan, daemonGone);
+    expect(check.refused).toBe(0);
+    expect(check.unchecked).toHaveLength(2);
+    expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
+  });
+
   it('one transient among refusals still leaves the stop unchecked', () => {
     let n = 0;
     const check = checkStop(rest, fan, () => {
       if (n++ === 0) {
-        throw new CompilerRejection('mwcceppc failed: pointer/array required');
+        throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
       }
       throw new Error('spawnSync docker ETIMEDOUT');
     });

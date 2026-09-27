@@ -34,7 +34,7 @@ import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, NotCompiledCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
-import { refusedByCompiler } from '@asmlift/core/stillborn';
+import { readableRefusal } from '@asmlift/core/stillborn';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { joinVariations, splitVariations } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
@@ -133,7 +133,7 @@ export interface FanOptions {
    *  asking for the compiles the guard would otherwise ask about, and the biggest stopped fans are
    *  over the limit (`kleod:PauseMenuScreenHandler:agbcc`, 30,240). And it exits 0 ONLY when the
    *  stop held: a false stop, an unchecked candidate and a fan no stop ended each exit non-zero, and
-   *  `pnpm` reports every non-zero exit as 1, so the `[whole]` line says which. */
+   *  `pnpm -s` reports every non-zero exit as 1, so the `[whole]` line says which. */
   whole?: boolean;
   /** What the user typed for `--toolchain` and `--asm`. Carried here ONLY so `optionRefusal` can
    *  see the pair: the row path takes its toolchain from the row id and never reads either, which
@@ -673,10 +673,10 @@ export interface StopCheck {
   compiled: { variations: readonly string[]; score: MatchScore }[];
   /** how many of the rest the compiler refused */
   refused: number;
-  /** every candidate of the rest whose compile threw something that is no refusal — a killed
-   *  compiler, a Docker outage, a timeout — with the first line of what it threw. The stop is not
-   *  checked on them: such a throw says nothing about the candidate (core stillborn.ts
-   *  `refusedByCompiler`, the test the rule itself reads a probe with). */
+  /** every candidate of the rest whose compile threw something that is no readable refusal — a
+   *  killed compiler, a Docker outage, a timeout — with the first line of what it threw. The stop is
+   *  not checked on them: such a throw says nothing about the candidate (core stillborn.ts
+   *  `readableRefusal`, the test the rule itself reads a probe with). */
   unchecked: { variations: readonly string[]; error: string }[];
 }
 
@@ -701,7 +701,7 @@ export function checkStop(
     try {
       check.compiled.push({ variations: n.variations, score: score(candidate) });
     } catch (e) {
-      if (refusedByCompiler(e)) {
+      if (readableRefusal(e)) {
         check.refused++;
       } else {
         check.unchecked.push({
@@ -726,8 +726,8 @@ export function stopCheckReport(rowId: string, check: StopCheck): { fan: string[
   );
   const uncheckedNote =
     `${check.unchecked.length} of the ${total} candidate(s) the stillborn stop did not compile never reached ` +
-    `the compiler's verdict: each threw something that is no refusal (a killed compiler, a Docker outage, a ` +
-    `timeout), which says nothing about the candidate`;
+    `the compiler's verdict: each threw something that is no readable refusal (a killed compiler, a Docker ` +
+    `outage, a timeout), which says nothing about the candidate`;
   if (check.compiled.length > 0) {
     return {
       fan: [

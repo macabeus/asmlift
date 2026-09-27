@@ -165,14 +165,16 @@ interface Reading {
   errors: Map<string, number>[];
 }
 
-/** Whether a throw is the compiler REFUSING the text: a `CompilerRejection`. Any other throw — a
- *  killed compiler, a Docker outage, a timeout — says nothing about the candidate. The rule reads a
- *  probe through it, and so does whatever checks the rule's bet by compiling a stopped fan's rest
- *  (the benchmark's `bench fan --whole`): a second test there could count a transient as a refusal. */
-export const refusedByCompiler = (thrown: unknown): thrown is CompilerRejection => thrown instanceof CompilerRejection;
+/** Whether a throw is the compiler REFUSING the text, read as the rule reads a probe: a
+ *  `CompilerRejection` whose every attempt prints an error the rule reads. Any other throw — a
+ *  killed compiler, a timeout — says nothing about the candidate, and neither does a rejection
+ *  that prints no such error: a Docker CLI that cannot reach its daemon exits 1, as a refusing
+ *  compiler does. Whatever checks the rule's bet by compiling a stopped fan's rest (the
+ *  benchmark's `bench fan --whole`) counts a refusal through this test, never a second one. */
+export const readableRefusal = (thrown: unknown): boolean => readingOf({ thrown }) !== null;
 
 function readingOf(outcome: ProbeOutcome): Reading | null {
-  if (outcome === 'compiled' || !refusedByCompiler(outcome.thrown)) {
+  if (outcome === 'compiled' || !(outcome.thrown instanceof CompilerRejection)) {
     return null;
   }
   const attempts = attemptsOf(outcome.thrown.diagnostic);
