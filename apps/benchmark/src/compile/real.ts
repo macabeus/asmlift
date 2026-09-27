@@ -6,7 +6,7 @@
 // the compiler's actual input, frozen — so the runner needs no project checkouts. The target and every
 // candidate compile at the row's codegen flags (`Case.codegen`).
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
+import { type Attempt, CompilerRejection, joinAttempts } from '@asmlift/core/compiler-diagnostics';
 import { macroDefinesOf } from '@asmlift/core/declare';
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
@@ -279,14 +279,14 @@ export function ladderCompile(
     // C++ candidate handed to the C parser fails on the word `class` — a diagnostic about the harness's
     // ladder, not about the decompiler's output.
     const failed = new Map<'c' | 'c++', Error>();
-    // EVERY rung's diagnostic, for the ranking driver's stillborn rule. That rule compares what two
-    // candidates were rejected FOR, and the richest rung alone cannot say: when it fails for a reason
-    // the candidate has no hand in — the corpus's shape is cpp's `global.h: No such file or
-    // directory` — every candidate carries its one sentence, the fan reads as rejected "for the same
-    // reason", and the product of two variations that each cure one of the poorer rung's errors is
-    // never compiled. The comparison is over the whole ladder, so a dead rung is a constant term
-    // and any rung a variation reaches still tells the candidates apart.
-    const rejections: string[] = [];
+    // EVERY rung's diagnostic, one ATTEMPT each (core `joinAttempts`), for the ranking driver's
+    // stillborn rule. That rule compares what two candidates were rejected FOR, and the richest rung
+    // alone cannot say: when it fails for a reason the candidate has no hand in — the corpus's shape
+    // is cpp's `global.h: No such file or directory` — every candidate carries its one sentence, the
+    // fan reads as rejected "for the same reason", and the product of two variations that each cure
+    // one of the poorer rung's errors is never compiled. The rule reads the attempts apart, so a
+    // dead rung stops no fan that another rung still tells apart.
+    const rejections: Attempt[] = [];
     let transient = false;
     const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
     const richest = richestRung(tu, ladder);
@@ -304,7 +304,7 @@ export function ladderCompile(
           // driver's stillborn rule treats it as the transient it is.
           transient ||= !(e instanceof CompilerRejection);
           if (e instanceof CompilerRejection) {
-            rejections.push(`--- ${rung.name} (${dialect}) ---\n${e.diagnostic}`);
+            rejections.push({ label: `${rung.name} (${dialect})`, diagnostic: e.diagnostic });
           }
           if (rung === richest) {
             failed.set(dialect, e instanceof Error ? e : new Error(String(e)));
@@ -322,7 +322,7 @@ export function ladderCompile(
     if (transient) {
       throw new Error(lastErr.message);
     }
-    throw new CompilerRejection(lastErr.message, rejections.join('\n'));
+    throw new CompilerRejection(lastErr.message, joinAttempts(rejections));
   };
 }
 

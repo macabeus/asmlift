@@ -8,7 +8,7 @@
 //
 // Over a fake compile module: the corpus's nine dead-prelude rows all have their richest rung
 // alive, so no committed row can referee this, and a synthetic row has no ladder at all.
-import { CompilerRejection, errorKey } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, attemptsOf, errorKey, errorMessages } from '@asmlift/core/compiler-diagnostics';
 import { NoScorableCandidateError, rankBy } from '@asmlift/core/rank';
 import { expect, test } from 'vitest';
 
@@ -110,6 +110,34 @@ test('the published message stays the richest rung’s: the world the candidate 
   expect(e.diagnostic).toContain('--- + manifest prependC (c) ---');
   expect(e.diagnostic).toContain('--- vendored ctx (c) ---');
   expect(e.diagnostic).toContain("too many arguments to function `g'");
+});
+
+test('a C++ row’s rejection splits back into its six attempts, in the order the ladder tried them', () => {
+  const compile = ladderCompile(fakeAgbcc([]), [], 'assembled', PREPEND_C, DEAD_CTX, 'c++');
+  let thrown: unknown;
+  try {
+    compile(fan()[0].source, 'f');
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(CompilerRejection);
+  const attempts = attemptsOf((thrown as CompilerRejection).diagnostic);
+  expect(attempts.map((a) => a.label)).toEqual([
+    'bare typedefs (c++)',
+    '+ manifest prependC (c++)',
+    'vendored ctx (c++)',
+    'bare typedefs (c)',
+    '+ manifest prependC (c)',
+    'vendored ctx (c)',
+  ]);
+  // each attempt holds what ITS rung said, and nothing another rung said
+  expect(attempts.map((a) => errorMessages(a.diagnostic))).toEqual(
+    [0, 1].flatMap(() => [
+      ['dereferencing pointer to incomplete type'],
+      ["too many arguments to function `g'", "too many arguments to function `h'"],
+      ['global.h: No such file or directory'],
+    ]),
+  );
 });
 
 test('a fan whose every rung is dead for one reason is still stillborn', () => {
