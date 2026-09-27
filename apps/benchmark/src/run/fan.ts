@@ -594,11 +594,23 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
   const dropped: DroppedCandidate[] = nsc?.dropped ?? [];
   const withheld: WithheldCandidate[] = nsc?.withheld ?? [];
   const message = e instanceof Error ? e.message : String(e);
-  const first = message.split('\n')[0];
+  const lines = message.split('\n');
+  // A stillborn fan's sentence ends in `errors:` and lists its survivors on the indented lines
+  // under it (core rank.ts `stillbornNote`) — the stop's evidence, and what a reader checks it by.
+  // Any other message's second line is the compiler's own text, which the drop list carries.
+  const survivors: string[] = [];
+  if (nsc !== undefined && nsc.notCompiled.length > 0) {
+    for (const line of lines.slice(1)) {
+      if (!line.startsWith('  ')) {
+        break;
+      }
+      survivors.push(line);
+    }
+  }
 
   const notes: string[] = [];
   const harnessDefect = nsc === undefined && !(e instanceof NoSpellableCandidateError) && !isDecline(e);
-  notes.push(`asmlift: [fan] no fan for ${rowId}: ${first}`);
+  notes.push(`asmlift: [fan] no fan for ${rowId}: ${[lines[0], ...survivors].join('\n')}`);
   if (nsc !== undefined) {
     // Count BOTH lists. `rankBy` has a reachable all-withheld branch ("N candidate(s) withheld,
     // none scored"), where a dropped-only count reads "the 0 [dropped] line(s) above ARE this

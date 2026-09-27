@@ -581,6 +581,39 @@ describe('noFanReport', () => {
     expect(r.harnessDefect).toBe(false);
   });
 
+  // A stillborn fan's survivors are the lines after its first, and they are the stop's evidence:
+  // cut to one line, the note promised them ("…every probe keeping one of its default's errors:")
+  // and printed none. The default's own diagnostic after them is not repeated.
+  it('prints a stillborn fan`s survivors under its sentence, and not the default`s diagnostic', () => {
+    const e = new NoScorableCandidateError(
+      "no scorable candidate for 'f': 4 of 12 candidates were NOT COMPILED: … keeping one of its default's errors:\n" +
+        "  function call 'g(unsigned long)' does not match\n" +
+        "  function call 'g(long)' does not match (x2)\n" +
+        "The default candidate's compile: mwcceppc failed: #   Error:\n  indented compiler text",
+      dropped,
+      [],
+      [{ variations: ['unsigned', 'flip-join'] }],
+    );
+    const first = noFanReport('ac-decomp:f:mwcc_242_81', e).notes[0];
+    expect(first.split('\n')).toEqual([
+      "asmlift: [fan] no fan for ac-decomp:f:mwcc_242_81: no scorable candidate for 'f': 4 of 12 candidates were NOT COMPILED: … keeping one of its default's errors:",
+      "  function call 'g(unsigned long)' does not match",
+      "  function call 'g(long)' does not match (x2)",
+    ]);
+  });
+
+  it('keeps one line for a fan every candidate of which was compiled', () => {
+    const e = new NoScorableCandidateError(
+      "no scorable candidate for 'f': agbcc failed\n  c.c:3: error",
+      dropped,
+      [],
+      [],
+    );
+    expect(noFanReport('sa3:f:agbcc', e).notes[0]).toBe(
+      "asmlift: [fan] no fan for sa3:f:agbcc: no scorable candidate for 'f': agbcc failed",
+    );
+  });
+
   // The all-withheld branch of core's `rankBy` ("N candidate(s) withheld, none scored") is
   // reachable, and a dropped-only count reads "the 0 [dropped] line(s) above ARE this row's fan"
   // printed directly under N withheld lines.
