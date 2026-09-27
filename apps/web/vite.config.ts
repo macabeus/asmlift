@@ -1,6 +1,15 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { defineConfig } from 'vite';
+
+// Where objdiff-wasm really is, resolved the way @matchkit/scoring resolves it. With a local matchkit
+// linked in (its CONTRIBUTING.md), that is inside the matchkit checkout, outside this workspace, and
+// the dev server would refuse to serve the .wasm.
+const scoring = realpathSync(join(import.meta.dirname, 'node_modules/@matchkit/scoring'));
+const objdiffWasm = dirname(createRequire(join(scoring, 'package.json')).resolve('objdiff-wasm'));
 
 export default defineConfig({
   // GitHub Pages project-site subpath (e.g. VITE_BASE_URL=/asmlift/); "/" for local dev.
@@ -21,6 +30,7 @@ export default defineConfig({
   // The production bundle must allow top-level await (objdiff-wasm) — ES2022 is the TLA baseline
   // and is satisfied by every browser that can run WebAssembly components anyway.
   build: { target: 'es2022' },
-  // Dev server reads the symlinked core sources + the corpus examples outside the app root.
-  server: { fs: { allow: ['../..'] } },
+  // Dev server reads the symlinked core sources + the corpus examples outside the app root, and the
+  // objdiff wasm wherever it is.
+  server: { fs: { allow: ['../..', objdiffWasm] } },
 });

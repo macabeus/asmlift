@@ -11,7 +11,14 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import { type MatchScore, type Scorer, type Target, createScorer, loadEngine } from '@matchkit/scoring';
+import {
+  EngineFailedError,
+  type MatchScore,
+  type Scorer,
+  type Target,
+  createScorer,
+  loadEngine,
+} from '@matchkit/scoring';
 import { assemble, compileToObject } from 'agbcc';
 
 import { toolFailureLine } from './candidate-compile';
@@ -174,14 +181,9 @@ export async function rankCandidatesInBrowser(
   // number compiled, so the phase still ends on a full bar rather than a bar that stops short.
   let total = candidates.length;
   // The target is parsed ONCE and every candidate is scored against it. A target the engine cannot
-  // parse fails each candidate with that error, exactly as parsing it per candidate did.
+  // parse would fail every candidate with the same error, so the ranking ends before compiling any.
   const scorer = await loadScorer();
-  let parsedTarget: Target | Error;
-  try {
-    parsedTarget = scorer.parseTarget(t.obj);
-  } catch (e) {
-    parsedTarget = e instanceof Error ? e : new Error(String(e));
-  }
+  const parsedTarget: Target | null = total > 0 ? scorer.parseTarget(t.obj) : null;
   const score = async (i: number): Promise<void> => {
     const c = candidates[i];
     // `outcomes.size` is how many candidates are FINISHED, and the tick is emitted at the top so
@@ -202,11 +204,12 @@ export async function rankCandidatesInBrowser(
           ? new Error(failure)
           : new CompilerRejection(failure, cc.stderr);
       }
-      if (parsedTarget instanceof Error) {
-        throw parsedTarget;
-      }
-      outcomes.set(c.source, scorer.score(parsedTarget, cc.obj, name));
+      outcomes.set(c.source, scorer.score(parsedTarget!, cc.obj, name));
     } catch (e) {
+      // a dead engine is no candidate's fault, and it fails every score after it: it ends the ranking
+      if (e instanceof EngineFailedError) {
+        throw e;
+      }
       outcomes.set(c.source, e instanceof Error ? e : new Error(String(e)));
     }
   };
@@ -233,9 +236,7 @@ export async function rankCandidatesInBrowser(
       }
     }
   } finally {
-    if (!(parsedTarget instanceof Error)) {
-      parsedTarget.dispose();
-    }
+    parsedTarget?.dispose();
   }
   emit({ phase: 'scoring', done: outcomes.size, total });
   // The scoring phase ends by CHANGING PHASE, never by sitting at done === total: the sort and the

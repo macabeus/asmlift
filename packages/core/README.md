@@ -75,8 +75,8 @@ Everything under `src/` is importable as `@asmlift/core/<path>` (e.g.
 
 Three ISA frontends (ARMv4T/Thumb, MIPS, PowerPC), four compiler families (`agbcc`, `ido`, `gcc`,
 `mwcc` — `codegen-flags.ts`'s `FlagFamily`) over seven target keys, three language backends over one neutral AST — all scored across the package seam
-by [`@asmlift/cli`](../cli/README.md) with the community `objdiff` engine (in-process, pinned
-`objdiff-wasm`; asmlift never hand-rolls a diff).
+by [`@asmlift/cli`](../cli/README.md) with the community `objdiff` engine (in-process through
+`@matchkit/scoring`, pinned `objdiff-wasm`; asmlift never hand-rolls a diff).
 
 ### The pipeline (`decompile()` in `pipeline.ts`)
 

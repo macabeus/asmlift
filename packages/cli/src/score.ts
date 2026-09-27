@@ -10,11 +10,17 @@
 // register themselves when imported; they are deliberately NOT part of this npm package.
 import { TargetDescription } from '@asmlift/core/target';
 import type { MatchScore } from '@matchkit/scoring';
-import { scoreFiles } from '@matchkit/scoring/node';
 
 import type { CandidateCompiler } from './compile-command';
 
-export { releaseTarget, scoreFiles as scoreObjects } from '@matchkit/scoring/node';
+// A DYNAMIC import, and it must stay one. The CLI bundle keeps @matchkit/scoring external, and
+// esbuild hoists an external's static import to the top of the bundle, so the engine would load
+// (and could fail) on every command. Awaited here, it loads with this module, which main.ts
+// reaches through a dynamic `import()` on the ranked path alone.
+const { releaseTarget, scoreFiles } = await import('@matchkit/scoring/node');
+const { EngineFailedError } = await import('@matchkit/scoring');
+
+export { EngineFailedError, releaseTarget, scoreFiles as scoreObjects };
 export type { DiffBreakdown, MatchScore } from '@matchkit/scoring';
 export type { CandidateCompiler } from './compile-command';
 

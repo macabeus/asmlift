@@ -6,6 +6,7 @@
 // request and echoes its id back.
 import { NoScorableCandidateError } from '@asmlift/core/rank';
 import { joinVariations } from '@asmlift/core/variation-tokens';
+import { EngineFailedError } from '@matchkit/scoring';
 
 import { throttleProgress, whileCurrent } from './rank-progress';
 import {
@@ -67,10 +68,14 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
       kind: 'result',
       reqId,
       ok: false,
-      error: err instanceof Error ? `${err.message}${refusalSummary(err)}` : String(err),
+      error: err instanceof Error ? `${err.message}${refusalSummary(err)}${engineHint(err)}` : String(err),
     } satisfies RankResponse);
   }
 };
+
+/** The engine is loaded once per worker, and the worker lives as long as the page. */
+const engineHint = (err: Error): string =>
+  err instanceof EngineFailedError ? '. Reload the page to load a new one.' : '';
 
 /** The counts and the first few refused candidates' variations off a total refusal, appended to the message because the
  *  message is all the worker protocol carries. Empty for every other error. */

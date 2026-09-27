@@ -57,14 +57,17 @@ themselves and report "0 lost, 0 gained" without having executed a single row.
 2. Keep cli's dependency on core at `workspace:^` — it publishes as `^<version>`.
 3. `pnpm install` to sync the lockfile (CI runs `--frozen-lockfile`).
 4. Verify the tarballs: `pnpm pack` in each package, and inspect `package/package.json`'s deps.
-5. Publish **core first, cli second** — cli depends on core:
+5. Check that the `@matchkit/scoring` version cli and `apps/web` declare is on npm. It is released
+   from its own repository (`macabeus/matchkit`), so a bump there is published before the asmlift
+   release that uses it.
+6. Publish **core first, cli second** — cli depends on core:
 
    ```
    pnpm --filter @asmlift/core publish --access public --otp=<code>
    pnpm --filter @asmlift/cli  publish --access public --otp=<code>
    ```
 
-6. `git tag -a vX.Y.Z <release-commit>` and push the tag.
+7. `git tag -a vX.Y.Z <release-commit>` and push the tag.
 
 ### 2FA
 
