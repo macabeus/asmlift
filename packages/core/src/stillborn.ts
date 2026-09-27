@@ -33,17 +33,18 @@
 // a product leaves it alone.
 //
 // A probe rejected with the default's whole multiset of errors leaves every message a survivor. The
-// rule also stops a fan whose variations DO reach some of its errors — `/setup-args` curing a
-// call's arity — while another error stays where it was in every probe: pikmin's C++
-// `setMatMatrices`, once it lifted, compiled all 768 candidates for a `GXLoadTexMtxImm` argument no
-// variation re-types.
+// rule also stops a fan whose variations DO reach some of its errors while another error stays
+// where it was in every probe: in `ac-decomp:aINS_destruct:mwcc_242_81`'s vendored-context attempt
+// `/setup-args` cures the call to `mPlib_Get_item_net_catch_label`, both `illegal implicit
+// conversion` errors stay, and the fan of 12 stops after 8 compiles — a rule that asked every probe
+// for the default's whole multiset would rank it whole.
 //
 // HALF BY HALF. Every fan is enumerated at BOTH signednesses (variation-tokens.ts, kind
 // `signedness`), and a signedness re-types the whole body: every type a message quotes changes
-// with it, so the one error a statement no variation reaches is refused with is worded twice —
-// `CARDGetSectorSize(unsigned long, long *)` does not match, and `CARDGetSectorSize(long, long *)`
-// does not. Asked over the whole fan, no message survives the `signed` probe, and
-// pikmin's `getCardStatus` compiled all 1,408 candidates. So each signedness HALF is asked as a fan
+// with it, so the one error a statement no variation reaches is refused with is worded twice — an
+// `illegal implicit conversion` to `struct game_s *` names `unsigned long` in one half and `long` in
+// the other. Asked over the whole fan, no message of `ac-decomp:aINS_destruct:mwcc_242_81`'s vendored-context attempt
+// survives the `signed` probe, and the fan is ranked whole. So each signedness HALF is asked as a fan
 // of its own: its first candidate is its default, its probes are the smallest carrier of each
 // variation name INSIDE it, and the fan is stillborn only when every half is. A half is found by
 // the registry's kind, never by a name, and a fan with no signedness in its names is one half.
@@ -76,27 +77,22 @@
 //
 // INTERACTION: a variation whose reach depends on another. A respell runs over whatever tree the
 // structure variations built, so a structure variation × respell product re-spells statements
-// neither of its probes touched. On
-// `pikmin:setMatMatrices__11DGXGraphicsFP8Materiali:mwcc_233_163n`, once it lifted, `/unmerge`
-// copies a join's call into both arms only on the `/flip-join` tree: the default, the `/flip-join`
-// probe and the `/unmerge` probe each print `pointer/array required` nine times in the vendored C
-// attempt, their product ten. That product moved the survivor UP, which keeps it an error; one that
-// moved it to zero, leaving no other error, would be a candidate that compiles and that the stop
-// never compiles. Compiled whole, 156 of each half's 384 candidates moved some survivor, and every
-// one kept another at the default's count.
+// neither of its probes touched: `/unmerge` copies a join's call into both arms only on the
+// `/flip-join` tree, so their product can print a message more often than the default and either
+// probe do. A product that moves a survivor UP keeps it an error; one that moved it to zero, leaving
+// no other error, would be a candidate that compiles and that the stop never compiles.
 //
 // Asking one surviving message per attempt, rather than every message, leaves these the same cases
 // in more fans: whatever the probes did to the other errors, the survivor is the one a product
-// would have to move, and the stop can rest on a single message — pikmin's `getCardStatus` stops on
-// one survivor in its vendored C++ attempt, the only one a C++ candidate can compile in.
+// would have to move, and the stop can rest on a single message in the one attempt a candidate
+// could compile in.
 //
-// Signedness re-types operands, and on that same row it cures half a statement: the declared
-// prototype is `CARDGetSectorSize(long, unsigned long *)`, and `signed` turns the call's
-// `(unsigned long, long *)` into `(long, long *)` — the first argument cured, the second kept, one
-// message either way. That is the JOINT CURE shape, and HALF BY HALF is what closes it for
-// signedness: a half holds its signedness fixed, so no probe or product in it re-types by
-// signedness. Any OTHER variation that re-types an operand or cures half a statement must revisit
-// this rule.
+// Signedness re-types operands, and so can cure half a statement: against a declared
+// `CARDGetSectorSize(long, unsigned long *)`, `signed` turns a call's `(unsigned long, long *)` into
+// `(long, long *)` — the first argument cured, the second kept, one message either way. That is the
+// JOINT CURE shape, and HALF BY HALF is what closes it for signedness: a half holds its signedness
+// fixed, so no probe or product in it re-types by signedness. Any OTHER variation that re-types an
+// operand or cures half a statement must revisit this rule.
 //
 // ONE COPY. Probe selection and the verdict are pure functions over indices, so the sync driver
 // (rank.ts `rankBy`), the pooled CLI driver and the webapp's async loop all sequence their own
