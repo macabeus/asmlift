@@ -16,7 +16,7 @@ import {
   enumerateCandidates,
   rankBy,
 } from '@asmlift/core/rank';
-import { type ProbeOutcome, defaultIsKeyedRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
+import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
@@ -230,7 +230,7 @@ export async function decompileRankedParallel(
   if (candidates.length > 0) {
     await pool([0]);
     let rest = candidates.map((_, i) => i).slice(1);
-    if (defaultIsKeyedRejection(outcomeOf(0)!)) {
+    if (defaultIsReadableRejection(outcomeOf(0)!)) {
       const probes = probeIndices(candidates);
       await pool(probes);
       const tried = new Set(probes);

@@ -138,16 +138,6 @@ export function verdictMessages(diagnostic: string): string[] | null {
   return messages.length === 0 ? null : messages;
 }
 
-/** WHAT a failed compile failed ON, as a value two compiles can be compared by: the MULTISET of
- *  its error messages, positions normalised away. A multiset, not a set — two calls with too many
- *  arguments are two errors, and a variation that repairs one of them has changed the answer.
- *  Null when no error is recognised, and null when the compiler stopped reporting: an unreadable
- *  or unfinished diagnostic equals nothing, itself included. */
-export function errorKey(diagnostic: string): string | null {
-  const messages = verdictMessages(diagnostic);
-  return messages === null ? null : JSON.stringify([...messages].sort());
-}
-
 /** One compile ATTEMPT inside a diagnostic that holds several: what the harness called the
  *  attempt, and what the compiler printed for it. */
 export interface Attempt {

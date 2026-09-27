@@ -18,7 +18,7 @@ import { cBackend } from '@asmlift/core/backend/c';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
 import { type RankedResult, type RefusedDeclarationReason, enumerateCandidates, rankBy } from '@asmlift/core/rank';
-import { type ProbeOutcome, defaultIsKeyedRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
+import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornVerdict } from '@asmlift/core/stillborn';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
@@ -322,7 +322,7 @@ export async function rankCandidatesInBrowser(
   if (total > 0) {
     await score(0);
     let rest = candidates.map((_, i) => i).slice(1);
-    if (defaultIsKeyedRejection(outcomeOf(0)!)) {
+    if (defaultIsReadableRejection(outcomeOf(0)!)) {
       const probes = probeIndices(candidates);
       for (const i of probes) {
         await score(i);

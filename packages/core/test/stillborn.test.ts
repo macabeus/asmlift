@@ -108,7 +108,7 @@ test('two DIFFERENT errors, each cured by its own variation: only the product co
   expect(compiled).toHaveLength(candidates.length);
 });
 
-test('a rejection whose diagnostic holds no readable error has no key, so nothing is skipped', () => {
+test('a rejection whose diagnostic holds no readable error is unread, so nothing is skipped', () => {
   const candidates = fan(['a', 'b']);
   const { run, compiled } = rank(candidates, () => {
     throw new CompilerRejection('cc failed: exit 1', 'Segmentation fault');

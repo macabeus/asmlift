@@ -1,6 +1,6 @@
 // The candidate-compile command factory (src/compile-command.ts) — the seam a project fills
 // with its own toolchain. Offline: the "compilers" here are plain sh commands.
-import { CompilerRejection, errorKey } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, verdictMessages } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -292,7 +292,7 @@ test("a rejection's diagnostic is the compiler's output alone, never the command
   const e = thrown as CompilerRejection;
   expect(e.message).toMatch(/exit 1[\s\S]*error: boom/);
   expect(e.diagnostic).toBe('<scratch>/cand.c:1: error: boom');
-  // a compiler that said nothing keys nothing, whatever the template's own text spells
+  // a compiler that said nothing is read as nothing, whatever the template's own text spells
   const silent = compileFromCommand('false # x.c:1: error: not the compiler ; {{inputPath}} {{outputPath}}');
   try {
     silent('int x;', 'f', 'c');
@@ -300,7 +300,7 @@ test("a rejection's diagnostic is the compiler's output alone, never the command
   } catch (e2) {
     expect(e2).toBeInstanceOf(CompilerRejection);
     expect((e2 as CompilerRejection).diagnostic).toBe('');
-    expect(errorKey((e2 as CompilerRejection).diagnostic)).toBeNull();
-    expect(errorKey((e2 as CompilerRejection).message)).not.toBeNull();
+    expect(verdictMessages((e2 as CompilerRejection).diagnostic)).toBeNull();
+    expect(verdictMessages((e2 as CompilerRejection).message)).not.toBeNull();
   }
 });

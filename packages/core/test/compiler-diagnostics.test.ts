@@ -1,7 +1,7 @@
 // What counts as an ERROR in a compiler's output, and when two failed compiles failed the same way.
 import { expect, test } from 'vitest';
 
-import { attemptsOf, errorKey, errorMessages, errorsFirst, joinAttempts } from '../src/compiler-diagnostics';
+import { attemptsOf, errorMessages, errorsFirst, joinAttempts, verdictMessages } from '../src/compiler-diagnostics';
 
 const AGBCC = [
   "c.c: In function `PauseMenuScreenHandler':",
@@ -36,20 +36,20 @@ test('the error messages of a pre-3.0 gcc diagnostic: no banner, no warning, no 
   ]);
 });
 
-test('the key is a MULTISET: repairing one of two identical errors changes it', () => {
+test('every copy of an error is read: repairing one of two identical errors changes the verdict', () => {
   const one = "c.c:9: too many arguments to function `thunk_HeapFree'";
-  expect(errorKey(AGBCC)).not.toBe(errorKey(one));
+  expect(verdictMessages(AGBCC)).not.toEqual(verdictMessages(one));
 });
 
-test('the key ignores where the error sits, which a respelled body moves', () => {
-  expect(errorKey('c.c:12: invalid operands to binary &')).toBe(
-    errorKey('agbcc failed: c.c:40: warning: x\n/tmp/q/c.c:31: invalid operands to binary &'),
+test('the verdict ignores where the error sits, which a respelled body moves', () => {
+  expect(verdictMessages('c.c:12: invalid operands to binary &')).toEqual(
+    verdictMessages('agbcc failed: c.c:40: warning: x\n/tmp/q/c.c:31: invalid operands to binary &'),
   );
 });
 
-test('the key reads a column and an `error:` tag as position and label', () => {
-  expect(errorKey("in.c:7:3: error: too many arguments to function 'g'")).toBe(
-    errorKey("in.c:19:11: error: too many arguments to function 'g'"),
+test('a column and an `error:` tag are read as position and label', () => {
+  expect(verdictMessages("in.c:7:3: error: too many arguments to function 'g'")).toEqual(
+    verdictMessages("in.c:19:11: error: too many arguments to function 'g'"),
   );
   expect(errorMessages("in.c:7:3: error: too many arguments to function 'g'")).toEqual([
     "too many arguments to function 'g'",
@@ -79,21 +79,21 @@ test('an mwcc error is the line under its caret; an mwcc warning is not an error
 });
 
 test('an IDO error drops its own position', () => {
-  expect(errorKey('cfe: Error: /tmp/bench-cand-a1/c.c, line 12: Syntax Error')).toBe(
-    errorKey('cfe: Error: /tmp/bench-cand-b2/c.c, line 40: Syntax Error'),
+  expect(verdictMessages('cfe: Error: /tmp/bench-cand-a1/c.c, line 12: Syntax Error')).toEqual(
+    verdictMessages('cfe: Error: /tmp/bench-cand-b2/c.c, line 40: Syntax Error'),
   );
 });
 
-test('text with no recognisable error has NO key — never an empty one that equals another', () => {
-  expect(errorKey('')).toBeNull();
-  expect(errorKey("'agbcc' timed out")).toBeNull();
-  expect(errorKey('c.c:3: warning: only a warning')).toBeNull();
-  expect(errorKey('compile command exited 0 but produced no object at {{outputPath}}: cc -c in.c')).toBeNull();
+test('text with no recognisable error has NO verdict — never an empty one that equals another', () => {
+  expect(verdictMessages('')).toBeNull();
+  expect(verdictMessages("'agbcc' timed out")).toBeNull();
+  expect(verdictMessages('c.c:3: warning: only a warning')).toBeNull();
+  expect(verdictMessages('compile command exited 0 but produced no object at {{outputPath}}: cc -c in.c')).toBeNull();
 });
 
 // ── the shapes the five real compilers were measured to print ──────────────────────────────────
 
-test('an mwcc message wrapped over several lines is ONE message, and its whole text is the key', () => {
+test('an mwcc message wrapped over several lines is ONE message, and its whole text is read', () => {
   const twoTargets = [
     '### mwcceppc.exe Compiler:',
     '#    File: ..\\host-tmp\\asmlift-ppc-score-uAUBsk\\cand.c',
@@ -149,10 +149,10 @@ test('an error whose message quotes a `note:` is still an error', () => {
   ]);
 });
 
-test('IDO spells the previous declaration’s position inside the message; the key drops it', () => {
+test('IDO spells the previous declaration’s position inside the message; the verdict drops it', () => {
   const at = (dir: string) =>
     `cfe: Error: ${dir}/cand.c, line 2: redeclaration of 'a'; previous declaration at line 2 in file '${dir}/cand.c'`;
-  expect(errorKey(at('/tmp/a1'))).toBe(errorKey(at('/tmp/b2')));
+  expect(verdictMessages(at('/tmp/a1'))).toEqual(verdictMessages(at('/tmp/b2')));
   expect(errorMessages(at('/tmp/a1'))).toEqual(["redeclaration of 'a'; previous declaration"]);
 });
 
@@ -164,7 +164,7 @@ test('pre-3.0 gcc’s `previously declared here` is where the OTHER declaration 
 
 // ── a report the compiler cut short ──────────────────────────────────────────────────────────────
 
-test('a diagnostic the compiler stopped short has NO key: a prefix of a verdict is not the verdict', () => {
+test('a diagnostic the compiler stopped short has NO verdict: a prefix of a verdict is not the verdict', () => {
   const arity = (n: number, tail: string[]) =>
     [
       ...Array.from(
@@ -175,18 +175,20 @@ test('a diagnostic the compiler stopped short has NO key: a prefix of a verdict 
       ...tail,
     ].join('\n');
   const ido = arity(30, ['   g(29, 1);', ' ---^', 'cfe: Fatal: Too many errors... goodbye.']);
-  expect(errorKey(ido)).toBeNull();
-  expect(errorKey(arity(30, []))).not.toBeNull();
+  expect(verdictMessages(ido)).toBeNull();
+  expect(verdictMessages(arity(30, []))).not.toBeNull();
   expect(
-    errorKey(
+    verdictMessages(
       'cap.c:3:5: error: too many arguments to function call, expected 1, have 2\nfatal error: too many errors emitted, stopping now [-ferror-limit=]\n20 errors generated.',
     ),
   ).toBeNull();
   expect(
-    errorKey("max.c:2:15: error: too many arguments to function 'g'\ncompilation terminated due to -fmax-errors=1."),
+    verdictMessages(
+      "max.c:2:15: error: too many arguments to function 'g'\ncompilation terminated due to -fmax-errors=1.",
+    ),
   ).toBeNull();
   expect(
-    errorKey(
+    verdictMessages(
       [
         '#      5: g(1, 1);',
         '#   Error:       ^',

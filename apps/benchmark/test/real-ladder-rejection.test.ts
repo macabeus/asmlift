@@ -8,7 +8,7 @@
 //
 // Over a fake compile module: the corpus's nine dead-prelude rows all have their richest rung
 // alive, so no committed row can referee this, and a synthetic row has no ladder at all.
-import { CompilerRejection, attemptsOf, errorKey, errorMessages } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, attemptsOf, errorMessages } from '@asmlift/core/compiler-diagnostics';
 import { NoScorableCandidateError, rankBy } from '@asmlift/core/rank';
 import { expect, test } from 'vitest';
 
@@ -62,27 +62,30 @@ const fan = () => [
   { variations: ['unsigned', 'fixg', 'fixh'], source: body('1', '3'), preference: 0 },
 ];
 
-const keyOf = (compile: (c: string, sym: string) => string, source: string): string | null => {
+/** What the manifest rung — alive whichever richest rung the row has — refused `source` with. */
+const manifestErrors = (compile: (c: string, sym: string) => string, source: string): string[] => {
   try {
     compile(source, 'f');
   } catch (e) {
-    return e instanceof CompilerRejection ? errorKey(e.diagnostic) : null;
+    const rung = attemptsOf((e as CompilerRejection).diagnostic).find((a) => a.label === '+ manifest prependC (c)');
+    return errorMessages(rung!.diagnostic);
   }
-  return null;
+  throw new Error('compiled');
 };
 
 test.each([
   ['dead', DEAD_CTX],
   ['alive', PREPEND_C],
-])('with the richest rung %s, a probe that cures one error changes the key and the product is found', (_, ctxI) => {
+])('with the richest rung %s, each probe cures one error in a live rung and the product is found', (_, ctxI) => {
   const compiled: string[] = [];
   const compile = ladderCompile(fakeAgbcc(compiled), [], 'assembled', PREPEND_C, ctxI, 'c');
   const candidates = fan();
-  const [dflt, fixg, fixh] = candidates.map((c) => keyOf(compile, c.source));
-  expect(dflt).not.toBeNull();
-  expect(fixg).not.toBe(dflt);
-  expect(fixh).not.toBe(dflt);
-  expect(fixg).not.toBe(fixh);
+  const [dflt, fixg, fixh] = candidates.slice(0, 3).map((c) => manifestErrors(compile, c.source));
+  const G = "too many arguments to function `g'";
+  const H = "too many arguments to function `h'";
+  expect(dflt).toEqual([G, H]);
+  expect(fixg).toEqual([H]);
+  expect(fixh).toEqual([G]);
 
   const scored: string[] = [];
   const ranked = rankBy(candidates, 'f', (source) => {

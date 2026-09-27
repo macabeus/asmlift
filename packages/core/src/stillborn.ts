@@ -286,6 +286,6 @@ function namedOnce(perAttempt: readonly Map<string, number>[]): string[] {
 /** Whether a driver that has compiled ONLY the default should now compile the probes — i.e.
  *  whether the default was rejected in a way the rule can read. A driver may skip this and compile
  *  the probes regardless; asking first is what keeps an ordinary fan's compile order untouched. */
-export function defaultIsKeyedRejection(outcome: ProbeOutcome): boolean {
+export function defaultIsReadableRejection(outcome: ProbeOutcome): boolean {
   return readingOf(outcome) !== null;
 }
