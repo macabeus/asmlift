@@ -1,28 +1,44 @@
-// The CLI bundle loads the objdiff engine on the scoring path alone: every import of the external
-// @matchkit/scoring is a lazy `await import()` (score.ts says why).
+// A plain decompile runs from the CLI bundle even when @matchkit/scoring cannot be loaded: the bundle
+// loads the objdiff engine on the scoring path alone (score.ts says why).
 import { build } from 'esbuild';
-import { resolve } from 'node:path';
-import { expect, test } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterAll, beforeAll, expect, test } from 'vitest';
 
 const pkg = resolve(import.meta.dirname, '../..');
+const dir = mkdtempSync(join(tmpdir(), 'asmlift-bundle-'));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-test('the bundle reaches @matchkit/scoring only through a lazy dynamic import', async () => {
+const node = (args: string[]) => spawnSync(process.execPath, args, { cwd: dir, encoding: 'utf8' });
+
+beforeAll(async () => {
   // The options of scripts/build.mjs that decide where an external import lands.
-  const out = await build({
+  await build({
     entryPoints: [resolve(pkg, 'src/main.ts')],
     bundle: true,
     platform: 'node',
     format: 'esm',
     target: 'node18',
     external: ['@matchkit/scoring', 'yaml'],
-    write: false,
+    outfile: join(dir, 'asmlift.mjs'),
     logLevel: 'silent',
   });
-  const text = out.outputFiles[0]!.text;
-  const lines = text.split('\n').filter((line) => line.includes('@matchkit/scoring'));
-  expect(lines.length).toBeGreaterThan(0);
-  for (const line of lines) {
-    expect(line).toMatch(/await import\("@matchkit\/scoring(\/files)?"\)/);
-    expect(line).toMatch(/^\s+/);
-  }
+  // Of the two externals, only yaml resolves next to the bundle.
+  mkdirSync(join(dir, 'node_modules'));
+  symlinkSync(realpathSync(join(pkg, 'node_modules/yaml')), join(dir, 'node_modules/yaml'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
+});
+
+test('@matchkit/scoring does not resolve next to the bundle', () => {
+  expect(node(['--input-type=module', '-e', "await import('@matchkit/scoring')"]).status).not.toBe(0);
+});
+
+test('a plain decompile runs from the bundle without it', () => {
+  const asm = join(pkg, '../core/test/corpus/agbcc-clamp0.s');
+  const run = node(['asmlift.mjs', asm, '--target', 'agbcc']);
+  expect(run.stderr).not.toMatch(/matchkit/);
+  expect(run.status).toBe(0);
+  expect(run.stdout).toMatch(/clamp0\(/);
 });
