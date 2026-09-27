@@ -107,9 +107,9 @@ const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
   return { perSiteSenseBits: n };
 };
 
-/** ONE candidate compiled and scored as `decompileRanked` scores it, by the same compiler with the
- *  same declarations. `bench fan --whole` compiles a stillborn fan's rest through this, so the check
- *  and the ranked pass cannot compile one candidate two ways. */
+/** ONE candidate compiled and scored outside a ranking, with the `scoreSource` call and the
+ *  declarations `decompileRanked` scores it with — `bench fan --whole` compiles a stillborn fan's
+ *  rest through this, and a check that compiled a candidate another way would check another text. */
 export const scoreCandidate = (
   cand: Candidate,
   name: string,

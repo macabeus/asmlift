@@ -296,8 +296,8 @@ describe('optionRefusal', () => {
   });
 
   // `pnpm bench fan <row> --whole` is the command every STOP line prints, and the biggest stopped
-  // fans are over the limit: under the guard it printed the size refusal, compiled nothing, and
-  // reached pnpm as exit 1 — the code a false stop exits with.
+  // fans are over the limit: under the guard it would print the size refusal, compile nothing, and
+  // reach pnpm as exit 1 — the code a false stop exits with.
   it('--whole raises the size limit, as --force does', () => {
     expect(raisesSizeLimit({ whole: true })).toBe(true);
     expect(raisesSizeLimit({ force: true })).toBe(true);
@@ -347,7 +347,7 @@ describe('--whole compiles the rest of a stopped fan', () => {
   });
 
   // A killed compiler, a Docker outage or a timeout throws too, and says nothing about the
-  // candidate: counted as a refusal, a check whose compiler died printed "the stop held", exit 0.
+  // candidate: counted as a refusal, a check whose compiler died would print "the stop held", exit 0.
   it('never counts a throw that is no refusal as refused: the stop is UNCHECKED, exit 3', () => {
     const killed = () => {
       throw new Error('mwcceppc (docker) did not run to completion (exit 137)\nkilled');
@@ -586,9 +586,9 @@ describe('noFanReport', () => {
     expect(r.harnessDefect).toBe(false);
   });
 
-  // A stillborn fan's survivors are the lines after its first, and they are the stop's evidence:
-  // cut to one line, the note promised them ("…every probe keeping one of its default's errors:")
-  // and printed none. The default's own diagnostic after them is not repeated.
+  // A stillborn fan's survivors are the lines after its first, and they are the stop's evidence,
+  // which the sentence ends by promising ("…every probe keeping one of its default's errors:"). The
+  // default's own diagnostic after them is not repeated.
   it('prints a stillborn fan`s survivors under its sentence, and not the default`s diagnostic', () => {
     const e = new NoScorableCandidateError(
       "no scorable candidate for 'f': 4 of 12 candidates were NOT COMPILED: … keeping one of its default's errors:\n" +

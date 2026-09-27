@@ -235,10 +235,10 @@ describe('parsing', () => {
     expect(parseFlags('agbcc', ['-O2', '-Werror']).errorLimitAt).toEqual([]);
   });
 
-  // `-Wfatal-errors` read as one more harmless `-W` word was compiled into every candidate: clang
-  // then reports only the FIRST error, with no trailer, and a fan whose default and probes each
-  // stop at a different first site read as one surviving error — declared stillborn while the
-  // product of its probes compiled.
+  // `-Wfatal-errors` read as one more harmless `-W` word would be compiled into every candidate:
+  // clang then reports only the FIRST error, with no trailer, and a fan whose default and probes
+  // each stop at a different first site would read as one surviving error — declared stillborn
+  // while the product of its probes compiles.
   test('gcc and clang error limits are error limits, not harmless diagnostics', () => {
     for (const family of ['gcc', 'agbcc'] as const) {
       const argv = ['-O2', '-Wfatal-errors', '-fmax-errors=1', '-ferror-limit=5', '-Wall'];

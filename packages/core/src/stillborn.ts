@@ -19,6 +19,16 @@
 // is not the sum of its variations (THE RESIDUALS, below) — and the rule never compiles a product
 // to check it.
 //
+// One survivor is enough; the probes may reach the default's other errors. In
+// `ac-decomp:aINS_destruct:mwcc_242_81`'s vendored-context attempt `/setup-args` cures the call to
+// `mPlib_Get_item_net_catch_label`, both `illegal implicit conversion` errors stay, and the fan of
+// 12 stops after 8 compiles.
+//
+// EXACTLY as many times: a probe that prints the survivor more often has re-spelled a statement
+// that raises it (`/reread-globals` re-reading a global whose type is refused), and a probe that
+// prints it fewer times has cured one. Either one reached it, so neither vouches that a product
+// leaves it alone.
+//
 // PER ATTEMPT. A rejection may hold several compiles (compiler-diagnostics.ts `attemptsOf`: the
 // benchmark's real tier tries every candidate in a ladder of contexts and two dialects), and a
 // candidate compiles when ANY attempt does. So a survivor is asked of EACH attempt, and one attempt
@@ -27,35 +37,20 @@
 // every probe while another attempt's product compiles. Every probe must have been tried in the
 // same attempts, under the same labels, as the default.
 //
-// Why EXACTLY as many times: a probe that prints the survivor more often has re-spelled a
-// statement that raises it (`/reread-globals` re-reading a global whose type is refused), and a
-// probe that prints it fewer times has cured one. Either one reached it, so neither vouches that
-// a product leaves it alone.
-//
-// A probe rejected with the default's whole multiset of errors leaves every message a survivor. The
-// rule also stops a fan whose variations DO reach some of its errors while another error stays
-// where it was in every probe: in `ac-decomp:aINS_destruct:mwcc_242_81`'s vendored-context attempt
-// `/setup-args` cures the call to `mPlib_Get_item_net_catch_label`, both `illegal implicit
-// conversion` errors stay, and the fan of 12 stops after 8 compiles — a rule that asked every probe
-// for the default's whole multiset would rank it whole.
-//
 // HALF BY HALF. Every fan is enumerated at BOTH signednesses (variation-tokens.ts, kind
-// `signedness`), and a signedness re-types the whole body: every type a message quotes changes
-// with it, so the one error a statement no variation reaches is refused with is worded twice — an
-// `illegal implicit conversion` to `struct game_s *` names `unsigned long` in one half and `long` in
-// the other. Asked over the whole fan, no message of `ac-decomp:aINS_destruct:mwcc_242_81`'s vendored-context attempt
-// survives the `signed` probe, and the fan is ranked whole. So each signedness HALF is asked as a fan
-// of its own: its first candidate is its default, its probes are the smallest carrier of each
-// variation name INSIDE it, and the fan is stillborn only when every half is. A half is found by
-// the registry's kind, never by a name, and a fan with no signedness in its names is one half.
-// These are MORE probes than one per name over the whole fan — every signedness is paired with
-// every variation before anything is skipped — and a stopped fan pays its second half's probes.
-// Any partition of the fan would serve, each cell asked with its own default and probes; signedness
-// is the one this rule splits on, because it is the variation that re-words the survivor in every
-// candidate. A variation that re-words it in part of the fan is not split on, and its probe leaves
-// that attempt without a survivor: `kleod:WorldMapScreenUnlockNewWorld:agbcc`'s only
-// vendored-context error, `incompatible types in assignment`, reads `invalid operands to binary &`
-// under `/derived-home` and under `/setup-args`, and that fan is ranked whole.
+// `signedness`), and a signedness re-types the whole body, so the survivor is worded once per half:
+// aINS_destruct's `illegal implicit conversion` to `struct game_s *` names `unsigned long` in one
+// half and `long` in the other, and asked over the whole fan nothing in its vendored-context
+// attempt survives the `signed` probe. So each half is asked as a fan of its own — its first
+// candidate is its default, its probes are the smallest carrier of each variation name INSIDE it —
+// and the fan is stillborn only when every half is. A half is found by the registry's kind, never
+// by a name, and a fan with no signedness in its names is one half. A stopped fan pays both halves'
+// probes.
+//
+// KNOWN GAP: a variation that re-words the survivor in PART of the fan is not split on, so its
+// probe leaves that attempt without a survivor and the fan is ranked whole —
+// `kleod:WorldMapScreenUnlockNewWorld:agbcc`'s only vendored-context error, `incompatible types in
+// assignment`, reads `invalid operands to binary &` under `/derived-home` and `/setup-args`.
 //
 // Anything else ranks the whole fan. A probe that compiles or is withheld: the fan is alive. An
 // attempt with no survivor: a product of variations may cure what no single one does. An attempt
@@ -64,16 +59,21 @@
 // `CompilerRejection`: a timeout or a killed compiler says nothing about the candidate.
 //
 // THE RESIDUALS, which this rule does NOT close: a product that cures the survivor while every
-// probe keeps it. Two shapes are known.
+// probe keeps it. One survivor being enough, a stop may rest its whole bet on a single message in
+// the one attempt a candidate could compile in. Two shapes are known.
 //
 // JOINT CURE: ONE error MESSAGE that needs TWO variations together. `a & b` is `invalid operands
 // to binary &` while either operand is a struct; if one variation re-types `a` and another re-types
 // `b`, each probe leaves the message where it was, and only their product compiles. The same shape
 // arises without any re-typing wherever the compiler prints ONE message for a statement holding TWO
 // defects: mwcc and IDO report `y = g(1, 2) + h(3, 4)` as a single message, and agbcc, kmc and IDO
-// report an undeclared name once however many times it is used — a probe that cures one of the two
-// defects leaves the message where it was. Two DIFFERENT messages each cured by its own variation
-// are not this case: each probe removes its message, neither survives, and the fan is ranked whole.
+// report an undeclared name once however many times it is used. Two DIFFERENT messages each cured
+// by its own variation are not this case: each probe removes its message, and neither survives.
+// Signedness re-types operands and can cure half a statement — against a declared
+// `CARDGetSectorSize(long, unsigned long *)`, `signed` turns a call's `(unsigned long, long *)` into
+// `(long, long *)`, one message either way — and HALF BY HALF is what closes it there: a half holds
+// its signedness fixed. Any OTHER variation that re-types an operand or cures half a statement
+// must revisit this rule.
 //
 // INTERACTION: a variation whose reach depends on another. A respell runs over whatever tree the
 // structure variations built, so a structure variation × respell product re-spells statements
@@ -81,18 +81,6 @@
 // `/flip-join` tree, so their product can print a message more often than the default and either
 // probe do. A product that moves a survivor UP keeps it an error; one that moved it to zero, leaving
 // no other error, would be a candidate that compiles and that the stop never compiles.
-//
-// Asking one surviving message per attempt, rather than every message, leaves these the same cases
-// in more fans: whatever the probes did to the other errors, the survivor is the one a product
-// would have to move, and the stop can rest on a single message in the one attempt a candidate
-// could compile in.
-//
-// Signedness re-types operands, and so can cure half a statement: against a declared
-// `CARDGetSectorSize(long, unsigned long *)`, `signed` turns a call's `(unsigned long, long *)` into
-// `(long, long *)` — the first argument cured, the second kept, one message either way. That is the
-// JOINT CURE shape, and HALF BY HALF is what closes it for signedness: a half holds its signedness
-// fixed, so no probe or product in it re-types by signedness. Any OTHER variation that re-types an
-// operand or cures half a statement must revisit this rule.
 //
 // ONE COPY. Probe selection and the verdict are pure functions over indices, so the sync driver
 // (rank.ts `rankBy`), the pooled CLI driver and the webapp's async loop all sequence their own

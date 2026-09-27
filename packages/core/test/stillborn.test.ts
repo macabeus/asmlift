@@ -170,8 +170,8 @@ test('a fan whose default compiles is never probed: enumeration order is the com
 
 // THE RESIDUALS (stillborn.ts header): one error MESSAGE that only the product of two variations
 // cures — both needed at once, or one that reaches the statement only on the other's tree. Each
-// probe leaves the multiset as it found it, so the rule stops, and the product is never compiled. Pinned so that the day a variation can re-type an operand, this is the test that
-// has to be argued with.
+// probe keeps the error, so the rule stops, and the product is never compiled. Pinned so that a
+// variation other than signedness that re-types an operand has this test to argue with.
 test('RESIDUAL: a single error that needs two variations jointly is declared stillborn', () => {
   const candidates = fan(['a', 'b']);
   const { run, compiled } = rank(candidates, (c) =>

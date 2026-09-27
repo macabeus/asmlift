@@ -1,9 +1,9 @@
 // asmlift — the compiler flags a run is about, and where they came from.
 //
 // One resolver serves both halves of a run. The flags it finds fill the compile command's
-// `{{cflags}}` word for word but for an error limit (`-maxerrors 1`, which a ranked run reads the
-// rejections past), and core parses the same words into the profile the run reports. The
-// first source that gives flags wins, and the `[flags]` line names it:
+// `{{cflags}}` word for word, save an error limit (`-maxerrors 1`) that would cut short the
+// rejections a ranked run reads, and core parses the same words into the profile the run reports.
+// The first source that gives flags wins, and the `[flags]` line names it:
 //   1. --cflags "<flags>"
 //   2. the dtk unit whose target object defines the function, in the `objdiff.json` beside
 //      decomp.yaml (dtk-unit.ts): its `scratch.c_flags`, compiled by its `scratch.compiler`

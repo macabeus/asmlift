@@ -302,8 +302,7 @@ describe('compareStops', () => {
   });
 
   // The count reads the variation ROSTER only: a re-lift that keeps the names keeps it, while every
-  // text the stop bet on is new. Keyed on the count alone, that re-placed bet printed no STOP line
-  // and owed no check.
+  // text the stop bet on is new — the same bet placed again, and owed a check again.
   test('names a row stopped at both sides whose not-compiled sources changed, whatever its count', () => {
     const r = compareStops(
       out(
