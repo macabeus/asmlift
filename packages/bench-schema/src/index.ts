@@ -117,7 +117,9 @@ export interface DecompilerResult {
    *  enumeration order, scratch paths scrubbed. The stop is a bet that the compiler refuses every
    *  one of those TEXTS, so the bet is placed anew whenever one changes — including on a re-lift
    *  that keeps the variation roster, and with it the count. `bench diff`'s STOP section reads it;
-   *  like the count it is a cost, never a verdict. */
+   *  like the count it is a cost, never a verdict. KNOWN GAP: it covers the sources only, so a
+   *  change to the row's flags or compile context that leaves every source as it was places the bet
+   *  again and moves neither this nor the count. */
   fanNotCompiledDigest?: string;
   /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
    *  objdiff-score every candidate. The price `fanSize` predicts, as this machine actually

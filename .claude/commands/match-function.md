@@ -290,7 +290,7 @@ rest of a fan it ends, so on those rows a false stop — a candidate that would 
 published as `noncompile` — looks exactly like a true one to every gate above. Run the command each
 `STOP` line prints, `pnpm bench fan <row> --whole`, and quote its `[whole]` line. Only exit 0 — `the
 stop held` — clears the row, and every other exit blocks the branch until its `[whole]` line is
-answered: `pnpm` reports every non-zero exit as 1, so the line, not the code, says which. `COMPILED`
+answered: `pnpm -s` reports every non-zero exit as 1, so the line, not the code, says which. `COMPILED`
 names a candidate the stop lost and blocks like a lost match; `UNCHECKED` names a candidate whose
 compile never reached a verdict (a killed compiler, Docker down) — re-run it; `no stillborn stop
 ended this fan` means this tree does not stop the row the artifact says it stops.
