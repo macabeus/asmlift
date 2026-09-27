@@ -27,15 +27,18 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
-import { StructureError, structure } from '../src/structure/structure';
+import { CARRIER_NAME_GATES, StructureError, type StructureHooks, structure } from '../src/structure/structure';
+import { irTraceOf, traceOf } from './helpers';
 
-const emit = (ir: string): string => {
+const lift = (ir: string) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn));
+  return fn;
 };
+const emit = (ir: string, hooks: StructureHooks = {}): string => cBackend.emit(structure(lift(ir), {}, hooks));
 
 // The lifted shape of the agbcc listing above, reduced to one loop. ^bb1 is header and latch; the
 // counter %2 is updated to %4 and the back edge carries %4, so post-loop the name holds %4's
@@ -291,8 +294,9 @@ test('a body of more than one block gets no pre-update home', () => {
 });
 
 // A block after the loop whose param holds a loop variable's NAME (fuzz seed 400010): the merge in
-// ^bb4 takes `%4`'s name while the region still reads `%5`, the value the loop leaves under it. The
-// self-loop's home would unlock it; it declines as it does without the home.
+// ^bb4 is offered `%4`'s name while the region still reads `%5`, the value the loop leaves under it.
+// `back-arg-live` refuses that name, and the function lifts. With the gate dropped the merge takes
+// it, and the self-loop's home would unlock the loop; it declines as it does without the home.
 const AFTER_A_MERGE_ON_A_LOOP_NAME = `fn pz400010 {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = add %1, %0
@@ -319,6 +323,24 @@ const AFTER_A_MERGE_ON_A_LOOP_NAME = `fn pz400010 {
 }
 `;
 
+test('a merge after the loop does not take the name the loop leaves its value under', () => {
+  const fn = lift(AFTER_A_MERGE_ON_A_LOOP_NAME);
+  const tree = structure(fn);
+  let judged = 0;
+  for (let seed = 1; seed <= 64; seed++) {
+    let want;
+    try {
+      want = irTraceOf(fn, seed);
+    } catch {
+      continue; // step cap: the IR itself does not return on this input
+    }
+    expect(traceOf(tree, seed)).toEqual(want);
+    judged++;
+  }
+  expect(judged).toBe(35); // the rest run the IR past the step cap
+});
+
 test('a pre-update home does not unlock a loop whose variable name a later merge holds', () => {
-  expect(() => emit(AFTER_A_MERGE_ON_A_LOOP_NAME)).toThrow(/reads a pre-update loop variable/);
+  const admit = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
+  expect(() => emit(AFTER_A_MERGE_ON_A_LOOP_NAME, admit)).toThrow(/reads a pre-update loop variable/);
 });

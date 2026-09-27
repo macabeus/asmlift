@@ -219,8 +219,9 @@ export function Playground({
               onGap: 'annotate',
               ...(symbolMap ? { symbols: symbolMap } : {}),
             }).sfn,
+            target.fpu?.slots,
           );
-      return { backend: cppBackend(spec) };
+      return { backend: cppBackend(spec, target.fpu?.slots) };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }

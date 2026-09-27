@@ -1,9 +1,10 @@
 // A refusal that names the floating-point REGISTER FILE, on the two ISAs that have one.
 //
-// asmlift models no floating-point registers at all: no value kind holds a float, no ABI home
-// receives one, no C spelling prints one. Every instruction that touches the file therefore
-// declines — which was already true and is not what these tests are about. What they pin is WHICH
-// capability the decline names, because before `fpReg` the same missing file surfaced under three
+// asmlift lifts the single-precision ARITHMETIC of that file through the ABI's float homes, and
+// nothing else in it (`fpu-lift.test.ts` pins what lifts, `docs/floating-point.md` says what is
+// next). Every other instruction that touches the file declines — the doubles, the conversions, the
+// moves to and from memory and the integer file, the compares. What these tests pin is WHICH
+// capability that decline names, because before `fpReg` the same missing file surfaced under three
 // different messages chosen by the SHAPE of the instruction rather than by the gap:
 //
 //   * `add.s $f0,$f12,$f14` and `fadds f1,f1,f2` -> "no register destination to degrade", because
@@ -44,18 +45,21 @@ const liftPpc = (insn: string) => () => decompile('f', ppc(insn), PPC_MWCC);
 
 describe('an instruction that touches the FPU is refused by the FILE it needs', () => {
   test.each([
-    ['MIPS single-precision arithmetic', 'add.s\t$f0,$f12,$f14', '\\$f0, \\$f12, \\$f14', liftMips],
+    // `abs.s` is single-precision arithmetic the decode does not lift (`fpu-lift.test.ts` has the
+    // ones it does).
+    ['MIPS single-precision arithmetic', 'abs.s\t$f0,$f12', '\\$f0, \\$f12', liftMips],
     ['MIPS double-precision arithmetic', 'add.d\t$f0,$f12,$f14', '\\$f0, \\$f12, \\$f14', liftMips],
     ['a MIPS format conversion', 'cvt.s.w\t$f6,$f4', '\\$f6, \\$f4', liftMips],
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
     ['a MIPS FPU load', 'lwc1\t$f0,0(a1)', '\\$f0', liftMips],
-    // …AND THE REGISTER LIST IS A SET. `fadds f1,f1,f2` reads two registers and writes one of
+    // …AND THE REGISTER LIST IS A SET. `fadd f1,f1,f2` reads two registers and writes one of
     // them; an undeduped filter published `(f1, f1, f2)` in five markers of the committed
     // artifact, which reads as three registers in a file the reader is being told does not exist.
-    ['PowerPC single-precision arithmetic', 'fadds   f1,f1,f2', 'f1, f2', liftPpc],
+    // Double precision, because the single-precision `fadds` lifts (`fpu-lift.test.ts`).
+    ['PowerPC double-precision arithmetic', 'fadd    f1,f1,f2', 'f1, f2', liftPpc],
     ['a PowerPC FPU load', 'lfs     f1,0(r4)', 'f1', liftPpc],
-    ['a PowerPC float move', 'fmr     f0,f2', 'f0, f2', liftPpc],
+    ['a PowerPC float absolute value', 'fabs    f0,f2', 'f0, f2', liftPpc],
   ])('%s', (_label, insn, regs, lift) => {
     const run = lift(insn);
     expect(run).toThrow(/unmodelled floating-point instruction/);
@@ -75,9 +79,9 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
   // everywhere else — which is what its own header promises ("normalises that dialect into the SAME
   // `DisasmInstr[]` the objdump parser yields"). Each case below is red if it strips it.
   test.each([
-    ['numbered arithmetic', 'add.s       $f0, $f12, $f14', '\\$f0, \\$f12, \\$f14'],
+    ['numbered arithmetic', 'add.d       $f0, $f12, $f14', '\\$f0, \\$f12, \\$f14'],
     // THE ABI SPELLING, which objdump never prints and the `af`/`marioparty3` trees use throughout.
-    ['ABI-named arithmetic', 'add.s       $ft2, $ft2, $ft3', '\\$ft2, \\$ft3'],
+    ['ABI-named arithmetic', 'add.d       $ft2, $ft2, $ft3', '\\$ft2, \\$ft3'],
     ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
     ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
     ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],
@@ -183,6 +187,14 @@ describe('a PowerPC branch target is an ADDRESS, and the FP predicate has no sig
   // is only the control.
   test('a non-branch instruction with an fN operand still names the file', () => {
     expect(liftPpc('tw      4,r3,f4')).toThrow(/floating-point register file \(f4\)/);
+  });
+
+  // The MIPS rule above, on PowerPC: the decode that lifts an FPR and the refusal that names the
+  // file ask one predicate, so a token cannot be a float to one and not to the other.
+  test('the decode and the refusal share one FP-register predicate', () => {
+    const ppc = readFileSync(new URL('../src/frontend/ppc.ts', import.meta.url), 'utf8');
+    expect(ppc.match(/\/\^f\\d\+\$\/i?/g)).toHaveLength(1);
+    expect(ppc).toContain('fpReg: PPC_FP_REG');
   });
 });
 

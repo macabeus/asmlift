@@ -27,8 +27,9 @@ import { cBackend } from '../src/backend/c';
 import type { Block, Fn, Value } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
-import { StructureError, structure } from '../src/structure/structure';
+import { CARRIER_NAME_GATES, StructureError, type StructureHooks, structure } from '../src/structure/structure';
 import { irTraceOf, traceOf } from './helpers';
 
 const LATCH_SUM = `fn latchsum {
@@ -139,9 +140,13 @@ const lifted = (ir: string, measured = false): Fn => {
 
 /** Seeds whose run both interpreters finish (the generated witnesses loop forever on some), and
  *  the count of those that disagree. */
-const disagreements = (ir: string, measured = false): { judged: number; differ: number } => {
+const disagreements = (
+  ir: string,
+  measured = false,
+  hooks: StructureHooks = {},
+): { judged: number; differ: number } => {
   const fn = lifted(ir, measured);
-  const tree = structure(fn);
+  const tree = structure(fn, {}, hooks);
   let judged = 0;
   let differ = 0;
   for (let seed = 1; seed <= 64; seed++) {
@@ -242,11 +247,12 @@ test('the outer latch reads a grandchild loop value under its name when the midd
 });
 
 // ── a name rewritten between the inner loop and the latch ─────────────────────────────────────
-// The inner loop leaves `x` in its variable; a merge after it (`if (c) x' = x; else x' = 0;`)
-// takes that same name, and the latch still reads the pre-merge `x` (`f1(x)`). `re-derives` does
-// not refuse the merge: the inner value re-derives from the INDUCTION variable's name, not from
-// the one the merge takes. So the name no longer holds the value, and the latch must not
-// substitute it — `f1(v3)` reads the merge (41 of 64 inputs wrong, measured).
+// The inner loop leaves `x` in its variable; a merge after it (`if (c) x' = x; else x' = 0;`) is
+// offered that same name while the latch still reads the pre-merge `x` (`f1(x)`). `back-arg-live`
+// refuses it, and the latch reads `x` under its name. Had the merge taken it, the name would no
+// longer hold the value, and the latch must not substitute it — `f1(v3)` reads the merge (41 of 64
+// inputs wrong, measured). The refusal below is what stands behind the gate, so its two fixtures
+// run with the gate dropped (`ADMIT_BACK_ARG`).
 //
 // Whether the re-derivation is right then depends on what it reads. In `T2_MERGE` the value is
 // `j + a0`, and `j`'s name holds the loop's UPDATED `j` by the time the latch runs: `f1(v2 + a0)`
@@ -286,17 +292,26 @@ const T2_MERGE = `fn t2merge {
 `;
 const T2_INVARIANT = T2_MERGE.replace('%10: s32 = add %8, %0', '%30: s32 = const {value=3}\n  %10: s32 = add %0, %30');
 
+const ADMIT_BACK_ARG: StructureHooks = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
+
+test('a merge after the inner loop does not take the name the latch reads the inner value under', () => {
+  for (const measured of [false, true]) {
+    expect(disagreements(T2_MERGE, measured)).toEqual({ judged: 64, differ: 0 });
+    expect(cBackend.emit(structure(lifted(T2_MERGE, measured)))).toMatch(/f1\(v\d+\);/);
+  }
+});
+
 test('a latch reader of an inner value whose name was rewritten, and whose re-derivation is stale, declines', () => {
   for (const measured of [false, true]) {
-    expect(() => structure(lifted(T2_MERGE, measured))).toThrow(StructureError);
-    expect(() => structure(lifted(T2_MERGE, measured))).toThrow(/whose name was rewritten/);
+    expect(() => structure(lifted(T2_MERGE, measured), {}, ADMIT_BACK_ARG)).toThrow(StructureError);
+    expect(() => structure(lifted(T2_MERGE, measured), {}, ADMIT_BACK_ARG)).toThrow(/whose name was rewritten/);
   }
 });
 
 test('a latch reader of an inner value whose name was rewritten re-derives it when nothing it reads changed', () => {
   for (const measured of [false, true]) {
-    expect(disagreements(T2_INVARIANT, measured)).toEqual({ judged: 64, differ: 0 });
-    expect(cBackend.emit(structure(lifted(T2_INVARIANT, measured)))).toMatch(/f1\(a0 \+ 3\);/);
+    expect(disagreements(T2_INVARIANT, measured, ADMIT_BACK_ARG)).toEqual({ judged: 64, differ: 0 });
+    expect(cBackend.emit(structure(lifted(T2_INVARIANT, measured), {}, ADMIT_BACK_ARG))).toMatch(/f1\(a0 \+ 3\);/);
   }
 });
 

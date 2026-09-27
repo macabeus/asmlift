@@ -5416,12 +5416,16 @@ export function lift(
   // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
   // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
   // correspondence, and recovering one is its own capability.
+  const slotOf = (key: string): number | null => {
+    const i = target.argRegs.indexOf(key);
+    return i >= 0 ? i : stackArgIndex(key);
+  };
   const argSlots: ArgSlots = {
-    slotOf: (key) => {
-      const i = target.argRegs.indexOf(key);
-      return i >= 0 ? i : stackArgIndex(key);
-    },
-    keyOf: (k) => (k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k)),
+    slotOf,
+    holes: (readKeys) =>
+      Array.from({ length: Math.max(0, ...readKeys.map((k) => slotOf(k) ?? -1)) }, (_, k) =>
+        k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k),
+      ),
   };
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();

@@ -37,7 +37,8 @@ import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { StructureError, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, structureOptionsFor } from '../src/target';
+import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -638,6 +639,200 @@ test('a copy is not sunk into a name a hoisted value still reads inside the loop
   const control = HOISTED_READS_DEST.replace('astore %7, %9, %15', 'astore %7, %12, %15');
   expect(control).not.toBe(HOISTED_READS_DEST);
   expect(emit(control)).toMatch(/do \{[^}]*\n\s+a3 = v\d+ \+ v\d+;[^}]*\} while/);
+});
+
+// THE SAME REFUSAL WHEREVER THE NAME CAME FROM. `dest-free-inside-loop` judges at SINK time, after
+// every name is settled, so it holds however the destination got its name — `canTakeName` at the
+// exit merge, `seedLoopParams` at a following loop's header, the merge order. Each witness below
+// declines, and each emits a wrong program with the gate dropped.
+const withoutDestFree = { preUpdateSinkGates: without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop') };
+const structured = (ir: string, opts = {}, hooks = {}) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  return structure(fn, opts, hooks);
+};
+const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
+
+/** `int t = b; while (d-- > 0) { b = a - (a + a); a = (t * t) * (a + b); } return b;` — the listing
+ *  gcc2.7.2kmc and IDO 7.1 emit for it (as `hw1`, in floats; the rule reads no type). `t * t` is
+ *  computed ONCE, ahead of the loop, from the entry `b`, and the loop reuses `b`'s register for the
+ *  new `b`. The exit merge `%18` is offered `b`'s entry name `a1`, and its copy would sink into the
+ *  body at `%11`, where the unnamed `%7` is still live, though it is dead at the merge itself. */
+const HOISTED_PAST_SUNK_COPY = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: unk32):
+  %3: unk32 = const {value=0}
+  %4: u32 = icmp_sle %2, %3
+  %5: unk32 = const {value=-1}
+  %6: unk32 = add %2, %5
+  cond_br %4, ^bb3(%1), ^bb1()
+^bb1():
+  %7: unk32 = mul %1, %1
+  br ^bb2(%0, %6)
+^bb2(%8: unk32, %9: unk32):
+  %10: unk32 = add %8, %8
+  %11: unk32 = sub %8, %10
+  %12: unk32 = add %8, %11
+  %13: unk32 = const {value=-1}
+  %14: unk32 = add %9, %13
+  %15: unk32 = const {value=0}
+  %16: u32 = icmp_sgt %9, %15
+  %17: unk32 = mul %7, %12
+  cond_br %16, ^bb2(%17, %14), ^bb3(%11)
+^bb3(%18: unk32):
+  ret %18
+}
+`;
+
+test('a copy is not sunk into a name a hoisted invariant still reads, at the merge that names it', () => {
+  expect(() => emit(HOISTED_PAST_SUNK_COPY)).toThrow(/reads a pre-update loop variable/);
+  // `a1 * a1` is `t * t`: with the gate dropped the sunk `a1 = …` runs ahead of it
+  const ablated = cBackend.emit(structured(HOISTED_PAST_SUNK_COPY, {}, withoutDestFree));
+  expect(ablated).toMatch(/do \{[^}]*\n\s+a1 = [^}]*a1 \* a1/);
+});
+
+/** `r = f(c); s = r; if (a >= 1) { if (b >= 0) r = g(b); do { t = r_(n); s = t + u; obs(r + 3); u = n + t; }
+ *  while (--n); } z(s); return s;`, as IR. The exit merge comes BEFORE the loop in block order, so
+ *  it is named before the pre-loop merge `%9` adopts the same name — and `%11 = %9 + 3`, hoisted and
+ *  unnamed, reads it inside the loop. */
+const EXIT_NAMED_FIRST = `fn ord {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: s32 = call %2 {target="f"}
+  %5: s32 = const {value=1}
+  %6: u32 = icmp_slt %0, %5
+  cond_br %6, ^bb6(%4), ^bb1()
+^bb1():
+  %7: u32 = icmp_slt %1, %3
+  cond_br %7, ^bb2(), ^bb3()
+^bb6(%20: s32):
+  %21: s32 = call %20 {target="z"}
+  ret %20
+^bb2():
+  br ^bb4(%4)
+^bb3():
+  %8: s32 = call %1 {target="g"}
+  br ^bb4(%8)
+^bb4(%9: s32):
+  %10: s32 = const {value=3}
+  %11: s32 = add %9, %10
+  %12: s32* = gaddr {sym="G"}
+  br ^bb5(%0, %3)
+^bb5(%13: s32, %14: s32):
+  %15: s32 = call %13 {target="r"}
+  %16: s32 = add %15, %14
+  %99: s32 = call %11 {target="obs"}
+  %17: s32 = add %13, %15
+  %18: s32 = sub %13, %5
+  %19: u32 = icmp_eq %18, %3
+  cond_br %19, ^bb6(%16), ^bb5(%18, %17)
+}
+`;
+
+test('a copy is not sunk into a name a hoisted value reads, when the exit merge was named first', () => {
+  expect(() => emit(EXIT_NAMED_FIRST)).toThrow(/reads a pre-update loop variable/);
+  const ablated = structured(EXIT_NAMED_FIRST, {}, withoutDestFree);
+  expect(irAgreement(EXIT_NAMED_FIRST, ablated, SEEDS)).toEqual({ judged: 300, disagree: 132 });
+});
+
+/** The same loop exiting into a SECOND loop's header. Under `coalesceLoopInit` (the MIPS targets)
+ *  `seedLoopParams` names that header's parameter first, and the pre-loop merge `%9` then adopts the
+ *  same name — `canTakeName`'s scan at the merge sees no named value under it that is live, and
+ *  nothing it looks at is the unnamed `%11` reading it. */
+const EXIT_INTO_A_LOOP = `fn l2b {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: s32 = call %2 {target="f"}
+  %5: s32 = const {value=1}
+  %6: u32 = icmp_slt %0, %5
+  cond_br %6, ^bb6(%4, %3), ^bb1()
+^bb1():
+  %7: u32 = icmp_slt %1, %3
+  cond_br %7, ^bb2(), ^bb3()
+^bb2():
+  br ^bb4(%4)
+^bb3():
+  %8: s32 = call %1 {target="g"}
+  br ^bb4(%8)
+^bb4(%9: s32):
+  %10: s32 = const {value=3}
+  %11: s32 = add %9, %10
+  %12: s32* = gaddr {sym="G"}
+  br ^bb5(%0, %3)
+^bb5(%13: s32, %14: s32):
+  %15: s32 = call %13 {target="r"}
+  %16: s32 = add %15, %14
+  %99: s32 = call %11 {target="obs"}
+  %17: s32 = add %13, %15
+  %18: s32 = sub %13, %5
+  %19: u32 = icmp_eq %18, %3
+  cond_br %19, ^bb6(%16, %3), ^bb5(%18, %17)
+^bb6(%20: s32, %21: s32):
+  %22: s32 = add %20, %21
+  %23: s32 = const {value=1}
+  %24: s32 = add %21, %23
+  %25: s32 = const {value=3}
+  %26: u32 = icmp_slt %24, %25
+  cond_br %26, ^bb6(%22, %24), ^bb7(%22)
+^bb7(%27: s32):
+  ret %27
+}
+`;
+
+test('a copy is not sunk into a name a hoisted value reads, when a later loop header named it', () => {
+  const opts = { coalesceLoopInit: true };
+  expect(() => cBackend.emit(structured(EXIT_INTO_A_LOOP, opts))).toThrow(/reads a pre-update loop variable/);
+  const ablated = structured(EXIT_INTO_A_LOOP, opts, withoutDestFree);
+  expect(irAgreement(EXIT_INTO_A_LOOP, ablated, SEEDS)).toEqual({ judged: 300, disagree: 132 });
+});
+
+/** gcc 2.7.2 `-O1 -mips3` on `int k7(int *p, int n, int m, int k) { int s = k; int u; int t; if (n >
+ *  0) { if (m >= 0) k = m * 7; u = p[m]; do { t = p[(n & 3) + 8]; s = t + u; p[(k & 3) + 8] = t ^ s;
+ *  u = p[n & 3]; } while (--n); } do { s ^= p[m]; } while (--m > 0); return s; }`. The second loop
+ *  names `s` first; `(k & 3)`, hoisted into `t1`, reads the `a3` the sunk `s` would take. */
+const K7 = `00000000 <k7>:
+   0:\tblez\ta1,58 <k7+0x58>
+   4:\tmove\tv1,a3
+   8:\tbltz\ta2,14 <k7+0x14>
+   c:\tsll\tv0,a2,0x3
+  10:\tsubu\tv1,v0,a2
+  14:\tsll\tv0,a2,0x2
+  18:\taddu\tv0,v0,a0
+  1c:\tlw\tt0,0(v0)
+  20:\tandi\tv0,v1,0x3
+  24:\tsll\tv0,v0,0x2
+  28:\taddu\tt1,v0,a0
+  2c:\tandi\tv1,a1,0x3
+  30:\tsll\tv1,v1,0x2
+  34:\taddu\tv1,v1,a0
+  38:\tlw\tv0,32(v1)
+  3c:\taddu\ta3,v0,t0
+  40:\txor\tv0,v0,a3
+  44:\tsw\tv0,32(t1)
+  48:\tlw\tt0,0(v1)
+  4c:\taddiu\ta1,a1,-1
+  50:\tbnez\ta1,30 <k7+0x30>
+  54:\tandi\tv1,a1,0x3
+  58:\tsll\tv0,a2,0x2
+  5c:\taddu\tv0,v0,a0
+  60:\tlw\tv0,0(v0)
+  64:\taddiu\ta2,a2,-1
+  68:\tbgtz\ta2,58 <k7+0x58>
+  6c:\txor\ta3,a3,v0
+  70:\tjr\tra
+  74:\tmove\tv0,a3
+`;
+
+test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through the MIPS pipeline', () => {
+  const run = (hooks = {}): string => {
+    const fn = frontendFor(MIPS_GCC).lift('k7', K7, MIPS_GCC, {});
+    applyIdiomPatterns(fn, MIPS_GCC);
+    raiseRecovered(fn, MIPS_GCC, {});
+    return cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false), hooks));
+  };
+  expect(() => run()).toThrow(/reads a pre-update loop variable/);
+  // with the gate dropped the sunk `a3 = v0 + v4` overwrites the `k` the store index reads
+  expect(run(withoutDestFree)).toMatch(/\n\s+a3 = v\d+ \+ v\d+;\n[^\n]*\(\(a3 & 3\) << 2\)/);
 });
 
 // WHERE `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory

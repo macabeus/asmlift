@@ -317,21 +317,24 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
     // The breaker's CRITICAL: a halfword read at byte offset 4 of an all-word class used to map
     // its byte-scaled idx through the WORD-index field table (idx 2 → third member, a 4-byte
     // read at offset 8) — silent wrong member, wrong width. It must spell as the cast instead.
-    const backend = cppBackend({
-      method: 'get',
-      cls: 'C',
-      retType: { base: 'int', ptr: 0 },
-      params: [],
-      classes: {
-        C: {
-          fields: [
-            { name: 'a', type: { base: 'int', ptr: 0 } },
-            { name: 'b', type: { base: 'int', ptr: 0 } },
-            { name: 'c', type: { base: 'int', ptr: 0 } },
-          ],
+    const backend = cppBackend(
+      {
+        method: 'get',
+        cls: 'C',
+        retType: { base: 'int', ptr: 0 },
+        params: [],
+        classes: {
+          C: {
+            fields: [
+              { name: 'a', type: { base: 'int', ptr: 0 } },
+              { name: 'b', type: { base: 'int', ptr: 0 } },
+              { name: 'c', type: { base: 'int', ptr: 0 } },
+            ],
+          },
         },
       },
-    });
+      undefined,
+    );
     const sfn: SFn = {
       name: 'get',
       params: [{ name: 'a0', type: T.ptr(T.s(32)) }],

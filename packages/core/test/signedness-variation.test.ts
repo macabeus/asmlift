@@ -12,7 +12,7 @@ import { type BinOp, type Expr, type LanguageBackend, exprChildren } from '../sr
 import { type VarTypes, renderedIntSignedness } from '../src/l3/typing';
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, type TargetDescription } from '../src/target';
 
 /** Lifts taken by the enumeration under test. The DECLINE's entire effect is a lift that never
  *  happens, and it is invisible everywhere downstream: a decline that stopped firing would re-lift,
@@ -102,6 +102,20 @@ describe('the signedness variation declines where the pin writes nothing', () =>
     );
     expect(cands.length).toBe(1);
     expect(emitted.length).toBe(1);
+    expect(lifts.n).toBe(2);
+  });
+
+  // `int h1(int a, int *p){ return *p; }` at the synthetic mwcc_242_81 and gcc2.7.2kmc flags. The
+  // frontend gives the unread `a` its slot, and that slot is the only scalar. Its signedness reaches
+  // no instruction, so there is nothing to pin.
+  test.each<[string, TargetDescription, string]>([
+    ['mwcc_242_81', PPC_MWCC, '00000000 <h1>:\n   0:\tlwz     r3,0(r4)\n   4:\tblr\n'],
+    ['gcc2.7.2kmc', MIPS_GCC, '00000000 <h1>:\n   0:\tjr\tra\n   4:\tlw\tv0,0(a1)\n'],
+  ])('a scalar entry param nothing reads is not a second pass (%s)', (_tc, target, asm) => {
+    lifts.n = 0;
+    const cands = enumerateCandidates('h1', asm, target);
+    expect(cands.length).toBe(1);
+    expect(cands[0].source).toContain('h1(s32 a0, s32 *a1)');
     expect(lifts.n).toBe(2);
   });
 

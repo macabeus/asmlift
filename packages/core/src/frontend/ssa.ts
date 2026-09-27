@@ -28,7 +28,7 @@ import {
   mkValue,
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
-import { T } from '../ir/types';
+import { type IrType, T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
@@ -268,7 +268,12 @@ export function makeSsaBuilder(
    *  comes from a prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒
    *  no partition is claimed, so every slot refuses and every register is a parameter. */
   liveInOf: () => LiveInModel = () => ({}),
+  /** The type of a value that stands for `key` before any instruction defines it — a parameter, a
+   *  phi. A register FILE, not a register: the FPU's keys are floats wherever they arrive, and every
+   *  other key is `unknown` for type recovery to settle. */
+  keyType: (key: string) => IrType | undefined = () => undefined,
 ): SsaBuilder {
+  const unset = (key: string): IrType => keyType(key) ?? T.unk(32);
   let modelMemo: LiveInModel | null = null;
   // Checked ONCE, where the model is materialised — every function with a parameter reads a
   // register def-lessly, so this runs on effectively every lift rather than only on the rare
@@ -495,7 +500,7 @@ export function makeSsaBuilder(
   };
 
   const newPhi = (reg: string, b: number): Value => {
-    const phi = mkValue(T.unk(32));
+    const phi = mkValue(unset(reg));
     irBlocks[b].params.push(phi);
     phiBlock.set(phi, b);
     phiKey.set(phi, reg);
@@ -549,7 +554,7 @@ export function makeSsaBuilder(
         defs[b].set(reg, obliged);
         return obliged;
       }
-      const p = mkValue(T.unk(32));
+      const p = mkValue(unset(reg));
       irBlocks[b].params.push(p);
       defs[b].set(reg, p);
       paramReg.set(p, reg);
@@ -627,7 +632,7 @@ export function makeSsaBuilder(
         return; // already a parameter, however it got there
       }
     }
-    const p = mkValue(T.unk(32));
+    const p = mkValue(unset(key));
     irBlocks[b].params.push(p);
     paramReg.set(p, key); // ranked by the ABI sort like any other parameter
     obligedParams[b].set(key, p);
@@ -1080,9 +1085,15 @@ export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
 /** Where a live-in of the entry block sits in the calling convention: `slotOf` gives its ABI
- *  argument slot (a register or an incoming stack word), or null for a live-in no argument arrives
- *  in — an uninitialised register the body reads; `keyOf` is its inverse. One per frontend, read by
- *  both halves of the entry-parameter rule: {@link mintArgSlotHoles} and {@link abiSortEntryParams}.
+ *  argument rank (a register or an incoming stack word), or null for a live-in no argument arrives
+ *  in — an uninitialised register the body reads; `holes` gives the keys of the argument slots the
+ *  convention proves precede the ones read (`readKeys`), whether or not the body reads them. One per
+ *  frontend, read by both halves of the entry-parameter rule: {@link mintArgSlotHoles} and
+ *  {@link abiSortEntryParams}.
+ *
+ *  `holes` is a function of everything read, not a slot-to-key table, because where two register
+ *  files share one slot sequence (MIPS o32's floats) the file a hole comes from depends on what the
+ *  function reads — `frontend/fpu.ts` `fpuArgSlots`.
  *
  *  Both halves need an entry block with NO predecessors, whose parameters are the function's own.
  *  A loop header's are phis, index-aligned with its predecessors' edge arguments, and neither
@@ -1090,13 +1101,14 @@ export const slotKeyOffset = (key: string): number | null =>
  *  target inserts an empty preheader ahead of it (each frontend's `preheader` note). */
 export interface ArgSlots {
   slotOf(key: string): number | null;
-  keyOf(slot: number): string;
+  holes(readKeys: readonly string[]): string[];
 }
 
-/** The slots of a convention that passes arguments in `argRegs` only. */
+/** The slots of a convention that passes arguments in `argRegs` only: every register below the
+ *  highest one read. */
 export const registerArgSlots = (argRegs: readonly string[]): ArgSlots => ({
   slotOf: (key) => (argRegs.includes(key) ? argRegs.indexOf(key) : null),
-  keyOf: (k) => argRegs[k],
+  holes: (readKeys) => argRegs.slice(0, Math.max(0, ...readKeys.map((k) => argRegs.indexOf(k)))),
 });
 
 /** A rank past every argument slot, for a live-in that is not one. */
@@ -1116,9 +1128,9 @@ export function mintArgSlotHoles(
   slots: ArgSlots,
 ): void {
   assertTrueEntry(entryHasPreds);
-  const top = Math.max(-1, ...ssa.irBlocks[0].params.map((p) => slots.slotOf(ssa.paramReg.get(p) ?? '') ?? -1));
-  for (let k = 0; k < top; k++) {
-    ssa.ensureParam(slots.keyOf(k), 0);
+  const read = ssa.irBlocks[0].params.map((p) => ssa.paramReg.get(p)).filter((k): k is string => k !== undefined);
+  for (const k of slots.holes(read)) {
+    ssa.ensureParam(k, 0);
   }
 }
 

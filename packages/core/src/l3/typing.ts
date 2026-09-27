@@ -162,6 +162,10 @@ export function exprIntWidth(e: Expr, varType: VarTypes): 32 | 64 {
   }
 }
 
+/** The float operators (l3/ast.ts BinOp): their result is the float their operands are, never an
+ *  integer, so none of the integer conversion rules below applies to one. */
+export const FLOAT_BINOPS: ReadonlySet<BinOp> = new Set<BinOp>(['f+', 'f-', 'f*', 'f/']);
+
 /** The binary operators whose RESULT is a C `int` whatever their operands are — read by both
  *  halves of the conversion model, which is the point of naming them once. */
 const INT_RESULT_BINOPS = new Set<BinOp>(['<', '<=', '>', '>=', '==', '!=', '&&', '||']);
@@ -247,10 +251,14 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     // folded to a shift — where `a / (s32)-2147483648` calls `__divsi3`.
     case 'const':
       return e.value > -2147483648 && e.value <= 2147483647;
-    // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`.
+    // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`. A float has no integer
+    // signedness at all.
     case 'un':
-      return e.op === '!' ? true : rec(e.e);
+      return e.op === 'f-' ? undefined : e.op === '!' ? true : rec(e.e);
     case 'bin': {
+      if (FLOAT_BINOPS.has(e.op)) {
+        return undefined;
+      }
       // The SIGNEDNESS-CARRYING pairs — the ops the tower keeps apart because C spells each pair
       // with one token and picks between them from the operand types (l3/ast.ts BinOp). The
       // C-family backend PINS their operands, so what gets printed renders as the op says
@@ -338,10 +346,15 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       return T.s(32);
     case 'cast':
       return e.to;
-    // `-`/`~` yield the promoted integer; `!` yields int. None yields a pointer.
+    // `-`/`~` yield the promoted integer; `!` yields int. None yields a pointer. A float negation
+    // yields the float it negates.
     case 'un':
-      return T.s(32);
+      return e.op === 'f-' ? rec(e.e) : T.s(32);
     case 'bin': {
+      // Both operands are one float type (ir/verify.ts holds the IR op to that), so the left names it.
+      if (FLOAT_BINOPS.has(e.op)) {
+        return rec(e.l);
+      }
       if (e.op === '+' || e.op === '-') {
         const l = rec(e.l);
         const r = rec(e.r);

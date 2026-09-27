@@ -513,7 +513,7 @@ test('C: the declaration list is refilled in the target frame order, in place', 
 });
 
 test('C++: the same, through the other C-family backend', () => {
-  const backend = cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] });
+  const backend = cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] }, undefined);
   expect(declOrder(backend.emit(twoSlots()))).toEqual(['lo', 'mid', 'hi']);
 });
 
@@ -622,7 +622,7 @@ test('every backend orders: no `emit` may print an unordered declaration list', 
   const backends = [
     cBackend,
     pascalBackend,
-    cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] }),
+    cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] }, undefined),
   ];
   for (const b of backends) {
     expect(declOrder(b.emit(sfn))).toEqual(['lo', 'mid', 'hi']);

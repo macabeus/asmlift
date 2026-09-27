@@ -149,7 +149,8 @@ const PROBES: Record<string, Probe> = {
     // the file (a destination it accepts), a store (which `storeClass` would otherwise claim), and
     // a control-register move (which names no FP register at all).
     fpu: [
-      ['arithmetic', '0:\tadd.s\t$f0,$f12,$f14\n4:\tjr\tra\n8:\tnop\n'],
+      // DOUBLE precision: the single-precision `add.s` lifts through the float homes.
+      ['arithmetic', '0:\tadd.d\t$f0,$f12,$f14\n4:\tjr\tra\n8:\tnop\n'],
       ['a move out of the file', '0:\tmfc1\tv0,$f12\n4:\tjr\tra\n8:\tnop\n'],
       ['an FPU store', '0:\tswc1\t$f0,0(a1)\n4:\tjr\tra\n8:\tnop\n'],
       ['the control register', '0:\tcfc1\tv0,$31\n4:\tjr\tra\n8:\tnop\n'],
@@ -179,7 +180,8 @@ const PROBES: Record<string, Probe> = {
     // Same four arms. `fcmpo`'s destination is a CONDITION register, which is the PowerPC shape
     // that forces the predicate to read every operand rather than only `ops[0]`.
     fpu: [
-      ['arithmetic', '0:\tfadds\tf1,f1,f2\n4:\tblr\n'],
+      // DOUBLE precision, as on MIPS: `fadds` lifts through the float homes.
+      ['arithmetic', '0:\tfadd\tf1,f1,f2\n4:\tblr\n'],
       ['a compare into a condition register', '0:\tfcmpo\tcr0,f1,f2\n4:\tblr\n'],
       ['an FPU store', '0:\tstfs\tf1,0(r3)\n4:\tblr\n'],
       ['the FPSCR', '0:\tmtfsfi\t7,0\n4:\tblr\n'],

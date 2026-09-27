@@ -135,6 +135,18 @@ export const OPCODES = {
   concat: { operands: 2, results: 1 }, // concat lo, hi → the 64-bit value whose low half is `lo`
   lo32: { operands: 1, results: 1 },
   hi32: { operands: 1, results: 1 },
+  // --- hardware floating point ---
+  // IEEE arithmetic on `{kind:'float'}` values, and on nothing else (ir/verify.ts checks both
+  // directions). NEW OPCODES rather than `add`/`sub` over a float-typed operand, by the rule the
+  // 64-bit section above states for OPERATIONS: every pass that matches `add` is an integer rewrite
+  // — a pointer walk, a reassociation, a constant fold, an idiom pattern — and a new opcode is what
+  // makes each of them skip. Pure: under the default IEEE environment none of them traps, so a
+  // dead one is reaped like any integer op.
+  fadd: { operands: 2, results: 1 },
+  fsub: { operands: 2, results: 1 },
+  fmul: { operands: 2, results: 1 },
+  fdiv: { operands: 2, results: 1 },
+  fneg: { operands: 1, results: 1 },
   // --- memory ---
   load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
@@ -248,6 +260,11 @@ export const WIDE_BITS = 64;
  *  form that says HOW the half was widened. This set keeps its one job: refuse an extension with no
  *  C spelling. */
 export const CAST_WIDTHS: ReadonlySet<number> = new Set([8, 16]);
+
+/** The float opcodes: the only ops a `{kind:'float'}` value may be an operand or a result of,
+ *  besides `ret` (ir/verify.ts). Authored beside the registry because no signature field says what
+ *  an op computes ON. */
+export const FLOAT_OPS: ReadonlySet<string> = new Set(['fadd', 'fsub', 'fmul', 'fdiv', 'fneg']);
 
 /** Signature lookup by RUNTIME opcode string (Op.opcode is a plain string — IR consumers switch
  *  on it); undefined for an unregistered opcode. */

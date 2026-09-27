@@ -421,7 +421,7 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
  *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
  *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
  *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
- *  file's variation varies only a naming decision on top of it. The populations do differ (2,502 vs 2,508
+ *  file's variation varies only a naming decision on top of it. The populations do differ (2,504 vs 2,508
  *  at depth 1), for the reason each file's `JUDGED` states; the DEFECTS do not.
  *
  *  A LIST, NOT A COUNT. A count is green on a change that fixes one defect and adds another, and it
