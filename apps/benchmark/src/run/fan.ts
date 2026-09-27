@@ -122,12 +122,18 @@ export interface FanOptions {
    *  5,952 candidates took 50 s wall here (`kleod:CountCollectedGems:agbcc`, target build included),
    *  so the biggest fans take minutes to merely list. */
   enumerateOnly?: boolean;
-  /** score a fan larger than FAN_SCORE_LIMIT anyway */
+  /** score a fan larger than FAN_SCORE_LIMIT anyway; `whole` implies it */
   force?: boolean;
   /** Compile the REST of a fan the stillborn stop (core stillborn.ts) ended: every candidate the
    *  ranked pass reports not compiled, each through that pass's own compiler (`checkStop`). The stop
    *  is a bet that none of them compiles, and a ranked run never checks it — on a row that newly
-   *  lifts into a stopped fan, a false stop publishes exactly as a true `noncompile`. */
+   *  lifts into a stopped fan, a false stop publishes exactly as a true `noncompile`.
+   *
+   *  It RAISES the FAN_SCORE_LIMIT guard, as `force` does: asking for the rest of a fan compiled is
+   *  asking for the compiles the guard would otherwise ask about, and the biggest stopped fans are
+   *  over the limit (`kleod:PauseMenuScreenHandler:agbcc`, 30,240). And it exits 0 ONLY when the
+   *  stop held: a false stop, an unchecked candidate and a fan no stop ended each exit non-zero, and
+   *  `pnpm` reports every non-zero exit as 1, so the `[whole]` line says which. */
   whole?: boolean;
   /** What the user typed for `--toolchain` and `--asm`. Carried here ONLY so `optionRefusal` can
    *  see the pair: the row path takes its toolchain from the row id and never reads either, which
@@ -520,6 +526,11 @@ export function optionRefusal(o: FanOptions): string | undefined {
   }
   return undefined;
 }
+
+/** Whether this run compiles a fan over FAN_SCORE_LIMIT without a pre-count: `--force`, or
+ *  `--whole`, which asks for the rest of a stopped fan compiled — the compiles the limit asks about. */
+export const raisesSizeLimit = (o: Pick<FanOptions, 'force' | 'whole'>): boolean =>
+  o.force === true || o.whole === true;
 
 /** Does `show` parse as a candidate's variations — non-empty entries, `/`-joined? */
 function namesVariations(show: string): boolean {
@@ -1051,7 +1062,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // ENUMERATE-ONLY, and also the pre-count the size guard needs. Skipped under `--force`, which
   // has already answered the question the count would ask — enumeration on the rows this guard
   // exists for is itself the expensive part.
-  if (o.enumerateOnly || !o.force) {
+  if (o.enumerateOnly || !raisesSizeLimit(o)) {
     // GUARDED, because `enumerateCandidates` has no annotate mode: the gap the phase-1 pass above
     // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 234 of the corpus's 1,062 rows
     // publish `declined` on exactly such a gap — the very rows `attribute-function.md` sends a
@@ -1120,6 +1131,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       note(`asmlift: [whole] ${c.id}: no stillborn stop ended this fan, so there is no rest to compile`);
       return code;
     }
+    note(
+      `asmlift: [whole] compiling the ${e.notCompiled.length} candidate(s) the stillborn stop did not compile: ` +
+        `${estimatedScoreTime(e.notCompiled.length, c.tier)} at this machine's measured cold rate`,
+    );
     const check = checkStop(
       e.notCompiled,
       enumerateRanked(c.sym, asm, c.codegen.target, reportingOpts),
@@ -1142,7 +1157,11 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   }
   printThrows();
   if (o.whole) {
-    note(`asmlift: [whole] ${c.id}: no stillborn stop ended this fan, so there is no rest to compile`);
+    // …and not exit 0: that is "the stop held", and the row a STOP line sent here was not stopped.
+    note(
+      `asmlift: [whole] ${c.id}: no stillborn stop ended this fan, so there is no rest to compile — the ` +
+        `fan below was ranked whole`,
+    );
   }
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.winner), stamp: stampFrom(treeBefore) }));
   // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
@@ -1157,5 +1176,5 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     }
     console.log(showSource(picked));
   }
-  return 0;
+  return o.whole ? 2 : 0;
 }

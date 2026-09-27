@@ -18,6 +18,7 @@ import {
   noFanReport,
   optionRefusal,
   pickCandidate,
+  raisesSizeLimit,
   renameWarning,
   renderFan,
   scoreLine,
@@ -292,6 +293,15 @@ describe('optionRefusal', () => {
 
   it('allows --toolchain with --asm, which is the pair it exists for', () => {
     expect(optionRefusal({ toolchain: 'ido7.1', asmPath: 'x.s', enumerateOnly: true })).toBeUndefined();
+  });
+
+  // `pnpm bench fan <row> --whole` is the command every STOP line prints, and the biggest stopped
+  // fans are over the limit: under the guard it printed the size refusal, compiled nothing, and
+  // reached pnpm as exit 1 — the code a false stop exits with.
+  it('--whole raises the size limit, as --force does', () => {
+    expect(raisesSizeLimit({ whole: true })).toBe(true);
+    expect(raisesSizeLimit({ force: true })).toBe(true);
+    expect(raisesSizeLimit({})).toBe(false);
   });
 
   it('refuses --whole where nothing is compiled, and allows it on the scoring path', () => {

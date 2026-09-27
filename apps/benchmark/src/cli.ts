@@ -25,7 +25,8 @@
 //                                        # prices a .s that is not a row, no scoring. --toolchain
 //                                        # belongs to --asm alone: a row names its own in its id.
 //                                        # --whole compiles the rest of a fan the stillborn stop
-//                                        # ended, and exits 1 when any of it compiles
+//                                        # ended, whatever its size, and exits 0 only when the
+//                                        # compiler refused all of it
 //   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
 //                    [--map-modes harness,nomap] [--fan] [--force] [--repeat N]
 //                    [--json <f>] [--compare <base.json> <head.json>] [--asm-dir <d> --toolchain <id>]
