@@ -7,13 +7,17 @@
 // the same sentence gets printed: 30,240 on `kleod:PauseMenuScreenHandler`.
 //
 // THE RULE. The DEFAULT candidate (first in enumeration order) is compiled first. Only if the
-// compiler REJECTS it is anything else asked: a PROBE per variation name in the fan — the
-// candidate with the fewest variations that carries it — is compiled, and the fan is stillborn
-// only when the default holds an error that SURVIVES every probe: a message the probe was
-// rejected with too, exactly as many times as the default was (compiler-diagnostics.ts
-// `errorMessages`, positions normalised away). A statement no single variation reaches is re-spelled
-// by no product of them either, so its error is in every candidate. Then the remaining candidates
-// are NOT COMPILED, and are reported as exactly that.
+// compiler REJECTS it is anything else asked: a PROBE per variation name — the candidate with the
+// fewest variations that carries it, per signedness half (HALF BY HALF) — is compiled, and the fan
+// is stillborn only when the default holds an error that SURVIVES every probe: a message the probe
+// was rejected with too, exactly as many times as the default was (compiler-diagnostics.ts
+// `errorMessages`, positions normalised away). Then the remaining candidates are NOT COMPILED, and
+// are reported as exactly that.
+//
+// WHAT IT BETS ON: that a statement no probe re-spells is re-spelled by no product of the probes'
+// variations either, so its error is in every candidate. That is a bet, not a theorem — a product
+// is not the sum of its variations (THE RESIDUALS, below) — and the rule never compiles a product
+// to check it.
 //
 // PER ATTEMPT. A rejection may hold several compiles (compiler-diagnostics.ts `attemptsOf`: the
 // benchmark's real tier tries every candidate in a ladder of contexts and two dialects), and a
@@ -28,11 +32,11 @@
 // probe that prints it fewer times has cured one. Either one reached it, so neither vouches that
 // a product leaves it alone.
 //
-// Over the same probes this generalises equal keys: a probe rejected with the default's whole
-// multiset of errors leaves every message a survivor. What it adds is a fan whose variations DO
-// reach some of its errors — `/setup-args` curing a call's arity — while another error stays where
-// it was in every probe: pikmin's C++ `setMatMatrices`, once it lifted, compiled all 768
-// candidates for a `GXLoadTexMtxImm` argument no variation re-types.
+// A probe rejected with the default's whole multiset of errors leaves every message a survivor. The
+// rule also stops a fan whose variations DO reach some of its errors — `/setup-args` curing a
+// call's arity — while another error stays where it was in every probe: pikmin's C++
+// `setMatMatrices`, once it lifted, compiled all 768 candidates for a `GXLoadTexMtxImm` argument no
+// variation re-types.
 //
 // HALF BY HALF. Every fan is enumerated at BOTH signednesses (variation-tokens.ts, kind
 // `signedness`), and a signedness re-types the whole body: every type a message quotes changes
@@ -44,8 +48,13 @@
 // variation name INSIDE it, and the fan is stillborn only when every half is. A half is found by
 // the registry's kind, never by a name, and a fan with no signedness in its names is one half.
 // These are MORE probes than one per name over the whole fan — every signedness is paired with
-// every variation before anything is skipped — so a fan equal keys over the old probes stopped
-// can be ranked whole now, and a stopped fan pays its second half's probes.
+// every variation before anything is skipped — and a stopped fan pays its second half's probes.
+// Any partition of the fan would serve, each cell asked with its own default and probes; signedness
+// is the one this rule splits on, because it is the variation that re-words the survivor in every
+// candidate. A variation that re-words it in part of the fan is not split on, and its probe leaves
+// that attempt without a survivor: `kleod:WorldMapScreenUnlockNewWorld:agbcc`'s only
+// vendored-context error, `incompatible types in assignment`, reads `invalid operands to binary &`
+// under `/derived-home` and under `/setup-args`, and that fan is ranked whole.
 //
 // Anything else ranks the whole fan. A probe that compiles or is withheld: the fan is alive. An
 // attempt with no survivor: a product of variations may cure what no single one does. An attempt
@@ -53,19 +62,35 @@
 // list that differs from the default's: an unread sentence equals nothing. A throw that is not a
 // `CompilerRejection`: a timeout or a killed compiler says nothing about the candidate.
 //
-// THE RESIDUAL COUNTER-CASE, which this rule does NOT close: ONE error MESSAGE that needs TWO
-// variations jointly. `a & b` is `invalid operands to binary &` while either operand is a struct;
-// if one variation re-types `a` and another re-types `b`, each probe leaves the message where it
-// was, and only their product compiles. The same shape arises without any re-typing wherever the
-// compiler prints ONE message for a statement holding TWO defects: mwcc and IDO report
-// `y = g(1, 2) + h(3, 4)` as a single message, and agbcc, kmc and IDO report an undeclared name
-// once however many times it is used — a probe that cures one of the two defects leaves the
-// message where it was. Two DIFFERENT messages each cured by its own variation are not this case:
-// each probe removes its message, neither survives, and the fan is ranked whole. The rule used to
-// ask that every probe leave EVERY message where it was; asking it of one message per attempt
-// leaves the residual the same case, in more fans: whatever the probes did to the other errors, the
-// survivor is the one that would need curing jointly. No variation in the vocabulary re-types an
-// operand or cures half a statement today; a variation that does must revisit this rule.
+// THE RESIDUALS, which this rule does NOT close: a product that cures the survivor while every
+// probe keeps it. Two shapes are known.
+//
+// JOINT CURE: ONE error MESSAGE that needs TWO variations together. `a & b` is `invalid operands
+// to binary &` while either operand is a struct; if one variation re-types `a` and another re-types
+// `b`, each probe leaves the message where it was, and only their product compiles. The same shape
+// arises without any re-typing wherever the compiler prints ONE message for a statement holding TWO
+// defects: mwcc and IDO report `y = g(1, 2) + h(3, 4)` as a single message, and agbcc, kmc and IDO
+// report an undeclared name once however many times it is used — a probe that cures one of the two
+// defects leaves the message where it was. Two DIFFERENT messages each cured by its own variation
+// are not this case: each probe removes its message, neither survives, and the fan is ranked whole.
+//
+// INTERACTION: a variation whose reach depends on another. A respell runs over whatever tree the
+// structure variations built, so a structure variation × respell product re-spells statements
+// neither of its probes touched. On
+// `pikmin:setMatMatrices__11DGXGraphicsFP8Materiali:mwcc_233_163n`, once it lifted, `/unmerge`
+// copies a join's call into both arms only on the `/flip-join` tree: the default, the `/flip-join`
+// probe and the `/unmerge` probe each print `pointer/array required` nine times in the vendored C
+// attempt, their product ten. That product moved the survivor UP, which keeps it an error; one that
+// moved it to zero, leaving no other error, would be a candidate that compiles and that the stop
+// never compiles. Compiled whole, 156 of each half's 384 candidates moved some survivor, and every
+// one kept another at the default's count.
+//
+// Asking one surviving message per attempt, rather than every message, leaves these the same cases
+// in more fans: whatever the probes did to the other errors, the survivor is the one a product
+// would have to move, and the stop can rest on a single message — pikmin's `getCardStatus` stops on
+// one survivor in its vendored C++ attempt, the only one a C++ candidate can compile in. No
+// variation in the vocabulary re-types an operand or cures half a statement today; a variation that
+// does must revisit this rule.
 //
 // ONE COPY. Probe selection and the verdict are pure functions over indices, so the sync driver
 // (rank.ts `rankBy`), the pooled CLI driver and the webapp's async loop all sequence their own
