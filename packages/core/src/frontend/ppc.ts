@@ -589,8 +589,7 @@ export function lift(
    *  the frame is the LR save (`frameStore`), and moving it back with `mtlr` is the return. Any other
    *  use is a function reading its own return address (MP4's `asm { mflr retaddr }` does, to tag
    *  an allocation with its caller), which no C expression spells, so that use refuses once the
-   *  function is built. A no-op `mflr` would leave rD holding its previous value, and the body's
-   *  read of it would lift as that value: a phantom parameter for r31, nothing at all for r3. */
+   *  function is built. */
   const returnAddresses = new Map<Value, number>();
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
