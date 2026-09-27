@@ -107,7 +107,7 @@ export interface DecompilerResult {
   fanSize?: number;
   /** asmlift only, `noncompile` rows: how many of `fanSize` were NEVER COMPILED, because the
    *  ranking declared the fan stillborn (core stillborn.ts: the default candidate and one probe
-   *  per variation were all rejected for the same reason). `fanSize` keeps counting them — they
+   *  per variation were all rejected, each for an error no variation changed). `fanSize` keeps counting them — they
    *  were enumerated — and `droppedCandidates` does not: nothing refused them. A cost, like
    *  `fanSize`, so it is out of `bench diff`'s watched fields. Absent when every candidate was
    *  compiled, which is every row that is not stillborn. */

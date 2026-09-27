@@ -1,9 +1,9 @@
-// THE STILLBORN STOP (src/stillborn.ts): a fan whose default and every per-variation probe are
-// rejected for the same reason is not compiled to the end — and every other fan is ranked whole,
-// exactly as if the rule did not exist.
+// THE STILLBORN STOP (src/stillborn.ts): a fan whose default holds an error every per-variation
+// probe is rejected with too, in every attempt, is not compiled to the end — and every other fan is
+// ranked whole, exactly as if the rule did not exist.
 import { expect, test } from 'vitest';
 
-import { CompilerRejection } from '../src/compiler-diagnostics';
+import { CompilerRejection, joinAttempts } from '../src/compiler-diagnostics';
 import { type Candidate, NoScorableCandidateError, rankBy } from '../src/rank';
 import { probeIndices } from '../src/stillborn';
 
@@ -179,4 +179,104 @@ test('RESIDUAL: two defects the compiler reports as one message are declared sti
   );
   expect(run).toThrow(NoScorableCandidateError);
   expect(compiled).not.toContain('unsigned/a/b');
+});
+
+// SURVIVAL (stillborn.ts header): a probe may cure SOME of the default's errors — the fan is still
+// stillborn when one error is left in every probe, exactly as often as in the default.
+test('one probe cures one of two errors and the other survives: stopped after the default and its probes', () => {
+  const candidates = fan(['setup-args', 'b', 'c']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('setup-args') ? reject(OPERANDS) : reject(ARITY, OPERANDS),
+  );
+  let thrown: unknown;
+  try {
+    run();
+  } catch (e) {
+    thrown = e;
+  }
+  const e = thrown as NoScorableCandidateError;
+  expect(compiled).toEqual(['unsigned', 'unsigned/setup-args', 'unsigned/b', 'unsigned/c', 'signed']);
+  expect(e.notCompiled).toHaveLength(candidates.length - compiled.length);
+  // the note names the error that survived, not the one a probe cured
+  const note = e.message.slice(0, e.message.indexOf("The default candidate's compile"));
+  expect(note).toContain('invalid operands to binary &');
+  expect(note).not.toContain('HeapFree');
+});
+
+test('a probe that prints the surviving error MORE often reached it: the fan is ranked whole', () => {
+  const candidates = fan(['reread-globals', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('reread-globals') ? reject(OPERANDS, OPERANDS) : reject(OPERANDS),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+test('two copies of an error, one cured: the error did not survive, so the fan is ranked whole', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('a') ? reject(ARITY) : reject(ARITY, ARITY),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+// PER ATTEMPT. A rejection of several compiles — the benchmark's ladder — compiles a candidate when
+// ANY attempt compiles, so every attempt must keep a survivor.
+const DEAD = 'c.c:1: fatal error: global.h: No such file or directory';
+const attempts = (...perAttempt: string[][]): never => {
+  throw new CompilerRejection(
+    `agbcc failed: ${perAttempt.at(-1)![0]}`,
+    joinAttempts(perAttempt.map((errors, k) => ({ label: `rung ${k}`, diagnostic: errors.join('\n') }))),
+  );
+};
+
+test('a dead attempt’s constant errors never stop a fan whose live attempt has no survivor', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) => {
+    const live = [...(c.variations.includes('a') ? [] : [ARITY]), ...(c.variations.includes('b') ? [] : [OPERANDS])];
+    return live.length === 0 ? { score: 0 } : attempts([DEAD], live);
+  });
+  expect(run().winner.source).toBe('unsigned/a/b');
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+test('every attempt keeps a survivor: stopped, whatever the probes cured elsewhere', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    attempts([DEAD], c.variations.includes('a') ? [OPERANDS] : [ARITY, OPERANDS]),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toEqual(['unsigned', 'unsigned/a', 'unsigned/b', 'signed']);
+});
+
+test('a probe tried in other attempts than the default is not read against it: the fan is ranked whole', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, (c) =>
+    c.variations.includes('a') ? attempts([OPERANDS]) : attempts([DEAD], [OPERANDS]),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+test('an attempt whose compiler stopped reporting is unread, so nothing is skipped', () => {
+  const candidates = fan(['a', 'b']);
+  const { run, compiled } = rank(candidates, () =>
+    attempts([OPERANDS], [ARITY, 'cfe: Fatal: Too many errors... goodbye.']),
+  );
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).toHaveLength(candidates.length);
+});
+
+// THE RESIDUAL again, in the shape survival lets through: a probe cured one error, and the error
+// that survived is one only two variations together cure. Stopped — the same case as above.
+test('RESIDUAL: the surviving error needs two variations jointly, whatever the probes cured besides', () => {
+  const candidates = fan(['setup-args', 'a', 'b']);
+  const { run, compiled } = rank(candidates, (c) => {
+    const operands = c.variations.includes('a') && c.variations.includes('b') ? [] : [OPERANDS];
+    const left = [...(c.variations.includes('setup-args') ? [] : [ARITY]), ...operands];
+    return left.length === 0 ? { score: 0 } : reject(...left);
+  });
+  expect(run).toThrow(NoScorableCandidateError);
+  expect(compiled).not.toContain('unsigned/setup-args/a/b');
 });

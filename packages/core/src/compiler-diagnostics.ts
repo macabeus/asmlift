@@ -127,17 +127,25 @@ export function errorMessages(diagnostic: string): string[] {
 const TRUNCATED =
   /Too many errors\.\.\. goodbye|too many errors emitted|compilation terminated due to -fmax-errors|^User break, cancelled/im;
 
+/** The error messages of a diagnostic that can be READ AS A VERDICT: `errorMessages`, or null when
+ *  it recognises none, and null when the compiler stopped reporting — what an unfinished
+ *  diagnostic printed is a prefix of its verdict, and two prefixes agree whatever follows them. */
+export function verdictMessages(diagnostic: string): string[] | null {
+  if (TRUNCATED.test(diagnostic)) {
+    return null;
+  }
+  const messages = errorMessages(diagnostic);
+  return messages.length === 0 ? null : messages;
+}
+
 /** WHAT a failed compile failed ON, as a value two compiles can be compared by: the MULTISET of
  *  its error messages, positions normalised away. A multiset, not a set — two calls with too many
  *  arguments are two errors, and a variation that repairs one of them has changed the answer.
  *  Null when no error is recognised, and null when the compiler stopped reporting: an unreadable
  *  or unfinished diagnostic equals nothing, itself included. */
 export function errorKey(diagnostic: string): string | null {
-  if (TRUNCATED.test(diagnostic)) {
-    return null;
-  }
-  const messages = errorMessages(diagnostic);
-  return messages.length === 0 ? null : JSON.stringify([...messages].sort());
+  const messages = verdictMessages(diagnostic);
+  return messages === null ? null : JSON.stringify([...messages].sort());
 }
 
 /** One compile ATTEMPT inside a diagnostic that holds several: what the harness called the
