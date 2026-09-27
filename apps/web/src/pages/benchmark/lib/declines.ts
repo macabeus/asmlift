@@ -173,7 +173,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
+      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
   },
   {
     // A branch whose block has NO predecessor reads flags nothing in this function set: at the
