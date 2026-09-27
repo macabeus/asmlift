@@ -1,7 +1,7 @@
 // What counts as an ERROR in a compiler's output, and when two failed compiles failed the same way.
 import { expect, test } from 'vitest';
 
-import { errorKey, errorMessages, errorsFirst } from '../src/compiler-diagnostics';
+import { attemptsOf, errorKey, errorMessages, errorsFirst, joinAttempts } from '../src/compiler-diagnostics';
 
 const AGBCC = [
   "c.c: In function `PauseMenuScreenHandler':",
@@ -205,4 +205,34 @@ test('IDO’s `Fatal:` is an error tag, so a fatal line is read as one and comes
     'cfe: Fatal: Cannot open file foo.h',
     'cfe: Warning 712: x',
   ]);
+});
+
+// A REJECTION OF SEVERAL COMPILES (the benchmark's real-tier ladder): each attempt is kept apart,
+// in the order it was tried, and the text still reads as every attempt's errors.
+test('attempts joined under a header split back as they were, in order', () => {
+  const attempts = [
+    { label: 'bare typedefs (c++)', diagnostic: "c.c:2: `S' undeclared (first use in this function)" },
+    { label: '+ manifest prependC (c++)', diagnostic: 'c.c:1: fatal error: global.h: No such file or directory\n' },
+    { label: 'vendored ctx (c++)', diagnostic: '' },
+    { label: 'vendored ctx (c)', diagnostic: AGBCC },
+  ];
+  expect(attemptsOf(joinAttempts(attempts))).toEqual(attempts);
+});
+
+test('a diagnostic with no header is ONE attempt: a single compile', () => {
+  expect(attemptsOf(AGBCC)).toEqual([{ label: '', diagnostic: AGBCC }]);
+  expect(attemptsOf('')).toEqual([{ label: '', diagnostic: '' }]);
+  // what came ahead of the first header is kept, as an attempt of its own
+  expect(attemptsOf(`cc1: error: x\n${joinAttempts([{ label: 'a', diagnostic: AGBCC }])}`)).toEqual([
+    { label: '', diagnostic: 'cc1: error: x' },
+    { label: 'a', diagnostic: AGBCC },
+  ]);
+});
+
+test('the attempt header is never read as an error line', () => {
+  const joined = joinAttempts([
+    { label: "unit context, the candidate's signature (c)", diagnostic: AGBCC },
+    { label: 'vendored ctx (c)', diagnostic: AGBCC },
+  ]);
+  expect(errorMessages(joined)).toEqual([...errorMessages(AGBCC), ...errorMessages(AGBCC)]);
 });
