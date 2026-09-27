@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=107.8s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=93.1s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,15 +136,15 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-27**, taken at `e3697562`
+Summed out of the committed artifact of **2026-09-27**, taken at `f71515a0`
 (`perf/noncompile-fan-stop`, on #262: the stillborn stop reads one surviving error per attempt and
-probes each signedness half as its own fan): the ranked pass alone is **1,133 s over 195 real
-rows** and **598 s over 799 synthetic rows**; wall clock was 381.6 s and 197.2 s on tiers that
-overlap, and **381.7 s** end to end (the CLI's own `Done in` line). Against `origin/main` it is
-**1 field change over 1 row**, fan **69,539 → 69,539 (1.00×)** over 994 comparable rows, while its
-ranked pass reads **1,645.6 s → 1,731.0 s (1.05×)**. The dearest single row is **141 s** on
-`kleod:PauseMenuScreenHandler:agbcc`, **12% of the tier** on its own — a `noncompile` with a fan of
-30,240, which is the figure to reach for when a scoped run looks cheap. That row compiled 35
+probes each signedness half as its own fan): the ranked pass alone is **1,003 s over 195 real
+rows** and **614 s over 799 synthetic rows**; the two tiers were run apart, in 361.4 s and 153.9 s
+of wall clock (each run's `Done in` line), so there is no end-to-end figure. Against `origin/main`
+it is **1 field change over 1 row**, fan **69,539 → 69,539 (1.00×)** over 994 comparable rows,
+while its ranked pass reads **1,645.6 s → 1,616.1 s (0.98×)**. The dearest single row is **128 s**
+on `kleod:PauseMenuScreenHandler:agbcc`, **13% of the tier** on its own — a `noncompile` with a fan
+of 30,240, which is the figure to reach for when a scoped run looks cheap. That row compiled 35
 candidates at `origin/main` too and read 141 s there, which prices the box rather than the branch.
 
 The artifact `origin/main` carried before this one, taken 2026-09-27 at `0271538d`
