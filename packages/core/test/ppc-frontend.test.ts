@@ -394,9 +394,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const bl = at.toString(16);
     return asm + `${bl}:\tbl      ${bl} <${sym}+0x${bl}>\n\t\t\t${bl}: R_PPC_REL24\tg9\n` + tail(at + 4);
   };
-  test('a store in the parameter area of a call that fills all eight argument registers refuses, read back or not', () => {
+  test('a store in the parameter area of a call that fills every argument register refuses, read back or not', () => {
     const ninth =
-      /^cannot lift '\w+': outgoing stack arguments not modelled — the undeclared call to 'g9' at 0x\w+ fills all 8/;
+      /^cannot lift '\w+': outgoing stack arguments not modelled — the undeclared call to 'g9' at 0x\w+ fills 8 argument registers/;
     expect(() =>
       dis(
         's9',
@@ -423,6 +423,19 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       }),
     ).toThrow(
       "outgoing stack arguments not modelled — 'g9' is declared with 9 parameters and the argument registers carry 8",
+    );
+  });
+  test('a 64-bit argument after seven words is in the parameter area of a call that fills seven', () => {
+    // mwcc 2.3.3 -O4,p, `int ll1(long long x) { return g7l(1, 2, 3, 4, 5, 6, 7, x); }`: the pair skips
+    // r10 and goes to 8(r1)/12(r1). Reading it back after the call must not make it a local.
+    const asm =
+      '0:\tmflr    r0\n4:\tli      r5,3\n8:\tstw     r0,4(r1)\nc:\tli      r6,4\n10:\tli      r7,5\n' +
+      '14:\tstwu    r1,-24(r1)\n18:\tli      r8,6\n1c:\tli      r9,7\n20:\tstw     r4,12(r1)\n24:\tli      r4,2\n' +
+      '28:\tstw     r3,8(r1)\n2c:\tli      r3,1\n30:\tbl      30 <ll1r+0x30>\n\t\t\t30: R_PPC_REL24\tg7l\n' +
+      '34:\tlwz     r4,8(r1)\n38:\tlwz     r5,12(r1)\n3c:\tadd     r3,r3,r4\n40:\tadd     r3,r3,r5\n' +
+      epi(0x44, 24);
+    expect(() => dis('ll1r', asm)).toThrow(
+      /^cannot lift 'll1r': outgoing stack arguments not modelled — the undeclared call to 'g7l' at 0x30 fills 7 argument registers/,
     );
   });
   test('control: a call that leaves an argument register free has no ninth argument to hide', () => {

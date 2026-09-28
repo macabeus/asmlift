@@ -1099,18 +1099,31 @@ export function lift(
           // argument or a local the compiler put in the same words. Reading the word back, before or
           // after the call, does not decide it, so the end-of-lift check for a store nothing reloads
           // is not enough here. Without a prototype this refuses; a declared arity says which.
-          if (declared === undefined && argc === ARG_REGS.length) {
+          //
+          // A guess of seven is the same question for one shape. A 64-bit argument takes an aligned
+          // register pair, so one that follows seven words skips r10 and fills the first two words
+          // of the parameter area (mwcc 2.3.3 builds `g(1, 2, 3, 4, 5, 6, 7, x)` with `long long x`
+          // that way). A single word there cannot be an argument after seven: the eighth word would
+          // have gone in r10.
+          if (declared === undefined && argc >= ARG_REGS.length - 1) {
             const depth = r1At.get(ins);
-            for (const [off, slot] of valueSlots) {
-              const inParamArea = typeof depth !== 'number' || (off >= depth + 8 && off < 0);
-              if (inParamArea && ssa.hasReachingDef(stackSlotKey(off), bi)) {
-                throw new PpcUnsupportedError(
-                  `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${sym}' at ` +
-                    `0x${ins.addr.toString(16)} fills all ${ARG_REGS.length} argument registers, and the value ` +
-                    `stored to '${slot.mem}' at 0x${slot.addr.toString(16)} reaches it in the callee's ` +
-                    `parameter area, where a ninth argument travels`,
-                );
-              }
+            const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
+            const inParamArea = (off: number) => typeof depth !== 'number' || (off >= depth + 8 && off < 0);
+            const word = [...valueSlots.keys()].find((off) => inParamArea(off) && reaching(off));
+            const passed =
+              argc === ARG_REGS.length || typeof depth !== 'number'
+                ? word
+                : reaching(depth + 8) && reaching(depth + 12)
+                  ? depth + 8
+                  : undefined;
+            if (passed !== undefined) {
+              const slot = valueSlots.get(passed)!;
+              throw new PpcUnsupportedError(
+                `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${sym}' at ` +
+                  `0x${ins.addr.toString(16)} fills ${argc} argument registers, and the value ` +
+                  `stored to '${slot.mem}' at 0x${slot.addr.toString(16)} reaches it in the callee's ` +
+                  `parameter area, where an argument past the registers travels`,
+              );
             }
           }
           const args: Value[] = [];
