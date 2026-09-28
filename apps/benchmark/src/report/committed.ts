@@ -40,6 +40,12 @@ export function headContains(ref: string): boolean | undefined {
   }
 }
 
+/** The commit HEAD and `ref` forked from, abbreviated; `undefined` when git cannot say. */
+export const mergeBaseSha = (ref: string): string | undefined => {
+  const full = git('merge-base', 'HEAD', `${ref}^{commit}`);
+  return full === undefined ? undefined : shortSha(full);
+};
+
 /** The artifact as of `ref` (a commit, tag or branch — `HEAD` by default).
  *
  *  AN EMPTY REF IS NOT A MISSING ONE, and git will not say so: `git show :<path>` with an empty

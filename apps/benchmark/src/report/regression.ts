@@ -20,7 +20,7 @@ import { join } from 'node:path';
 
 import { retiredRows } from '../cases/retired';
 import { RESULTS_DIR } from '../config';
-import { readCommitted, sameRun } from './committed';
+import { headContains, mergeBaseSha, readCommitted, sameRun, shortSha } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -126,6 +126,32 @@ export function rowsAddedSince(base: BenchOutput, self: BenchOutput): BenchOutpu
   return { ...self, results: self.results.filter((r) => !baseKeys.has(join.headKey(r))) };
 }
 
+/** WHAT THIS GATE COMPARED AGAINST, printed before its verdict. `origin/main` is a different commit on
+ *  every machine and after every fetch — a worktree's fetch moves it for every other worktree too —
+ *  so the base is named by SHA, with the commit HEAD forked from it. When HEAD does not contain the
+ *  base, the line says so: every row the base's own newer commits moved then reads below as if this
+ *  branch had moved it (a merged neighbour's gain printed as this branch's LOST row). A notice, not a
+ *  refusal: the comparison still runs, and the reader decides whether to rebase first. */
+export function baseLine(a: {
+  base: string;
+  sha?: string;
+  generatedAt: string;
+  mergeBase?: string;
+  contains?: boolean;
+}): string {
+  const named = `regression: base ${a.base}${a.sha ? ` = ${a.sha}` : ''} (artifact generated ${a.generatedAt})`;
+  if (a.base === 'HEAD' || a.contains === undefined) {
+    return named;
+  }
+  if (a.contains) {
+    return `${named} · HEAD contains it`;
+  }
+  return (
+    `${named} · HEAD does NOT contain it (merge-base ${a.mergeBase ?? 'unknown'}): ${a.base} gained commits ` +
+    `after this branch forked, and any row those commits moved reads below as if this branch moved it`
+  );
+}
+
 /** CLI entry: the committed results.json at `base` vs the freshly merged one, PLUS the branch's own
  *  committed artifact vs the fresh one over the rows `base` does not have. Returns the process exit
  *  code — 0 iff no match was lost and no committed row vanished, in EITHER comparison. `base`
@@ -135,6 +161,15 @@ export function regressionGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
   const report = compareOutcomes(committed, fresh, retiredRows());
+  console.log(
+    baseLine({
+      base,
+      sha: shortSha(base),
+      generatedAt: committed.meta.generatedAt,
+      mergeBase: mergeBaseSha(base),
+      contains: headContains(base),
+    }),
+  );
 
   for (const f of report.gained) {
     console.log(`GAINED  ${f.id} [${f.decompiler}] ${f.from} → match`);
