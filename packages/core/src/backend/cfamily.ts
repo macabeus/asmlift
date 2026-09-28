@@ -243,6 +243,31 @@ function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt
   return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recastInt(e0.l, false, w), e0.r];
 }
 
+/** Does passing `a` to a parameter declared `to` take a conversion C++ will not make implicitly?
+ *  Three do, and C makes each of them implicitly, so the cast spells the conversion C would have
+ *  made and the compiled code is C's: an object pointer to a pointer of another pointee (a conversion
+ *  to `void *`, or one that only adds a qualifier, is implicit in C++ too), an integer to a pointer
+ *  (the literal `0` is the one integer that converts), and a pointer to an integer. Only reached on a
+ *  function compiled as C++ (`SFn.declaredArgs`). */
+function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
+  const from = exprCType(a, vt.type);
+  // qualifiers never decide it: a `T * const` parameter is a pointer parameter
+  const bare = to
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (bare.endsWith('*')) {
+    if (a.k === 'const' && a.value === 0) {
+      return false;
+    }
+    if (from?.kind !== 'ptr') {
+      return true;
+    }
+    return bare !== 'void *' && bare !== cType(from).replace(/\s+/g, ' ').trim();
+  }
+  return from?.kind === 'ptr';
+}
+
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
   const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
@@ -274,8 +299,15 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       const g = `&${e.name}`;
       return parentPrec < 2 ? `(${g})` : g;
     }
-    case 'call':
-      return `${e.fn}(${e.args.map((a) => rec(a, 99)).join(', ')})`;
+    case 'call': {
+      const declared = vt.declaredArgs(e.fn);
+      return `${e.fn}(${e.args
+        .map((a, i) => {
+          const to = declared?.[i];
+          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : rec(a, 99);
+        })
+        .join(', ')})`;
+    }
     // `v++` / `v--`. Postfix over a bare identifier, so it binds tighter than every parent and
     // never self-parenthesizes.
     case 'postincr':

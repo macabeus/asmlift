@@ -449,7 +449,7 @@ export function enumerateCandidates(
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   const frontend = frontendFor(target);
   const baseOpts = {
-    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name])),
+    ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
     // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
     // be handed a tree carrying one, because its refusal costs the whole candidate (and, when
     // every candidate carries it, the whole row).

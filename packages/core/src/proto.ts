@@ -1,4 +1,4 @@
-import type { SymbolMap, SymbolTypeFacts } from './symbols';
+import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
 // matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
@@ -7,10 +7,12 @@ import type { SymbolMap, SymbolTypeFacts } from './symbols';
 // `returnsVoid` and the widths raise/paramwidth.ts checks against. It also keeps the frontend seam
 // honest: a frontend receives prototypes, not a grab-bag of ISA-specific options.
 
-/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). ONE fact is
- *  read off it and everything else is derived from that fact: the WIDTH it spells
+/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). The lift reads
+ *  ONE fact off it and derives everything else from that fact: the WIDTH it spells
  *  (`declaredWidth`). raise/paramwidth.ts checks its inference against that width, and
- *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies.
+ *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies. On a
+ *  function compiled as C++ the printer reads the SPELLING too: a call argument is cast to it where
+ *  C++ converts nothing implicitly (backend/cfamily.ts `argConversion`).
  *
  *  A DECLARED WIDTH ONLY VETOES, never pins. Where the asm carries a prologue extension the
  *  declaration contradicts, the declaration wins — it is a fact from the project's headers, where
@@ -314,7 +316,9 @@ export function declaredWidth(t: ParamType): number | undefined {
     .replace(/\b(?:const|volatile)\b/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  if (s.endsWith('*')) {
+  // a pointer — including a function pointer's abstract declarator, `void (*)(s32)` — is
+  // register-wide whatever it points at
+  if (s.endsWith('*') || /\(\s*\*\s*\)\s*\(.*\)$/.test(s)) {
     return 32;
   }
   const own = /^([su])(8|16|32|64)$/.exec(s);
@@ -571,8 +575,10 @@ export function validatePrototypes(value: unknown): string[] {
 /** The C type spelling for one declared parameter/return, or null when the facts do not
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
- *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
- *  are read for the register widths they sum to alone (test/param-pointee-variation.test.ts). */
+ *  would move no byte: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
+ *  are read for the register widths they sum to (test/param-pointee-variation.test.ts). The one
+ *  reader of a pointee's spelling is a C++ call argument's cast, which a header's declaration
+ *  supplies (proto-context.ts, whose sized entries win over this one). */
 function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   if (t.pointer) {
     return 'void *';
@@ -586,6 +592,19 @@ function typeSpelling(t: SymbolTypeFacts): ParamType | null {
     return `${t.signed ? 's' : 'u'}${t.size * 8}`;
   }
   return null;
+}
+
+/** The prototype a code symbol's DWARF signature states, or `undefined` when it states none this
+ *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`). */
+export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
+  if (info.kind !== 'code' || !info.signature) {
+    return undefined;
+  }
+  const params = info.signature.params.map(typeSpelling);
+  if (params.some((p) => p === null)) {
+    return undefined;
+  }
+  return { params: params as ParamType[], ...(info.signature.returns === null ? { returnsVoid: true } : {}) };
 }
 
 /**
@@ -631,17 +650,13 @@ export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prot
           out[info.name] = rest;
         }
       }
-      if (info.kind !== 'code' || !info.signature || out[info.name] !== undefined) {
+      if (out[info.name] !== undefined) {
         continue;
       }
-      const params = info.signature.params.map(typeSpelling);
-      if (params.some((p) => p === null)) {
-        continue;
+      const signed = symbolPrototype(info);
+      if (signed !== undefined) {
+        out[info.name] = signed;
       }
-      out[info.name] = {
-        params: params as ParamType[],
-        ...(info.signature.returns === null ? { returnsVoid: true } : {}),
-      };
     }
   }
   return out;

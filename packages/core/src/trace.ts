@@ -315,7 +315,7 @@ function traceTower(
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap option as decompile()
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
-    ...structureOptionsFor(target, returnsVoid),
+    ...structureOptionsFor(target, returnsVoid, prototypes),
     spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),

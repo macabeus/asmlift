@@ -52,7 +52,7 @@ export interface RankOptions {
    *  can print it. Core's header states why the distinction matters ("a variation that never fires
    *  because it always throws is a defect, and without this it looks identical to a variation that
    *  correctly declined"). Only this CLI and `pnpm bench fan` supply one: `pnpm bench run` reaches
-   *  `decompileRanked` without it, so a whole pre-respell half of a row's fan can still vanish from
+   *  `decompileRankedParallel` without it, so a whole pre-respell half of a row's fan can still vanish from
    *  a `pnpm bench run` with nothing printed. Read an absent `[threw]` line as a fact
    *  about the wiring before reading it as a fact about the variations. */
   onEnumerationError?: (variations: readonly string[], error: string) => void;
@@ -176,30 +176,33 @@ export function decompileRanked(
  *
  *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
  *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list
- *  are what the serial path would have produced. The benchmark deliberately keeps calling
- *  `decompileRanked`: a published measurement must not depend on a scheduler. */
+ *  are what the serial path would have produced, and a published measurement that runs through
+ *  this driver depends on no scheduler. */
 export async function decompileRankedParallel(
   name: string,
   asm: string,
   target: TargetDescription,
   targetObj: string,
   opts: RankOptions & {
-    jobs: number;
+    /** how many workers compile at once — a count, or a count chosen from the fan's size once it is
+     *  enumerated, asked once and before the first `worker()` */
+    jobs: number | ((fan: number) => number);
     /** mints one INDEPENDENT async compiler per worker (compile-command.ts `worker()`) */
     worker: () => AsyncCandidateCompiler;
   },
 ): Promise<RankedResult> {
   const backend = opts.backend ?? cBackend;
   const clock = opts.clock;
-  if (clock) {
-    clock.workers = Math.max(1, opts.jobs);
-  }
   const candidates = timed(clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
+  const jobs = Math.max(1, typeof opts.jobs === 'number' ? opts.jobs : opts.jobs(candidates.length));
+  if (clock) {
+    clock.workers = jobs;
+  }
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const scored = new Map<string, MatchScore | Error>();
   let done = 0;
   let best: MatchScore | undefined;
-  const workers = Array.from({ length: Math.max(1, opts.jobs) }, () => opts.worker());
+  const workers = Array.from({ length: jobs }, () => opts.worker());
   const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
     let result: MatchScore | Error;
     try {

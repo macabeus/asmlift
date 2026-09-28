@@ -131,6 +131,10 @@ export interface DecompilerResult {
    *  key for exactly that reason — a nondeterministic field in either would report every row as
    *  moved on every run. Read it as what this run cost, alongside the count that explains it.
    *
+   *  A fan of `PARALLEL_FAN` candidates or more (apps/benchmark eval/asmlift.ts) compiles on
+   *  `ROW_COMPILE_WORKERS` threads, so its seconds are wall over those threads, not compile time:
+   *  such a row's seconds per candidate are not a single compiler's.
+   *
    *  ITS READER is `bench diff`'s cost section (`compareCost`/`costLines` in report/diff.ts),
    *  which reports the tier total and names only rows over both floors, and says in the line
    *  itself that it is wall clock. THE CACHE STATE IS NOT IN THIS ARTIFACT: the ~5× above is the
@@ -225,9 +229,9 @@ export interface FunctionRow {
   ctxProto?: string;
   /** Prototype hints asmlift received (structurally mirrors @asmlift/core/proto Prototypes —
    *  spelled out here so this package stays dependency-free): a callee's `params` (a bare arity
-   *  count OR the typed parameter list) drives call argument recovery; the function's own entry
-   *  supplies `returnsVoid`. */
-  proto?: Record<string, { params?: number | string[]; returnsVoid?: boolean }>;
+   *  count OR the typed parameter list) drives call argument recovery, and its `returns` the width
+   *  it hands back; the function's own entry supplies `returnsVoid`. */
+  proto?: Record<string, { params?: number | string[]; returns?: string; returnsVoid?: boolean }>;
   /** The target object's combined `objdump -s -r -t` dump (symbols + relocs + data-section
    *  bytes) — what feeds jump-table/const recovery for both decompilers. Absent on ARM rows
    *  (agbcc `.s` carries its data inline). */

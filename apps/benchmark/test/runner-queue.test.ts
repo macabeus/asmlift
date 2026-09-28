@@ -25,7 +25,7 @@ import { runCases } from '../src/run/runner';
 const IDS = ['synthetic:divc:agbcc', 'synthetic:udivc:agbcc', 'synthetic:divv:agbcc'];
 
 describe.skipIf(!agbccAvailable())('a shard taking rows off the queue', () => {
-  test('measures only unclaimed rows, numbered by queue place, and a resume measures exactly the rest', () => {
+  test('measures only unclaimed rows, numbered by queue place, and a resume measures exactly the rest', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bench-runner-queue-'));
     writePlan(dir, { commit: 'c0ffee', ids: IDS });
     const cases = planCases(dir, syntheticCases({ toolchain: 'agbcc' }));
@@ -35,7 +35,7 @@ describe.skipIf(!agbccAvailable())('a shard taking rows off the queue', () => {
     const lines: string[] = [];
     const spy = vi.spyOn(console, 'log').mockImplementation((l: string) => void lines.push(l));
     try {
-      const first = runCases(cases, partPath(dir, 0, 0), { claimer: claimer(dir, 's0'), tag: ' s0' });
+      const first = await runCases(cases, partPath(dir, 0, 0), { claimer: claimer(dir, 's0'), tag: ' s0' });
       expect(first.map((r: FunctionResult) => r.id)).toEqual([IDS[0], IDS[2]]);
       expect(lines.filter((l) => l.startsWith('[')).map((l) => l.split(' ')[0])).toEqual(['[1/3]', '[3/3]']);
 
@@ -45,7 +45,7 @@ describe.skipIf(!agbccAvailable())('a shard taking rows off the queue', () => {
       expect(releaseUnfinished(dir, plan, new Set(journal.results.map((r) => r.id)))).toBe(1);
 
       lines.length = 0;
-      const resumed = runCases(cases, partPath(dir, 1, 0), { claimer: claimer(dir, 's0'), tag: ' s0' });
+      const resumed = await runCases(cases, partPath(dir, 1, 0), { claimer: claimer(dir, 's0'), tag: ' s0' });
       expect(resumed.map((r: FunctionResult) => r.id)).toEqual([IDS[1]]);
       expect(lines.filter((l) => l.startsWith('[')).map((l) => l.split(' ')[0])).toEqual(['[2/3]']);
       expect(unaccounted(plan, journalRows(readJournal(dir).parts))).toEqual([]);

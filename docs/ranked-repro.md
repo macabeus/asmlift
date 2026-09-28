@@ -870,7 +870,7 @@ find nothing to disagree with and go green having audited nothing.
 
 - **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
   naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
-  signature in `tools.asmlift.elf`). On the canonical LBG command that line is absent; without
+  declaration in a `--context` header, no signature in `tools.asmlift.elf`). On the canonical LBG command that line is absent; without
   `--proto` it reads `1 callee(s) have no declared arity … thunk_HeapFree`, in the same stderr you
   are already pasting. Check the tail of your log before you quote a score.
 - Quote the counts by pasting the **`asmlift: [ranked]` line**, the last thing every ranked run

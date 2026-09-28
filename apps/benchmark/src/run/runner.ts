@@ -144,11 +144,11 @@ export function rankProgress(
  *  With a claimer, `cases` is in plan order, a row's number is its place in the queue — so
  *  `[312/892]` reads the same in every shard's lines — and the part file also names the rows it
  *  SKIPPED, which the stitch needs to tell a skipped row from a lost one. */
-export function runCases(
+export async function runCases(
   cases: Case[],
   outPath: string,
   { writeEmpty = true, claimer, tag = '' }: { writeEmpty?: boolean; claimer?: Claimer; tag?: string } = {},
-): FunctionResult[] {
+): Promise<FunctionResult[]> {
   const total = cases.length;
   function* rows(): Generator<{ c: Case; k?: number }> {
     if (!claimer) {
@@ -226,7 +226,7 @@ export function runCases(
     };
     let r: FunctionResult;
     try {
-      r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile, rankProgress(c.id, t0));
+      r = await evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile, rankProgress(c.id, t0));
     } catch (e) {
       // A throw out of evaluation is a HARNESS defect too (a decompiler's own failure is an
       // outcome and never reaches here), so it is handled the way a build failure is.

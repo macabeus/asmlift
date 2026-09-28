@@ -13,7 +13,7 @@ import { cBackend } from '@asmlift/core/backend/c';
 import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
-import { type FnProto, declaresVoidReturn } from '@asmlift/core/proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
@@ -69,6 +69,7 @@ export function decompileWithReport(
           returnsVoid,
           compile,
           opts.prototypes?.[name],
+          prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
           inferredSymbols,
           mapSymbols,
         )
@@ -135,6 +136,7 @@ function tryScore(
   returnsVoid: boolean,
   compile: CandidateCompiler | undefined,
   self: FnProto | undefined,
+  prototypes: Prototypes,
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
 ): number | undefined {
@@ -154,7 +156,7 @@ function tryScore(
     // probe would spell a bare `gSym[i]` whose meaning rests on a derived `extern u16 gSym[]`
     // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
     const sfn = structureChecked(clone, {
-      ...structureOptionsFor(target, returnsVoid),
+      ...structureOptionsFor(target, returnsVoid, prototypes),
       spellSwitchFallthrough: backend.spellsSwitchFallthrough,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),

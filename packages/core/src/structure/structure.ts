@@ -1569,6 +1569,9 @@ export interface StructureOptions {
   // spell "no" on a public option type. The translation happens once, in `structureOptionsFor`
   // (target.ts), which is where the target-to-structurer mapping lives.
   spillSlotOrder?: 'ascending' | 'descending';
+  // C++ only: each declared callee's parameter types, carried to the backend on `SFn.declaredArgs`
+  // (see there). Built by `structureOptionsFor` from the prototype table.
+  declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -2030,6 +2033,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchRequiresFrontLoadedTests = false,
     spellSwitchFallthrough = true,
     spillSlotOrder,
+    declaredArgs,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -6612,7 +6616,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // absent stays absent: the backend asks "is a direction known?", and there is no third state
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
+    ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
   };
+}
+
+/** Of the declared callees' parameter types, the ones this body calls — every tree the ranked pass
+ *  structures carries its own, and is keyed by its whole text. */
+function calledArgs(
+  declared: NonNullable<StructureOptions['declaredArgs']>,
+  body: Stmt[],
+): { declaredArgs?: NonNullable<StructureOptions['declaredArgs']> } {
+  const called: Record<string, readonly (string | undefined)[]> = {};
+  for (const e of walkExprs(body)) {
+    if (e.k === 'call' && Object.hasOwn(declared, e.fn)) {
+      called[e.fn] = declared[e.fn];
+    }
+  }
+  return Object.keys(called).length > 0 ? { declaredArgs: called } : {};
 }
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/

@@ -356,7 +356,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   candidate objects have one score by definition, which is where
   [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
 
-  **A PARAMETER'S POINTEE is refused one step earlier than that: the fact has no reader at all.**
+  **A PARAMETER'S POINTEE is refused one step earlier than that: the fact has no reader in the
+  bytes.** Its one reader is a spelling — a call argument on a unit compiled as C++ is cast to its
+  parameter's declared type, which the unit's header states (`core/src/proto-context.ts`) and DWARF
+  would state no better.
   The recurring proposal is to carry a struct pointee on `SymbolTypeFacts` so a project's DWARF
   `Sprite *` argument stops arriving at `proto.ts` `typeSpelling` and leaving it as `void *`. But a
   declared parameter type is consulted for exactly one thing, and it does not ask what a `*` points

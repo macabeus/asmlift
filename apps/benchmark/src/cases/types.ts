@@ -43,7 +43,7 @@ interface CaseFields {
   build: () => BuiltTarget;
   /** Context-aware candidate scorer (real tier); undefined = the toolchain adapter default. */
   scorer?: Scorer;
-  /** Context-aware candidate COMPILE (real tier): asmlift's decompileRanked ranks + scores its
+  /** Context-aware candidate COMPILE (real tier): asmlift's ranked pass ranks + scores its
    *  candidates through THIS, so asmlift compiles in the same project context (headers, extern
    *  globals) as m2c — symmetric. undefined = the decomp.yaml/registry compiler (synthetic). */
   compile?: CandidateCompiler;

@@ -278,6 +278,19 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
       expect(c).toContain('cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c');
       expect(c).toContain('-lang=c');
       expect(c).not.toContain('extern "C"');
+
+      // a C++ unit's candidate scored as C: the command keeps the unit's dialect, which is what the
+      // CLI emits for, and the context compiles the candidate as C (`bench target` opens it with
+      // `#pragma cplusplus off`)
+      writeScoreConfig('mwcc_242_81', canonical('mwcc_242_81'), dir, {
+        ctxFile: 'ctx.i',
+        language: 'c',
+        unitLanguage: 'c++',
+      });
+      const unit = (YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc).tools.asmlift.compiler;
+      expect(unit).toContain('cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c');
+      expect(unit).toContain('-lang=c++');
+      expect(unit).not.toContain('extern "C"');
     });
   });
 

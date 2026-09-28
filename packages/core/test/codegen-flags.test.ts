@@ -335,11 +335,13 @@ describe("a unit's language", () => {
   // `-dialect` is the same option under another name and `ec++` is the third word of its
   // vocabulary (mwcceppc -help). Both are C++ — `-lang=ec++` and `-lang=c++` compile one unit to
   // a byte-identical object — and reading either as C would build it with the wrong front end.
-  test('reads -dialect and ec++ as the C++ they are, and refuses any other word', () => {
+  // `objc` is the fourth word mwcceppc accepts, and compiles a C function to `-lang=c`'s object.
+  test('reads -dialect and ec++ as the C++ they are, objc as C, and refuses any other word', () => {
     expect(unitLanguage('src/u.c', ['-dialect=c++'])).toBe('c++');
     expect(unitLanguage('src/u.c', ['-dialect', 'c++'])).toBe('c++');
     expect(unitLanguage('src/u.c', ['-lang=ec++'])).toBe('c++');
     expect(unitLanguage('src/u.c', ['-dialect=c++', '-lang=c'])).toBe('c');
-    expect(() => unitLanguage('src/u.c', ['-lang=objc'])).toThrow(/not one of c, c\+\+, ec\+\+/);
+    expect(unitLanguage('src/u.c', ['-lang=objc'])).toBe('c');
+    expect(() => unitLanguage('src/u.c', ['-lang=c99'])).toThrow(/not one of c, c\+\+, ec\+\+, objc/);
   });
 });

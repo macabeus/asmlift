@@ -4,7 +4,7 @@
 // this suite); the refs it hands back are REAL — derived by core's enumeration from the exact
 // tree each spelling was emitted from, so the call-target exclusion is exercised, not simulated.
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
-import { decompileRanked } from '@asmlift/cli/rank';
+import { decompileRankedParallel } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
@@ -16,7 +16,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { runAsmlift, symbolShape, symbolsUsedFrom } from '../src/eval/asmlift';
 import type { Toolchain } from '../src/toolchains';
 
-vi.mock('@asmlift/cli/rank', () => ({ decompileRanked: vi.fn() }));
+vi.mock('@asmlift/cli/rank', () => ({ decompileRankedParallel: vi.fn() }));
 // Real decompile, but call-countable — pins the backstop's RETIREMENT (exactly ONE phase-1
 // decompile per row; the old retry-without-map second call must never come back).
 vi.mock('@asmlift/core/pipeline', async (importOriginal) => {
@@ -24,7 +24,8 @@ vi.mock('@asmlift/core/pipeline', async (importOriginal) => {
   return { ...actual, decompile: vi.fn(actual.decompile) };
 });
 
-const ranked = vi.mocked(decompileRanked);
+const ranked = vi.mocked(decompileRankedParallel);
+const ROW = { tier: 'synthetic' as const, id: 'synthetic:f:agbcc', sym: 'f' };
 
 const TC = { id: 'agbcc' } as Toolchain;
 const CODEGEN = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
@@ -44,7 +45,7 @@ const SCORE: MatchScore = {
 
 /** Rank-for-real minus the scorer: enumerate the true candidates, pick by a predicate over their variations. */
 function rankPicking(pick: (variations: readonly string[]) => boolean): void {
-  ranked.mockImplementation((name, asm, target, _obj, opts) => {
+  ranked.mockImplementation(async (name, asm, target, _obj, opts) => {
     const cands = enumerateCandidates(name, asm, target, opts);
     const cand = cands.find((c) => pick(c.variations));
     if (!cand) {
@@ -63,9 +64,9 @@ const COUNTER: SymbolInfo = { name: 'gCounter', kind: 'data', shape: 'scalar', s
 const MAP: SymbolMap = new Map([[0x03001234, [COUNTER]]]);
 
 describe('symbolsUsed / winnerVariations capture (pinned)', () => {
-  test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the variations', () => {
+  test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the variations', async () => {
     rankPicking((v) => !hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', ROW, undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([{ name: 'gCounter', shape: 'scalar u16' }]);
@@ -73,7 +74,7 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
     expect(hasVariation(r.winnerVariations!, 'raw-globals')).toBe(false);
   });
 
-  test('a CALL target is never recorded, even alongside a recorded data ref', () => {
+  test('a CALL target is never recorded, even alongside a recorded data ref', async () => {
     const body =
       'f:\n\tpush\t{lr}\n\tbl\tDoThing\n\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x03001234\n';
     const map: SymbolMap = new Map([
@@ -81,43 +82,43 @@ describe('symbolsUsed / winnerVariations capture (pinned)', () => {
       [0x08001000, [{ name: 'DoThing', kind: 'code' }]],
     ]);
     rankPicking((v) => !hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, CODEGEN, 'f', body, '/nonexistent.o', undefined, noCompile, map);
+    const r = await runAsmlift(TC, CODEGEN, 'f', body, '/nonexistent.o', ROW, undefined, noCompile, map);
     const names = (r.symbolsUsed ?? []).map((s) => s.name);
     expect(names).toContain('gCounter');
     expect(names).not.toContain('DoThing'); // called ⇒ excluded upstream (C89 prototype poison)
   });
 
-  test('a raw-globals winner on a map row ⇒ symbolMap true, symbolsUsed HONESTLY empty', () => {
+  test('a raw-globals winner on a map row ⇒ symbolMap true, symbolsUsed HONESTLY empty', async () => {
     rankPicking((v) => hasVariation(v, 'raw-globals'));
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', ROW, undefined, noCompile, MAP);
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([]);
     expect(hasVariation(r.winnerVariations!, 'raw-globals')).toBe(true); // the variations say which spelling won
   });
 
-  test('no map ⇒ no symbolsUsed field at all; the variations still record the winner', () => {
+  test('no map ⇒ no symbolsUsed field at all; the variations still record the winner', async () => {
     rankPicking(() => true);
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', ROW, undefined, noCompile);
     expect(r).not.toHaveProperty('symbolMap');
     expect(r).not.toHaveProperty('symbolsUsed');
     expect(r.winnerVariations).toBeDefined();
   });
 
-  test('an unscored row (noncompile) carries neither provenance field', () => {
+  test('an unscored row (noncompile) carries neither provenance field', async () => {
     ranked.mockImplementation(() => {
       throw new Error('error: boom');
     });
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, '/nonexistent.o', ROW, undefined, noCompile, MAP);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('symbolsUsed');
     expect(r).not.toHaveProperty('winnerVariations');
   });
 
-  test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', () => {
+  test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', async () => {
     // (schema-historical) is never set.
     const gapped = 'f:\n\tclz\tr0, r0\n\tbx\tlr\n';
     vi.mocked(decompile).mockClear();
-    const r = runAsmlift(TC, CODEGEN, 'f', gapped, '/nonexistent.o', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', gapped, '/nonexistent.o', ROW, undefined, noCompile, MAP);
     expect(r.outcome).toBe('declined');
     expect(r.symbolMap).toBe(true);
     expect(decompile).toHaveBeenCalledTimes(1);
@@ -165,8 +166,8 @@ describe('symbolShape formatting (pinned)', () => {
 });
 
 describe('dropped candidates are recorded, never silently swallowed', () => {
-  test('a spelling that failed to build is published with its diagnostic', () => {
-    ranked.mockImplementation((name, asm, target, _obj, opts) => {
+  test('a spelling that failed to build is published with its diagnostic', async () => {
+    ranked.mockImplementation(async (name, asm, target, _obj, opts) => {
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
@@ -176,16 +177,16 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
         withheld: [],
       };
     });
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', ROW, undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.droppedCandidates).toEqual([
       { variations: ['unsigned'], error: "too many arguments to `thunk_sub_080002A0'" },
     ]);
   });
 
-  test('every candidate building ⇒ the field is absent, not an empty array', () => {
+  test('every candidate building ⇒ the field is absent, not an empty array', async () => {
     rankPicking(() => true);
-    expect(runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty(
+    expect(await runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', ROW, undefined, noCompile, MAP)).not.toHaveProperty(
       'droppedCandidates',
     );
   });
@@ -194,8 +195,8 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
 describe('withheld candidates are recorded too, and are a different fact', () => {
   const WHY = 'this spelling rests on a device-behaviour fact no gate over the C can settle';
 
-  test('a spelling refused PUBLICATION is published with the score it reached', () => {
-    ranked.mockImplementation((name, asm, target, _obj, opts) => {
+  test('a spelling refused PUBLICATION is published with the score it reached', async () => {
+    ranked.mockImplementation(async (name, asm, target, _obj, opts) => {
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
@@ -205,16 +206,16 @@ describe('withheld candidates are recorded too, and are a different fact', () =>
         withheld: [{ variations: ['unsigned', 'unreduce'], score: 35, why: WHY }],
       };
     });
-    const r = runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    const r = await runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', ROW, undefined, noCompile, MAP);
     // NOT folded into droppedCandidates: nothing failed to build, and reporting one as the other
     // would make the dropped column name compile errors that never happened.
     expect(r.droppedCandidates).toBeUndefined();
     expect(r.withheldCandidates).toEqual([{ variations: ['unsigned', 'unreduce'], score: 35, why: WHY }]);
   });
 
-  test('nothing withheld ⇒ the field is absent, not an empty array', () => {
+  test('nothing withheld ⇒ the field is absent, not an empty array', async () => {
     rankPicking(() => true);
-    expect(runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty(
+    expect(await runAsmlift(TC, CODEGEN, 'f', LOADH, 'obj', ROW, undefined, noCompile, MAP)).not.toHaveProperty(
       'withheldCandidates',
     );
   });

@@ -79,16 +79,20 @@ export interface RealFunction {
    *             declaration shapes, scalar/element signedness, array extents, volatility,
    *             const-ness, address-cast macro bodies, and — where the vendoring found them —
    *             callee signatures and struct tags with full field tables. The row's OWN
-   *             definition-derived facts are redacted first (core's `asIfUndecompiled`).
+   *             definition-derived facts are redacted first (core's `asIfUndecompiled`). And the
+   *             callee declarations of the vendored context its candidates compile in
+   *             (context-proto.ts `rowPrototypes`).
    *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
-   *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`). Neither tool is
-   *             handed the row's own signature out of the reference source — with one measured
-   *             exception, README residual 4.
+   *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`); on a row with
+   *             no project context for it (every C++ row), the callee declarations asmlift reads,
+   *             as C (context-proto.ts `m2cDeclarations`). Neither tool is handed the row's own
+   *             signature out of the reference source — with one measured exception, README
+   *             residual 4.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
    *  against a tool handed layouts outright. This flag is set on every real C row without a
    *  hand-written `ctx`. A C++ row carries neither: the parser below is C-only, and 42 of the 378
-   *  real rows are C++.
+   *  real rows are C++ — which is why their callee declarations reach m2c as a rendered C block.
    *
    *  IT IS NOT EXACT PARITY, and the residuals run in both directions — apps/benchmark/README.md
    *  lists them. Nor is a "project context" one uniform thing: it is whatever that project's TU
@@ -172,7 +176,8 @@ export interface VendoredEntry {
 /** A manifest paired with its vendored compiler inputs (the runtime shape — no checkout). */
 export interface VendoredManifest extends RealManifest {
   /** sym → gunzip'd preprocessed texts: the target TU, the candidate context, and m2c's context. */
-  vendored: (sym: string) => { tuI: string; ctxI: string; m2cI: string };
+  /** the row's vendored compiler inputs, and `ctxFile`, the name its unit context is vendored under */
+  vendored: (sym: string) => { tuI: string; ctxI: string; m2cI: string; ctxFile: string };
   /** sym → repo-relative path of m2c's vendored context blob (the row's ctxRef). */
   ctxPath: (sym: string) => string;
   /** The vendored symbol map (names + declaration shapes) a row of `module` is read with: the
@@ -587,6 +592,7 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
         tuI: gunzipSync(readFileSync(join(dir, entry.tu))).toString('utf8'),
         ctxI: gunzipSync(readFileSync(join(dir, entry.ctx))).toString('utf8'),
         m2cI: gunzipSync(readFileSync(join(dir, entry.m2c))).toString('utf8'),
+        ctxFile: `${man.project}/${entry.ctx}`,
       };
     },
     ctxPath: (sym) => `apps/benchmark/dataset/real/tu/${man.project}/${entryOf(sym).m2c}`,

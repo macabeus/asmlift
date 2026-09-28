@@ -359,6 +359,12 @@ describe('refusals', () => {
     );
   });
 
+  test('a dialect word CodeWarrior refuses is refused, not thrown', () => {
+    expect(refusal({ toolchain: 'mwcc_242_81', cflags: '-O4,p -lang=c99' })).toBe(
+      "--cflags: CodeWarrior dialect 'c99' is not one of c, c++, ec++, objc",
+    );
+  });
+
   test('flags the command cannot take: a paste-ready command with {{cflags}} in place of its own flags', () => {
     const message = refusal({ cflags: '-O1', ranked: true, command: SCRIPT, configPath: '/p/decomp.yaml' });
     const [first, ...rest] = message.split('\n');

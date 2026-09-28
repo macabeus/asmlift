@@ -40,9 +40,10 @@ a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 cannot be handed to m2c's C parser at all (residual 5). The 42 C++ rows of pikmin carry NO m2c
 context, and the reason is m2c's rather than the dataset's: its `--context` parser is pycparser — C,
 and only C — so a C++ unit's own vendored context does not degrade it, it makes it FAIL
-(`manifests.ts`). Neither tool is given that unit's declarations there, so the row is symmetric as
-it stands; whether to hand-write C declarations for those 42 instead, as residual 5's row does, is
-open. Synthetic rows carry the prototype in
+(`manifests.ts`). The unit's callee DECLARATIONS reach both tools anyway: asmlift reads them out of
+the vendored context the candidates compile in, and on a row m2c gets no project context for, m2c
+gets the same entries as a C declaration block appended to its `ctx` (`cases/context-proto.ts`
+`m2cDeclarations`; the row publishes it). Synthetic rows carry the prototype in
 the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
 what that translation unit preprocesses to, **never an invented type** (where a project types a
 global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
@@ -130,9 +131,12 @@ _Favouring m2c._
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
    `.state/.frameCounter/.type/.datap` in the context.
-2. **Callee prototypes.** m2c reads them out of the headers; asmlift's channel is the map's
-   `signature` field, which the vendoring extracts for kleod and pokeemerald only — af,
-   marioparty3, sa3, snowboardkids2 and the three dtk projects vendor **zero**.
+2. **Callee prototypes.** m2c reads them out of the headers; asmlift reads the same headers — the
+   vendored context its candidates compile in (`cases/context-proto.ts`) — under the map's
+   `signature` field, which the vendoring extracts for kleod and pokeemerald only, and under the
+   manifest's `proto`. What is not symmetric is what each can READ: a declaration asmlift's scanner
+   skips, or cannot size, falls back to the register guess, and m2c's C declaration block for the
+   43 rows without a project context carries only what can be spelled for its C parser.
 3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
    and m2c can READ it, so where it declares a struct type for a project static table
    (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
@@ -151,8 +155,9 @@ _Favouring m2c._
    `ac-decomp:JW_JUTGamePad_read`, declares `OSTime OSGetTime(void)` — so m2c is told the callee
    returns 64 bits, where asmlift's `proto` says only `{"params": []}`, and m2c's output uses it
    (`s64 temp_ret = OSGetTime();`). It is on that path because its unit is C++: the vendored
-   context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given
-   NOTHING and infer its signature from the asm as asmlift does, which is what pikmin's 42 take;
+   context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given no
+   project context — only the callee declarations asmlift's lift read, as C (`m2cDeclarations`) —
+   and infer its own signature from the asm as asmlift does, which is what pikmin's 42 take;
    `authored-facts.test.ts` pins each path by itself, and which of the two a C++ row should take is
    open. Both tools decline the row on other causes today. The callee
    NAMES either side is told are already held equal by `test/authored-facts.test.ts`, and the same

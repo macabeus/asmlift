@@ -637,14 +637,26 @@ export function storedFlags(family: FlagFamily, argv: readonly string[]): string
  *  option, and only mwcc has a C++ front end, so every other family answers `c` unless its unit is
  *  named for C++ — which none is, and where one is, real.ts refuses the row by name. */
 export function unitLanguage(unit: string, cflags: readonly string[]): 'c' | 'c++' {
-  const stated = parseFlags('mwcc', cflags).slots.lang;
+  return dialectOf(parseFlags('mwcc', cflags).slots.lang, unit);
+}
+
+/** A `-lang` word CodeWarrior does not accept. */
+export class UnreadableDialectError extends Error {}
+
+/** The dialect a `-lang` word states — the one reading of it, for `unitLanguage` and for the target
+ *  `targetFor` resolves at a flag set. With no word, the unit's extension when there is a unit, C
+ *  otherwise. `objc` is C to this reading: its functions are C's. A word CodeWarrior itself refuses
+ *  is refused. */
+export function dialectOf(stated: string | undefined, unit?: string): 'c' | 'c++' {
   if (stated === undefined) {
-    return /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
+    return unit !== undefined && /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
   }
-  if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++') {
-    throw new Error(`${unit}: CodeWarrior dialect '${stated}' is not one of c, c++, ec++`);
+  if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++' && stated !== 'objc') {
+    throw new UnreadableDialectError(
+      `${unit === undefined ? '' : `${unit}: `}CodeWarrior dialect '${stated}' is not one of c, c++, ec++, objc`,
+    );
   }
-  return stated === 'c' ? 'c' : 'c++';
+  return stated === 'c++' || stated === 'ec++' ? 'c++' : 'c';
 }
 
 /** The optimisation level the compiler acts on (`-O2`, `-O4,p`), or null when the flags name none and

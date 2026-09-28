@@ -68,7 +68,12 @@ vars=$(lane_env env | grep -E '^ASMLIFT_[A-Z0-9_]+=' | sort || true)
 [ -n "$vars" ] || die "no ASMLIFT_* in ${env_file:-this shell}; a worktree's sibling defaults resolve to nothing (round protocol trap #6)"
 [ "$(lane_env sh -c 'command -v cpp')" != /usr/bin/cpp ] || die "\`cpp\` resolves to Apple clang's /usr/bin/cpp in ${env_file:-this shell} — put the shim first (round protocol trap #6)"
 
-main=$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")
+# The main checkout: the repository this script sits in, or — run from a copy elsewhere — the one
+# this shell is in. Resolved to an absolute path or refused: the links below are made from it.
+common=$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null ||
+  git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+  die "cannot find the repository: run this script from a checkout of asmlift, or from inside one"
+main=$(dirname "$common")
 
 # 1. the worktree, off a fresh base
 case $base in origin/*) git -C "$main" fetch -q origin "${base#origin/}" ;; esac

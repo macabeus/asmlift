@@ -12,7 +12,7 @@
 // unclaimed row, so a shard is idle only once the queue is empty.
 //
 // WHY EXCLUSIVE FILES. The shard children are separate `tsx` processes that block their event loop
-// in `spawnSync` for every compile, so a message from the parent could not be read while a row
+// in `spawnSync` for every compile they run on their own thread, so a message from the parent could not be read while a row
 // runs; `open(…, 'wx')` is atomic on a local filesystem and needs no reader. The same files are the
 // journal: a claim no part file finished is a row that was in flight when the run died, and
 // `--resume` re-queues exactly those.

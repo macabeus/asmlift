@@ -4,7 +4,7 @@
 // output is compiled+scored exactly as the target was built.
 import type { DecompilerResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
-import { type RankOptions, type RankedResult, decompileRanked } from '@asmlift/cli/rank';
+import { type RankOptions, type RankedResult, decompileRanked, decompileRankedParallel } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
@@ -18,6 +18,7 @@ import { cachedExtractAsmData, sha } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
 import { scrub } from '../report/committed';
 import type { Toolchain } from '../toolchains';
+import { CompilePoolDied, type RowRef, compilePool } from './compile-pool';
 import { compilerErrorLines } from './outcome';
 import { assessQuality } from './quality';
 
@@ -70,13 +71,7 @@ export function rankOptionsFor(
   } catch {
     asmData = undefined;
   }
-  // Candidate compilation: on the REAL tier, use the project-context compile (headers + extern
-  // globals) so an emission referencing them scores in the same context m2c is scored in —
-  // symmetric, and exactly how a user's own project would recompile the decompiled function.
-  // On the synthetic tier (no context), the generated decomp.yaml compiler (the unconfigured
-  // user path; the pooled pair's is @asmlift/toolchains' own), at the row's flags. This is what lets
-  // recovered GLOBALS (a bare `gSym`) compile at all.
-  const compile = contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
+  const compile = rowCompiler(tc, codegen, contextCompile);
   return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
@@ -87,14 +82,28 @@ export function rankOptionsFor(
   };
 }
 
+/** The compiler a row's candidates are ranked with — here and on every compile thread of its pool
+ *  (compile-worker.ts). On the REAL tier, the project-context compile (headers + extern globals), so
+ *  an emission referencing them scores in the same context m2c is scored in — symmetric, and exactly
+ *  how a user's own project would recompile the decompiled function. On the synthetic tier (no
+ *  context), the generated decomp.yaml compiler (the unconfigured user path; the pooled pair's is
+ *  @asmlift/toolchains' own), at the row's flags. This is what lets recovered GLOBALS (a bare
+ *  `gSym`) compile at all. */
+export function rowCompiler(
+  tc: Pick<Toolchain, 'id'>,
+  codegen: Pick<ResolvedTarget, 'cflags'>,
+  contextCompile?: CandidateCompiler,
+): CandidateCompiler {
+  return contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
+}
+
 /** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its variations, its score and
  *  the source it was scored from (`Scored extends Candidate`).
  *
  *  `runAsmlift` publishes four facts out of this object — the winner's variations and source, the
  *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
- *  one supported way to read them, and it is deliberately the SAME call the harness makes rather
- *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
- *  and a published measurement must not depend on a scheduler. */
+ *  one supported way to read them. The harness ranks through `decompileRankedParallel` (`rankRow`),
+ *  which orders the same memoized scores and so publishes what this serial call would. */
 export function asmliftFan(
   codegen: ResolvedTarget,
   sym: string,
@@ -103,6 +112,46 @@ export function asmliftFan(
   opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
 ): RankedResult {
   return decompileRanked(sym, asm, codegen.target, obj, opts);
+}
+
+/** How many threads compile a big fan's candidates, and how big a fan must be to get them.
+ *
+ *  The tier's queue hands out its costliest rows first (run/queue.ts `claimOrder`), so a tier ends
+ *  no sooner than its costliest row does, however many shards drain the rest. Threads shorten
+ *  exactly those rows and add no compile: the same candidates compile, spread over more cores for
+ *  the minutes the other shards are still busy with cheap rows. The size is where a thread's start
+ *  (a module load and the row's case rebuilt) stops mattering beside the compiles it takes over; the
+ *  count is what the other shards leave idle once they reach the tier's cheap tail. */
+export const ROW_COMPILE_WORKERS = 4;
+export const PARALLEL_FAN = 500;
+
+/** The ranked pass the harness publishes: `asmliftFan`'s ranking, with a big fan's compiles spread
+ *  over `ROW_COMPILE_WORKERS` threads (compile-pool.ts). The ranking is the parallel driver's, which
+ *  orders the same memoized scores the serial driver does, so every published field is the same;
+ *  only `rankSeconds` depends on the threads. */
+async function rankRow(
+  codegen: ResolvedTarget,
+  sym: string,
+  asm: string,
+  obj: string,
+  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress'>,
+  row: RowRef,
+): Promise<RankedResult> {
+  const compile = opts.compile!;
+  let threads = false;
+  const pool = compilePool(row);
+  try {
+    return await decompileRankedParallel(sym, asm, codegen.target, obj, {
+      ...opts,
+      jobs: (fan) => ((threads = fan >= PARALLEL_FAN) ? ROW_COMPILE_WORKERS : 1),
+      worker: () =>
+        threads
+          ? pool.worker()
+          : async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
+    });
+  } finally {
+    await pool.close();
+  }
 }
 
 /** HOW BIG THIS ROW'S FAN WAS — every spelling enumeration emitted.
@@ -170,21 +219,22 @@ function compilerText(e: unknown): string {
  *  synthetic tier. */
 const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).toFixed(2));
 
-// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous variations
+// asmlift runs in its differ-ranked production mode (`rankRow`): genuinely-ambiguous variations
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
-// winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
-// scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
-export function runAsmlift(
+// winner — single-shot `decompile` would under-score what asmlift can match. Every candidate
+// compiles with the row's compiler (`rowCompiler`) and is scored against the row's target object.
+export async function runAsmlift(
   tc: Toolchain,
   codegen: ResolvedTarget,
   sym: string,
   asm: string,
   obj: string,
+  row: RowRef,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
   onProgress?: RankOptions['onProgress'],
-): DecompilerResult {
+): Promise<DecompilerResult> {
   const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
@@ -240,8 +290,11 @@ export function runAsmlift(
   const rankT0 = Date.now();
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) });
+    ranked = await rankRow(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) }, row);
   } catch (e) {
+    if (e instanceof CompilePoolDied) {
+      throw e;
+    }
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref
     // family), but this also catches scorer infrastructure errors; the diagnostics say which.

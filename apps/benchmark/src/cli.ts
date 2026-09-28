@@ -390,10 +390,12 @@ switch (command) {
       const [tier] = tiers;
       const dir = runDir(tier);
       const out = partPath(dir, Number(opts.claim), shard.idx);
-      const n = runCases(planCases(dir, casesFor(tier)), out, {
-        claimer: claimer(dir, `pid ${process.pid} shard ${shard.idx}`),
-        tag: ` s${shard.idx}`,
-      }).length;
+      const n = (
+        await runCases(planCases(dir, casesFor(tier)), out, {
+          claimer: claimer(dir, `pid ${process.pid} shard ${shard.idx}`),
+          tag: ` s${shard.idx}`,
+        })
+      ).length;
       console.log(`\nWrote ${n} ${tier} results → ${out}`);
       reportCandCache();
     } else if (opts.serial) {
@@ -415,7 +417,7 @@ switch (command) {
           console.log(`\nNo ${tier} row selected — ${out} left unchanged`);
           continue;
         }
-        const n = runCases(cases, out, { writeEmpty: !filtered }).length;
+        const n = (await runCases(cases, out, { writeEmpty: !filtered })).length;
         if (filtered) {
           selected = (selected ?? 0) + n;
         }
@@ -548,6 +550,10 @@ switch (command) {
     // in: a synthetic row's candidates all go through benchScorer, which compiles them as C whatever
     // the target's language, and only the real tier's ladder below can land on C++.
     let ctxLanguage: 'c' | 'c++' = 'c';
+    // …and the dialect the harness EMITTED the row's candidates in, which the command's `-lang` must
+    // state because the CLI reads its emission dialect off it: the row's flags decide it, not the
+    // row's language — a synthetic C++ row's flags state no `-lang`, so it is emitted as C.
+    const emitted = c.codegen.target.dialect ?? 'c';
     if (c.tier === 'real') {
       const man = loadManifests().find((m) => m.project === c.project);
       if (man) {
@@ -578,10 +584,21 @@ switch (command) {
           : { rung: richestRung(man.tu, ladder), language: c.language };
         ctxRung = picked.rung.name;
         ctxLanguage = picked.language;
-        ctxFile = materializeScoringContext(picked.rung.prelude + macros, out);
+        // a C++ unit's candidate that only compiled as C: the command keeps the unit's `-lang=c++`
+        // (the CLI's emission dialect), and CodeWarrior's own pragma compiles the rest as C — the
+        // object is byte-identical to a `-lang=c` compile, which `bench fidelity`'s replay of every
+        // scored row's script is what holds
+        const asC = picked.language === 'c' && emitted === 'c++' ? '#pragma cplusplus off\n' : '';
+        ctxFile = materializeScoringContext(asC + picked.rung.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: ctxLanguage });
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, {
+      elf,
+      ctxFile,
+      symbolsFile,
+      language: ctxLanguage,
+      unitLanguage: emitted,
+    });
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id} ${shellJoinFlags(c.codegen.cflags)}${
         c.tier === 'real' ? `, the flags of ${c.unit}` : ''

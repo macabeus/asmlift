@@ -7,8 +7,9 @@
 // writes today — and the one shape where a pointee WOULD be byte-load-bearing, which is a struct
 // ASSIGNMENT and has no inhabitant.
 //
-// Each test below fails the moment a pointee starts to matter — which is the point. When it does,
-// the refusal is stale and belongs re-measured, not re-asserted. The sibling refusal is
+// Each test below fails the moment a pointee starts to matter to the bytes — which is the point.
+// When it does, the refusal is stale and belongs re-measured, not re-asserted. (The SPELLING has one
+// reader, a C++ call argument's cast, which a header supplies: test/cpp-arg-cast.test.ts.) The sibling refusal is
 // test/signedness-variation.test.ts; the prose half is docs/level-tower.md. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 

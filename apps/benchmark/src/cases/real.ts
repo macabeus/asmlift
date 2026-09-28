@@ -5,7 +5,8 @@
 // globals/structs is never noncompile merely for missing context.
 //
 // PROVISIONING: both tools read the project's declarations out of the same vendored freeze —
-// asmlift the vendored symbol map (`symbols`), m2c the vendored preprocessed context (`m2cCtx`).
+// asmlift the vendored symbol map (`symbols`) and its context's callee declarations (`proto`), m2c
+// the vendored preprocessed context (`m2cCtx`), or those declarations as C where it gets none.
 // Neither is handed the row's own signature out of the reference source. manifests.ts's `m2cCtx`
 // doc states what each channel carries; README.md lists the residuals, in both directions, and
 // the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
@@ -17,6 +18,7 @@ import { readFileSync } from 'node:fs';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
 import { type BuiltTarget, TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
+import { rowPrototypes } from './context-proto';
 import { type RealFunction, loadManifests } from './manifests';
 import { targetDigest } from './rom-function';
 import type { Case } from './types';
@@ -42,7 +44,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
       // the linkage a candidate needs to export the mangled symbol a C++ target is keyed by.
       const language = unitLanguage(f.unit, unit.cflags);
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
-      const m2cI = f.m2cCtx ? man.vendored(f.sym).m2cI : null;
+      // read once: every field below that needs the unit's context shares this one copy
+      const vendored = man.vendored(f.sym);
+      const m2cI = f.m2cCtx ? vendored.m2cI : null;
       const ctxProto = m2cI === null ? null : m2cOwnPrototype(f.sym, f.proto, m2cI);
       cases.push({
         id,
@@ -64,7 +68,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctx: m2cI === null ? f.ctx : appendCtxProto(m2cI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         ctxProto: ctxProto ?? undefined,
-        proto: f.proto,
+        proto: rowPrototypes(f.proto, vendored, language, f.sym, symbols),
         // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
         // so the project ELF knows things about it that a user mid-decomp cannot. Score against
         // the map as it would look with this function still `INCLUDE_ASM` (core's
@@ -83,22 +87,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
             unit.toolchain,
             buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI, language),
           ),
-        scorer: makeRealScorer(
-          unit.toolchain,
-          codegen.cflags,
-          man.tu,
-          f.prependC ?? '',
-          man.vendored(f.sym).ctxI,
-          language,
-        ),
-        compile: makeRealCompile(
-          unit.toolchain,
-          codegen.cflags,
-          man.tu,
-          f.prependC ?? '',
-          man.vendored(f.sym).ctxI,
-          language,
-        ),
+        scorer: makeRealScorer(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
+        compile: makeRealCompile(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
       });
     }
   }

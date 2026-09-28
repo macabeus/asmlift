@@ -11,6 +11,7 @@ import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
+import { m2cDeclarations, referencedPrototypes } from '../cases/context-proto';
 import { rowFeatures } from '../cases/features';
 import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
@@ -238,7 +239,7 @@ function firstLine(s: string): string {
   return s.split('\n')[0].slice(0, 200);
 }
 
-export function evaluate(
+export async function evaluate(
   tc: Toolchain,
   spec: EvalSpec,
   obj: string,
@@ -246,7 +247,7 @@ export function evaluate(
   scorer?: Scorer,
   compile?: CandidateCompiler,
   onRankProgress?: RankOptions['onProgress'],
-): FunctionResult {
+): Promise<FunctionResult> {
   const score: Scorer = scorer ?? benchScorer(tc.id, spec.codegen.cflags);
   // the object's data sections feed the m2c normalizer (jump tables, anonymous constants) and
   // are PUBLISHED on the row so the reproduction scripts carry them too; best-effort — without
@@ -261,13 +262,33 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols, onRankProgress);
+  // the entries this lift can look up: what the row publishes and its script passes as `--proto`.
+  // The dump too, because a MIPS call names its target only in the relocation it carries.
+  const proto = referencedPrototypes(spec.proto, asmDump === undefined ? asm : `${asm}\n${asmDump}`, spec.sym);
+  const row = { tier: rowTier(spec).tier, id: `${spec.project}:${spec.sym}:${tc.id}`, sym: spec.sym };
+  const asmlift = await runAsmlift(
+    tc,
+    spec.codegen,
+    spec.sym,
+    asm,
+    obj,
+    row,
+    proto,
+    compile,
+    spec.symbols,
+    onRankProgress,
+  );
+  // A real row m2c is not given its project's context for gets the callee declarations asmlift's lift
+  // read, as C its parser reads — the same facts through each tool's own channel.
+  const declared = spec.tier === 'real' && spec.ctxRef === undefined ? m2cDeclarations(proto, spec.sym, spec.ctx) : '';
+  const m2cSpec =
+    declared === '' ? spec : { ...spec, ctx: spec.ctx === undefined ? declared : `${spec.ctx}\n${declared}` };
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
   const m2c = cachedM2cResult(
-    { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language },
-    () => evaluateM2c(tc, spec, obj, asm, score, asmDump),
+    { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: m2cSpec.ctx, obj, lang: spec.language },
+    () => evaluateM2c(tc, m2cSpec, obj, asm, score, asmDump),
   );
   return {
     id: `${spec.project}:${spec.sym}:${tc.id}`,
@@ -289,10 +310,10 @@ export function evaluate(
     refSource: spec.refSource,
     sourceUrl: spec.sourceUrl,
     targetAsm: asm,
-    ctx: spec.ctxRef ? undefined : spec.ctx,
+    ctx: spec.ctxRef ? undefined : m2cSpec.ctx,
     ctxRef: spec.ctxRef,
     ctxProto: spec.ctxProto,
-    proto: spec.proto,
+    proto,
     asmDump,
     asmlift,
     m2c,

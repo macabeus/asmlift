@@ -408,6 +408,11 @@ export interface SFn {
    *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target
    *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
   slotOrder?: 'ascending' | 'descending';
+  /** The emitted C is compiled AS C++, and these are each declared callee's parameter types (an
+   *  entry the printer cannot spell is `undefined`). An emission policy like `slotOrder`: C converts
+   *  any pointer or integer argument to its parameter type, C++ refuses three of those conversions,
+   *  and the printer spells the cast for exactly those (backend/cfamily.ts `argConversion`). */
+  declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct
