@@ -10,14 +10,7 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import {
-  EngineFailedError,
-  type MatchScore,
-  type Scorer,
-  type Target,
-  createScorer,
-  loadEngine,
-} from '@matchkit/scoring';
+import { EngineFailedError, type MatchScore, type Scorer, type Target, createScorer } from '@matchkit/scoring';
 import { assemble, compileToObject } from 'agbcc';
 
 import { toolFailureLine } from './candidate-compile';
@@ -84,7 +77,7 @@ export type { DiffBreakdown, MatchScore } from '@matchkit/scoring';
 
 // one scorer per worker, loaded with its engine on first use
 let scorerPromise: Promise<Scorer> | null = null;
-const loadScorer = (): Promise<Scorer> => (scorerPromise ??= loadEngine().then((engine) => createScorer(engine)));
+const loadScorer = (): Promise<Scorer> => (scorerPromise ??= createScorer());
 
 /** Warm the wasm engines ahead of the first score (agbcc's two modules + objdiff). */
 export function preloadScorers(): void {

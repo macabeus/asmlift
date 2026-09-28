@@ -2,7 +2,7 @@
 // or a target it cannot parse. The scorer and its engine are real. `agbcc` is replaced whole, as
 // candidate-compile.test.ts explains: it assembles to and compiles to fixed objects.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
-import { EngineFailedError, UndiffableError, createScorer, loadEngine } from '@matchkit/scoring';
+import { EngineFailedError, UndiffableError, createScorer } from '@matchkit/scoring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, expect, test, vi } from 'vitest';
@@ -45,7 +45,7 @@ test('a target the engine cannot parse ends the ranking before any compile', asy
 
 // Last: it kills the engine this file shares.
 test('an engine that dies during the ranking ends it at the first score', async () => {
-  const scorer = createScorer(await loadEngine());
+  const scorer = await createScorer();
   const target = scorer.parseTarget(read('target.o'));
   state.onCompile = () => {
     state.onCompile = undefined;
