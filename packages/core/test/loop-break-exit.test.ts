@@ -439,6 +439,53 @@ test('a refused `break` to an exit that ends in a return copies the tail instead
   expect(src.match(/G = 0;/g)).toHaveLength(3);
 });
 
+/** agbcc -O2 of `int f(int *p, int n, int m, int k) { int t = 0; while (*p != k) { if (p[1] == m) {
+ *  if (p[2] == 0) break; t += 3; } p++; if (--n < 0) break; } G = t; if (n > 5) t = 1; return t; }`.
+ *  The `if (p[1] == m)` joins at `.L4`, the loop's exit, and both of its arms reach the latch's
+ *  `if (--n < 0) break;`. Spelled with the latch's implicit continue, `G = t; …; return t;` would
+ *  render after that `if` inside the body and the loop would run at most once. */
+const IF_JOINING_AT_THE_EXIT = `f:
+	push	{r4, r5, r6, lr}
+	add	r4, r0, #0
+	add	r5, r2, #0
+	mov	r2, #0x0
+	ldr	r6, .L11
+.L3:
+	ldr	r0, [r4]
+	cmp	r0, r3
+	beq	.L4
+	ldr	r0, [r4, #0x4]
+	cmp	r0, r5
+	bne	.L6
+	ldr	r0, [r4, #0x8]
+	cmp	r0, #0
+	beq	.L4
+	add	r2, r2, #0x3
+.L6:
+	add	r4, r4, #0x4
+	sub	r1, r1, #0x1
+	cmp	r1, #0
+	bge	.L3
+.L4:
+	str	r2, [r6]
+	cmp	r1, #0x5
+	ble	.L10
+	mov	r2, #0x1
+.L10:
+	add	r0, r2, #0
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+.L11:
+	.word	G
+`;
+
+test('a latch break under an `if` that joins at the loop exit declines', () => {
+  expect(() => decompile('f', IF_JOINING_AT_THE_EXIT, ARMV4T_AGBCC, { prototypes: { f: { params: 4 } } })).toThrow(
+    /unrecovered back-edge/,
+  );
+});
+
 /** A bottom-tested loop with a mid-body edge to its exit, which is not a `ret` block. */
 const DO_WHILE_BREAK = `fn dwbreak {
 ^bb0(%0: s32, %1: s32):

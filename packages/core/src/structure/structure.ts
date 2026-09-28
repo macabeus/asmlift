@@ -5498,7 +5498,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // back-edge arm is the implicit continue (control falls to the loop bottom). Guarded to leaving
     // edges only (`!body.has(exitB)` AND a break/return target); an in-body conditional continue still
     // declines (falls through → the header re-entry trips `onStack`, an honest loud fail).
-    if (loopCtx && (takenB === loopCtx.header || fallB === loopCtx.header)) {
+    //
+    // The implicit continue holds only where the region being structured ends at the loop bottom
+    // (`stop === header`). An `if` in the body whose join lies OUTSIDE it, at the loop's exit, hands
+    // its arms that exit as `stop` and renders the exit region after itself, still inside the body:
+    // spelled here, the continue arm would fall into that region and the loop would run at most once.
+    // Refused, the arm re-enters the header and declines loud.
+    if (loopCtx && stop === loopCtx.header && (takenB === loopCtx.header || fallB === loopCtx.header)) {
       const contIsTaken = takenB === loopCtx.header;
       const exitB = contIsTaken ? fallB : takenB;
       const isBreak = exitB === loopCtx.exit;
