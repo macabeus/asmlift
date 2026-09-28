@@ -314,7 +314,9 @@ export function declaredWidth(t: ParamType): number | undefined {
     .replace(/\b(?:const|volatile)\b/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  if (s.endsWith('*')) {
+  // a pointer — including a function pointer's abstract declarator, `void (*)(s32)` — is
+  // register-wide whatever it points at
+  if (s.endsWith('*') || /\(\s*\*\s*\)\s*\(.*\)$/.test(s)) {
     return 32;
   }
   const own = /^([su])(8|16|32|64)$/.exec(s);
