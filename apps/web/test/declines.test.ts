@@ -901,11 +901,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // base only this function's accesses describe, which raise/structs.ts declares as a union
   // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
   // is a population, not a capability.
+  //
+  // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
+  // row's own context declares, and that declaration now reaches the lift. A call no declaration
+  // covers still declines there.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'clobbered-value',
     'cross-block-flags',
+    'no-prototype-args',
     'pool-word-shape',
     'store-class',
     'structs',
