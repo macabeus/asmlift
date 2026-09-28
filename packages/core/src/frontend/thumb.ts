@@ -2625,6 +2625,30 @@ function auditFrameObjects({
     // narrowing of an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and
     // reads as a callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
+    // The accesses through a runtime-indexed address, per object — kept apart from `accesses`,
+    // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
+    // `a`.
+    const indexed = new Map<number, { width: number; signed: boolean }[]>();
+    const indexedAccess = (off: number, sum: Value): void => {
+      const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          const roles = [
+            ...op.operands.flatMap((v, i) => (v === sum ? [i] : [])),
+            ...(op.successors ?? []).flatMap((s) => (s.args.includes(sum) ? [-1] : [])),
+          ];
+          for (const i of roles) {
+            if ((op.opcode !== 'load' && op.opcode !== 'store') || i !== 0 || (op.attrs.off as number) !== 0) {
+              fail(
+                `a runtime index into the object at [sp,#${off}) flows into \`${i === -1 ? 'a phi' : op.opcode}\` — ` +
+                  'only a load or store at the indexed address is modelled',
+              );
+            }
+            got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+          }
+        }
+      }
+    };
     for (const off of objects.keys()) {
       accesses.set(off, []);
     }
@@ -2681,6 +2705,15 @@ function auditFrameObjects({
                 publishedOutward.add(off);
               }
             }
+            return;
+          }
+          // A RUNTIME INDEX into the object: `mov r1, sp / add r0, r1, r4 / ldrb r0, [r0]` is
+          // agbcc's `a[i]` on a `u8 a[n]` local. The sum names no fixed offset, so it is not a
+          // capture of its own; what it may do is judged here, whole, and the object it indexes is
+          // judged below with the rest.
+          const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
+          if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
+            indexedAccess(off, op.results[0]);
             return;
           }
           fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
@@ -2877,6 +2910,7 @@ function auditFrameObjects({
     // and then that its bytes belong to nothing else.
     const extent = new Map<number, { width: number; count: number }>();
     for (const [off, acc] of accesses) {
+      const byIndex = indexed.get(off) ?? [];
       if (acc.length === 0) {
         // An object with no access of its own has no declared type and no extent, and the two
         // ways it gets there are two different gaps. Its bytes may already be keyed by the slot
@@ -2886,9 +2920,25 @@ function auditFrameObjects({
         const why = notTheWholeArea(off);
         if (why !== null) {
           fail(
-            'the captured address is never dereferenced in this function, so nothing pins the ' +
-              `local object type — and ${why}`,
+            (byIndex.length > 0
+              ? 'the captured address is read only through a runtime index'
+              : 'the captured address is never dereferenced in this function') +
+              `, so nothing pins the local object type — and ${why}`,
           );
+        }
+        // An indexed access reads ONE ELEMENT of the storage declared below, so it must be one:
+        // an unsigned byte. A wider element is a different array over the same bytes, and a
+        // sign-extending read is not what `u8` spells.
+        for (const a of byIndex) {
+          if (a.width !== 1) {
+            fail(
+              `a runtime index into the object at [sp,#${off}) accesses ${a.width} bytes, and the storage ` +
+                'nothing else types is declared as bytes — only a byte element is modelled',
+            );
+          }
+          if (a.signed) {
+            fail(`a runtime index into the object at [sp,#${off}) sign-extends, and the storage is declared unsigned`);
+          }
         }
         // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
         // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
@@ -2909,6 +2959,12 @@ function auditFrameObjects({
         // the declared extent coarser too, never wrong about the bytes the machine reserved.
         extent.set(off, { width: 1, count: localArea });
         continue;
+      }
+      if (byIndex.length > 0) {
+        fail(
+          `a runtime index into the object at [sp,#${off}), which an access of its own types as one ` +
+            'scalar — only the untyped storage of the whole reserved area is indexed',
+        );
       }
       const widths = new Set(acc.map((a) => a.width));
       if (widths.size > 1) {

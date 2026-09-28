@@ -423,6 +423,46 @@ describe('the audit judges each frame object on its own bytes', () => {
       );
     });
 
+    // A RUNTIME INDEX into the untyped storage. agbcc's own output for `u32 pick(u32 i){ u8 a[8];
+    // memcpy(a, tbl, 8); return a[i]; }` (and `a[i] = v` for the store), at the corpus's flags.
+    describe('a runtime index reads one byte element of the untyped storage', () => {
+      const indexed = (access: string) =>
+        copy(
+          '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x8\n\tbl\tmemcpy\n' +
+            `\tmov\tr1, sp\n\tadd\tr0, r1, r4\n${access}`,
+          '0x8',
+        ) + '.L3:\n\t.word\ttbl\n';
+
+      test('a byte load at the indexed address is an element of the declared bytes', () => {
+        expect(lift(indexed('\tldrb\tr0, [r0]\n')).source).toContain('u8 sp0[8];');
+        expect(lift(indexed('\tldrb\tr0, [r0]\n')).source).toContain('((u8 *)sp0)[a0]');
+      });
+
+      test('a byte store at the indexed address is one too', () => {
+        expect(lift(indexed('\tstrb\tr5, [r0]\n\tmov\tr0, #0x0\n')).source).toContain('((u8 *)sp0)[a0] = a1;');
+      });
+
+      test('a wider element is another array over the same bytes, and declines naming its width', () => {
+        // `u16 a[4]; … return a[i];` — agbcc scales the index and reads a halfword
+        expect(() => lift(indexed('\tldrh\tr0, [r0]\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) accesses 2 bytes/,
+        );
+      });
+
+      test('an indexed address that is not only accessed declines', () => {
+        expect(() => lift(indexed('\tbl\tuse\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) flows into `call`/,
+        );
+        expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(/flows into `load`/);
+      });
+
+      test('an object an access of its own types as a scalar is not indexed', () => {
+        expect(() => lift(indexed('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\), which an access of its own types as one scalar/,
+        );
+      });
+    });
+
     // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
     // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
     // the shape — these assert that the earlier refusal is the one that fires, so a change that

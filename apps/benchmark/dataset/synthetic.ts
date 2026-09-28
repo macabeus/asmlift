@@ -7247,6 +7247,21 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void *memcpy(void *, const void *, unsigned long);\nvoid stkext(void);',
   },
   {
+    sym: 'stkidx',
+    // `stkext`'s buffer, read back through a RUNTIME index: `mov r1, sp / add r0, r1, r4 /
+    // ldrb r0, [r0]`. The index names no offset, so no access types the buffer, and the byte it
+    // reads is one element of the storage the reservation sizes. `sa3:sa2__sub_8004418` is this
+    // shape in a real project. Sixty-four bytes for the reason `stkext` gives, and one more: the
+    // table is fitted from the asm as a word, and gcc open-codes a copy of 32 bytes or fewer from
+    // an aligned source as `ldmia`/`stmia` — a different function around the same index.
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gBlob[64];\n' +
+      'u32 stkidx(u32 i){ u8 a[64]; memcpy(&a[0], gBlob, sizeof a); return a[i]; }',
+    features: ['stack-addr', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nu32 stkidx(u32 i);',
+  },
+  {
     sym: 'stkextsret',
     // NO `stack-addr` TAG, and that is the floor holding rather than an omission: the tag's floor
     // is the `&`, and this source never writes one. The address is taken by the ABI, not by the
