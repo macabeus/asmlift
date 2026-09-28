@@ -101,7 +101,7 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from './hazards';
-import { type NaturalLoop, analyzeLoops } from './loops';
+import { type NaturalLoop, analyzeLoops, latchChain } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
@@ -1177,11 +1177,17 @@ export function edgeCopyOrdersDiffer(fn: Fn): boolean {
 interface DoWhileInfo {
   header: Block;
   latch: Block;
+  /** the latches after `latch` when they form a chain (`latchChain`): each one's test is a further
+   *  `||` term, and the last one's edge out of the loop is the exit. Empty for a single latch. */
+  tail: Block[];
   exit: Block;
   forwardPreds: Block[];
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   arms: LoopArm[];
 }
+
+/** The do-while latch whose edge leaves the loop: the last of a chain, else the latch. */
+const exitLatch = (dw: DoWhileInfo): Block => dw.tail[dw.tail.length - 1] ?? dw.latch;
 
 /** One carrier offered to one merge slot, as `FRESH_MERGE_GATES` judges it. */
 export interface FreshMergeCarrier {
@@ -2451,9 +2457,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // test and update live in ONE block, so the latch test reads the UPDATED value → emitWhile substitutes
   // the back-edge arg back to the header param. This is DISTINCT from a test-at-top multi-block `while`
   // (whileLoops, below) whose header is a pure test read on entry values.
+  // A header whose latches form a chain at the loop bottom (`latchChain`) is a do-while with an
+  // `||` test, whichever latch is the header itself.
+  const chains = new Map<Block, Block[]>();
+  for (const nl of forest.byHeader.values()) {
+    const chain = latchChain(nl, preds);
+    if (chain !== null) {
+      chains.set(nl.header, chain);
+    }
+  }
   const loops = new Map<Block, LoopInfo>();
   for (const nl of forest.byHeader.values()) {
-    if (!nl.selfLoop) {
+    if (!nl.selfLoop || chains.has(nl.header)) {
       continue;
     } // multi-block loops go through whileLoops
     const b = nl.header;
@@ -2513,10 +2528,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   }
 
   // --- structured natural loops (test-at-top `while` / bottom-test `do-while`) ---
-  // Both share the fail-closed preconditions: single latch, properly-nested inner loops only,
-  // reducible single-entry body, and a SINGLE real (non-ret) exit — early returns (ret-terminated
-  // targets) are allowed in-body. The shape then splits on WHERE the exit lives: the HEADER exits
-  // (pure test-at-top) → `while`; the LATCH exits (body-first) → `do-while`. Anything that fails
+  // Both share the fail-closed preconditions: single latch (or a chain of them, a `do-while` only),
+  // properly-nested inner loops only, reducible single-entry body, and a SINGLE real (non-ret) exit —
+  // early returns (ret-terminated targets) are allowed in-body. The shape then splits on WHERE the
+  // exit lives: the HEADER exits (pure test-at-top) → `while`; the LATCH exits (body-first) →
+  // `do-while`. Anything that fails
   // declines to plain if-recovery, which re-enters the header and fails loud via `onStack`.
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
@@ -2525,10 +2541,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (nl.selfLoop && loops.has(h)) {
       continue;
     } // guarded self-loops use emitWhile (above); UNGUARDED ones are single-block do-whiles
-    if (!nl.selfLoop && nl.latches.length !== 1) {
+    const chain = chains.get(h);
+    if (chain === undefined && !nl.selfLoop && nl.latches.length !== 1) {
       continue;
-    } // single latch only
-    const latch = nl.selfLoop ? h : nl.latches[0];
+    } // single latch only, or a chain of them
+    const latch = chain?.[0] ?? (nl.selfLoop ? h : nl.latches[0]);
     // Nested loops: an inner loop whose header sits in this body is fine ONLY if it is PROPERLY
     // nested — its ENTIRE body is contained in ours (a forest descendant). Structuring then recurses
     // naturally: when the outer body reaches the inner header, structureBlock dispatches to the inner's
@@ -2579,11 +2596,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       exit: Block,
       kind: 'while' | 'dowhile',
       bodyEntry: Block | null = null;
-    if (!nl.selfLoop && hTerm.opcode === 'cond_br' && hInBody.length === 1 && hOut.length === 1 && headerPure) {
+    if (
+      chain === undefined &&
+      !nl.selfLoop &&
+      hTerm.opcode === 'cond_br' &&
+      hInBody.length === 1 &&
+      hOut.length === 1 &&
+      headerPure
+    ) {
       kind = 'while';
       exitFrom = h;
       exit = hOut[0].block;
       bodyEntry = hInBody[0].block;
+    } else if (chain !== undefined) {
+      kind = 'dowhile';
+      exitFrom = chain[chain.length - 1];
+      exit = successorsOf(exitFrom).find((s) => s !== h)!;
     } else if (lTerm.opcode === 'cond_br' && lOut.length === 1 && lTerm.successors.some((s) => s.block === h)) {
       // a SELF-loop always lands here: its ops run before its bottom test (body-first), so the
       // faithful spelling is `do { ops; updates } while (cond)` with header === latch
@@ -2643,7 +2671,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         breaks,
       });
     } else {
-      doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, arms });
+      doWhileLoops.set(h, {
+        header: h,
+        latch,
+        tail: chain?.slice(1) ?? [],
+        exit,
+        forwardPreds: nl.forwardPreds,
+        body: nl.body,
+        arms,
+      });
     }
   }
 
@@ -2962,7 +2998,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (!nl || nl.body.has(b) || !nl.body.has(pr)) {
       return false;
     }
-    if (!loops.has(header!) && doWhileLoops.get(header!)?.latch !== pr) {
+    const dw = doWhileLoops.get(header!);
+    if (!loops.has(header!) && (dw === undefined || exitLatch(dw) !== pr)) {
       return false;
     }
     const back = successorTo(pr, header!);
@@ -6122,6 +6159,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const updates = argAssigns(dw.latch, dw.header, latchMap);
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
+    // Every latch's test, in the order control reaches them: one `||` term each (`DoWhileInfo.tail`).
+    const tests = [dw.latch, ...dw.tail].map((l) => l.ops[l.ops.length - 1]);
+    // A LATER TERM THAT HOLDS A STATEMENT (a store, a named temp, an unread call) has no position
+    // inside an `||`: its ops run only where the terms before it failed. Such a chain is spelled
+    // `while (1)` instead, one `if (term) continue;` per latch and the statements between them.
+    const statementInTail = dw.tail.some((l) =>
+      l.ops
+        .slice(0, -1)
+        .some(
+          (op) =>
+            op.opcode === 'store' ||
+            op.opcode === 'astore' ||
+            rendersAtOwnPosition(op) ||
+            unreadResult(op) ||
+            anchoredAt.has(op),
+        ),
+    );
+    // What the later terms read, statements included: all of it renders after the update copies.
+    const tailReads = dw.tail.flatMap((l) => l.ops.flatMap((op) => op.operands));
     // A DEFENSIVE GUARD, and the reason the sink stands down rather than repairing anything. A body
     // block's param that holds a LOOP VARIABLE's name makes the arm's copy into it a real write
     // partway through the body, and everything rendered after it reads the name RAW: the update,
@@ -6158,23 +6214,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       });
     }
     const rebindHazard = [...bodyRebinds].some((n) => headerNames.has(n));
-    const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
+    const exitArgs = (successorTo(exitLatch(dw), dw.exit)?.args ?? []) as Value[];
     // A pre-update exit copy moves INSIDE the body, ahead of the update, where the loop variables
     // still hold their top-of-iteration values. No zero-trip seed here: a `do-while` always runs
     // its body, so any other predecessor of the exit is an ordinary edge some enclosing `if`
-    // already emits.
-    const sunk = rebindHazard
-      ? new Map<number, Op | null>()
-      : sinkablePreUpdateSlots(
-          dw.header,
-          dw.exit,
-          exitArgs,
-          dw.body,
-          dw.latch,
-          sub,
-          updateWrites,
-          hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
-        );
+    // already emits. Not for a chained test: its exit edge leaves from the last term, and a copy
+    // sunk ahead of the update would run on every iteration's way into the test.
+    const sunk =
+      rebindHazard || dw.tail.length > 0
+        ? new Map<number, Op | null>()
+        : sinkablePreUpdateSlots(
+            dw.header,
+            dw.exit,
+            exitArgs,
+            dw.body,
+            dw.latch,
+            sub,
+            updateWrites,
+            hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+          );
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
@@ -6190,7 +6248,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //
     // Asked of every `do-while`, not only of a folded one: the arm holds the same call whichever way
     // the counter is spelled.
-    if (testSkipsAnEffect(lterm.operands[0], sub)) {
+    if (tests.some((t) => testSkipsAnEffect(t.operands[0], sub))) {
       throw new StructureError(
         `cannot structure '${fn.name}': the bottom test may evaluate an effect behind a '&&'/'||' ` +
           `that the asm ran on every iteration`,
@@ -6200,19 +6258,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // leaf, with the update copy dropped from the foot of the body. Asked only where the test is
     // already a hazard, so a loop that structures today enumerates exactly the candidates it did.
     // The polarity is the one applied to `cond` below — the continue edge must be the taken one.
-    const condAnswer = readsClobbered(lterm.operands[0], sub, updateWrites)
-      ? preUpdateCondFold(
-          lterm.operands[0],
-          lterm.successors[1].block === dw.header,
-          dw.header,
-          successorTo(dw.latch, dw.header)?.args ?? [],
-          exitArgs,
-          dw.body,
-          sub,
-          updates,
-          updateWrites,
-        )
-      : null;
+    const condAnswer =
+      dw.tail.length === 0 && readsClobbered(lterm.operands[0], sub, updateWrites)
+        ? preUpdateCondFold(
+            lterm.operands[0],
+            lterm.successors[1].block === dw.header,
+            dw.header,
+            successorTo(dw.latch, dw.header)?.args ?? [],
+            exitArgs,
+            dw.body,
+            sub,
+            updates,
+            updateWrites,
+          )
+        : null;
     const condFold = condAnswer === null || 'refused' in condAnswer ? null : condAnswer;
     // A PRE-UPDATE HOME DOES NOT UNLOCK A LOOP whose variable's NAME a block after it also holds.
     // The exit region reads the loop's back-edge values under those names (`sub`), and such a
@@ -6232,7 +6291,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         updateWrites,
         postLoop,
         condFold !== null,
-      )
+      ) ||
+      tailReads.some((v) => readsClobbered(v, sub, updateWrites))
     ) {
       // Three reasons share this refusal — the test, an exit slot, an escaped body value — and the
       // one that was asked in detail names the gate that answered.
@@ -6342,7 +6402,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const updateRoots = successorTo(dw.latch, dw.header)!.args;
       if (
         [...effectRoots, ...updateRoots].some((r) => needs(r, bodyMap, unreadable)) ||
-        needs(lterm.operands[0], condMap, condUnreadable)
+        [lterm.operands[0], ...tailReads].some((r) => needs(r, condMap, condUnreadable))
       ) {
         throw new StructureError(
           `cannot structure '${fn.name}': a loop latch reads an inner loop's value whose name was rewritten ` +
@@ -6350,10 +6410,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
       }
     }
-    let cond = exprWith(condMap)(lterm.operands[0]);
-    if (lterm.successors[1].block === dw.header) {
-      cond = negateCond(cond);
-    } // continue edge must be `taken`
+    // continue edge must be `taken`
+    const goesRound = (t: Op): Expr => {
+      const c = exprWith(condMap)(t.operands[0]);
+      return t.successors[1].block === dw.header ? negateCond(c) : c;
+    };
+    if (statementInTail) {
+      const rounds: Stmt[] = [];
+      tests.forEach((t, i) => {
+        if (i > 0) {
+          rounds.push(...withSub(condMap, () => sideEffects(dw.tail[i - 1])));
+        }
+        rounds.push(
+          i < tests.length - 1
+            ? mkIf(goesRound(t), [{ k: 'continue' }], [])
+            : mkIf(negateCond(goesRound(t)), [{ k: 'break' }], []),
+        );
+      });
+      return [
+        { k: 'while', cond: { k: 'const', value: 1 }, body: [...body, ...rounds] },
+        ...withSub(sub, () => [...argAssigns(exitLatch(dw), dw.exit, sub), ...structureRegion(dw.exit, stop)]),
+      ];
+    }
+    // a chain goes round when any term does
+    let cond = tests.map(goesRound).reduce((l, r): Expr => ({ k: 'bin', op: '||', l, r }));
     if (condFold !== null) {
       // AFTER the negation, so the leaf is placed in the tree that is emitted. `negateCond` rewrites
       // the connectives by De Morgan, which moves the leaf between arms without duplicating it — and
@@ -6371,7 +6451,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars).
     out.push(
       ...withSub(sub, () => [
-        ...argAssigns(dw.latch, dw.exit, sub, (j) => !sunk.has(j)),
+        ...argAssigns(exitLatch(dw), dw.exit, sub, (j) => !sunk.has(j)),
         ...structureRegion(dw.exit, stop),
       ]),
     );

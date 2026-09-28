@@ -2460,6 +2460,20 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['continue', 'memory'],
     toolchains: ALL,
   },
+  // A do-while whose `||` test calls a function in a later term. The IR cannot fold the call's term
+  // into the one before it — the fold would run `g` on every iteration — so the loop reaches the
+  // structurer with several latches, chained at its bottom (`latchChain`).
+  {
+    sym: 'orchain',
+    src:
+      'extern int gTbl[];\nint f(void);\nint g(int);\n' +
+      'int orchain(int a, int s, int m, int n){ int t; do { t = f() % n; } ' +
+      'while (t == a || g(t) == s || (m & gTbl[t])); return t; }',
+    features: ['global'],
+    toolchains: CALL,
+    ctx: 'extern int gTbl[]; int f(void); int g(int);',
+    proto: { f: { params: 0 }, g: { params: 1 } },
+  },
 
   // ── casts / integer promotion ───────────────────────────────────────────────────────────────
   {

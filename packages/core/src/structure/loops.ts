@@ -120,3 +120,55 @@ export function analyzeLoops(fn: Fn, dom: Map<Block, Set<Block>>): LoopForest {
 
   return { byHeader, parent };
 }
+
+/** The loop's latches as a CHAIN at its bottom, in the order control reaches them — or null. Each
+ *  latch is a two-way branch with one edge back to the header; each one's other edge enters the
+ *  next latch, and the last one's leaves the loop. That is `do { … } while (a || b || c)` with its
+ *  terms left as branches, which the IR keeps whenever it cannot fold one into a single test (a
+ *  later term calls a function, and the fold would run the call unconditionally).
+ *
+ *  Every latch after the first is entered only from the one before it, takes no params, and hands
+ *  the header the same arguments the first one does, so the loop's update is ONE set of copies
+ *  whichever term sends it round. The first latch may be the header itself. A single latch, or any
+ *  other latch set, is null. */
+export function latchChain(nl: NaturalLoop, preds: Map<Block, Block[]>): Block[] | null {
+  const latches = new Set(nl.latches);
+  if (latches.size < 2) {
+    return null;
+  }
+  const next = new Map<Block, Block>();
+  for (const l of latches) {
+    const term = l.ops[l.ops.length - 1];
+    const back = term.opcode === 'cond_br' ? term.successors.filter((s) => s.block === nl.header) : [];
+    if (term.successors.length !== 2 || back.length !== 1) {
+      return null;
+    }
+    next.set(l, term.successors.find((s) => s.block !== nl.header)!.block);
+  }
+  const entered = new Set(next.values());
+  const starts = [...latches].filter((l) => !entered.has(l));
+  if (starts.length !== 1) {
+    return null;
+  }
+  const chain = [starts[0]];
+  while (latches.has(next.get(chain[chain.length - 1])!) && chain.length <= latches.size) {
+    chain.push(next.get(chain[chain.length - 1])!);
+  }
+  if (chain.length !== latches.size || nl.body.has(next.get(chain[chain.length - 1])!)) {
+    return null;
+  }
+  const backArgs = (l: Block) => l.ops[l.ops.length - 1].successors.find((s) => s.block === nl.header)!.args;
+  const first = backArgs(chain[0]);
+  for (let i = 1; i < chain.length; i++) {
+    const l = chain[i];
+    const ps = preds.get(l) ?? [];
+    if (l === nl.header || l.params.length !== 0 || ps.length !== 1 || ps[0] !== chain[i - 1]) {
+      return null;
+    }
+    const args = backArgs(l);
+    if (args.length !== first.length || args.some((v, k) => v !== first[k])) {
+      return null;
+    }
+  }
+  return chain;
+}
