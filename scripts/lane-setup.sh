@@ -56,12 +56,15 @@ fi
 [ -z "$env_file" ] || [ -f "$env_file" ] || die "--env $env_file does not exist"
 [ ! -e "$wt" ] || die "$wt already exists — never launch into a worktree that may be live; pick a new path"
 case $wt in /*) ;; *) die "give <worktree> as an absolute path: the round is briefed with it verbatim" ;; esac
-vars=
-if [ -z "$env_file" ]; then
-  vars=$(env | grep -E '^ASMLIFT_[A-Z0-9_]+=' | sort || true)
-  [ -n "$vars" ] || die "no ASMLIFT_* is exported in this shell and no --env was given; a worktree's sibling defaults resolve to nothing (round protocol trap #6)"
-  [ "$(command -v cpp)" != /usr/bin/cpp ] || die "\`cpp\` resolves to Apple clang's /usr/bin/cpp in this shell — source the environment that puts the shim first, or pass --env (round protocol trap #6)"
+# The environment the lane will run in: this shell's, or the one `--env` produces when sourced.
+if [ -n "$env_file" ]; then
+  lane_env() { (. "$env_file" && "$@"); }
+else
+  lane_env() { "$@"; }
 fi
+vars=$(lane_env env | grep -E '^ASMLIFT_[A-Z0-9_]+=' | sort || true)
+[ -n "$vars" ] || die "no ASMLIFT_* in ${env_file:-this shell}; a worktree's sibling defaults resolve to nothing (round protocol trap #6)"
+[ "$(lane_env sh -c 'command -v cpp')" != /usr/bin/cpp ] || die "\`cpp\` resolves to Apple clang's /usr/bin/cpp in ${env_file:-this shell} — put the shim first (round protocol trap #6)"
 
 main=$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")
 

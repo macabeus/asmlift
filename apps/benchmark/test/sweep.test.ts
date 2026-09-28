@@ -174,6 +174,11 @@ describe('a row that declined on the base and ranks here is priced', () => {
   it('prints nothing when no row newly ranks', () => {
     expect(newlyRankedLines(newlyRanked(compareSweeps(base(), base()), rates))).toEqual([]);
   });
+
+  it('prices nothing against a base swept without --fan, whose rows never threw', () => {
+    const noFan = [rec(CARD, 'harness', {})];
+    expect(newlyRanked(compareSweeps(noFan, [rec(CARD, 'harness', { fan: 1408 })]), rates)).toEqual([]);
+  });
 });
 
 describe('the three fan hashes', () => {

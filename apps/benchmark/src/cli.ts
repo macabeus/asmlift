@@ -324,6 +324,10 @@ switch (command) {
       });
       let exit: number | null | undefined;
       child.on('exit', (code) => (exit = code));
+      child.on('error', (e) => {
+        console.error(`bench run could not be started detached: ${e.message}`);
+        process.exit(1);
+      });
       for (;;) {
         await new Promise((r) => setTimeout(r, 250));
         const state = readBenchLock();
