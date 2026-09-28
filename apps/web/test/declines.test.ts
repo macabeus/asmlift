@@ -981,7 +981,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 2],
-    ['address-taken-local > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
