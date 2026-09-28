@@ -69,14 +69,16 @@ test('a header value read after a break is not re-derived from the updated name'
 // mis-models the statement shape (a dce that lets a mid-body `break` fall through drops the copy it
 // carries) is invisible to the first judgement.
 //
-// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), and a `do-while`
-// (`DO_WHILE_BREAK`). A refusal is loud only where the exit is a live merge; an exit that ends in a
-// `ret` can take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break` the
-// latch path refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no witness, and are kept as the conditions this spelling
-// rests on rather than as rules any input is known to need: an edge out of a nested loop's body (a
-// loop this recognizer admits leaves only to its own exit, which lies inside ours); an in-body branch
-// whose other edge leaves the loop as well (if-recovery declines those branches first); and an exit
-// region reading a name this iteration already wrote (naming gives no header value such a name).
+// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), a `do-while`
+// (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit
+// (`IF_JOINING_AT_THE_EXIT`). A refusal is loud only where the exit is a live merge; an exit that ends
+// in a `ret` can take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break`
+// the latch path refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
+// witness, and are kept as the conditions this spelling rests on rather than as rules any input is
+// known to need: an edge out of a nested loop's body (a loop this recognizer admits leaves only to its
+// own exit, which lies inside ours); an in-body branch whose other edge leaves the loop as well
+// (if-recovery declines those branches first); and an exit region reading a name this iteration
+// already wrote (naming gives no header value such a name).
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
 type Agreement = { judged: number; disagree: number };
