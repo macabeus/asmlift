@@ -1,8 +1,9 @@
 // A LOOP WITH NO TEST OF ITS OWN: `while (1)`.
 //
-// A loop whose latches are neither one latch, a chain (`latch-chain.test.ts`) nor a nest
-// (`header-nest.test.ts`) — a `continue` in mid-body beside the loop's bottom latch — has no single
-// test to put at its top or bottom. It is spelled `while (1)`: every edge back to the header is a
+// A loop no other recognizer takes — latches that are no one latch, chain (`latch-chain.test.ts`)
+// or nest (`header-nest.test.ts`), such as a `continue` in mid-body beside the bottom latch; or one
+// latch under a header that computes before it tests — has no single test to put at its top or
+// bottom. It is spelled `while (1)`: every edge back to the header is a
 // continue (implicit at the foot of the region, `continue;` above it), every edge out is a `break`
 // to the one exit the loop is given or an early `return`. An `if` in the body joins where the paths
 // that do not end meet (`foreverJoin`), so an arm that continues does not drag the rest of the
@@ -128,6 +129,24 @@ const TWO_LIVE_EXITS = `fn twoexits {
   ret %3
 }`;
 
+/** A header that computes before it tests, over one unconditional latch — no pure test for a
+ *  `while`, no bottom test for a `do-while`: `i = 0; while (1) { if (f(i) >= a0) break; i++; }`. */
+const MID_TESTED = `fn midtest {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = call %3 {target="f"}
+  %5: u32 = icmp_sge %4, %0
+  cond_br %5, ^bb3(), ^bb2()
+^bb2():
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  br ^bb1(%7)
+^bb3():
+  ret %3
+}`;
+
 test('a mid-body continue beside the bottom latch is a `while (1)` with a `break` to its exit', () => {
   const r = judged(MID_CONTINUE);
   expect(r.src).toBe(
@@ -154,4 +173,14 @@ test('a continue nested under an `if` jumps, and the rest of the iteration is wr
 
 test('a loop leaving for two live merges has no one exit, and declines LOUD', () => {
   expect(() => judged(TWO_LIVE_EXITS)).toThrow(/unrecovered back-edge/);
+});
+
+test('a header that computes before it tests is a `while (1)` with its test in mid-body', () => {
+  const r = judged(MID_TESTED);
+  expect(r.src).toBe(
+    's32 midtest(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (1) {\n' +
+      '        if ((s32)f(v0) >= a0) break;\n        v0 = v0 + 1;\n    }\n    return v0;\n}\n',
+  );
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });

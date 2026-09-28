@@ -11,8 +11,7 @@
 //                                                                 and THIS FILE's MULTILATCH
 //   3. overlapping inner  a nested header whose body escapes ours  0 failed — UNWITNESSED
 //   4. irreducible        `!reducible`                             0 failed — UNWITNESSED
-//   5. neither shape      no clean pre-tested/bottom-tested exit  2 failed — latch.test.ts,
-//                                                                 opaque-effects.test.ts
+//   5. neither shape      no clean pre-tested/bottom-tested exit  left to `while (1)` — loop-forever.test.ts
 //   6. multiple exits     `!singleExit`                           0 failed — UNWITNESSED
 //
 // So THREE of the six are unwitnessed. #4 is this file's named debt, instrumented below. For #3 and

@@ -2719,12 +2719,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
-  // A loop with several latches that none of the shapes above spells — a conditional `continue` in
-  // mid-body beside the bottom latch — is `while (1)`: every edge back to the header is the
+  // A loop none of the shapes above spells — several latches with a conditional `continue` in
+  // mid-body beside the bottom one, or one latch under a header that computes before it tests (a
+  // mid-tested loop) — is `while (1)`: every edge back to the header is the
   // implicit continue at the foot of its region, and every edge out is a `break` to the one exit
   // chosen below or an early `return`. Same fail-closed preconditions as above: properly nested
   // inner loops, a single-entry body, and no break out of an inner loop's body. The exit is the
-  // first target, in block order, under which every other edge out is an arm or reaches a `ret`.
+  // first target, in block order, under which every other edge out is an early-return arm or lands
+  // on a `ret` block with no effect in it.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const innerBodyHas = (nl: NaturalLoop, b: Block): boolean =>
     [...forest.byHeader.values()].some((l2) => l2.header !== nl.header && nl.body.has(l2.header) && l2.body.has(b));
@@ -2744,7 +2746,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
         }
-        return owned !== null || isRet(e.to);
+        // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
+        // must hold nothing a second copy would run twice in the source
+        return owned !== null || (isRet(e.to) && !e.to.ops.some((op) => EFFECTFUL_OPS.has(op.opcode)));
       });
       if (fits) {
         return { header: nl.header, exit, body: nl.body, arms, breaks };
@@ -2755,7 +2759,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const shape =
-      new Set(nl.latches).size > 1 &&
       !chains.has(h) &&
       !nests.has(h) &&
       !loops.has(h) &&

@@ -134,16 +134,33 @@ describe('the boundary contract backstops annotate mode', () => {
 });
 
 describe('a decline caused by an unmodelled instruction says so', () => {
-  // An `opaque` does not only degrade its own value — it makes its block impure, and `headerPure`
-  // then refuses the loop. The decline was true ("unrecovered back-edge … loop-recovery declined
-  // this shape") and useless: the shape is fine, an instruction is missing. It also sent the
-  // benchmark's decline Pareto to `loop-shapes`, pointing the next round at the wrong capability.
+  // An `opaque` does not only degrade its own value — it makes its block impure, and a shape
+  // recognizer may refuse the block for it. A decline that then reads "unrecovered back-edge …
+  // loop-recovery declined this shape" is true and useless when an instruction is what is missing,
+  // and it sends the benchmark's decline Pareto to `loop-shapes`, pointing the next round at the
+  // wrong capability. So `attributeOpaques` appends the instruction to such a decline.
   const whileWithHeaderInsn = (insn: string) =>
     `\tmov\tr1, #0\n.L1:\n\t${insn}\n\tcmp\tr1, #10\n\tbge\t.L2\n\tadd\tr1, r1, #1\n\tb\t.L1\n.L2:\n\tmov\tr0, r1\n\tbx\tlr\n`;
 
-  test('a loop-shape decline names the unmodelled instruction in the header', () => {
-    expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(/unrecovered back-edge/);
-    expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(/carries unmodelled instruction 'clz'/);
+  // An impure header is no `while`, and the loop is `while (1)` with its test in mid-body: the gap
+  // is named where the instruction ran, not as a loop shape.
+  test('an unmodelled instruction in a loop header is a gap at its position, not a loop decline', () => {
+    expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(
+      /unresolvable value\(s\) in 'f' — unmodelled instruction 'clz'$/,
+    );
+    const { source } = dc('f', whileWithHeaderInsn('clz\tr2, r0'), 'annotate');
+    expect(source).toContain('while (1) {');
+    expect(source).toContain(`ASMLIFT_ERROR("${gapReasonFor({ mnemonic: 'clz' })}"`);
+  });
+
+  // A loop no recognizer takes — entered in its middle, so it has no header — declines, and the
+  // decline names the instruction the function carries.
+  test('a loop-shape decline names the unmodelled instruction the function carries', () => {
+    const irreducible =
+      '\tmov\tr1, #0\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L1:\n\tclz\tr2, r0\n\tadd\tr1, r1, r2\n.L2:\n' +
+      '\tcmp\tr1, #10\n\tblt\t.L1\n\tmov\tr0, r1\n\tbx\tlr\n';
+    expect(() => dc('f', irreducible)).toThrow(/unrecovered back-edge/);
+    expect(() => dc('f', irreducible)).toThrow(/carries unmodelled instruction 'clz'/);
   });
 
   test('the same loop with a MODELLED instruction still recovers', () => {
