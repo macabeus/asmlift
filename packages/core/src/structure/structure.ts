@@ -4928,7 +4928,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // same values. They compute them from the names they read, at the loop's end instead of at the
   // header, so those names must still hold what the header read: none may be one `writes` holds.
   // Without that clause a latch break spelled after its update runs the update twice —
-  // `v = v + 1; break;`, then the header's copy `x = v + 1` after the loop.
+  // `v = v + 1; break;`, then the header's copy `x = v + 1` after the loop. The clause is judged
+  // over every argument the header hands the exit, at the value level, and not only over the copies
+  // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
+  // still reads that name, and a latch update that wrote it hands the exit the updated value.
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
     if (!whileLoops.has(frame.header)) {
       return { refusal: 'leaves a do-while' };
@@ -4942,7 +4945,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       for (const s of headerCopies) {
         stmtExprs(s).forEach((e) => exprVars(e, reads));
       }
-      bare = breakArgs.every((v, k) => v === headerArgs[k]) && ![...reads].some((n) => writes.has(n));
+      bare =
+        breakArgs.every((v, k) => v === headerArgs[k]) &&
+        ![...reads].some((n) => writes.has(n)) &&
+        !headerArgs.some((a) => readsClobbered(a, new Map(), writes));
       if (!bare) {
         return { refusal: 'would run the copies the loop header hands its exit' };
       }

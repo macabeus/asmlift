@@ -70,7 +70,8 @@ test('a header value read after a break is not re-derived from the updated name'
 // carries) is invisible to the first judgement.
 //
 // Refusals and their witnesses: header→exit copies the break cannot share (`HEADER_EXIT_COPIES`,
-// and `LATCH_BREAK_SHARES_UPDATED_NAME` for copies reading a name the update wrote; a break handing
+// and `LATCH_BREAK_SHARES_UPDATED_NAME` for copies reading a name the update wrote,
+// `LATCH_BREAK_SHARES_IDENTITY_SLOT` for an exit value whose copy renders nothing; a break handing
 // the exit the header's own values shares them, `BREAK_SHARES_HEADER_COPIES`), a `do-while`
 // (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit, where the
 // implicit continue does not hold (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
@@ -460,6 +461,40 @@ test('a latch `break` does not share header copies that read a name its update w
     's32 latchshare(s32 a0) {\n    s32 v0;\n    for (v0 = 0; v0 + 1 < a0; v0 = v0 + 1) {\n' +
       '        if (f() == 2) break;\n    }\n    v0 = v0 + 1;\n    g(v0);\n    return v0;\n}\n',
   );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** A latch break handing the exit the header's own values, where one of them needs no copy at all:
+ *  the exit parameter takes the header parameter's own name, so the header's exit edge renders
+ *  nothing for it. The latch path writes that name in its update (`v0 = v0 + 1`, and `v1 = v0` for
+ *  the second header parameter) before `if (…) break;`, so a bare break would reach the exit with
+ *  the updated value where the IR hands it the old one. The break rule judges every exit argument
+ *  the header hands on, rendered or not, refuses the share, and the break is spelled ahead of the
+ *  update. agbcc -O2 lays out `for (;;) { acc += prev; prev = cur; if (cur >= n) break; cv(acc);
+ *  cur++; if (cg(prev) > k) break; } cv(prev);` this way. */
+const LATCH_BREAK_SHARES_IDENTITY_SLOT = `fn latchident {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %20: s32 = const {value=7}
+  %3: u32 = icmp_slt %0, %1
+  cond_br %3, ^bb6(%20, %1), ^bb1(%2, %1)
+^bb1(%4: s32, %5: s32):
+  %8: u32 = icmp_slt %4, %1
+  cond_br %8, ^bb5(), ^bb6(%4, %0)
+^bb5():
+  %9: s32 = call %4 {target="f0"}
+  %13: s32 = const {value=1}
+  %14: s32 = add %4, %13
+  %15: u32 = icmp_eq %9, %14
+  cond_br %15, ^bb1(%14, %4), ^bb6(%4, %0)
+^bb6(%16: s32, %17: s32):
+  %19: s32 = call %16 {target="f1"}
+  %21: s32 = call %17 {target="f2"}
+  ret %16
+}`;
+
+test('a latch `break` does not share a header exit value whose copy renders nothing', () => {
+  const { agreement, shipped } = judged(LATCH_BREAK_SHARES_IDENTITY_SLOT);
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
