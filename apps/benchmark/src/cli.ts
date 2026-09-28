@@ -390,10 +390,12 @@ switch (command) {
       const [tier] = tiers;
       const dir = runDir(tier);
       const out = partPath(dir, Number(opts.claim), shard.idx);
-      const n = runCases(planCases(dir, casesFor(tier)), out, {
-        claimer: claimer(dir, `pid ${process.pid} shard ${shard.idx}`),
-        tag: ` s${shard.idx}`,
-      }).length;
+      const n = (
+        await runCases(planCases(dir, casesFor(tier)), out, {
+          claimer: claimer(dir, `pid ${process.pid} shard ${shard.idx}`),
+          tag: ` s${shard.idx}`,
+        })
+      ).length;
       console.log(`\nWrote ${n} ${tier} results → ${out}`);
       reportCandCache();
     } else if (opts.serial) {
@@ -415,7 +417,7 @@ switch (command) {
           console.log(`\nNo ${tier} row selected — ${out} left unchanged`);
           continue;
         }
-        const n = runCases(cases, out, { writeEmpty: !filtered }).length;
+        const n = (await runCases(cases, out, { writeEmpty: !filtered })).length;
         if (filtered) {
           selected = (selected ?? 0) + n;
         }

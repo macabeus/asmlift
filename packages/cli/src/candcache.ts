@@ -190,6 +190,16 @@ export const cacheStats = (): Record<string, number> => {
   }
   return pending === 0 ? { ...STATS } : { ...STATS, sampledPending: pending };
 };
+/** Add another thread's counters to this one's — a worker thread compiling for this process keeps
+ *  its own module state, and the run's `[candcache]` line and `cacheMismatches` gate are this
+ *  thread's. */
+export function absorbCacheStats(stats: Readonly<Record<string, number>>): void {
+  for (const [k, n] of Object.entries(stats)) {
+    if (k !== 'sampledPending') {
+      bump(k, n);
+    }
+  }
+}
 /** How many stored answers disagreed with the truth — `mismatch` from the sampled/verify AUDIT
  *  plus `objectCorrupt` from a `put` finding `objects/<sha>` holding bytes it is not named after.
  *  Both mean the store served (or would have served) bytes the compiler did not produce, and the

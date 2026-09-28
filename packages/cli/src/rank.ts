@@ -176,30 +176,33 @@ export function decompileRanked(
  *
  *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
  *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list
- *  are what the serial path would have produced. The benchmark deliberately keeps calling
- *  `decompileRanked`: a published measurement must not depend on a scheduler. */
+ *  are what the serial path would have produced, and a published measurement that runs through
+ *  this driver depends on no scheduler. */
 export async function decompileRankedParallel(
   name: string,
   asm: string,
   target: TargetDescription,
   targetObj: string,
   opts: RankOptions & {
-    jobs: number;
+    /** how many workers compile at once — a count, or a count chosen from the fan's size once it is
+     *  enumerated */
+    jobs: number | ((fan: number) => number);
     /** mints one INDEPENDENT async compiler per worker (compile-command.ts `worker()`) */
     worker: () => AsyncCandidateCompiler;
   },
 ): Promise<RankedResult> {
   const backend = opts.backend ?? cBackend;
   const clock = opts.clock;
-  if (clock) {
-    clock.workers = Math.max(1, opts.jobs);
-  }
   const candidates = timed(clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
+  const jobs = Math.max(1, typeof opts.jobs === 'number' ? opts.jobs : opts.jobs(candidates.length));
+  if (clock) {
+    clock.workers = jobs;
+  }
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const scored = new Map<string, MatchScore | Error>();
   let done = 0;
   let best: MatchScore | undefined;
-  const workers = Array.from({ length: Math.max(1, opts.jobs) }, () => opts.worker());
+  const workers = Array.from({ length: jobs }, () => opts.worker());
   const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
     let result: MatchScore | Error;
     try {

@@ -17,12 +17,12 @@ vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
 const CODEGEN: Case['codegen'] = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 describe('parseShard (pinned)', () => {
-  test('parses i/N', () => {
+  test('parses i/N', async () => {
     expect(parseShard('0/1')).toEqual({ idx: 0, n: 1 });
     expect(parseShard('3/8')).toEqual({ idx: 3, n: 8 });
   });
 
-  test('rejects malformed input loudly', () => {
+  test('rejects malformed input loudly', async () => {
     for (const bad of ['8/8', '-1/4', '2', 'a/b', '1/0', '']) {
       expect(() => parseShard(bad), bad).toThrow(/bad --shard/);
     }
@@ -30,7 +30,7 @@ describe('parseShard (pinned)', () => {
 });
 
 describe('runCases toolchain availability (pinned)', () => {
-  test('an unavailable toolchain skips its case — no row, no throw', () => {
+  test('an unavailable toolchain skips its case — no row, no throw', async () => {
     const c: Case = {
       id: 'synthetic:ghost:agbcc',
       tier: 'synthetic',
@@ -47,12 +47,12 @@ describe('runCases toolchain availability (pinned)', () => {
       },
     };
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
-    const results = runCases([c], outPath);
+    const results = await runCases([c], outPath);
     expect(results).toEqual([]);
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
   });
 
-  test('writeEmpty: false leaves an EXISTING tier file byte-for-byte alone when every row SKIPs', () => {
+  test('writeEmpty: false leaves an EXISTING tier file byte-for-byte alone when every row SKIPs', async () => {
     // The default above is the shard CHILD's contract: a part file is always written and the
     // stitcher owns <tier>.json. The serial path writes <tier>.json DIRECTLY, and a row that is
     // SELECTED and then SKIPPED walks past cli.ts's `cases.length === 0` guard with cases.length
@@ -78,18 +78,18 @@ describe('runCases toolchain availability (pinned)', () => {
     const sentinel = JSON.stringify({ meta: { counts: { total: 1 } }, results: [{ id: 'synthetic:kept:agbcc' }] });
     writeFileSync(outPath, sentinel);
 
-    expect(runCases([c], outPath, { writeEmpty: false })).toEqual([]);
+    expect(await runCases([c], outPath, { writeEmpty: false })).toEqual([]);
     expect(readFileSync(outPath, 'utf8'), 'the previous tier file survives a run that measured nothing').toBe(sentinel);
 
     // …and the DEFAULT still clobbers it, which is what makes `writeEmpty: false` the load-bearing
     // half rather than a flag that happens to agree with the behaviour either way.
-    expect(runCases([c], outPath)).toEqual([]);
+    expect(await runCases([c], outPath)).toEqual([]);
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
   });
 });
 
 describe('runCases build failures (pinned)', () => {
-  test('a target that cannot build fails the shard loudly, after flushing the other rows', () => {
+  test('a target that cannot build fails the shard loudly, after flushing the other rows', async () => {
     const c: Case = {
       id: 'synthetic:ghost:mwcc_242_81',
       tier: 'synthetic',
@@ -106,7 +106,7 @@ describe('runCases build failures (pinned)', () => {
       },
     };
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
-    expect(() => runCases([c], outPath)).toThrow(
+    await expect(runCases([c], outPath)).rejects.toThrow(
       /1 case\(s\) yielded no row .* synthetic:ghost:mwcc_242_81 \(target build failed\)/,
     );
     // the part file is still written, so surviving rows are never lost to the throw
@@ -115,13 +115,13 @@ describe('runCases build failures (pinned)', () => {
 
   // A throw out of evaluation — the fan tally meeting an unregistered variation is one — is a harness
   // defect, never an outcome. It must not end the shard early and lose the rows after it.
-  test('an evaluation that throws fails the shard loudly, after the rows that follow it are written', () => {
+  test('an evaluation that throws fails the shard loudly, after the rows that follow it are written', async () => {
     const row = { id: 'synthetic:kept:agbcc', asmlift: {}, m2c: {} } as FunctionResult;
     vi.mocked(evaluate)
-      .mockImplementationOnce(() => {
+      .mockImplementationOnce(async () => {
         throw new Error("'nosuch' names no registered variation");
       })
-      .mockImplementationOnce(() => row);
+      .mockImplementationOnce(async () => row);
     const c = (sym: string): Case => ({
       id: `synthetic:${sym}:agbcc`,
       tier: 'synthetic',
@@ -136,7 +136,7 @@ describe('runCases build failures (pinned)', () => {
       build: () => ({ obj: '/nonexistent.o', asm: '' }),
     });
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
-    expect(() => runCases([c('broken'), c('kept')], outPath)).toThrow(
+    await expect(runCases([c('broken'), c('kept')], outPath)).rejects.toThrow(
       /1 case\(s\) yielded no row .* synthetic:broken:agbcc \(evaluation threw\)/,
     );
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results.map((r: FunctionResult) => r.id)).toEqual([
@@ -146,7 +146,7 @@ describe('runCases build failures (pinned)', () => {
 });
 
 describe('benchMeta (pinned)', () => {
-  test('counts tiers and dedupes toolchains', () => {
+  test('counts tiers and dedupes toolchains', async () => {
     const rows = [
       { tier: 'synthetic', toolchain: 'agbcc' },
       { tier: 'synthetic', toolchain: 'ido7.1' },
@@ -169,23 +169,23 @@ describe('fmt renders a gap over its denominator', () => {
   const d = (over: Partial<DecompilerResult>): DecompilerResult =>
     ({ outcome: 'nonmatch', ...over }) as DecompilerResult;
 
-  test('a scored gap prints score/maxScore', () => {
+  test('a scored gap prints score/maxScore', async () => {
     expect(fmt(d({ score: 171, maxScore: 387 }))).toBe('diff:171/387');
     expect(fmt(d({ score: 290, maxScore: 404 }))).toBe('diff:290/404');
   });
 
-  test('an unscored denominator degrades to the bare numerator rather than printing null', () => {
+  test('an unscored denominator degrades to the bare numerator rather than printing null', async () => {
     expect(fmt(d({ score: 12, maxScore: null }))).toBe('diff:12');
   });
 
   // The artifact types it `number | null`, but this renderer also runs over hand-built and older
   // objects where the key is simply ABSENT, and `diff:12/undefined` is a worse answer than
   // `diff:12`.
-  test('an ABSENT denominator degrades the same way a null one does', () => {
+  test('an ABSENT denominator degrades the same way a null one does', async () => {
     expect(fmt(d({ score: 12, maxScore: undefined as unknown as null }))).toBe('diff:12');
   });
 
-  test('the other outcomes are untouched', () => {
+  test('the other outcomes are untouched', async () => {
     expect(fmt(d({ outcome: 'match' }))).toBe('MATCH');
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
     expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
@@ -194,7 +194,7 @@ describe('fmt renders a gap over its denominator', () => {
 });
 
 describe('the in-row progress line', () => {
-  test('says nothing for a minute, then once a minute, with the best score so far', () => {
+  test('says nothing for a minute, then once a minute, with the best score so far', async () => {
     let t = 1_000_000;
     const lines: string[] = [];
     const on = rankProgress(

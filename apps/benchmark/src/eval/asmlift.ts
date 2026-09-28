@@ -4,7 +4,7 @@
 // output is compiled+scored exactly as the target was built.
 import type { DecompilerResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
-import { type RankOptions, type RankedResult, decompileRanked } from '@asmlift/cli/rank';
+import { type RankOptions, type RankedResult, decompileRanked, decompileRankedParallel } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
@@ -18,6 +18,7 @@ import { cachedExtractAsmData, sha } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
 import { scrub } from '../report/committed';
 import type { Toolchain } from '../toolchains';
+import { type RowRef, compilePool } from './compile-pool';
 import { compilerErrorLines } from './outcome';
 import { assessQuality } from './quality';
 
@@ -92,9 +93,8 @@ export function rankOptionsFor(
  *
  *  `runAsmlift` publishes four facts out of this object — the winner's variations and source, the
  *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
- *  one supported way to read them, and it is deliberately the SAME call the harness makes rather
- *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
- *  and a published measurement must not depend on a scheduler. */
+ *  one supported way to read them. The harness ranks through `decompileRankedParallel` (`rankRow`),
+ *  which orders the same memoized scores and so publishes what this serial call would. */
 export function asmliftFan(
   codegen: ResolvedTarget,
   sym: string,
@@ -103,6 +103,41 @@ export function asmliftFan(
   opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
 ): RankedResult {
   return decompileRanked(sym, asm, codegen.target, obj, opts);
+}
+
+/** How many threads compile a big fan's candidates, and how big a fan must be to get them. Below the
+ *  size, one compiler on this thread; above it, the row would otherwise hold its shard for as long as
+ *  every other shard takes to finish the rest of its tier. */
+export const ROW_COMPILE_WORKERS = 4;
+export const PARALLEL_FAN = 500;
+
+/** The ranked pass the harness publishes: `asmliftFan`'s ranking, with a big fan's compiles spread
+ *  over `ROW_COMPILE_WORKERS` threads (compile-pool.ts). The ranking is the parallel driver's, which
+ *  orders the same memoized scores the serial driver does, so every published field is the same;
+ *  only `rankSeconds` depends on the threads. */
+async function rankRow(
+  codegen: ResolvedTarget,
+  sym: string,
+  asm: string,
+  obj: string,
+  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress'>,
+  row: RowRef,
+): Promise<RankedResult> {
+  const compile = opts.compile!;
+  let threads = false;
+  const pool = compilePool(row);
+  try {
+    return await decompileRankedParallel(sym, asm, codegen.target, obj, {
+      ...opts,
+      jobs: (fan) => ((threads = fan >= PARALLEL_FAN) ? ROW_COMPILE_WORKERS : 1),
+      worker: () =>
+        threads
+          ? pool.worker()
+          : async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
+    });
+  } finally {
+    await pool.close();
+  }
 }
 
 /** HOW BIG THIS ROW'S FAN WAS — every spelling enumeration emitted.
@@ -174,17 +209,18 @@ const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).t
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
 // winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
 // scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
-export function runAsmlift(
+export async function runAsmlift(
   tc: Toolchain,
   codegen: ResolvedTarget,
   sym: string,
   asm: string,
   obj: string,
+  row: RowRef,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
   onProgress?: RankOptions['onProgress'],
-): DecompilerResult {
+): Promise<DecompilerResult> {
   const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
@@ -240,7 +276,7 @@ export function runAsmlift(
   const rankT0 = Date.now();
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) });
+    ranked = await rankRow(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) }, row);
   } catch (e) {
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref

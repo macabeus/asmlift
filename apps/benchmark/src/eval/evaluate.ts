@@ -239,7 +239,7 @@ function firstLine(s: string): string {
   return s.split('\n')[0].slice(0, 200);
 }
 
-export function evaluate(
+export async function evaluate(
   tc: Toolchain,
   spec: EvalSpec,
   obj: string,
@@ -247,7 +247,7 @@ export function evaluate(
   scorer?: Scorer,
   compile?: CandidateCompiler,
   onRankProgress?: RankOptions['onProgress'],
-): FunctionResult {
+): Promise<FunctionResult> {
   const score: Scorer = scorer ?? benchScorer(tc.id, spec.codegen.cflags);
   // the object's data sections feed the m2c normalizer (jump tables, anonymous constants) and
   // are PUBLISHED on the row so the reproduction scripts carry them too; best-effort — without
@@ -264,7 +264,19 @@ export function evaluate(
   }
   // the entries this lift can look up: what the row publishes and its script passes as `--proto`
   const proto = referencedPrototypes(spec.proto, asm, spec.sym);
-  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, proto, compile, spec.symbols, onRankProgress);
+  const row = { tier: rowTier(spec).tier, id: `${spec.project}:${spec.sym}:${tc.id}`, sym: spec.sym };
+  const asmlift = await runAsmlift(
+    tc,
+    spec.codegen,
+    spec.sym,
+    asm,
+    obj,
+    row,
+    proto,
+    compile,
+    spec.symbols,
+    onRankProgress,
+  );
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
