@@ -1,6 +1,11 @@
 // A real row's prototype table (src/cases/context-proto.ts): the vendored context's declarations
 // under the manifest's own entries, without the row's own declaration, narrowed to what the
 // assembly names before it is published.
+import { validatePrototypes } from '@asmlift/core/proto';
+import { prototypesFromContext } from '@asmlift/core/proto-context';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
 import { referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
@@ -38,4 +43,23 @@ describe('a real row prototype table', () => {
     });
     expect(referencedPrototypes(undefined, asm, 'self')).toBeUndefined();
   });
+});
+
+describe('every vendored context', () => {
+  test('parses to a table the CLI --proto accepts', () => {
+    const root = join(import.meta.dirname, '..', 'dataset', 'real', 'tu');
+    let contexts = 0;
+    for (const project of readdirSync(root)) {
+      for (const f of readdirSync(join(root, project)).filter((x) => x.startsWith('ctx-'))) {
+        const text = gunzipSync(readFileSync(join(root, project, f))).toString('utf8');
+        for (const language of ['c', 'c++'] as const) {
+          expect(validatePrototypes(prototypesFromContext(text, language)), `${project}/${f} (${language})`).toEqual(
+            [],
+          );
+        }
+        contexts++;
+      }
+    }
+    expect(contexts).toBeGreaterThan(100);
+  }, 120_000);
 });

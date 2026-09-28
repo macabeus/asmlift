@@ -1,5 +1,5 @@
 import type { FnProto, ParamType, Prototypes } from './proto';
-import { declaredWidth } from './proto';
+import { declaredWidth, validatePrototypes } from './proto';
 import type { SymbolMap } from './symbols';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -226,11 +226,24 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   }
   const out: Prototypes = {};
   for (const [name, p] of found) {
-    if (p !== null) {
-      out[name] = p;
+    const valid = p === null ? undefined : admissible(name, p);
+    if (valid !== undefined) {
+      out[name] = valid;
     }
   }
   return out;
+}
+
+/** The entry as a table the CLI's `--proto` accepts (`validatePrototypes`), which is what a row's
+ *  published table is handed back through: a `returns` it refuses is dropped — a return wider than a
+ *  register with a parameter list that cannot be printed — and the entry with it if that is not
+ *  enough. */
+function admissible(name: string, p: FnProto): FnProto | undefined {
+  if (validatePrototypes({ [name]: p }).length === 0) {
+    return p;
+  }
+  const { returns: _dropped, ...rest } = p;
+  return validatePrototypes({ [name]: rest }).length === 0 ? rest : undefined;
 }
 
 function readSignature(
