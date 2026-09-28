@@ -175,7 +175,7 @@ export async function rankCandidatesInBrowser(
   // Parsed ONCE, before any compile: a target the engine cannot parse would fail every candidate
   // alike, so it ends the ranking here.
   const scorer = await loadScorer();
-  const parsedTarget: Target | null = total > 0 ? scorer.parseTarget(t.obj) : null;
+  using parsedTarget: Target | null = total > 0 ? scorer.parseTarget(t.obj) : null;
   const score = async (i: number): Promise<void> => {
     const c = candidates[i];
     // `outcomes.size` is how many candidates are FINISHED, and the tick is emitted at the top so
@@ -209,26 +209,22 @@ export async function rankCandidatesInBrowser(
     const r = outcomes.get(candidates[i].source);
     return r === undefined ? undefined : r instanceof Error ? { thrown: r } : 'compiled';
   };
-  try {
-    if (total > 0) {
-      await score(0);
-      let rest = candidates.map((_, i) => i).slice(1);
-      if (defaultIsReadableRejection(outcomeOf(0)!)) {
-        const probes = probeIndices(candidates);
-        for (const i of probes) {
-          await score(i);
-        }
-        const tried = new Set(probes);
-        const stillborn = stillbornVerdict(candidates, outcomeOf);
-        rest = stillborn === null ? rest.filter((i) => !tried.has(i)) : [];
-        total = stillborn === null ? total : stillborn.compiled.length;
-      }
-      for (const i of rest) {
+  if (total > 0) {
+    await score(0);
+    let rest = candidates.map((_, i) => i).slice(1);
+    if (defaultIsReadableRejection(outcomeOf(0)!)) {
+      const probes = probeIndices(candidates);
+      for (const i of probes) {
         await score(i);
       }
+      const tried = new Set(probes);
+      const stillborn = stillbornVerdict(candidates, outcomeOf);
+      rest = stillborn === null ? rest.filter((i) => !tried.has(i)) : [];
+      total = stillborn === null ? total : stillborn.compiled.length;
     }
-  } finally {
-    parsedTarget?.dispose();
+    for (const i of rest) {
+      await score(i);
+    }
   }
   emit({ phase: 'scoring', done: outcomes.size, total });
   // The scoring phase ends by CHANGING PHASE, never by sitting at done === total: the sort and the
