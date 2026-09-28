@@ -9,7 +9,8 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type { Case } from '../src/cases/types';
 import { evaluate } from '../src/eval/evaluate';
-import { benchMeta, fmt, inShard, parseShard, runCases } from '../src/run/runner';
+import { claimer, writePlan } from '../src/run/queue';
+import { benchMeta, fmt, inShard, parseShard, rankProgress, rankProgressLine, runCases } from '../src/run/runner';
 
 // No case below reaches a decompiler; the one that evaluates says what evaluation returns.
 vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
@@ -199,5 +200,66 @@ describe('fmt renders a gap over its denominator', () => {
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
     expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
     expect(fmt(d({ outcome: 'failed' }))).toBe('failed');
+  });
+});
+
+describe('runCases off the shared queue', () => {
+  test('two shards claiming from one queue measure every row once, in plan order, numbered by queue place', () => {
+    vi.mocked(evaluate).mockImplementation(
+      (_tc, spec) => ({ id: `synthetic:${spec.sym}:agbcc`, asmlift: {}, m2c: {} }) as FunctionResult,
+    );
+    const c = (sym: string): Case => ({
+      id: `synthetic:${sym}:agbcc`,
+      tier: 'synthetic',
+      sym,
+      project: 'synthetic',
+      language: 'c',
+      features: [],
+      loc: 1,
+      refSource: `int ${sym};`,
+      toolchain: { available: () => true } as Case['toolchain'],
+      codegen: CODEGEN,
+      build: () => ({ obj: '/nonexistent.o', asm: '' }),
+    });
+    const cases = ['a', 'b', 'c'].map(c);
+    const dir = mkdtempSync(join(tmpdir(), 'bench-runner-test-'));
+    writePlan(dir, { commit: 'c', ids: cases.map((x) => x.id) });
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((l: string) => void lines.push(l));
+    const first = runCases(cases, join(dir, 'p0.json'), { idx: 0, n: 2 }, { claimer: claimer(dir, 3, 's0') });
+    const second = runCases(cases, join(dir, 'p1.json'), { idx: 1, n: 2 }, { claimer: claimer(dir, 3, 's1') });
+    spy.mockRestore();
+    // the first shard drained the queue, so the second found nothing — no row twice
+    expect(first.map((r) => r.id)).toEqual(cases.map((x) => x.id));
+    expect(second).toEqual([]);
+    expect(lines.filter((l) => l.startsWith('[')).map((l) => l.split(' ')[0])).toEqual(['[1/3]', '[2/3]', '[3/3]']);
+  });
+});
+
+describe('the in-row progress line', () => {
+  test('says nothing for a minute, then once a minute, with the best score so far', () => {
+    let t = 1_000_000;
+    const lines: string[] = [];
+    const on = rankProgress(
+      'mp4:getCardStatus:mwcc_233_163n',
+      t,
+      (l) => lines.push(l),
+      () => t,
+    );
+    for (const [at, done] of [
+      [30, 10],
+      [59, 20],
+      [61, 21],
+      [90, 30],
+      [125, 40],
+    ] as const) {
+      t = 1_000_000 + at * 1000;
+      on(done, 1408, done > 25 ? ({ score: 12, rows: 300 } as never) : undefined);
+    }
+    expect(lines).toEqual([
+      '  … mp4:getCardStatus:mwcc_233_163n still ranking: 21/1408 candidates (61s)',
+      '  … mp4:getCardStatus:mwcc_233_163n still ranking: 40/1408 candidates, best diff:12/300 (125s)',
+    ]);
+    expect(rankProgressLine('x', 1, 2, undefined, 0.4)).toBe('  … x still ranking: 1/2 candidates (0s)');
   });
 });

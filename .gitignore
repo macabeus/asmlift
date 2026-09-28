@@ -16,6 +16,8 @@ build/
 apps/benchmark/results/*.log
 # per-worker partials written mid-run then merged into synthetic.json (transient)
 apps/benchmark/results/*.part*.json
+# a fanned run's row queue and per-row journal (run/queue.ts), removed when the run finishes
+apps/benchmark/results/.*.run/
 # CI-fetched toolchains + pinned m2c (.github/workflows/benchmark.yml)
 .deps/
 # bench-owned toolchains fetched by `pnpm bench setup` (gcc 2.7.2 + binutils 2.6 releases). No

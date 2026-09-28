@@ -183,6 +183,7 @@ export function runAsmlift(
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
+  onProgress?: RankOptions['onProgress'],
 ): DecompilerResult {
   const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
@@ -239,7 +240,7 @@ export function runAsmlift(
   const rankT0 = Date.now();
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(codegen, sym, asm, obj, opts);
+    ranked = asmliftFan(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) });
   } catch (e) {
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref

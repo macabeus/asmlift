@@ -3,6 +3,7 @@
 // each decompiler runs and is scored against the SAME object with the SAME compiler — symmetric.
 import { type DecompilerResult, type FunctionResult, type RowTier, rowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
+import type { RankOptions } from '@asmlift/cli/rank';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
@@ -244,6 +245,7 @@ export function evaluate(
   asm: string,
   scorer?: Scorer,
   compile?: CandidateCompiler,
+  onRankProgress?: RankOptions['onProgress'],
 ): FunctionResult {
   const score: Scorer = scorer ?? benchScorer(tc.id, spec.codegen.cflags);
   // the object's data sections feed the m2c normalizer (jump tables, anonymous constants) and
@@ -259,7 +261,7 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
+  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols, onRankProgress);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.

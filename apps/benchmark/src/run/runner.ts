@@ -8,12 +8,14 @@ import {
   type FunctionResult,
   rowTier,
 } from '@asmlift/bench-schema';
+import type { RankOptions } from '@asmlift/cli/rank';
 import { writeFileSync } from 'node:fs';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import type { Case } from '../cases/types';
 import { type EvalSpec, evaluate } from '../eval/evaluate';
 import { asmliftProvenance } from '../provenance';
+import type { Claimer } from './queue';
 
 export interface Shard {
   idx: number; // 0-based shard index
@@ -98,6 +100,42 @@ export function rowLine(n: number, total: number, tag: string, r: FunctionResult
   return `[${n}/${total}]${tag} ${r.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  ${costNote(r.asmlift, secs)}`;
 }
 
+/** How long a row ranks before it says so, and how often after that. A row's own line is printed
+ *  when it FINISHES, so a row ranking for hours printed nothing at all: the 2026-09-23 run showed
+ *  one shard silent for 10,276 s on `getCardStatus`, and "stuck or slow?" was unanswerable from
+ *  the log. Rows under a minute — nearly all of them — print exactly what they printed before. */
+export const ROW_PROGRESS_SECONDS = 60;
+
+/** The in-row line. Pure, for the test. */
+export function rankProgressLine(
+  id: string,
+  done: number,
+  total: number,
+  best: { score: number; rows: number } | undefined,
+  secs: number,
+): string {
+  return `  … ${id} still ranking: ${done}/${total} candidates${best ? `, best diff:${best.score}/${best.rows}` : ''} (${Math.round(secs)}s)`;
+}
+
+/** An `onProgress` that prints `rankProgressLine` at most once per `every` seconds, the first time
+ *  `every` seconds into the row. `now` is injectable for the test. */
+export function rankProgress(
+  id: string,
+  t0: number,
+  log: (line: string) => void = console.log,
+  now: () => number = Date.now,
+  every = ROW_PROGRESS_SECONDS,
+): NonNullable<RankOptions['onProgress']> {
+  let next = t0 + every * 1000;
+  return (done, total, best) => {
+    const t = now();
+    if (t >= next) {
+      next = t + every * 1000;
+      log(rankProgressLine(id, done, total, best, (t - t0) / 1000));
+    }
+  };
+}
+
 /** Whether flat index `idx` belongs to `shard` — the slicing contract the orchestrator rides on. */
 export function inShard(idx: number, shard: Shard): boolean {
   return idx % shard.n === shard.idx;
@@ -117,9 +155,22 @@ export function runCases(
   cases: Case[],
   outPath: string,
   shard: Shard = { idx: 0, n: 1 },
-  { writeEmpty = true }: { writeEmpty?: boolean } = {},
+  { writeEmpty = true, claimer }: { writeEmpty?: boolean; claimer?: Claimer } = {},
 ): FunctionResult[] {
-  const mine = cases.filter((_, idx) => inShard(idx, shard));
+  // With a CLAIMER the rows are not this shard's slice but whatever the shared queue hands it
+  // (queue.ts), `cases` is in plan order, and a row's number is its place in that queue — so
+  // `[312/892]` reads the same in every shard's lines.
+  const mine = claimer ? cases : cases.filter((_, idx) => inShard(idx, shard));
+  const total = claimer ? claimer.total : mine.length;
+  function* rows(): Generator<{ c: Case; k?: number }> {
+    if (!claimer) {
+      yield* mine.map((c) => ({ c }));
+      return;
+    }
+    for (let k = claimer.claim(); k !== undefined; k = claimer.claim()) {
+      yield { c: cases[k], k };
+    }
+  }
   const results: FunctionResult[] = [];
   const tag = shard.n > 1 ? ` s${shard.idx}` : '';
   let done = 0;
@@ -138,7 +189,7 @@ export function runCases(
     writeFileSync(outPath, JSON.stringify(out, null, 2));
   };
 
-  for (const c of mine) {
+  for (const { c, k } of rows()) {
     if (!c.toolchain.available()) {
       console.log(`SKIP ${c.id}: toolchain unavailable`);
       skips++;
@@ -159,7 +210,7 @@ export function runCases(
       // Finish the shard (keep the other rows), then fail loudly below: a case with no row
       // would otherwise vanish from the results without a trace.
       noRow.push(`${c.id} (target build failed)`);
-      console.log(`[--/${mine.length}] ${c.id}  BUILD-FAIL: ${firstLine(e)}`);
+      console.log(`[--/${total}] ${c.id}  BUILD-FAIL: ${firstLine(e)}`);
       continue;
     }
     const spec: EvalSpec = {
@@ -183,24 +234,25 @@ export function runCases(
     };
     let r: FunctionResult;
     try {
-      r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
+      r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile, rankProgress(c.id, t0));
     } catch (e) {
       // A throw out of evaluation is a HARNESS defect too (a decompiler's own failure is an
       // outcome and never reaches here), so it is handled the way a build failure is.
       noRow.push(`${c.id} (evaluation threw)`);
-      console.log(`[--/${mine.length}] ${c.id}  EVAL-FAIL: ${firstLine(e)}`);
+      console.log(`[--/${total}] ${c.id}  EVAL-FAIL: ${firstLine(e)}`);
       continue;
     }
     results.push(r);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(rowLine(++done, mine.length, tag, r, secs));
+    ++done;
+    console.log(rowLine(k === undefined ? done : k + 1, total, tag, r, secs));
     flush();
   }
   flush();
   if (skips > 0) {
     // the shape the orchestrator greps for; keep the prefix and the `n/total` in step with it
     console.log(
-      `SKIPPED ${skips}/${mine.length} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
+      `SKIPPED ${skips}/${claimer ? done + skips + noRow.length : mine.length} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
     );
   }
   if (noRow.length > 0) {

@@ -2,7 +2,11 @@
 // subcommand here — there are no other executable scripts.
 //
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
-//                  [--serial] [--shard i/N] [--toolchain id] [--no-lock]
+//                  [--serial] [--shard i/N] [--toolchain id] [--no-lock] [--resume] [--detach]
+//                                        # --resume continues the last fanned run that did not
+//                                        # finish (same HEAD, same filters), measuring only the
+//                                        # rows it had not; --detach runs it in the background,
+//                                        # logging to results/run-<time>.log (docs/bench-cost.md §5)
 //   pnpm bench in-flight                 # is a `bench run` measuring this worktree RIGHT NOW?
 //                                        # exit 1 if so, naming the record, its pid, argv and age.
 //                                        # Run it before ANY phase that edits the tree: the
@@ -92,7 +96,8 @@ import {
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { symbolMapToJson } from '@asmlift/core/symbols';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -109,6 +114,7 @@ import { publish } from './report/publish';
 import { acquireBenchLock, benchLockStatus } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
+import { claimer, partPath, readPlan, runDir } from './run/queue';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -129,6 +135,11 @@ const { values: opts, positionals } = parseArgs({
     // out loud on stderr. It exists so that the way past a refusal is not `rm`ing a record someone
     // else's live run depends on.
     'no-lock': { type: 'boolean', default: false },
+    // run only: continue the tier's unfinished queue (run/queue.ts), and run in the background.
+    // `--claim <gen>` is what the orchestrator hands its shard children, not a flag to type.
+    resume: { type: 'boolean', default: false },
+    detach: { type: 'boolean', default: false },
+    claim: { type: 'string' },
     build: { type: 'boolean', default: false },
     out: { type: 'string' },
     'project-root': { type: 'string' },
@@ -237,6 +248,16 @@ switch (command) {
       );
       process.exit(2);
     }
+    if (opts.claim !== undefined && !(opts.serial && opts.shard && tiers.length === 1)) {
+      console.error(
+        "--claim is the shard child's flag (orchestrate.ts): it needs --serial, --shard i/N and one --tier.",
+      );
+      process.exit(2);
+    }
+    if (opts.resume && opts.serial) {
+      console.error("--resume continues a FANNED run's queue; --serial has none. Drop one of them.");
+      process.exit(2);
+    }
     // BEFORE anything that costs: the conditions that make a run's numbers worthless — or that
     // make starting it at all a mistake — are all decidable in under a second. ONE options object,
     // read by every verdict and by the record below, because two hand-kept copies of it drift.
@@ -256,6 +277,28 @@ switch (command) {
     if (preflight.refusals.length > 0) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
+    }
+    // DETACHED: the same argv minus `--detach`, in its own session with its output in a log, and
+    // this process gone. After the preflight, so a refusal is still answered here and now; before
+    // the record, because the record names a pid, and it must be the pid that stays alive — the
+    // detached run takes its own on the way in.
+    if (opts.detach) {
+      mkdirSync(RESULTS_DIR, { recursive: true });
+      const log = join(RESULTS_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+      const fd = openSync(log, 'a');
+      const child = spawn('tsx', [import.meta.filename, ...process.argv.slice(2).filter((a) => a !== '--detach')], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: ['ignore', fd, fd],
+      });
+      child.unref();
+      console.log(
+        `bench run detached: pid ${child.pid}, log ${log}\n` +
+          `  follow:  tail -f ${log}\n` +
+          `  running? pnpm bench in-flight\n` +
+          `  stop:    kill -9 ${child.pid} and its shard children (docs/bench-cost.md §5); a fanned run then continues with --resume`,
+      );
+      process.exit(0);
     }
     // Then record that this worktree is being measured, so the phases that EDIT it — and the next
     // `bench run` on this machine — can tell. Taking the record is a WRITE and not a verdict,
@@ -292,6 +335,28 @@ switch (command) {
       let selected: number | null = null;
       const untouched: Tier[] = [];
       for (const tier of tiers) {
+        if (opts.claim !== undefined) {
+          // A shard child of a fanned run: rows come off the tier's shared queue, in the plan's
+          // order, and a plan row this tree no longer selects is a plan from another tree.
+          const dir = runDir(tier);
+          const plan = readPlan(dir);
+          if (plan === undefined) {
+            throw new Error(`--claim: no plan in ${dir} — the orchestrator writes it before spawning a shard`);
+          }
+          const byId = new Map(casesFor(tier).map((c) => [c.id, c]));
+          const ordered = plan.ids.map((id) => {
+            const c = byId.get(id);
+            if (c === undefined) {
+              throw new Error(`--claim: the plan in ${dir} names ${id}, which this tree does not select`);
+            }
+            return c;
+          });
+          const n = runCases(ordered, partPath(dir, Number(opts.claim), shard.idx), shard, {
+            claimer: claimer(dir, ordered.length, `pid ${process.pid} shard ${shard.idx}`),
+          }).length;
+          console.log(`\nWrote ${n} ${tier} results → ${partPath(dir, Number(opts.claim), shard.idx)}`);
+          continue;
+        }
         const out = join(RESULTS_DIR, opts.shard ? `${tier}.part${shard.idx}.json` : `${tier}.json`);
         const filtered = !opts.shard && tierIsFiltered(tier, opts);
         const cases = casesFor(tier);
@@ -355,7 +420,15 @@ switch (command) {
         console.error(`bad --jobs ${opts.jobs}; want a positive integer`);
         process.exit(2);
       }
-      await orchestrate({ jobs, tiers, only: opts.only, project: opts.project, toolchain: opts.toolchain });
+      await orchestrate({
+        jobs,
+        tiers,
+        only: opts.only,
+        project: opts.project,
+        toolchain: opts.toolchain,
+        resume: opts.resume,
+        caseIds: (tier) => casesFor(tier).map((c) => c.id),
+      });
     }
     break;
   }
