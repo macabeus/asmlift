@@ -454,6 +454,30 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '1c:\tlwz     r31,12(r1)\n20:\tlwz     r0,20(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
     expect(() => dis('passed', passed)).toThrow(used);
   });
+  test('the return address is saved only in the link register save word, and only where every path holds it', () => {
+    const eightArgs = (at: number) =>
+      Array.from({ length: 8 }, (_, k) => `${(at + 4 * k).toString(16)}:\tli      r${k + 3},${k + 1}\n`).join('');
+    const call = (sym: string, at: number) =>
+      `${at.toString(16)}:\tbl      ${at.toString(16)} <${sym}+0x${at.toString(16)}>\n\t\t\t${at.toString(16)}: R_PPC_REL24\tg9\n`;
+    // mwcc 2.3.3 -O4,p, `register unsigned ra; asm { mflr ra } return g9(1, 2, 3, 4, 5, 6, 7, 8, ra);`:
+    // the copy stored 8 bytes above the pushed r1 is g9's ninth argument, not a second LR save.
+    const ninth =
+      pro(16) + 'c:\tmflr    r0\n10:\tstw     r0,8(r1)\n' + eightArgs(0x14) + call('ra9', 0x34) + epi(0x38, 16);
+    expect(() => dis('ra9', ninth)).toThrow(
+      /the store to '8\(r1\)' at 0x10 is not the link register's save — the return address the 'mflr' at 0xc copies out lands -8 bytes/,
+    );
+    // mwcc 2.3.3 -O2, `register unsigned ra = a; if (c) { asm { mflr ra } } return g9(1, …, 8, ra);`:
+    // on the fall-through path r3 still holds the argument.
+    const onePath =
+      pro(24) +
+      'c:\tcmpwi   r4,0\n10:\tbeq-    18 <rap+0x18>\n14:\tmflr    r3\n18:\tstw     r3,8(r1)\n' +
+      eightArgs(0x1c) +
+      call('rap', 0x3c) +
+      epi(0x40, 24);
+    expect(() => dis('rap', onePath)).toThrow(
+      /the store to '8\(r1\)' at 0x18 is not the link register's save — r3 holds the return address an 'mflr' copies out on some paths and not on others/,
+    );
+  });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
   // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore would find no slot.

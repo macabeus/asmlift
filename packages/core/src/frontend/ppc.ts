@@ -394,6 +394,11 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   };
 }
 
+/** The link register's save word, as an offset from the entry r1: the second word of the caller's
+ *  frame header, after the back chain. mwcc 2.3.3 spells it `4(r1)` before the push and 2.4.x
+ *  `N+4(r1)` after it (`r1Displacements`). */
+const LR_SAVE_WORD = 4;
+
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
  *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
  *
@@ -586,10 +591,10 @@ export function lift(
   const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
   /** The return address `mflr rD` copies out of the link register, per value standing for one, with
    *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
-   *  the frame is the LR save (`frameStore`), and moving it back with `mtlr` is the return. Any other
-   *  use is a function reading its own return address (MP4's `asm { mflr retaddr }` does, to tag
-   *  an allocation with its caller), which no C expression spells, so that use refuses once the
-   *  function is built. */
+   *  the link register's save word is the LR save (`frameStore`), and moving it back with `mtlr` is
+   *  the return. Any other use is a function reading its own return address (MP4's
+   *  `asm { mflr retaddr }` does, to tag an allocation with its caller), which no C expression
+   *  spells, so that use refuses: a store at once, anything else once the function is built. */
   const returnAddresses = new Map<Value, number>();
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
@@ -749,11 +754,31 @@ export function lift(
       }
       const off = entryOffset(ins, mem);
       const isArg = ARG_REGS.includes(srcReg);
-      // A save stores what the register held at entry, or the return address `mflr` copied into
-      // it: no other definition reaches it on any path. An argument register nothing defined holds
-      // the argument, which is a value.
-      const noValueReaches = !ssa.hasReachingDef(srcReg, bi, (v) => !returnAddresses.has(v));
-      if (noValueReaches && (!isArg || ssa.hasReachingDef(srcReg, bi))) {
+      // The LR SAVE stores the return address `mflr` copied out, and only into the link register's
+      // save word, 4 bytes above the entry r1. Anywhere else the word is a value — past the push,
+      // 8 bytes up is the callee's parameter area, where it is a ninth argument — and a register
+      // holding the return address on some paths and anything else on others is not a save at all.
+      if (ssa.hasReachingDef(srcReg, bi, (v) => returnAddresses.has(v))) {
+        const v = readVar(srcReg, bi);
+        if (!returnAddresses.has(v) || off !== LR_SAVE_WORD) {
+          throw new PpcUnsupportedError(
+            `cannot lift '${name}': the store to '${mem}' at 0x${ins.addr.toString(16)} is not the link ` +
+              `register's save — ${
+                returnAddresses.has(v)
+                  ? `the return address the 'mflr' at 0x${returnAddresses.get(v)!.toString(16)} copies out lands ` +
+                    `${off} bytes from the entry r1, not in the save word ${LR_SAVE_WORD} bytes up, so it is ` +
+                    'used as a value'
+                  : `${srcReg} holds the return address an 'mflr' copies out on some paths and not on others`
+              }`,
+          );
+        }
+        refuseMixedSlot(ins, mem, off, 'save');
+        saveSlots.set(off, srcReg);
+        return true;
+      }
+      // Any other save stores what the register held at entry: nothing defined it on any path. An
+      // argument register nothing defined holds the argument, which is a value.
+      if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
         refuseMixedSlot(ins, mem, off, 'save');
         saveSlots.set(off, srcReg);
         return true;
