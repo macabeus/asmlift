@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=120.3s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=98.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -136,34 +136,38 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-28**, taken at `9d035d8e`
-(`match/vrammalloc`, on #264: a `while` loop's break to its own exit, 1 row that declined now
-ranks): the ranked pass alone is **2,482 s over 203 real rows** and **659 s over 799 synthetic
-rows**; wall clock was 1,178.9 s and 260.4 s on tiers that overlap, and **1,179.1 s** end to end
-(the CLI's own `Done in` line). Against `origin/main` it is **14 field changes over 2 rows**, fan
-**71,730 → 71,682 (1.00×)** over 1,001 comparable rows, while its ranked pass reads **2,640.6 s →
-3,136.6 s (1.19×)**, and 1 row (4.6 s) ranks here that declined at `origin/main`. The dearest
-single row is **1,029 s** on `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, **41% of the
-tier** on its own — a `noncompile` with a fan of 1,408 that the stillborn stop ends after 130
-compiles. It is the real tier's whole wall clock, alone on its shard long after the other seven
-finished, so §1's tier figure does not price a full bench on this artifact — this row does.
-Compiled whole, as it was before the stop reached it, the same row read 10,276 s.
+Summed out of the committed artifact of **2026-09-28**, taken at `9691f920`
+(`meta/parallel-run-recommendations`, #268: shards take rows off a shared queue, and no row moves):
+the ranked pass alone is **2,233 s over 203 real rows** and **594 s over 799 synthetic rows**; wall
+clock was 1,006.5 s and 96.1 s on tiers that overlap, and **1,006.9 s** end to end (the CLI's own
+`Done in` line). Against `origin/main` it is **0 field changes**, fan **71,830 → 71,830 (1.00×)**
+over 1,002 comparable rows, while its ranked pass reads **3,141.2 s → 2,827.5 s (0.90×)**. The
+dearest single row is **990 s** on `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, **44% of
+the tier** on its own — a `noncompile` with a fan of 1,408 that the stillborn stop ends after 130
+compiles. The queue started it first, and the tier's other rows finished on the other seven shards
+while it ran, so the tier's wall clock is this row's: §1's tier figure does not price a full bench
+on this artifact — this row does. Compiled whole, as it was before the stop reached it, the same
+row read 10,276 s.
 
-The artifact `origin/main` carried before this one, taken 2026-09-28 at `4708d063`
+The artifact `origin/main` carried before this one, taken 2026-09-28 at `9d035d8e`
+(`match/vrammalloc`, on #264), read **2,482 s over 203 real rows** and **659 s over 799 synthetic
+rows**; wall clock was 1,178.9 s and 260.4 s on tiers that overlap, 1,179.1 s end to end, with the
+same row alone on its shard long after the other seven finished; its dearest row was 1,029 s on
+that row, 41% of the tier. The one before it, taken 2026-09-28 at `4708d063`
 (`match/searchkanjicode`, #264), read **2,100 s over 202 real rows** and **540 s over 799 synthetic
 rows**; wall clock was 1,075.4 s and 209.9 s on tiers that overlap, 1,075.5 s end to end, and its
-dearest row was 956 s on the same row, 45% of the tier. The one before it, taken 2026-09-27 at
+dearest row was 956 s on the same row, 45% of the tier. The one before that, taken 2026-09-27 at
 `c548a793` (`perf/noncompile-fan-stop`, #265), read **1,871 s over 195 real rows** and **866 s over 799
 synthetic rows**; wall clock was 781.1 s and 274.6 s, **783.2 s** end to end, run beside two
 `pnpm bench fan --whole` checks on another tree, and its dearest row was **356 s** on
-`sa3:sub_804DC38:agbcc`, 19% of the tier — the same row reads 85 s here. The one before that, taken
+`sa3:sub_804DC38:agbcc`, 19% of the tier — the same row reads 85 s here. Before that, taken
 2026-09-27 at `0271538d` (#262), read 1,107 s over 195 real rows and 539 s over 799 synthetic rows;
 wall clock was 370.9 s and 178.1 s, 371.1 s end to end, and its dearest row was 141 s on
-`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. And the one before that, taken 2026-09-26 at
+`kleod:PauseMenuScreenHandler:agbcc`, 13% of the tier. And before that, taken 2026-09-26 at
 `ca797b50` (#260), read 1,090 s over 195 real rows and 653 s over 786 synthetic rows; wall clock
 was 363.4 s and 214.8 s, 363.6 s end to end, and its dearest row was 132 s on the same row, 12% of
-the tier. So fans that moved by at most 1% have been priced 1.66×, 0.54×, 0.94×, 1.23×, 0.58× and
-1.19× on consecutive artifacts: the seconds are the box, not the branch.
+the tier. So fans that moved by at most 1% have been priced 1.66×, 0.54×, 0.94×, 1.23×, 0.58×,
+1.19× and 0.90× on consecutive artifacts: the seconds are the box, not the branch.
 
 THE SAME BRANCH, BENCHED TWICE AGAINST TWO BASES, AND THE COST RATIO CHANGED SIGN WHILE THE FAN DID
 NOT MOVE EITHER TIME. This branch changes decline TEXT and nothing else — 152 field changes over 69
