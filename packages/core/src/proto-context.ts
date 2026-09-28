@@ -12,10 +12,10 @@ import type { SymbolMap } from './symbols';
 // name. A block that is not `extern "C"` — a struct, class, namespace or function body — is
 // skipped whole: what it declares has C++ linkage or is a member, and its symbol is mangled.
 //
-// KEYED BY THE DECLARED NAME, which is the symbol a call in the assembly names only for C linkage.
-// A C++ free function is called by its mangled symbol, so its entry here is never looked up —
-// which is why nothing tracks linkage. A name declared twice with different signatures (an
-// overload) is dropped: the table cannot say which one a call means.
+// KEYED BY THE DECLARED NAME, which is the symbol a call in the assembly names only for C linkage:
+// a C++ free function is called by its mangled symbol, so linkage decides itself at the lookup. A
+// name declared twice with different signatures (an overload) is dropped: the table cannot say which
+// one a call means.
 //
 // A TYPEDEF RESOLVES ONLY TO THE SAME TYPE. A spelling here is printed into candidates beside the
 // project's own headers (`declare.ts`), where a different type is a conflicting declaration. So a

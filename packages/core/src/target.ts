@@ -1056,7 +1056,7 @@ export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typede
 
 /** Each declared callee's parameter types, where one can be PRINTED as a cast — the argument
  *  conversions C++ refuses to make implicitly (backend/cfamily.ts `argConversion`). An entry this
- *  cannot spell is `undefined`, and that argument prints as it always did. */
+ *  cannot spell is `undefined`, and that argument is printed uncast. */
 function declaredArgTypes(prototypes: Prototypes): Record<string, readonly (ParamType | undefined)[]> {
   const out: Record<string, readonly (ParamType | undefined)[]> = {};
   for (const [name, p] of Object.entries(prototypes)) {

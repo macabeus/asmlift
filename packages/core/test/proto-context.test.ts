@@ -6,7 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { declaredArgWidths, declaredWidth } from '../src/proto';
 import { prototypesFromContext } from '../src/proto-context';
 
-// the CARD block of Pikmin's preprocessed context, as vendored for its benchmark rows
+// the shape of the CARD block in Pikmin's context: its typedefs and an `extern "C"` block
 const PIKMIN_CARD = `
 # 1 "include/types.h"
 typedef signed long s32;

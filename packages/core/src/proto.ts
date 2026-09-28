@@ -7,10 +7,12 @@ import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 // `returnsVoid` and the widths raise/paramwidth.ts checks against. It also keeps the frontend seam
 // honest: a frontend receives prototypes, not a grab-bag of ISA-specific options.
 
-/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). ONE fact is
- *  read off it and everything else is derived from that fact: the WIDTH it spells
+/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). The lift reads
+ *  ONE fact off it and derives everything else from that fact: the WIDTH it spells
  *  (`declaredWidth`). raise/paramwidth.ts checks its inference against that width, and
- *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies.
+ *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies. On a
+ *  function compiled as C++ the printer reads the SPELLING too: a call argument is cast to it where
+ *  C++ converts nothing implicitly (backend/cfamily.ts `argConversion`).
  *
  *  A DECLARED WIDTH ONLY VETOES, never pins. Where the asm carries a prologue extension the
  *  declaration contradicts, the declaration wins — it is a fact from the project's headers, where
@@ -573,8 +575,10 @@ export function validatePrototypes(value: unknown): string[] {
 /** The C type spelling for one declared parameter/return, or null when the facts do not
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
- *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
- *  are read for the register widths they sum to alone (test/param-pointee-variation.test.ts). */
+ *  would move no byte: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
+ *  are read for the register widths they sum to (test/param-pointee-variation.test.ts). The one
+ *  reader of a pointee's spelling is a C++ call argument's cast, which a header's declaration
+ *  supplies (proto-context.ts, whose sized entries win over this one). */
 function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   if (t.pointer) {
     return 'void *';

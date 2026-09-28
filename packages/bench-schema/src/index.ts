@@ -225,9 +225,9 @@ export interface FunctionRow {
   ctxProto?: string;
   /** Prototype hints asmlift received (structurally mirrors @asmlift/core/proto Prototypes —
    *  spelled out here so this package stays dependency-free): a callee's `params` (a bare arity
-   *  count OR the typed parameter list) drives call argument recovery; the function's own entry
-   *  supplies `returnsVoid`. */
-  proto?: Record<string, { params?: number | string[]; returnsVoid?: boolean }>;
+   *  count OR the typed parameter list) drives call argument recovery, and its `returns` the width
+   *  it hands back; the function's own entry supplies `returnsVoid`. */
+  proto?: Record<string, { params?: number | string[]; returns?: string; returnsVoid?: boolean }>;
   /** The target object's combined `objdump -s -r -t` dump (symbols + relocs + data-section
    *  bytes) — what feeds jump-table/const recovery for both decompilers. Absent on ARM rows
    *  (agbcc `.s` carries its data inline). */
