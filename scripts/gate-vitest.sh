@@ -24,7 +24,12 @@
 # timeout above is what that costs when two rounds' gates and a bench share the machine. Measured
 # 2026-09-28 on this 10-core machine, the root config back to back: default workers 215 s, ending
 # with `Errors  1 error` (the RPC timeout) at a load average of ~30; `--maxWorkers=3` 127 s, no error.
-# Fewer workers was the FASTER run, not only the quieter one.
+# Fewer workers was the FASTER run, not only the quieter one. It is not a cure: a later 3-worker run
+# at a load average of ~10 hit the timeout once (325/325 files passed), and so did origin/main at
+# 1b310c15 beside it (324/324 passed, `Errors  1 error`), because what misses the
+# deadline is a test holding its worker's thread in synchronous work — the root suite has single
+# tests of 22-31 s — and load stretches those past 60 s at any worker count. So the verdict names
+# the error and says re-run; it never reads it as a pass.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2
