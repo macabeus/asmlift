@@ -51,6 +51,7 @@ import {
   Stmt,
   SwitchCase,
   exprChildren,
+  exprEquals,
   exprHasEffect,
   gapReasonFor,
   mapExprChildren,
@@ -1184,6 +1185,8 @@ interface DoWhileInfo {
   forwardPreds: Block[];
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   arms: LoopArm[];
+  /** body blocks whose edge to `exit` is a `break` — one no `arms` entry owns, to a live exit */
+  breaks: Set<Block>;
 }
 
 /** The do-while latch whose edge leaves the loop: the last of a chain, else the latch. */
@@ -2632,12 +2635,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       continue; // neither a clean pre-tested nor bottom-tested single-exit shape
     }
     // Single loop exit (ret-aware): the chosen exit is the ONE real exit; every OTHER edge leaving
-    // the body must be an early `return` (`earlyReturnArm`), a ret-terminated target, or — for a
-    // `while` — a `break`: an edge landing on the header's own exit, which C spells by leaving the
-    // loop and running the exit region once, after it. A second exit that lands on any OTHER live
-    // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
-    // body (a two-level exit) and a `do-while`'s `break` to a live exit (its exit copies are judged
-    // differently). An edge to the header's exit is a break whatever the exit holds: the asm runs
+    // the body must be an early `return` (`earlyReturnArm`), a ret-terminated target, or a `break`:
+    // an edge landing on the loop's own exit, which C spells by leaving the loop and running the
+    // exit region once, after it. A second exit that lands on any OTHER live merge has no
+    // single-level spelling → decline, as does a `break` edge out of a NESTED loop's body (a
+    // two-level exit). A `do-while` takes as breaks only the edges nothing else claims, to a live
+    // exit (`doWhileBreakRule`). A `while`'s edge to its exit is a break whatever the exit holds: the asm runs
     // ONE copy of the exit region for both edges, and agbcc and mwcc keep a source-duplicated return
     // tail duplicated, so copying the tail into the arm spells another object. Where that exit ends
     // in a return, the edge is also an arm or a ret target, and emission copies the tail where the
@@ -2655,7 +2658,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         arms.push({ from: e.from, to: e.to, owned });
       }
       if (
-        kind === 'while' &&
+        (kind === 'while' || (!owned && !isRet(e.to))) &&
         e.to === exit &&
         ![...forest.byHeader.values()].some((l2) => l2.header !== h && nl.body.has(l2.header) && l2.body.has(e.from))
       ) {
@@ -2689,6 +2692,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         forwardPreds: nl.forwardPreds,
         body: nl.body,
         arms,
+        breaks,
       });
       if (nest !== undefined) {
         sharedSelfLoops.set(h, {
@@ -2699,6 +2703,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           forwardPreds: (preds.get(h) ?? []).filter((p) => p !== h),
           body: new Set([h]),
           arms: [],
+          breaks: new Set(),
         });
       }
     }
@@ -4977,8 +4982,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // THE BREAK RULE, for a `break` from block `from` out of `frame`'s body wherever the edge sits. A
   // `break` lands after the loop, where the header→exit copies render and then the exit region, raw.
+  // A `do-while`'s exit copies live post-loop too, but are judged differently (`doWhileBreakRule`).
   // Refused:
-  //   • a `do-while`: its exit copies live post-loop too, but are judged differently;
   //   • the header→exit edge has copies the break cannot share: the break path runs them too, and
   //     they would overwrite what the break carried;
   //   • the exit region reads a loop value under a loop variable's name that `writes` holds —
@@ -4995,8 +5000,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
-    if (!whileLoops.has(frame.header)) {
-      return { refusal: 'leaves a do-while' };
+    const dw = doWhileLoops.get(frame.header);
+    if (dw !== undefined) {
+      return doWhileBreakRule(dw, from, writes);
     }
     const headerCopies = argAssigns(frame.header, frame.exit);
     let bare = false;
@@ -5020,6 +5026,46 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' };
     }
     return { bare };
+  };
+  // A `break` OUT OF A DO-WHILE runs no copies of its own: it falls into the ones the latch hands the
+  // exit, which render after the loop under the latch's substitution and so read the loop variables'
+  // NAMES. On the break path those names still hold what the iteration read, since the update never
+  // ran, so each copy computes what the break carried exactly when it spells the same expression the
+  // break's own copy would have spelled at the break. Refused:
+  //   • any slot where the two spellings differ;
+  //   • the exit region reads a value the latch's substitution renders as a loop variable's name —
+  //     on the break path that name holds the value before the update;
+  //   • the exit region re-derives a body value from a name this iteration rewrote before the break.
+  const doWhileBreakRule = (
+    dw: DoWhileInfo,
+    from: Block,
+    writes: Set<string>,
+  ): { refusal: string } | { bare: boolean } => {
+    const sub = latchSub(dw);
+    const latchArgs = successorTo(exitLatch(dw), dw.exit)!.args;
+    const breakArgs = successorTo(from, dw.exit)!.args;
+    if (breakArgs.some((v, k) => !exprEquals(expr(v), exprWith(sub)(latchArgs[k])))) {
+      return { refusal: 'carries a value the copies after the do-while do not spell' };
+    }
+    const exitRegion = new Set([dw.exit, ...reachFrom(dw.exit)].filter((x) => !dw.body.has(x)));
+    const seen = new Set<Value>();
+    const readsSubbed = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      if (sub.has(x)) {
+        return true;
+      }
+      return !varName.has(x) && (defs.get(x)?.operands.some(readsSubbed) ?? false);
+    };
+    if ([...exitRegion].some((b) => b.ops.some((op) => op.operands.some(readsSubbed)))) {
+      return { refusal: "reaches an exit region that reads a value the latch's update hands the header" };
+    }
+    if (loopEscapeHazard(dw.body, new Map(), writes, exitRegion)) {
+      return { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' };
+    }
+    return { bare: true };
   };
   // The loop-variable names an iteration has written on its way from the header to `b`, before any
   // update copy (`loopWriteSetAhead`).
@@ -6253,7 +6299,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already emits. Not for a chained test: its exit edge leaves from the last term, and a copy
     // sunk ahead of the update would run on every iteration's way into the test.
     const sunk =
-      rebindHazard || dw.tail.length > 0
+      rebindHazard || dw.tail.length > 0 || dw.breaks.size > 0
         ? new Map<number, Op | null>()
         : sinkablePreUpdateSlots(
             dw.header,
@@ -6366,7 +6412,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     let inner: Stmt[] = [];
     if (dw.header !== dw.latch) {
       dwActive.add(dw.header);
-      inner = withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: new Set() }, () =>
+      inner = withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: dw.breaks }, () =>
         structureBlock(dw.header, dw.latch),
       ); // header..latch (exclusive of latch)
       dwActive.delete(dw.header);
