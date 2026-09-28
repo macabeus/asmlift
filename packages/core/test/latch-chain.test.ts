@@ -184,5 +184,5 @@ test('a later term reading a pre-update loop variable declines LOUD', () => {
 });
 
 test('latches with different updates still decline LOUD', () => {
-  expect(() => judged(DIFFERENT_UPDATES)).toThrow(/unrecovered back-edge/);
+  expect(() => judged(DIFFERENT_UPDATES)).toThrow(/cannot structure 'diffupd'/);
 });

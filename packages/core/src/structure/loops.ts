@@ -172,3 +172,33 @@ export function latchChain(nl: NaturalLoop, preds: Map<Block, Block[]>): Block[]
   }
   return chain;
 }
+
+/** A self-loop that shares its header with an enclosing loop: the natural loops of `do { while
+ *  (c); … } while (d)`, which the back-edge analysis merges into one because both back edges
+ *  target the same block. The header's own edge is the inner loop and every other latch the outer
+ *  one's. */
+export interface HeaderNest {
+  /** the outer loop's latches: one, or a chain of them (`latchChain`) */
+  latches: Block[];
+  /** where the inner self-loop's test sends control when it fails — the rest of the outer body */
+  innerExit: Block;
+}
+
+/** The loop as a {@link HeaderNest}, or null. The header's terminator is a two-way branch with one
+ *  edge to itself and the other staying in the loop, and the other latches form the outer loop's
+ *  latch or chain. Null when all the latches together form a chain: that is a single loop whose
+ *  test the header's branch begins. */
+export function sharedHeaderNest(nl: NaturalLoop, preds: Map<Block, Block[]>): HeaderNest | null {
+  const h = nl.header;
+  const rest = [...new Set(nl.latches)].filter((l) => l !== h);
+  const term = h.ops[h.ops.length - 1];
+  if (!nl.selfLoop || rest.length === 0 || term.opcode !== 'cond_br' || latchChain(nl, preds) !== null) {
+    return null;
+  }
+  const out = term.successors.filter((s) => s.block !== h);
+  if (out.length !== 1 || !nl.body.has(out[0].block)) {
+    return null;
+  }
+  const latches = rest.length === 1 ? rest : latchChain({ ...nl, latches: rest }, preds);
+  return latches === null ? null : { latches, innerExit: out[0].block };
+}
