@@ -58,6 +58,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { isMainThread, threadId } from 'node:worker_threads';
 
 import { shellProgramText } from './shell-text';
 
@@ -194,12 +195,17 @@ export const cacheStats = (): Record<string, number> => {
  *  its own module state, and the run's `[candcache]` line and `cacheMismatches` gate are this
  *  thread's. */
 export function absorbCacheStats(stats: Readonly<Record<string, number>>): void {
+  if ((stats.sampledPending ?? 0) > 0) {
+    throw new Error(`a compile thread ended with ${stats.sampledPending} sampled audit(s) still pending`);
+  }
   for (const [k, n] of Object.entries(stats)) {
-    if (k !== 'sampledPending') {
-      bump(k, n);
-    }
+    bump(k, n);
   }
 }
+
+/** The sample seed this process audits with — handed to a compile thread so its selection is the
+ *  one the `[candcache]` line's `seed=` replays. */
+export const cacheSampleSeed = (): string => SAMPLE_SEED;
 /** How many stored answers disagreed with the truth — `mismatch` from the sampled/verify AUDIT
  *  plus `objectCorrupt` from a `put` finding `objects/<sha>` holding bytes it is not named after.
  *  Both mean the store served (or would have served) bytes the compiler did not produce, and the
@@ -831,7 +837,10 @@ function linkInto(objBytes: Buffer, dest: string): void {
 // box). A wall-clock grace window alone is not liveness — a run longer than the window, and the
 // `/match-function` ladder is hours, is unprotected. So a process CLAIMS the namespace it is
 // about to use with a lease file, and a pruner treats a namespace with a live lease as untouchable.
-const LEASE = `${process.pid}-${randomBytes(4).toString('hex')}`;
+// A worker thread loads its own copy of this module — its own lease list — so its lease names its
+// thread, and no copy in this process can tell whether a sibling thread's lease is still held.
+const LEASE = `${process.pid}-${isMainThread ? '' : `t${threadId}-`}${randomBytes(4).toString('hex')}`;
+const threadLease = (name: string): boolean => /^\d+-t\d+-/.test(name);
 const PRUNE_GRACE_MS = 60 * 60 * 1000;
 /** WALL-CLOCK BUDGET for one prune, and the reason there is one. `pruneOnce` runs in EVERY
  *  process that resolves a namespace — both halves of a ~1800 s `pnpm bench run` included — and
@@ -916,7 +925,9 @@ function namespaceIsLive(nsDir: string, ignoreOwn = false): boolean {
       }
       continue;
     }
-    if (Number(n.split('-')[0]) !== process.pid && pidAlive(Number(n.split('-')[0]))) {
+    const pid = Number(n.split('-')[0]);
+    if ((pid !== process.pid && pidAlive(pid)) || (pid === process.pid && (threadLease(n) || !isMainThread))) {
+      // another live process, or a thread of this one — which no copy of this module can see held
       anyLive = true;
       continue;
     }
@@ -1026,7 +1037,9 @@ function keysOf(nsDir: string): { path: string; at: number }[] {
 // the window), and a cap that provably cannot fire is the silent half of a loud-failure rule. What
 // makes eviction safe is not age: it is that no OTHER process holds this namespace, that `get` is
 // miss-on-race, and that `reapUnlinked` leaves objects younger than its own grace window alone.
-let pruned = false;
+// A worker thread never prunes: it runs beside sibling threads serving compiles from the store, and
+// the process's main thread is where a prune belongs.
+let pruned = !isMainThread;
 function pruneOnce(keepNs: string): void {
   if (pruned) {
     return;

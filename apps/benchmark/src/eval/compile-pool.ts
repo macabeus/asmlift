@@ -3,7 +3,7 @@
 // spawn — so a compiler that runs beside others has to run on a thread of its own; the ranking
 // itself stays on this thread, over the same enumeration and the same memoized scores, so the
 // winner, the tie-breaks, the dropped list and the stillborn verdict are the serial driver's.
-import { absorbCacheStats } from '@asmlift/cli/candcache';
+import { absorbCacheStats, cacheSampleSeed } from '@asmlift/cli/candcache';
 import type { AsyncCandidateCompiler } from '@asmlift/cli/compile-command';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { Worker } from 'node:worker_threads';
@@ -31,21 +31,34 @@ export type CompileReply =
   | { kind: 'stats'; stats: Record<string, number> };
 
 /** A pool of compile threads for one row: `worker()` starts one, `close()` collects every thread's
- *  candidate-cache counters into this thread's and stops them. */
+ *  candidate-cache counters into this thread's and stops them.
+ *
+ *  A thread that dies is a HARNESS failure, never a candidate's: the compiles it held reject, and
+ *  `close()` throws, so the row fails its evaluation instead of ranking over candidates a crash
+ *  refused. */
 export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler; close: () => Promise<void> } {
   const threads: Worker[] = [];
   let seq = 0;
-  const dead = new Set<Worker>();
-  const live = (): Worker[] => threads.filter((t) => !dead.has(t));
+  let closing = false;
+  let failure: Error | undefined;
   const worker = (): AsyncCandidateCompiler => {
     const t = new Worker(new URL('./compile-worker.ts', import.meta.url), {
       workerData: row,
       execArgv: WORKER_EXEC_ARGV,
+      // the process's audit sample, so the `[candcache]` line's `seed=` replays every thread's
+      env: { ...process.env, ASMLIFT_CANDCACHE_SAMPLE_SEED: cacheSampleSeed() },
     });
     threads.push(t);
     const waiting = new Map<number, { resolve: (obj: string) => void; reject: (e: Error) => void }>();
-    // a thread that died fails every compile still waiting on it and every one sent after
     let died: Error | undefined;
+    const die = (e: Error): void => {
+      died ??= e;
+      failure ??= new Error(`compile thread for ${row.id} died: ${e.message}`, { cause: e });
+      for (const w of waiting.values()) {
+        w.reject(failure);
+      }
+      waiting.clear();
+    };
     t.on('message', (m: CompileReply) => {
       if (m.kind === 'stats') {
         return;
@@ -58,18 +71,16 @@ export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler
         w?.reject(m.diagnostic === undefined ? new Error(m.message) : new CompilerRejection(m.message, m.diagnostic));
       }
     });
-    t.on('error', (e) => {
-      dead.add(t);
-      died = e;
-      for (const w of waiting.values()) {
-        w.reject(e);
+    t.on('error', die);
+    t.on('exit', (code) => {
+      if (!closing) {
+        die(new Error(`exited with code ${code}`));
       }
-      waiting.clear();
     });
     return (source, symbol, backendId, declarations) =>
       new Promise<string>((resolve, reject) => {
         if (died !== undefined) {
-          reject(died);
+          reject(failure);
           return;
         }
         const n = ++seq;
@@ -86,8 +97,13 @@ export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler
       });
   };
   const close = async (): Promise<void> => {
+    closing = true;
+    if (failure !== undefined) {
+      await Promise.all(threads.map((t) => t.terminate()));
+      throw failure;
+    }
     await Promise.all(
-      live().map(
+      threads.map(
         (t) =>
           new Promise<void>((resolve) => {
             const onStats = (m: CompileReply): void => {

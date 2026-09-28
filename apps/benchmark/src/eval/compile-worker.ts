@@ -7,7 +7,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 
 import { realCases } from '../cases/real';
 import { syntheticCases } from '../cases/synthetic';
-import { benchCompilerFor } from '../decomp-config';
+import { rowCompiler } from './asmlift';
 import type { CompileReply, CompileRequest, RowRef } from './compile-pool';
 
 const row = workerData as RowRef;
@@ -17,7 +17,7 @@ const c = (row.tier === 'real' ? realCases({ only: row.sym }) : syntheticCases({
 if (c === undefined) {
   throw new Error(`compile worker: no case ${row.id}`);
 }
-const compile = c.compile ?? benchCompilerFor(c.toolchain.id, c.codegen.cflags);
+const compile = rowCompiler(c.toolchain, c.codegen, c.compile);
 
 parentPort!.on('message', (m: CompileRequest) => {
   let reply: CompileReply;

@@ -8,6 +8,7 @@
 // one namespace leaves every other namespace's answers intact.
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,7 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
@@ -330,6 +331,24 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       m.candCache('t', () => NS_B).warm();
       expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
     });
+  });
+
+  test('a compile THREAD of this process holds its namespace — its lease is never swept as stale', async () => {
+    // A worker thread loads its own copy of this module, so the pruning copy cannot see the thread's
+    // leases in its own list; the pid alone says only "this process", which is alive.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
+    });
+    age(root, NS_A);
+    const lease = join(root, 'ns', NS_A.slice(0, 16), '.live', `${process.pid}-t3-cafe`);
+    mkdirSync(dirname(lease), { recursive: true });
+    writeFileSync(lease, `${process.pid}\n`);
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats().prunedNamespaces, 'a thread of this process outranks the cap').toBeUndefined();
+    });
+    expect(existsSync(lease)).toBe(true);
   });
 
   test('the cap counts the NEGATIVE entries too — they are most of the store and weighed zero', async () => {

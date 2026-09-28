@@ -71,13 +71,7 @@ export function rankOptionsFor(
   } catch {
     asmData = undefined;
   }
-  // Candidate compilation: on the REAL tier, use the project-context compile (headers + extern
-  // globals) so an emission referencing them scores in the same context m2c is scored in —
-  // symmetric, and exactly how a user's own project would recompile the decompiled function.
-  // On the synthetic tier (no context), the generated decomp.yaml compiler (the unconfigured
-  // user path; the pooled pair's is @asmlift/toolchains' own), at the row's flags. This is what lets
-  // recovered GLOBALS (a bare `gSym`) compile at all.
-  const compile = contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
+  const compile = rowCompiler(tc, codegen, contextCompile);
   return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
@@ -86,6 +80,21 @@ export function rankOptionsFor(
     // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
   };
+}
+
+/** The compiler a row's candidates are ranked with — here and on every compile thread of its pool
+ *  (compile-worker.ts). On the REAL tier, the project-context compile (headers + extern globals), so
+ *  an emission referencing them scores in the same context m2c is scored in — symmetric, and exactly
+ *  how a user's own project would recompile the decompiled function. On the synthetic tier (no
+ *  context), the generated decomp.yaml compiler (the unconfigured user path; the pooled pair's is
+ *  @asmlift/toolchains' own), at the row's flags. This is what lets recovered GLOBALS (a bare
+ *  `gSym`) compile at all. */
+export function rowCompiler(
+  tc: Pick<Toolchain, 'id'>,
+  codegen: Pick<ResolvedTarget, 'cflags'>,
+  contextCompile?: CandidateCompiler,
+): CandidateCompiler {
+  return contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
 }
 
 /** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its variations, its score and
@@ -105,9 +114,14 @@ export function asmliftFan(
   return decompileRanked(sym, asm, codegen.target, obj, opts);
 }
 
-/** How many threads compile a big fan's candidates, and how big a fan must be to get them. Below the
- *  size, one compiler on this thread; above it, the row would otherwise hold its shard for as long as
- *  every other shard takes to finish the rest of its tier. */
+/** How many threads compile a big fan's candidates, and how big a fan must be to get them.
+ *
+ *  The tier's queue hands out its costliest rows first (run/queue.ts `claimOrder`), so a tier ends
+ *  no sooner than its costliest row does, however many shards drain the rest. Threads shorten
+ *  exactly those rows and add no compile: the same candidates compile, spread over more cores for
+ *  the minutes the other shards are still busy with cheap rows. The size is where a thread's start
+ *  (a module load and the row's case rebuilt) stops mattering beside the compiles it takes over; the
+ *  count is what the other shards leave idle once they reach the tier's cheap tail. */
 export const ROW_COMPILE_WORKERS = 4;
 export const PARALLEL_FAN = 500;
 
