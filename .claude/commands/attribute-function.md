@@ -262,7 +262,7 @@ attribution line for every decline naming its first blocker. Constraints learned
    no synthetic row preprocesses. **So a real-tier `noncompile` you see in Phase 6 is a real
    attribution signal, not your shell: the preflight has already ruled that out.**
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
-   they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
+   they must pass after. `pnpm test:root`, `pnpm test:matching`, `pnpm typecheck`,
    `pnpm lint`, `pnpm format` check. **`pnpm format` is `prettier --write .`, a tree WRITE**, and
    step 1 above is a bench you were told to background: `pnpm bench in-flight` first, exit 1 means
    wait.

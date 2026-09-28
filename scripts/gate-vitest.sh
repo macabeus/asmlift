@@ -13,7 +13,8 @@
 #     test passed. A reader who learned to ignore that learns to ignore a real unhandled error.
 #
 # So this reads the summary instead: `Test Files  N passed (M)` with N == M, no `failed`, no
-# `skipped`, AND exit 0. Anything else fails, and the verdict line says which. An `Errors` line is
+# `skipped`, the same of the `Tests` line — a shell without the toolchain env skips single tests
+# (`skipIf(!HAVE_AGBCC)`, docs/bench-cost.md §1), not whole files — AND exit 0. Anything else fails, and the verdict line says which. An `Errors` line is
 # named in the verdict either way; it fails the gate through the exit status, so a config that
 # chose `dangerouslyIgnoreUnhandledErrors` (vitest.matching.config.ts, for the same timeout from
 # its own serial compiles) keeps that choice.
@@ -57,6 +58,7 @@ fail() {
 
 [ -n "$files" ] || fail "no 'Test Files' summary line, so the run did not finish (exit $status)"
 case $files in *failed* | *skipped* | *todo*) fail "not every collected file passed" ;; esac
+case $tests in *failed* | *skipped* | *todo*) fail "not every collected test passed — a skip is a gate that did not run" ;; esac
 n=$(printf '%s\n' "$files" | sed -nE 's/^Test Files +([0-9]+) passed \(([0-9]+)\)$/\1/p')
 m=$(printf '%s\n' "$files" | sed -nE 's/^Test Files +([0-9]+) passed \(([0-9]+)\)$/\2/p')
 [ -n "$n" ] && [ "$n" = "$m" ] || fail "passed files do not equal collected files"
