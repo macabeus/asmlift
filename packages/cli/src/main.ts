@@ -20,7 +20,7 @@ import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
-import { contextPrototypesUnder, prototypesFromContext } from '@asmlift/core/proto-context';
+import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
@@ -726,9 +726,8 @@ export async function runCli(
   // part of what the emitted C must be.
   const unitTarget = flagsResolution.resolved.target;
 
-  // --context: the declarations in the headers the candidate compiles against. Under --proto,
-  // which wins per symbol, and under the symbol map's signatures (`contextPrototypesUnder`); the
-  // function's OWN declaration is withheld for the reason the map's is (`asIfUndecompiled` above).
+  // --context: the declarations in the headers the candidate compiles against, under --proto and
+  // the symbol map's signatures (`withContextPrototypes`).
   const contextFlag = flags.get('context') as string | undefined;
   if (contextFlag !== undefined) {
     let text: string;
@@ -741,9 +740,12 @@ export async function runCli(
         stderr: `asmlift: cannot read --context file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
-    const declared = prototypesFromContext(text, unitTarget.dialect ?? 'c');
-    const { [name]: _own, ...callees } = contextPrototypesUnder(declared, symbols);
-    prototypes = { ...callees, ...prototypes };
+    prototypes = withContextPrototypes(
+      prototypes,
+      prototypesFromContext(text, unitTarget.dialect ?? 'c'),
+      name,
+      symbols,
+    );
   }
 
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the

@@ -276,8 +276,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   return out;
 }
 
-/** The entry as a table the CLI's `--proto` accepts (`validatePrototypes`), which is what a row's
- *  published table is handed back through: a `returns` it refuses is dropped — a return wider than a
+/** The entry as a table `validatePrototypes` accepts, the check every `--proto` table passes, so a
+ *  context's prototypes can travel as one: a `returns` it refuses is dropped — a return wider than a
  *  register with a parameter list that cannot be printed — and the entry with it if that is not
  *  enough. */
 function admissible(name: string, p: FnProto): FnProto | undefined {
@@ -325,6 +325,21 @@ function readSignature(
   return proto;
 }
 
+/** The prototypes a lift of `own` reads when a context is in hand: `stated` — a caller's own
+ *  prototypes, which win per name — over the context's declarations less those the symbol map
+ *  states better (`contextPrototypesUnder`). `own`'s declaration is left out, as the map's is
+ *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
+ *  fact, and only what the caller states about it is kept. */
+export function withContextPrototypes(
+  stated: Prototypes | undefined,
+  context: Prototypes,
+  own: string,
+  symbols: SymbolMap | undefined,
+): Prototypes {
+  const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols);
+  return { ...callees, ...stated };
+}
+
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
 
 /** A context's prototypes, less the entries the symbol map states better. `prototypesFromSymbols`
@@ -334,7 +349,7 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  need; an entry that cannot size one yields to a map signature that can be spelled, which sizes by
  *  byte count what a declaration names (a by-value struct of a register's width); and where the map
  *  spells nothing either, the context entry stays. */
-export function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefined): Prototypes {
+function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefined): Prototypes {
   if (symbols === undefined) {
     return context;
   }

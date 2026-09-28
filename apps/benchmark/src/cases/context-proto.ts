@@ -1,17 +1,16 @@
 // A real row's callee prototypes: the declarations in the vendored context its candidates are
-// compiled against (core `prototypesFromContext`), under the symbol map's signatures and the
-// manifest's own `proto`, each of which wins per symbol. The context is the same one every candidate compiles in and m2c reads its signatures
-// from, so asmlift lifts each call at the arity the compiler will check it against.
+// compiled against (core `prototypesFromContext`), so asmlift lifts each call at the arity the
+// compiler will check it against — and, on a row m2c is given no project context, the same
+// declarations rendered as the C m2c reads (`m2cDeclarations`).
 import { PRELUDE_TYPEDEFS, type Prototypes, declaredWidth, declaresVoidReturn } from '@asmlift/core/proto';
-import { contextPrototypesUnder, prototypesFromContext } from '@asmlift/core/proto-context';
+import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
 /** parsed contexts, keyed by dialect and vendored file: the rows of one unit share a context */
 const parsed = new Map<string, Prototypes>();
 
-/** The row's prototype table. The function's OWN declaration is left out: the symbol map is read as
- *  if the function were still undecompiled (`asIfUndecompiled`), and a header's signature for it is
- *  that kind of fact — what the manifest states about it is kept. */
+/** The row's prototype table: the manifest's `proto` over its vendored context
+ *  (`withContextPrototypes`, which says whose entry wins and why the row's own is left out). */
 export function rowPrototypes(
   manifest: Prototypes | undefined,
   { ctxI, ctxFile }: { ctxI: string; ctxFile: string },
@@ -28,8 +27,7 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language);
     parsed.set(key, derived);
   }
-  const { [sym]: _own, ...callees } = contextPrototypesUnder(derived, symbols);
-  const merged = { ...callees, ...manifest };
+  const merged = withContextPrototypes(manifest, derived, sym, symbols);
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
@@ -56,12 +54,16 @@ export function referencedPrototypes(proto: Prototypes | undefined, text: string
  *  (`typedef struct OSMutex OSMutex;`): m2c reads a declaration for its signature, and its output is
  *  compiled against the project's own headers, where a pointer of another type than the declared
  *  one is a C++ compile error. An entry with a parameter or a return nothing sizes is left out, and
- *  so is a name the row's context already declares. */
+ *  so is a name the row's context already declares.
+ *
+ *  This admits more than core's `spellableProto`, which prints a declaration into the candidate's
+ *  own translation unit and so only spells types that unit is sure to know. m2c's declarations are
+ *  read for their signatures alone, and a project type they name is declared opaque right here. */
 export function m2cDeclarations(proto: Prototypes | undefined, sym: string, ctx: string | undefined): string {
   const opaque = new Map<string, string>();
   const lines: string[] = [];
   for (const [name, p] of Object.entries(proto ?? {})) {
-    if (name === sym || !Array.isArray(p.params) || (ctx !== undefined && new RegExp(`\\b${name}\\s*\\(`).test(ctx))) {
+    if (name === sym || !Array.isArray(p.params) || (ctx !== undefined && declaredIn(ctx, name))) {
       continue;
     }
     const ret = declaresVoidReturn(p) ? 'void' : p.returns;
@@ -78,6 +80,10 @@ export function m2cDeclarations(proto: Prototypes | undefined, sym: string, ctx:
   }
   return [...opaque.values(), ...lines].join('\n');
 }
+
+/** whether `text` declares or calls `name` — a `name(` not inside a longer identifier */
+const declaredIn = (text: string, name: string): boolean =>
+  new RegExp(`(?<![\\w$.])${name.replace(/[.*+?^${}()|[\]\\$]/g, '\\$&')}\\s*\\(`).test(text);
 
 const C_WORDS = new Set([
   'void',
