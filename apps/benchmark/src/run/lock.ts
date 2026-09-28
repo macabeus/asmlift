@@ -239,7 +239,7 @@ export function benchInFlightRefusal(state: BenchLockState, root: string = REPO_
     'Editing the tree now does not just risk the edit: `provenance.ts` samples git DURING the run',
     'and the sample is STICKY, so one save stamps the whole run dirty and `bench:merge` throws the',
     'numbers away — 39 minutes, after the fact, for a change that was reverted.',
-    'Wait for the run (its log ends in an `EXIT=` line), then edit. If the run is dead, the record',
+    'Wait for the run (`pnpm bench in-flight` exits 0 once it is gone), then edit. If the run is dead, the record',
     `names its pid: check, then \`rm ${state.path}/<pid>.json\`.`,
   ].join('\n');
 }
@@ -287,7 +287,7 @@ export function concurrentRunRefusal(state: BenchLockState, run: BenchRunIdentit
       '',
       `Both runs write ${files}, so the second publishes a tier stitched from two`,
       'measurements — a one-row `--only` run rewrites that file too, with its one row.',
-      'Wait for it (its log ends in an `EXIT=` line), or run a SCOPED probe (`--only`) on a tier it',
+      'Wait for it (`pnpm bench in-flight` exits 0 once it is gone), or run a SCOPED probe (`--only`) on a tier it',
       'is not writing — scoped, because a second WHOLE tier beside this one halves both runs and',
       'can kill a shard with no error line. A separate worktree is the other way.',
       `If that pid is dead: \`rm ${state.path}/${sameFile.pid}.json\`. If you have a reason to`,

@@ -549,37 +549,47 @@ stated reason is fine, a silent extra half hour is not.
 A full bench and a ranked run are pure waiting. Launch one in the BACKGROUND at the start of a
 phase whose other work does not depend on its answer, and read the log at the end.
 
-**Wait on a condition that tells "finished" from "stopped moving".** The marker alone is not that:
-a killed run writes no marker and a wedged one writes no marker either, so a bare `until grep -q`
-waits forever on both. Poll for the marker AND for the log growing, under a stated upper bound:
+**`pnpm bench run --detach`** starts the run in its own session and returns at once, printing the
+pid and the log (`apps/benchmark/results/run-<time>.log`). The run survives the shell, the agent
+and the session that started it — the 2026-09-23 run lost a 3.5 h bench to an auth outage that
+took its launching shell with it.
+
+**Wait on a condition that tells "finished" from "stopped moving".** A killed run and a wedged one
+both leave a log that simply stops, so poll for the run to leave the register AND for the log
+growing, under a stated upper bound:
 
 ```sh
-LOG=/tmp/<round>-bench.log
-( pnpm bench run > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG" ) &
+pnpm bench run --detach      # note the log path it prints
+LOG=<that path>
 … meanwhile: read the diff, grep the corpus, draft the report — READ-ONLY work only …
 
 prev=0; still=0; waited=0
-until grep -q 'EXIT=' "$LOG"; do
+until pnpm bench in-flight >/dev/null 2>&1; do   # exit 0 = no run is measuring this worktree
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 3200 s of no growth is ~30% over this corpus's long-pole ROW — the 2,454 s below, not the
-  # 2,169 s the whole real tier walls at. Below that, a static log is normal, not a hang.
-  # Raise it, never lower it, as that row grows.
-  [ "$still" -ge 3200 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
+  # A row still ranking prints `… still ranking: n/N candidates` once a minute, so a quiet log
+  # is no longer the long-pole row working: what stays silent is enumeration and the target
+  # build (~91 s on the corpus's largest fan, §3). 900 s of no growth is a run to investigate.
+  [ "$still" -ge 900 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
+grep -E '^(✓|✗|–) |^Done in|Error' "$LOG"
 ```
 
-**A log that stopped growing is almost certainly `kleod:PauseMenuScreenHandler:agbcc`** — one row,
-~2,454 s of ranked pass, alone on one shard while the other seven sit finished. That 2,454 s is a
-figure from a run slower than any §3 now lists, and it is the number the threshold above is set
-from; the spelling count it was taken over has since moved, so read the row's size from §3 (30,240
-in the artifact of 2026-09-19, 27,360 in the one before it), never from here.
-Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
-spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
-this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven
-hung.** A supervisor once killed a healthy gate run on exactly this signature and lost ~44 minutes.
+**The long pole prints its progress now.** A row whose ranked pass runs past a minute says so once
+a minute — `… mp4:getCardStatus:mwcc_233_163n still ranking: 400/1408 candidates, best diff:12/300
+(1830s)` — so "stuck or slow?" is read off the log instead of guessed. The corpus's slowest rows
+(`mp4:getCardStatus:mwcc_233_163n`, 1,408 candidates ranked in 10,276 s on 2026-09-23;
+`kleod:PauseMenuScreenHandler:agbcc`, read its size from §3) are that normal shape, not a hang.
+**Never kill a bench you have not proven hung.** A supervisor once killed a healthy gate run on
+exactly this signature and lost ~44 minutes.
+
+**The shards share one row queue** (`run/queue.ts`): each takes the next unclaimed row, rows the
+committed artifact never priced first and then the dearest by its `rankSeconds`. So an expensive
+row starts early instead of wherever a fixed `idx % jobs` slice put it, and while it runs, the
+other shards finish the rest of its tier and move on to the next. It cannot make the one row
+cheaper: a tier still ends no sooner than its dearest row.
 
 **Never wait on `pgrep -f "<pattern>"` when the pattern also matches your own waiting shell** —
 five waiter shells once deadlocked on each other for eight hours doing exactly that, long after
@@ -597,7 +607,7 @@ gate bench.
 
 So a run in flight records itself in `/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run
 `pnpm bench in-flight` before any phase that EDITS the tree, and read its exit code: 1 means a run
-is measuring this worktree — wait for its `EXIT=` line — and 0 means the tree is yours.** (There is
+is measuring this worktree — wait until it exits 0 — and 0 means the tree is yours.** (There is
 no `--all`; it answers for this worktree only. A neighbour's bench cannot be dirtied by an edit
 here, which is why.)
 
@@ -629,6 +639,12 @@ compiling at PPID 1. So:
 
 The record the killed run strands names a dead pid, so it reads STALE — that blocks nothing, and
 the next run sweeps it.
+
+**Nothing measured is lost.** Each shard flushes after every row into
+`apps/benchmark/results/.<tier>.run/`, and `pnpm bench run --resume` — same HEAD, same filters, or
+it refuses — re-queues only the rows no shard finished and stitches the old rows and the new into
+the tier file. A run started WITHOUT `--resume` discards an unfinished queue and says how many rows
+it dropped. A run whose shards exit nonzero keeps its queue for the same reason.
 
 ### Two full benches must never overlap on this machine
 

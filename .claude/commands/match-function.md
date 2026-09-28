@@ -377,7 +377,7 @@ written for the first version is the likeliest thing in the diff to have become 
 while a bench is in flight** — this phase rewrites files across the whole diff, the mid-run sampler
 is sticky, and a round has paid for a whole voided real tier on exactly this pair
 (`docs/bench-cost.md` §5). **Run `pnpm bench in-flight` first**:
-exit 1 means a run is measuring this worktree, so wait for its `EXIT=` line before you touch a
+exit 1 means a run is measuring this worktree, so wait until it exits 0 before you touch a
 file.
 
 Inventory first — `git diff main HEAD`, added lines matching `^\+\s*(//|/\*|\*)`, counted per

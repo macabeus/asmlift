@@ -56,8 +56,8 @@ describe('emptySelectionError', () => {
 // The two tier fans used to be two sequential `Promise.all`s, so every run paid both tiers'
 // tails: the real fan could not start until the last synthetic shard exited, and then ran its own
 // heaviest shard alone. One queue over `jobs` slots removes that — but only if the queue is still
-// exactly the same set of shard tasks, since a shard's slice (`idx % jobs`) is what decides which
-// rows it measures.
+// exactly the same set of shard tasks: `tiers × jobs` children, each claiming rows off its tier's
+// shared queue (run/queue.ts) until none are left.
 describe('shardQueue', () => {
   it('is a permutation of every tier × every shard — no row gained, none lost', () => {
     const q = shardQueue({ jobs: 8, tiers: ['synthetic', 'real'] });

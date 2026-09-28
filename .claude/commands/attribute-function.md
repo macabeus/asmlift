@@ -202,8 +202,8 @@ exclusions) get written down for their own future family, not smuggled into this
 
 This phase writes files, and the mid-run provenance sampler counts every path but the benchmark's
 own regenerated artifacts — so **run `pnpm bench in-flight` first**: exit 1 means a bench is
-measuring this worktree and one save stamps its whole run dirty, stickily. Wait for that run's
-`EXIT=` line.
+measuring this worktree and one save stamps its whole run dirty, stickily. Wait until
+`pnpm bench in-flight` exits 0.
 
 One family, one block comment, modeled on the existing families in `dataset/synthetic.ts` (the
 uninit-local block is the reference): what each row isolates, which are controls, and an
