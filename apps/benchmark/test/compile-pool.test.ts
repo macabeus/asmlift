@@ -11,8 +11,8 @@ import { describe, expect, test } from 'vitest';
 import { realCases } from '../src/cases/real';
 import { syntheticCases } from '../src/cases/synthetic';
 import { benchCompilerFor } from '../src/decomp-config';
-import { rowCompiler } from '../src/eval/asmlift';
-import { compilePool } from '../src/eval/compile-pool';
+import { rowCompiler, runAsmlift } from '../src/eval/asmlift';
+import { CompilePoolDied, compilePool } from '../src/eval/compile-pool';
 
 describe.skipIf(!agbccAvailable())('a row compile pool', () => {
   test('compiles as the row compiler does, and returns a rejection as a CompilerRejection', async () => {
@@ -57,6 +57,19 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     expect(String(refused)).toMatch(/compile thread for synthetic:nosuchrow:agbcc died/);
     await expect(pool.close()).rejects.toThrow(/died/);
   }, 120_000);
+
+  // …and the row fails its evaluation rather than publishing the crash as every candidate's refusal.
+  // dmascope's fan is past PARALLEL_FAN, so its compiles go to threads.
+  test('a big fan whose threads die fails the row instead of publishing a noncompile', async () => {
+    const [c] = syntheticCases({ only: 'dmascope', toolchain: 'agbcc' }).filter(
+      (x) => x.id === 'synthetic:dmascope:agbcc',
+    );
+    const { obj, asm } = c.build();
+    const lost = { tier: 'synthetic' as const, id: 'synthetic:nosuchrow:agbcc', sym: c.sym };
+    await expect(runAsmlift(c.toolchain, c.codegen, c.sym, asm, obj, lost, c.proto)).rejects.toBeInstanceOf(
+      CompilePoolDied,
+    );
+  }, 300_000);
 
   test('adds another thread counters to this one', () => {
     const before = cacheStats().hit ?? 0;

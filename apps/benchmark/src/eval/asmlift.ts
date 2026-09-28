@@ -18,7 +18,7 @@ import { cachedExtractAsmData, sha } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
 import { scrub } from '../report/committed';
 import type { Toolchain } from '../toolchains';
-import { type RowRef, compilePool } from './compile-pool';
+import { CompilePoolDied, type RowRef, compilePool } from './compile-pool';
 import { compilerErrorLines } from './outcome';
 import { assessQuality } from './quality';
 
@@ -292,6 +292,9 @@ export async function runAsmlift(
   try {
     ranked = await rankRow(codegen, sym, asm, obj, { ...opts, ...(onProgress ? { onProgress } : {}) }, row);
   } catch (e) {
+    if (e instanceof CompilePoolDied) {
+      throw e;
+    }
     // A throw here is recorded as noncompile with the phase-1 source: usually a candidate
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref
     // family), but this also catches scorer infrastructure errors; the diagnostics say which.

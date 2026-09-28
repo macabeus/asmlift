@@ -32,6 +32,7 @@ import {
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { threadId } from 'node:worker_threads';
 import YAML from 'yaml';
 
 import { shq } from './compile/util';
@@ -140,8 +141,10 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'decomp.yaml');
-  // Atomic write: parallel bench workers may generate concurrently; rename prevents torn reads.
-  const tmp = `${file}.${process.pid}.tmp`;
+  // Atomic write: parallel bench workers — processes, and a row's compile threads within one — may
+  // generate concurrently; rename prevents torn reads, and a temp file per thread keeps one writer's
+  // rename from taking another's.
+  const tmp = `${file}.${process.pid}-${threadId}.tmp`;
   writeFileSync(tmp, YAML.stringify(doc));
   renameSync(tmp, file);
 

@@ -640,19 +640,23 @@ export function unitLanguage(unit: string, cflags: readonly string[]): 'c' | 'c+
   return dialectOf(parseFlags('mwcc', cflags).slots.lang, unit);
 }
 
+/** A `-lang` word CodeWarrior does not accept. */
+export class UnreadableDialectError extends Error {}
+
 /** The dialect a `-lang` word states — the one reading of it, for `unitLanguage` and for the target
  *  `targetFor` resolves at a flag set. With no word, the unit's extension when there is a unit, C
- *  otherwise; a word outside `c | c++ | ec++` is refused. */
+ *  otherwise. `objc` is C to this reading: its functions are C's. A word CodeWarrior itself refuses
+ *  is refused. */
 export function dialectOf(stated: string | undefined, unit?: string): 'c' | 'c++' {
   if (stated === undefined) {
     return unit !== undefined && /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
   }
-  if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++') {
-    throw new Error(
-      `${unit === undefined ? '' : `${unit}: `}CodeWarrior dialect '${stated}' is not one of c, c++, ec++`,
+  if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++' && stated !== 'objc') {
+    throw new UnreadableDialectError(
+      `${unit === undefined ? '' : `${unit}: `}CodeWarrior dialect '${stated}' is not one of c, c++, ec++, objc`,
     );
   }
-  return stated === 'c' ? 'c' : 'c++';
+  return stated === 'c++' || stated === 'ec++' ? 'c++' : 'c';
 }
 
 /** The optimisation level the compiler acts on (`-O2`, `-O4,p`), or null when the flags name none and

@@ -30,6 +30,9 @@ export type CompileReply =
   | { kind: 'error'; seq: number; message: string; diagnostic?: string }
   | { kind: 'stats'; stats: Record<string, number> };
 
+/** A compile thread died: the harness failed, not a candidate, and the row fails its evaluation. */
+export class CompilePoolDied extends Error {}
+
 /** A pool of compile threads for one row: `worker()` starts one, `close()` collects every thread's
  *  candidate-cache counters into this thread's and stops them.
  *
@@ -40,7 +43,7 @@ export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler
   const threads: Worker[] = [];
   let seq = 0;
   let closing = false;
-  let failure: Error | undefined;
+  let failure: CompilePoolDied | undefined;
   const worker = (): AsyncCandidateCompiler => {
     const t = new Worker(new URL('./compile-worker.ts', import.meta.url), {
       workerData: row,
@@ -53,7 +56,7 @@ export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler
     let died: Error | undefined;
     const die = (e: Error): void => {
       died ??= e;
-      failure ??= new Error(`compile thread for ${row.id} died: ${e.message}`, { cause: e });
+      failure ??= new CompilePoolDied(`compile thread for ${row.id} died: ${e.message}`, { cause: e });
       for (const w of waiting.values()) {
         w.reject(failure);
       }

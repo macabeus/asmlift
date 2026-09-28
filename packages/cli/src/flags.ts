@@ -14,6 +14,7 @@
 // Every refusal is one message, with no usage block, because it names its own fix.
 import {
   type FlagFamily,
+  UnreadableDialectError,
   UnreadableLevelError,
   effectiveFlags,
   parseFlags,
@@ -266,13 +267,16 @@ function levelRefusal(source: string, e: UnreadableLevelError): Refusal {
   return { ok: false, message: `${source}: ${e.message}${hint}` };
 }
 
-/** Runs `f`, turning a level refusal into the resolver's refusal. */
+/** Runs `f`, turning a level or dialect refusal into the resolver's refusal. */
 function orLevelRefusal<T>(source: string, f: () => T): T | Refusal {
   try {
     return f();
   } catch (e) {
     if (e instanceof UnreadableLevelError) {
       return levelRefusal(source, e);
+    }
+    if (e instanceof UnreadableDialectError) {
+      return { ok: false, message: `${source}: ${e.message}` };
     }
     throw e;
   }
