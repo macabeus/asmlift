@@ -1041,7 +1041,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tg\n' +
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(() => decompile('f', escaped, ARMV4T_AGBCC)).toThrow(
+    // `g` declared `void`: an object only READ here and taken at argument 0 is otherwise a struct
+    // return's temp, which refuses first
+    const voidG = { prototypes: { g: { params: 1, returnsVoid: true } } };
+    expect(() => decompile('f', escaped, ARMV4T_AGBCC, voidG)).toThrow(
       /address-taken stack local — the captured address escapes/,
     );
     // DISCRIMINATING CONTROL — the one that makes the title true. The same captured address,
@@ -1507,6 +1510,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
           decompile('f', word('\tmov\tr0, sp\n\tmov\tr1, r0\n\tadd\tr0, r1, #0x4\n'), ARMV4T_AGBCC, { prototypes }),
         ).toThrow(/the store to \[sp,#4\] reaches `bl getw` unread .* it may be that call's outgoing stack argument/);
       });
+    });
+
+    // …and the same frame word READ back after a call that took its address at argument 0 is,
+    // instruction for instruction, a struct return's hidden temp. agbcc's own output for
+    // `struct S4 { char a, b, c, d; }; s32 f(s32 x){ struct S4 s; five(x, x, x, x, x); s = mk(x);
+    // return s.a; }`, at the corpus's flags. Lifted as a local it is `mk(&sp4, a0)` — the call the
+    // real prototype rejects — so it declines until `mk`'s return is declared.
+    test('an object only read after a call took it at argument 0 is a struct return until declared', () => {
+      const sret =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tstr\tr4, [sp]\n\tadd\tr1, r4, #0\n' +
+        '\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r4, #0\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp, #0x4]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      const five = { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true };
+      expect(() => decompile('f', sret, ARMV4T_AGBCC, { prototypes: { five } })).toThrow(
+        /the object at \[sp,#4\) is never written here, and `mk` takes it at argument 0 and nothing says what that callee returns/,
+      );
+      // an out-parameter the project declares as one is the local it looks like
+      const mk = { params: ['s32 *', 's32'], returnsVoid: true };
+      expect(decompile('f', sret, ARMV4T_AGBCC, { prototypes: { five, mk } }).source).toContain('mk(&sp4, a0);');
     });
 
     // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =

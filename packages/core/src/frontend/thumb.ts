@@ -2998,6 +2998,14 @@ function auditFrameObjects({
       if (signs.size > 1) {
         fail('the loads through the captured address disagree on signedness — one declared type extends one way');
       }
+      // …and a scalar this function only READS is the callee's to fill, which is what a struct
+      // return's hidden temp is: agbcc spells `s = mk(x)` above an outgoing block as `add r0, sp,
+      // #0x4 / bl mk / ldr r0, [sp, #0x4]`, instruction for instruction an out-parameter call. The
+      // question the whole-frame and untyped arms ask, asked of every object.
+      const whyItStands = acc.some((a) => !a.isLoad) ? null : hiddenReturnPointerStands(off);
+      if (whyItStands !== null) {
+        fail(`the object at [sp,#${off}) is never written here, and ${whyItStands}`);
+      }
       extent.set(off, { width: acc[0].width, count: 1 });
     }
     // Each object must own its bytes outright: inside the reserved local area, clear of every SSA
