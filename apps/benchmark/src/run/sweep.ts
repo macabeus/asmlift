@@ -233,7 +233,12 @@ export function newlyRanked(d: SweepDiff, rates: ReadonlyMap<string, number>): N
     const threw = m.fields.find((f) => f.field === 'fanThrew');
     // the base must have THROWN: a base swept without `--fan` has neither field, and its rows did
     // not decline
-    if (m.mapMode !== 'harness' || typeof fan?.to !== 'number' || typeof threw?.from !== 'string' || threw.to !== undefined) {
+    if (
+      m.mapMode !== 'harness' ||
+      typeof fan?.to !== 'number' ||
+      typeof threw?.from !== 'string' ||
+      threw.to !== undefined
+    ) {
       continue;
     }
     // matched as a suffix, not cut off the id: identity.test.ts censuses every `:` cut

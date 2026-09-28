@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 import { retiredRows } from '../cases/retired';
 import { RESULTS_DIR } from '../config';
-import { RESULTS_PATH, headContains, readCommitted, sameRun, scrub, shortSha } from './committed';
+import { RESULTS_PATH, baseNotice, gitFacts, readCommitted, sameRun, scrub } from './committed';
 import { rowsAddedSince } from './regression';
 
 /** The fields a published claim is made of, named individually when they move.
@@ -559,16 +559,10 @@ export function fanLines(r: FanReport, base: string, freshCounted: number): stri
   return lines;
 }
 
-/** THE ROWS THAT RANK HERE AND HAD NO FAN AT THE BASE, priced: fan size and ranked seconds, most
- *  expensive first. The multiplier above is over rows BOTH sides counted, so a row that newly lifts
- *  is outside it by construction — and a newly lifted row is where a round's cost hides. #264's
- *  first lift of `pikmin:getCardStatus__10MemoryCardFi` (fan 1,408, every candidate noncompile)
- *  printed `fan … 1.00×` while the real tier went from 361 s to 10,474 s. Informational, like the
- *  rest of the section. */
-export function newlyRankedLines(fans: FanReport, cost: CostReport, base: string): string[] {
-  if (fans.appeared.length === 0) {
-    return [];
-  }
+/** The rows that rank here and had no fan at the base, by name, dearest first — `vanishedLines`'
+ *  twin. `fanLines` counts them and `costLines` totals their seconds, but the multiplier is over
+ *  rows both sides ranked, so which rows they are, and what each costs, is printed nowhere else. */
+export function appearedLines(fans: FanReport, cost: CostReport, base: string): string[] {
   const seconds = new Map(cost.appeared.map((c) => [c.id, c.to]));
   const rows = fans.appeared
     .map((c) => ({ id: c.id, fan: c.to, secs: seconds.get(c.id) }))
@@ -576,19 +570,13 @@ export function newlyRankedLines(fans: FanReport, cost: CostReport, base: string
   const shown = rows.slice(0, FAN_ROWS_SHOWN);
   const lines = shown.map(
     (r) =>
-      `FAN NEW ${r.id}: fan ${r.fan}` +
+      `FAN     ${r.id}: none → ${r.fan}` +
       (r.secs === undefined ? '' : `, ranked in ${secs(r.secs)}`) +
-      ` — no fan at ${base} (it declined there, failed, or is new)`,
+      ` — not counted at ${base} (it declined there, failed, or is new)`,
   );
   if (rows.length > shown.length) {
-    lines.push(`FAN NEW …and ${rows.length - shown.length} more row(s) newly ranked`);
+    lines.push(`FAN     …and ${rows.length - shown.length} more row(s) newly ranked`);
   }
-  const fanTotal = rows.reduce((n, r) => n + r.fan, 0);
-  const secsTotal = rows.reduce((n, r) => n + (r.secs ?? 0), 0);
-  lines.push(
-    `fan vs ${base}: ${rows.length} row(s) newly ranked, ${fanTotal} candidate(s), ${secs(secsTotal)} of ranked ` +
-      `pass — outside the multiplier above, which only compares rows both sides ranked`,
-  );
   return lines;
 }
 
@@ -719,10 +707,10 @@ export function diffGate(base = 'HEAD'): number {
   // What was compared, before the verdict — a reader of a PR body can otherwise only take the
   // tick on trust. The base by SHA (a branch name is a different commit on every machine), and
   // the fresh artifact by the run that produced it.
-  const sha = shortSha(base);
+  const notice = baseNotice({ base, generatedAt: committed.meta.generatedAt, ...gitFacts(base) });
   const stamp = fresh.meta.asmlift;
   console.log(
-    `diff: base ${base}${sha ? ` = ${sha}` : ''} (artifact generated ${committed.meta.generatedAt}) · ` +
+    `diff: ${notice.named} · ` +
       `fresh ${RESULTS_PATH} generated ${fresh.meta.generatedAt}` +
       (stamp ? ` at ${stamp.commit.slice(0, 7)}${stamp.dirty ? ' (dirty tree)' : ''}` : ''),
   );
@@ -737,11 +725,8 @@ export function diffGate(base = 'HEAD'): number {
     return 2;
   }
 
-  if (headContains(base) === false) {
-    console.log(
-      `WARNING: HEAD does not contain ${base} — everything ${base} gained meanwhile is being read as\n` +
-        `a change this branch made (or hidden by one). Rebase, re-run, then diff again.`,
-    );
+  if (notice.warning) {
+    console.log(notice.warning);
   }
 
   const report = compareMeasurements(committed, fresh, retiredRows());
@@ -780,7 +765,7 @@ export function diffGate(base = 'HEAD'): number {
     console.log(line);
   }
   // …what the rows that newly rank cost, which the multiplier above cannot see.
-  for (const line of newlyRankedLines(fans, cost, base)) {
+  for (const line of appearedLines(fans, cost, base)) {
     console.log(line);
   }
   // …where the stillborn stop newly fires: the rows a false stop would hide in, each with its check.

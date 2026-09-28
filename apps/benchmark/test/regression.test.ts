@@ -4,8 +4,9 @@ import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@as
 import { describe, expect, test } from 'vitest';
 
 import { sameRun } from '../src/report/committed';
+import { baseNotice } from '../src/report/committed';
 import { notRegenerated } from '../src/report/diff';
-import { baseLine, compareOutcomes, rowsAddedSince } from '../src/report/regression';
+import { compareOutcomes, rowsAddedSince } from '../src/report/regression';
 
 const res = (outcome: Outcome): DecompilerResult => ({
   decompiler: 'asmlift',
@@ -264,25 +265,23 @@ describe('sameRun — the artifact-compared-with-itself guard both added-row sec
   });
 });
 
-describe('baseLine — what regression compared against, printed before the verdict', () => {
+describe('baseNotice — what a comparison gate compared against, printed before the verdict', () => {
   const at = { base: 'origin/main', sha: 'bfbee33', generatedAt: '2026-09-24T03:52:28.306Z' };
 
-  test('names the base by sha and says HEAD contains it', () => {
-    expect(baseLine({ ...at, mergeBase: 'bfbee33', contains: true })).toBe(
-      'regression: base origin/main = bfbee33 (artifact generated 2026-09-24T03:52:28.306Z) · HEAD contains it',
-    );
+  test('names the base by sha', () => {
+    expect(baseNotice({ ...at, contains: true, mergeBase: 'bfbee33' })).toEqual({
+      named: 'base origin/main = bfbee33 (artifact generated 2026-09-24T03:52:28.306Z)',
+    });
   });
 
-  test('a base that moved past the branch is reported, not refused', () => {
-    const line = baseLine({ ...at, mergeBase: '40a12ca', contains: false });
-    expect(line).toContain('HEAD does NOT contain it (merge-base 40a12ca)');
-    expect(line).toContain('reads below as if this branch moved it');
+  test('a base that moved past the branch is reported with where the branch forked, not refused', () => {
+    const { warning } = baseNotice({ ...at, contains: false, mergeBase: '40a12ca' });
+    expect(warning).toContain('HEAD does not contain origin/main (the branch forked at 40a12ca)');
+    expect(warning).toContain('reads below as a change this branch made');
   });
 
-  test('HEAD as the base, or a git that cannot answer, prints the base alone', () => {
-    expect(baseLine({ ...at, base: 'HEAD', contains: true })).toBe(
-      'regression: base HEAD = bfbee33 (artifact generated 2026-09-24T03:52:28.306Z)',
-    );
-    expect(baseLine({ ...at, contains: undefined })).not.toContain('contain');
+  test('HEAD as the base, or a git that cannot answer, warns of nothing', () => {
+    expect(baseNotice({ ...at, base: 'HEAD', contains: false }).warning).toBeUndefined();
+    expect(baseNotice({ ...at, contains: undefined }).warning).toBeUndefined();
   });
 });

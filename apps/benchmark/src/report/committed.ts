@@ -48,6 +48,38 @@ export const mergeBaseSha = (ref: string): string | undefined => {
   return full === undefined ? undefined : shortSha(full);
 };
 
+/** What a comparison gate compared against, for the line it prints before its verdict. `origin/main`
+ *  is a different commit on every machine and after every fetch, so the base is named by sha. When
+ *  HEAD does not contain the base, the warning says where the branch forked: every row the base's
+ *  newer commits moved then reads as this branch's change. A notice, not a refusal — the reader
+ *  decides whether to rebase first. Pure over the git facts, which `gitFacts` supplies. */
+export function baseNotice(a: {
+  base: string;
+  generatedAt: string;
+  sha?: string;
+  contains?: boolean;
+  mergeBase?: string;
+}): { named: string; warning?: string } {
+  const named = `base ${a.base}${a.sha ? ` = ${a.sha}` : ''} (artifact generated ${a.generatedAt})`;
+  if (a.base === 'HEAD' || a.contains !== false) {
+    return { named };
+  }
+  return {
+    named,
+    warning:
+      `WARNING: HEAD does not contain ${a.base} (the branch forked at ${a.mergeBase ?? 'an unknown commit'}) — ` +
+      `everything ${a.base} gained since reads below as a change this branch made, or is hidden by one. ` +
+      `Rebase, re-run, then compare again.`,
+  };
+}
+
+/** The git facts `baseNotice` reads, for `ref` in this checkout. */
+export const gitFacts = (ref: string): { sha?: string; contains?: boolean; mergeBase?: string } => ({
+  sha: shortSha(ref),
+  contains: headContains(ref),
+  mergeBase: mergeBaseSha(ref),
+});
+
 /** The artifact as of `ref` (a commit, tag or branch — `HEAD` by default).
  *
  *  AN EMPTY REF IS NOT A MISSING ONE, and git will not say so: `git show :<path>` with an empty

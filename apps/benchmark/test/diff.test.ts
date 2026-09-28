@@ -7,6 +7,7 @@ import {
   FAN_ROWS_SHOWN,
   FLAG_ROWS_SHOWN,
   type FanReport,
+  appearedLines,
   compareCost,
   compareFans,
   compareMeasurements,
@@ -15,7 +16,6 @@ import {
   fanLines,
   flagsLines,
   groupByFlags,
-  newlyRankedLines,
   notRegenerated,
   stopLines,
 } from '../src/report/diff';
@@ -629,27 +629,24 @@ describe('flags', () => {
   });
 });
 
-describe('newlyRankedLines — the rows the multiplier cannot see', () => {
-  test('a row that declined at the base and ranks here is priced by fan and seconds', () => {
-    const base = out(row('pikmin:getCardStatus', { outcome: 'declined' }), row('a', { fanSize: 4, rankSeconds: 1 }));
+describe('appearedLines — the rows the multiplier cannot see', () => {
+  test('a row that declined at the base and ranks here is named with its fan and seconds', () => {
+    const base = out(row('p:dear', { outcome: 'declined' }), row('a', { fanSize: 4, rankSeconds: 1 }));
     const fresh = out(
-      row('pikmin:getCardStatus', { outcome: 'noncompile', fanSize: 1408, rankSeconds: 10276.5 }),
+      row('p:dear', { outcome: 'noncompile', fanSize: 1408, rankSeconds: 900.5 }),
       row('a', { fanSize: 4, rankSeconds: 1 }),
     );
-    const lines = newlyRankedLines(compareFans(base, fresh), compareCost(base, fresh), 'origin/main');
-    expect(lines[0]).toBe(
-      'FAN NEW pikmin:getCardStatus: fan 1408, ranked in 10276.5s — no fan at origin/main (it declined there, failed, or is new)',
-    );
-    expect(lines.at(-1)).toContain('1 row(s) newly ranked, 1408 candidate(s), 10276.5s of ranked pass');
-    // and the multiplier line alone still reads neutral: the reason this section exists
+    expect(appearedLines(compareFans(base, fresh), compareCost(base, fresh), 'origin/main')).toEqual([
+      'FAN     p:dear: none → 1408, ranked in 900.5s — not counted at origin/main (it declined there, failed, or is new)',
+    ]);
+    // the multiplier alone reads neutral: the reason the rows are named
     expect(fanLines(compareFans(base, fresh), 'origin/main', 2).at(-1)).toContain('(1.00×)');
   });
 
-  test('most expensive first, and silent when nothing newly ranks', () => {
+  test('dearest first, and silent when nothing newly ranks', () => {
     const fresh = out(row('cheap', { fanSize: 900, rankSeconds: 2 }), row('dear', { fanSize: 8, rankSeconds: 90 }));
-    const lines = newlyRankedLines(compareFans(out(), fresh), compareCost(out(), fresh), 'main');
-    expect(lines[0]).toMatch(/^FAN NEW dear:/);
+    expect(appearedLines(compareFans(out(), fresh), compareCost(out(), fresh), 'main')[0]).toMatch(/^FAN {5}dear:/);
     const same = out(row('a', { fanSize: 4 }));
-    expect(newlyRankedLines(compareFans(same, same), compareCost(same, same), 'main')).toEqual([]);
+    expect(appearedLines(compareFans(same, same), compareCost(same, same), 'main')).toEqual([]);
   });
 });
