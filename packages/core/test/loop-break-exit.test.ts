@@ -12,7 +12,8 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { StructureError, structure } from '../src/structure/structure';
+import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -57,4 +58,300 @@ test('a header value read after a break is not re-derived from the updated name'
       '            v1 = v1 + -1;\n        }\n    }\n    return (a0 ^ v0 + a0 ^ (a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0) * ' +
       '(a0 * ((a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0));\n}\n',
   );
+});
+
+// A `break` FROM INSIDE THE BODY, to that same exit. The edge leaves before the update, so the exit
+// region reads the values the header read and the one rendering after the loop serves both exits.
+// Each accepted fixture is also run against its own IR (`irAgreement`), so a break spelled on the
+// wrong edge or with the wrong sense changes an observable rather than only a string.
+//
+// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`); a `break` whose other
+// edge is the back edge, left to the latch path, which refuses it here (`LATCH_READS_OLD_VALUE`); a
+// `do-while` (`DO_WHILE_BREAK`). Three have no witness, and are kept as the conditions this spelling
+// rests on rather than as rules any input is known to need: an edge out of a nested loop's body (a
+// loop this recognizer admits leaves only to its own exit, which lies inside ours); an in-body branch
+// whose other edge leaves the loop as well (if-recovery declines those branches first); and an exit
+// region reading a name this iteration already wrote (naming gives no header value such a name).
+const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
+
+const judged = (ir: string): { src: string; agreement: { judged: number; disagree: number } } => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  return { src: cBackend.emit(sfn), agreement: irAgreement(ir, sfn, SEEDS) };
+};
+
+/** `sa3:VramMalloc:agbcc`'s inner loop: `for (j = 0; j < count; j++) { if (i + j >= max) return
+ *  ewram_end; if (state[i + j] != 0) break; } if (j == count) …`. A latch of its own, an early
+ *  `return` arm, and a `break` to a merge that reads `j` and does work before it returns. */
+const INNER_BREAK_TO_MERGE = `fn vraminner {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  br ^bb1(%3)
+^bb1(%4: s32):
+  %5: u32 = icmp_slt %4, %0
+  cond_br %5, ^bb2(), ^bb5()
+^bb2():
+  %6: s32 = add %1, %4
+  %7: u32 = icmp_slt %6, %2
+  cond_br %7, ^bb3(), ^bb7()
+^bb3():
+  %8: s32 = call %6 {target="f"}
+  %9: s32 = const {value=0}
+  %10: u32 = icmp_eq %8, %9
+  cond_br %10, ^bb4(), ^bb5()
+^bb4():
+  %11: s32 = const {value=1}
+  %12: s32 = add %4, %11
+  br ^bb1(%12)
+^bb5():
+  %13: u32 = icmp_eq %4, %0
+  cond_br %13, ^bb6(), ^bb8()
+^bb6():
+  %14: s32 = add %1, %4
+  %16: s32 = call %14 {target="g"}
+  ret %14
+^bb7():
+  %15: s32 = const {value=-1}
+  ret %15
+^bb8():
+  ret %4
+}`;
+
+test('a mid-body `break` to the loop exit is spelled where it leaves', () => {
+  const { src, agreement } = judged(INNER_BREAK_TO_MERGE);
+  expect(src).toBe(
+    's32 vraminner(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n' +
+      '        if (a1 + v0 >= a2) {\n            return -1;\n        } else {\n' +
+      '            if (f(a1 + v0) != 0) break;\n            v0 = v0 + 1;\n        }\n    }\n' +
+      '    if (v0 != a0) {\n        return v0;\n    } else {\n        g(a1 + v0);\n        return a1 + v0;\n    }\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The break as the TAKEN edge, the body continuing on the fall-through. */
+const BREAK_ON_TAKEN_EDGE = `fn breaktaken {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb4()
+^bb2():
+  %5: s32 = add %1, %3
+  %6: s32 = call %5 {target="f"}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb4(), ^bb3()
+^bb3():
+  %9: s32 = const {value=1}
+  %10: s32 = add %3, %9
+  br ^bb1(%10)
+^bb4():
+  %11: s32 = call %3 {target="g"}
+  ret %3
+}`;
+
+test('the break sense follows the edge that leaves', () => {
+  const { src, agreement } = judged(BREAK_ON_TAKEN_EDGE);
+  expect(src).toBe(
+    's32 breaktaken(s32 a0, s32 a1) {\n    s32 v0;\n    for (v0 = 0; v0 < a0; v0 = v0 + 1) {\n' +
+      '        if (f(a1 + v0) == 0) break;\n    }\n    g(v0);\n    return v0;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** A merge inside the body before the break: its param is written on this iteration, under a name of
+ *  its own, and the exit still reads the header's `v1`. */
+const MERGE_BEFORE_BREAK = `fn mergebefore {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%1)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb6()
+^bb2():
+  %5: s32 = call %3 {target="f"}
+  %6: s32 = const {value=0}
+  %7: u32 = icmp_slt %5, %6
+  cond_br %7, ^bb3(), ^bb4()
+^bb3():
+  %8: s32 = const {value=1}
+  %9: s32 = add %3, %8
+  br ^bb5(%9)
+^bb4():
+  %10: s32 = const {value=2}
+  %11: s32 = add %3, %10
+  br ^bb5(%11)
+^bb5(%12: s32):
+  %13: s32 = call %12 {target="h"}
+  %14: u32 = icmp_eq %13, %6
+  cond_br %14, ^bb6(), ^bb7()
+^bb7():
+  br ^bb1(%12)
+^bb6():
+  %15: s32 = call %3 {target="g"}
+  ret %3
+}`;
+
+test('a body merge ahead of the break does not reach the exit', () => {
+  const { src, agreement } = judged(MERGE_BEFORE_BREAK);
+  expect(src).toBe(
+    's32 mergebefore(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v1 = a1;\n    while (v1 < a0) {\n' +
+      '        v0 = 0;\n        if ((s32)f(v1) >= v0) {\n            v2 = v1 + 2;\n        } else {\n' +
+      '            v2 = v1 + 1;\n        }\n        if (h(v2) == v0) break;\n        v1 = v2;\n    }\n' +
+      '    g(v1);\n    return v1;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The latch's own conditional `break`, to an exit that is not a `ret` block: the latch path spells
+ *  it once the loop is admitted. */
+const LATCH_BREAK_TO_LIVE_EXIT = `fn latchlive {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb3()
+^bb2():
+  %5: s32 = call %3 {target="f"}
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  %9: u32 = icmp_eq %7, %1
+  cond_br %9, ^bb3(), ^bb1(%7)
+^bb3():
+  %10: s32 = call %1 {target="g"}
+  br ^bb4()
+^bb4():
+  ret %1
+}`;
+
+test('a latch `break` to an exit that is not a `ret` block is spelled by the latch path', () => {
+  const { src, agreement } = judged(LATCH_BREAK_TO_LIVE_EXIT);
+  expect(src).toBe(
+    's32 latchlive(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n        f(v0);\n' +
+      '        v0 = v0 + 1;\n        if (v0 == a1) break;\n    }\n    g(a1);\n    return a1;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** A `ret`-terminated exit with no effects makes the edge an early-`return` arm, not a break: the
+ *  shape `kleod:UpdateEntityAnimationInfoEntries:agbcc` has, spelled as it was before breaks. */
+const EDGE_TO_RET_EXIT = `fn retexit {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb4()
+^bb2():
+  %5: s32 = add %1, %3
+  %6: s32 = call %5 {target="f"}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb3(), ^bb4()
+^bb3():
+  %9: s32 = const {value=1}
+  %10: s32 = add %3, %9
+  br ^bb1(%10)
+^bb4():
+  ret
+}`;
+
+test('an edge to a pure `ret` exit stays an early `return`', () => {
+  expect(emit(EDGE_TO_RET_EXIT)).toBe(
+    'void retexit(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n' +
+      '        if (f(a1 + v0) != 0) {\n            return;\n        } else {\n            v0 = v0 + 1;\n' +
+      '        }\n    }\n    return;\n}\n',
+  );
+});
+
+/** The exit takes a param: `-1` from the header, `j` from the break. The header's copy runs after
+ *  the loop, so a `break` would reach it and overwrite `j`. */
+const HEADER_EXIT_COPIES = `fn exitcopies {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  %20: s32 = const {value=-1}
+  cond_br %4, ^bb2(), ^bb4(%20)
+^bb2():
+  %5: s32 = add %1, %3
+  %6: s32 = call %5 {target="f"}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb3(), ^bb4(%3)
+^bb3():
+  %9: s32 = const {value=1}
+  %10: s32 = add %3, %9
+  br ^bb1(%10)
+^bb4(%11: s32):
+  %12: s32 = call %11 {target="g"}
+  ret %11
+}`;
+
+test('a `break` the header-exit copies would overwrite declines', () => {
+  expect(() => emit(HEADER_EXIT_COPIES)).toThrow(/would run the copies the loop header hands its exit/);
+});
+
+/** The break test sits in the latch, after the update, and the exit reads the header's `v1`. */
+const LATCH_READS_OLD_VALUE = `fn latchold {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%1)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb6()
+^bb2():
+  %5: s32 = call %3 {target="f"}
+  %6: s32 = const {value=0}
+  %7: u32 = icmp_slt %5, %6
+  cond_br %7, ^bb3(), ^bb4()
+^bb3():
+  %8: s32 = const {value=1}
+  %9: s32 = add %3, %8
+  br ^bb5(%9)
+^bb4():
+  %10: s32 = const {value=2}
+  %11: s32 = add %3, %10
+  br ^bb5(%11)
+^bb5(%12: s32):
+  %13: s32 = call %12 {target="h"}
+  %14: u32 = icmp_eq %13, %6
+  cond_br %14, ^bb6(), ^bb1(%12)
+^bb6():
+  %15: s32 = call %3 {target="g"}
+  ret %3
+}`;
+
+test('a latch `break` whose exit reads the value before the update declines', () => {
+  expect(() => emit(LATCH_READS_OLD_VALUE)).toThrow(/leaves from the latch/);
+});
+
+/** A bottom-tested loop with a mid-body edge to its exit, which is not a `ret` block. */
+const DO_WHILE_BREAK = `fn dwbreak {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %5: s32 = add %1, %3
+  %6: s32 = call %5 {target="f"}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb3(), ^bb2()
+^bb2():
+  %9: s32 = const {value=1}
+  %10: s32 = add %3, %9
+  %4: u32 = icmp_slt %10, %0
+  cond_br %4, ^bb1(%10), ^bb3()
+^bb3():
+  %11: s32 = call %3 {target="g"}
+  br ^bb4()
+^bb4():
+  ret %3
+}`;
+
+test('a `do-while` with a mid-body `break` still declines', () => {
+  expect(() => emit(DO_WHILE_BREAK)).toThrow(StructureError);
 });

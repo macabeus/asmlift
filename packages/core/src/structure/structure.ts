@@ -1091,6 +1091,13 @@ interface WhileLoopInfo {
   forwardPreds: Block[]; // header preds outside the loop body (the entry/init side)
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   arms: LoopArm[]; // the early-`return` exits out of the body (`earlyReturnArm`)
+  breaks: LoopEdge[]; // the body edges that land on `exit` itself: each one is a `break`
+}
+
+/** One edge out of a loop body, keyed like a {@link LoopArm}: by edge, not by target. */
+interface LoopEdge {
+  from: Block;
+  to: Block;
 }
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -2588,11 +2595,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       continue; // neither a clean pre-tested nor bottom-tested single-exit shape
     }
     // Single loop exit (ret-aware): the chosen exit is the ONE real exit; every OTHER edge leaving
-    // the body must be an early `return` (`earlyReturnArm`) or a ret-terminated target. A second exit
-    // that lands on a LIVE non-return merge is a genuine `break`/second structured exit → decline.
-    // The arms are kept: emission needs to know which edges out of the body end an iteration rather
-    // than continue it.
+    // the body must be an early `return` (`earlyReturnArm`), a ret-terminated target, or — for a
+    // `while` — a `break`: an edge landing on the header's own exit, which C spells by leaving the
+    // loop and running the exit region once, after it. A second exit that lands on any OTHER live
+    // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
+    // body (that is a two-level exit) and any `break` of a `do-while` (its exit copies are judged
+    // differently, and no row has asked). The arms and breaks are kept: emission needs to know
+    // which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
+    const breaks: LoopEdge[] = [];
     let singleExit = true;
     for (const e of nl.exitEdges) {
       if (e.from === exitFrom && e.to === exit) {
@@ -2601,6 +2612,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
+      } else if (
+        kind === 'while' &&
+        e.to === exit &&
+        ![...forest.byHeader.values()].some((l2) => l2.header !== h && nl.body.has(l2.header) && l2.body.has(e.from))
+      ) {
+        breaks.push({ from: e.from, to: e.to });
       } else if (!isRet(e.to)) {
         singleExit = false;
         break;
@@ -2619,6 +2636,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         forwardPreds: nl.forwardPreds,
         body: nl.body,
         arms,
+        breaks,
       });
     } else {
       doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, arms });
@@ -4873,7 +4891,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[] };
+  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[]; breaks: LoopEdge[] };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -5541,6 +5559,78 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
 
+    // A `break` from INSIDE the body: one edge of this cond_br is an admitted break edge (it lands on
+    // the `while`'s own exit), the other stays in the body. Spelled `if (c) { <edge copies>; break; }`
+    // and then the rest of the body, which is what the asm runs: the exit region renders once, after
+    // the loop, for the header's exit and this edge alike. No update has run on this path, so the
+    // loop variables still hold what the header read, unless a block between the header and here
+    // wrote one of their names. The loop was admitted on the promise of this spelling, so each
+    // refusal is LOUD:
+    //   • the header→exit edge has copies: they run after the loop on the break path too, and
+    //     clobber what the break carried (the latch path's break-clobber rule);
+    //   • the other edge is the back edge: the latch path above owns that one, and reaching here
+    //     means it refused;
+    //   • the other edge leaves the body too;
+    //   • the exit region reads a value under a name written earlier in this iteration.
+    // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
+    // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
+    const brk = loopCtx?.breaks.find((e) => e.from === b) ?? null;
+    if (loopCtx && brk) {
+      const breakIsTaken = takenB === brk.to;
+      const stayB = breakIsTaken ? fallB : takenB;
+      const refuse = (why: string): never => {
+        throw new StructureError(`cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${why}`);
+      };
+      if (argAssigns(loopCtx.header, loopCtx.exit).length !== 0) {
+        refuse('would run the copies the loop header hands its exit');
+      }
+      if (stayB === loopCtx.header) {
+        refuse('leaves from the latch, after an update the exit test or the exit region cannot read past');
+      }
+      if (!loopCtx.body.has(stayB)) {
+        refuse('has no edge beside it that stays in the loop');
+      }
+      const before = new Set<Block>([b]);
+      for (const stack = [b]; stack.length;) {
+        for (const p of preds.get(stack.pop()!) ?? []) {
+          if (p !== loopCtx.header && loopCtx.body.has(p) && !before.has(p)) {
+            before.add(p);
+            stack.push(p);
+          }
+        }
+      }
+      // A param is written by its in-edges' copies, except where every one of them already holds
+      // the name (an identity copy, which `argAssigns` elides); a materialized def is written in place.
+      const writtenBefore = new Set<string>();
+      for (const x of before) {
+        const ins = [...inEdgeRecords(preds, x)];
+        x.params.forEach((p, k) => {
+          const n = varName.get(p);
+          if (n !== undefined && ins.some(({ succ }) => varName.get(succ.args[k]) !== n)) {
+            writtenBefore.add(n);
+          }
+        });
+        for (const o of x.ops) {
+          const n = materialize.has(o) && o.results[0] !== undefined ? varName.get(o.results[0]) : undefined;
+          if (n !== undefined) {
+            writtenBefore.add(n);
+          }
+        }
+      }
+      const exitRegion = new Set([loopCtx.exit, ...reachFrom(loopCtx.exit)].filter((x) => !loopCtx!.body.has(x)));
+      if (loopEscapeHazard(loopCtx.body, new Map(), writtenBefore, exitRegion)) {
+        refuse('reaches an exit region that reads a loop value under a name this iteration already rewrote');
+      }
+      let leaveCond = expr(term.operands[0]);
+      if (!breakIsTaken) {
+        leaveCond = negateCond(leaveCond);
+      }
+      const [breakEdge, stayEdge] = breakIsTaken ? term.successors : [term.successors[1], term.successors[0]];
+      out.push(mkIf(leaveCond, [...argAssignsFor(b, breakEdge), { k: 'break' }], []));
+      out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
+      return out;
+    }
+
     // Regime-A switch: if this cond_br roots a comparison tree over a single scrutinee, emit a
     // `switch`. A pre-check here — mirroring the guard-fused-loop check above — so it sees the raw
     // tree before if-recovery claims the diamonds. Declines (null) fall through to plain if-recovery.
@@ -5826,7 +5916,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // Mirror the br/cond_br cases: argAssigns then structureRegion. Structure the body under this
     // loop's frame so an in-body conditional exit (break / early return) is recognised instead of
     // tripping the header-re-entry `onStack` guard.
-    const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms }, () => [
+    const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks }, () => [
       ...argAssigns(wl.header, wl.bodyEntry),
       ...structureRegion(wl.bodyEntry, wl.header),
     ]);
@@ -6139,7 +6229,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const inner =
       dw.header === dw.latch
         ? [] // single-block self-loop: the header IS the latch — its ops render via sideEffects below
-        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms }, () =>
+        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: [] }, () =>
             structureBlock(dw.header, dw.latch),
           ); // header..latch (exclusive of latch)
     dwActive.delete(dw.header);
