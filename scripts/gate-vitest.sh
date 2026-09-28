@@ -22,7 +22,7 @@
 # wins). vitest's own default is one per core minus one — 9 on a 10-core machine — and the RPC
 # timeout above is what that costs when two rounds' gates and a bench share the machine. Measured
 # 2026-09-28 on this 10-core machine, the root config back to back: default workers 215 s, ending
-# `1 failed` + `Errors  1 error` at a load average of ~30; `--maxWorkers=3` 127 s, 324/324 files.
+# with `Errors  1 error` (the RPC timeout) at a load average of ~30; `--maxWorkers=3` 127 s, no error.
 # Fewer workers was the FASTER run, not only the quieter one.
 set -u
 
