@@ -2360,6 +2360,8 @@ interface FrameObjectAudit {
    *  area, which is where an untyped object claims to start */
   outgoingArea: number;
   capturedObjectIsTheWholeFrame: boolean;
+  /** every capture the add arm re-minted at a constant offset from it */
+  movedCaptures: ReadonlySet<Value>;
   prototypes: Prototypes;
   symbols: SymbolMap | undefined;
   target: TargetDescription;
@@ -2384,12 +2386,26 @@ function auditFrameObjects({
   usedSlotOffsets,
   outgoingArea,
   capturedObjectIsTheWholeFrame,
+  movedCaptures,
   prototypes,
   symbols,
   target,
 }: FrameObjectAudit): void {
+  // A capture the add arm MOVED by a constant and nothing else reads names no object — the moved
+  // one does — so it is dropped rather than judged as an object with no use. Only those: an
+  // unused `mov rD, sp` of the machine's own is still a capture, and is judged.
+  const read = new Set<Value>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      op.operands.forEach((v) => read.add(v));
+      (op.successors ?? []).forEach((s) => s.args.forEach((v) => read.add(v)));
+    }
+  }
   let laddrs: Op[] = [];
   for (const blk of irBlocks) {
+    blk.ops = blk.ops.filter(
+      (op) => op.opcode !== 'laddr' || read.has(op.results[0]) || !movedCaptures.has(op.results[0]),
+    );
     for (const op of blk.ops) {
       if (op.opcode === 'laddr') {
         laddrs.push(op);
@@ -4446,6 +4462,10 @@ export function lift(
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
+  // The frame offset each `laddr` the mov and add arms minted names, so a capture moved by a
+  // constant is re-minted at its own offset rather than audited as arithmetic.
+  const laddrOff = new Map<Value, number>();
+  const movedCaptures = new Set<Value>();
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
   // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
@@ -4776,6 +4796,7 @@ export function lift(
             if (slotsOk && localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
+              laddrOff.set(res, 0);
               writeData(reg(a), bi, res);
               break;
             }
@@ -4804,10 +4825,30 @@ export function lift(
             if (slotsOk && localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));
+              laddrOff.set(res, imm(c));
               writeData(reg(a), bi, res);
               break;
             }
             throw spAsDataError();
+          }
+          // …and a capture MOVED by a constant is the capture of that other offset, which is how
+          // agbcc spells one it cannot reach in a single `add rD, sp, #k`: `mov r2, sp / add r2,
+          // r2, #0x8`. The two-operand `add rD, #c` moves rD itself.
+          {
+            const [src, by] = c === undefined ? [a, b] : [b, c];
+            const from =
+              src !== undefined && !isSpReg(src) && by !== undefined && IMM_LITERAL.test(by)
+                ? readData(reg(src), bi)
+                : undefined;
+            const base = from === undefined ? undefined : laddrOff.get(from);
+            if (from !== undefined && base !== undefined && by !== undefined) {
+              movedCaptures.add(from);
+              const res = mkValue(T.unk(32));
+              irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: base + imm(by) } }));
+              laddrOff.set(res, base + imm(by));
+              writeData(reg(a), bi, res);
+              break;
+            }
           }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
           // low regs isn't always available). Model it as a pure copy — the SAME SSA VALUE — not
@@ -5539,6 +5580,7 @@ export function lift(
     usedSlotOffsets,
     outgoingArea: outgoingArgs.area,
     capturedObjectIsTheWholeFrame,
+    movedCaptures,
     prototypes,
     symbols,
     target,

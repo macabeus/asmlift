@@ -102,6 +102,20 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tand\tr3, r1\n'))).toThrow(CAPTURE);
   });
 
+  test('a capture MOVED BY A CONSTANT is the capture of that offset', () => {
+    // `mov r2, sp / add r2, r2, #0x8` is how `sa3:ProcessOamBuffers` spells `&local` at [sp,#8];
+    // the two-operand `add rD, #k` moves rD itself. Either way the object is at the sum, and the
+    // `mov` left behind names nothing.
+    const moved = (move: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n${move}\tstrh\tr0, [r2]\n\tbl\tg\n` +
+      `\tmov\tr2, sp\n${move}\tldrh\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const want = 's32 f(s32 a0) {\n    u16 sp4;\n    sp4 = a0;\n    g(a0);\n    return sp4;\n}\n';
+    expect(lift(moved('\tadd\tr2, r2, #0x4\n')).source).toBe(want);
+    expect(lift(moved('\tadd\tr2, #0x4\n')).source).toBe(want);
+    // a move DOWN is not one: nothing spells a negative frame offset, and `sub` stays arithmetic
+    expect(() => lift(moved('\tsub\tr2, #0x4\n'))).toThrow(/the captured address flows into `sub`/);
+  });
+
   test('a WORD access through a capture is not this shape — the outgoing arguments live there', () => {
     // `ldr`/`str` DO have an `[sp,#imm]` encoding, so a word access through a copy is some other
     // shape. What makes it matter is the outgoing-argument area: agbcc stages arguments 5+ at the

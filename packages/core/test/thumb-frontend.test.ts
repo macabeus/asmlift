@@ -2397,8 +2397,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
-    // address arithmetic on the capture: the object's extent stops being one scalar
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tadd\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+    // address arithmetic on the capture that is not a constant move: the object's extent stops
+    // being one scalar
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tsub\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
     // an access at a nonzero offset through the capture
