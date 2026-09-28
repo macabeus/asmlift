@@ -79,16 +79,20 @@ export interface RealFunction {
    *             declaration shapes, scalar/element signedness, array extents, volatility,
    *             const-ness, address-cast macro bodies, and — where the vendoring found them —
    *             callee signatures and struct tags with full field tables. The row's OWN
-   *             definition-derived facts are redacted first (core's `asIfUndecompiled`).
+   *             definition-derived facts are redacted first (core's `asIfUndecompiled`). And the
+   *             callee declarations of the vendored context its candidates compile in
+   *             (context-proto.ts `rowPrototypes`).
    *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
-   *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`). Neither tool is
-   *             handed the row's own signature out of the reference source — with one measured
-   *             exception, README residual 4.
+   *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`); on a row with
+   *             no project context for it (every C++ row), the callee declarations asmlift reads,
+   *             as C (context-proto.ts `m2cDeclarations`). Neither tool is handed the row's own
+   *             signature out of the reference source — with one measured exception, README
+   *             residual 4.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
    *  against a tool handed layouts outright. This flag is set on every real C row without a
    *  hand-written `ctx`. A C++ row carries neither: the parser below is C-only, and 42 of the 378
-   *  real rows are C++.
+   *  real rows are C++ — which is why their callee declarations reach m2c as a rendered C block.
    *
    *  IT IS NOT EXACT PARITY, and the residuals run in both directions — apps/benchmark/README.md
    *  lists them. Nor is a "project context" one uniform thing: it is whatever that project's TU

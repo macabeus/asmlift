@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
-import { referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
+import { m2cDeclarations, referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
 
 const at = (ctxI: string, ctxFile = 'test/ctx.i') => ({ ctxI, ctxFile });
 const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b); void self(s32 x);';
@@ -54,6 +54,22 @@ describe('a real row prototype table', () => {
       callee: { returns: 's32', params: ['s32'] },
     });
     expect(referencedPrototypes(undefined, asm, 'self')).toBeUndefined();
+  });
+});
+
+describe('what m2c is given where it gets no project context', () => {
+  test('the same entries, as C its parser reads — an unspellable pointer as void *, nothing unsized', () => {
+    const proto = {
+      self: { returnsVoid: true, params: [] },
+      probe: { returns: 'int', params: ['s32'] },
+      mount: { returns: 's32', params: ['s32', 'struct Card *', 'void (*)(s32 chan)'] },
+      byval: { returnsVoid: true, params: ['Vec'] },
+      declared: { returns: 's32', params: ['s32'] },
+      opaque: { params: ['s32'] },
+    };
+    expect(m2cDeclarations(proto, 'self', 's32 declared(s32 x);')).toBe(
+      'int probe(s32);\ns32 mount(s32, void *, void *);',
+    );
   });
 });
 

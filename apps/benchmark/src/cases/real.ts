@@ -5,7 +5,8 @@
 // globals/structs is never noncompile merely for missing context.
 //
 // PROVISIONING: both tools read the project's declarations out of the same vendored freeze —
-// asmlift the vendored symbol map (`symbols`), m2c the vendored preprocessed context (`m2cCtx`).
+// asmlift the vendored symbol map (`symbols`) and its context's callee declarations (`proto`), m2c
+// the vendored preprocessed context (`m2cCtx`), or those declarations as C where it gets none.
 // Neither is handed the row's own signature out of the reference source. manifests.ts's `m2cCtx`
 // doc states what each channel carries; README.md lists the residuals, in both directions, and
 // the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
@@ -86,22 +87,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
             unit.toolchain,
             buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI, language),
           ),
-        scorer: makeRealScorer(
-          unit.toolchain,
-          codegen.cflags,
-          man.tu,
-          f.prependC ?? '',
-          vendored.ctxI,
-          language,
-        ),
-        compile: makeRealCompile(
-          unit.toolchain,
-          codegen.cflags,
-          man.tu,
-          f.prependC ?? '',
-          vendored.ctxI,
-          language,
-        ),
+        scorer: makeRealScorer(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
+        compile: makeRealCompile(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
       });
     }
   }
