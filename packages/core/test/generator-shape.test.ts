@@ -18,13 +18,18 @@
 // the multi-child sweeps actually judge. Nor does reaching a rule witness it: all three
 // `latchInnerSub` child rules are reached on every depth-3 seed and are byte-inert under mutation
 // (`helpers.ts`'s generator docblock carries the measurement).
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { count, generateSsaFn } from './helpers';
+
+// Same load sensitivity as the sibling fuzz: each census structures 4,000 seeds, the depth-3 one
+// runs close to the 5 s default on a CI runner, and it times out on runner load rather than on a
+// defect. A real hang is still loud, just 60 s later.
+vi.setConfig({ testTimeout: 60_000 });
 
 const SEEDS = 4000;
 
