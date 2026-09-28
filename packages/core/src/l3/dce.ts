@@ -98,6 +98,16 @@ function allAddrNamesInto(stmts: Stmt[], out: Set<string>): void {
   }
 }
 
+/** Where a `break` and a `continue` at this depth land, as the set live there. A jump does not fall
+ *  through to the statement after it: the live set at a jump is its TARGET's, not what the rest of
+ *  the enclosing block reads. `break` targets the innermost loop or switch, `continue` the innermost
+ *  loop; each is that statement's conservative in-scope set (everything read anywhere in it plus
+ *  what is live after it), which also covers the loop's own next test and update. */
+interface JumpLive {
+  brk: ReadonlySet<string>;
+  cont?: ReadonlySet<string>; // absent in a switch no loop encloses
+}
+
 /** Backward live-variable walk over one block. `liveOut` is the set of locals live on exit;
  *  returns the rewritten block and the set live on entry. */
 function dceBlock(
@@ -105,6 +115,7 @@ function dceBlock(
   liveOut: ReadonlySet<string>,
   locals: ReadonlySet<string>,
   volatiles: ReadonlySet<string>,
+  jumps: JumpLive | null,
 ): { out: Stmt[]; liveIn: Set<string> } {
   const live = new Set(liveOut);
   const rev: Stmt[] = [];
@@ -156,12 +167,19 @@ function dceBlock(
       }
       case 'break':
       case 'continue': {
+        // A mid-body `if (c) { v = x; break; }` carries the loop's exit value in `v`, while the
+        // statements after the `if` overwrite `v` for the next iteration. Leaving `live` as the
+        // fall-through set would judge the carried copy dead and drop it.
+        const target = s.k === 'break' ? jumps?.brk : jumps?.cont;
+        if (target) {
+          setLive(new Set(target));
+        }
         rev.push(s);
         break;
       }
       case 'if': {
-        const t = dceBlock(s.then, live, locals, volatiles);
-        const e = dceBlock(s.else, live, locals, volatiles);
+        const t = dceBlock(s.then, live, locals, volatiles, jumps);
+        const e = dceBlock(s.else, live, locals, volatiles, jumps);
         const nlive = new Set<string>();
         for (const r of reads(s.cond)) {
           nlive.add(r);
@@ -191,7 +209,7 @@ function dceBlock(
         // loop-carried store is never cut. Body DCE removes only what is dead on EVERY path.
         const loopLive = new Set(live);
         allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals, volatiles);
+        const b = dceBlock(s.body, loopLive, locals, volatiles, { brk: loopLive, cont: loopLive });
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -203,7 +221,7 @@ function dceBlock(
       case 'for': {
         const loopLive = new Set(live);
         allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals, volatiles);
+        const b = dceBlock(s.body, loopLive, locals, volatiles, { brk: loopLive, cont: loopLive });
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -217,8 +235,9 @@ function dceBlock(
         // read anywhere in the switch as live throughout — no case-body store is ever cut.
         const swLive = new Set(live);
         allReadsInto([s], swLive);
-        const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals, volatiles).out }));
-        const def = s.default ? dceBlock(s.default, swLive, locals, volatiles).out : s.default;
+        const inSwitch: JumpLive = { brk: swLive, cont: jumps?.cont };
+        const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals, volatiles, inSwitch).out }));
+        const def = s.default ? dceBlock(s.default, swLive, locals, volatiles, inSwitch).out : s.default;
         const nlive = new Set(swLive);
         for (const r of reads(s.scrutinee)) {
           nlive.add(r);
@@ -266,7 +285,7 @@ export function eliminateDeadStores(sfn: SFn): SFn {
   allAddrNamesInto(sfn.body, addressTaken);
   const volatiles = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
   const locals = new Set(sfn.locals.filter((l) => !l.volatile && !addressTaken.has(l.name)).map((l) => l.name));
-  const body = dceBlock(sfn.body, new Set<string>(), locals, volatiles).out;
+  const body = dceBlock(sfn.body, new Set<string>(), locals, volatiles, null).out;
   const used = new Set<string>();
   referencedNames(body, used);
   return { ...sfn, body, locals: sfn.locals.filter((l) => used.has(l.name) || l.volatile) };

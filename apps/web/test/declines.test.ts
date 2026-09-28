@@ -1083,6 +1083,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'loop-recovery declined', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'pre-update loop variable', 'packages/core/src/structure/structure.ts'],
+    ['loop-shapes', 'a break out of block', 'packages/core/src/structure/structure.ts'],
     ['loop-exit-values', 'post-loop read reaches a temp', 'packages/core/src/structure/structure.ts'],
     ['loop-exit-values', 'do not reproduce on a zero-trip run', 'packages/core/src/structure/structure.ts'],
     ['switch-shapes', 'case arms do not linearize', 'packages/core/src/structure/structure.ts'],

@@ -310,10 +310,11 @@ test('a conditional-latch arm returns the value the IR read, not the updated one
   );
 });
 
-// REFUSAL — a conditional-latch `break` whose POST-LOOP region reads the induction variable
-// directly. The break edge carries the pre-update value and the post-loop code renders after the
-// update, so `main` emitted `(i + 1) * 100`. `^bb3` is the loop's own exit, not an arm, so the
-// clamp cannot stand in for the CFG join either — the shape declines both ways out.
+// A conditional-latch `break` whose POST-LOOP region reads the induction variable directly. The
+// break edge carries the pre-update value, so the latch path's update-first spelling would render
+// the post-loop code after the update, where it reads `(i + 1) * 100`, and the latch path refuses
+// it. The break is spelled ahead of the update instead: in the `for`, a `break` skips the
+// increment, and the post-loop read sees the value the test read.
 const BREAK_POSTLOOP_READ = `fn brkpost {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}
@@ -337,7 +338,10 @@ const BREAK_POSTLOOP_READ = `fn brkpost {
 }
 `;
 
-test('a break whose post-loop region reads the pre-update induction value declines', () => {
+test('a break whose post-loop region reads the pre-update induction value leaves ahead of the update', () => {
   expect(() => emit(LATCH_ARM_STORE)).not.toThrow();
-  expect(() => emit(BREAK_POSTLOOP_READ)).toThrow(StructureError);
+  expect(emit(BREAK_POSTLOOP_READ)).toBe(
+    's32 brkpost(s32 *a0) {\n    s32 v0;\n    for (v0 = 0; v0 < 10; v0 = v0 + 1) {\n' +
+      '        if (gFlag == 0) break;\n    }\n    *a0 = v0 * 100;\n    return v0 * 100;\n}\n',
+  );
 });
