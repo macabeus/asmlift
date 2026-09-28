@@ -262,8 +262,9 @@ export async function evaluate(
   } catch {
     // text-only fallback
   }
-  // the entries this lift can look up: what the row publishes and its script passes as `--proto`
-  const proto = referencedPrototypes(spec.proto, asm, spec.sym);
+  // the entries this lift can look up: what the row publishes and its script passes as `--proto`.
+  // The dump too, because a MIPS call names its target only in the relocation it carries.
+  const proto = referencedPrototypes(spec.proto, asmDump === undefined ? asm : `${asm}\n${asmDump}`, spec.sym);
   const row = { tier: rowTier(spec).tier, id: `${spec.project}:${spec.sym}:${tc.id}`, sym: spec.sym };
   const asmlift = await runAsmlift(
     tc,

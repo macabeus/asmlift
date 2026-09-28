@@ -172,7 +172,8 @@ export interface VendoredEntry {
 /** A manifest paired with its vendored compiler inputs (the runtime shape — no checkout). */
 export interface VendoredManifest extends RealManifest {
   /** sym → gunzip'd preprocessed texts: the target TU, the candidate context, and m2c's context. */
-  vendored: (sym: string) => { tuI: string; ctxI: string; m2cI: string };
+  /** the row's vendored compiler inputs, and `ctxFile`, the name its unit context is vendored under */
+  vendored: (sym: string) => { tuI: string; ctxI: string; m2cI: string; ctxFile: string };
   /** sym → repo-relative path of m2c's vendored context blob (the row's ctxRef). */
   ctxPath: (sym: string) => string;
   /** The vendored symbol map (names + declaration shapes) a row of `module` is read with: the
@@ -587,6 +588,7 @@ export function withVendoredInputs(man: RealManifest): VendoredManifest {
         tuI: gunzipSync(readFileSync(join(dir, entry.tu))).toString('utf8'),
         ctxI: gunzipSync(readFileSync(join(dir, entry.ctx))).toString('utf8'),
         m2cI: gunzipSync(readFileSync(join(dir, entry.m2c))).toString('utf8'),
+        ctxFile: `${man.project}/${entry.ctx}`,
       };
     },
     ctxPath: (sym) => `apps/benchmark/dataset/real/tu/${man.project}/${entryOf(sym).m2c}`,

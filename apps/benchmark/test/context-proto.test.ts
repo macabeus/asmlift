@@ -10,11 +10,12 @@ import { describe, expect, test } from 'vitest';
 
 import { referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
 
+const at = (ctxI: string, ctxFile = 'test/ctx.i') => ({ ctxI, ctxFile });
 const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b); void self(s32 x);';
 
 describe('a real row prototype table', () => {
   test('context declarations under the manifest, which wins per symbol, and never the row itself', () => {
-    const p = rowPrototypes({ other: { params: 3 } }, CTX, 'c', 'self', undefined);
+    const p = rowPrototypes({ other: { params: 3 } }, at(CTX), 'c', 'self', undefined);
     expect(p).toEqual({ callee: { returns: 's32', params: ['s32'] }, other: { params: 3 } });
   });
 
@@ -32,21 +33,21 @@ describe('a real row prototype table', () => {
       // a signless narrow parameter spells nothing, so the map states no prototype for it
       [0x108, [code('opaque', [{ size: 2, signed: null }])]],
     ]);
-    expect(rowPrototypes(undefined, ctx, 'c', 'self', map as never)).toEqual({
+    expect(rowPrototypes(undefined, at(ctx, 'precedence.i'), 'c', 'self', map as never)).toEqual({
       callee: { returns: 's32', params: ['s32'] },
       opaque: { returnsVoid: true, params: ['S'] },
     });
   });
 
   test('an empty context leaves the manifest table as it is', () => {
-    expect(rowPrototypes(undefined, '', 'c', 'self', undefined)).toBeUndefined();
-    expect(rowPrototypes({ self: { returnsVoid: true } }, '', 'c', 'self', undefined)).toEqual({
+    expect(rowPrototypes(undefined, at(''), 'c', 'self', undefined)).toBeUndefined();
+    expect(rowPrototypes({ self: { returnsVoid: true } }, at(''), 'c', 'self', undefined)).toEqual({
       self: { returnsVoid: true },
     });
   });
 
   test('publishes only the entries the assembly names, plus the row own', () => {
-    const p = rowPrototypes({ self: { returnsVoid: true } }, CTX, 'c', 'self', undefined);
+    const p = rowPrototypes({ self: { returnsVoid: true } }, at(CTX), 'c', 'self', undefined);
     const asm = 'self:\n  mflr r0\n  bl callee\n  blr\n';
     expect(referencedPrototypes(p, asm, 'self')).toEqual({
       self: { returnsVoid: true },

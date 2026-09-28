@@ -43,7 +43,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
       // the linkage a candidate needs to export the mangled symbol a C++ target is keyed by.
       const language = unitLanguage(f.unit, unit.cflags);
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
-      const m2cI = f.m2cCtx ? man.vendored(f.sym).m2cI : null;
+      // read once: every field below that needs the unit's context shares this one copy
+      const vendored = man.vendored(f.sym);
+      const m2cI = f.m2cCtx ? vendored.m2cI : null;
       const ctxProto = m2cI === null ? null : m2cOwnPrototype(f.sym, f.proto, m2cI);
       cases.push({
         id,
@@ -65,7 +67,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctx: m2cI === null ? f.ctx : appendCtxProto(m2cI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         ctxProto: ctxProto ?? undefined,
-        proto: rowPrototypes(f.proto, man.vendored(f.sym).ctxI, language, f.sym, symbols),
+        proto: rowPrototypes(f.proto, vendored, language, f.sym, symbols),
         // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
         // so the project ELF knows things about it that a user mid-decomp cannot. Score against
         // the map as it would look with this function still `INCLUDE_ASM` (core's
@@ -89,7 +91,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
           codegen.cflags,
           man.tu,
           f.prependC ?? '',
-          man.vendored(f.sym).ctxI,
+          vendored.ctxI,
           language,
         ),
         compile: makeRealCompile(
@@ -97,7 +99,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
           codegen.cflags,
           man.tu,
           f.prependC ?? '',
-          man.vendored(f.sym).ctxI,
+          vendored.ctxI,
           language,
         ),
       });
