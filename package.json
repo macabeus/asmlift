@@ -8,9 +8,10 @@
   "packageManager": "pnpm@9.14.4",
   "scripts": {
     "asmlift": "tsx packages/cli/src/main.ts",
-    "test": "vitest run && vitest run --config vitest.matching.config.ts",
+    "test": "sh scripts/gate-vitest.sh && sh scripts/gate-vitest.sh --config vitest.matching.config.ts",
+    "test:root": "sh scripts/gate-vitest.sh",
     "test:offline": "vitest run packages/core/test packages/cli/test/offline packages/toolchains/test",
-    "test:matching": "vitest run --config vitest.matching.config.ts",
+    "test:matching": "sh scripts/gate-vitest.sh --config vitest.matching.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core && tsc --noEmit -p apps/web && tsc --noEmit -p apps/web/tsconfig.test.json",
     "bench": "tsx apps/benchmark/src/cli.ts",
     "bench:merge": "tsx apps/benchmark/src/cli.ts merge",
