@@ -11,6 +11,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { StructureError, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
@@ -63,7 +64,10 @@ test('a header value read after a break is not re-derived from the updated name'
 // A `break` FROM INSIDE THE BODY, to that same exit. The edge leaves before the update, so the exit
 // region reads the values the header read and the one rendering after the loop serves both exits.
 // Each accepted fixture is also run against its own IR (`irAgreement`), so a break spelled on the
-// wrong edge or with the wrong sense changes an observable rather than only a string.
+// wrong edge or with the wrong sense changes an observable rather than only a string. It is judged
+// twice: as `structure()` returns it, and as it ships, after `readabilityRewrites` — a rewrite that
+// mis-models the new statement shape (dce once let a mid-body `break` fall through and dropped the
+// copy it carried) is invisible to the first judgement.
 //
 // Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`); a `break` whose other
 // edge is the back edge, left to the latch path, which refuses it here (`LATCH_READS_OLD_VALUE`); a
@@ -74,12 +78,17 @@ test('a header value read after a break is not re-derived from the updated name'
 // region reading a name this iteration already wrote (naming gives no header value such a name).
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
-const judged = (ir: string): { src: string; agreement: { judged: number; disagree: number } } => {
+type Agreement = { judged: number; disagree: number };
+const judged = (ir: string): { src: string; agreement: Agreement; shipped: Agreement } => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
   const sfn = structure(fn);
-  return { src: cBackend.emit(sfn), agreement: irAgreement(ir, sfn, SEEDS) };
+  return {
+    src: cBackend.emit(sfn),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
 };
 
 /** `sa3:VramMalloc:agbcc`'s inner loop: `for (j = 0; j < count; j++) { if (i + j >= max) return
@@ -120,7 +129,7 @@ const INNER_BREAK_TO_MERGE = `fn vraminner {
 }`;
 
 test('a mid-body `break` to the loop exit is spelled where it leaves', () => {
-  const { src, agreement } = judged(INNER_BREAK_TO_MERGE);
+  const { src, agreement, shipped } = judged(INNER_BREAK_TO_MERGE);
   expect(src).toBe(
     's32 vraminner(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n' +
       '        if (a1 + v0 >= a2) {\n            return -1;\n        } else {\n' +
@@ -128,6 +137,7 @@ test('a mid-body `break` to the loop exit is spelled where it leaves', () => {
       '    if (v0 != a0) {\n        return v0;\n    } else {\n        g(a1 + v0);\n        return a1 + v0;\n    }\n}\n',
   );
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** The break as the TAKEN edge, the body continuing on the fall-through. */
@@ -154,12 +164,13 @@ const BREAK_ON_TAKEN_EDGE = `fn breaktaken {
 }`;
 
 test('the break sense follows the edge that leaves', () => {
-  const { src, agreement } = judged(BREAK_ON_TAKEN_EDGE);
+  const { src, agreement, shipped } = judged(BREAK_ON_TAKEN_EDGE);
   expect(src).toBe(
     's32 breaktaken(s32 a0, s32 a1) {\n    s32 v0;\n    for (v0 = 0; v0 < a0; v0 = v0 + 1) {\n' +
       '        if (f(a1 + v0) == 0) break;\n    }\n    g(v0);\n    return v0;\n}\n',
   );
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** A merge inside the body before the break: its param is written on this iteration, under a name of
@@ -195,7 +206,7 @@ const MERGE_BEFORE_BREAK = `fn mergebefore {
 }`;
 
 test('a body merge ahead of the break does not reach the exit', () => {
-  const { src, agreement } = judged(MERGE_BEFORE_BREAK);
+  const { src, agreement, shipped } = judged(MERGE_BEFORE_BREAK);
   expect(src).toBe(
     's32 mergebefore(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v1 = a1;\n    while (v1 < a0) {\n' +
       '        v0 = 0;\n        if ((s32)f(v1) >= v0) {\n            v2 = v1 + 2;\n        } else {\n' +
@@ -203,6 +214,45 @@ test('a body merge ahead of the break does not reach the exit', () => {
       '    g(v1);\n    return v1;\n}\n',
   );
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The break CARRIES a value: the exit takes a param, the header hands it the loop variable (an
+ *  identity copy) and the break hands it this iteration's `g(v)`. The statement after the `if`
+ *  overwrites the same name for the next iteration, so the copy inside the `if` is live only
+ *  through the `break`. pokeemerald's `AgbRFU_checkID` (`id = Sio32IDMain(); if (id != 0) break;`
+ *  … `return id;`) has this shape. The test is an `icmp_eq`: the IR oracle models no `icmp_ne`, and
+ *  skips every seed that enters the loop when one is there. */
+const BREAK_CARRIES_A_COPY = `fn brkcopy {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: u32 = icmp_slt %2, %0
+  cond_br %3, ^bb2(), ^bb4(%2)
+^bb2():
+  %4: s32 = call %2 {target="g"}
+  %5: s32 = call %4 {target="f"}
+  %6: s32 = const {value=0}
+  %7: u32 = icmp_eq %5, %6
+  cond_br %7, ^bb3(), ^bb4(%4)
+^bb3():
+  %8: s32 = const {value=2}
+  %9: s32 = add %4, %8
+  br ^bb1(%9)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="h"}
+  ret %10
+}`;
+
+test('the copy a `break` carries survives the readability rewrites', () => {
+  const { src, agreement, shipped } = judged(BREAK_CARRIES_A_COPY);
+  expect(src).toBe(
+    's32 brkcopy(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    v1 = a1;\n    while (v1 < a0) {\n' +
+      '        v0 = g(v1);\n        if (f(v0) != 0) {\n            v1 = v0;\n            break;\n        }\n' +
+      '        v1 = v0 + 2;\n    }\n    h(v1);\n    return v1;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** The latch's own conditional `break`, to an exit that is not a `ret` block: the latch path spells
@@ -228,12 +278,13 @@ const LATCH_BREAK_TO_LIVE_EXIT = `fn latchlive {
 }`;
 
 test('a latch `break` to an exit that is not a `ret` block is spelled by the latch path', () => {
-  const { src, agreement } = judged(LATCH_BREAK_TO_LIVE_EXIT);
+  const { src, agreement, shipped } = judged(LATCH_BREAK_TO_LIVE_EXIT);
   expect(src).toBe(
     's32 latchlive(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n        f(v0);\n' +
       '        v0 = v0 + 1;\n        if (v0 == a1) break;\n    }\n    g(a1);\n    return a1;\n}\n',
   );
   expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
 /** A `ret`-terminated exit with no effects makes the edge an early-`return` arm, not a break: the

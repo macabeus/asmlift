@@ -109,6 +109,71 @@ describe('dead-local-store elimination', () => {
     ];
     expect(eliminateDeadStores(fn(body)).body).toEqual(body);
   });
+
+  // A JUMP DOES NOT FALL THROUGH. The live set at a `break` is what the loop's exit reads, and at a
+  // `continue` what the next test and iteration read — not what the statements after the enclosing
+  // `if` read. Those overwrite `v0` below, so a fall-through walk judged the carried copy dead.
+  const v0 = { k: 'var', name: 'v0' } as const;
+  const v1 = { k: 'var', name: 'v1' } as const;
+  const leave = (jump: 'break' | 'continue'): Stmt => ({
+    k: 'if',
+    cond: { k: 'call', fn: 'f', args: [v1] },
+    then: [{ k: 'assign', name: 'v0', value: v1 }, { k: jump }],
+    else: [],
+  });
+  const overwrite: Stmt = { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v1, r: { k: 'const', value: 2 } } };
+
+  test("a copy a mid-body `break` carries to the loop's exit is kept", () => {
+    // while (v1 < 9) { if (f(v1)) { v0 = v1; break; } v0 = v1 + 2; v1 = g(v0); } return v0;
+    const body: Stmt[] = [
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<', l: v1, r: { k: 'const', value: 9 } },
+        body: [leave('break'), overwrite, { k: 'assign', name: 'v1', value: { k: 'call', fn: 'g', args: [v0] } }],
+      },
+      { k: 'return', value: v0 },
+    ];
+    expect(eliminateDeadStores(fn(body, ['v0', 'v1'])).body).toEqual(body);
+  });
+
+  test('a copy a mid-body `continue` carries to the next test is kept', () => {
+    // while (v0 != 0) { if (f(v1)) { v0 = v1; continue; } v0 = v1 + 2; }
+    const body: Stmt[] = [
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '!=', l: v0, r: { k: 'const', value: 0 } },
+        body: [leave('continue'), overwrite],
+      },
+    ];
+    expect(eliminateDeadStores(fn(body, ['v0', 'v1'])).body).toEqual(body);
+  });
+
+  test('CONTROL: the same copy with no jump after it is dead', () => {
+    // while (v1 < 9) { if (f(v1)) { v0 = v1; } v0 = v1 + 2; v1 = g(v0); } return v0;
+    const out = eliminateDeadStores(
+      fn(
+        [
+          {
+            k: 'while',
+            cond: { k: 'bin', op: '<', l: v1, r: { k: 'const', value: 9 } },
+            body: [
+              {
+                k: 'if',
+                cond: { k: 'call', fn: 'f', args: [v1] },
+                then: [{ k: 'assign', name: 'v0', value: v1 }],
+                else: [],
+              },
+              overwrite,
+              { k: 'assign', name: 'v1', value: { k: 'call', fn: 'g', args: [v0] } },
+            ],
+          },
+          { k: 'return', value: v0 },
+        ],
+        ['v0', 'v1'],
+      ),
+    );
+    expect(JSON.stringify(out.body)).not.toContain('"then":[{"k":"assign"');
+  });
 });
 
 // AN ADDRESS-TAKEN LOCAL is never a dead store, whatever its qualifiers. This walk is BACKWARD, so
