@@ -764,7 +764,7 @@ export function diffGate(base = 'HEAD'): number {
   for (const line of fanLines(fans, base, fresh.results.filter((r) => r.asmlift.fanSize !== undefined).length)) {
     console.log(line);
   }
-  // …what the rows that newly rank cost, which the multiplier above cannot see.
+  // …and which rows newly rank, and what each cost — the multiplier above cannot see them.
   for (const line of appearedLines(fans, cost, base)) {
     console.log(line);
   }

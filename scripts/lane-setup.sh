@@ -1,21 +1,22 @@
 #!/bin/sh
-# A worktree a round can run `bench run` in, in one command — every step a coordinator did by hand
-# per lane, and got wrong at least once:
+# A worktree a round can run `bench run` in, in one command:
 #
 #   sh scripts/lane-setup.sh <worktree> <branch> [--base <ref>] [--env <file>]
 #                            [--board <dir> --handle <H> --args <json>]
 #
 #   1. `git worktree add -b <branch> <worktree> <base>` off a freshly fetched base (origin/main),
-#      `<base>` resolved in the MAIN checkout. Refuses a path that exists: launching into a live
-#      worktree is the failure on record.
+#      `<base>` resolved in the MAIN checkout. Refuses a path that exists: a round launched into a
+#      live worktree shares it with the round already there.
 #   2. links apps/benchmark/{checkouts,toolchains} to the MAIN checkout's copies — `bench setup`
-#      materializes gigabytes there, once. .gitignore matches both as symlinks.
+#      materializes gigabytes there, once — so every lane reads the same checkouts, and a
+#      `bench setup --build` in one lane rebuilds what the others read. .gitignore matches both
+#      as symlinks.
 #   3. writes <worktree>/.envrc.local: `--env <file>` copied verbatim; otherwise every `ASMLIFT_*`
 #      exported in THIS shell, plus the directories this shell resolves node, pnpm and `cpp` from
-#      — `cpp` because a login shell puts Apple clang's first, and 44 matches became `noncompile`
-#      with the run reporting ✓ (round protocol trap #6). A worktree's sibling defaults resolve to
-#      nothing, so no `ASMLIFT_*` at all is refused before anything is created. Nothing sources
-#      the file for you.
+#      — `cpp` because a login shell puts Apple clang's first, and Apple's ignores `-o` (round
+#      protocol trap #6). Either way the environment is checked before anything is created: at
+#      least one `ASMLIFT_*`, since a worktree's sibling defaults resolve to nothing, and a `cpp`
+#      that is not /usr/bin/cpp. Nothing sources the file for you.
 #   4. `pnpm install --frozen-lockfile --prefer-offline` in the worktree.
 #   5. with `--board`, `--handle` and `--args`: writes the Workflow args to
 #      <board>/args/<handle>.json BEFORE the launch. A resume needs the exact args of the run it

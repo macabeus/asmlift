@@ -1,35 +1,25 @@
 #!/bin/sh
-# A vitest run that is a GATE: exit 0 only when every collected test file passed.
+# A vitest run that is a GATE: exit 0 only when every collected test file and test passed.
 #
 #   sh scripts/gate-vitest.sh [vitest args…]        e.g.  --config vitest.matching.config.ts
 #
 # vitest's own exit status is not that, in either direction:
 #
-#   - it exits 0 on a PARTIAL run. `test:matching` skips 12 of its files when the external drive
-#     holding the mwcc/kmc/gcc272 images is detached, and reports them as skipped, not failed.
-#     Three PRs have published such a run as their gate.
-#   - it exits 1 on a GREEN run. Under load, a worker misses vitest's 60 s worker↔main RPC
-#     deadline and the run ends `Errors  1 error` (`Timeout calling "onTaskUpdate"`), with every
-#     test passed. A reader who learned to ignore that learns to ignore a real unhandled error.
+#   - it exits 0 on a PARTIAL run: a suite whose toolchain, Docker image or checkout is missing
+#     skips, and a skip is reported as skipped, not failed.
+#   - it exits 1 on a GREEN run: a worker that holds its thread in synchronous work past vitest's
+#     60 s worker↔main RPC deadline ends the run `Errors  1 error` (`Timeout calling
+#     "onTaskUpdate"`) with every test passed. Load stretches the root suite's longest single tests
+#     past that deadline at any worker count; fewer workers make it rarer.
 #
-# So this reads the summary instead: `Test Files  N passed (M)` with N == M, no `failed`, no
-# `skipped`, the same of the `Tests` line — a shell without the toolchain env skips single tests
-# (`skipIf(!HAVE_AGBCC)`, docs/bench-cost.md §1), not whole files — AND exit 0. Anything else fails, and the verdict line says which. An `Errors` line is
-# named in the verdict either way; it fails the gate through the exit status, so a config that
-# chose `dangerouslyIgnoreUnhandledErrors` (vitest.matching.config.ts, for the same timeout from
-# its own serial compiles) keeps that choice.
+# So this reads the summary: `Test Files  N passed (M)` with N == M and no `failed`, `skipped` or
+# `todo` there or on the `Tests` line — a shell without the toolchain env skips single tests, not
+# whole files — AND exit 0. The verdict line says which condition failed. An `Errors` line fails the
+# gate through the exit status, so a config that chose `dangerouslyIgnoreUnhandledErrors`
+# (vitest.matching.config.ts) keeps that choice, and an error is named in the verdict either way.
 #
-# WORKERS. The default is 3 (`VITEST_MAX_WORKERS` overrides; an explicit `--maxWorkers` in the args
-# wins). vitest's own default is one per core minus one — 9 on a 10-core machine — and the RPC
-# timeout above is what that costs when two rounds' gates and a bench share the machine. Measured
-# 2026-09-28 on this 10-core machine, the root config back to back: default workers 215 s, ending
-# with `Errors  1 error` (the RPC timeout) at a load average of ~30; `--maxWorkers=3` 127 s, no error.
-# Fewer workers was the FASTER run, not only the quieter one. It is not a cure: a later 3-worker run
-# at a load average of ~10 hit the timeout once (325/325 files passed), and so did origin/main at
-# 1b310c15 beside it (324/324 passed, `Errors  1 error`), because what misses the
-# deadline is a test holding its worker's thread in synchronous work — the root suite has single
-# tests of 22-31 s — and load stretches those past 60 s at any worker count. So the verdict names
-# the error and says re-run; it never reads it as a pass.
+# WORKERS. 3 by default (`VITEST_MAX_WORKERS` overrides; an explicit `--maxWorkers` in the args
+# wins) — docs/bench-cost.md §1 has what the root suite costs at that and at vitest's default.
 set -u
 
 log=$(mktemp "${TMPDIR:-/tmp}/gate-vitest.XXXXXX") || exit 2

@@ -241,7 +241,7 @@ export function newlyRanked(d: SweepDiff, rates: ReadonlyMap<string, number>): N
     ) {
       continue;
     }
-    // matched as a suffix, not cut off the id: identity.test.ts censuses every `:` cut
+    // matched as a suffix: identity.test.ts censuses every `:` cut of an id
     const toolchain = Object.keys(TOOLCHAINS).find((t) => m.id.endsWith(`:${t}`));
     const tier = m.id.startsWith('synthetic:') ? 'synthetic' : 'real';
     out.push({
@@ -936,7 +936,7 @@ function reportDiff(d: SweepDiff, what: string, o: SweepOptions): number {
   for (const line of renderDiff(d)) {
     console.log(line);
   }
-  // not gated on `--fan`: `--compare` reads two record files whatever flag wrote them, and a sweep
+  // every comparison: `--compare` reads two record files whatever flag wrote them, and a sweep
   // without fans moves no `fan` field, so this prints nothing there
   const { rates, unreadable } = recordedRankRates();
   for (const line of newlyRankedLines(newlyRanked(d, rates), unreadable)) {

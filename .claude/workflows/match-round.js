@@ -271,11 +271,9 @@ if (!shipped) return died('Ship')
 round.shipped = shipped
 
 // ONE MORE BREAKER on every commit that reached the PR without a wave reading it: the last wave's
-// remediation, and whatever the ship agent changed while rebasing. A remediation is the likeliest
-// place for a new defect — it is written fast, against a finding, by an agent that has not read the
-// whole change — and on the 2026-09-23 run a dedupe one round wrote was itself decline→wrong, and
-// only a breaker reading it caught that. One breaker, not a wave: what it finds is fixed and gated, and
-// those fixes are named as unreviewed in the slot rather than looping.
+// remediation, and whatever the ship agent changed while rebasing. A remediation is written fast,
+// against one finding, by an agent that has not read the whole change. One breaker, not a wave:
+// what it confirms is fixed and gated, and those fixes are named as unreviewed in the slot.
 let finalReview = null
 const pending = [
   ...(unreviewed ? [`the last wave's remediation, as written before the rebase: \`git -C ${worktree} log -p ${unreviewed}\``] : []),

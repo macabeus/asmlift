@@ -136,7 +136,7 @@ const { values: opts, positionals } = parseArgs({
     // else's live run depends on.
     'no-lock': { type: 'boolean', default: false },
     // run only: continue the tier's unfinished queue (run/queue.ts), and run in the background.
-    // `--claim <gen>` is what the orchestrator hands its shard children, not a flag to type.
+    // `--claim <gen>` is what the orchestrator hands its shard children; nobody types it.
     resume: { type: 'boolean', default: false },
     detach: { type: 'boolean', default: false },
     claim: { type: 'string' },

@@ -1,5 +1,5 @@
 // Shard fan-out + stitch — the whole parent/child contract. Fans each tier across N worker
-// PROCESSES (each a `cli.ts run --serial --tier X --shard i/N --claim <gen>` child taking rows off
+// PROCESSES (each a `cli.ts run --tier X --shard i/N --claim <gen>` child taking rows off
 // the tier's shared queue and writing a part file — queue.ts), then stitches the parts into the
 // canonical per-tier file. Process-level sharding: the hot path per
 // case is a synchronous cross-compile + m2c/asmlift that spawnSync-blocks the event loop, so

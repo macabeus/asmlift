@@ -549,10 +549,11 @@ stated reason is fine, a silent extra half hour is not.
 A full bench and a ranked run are pure waiting. Launch one in the BACKGROUND at the start of a
 phase whose other work does not depend on its answer, and read the log at the end.
 
-**`pnpm bench run --detach`** starts the run in its own session and returns at once, printing the
-pid and the log (`apps/benchmark/results/run-<time>.log`). The run survives the shell, the agent
-and the session that started it — the 2026-09-23 run lost a 3.5 h bench to an auth outage that
-took its launching shell with it.
+**`pnpm bench run --detach`** starts the run in its own process group, with its output in a log
+(`apps/benchmark/results/run-<time>.log`), and returns once the run's record is in the register —
+so `pnpm bench in-flight` sees it from the first poll. The run survives the shell, the agent and
+the session that started it. It prints the record's pid and the one command that stops the run and
+every shard: `kill -9 -- -<process group>`.
 
 **Wait on a condition that tells "finished" from "stopped moving".** A killed run and a wedged one
 both leave a log that simply stops, so poll for the run to leave the register AND for the log
@@ -569,33 +570,34 @@ until pnpm bench in-flight >/dev/null 2>&1; do   # exit 0 = no run is measuring 
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
   # A row still ranking prints `… still ranking: n/N candidates` once a minute, so a quiet log
-  # is no longer the long-pole row working: what stays silent is enumeration and the target
-  # build (~91 s on the corpus's largest fan, §3). 900 s of no growth is a run to investigate.
+  # is no longer the long-pole row working: what stays silent is a row's target build and
+  # enumeration, 91.2 s on the corpus's largest fan (`SWEEP_FAN_LIMIT` in run/sweep.ts).
+  # 900 s of no growth is a run to investigate.
   [ "$still" -ge 900 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
 grep -E '^(✓|✗|–) |^Done in|Error' "$LOG"
 ```
 
-**The long pole prints its progress now.** A row whose ranked pass runs past a minute says so once
-a minute — `… mp4:getCardStatus:mwcc_233_163n still ranking: 400/1408 candidates, best diff:12/300
-(1830s)` — so "stuck or slow?" is read off the log instead of guessed. The corpus's slowest rows
-(`mp4:getCardStatus:mwcc_233_163n`, 1,408 candidates ranked in 10,276 s on 2026-09-23;
-`kleod:PauseMenuScreenHandler:agbcc`, read its size from §3) are that normal shape, not a hang.
+**The long pole prints its progress.** A row whose ranked pass runs past a minute says so once a
+minute — `… pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n still ranking: 400/1408 candidates,
+best diff:12/300 (1830s)` — so "stuck or slow?" is read off the log instead of guessed. The
+corpus's slowest ranked pass is that row's: 1,028.76 s over 1,408 candidates in the artifact at
+1b310c15 (`git show 1b310c15:apps/benchmark/results/results.json`, its `asmlift.rankSeconds`). A
+row that long is the normal shape, not a hang.
 **Never kill a bench you have not proven hung.** A supervisor once killed a healthy gate run on
 exactly this signature and lost ~44 minutes.
 
 **The shards share one row queue** (`run/queue.ts`): each takes the next unclaimed row, rows the
-committed artifact never priced first and then the dearest by its `rankSeconds`. So an expensive
-row starts early instead of wherever a fixed `idx % jobs` slice put it, and while it runs, the
-other shards finish the rest of its tier and move on to the next. It cannot make the one row
-cheaper: a tier still ends no sooner than its dearest row.
+committed artifact never priced first and then the dearest by its `rankSeconds`. While an expensive
+row runs, the other shards finish the rest of its tier and move on to the next. A tier still ends
+no sooner than its dearest row.
 
 **Never wait on `pgrep -f "<pattern>"` when the pattern also matches your own waiting shell** —
 five waiter shells once deadlocked on each other for eight hours doing exactly that, long after
 the jobs they watched had finished. `grep '[b]ench/src/cli\.ts'` does not match
 `apps/benchmark/src/cli.ts` either: the process to look for is the `tsx …/apps/benchmark/src/cli.ts
-run …` parent, and its shard children are `… run --serial --tier <t> --shard i/N`.
+run …` parent, and its shard children are `… run --tier <t> --shard i/N --claim <gen>`.
 
 ### What you may keep working ON
 
@@ -629,22 +631,26 @@ and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `sp
 case, so no signal handler can run until it is done, and `lock.ts` has no handlers by design for
 the same reason.
 
-`kill -9` is the stop that works on the parent — **and it orphans the shards.** They are ordinary
-`spawn`ed `tsx` children (`orchestrate.ts`), so killing the parent leaves up to eight of them
-compiling at PPID 1. So:
+`kill -9` is the stop that works — **and, sent to the parent alone, it orphans the shards.** They
+are ordinary `spawn`ed `tsx` children (`orchestrate.ts`), left compiling at PPID 1; an orphan
+finishes its current row and then stops claiming, and until it has, a new run in that worktree
+refuses to start and names its pid. So:
 
-1. `kill -9 <parent pid>`;
-2. kill the shard children too — they carry `--shard i/N` in their command line;
+1. a `--detach`ed run: `kill -9 -- -<process group>`, the command it printed — the whole run at once;
+2. otherwise `kill -9 <parent pid>`, then the shard children — they carry `--claim <gen>` in their
+   command line;
 3. **verify with `ps`**, and exclude your own grep pipeline from what you read.
 
 The record the killed run strands names a dead pid, so it reads STALE — that blocks nothing, and
 the next run sweeps it.
 
 **Nothing measured is lost.** Each shard flushes after every row into
-`apps/benchmark/results/.<tier>.run/`, and `pnpm bench run --resume` — same HEAD, same filters, or
-it refuses — re-queues only the rows no shard finished and stitches the old rows and the new into
-the tier file. A run started WITHOUT `--resume` discards an unfinished queue and says how many rows
-it dropped. A run whose shards exit nonzero keeps its queue for the same reason.
+`apps/benchmark/results/.<tier>.run/`, and `pnpm bench run --resume` re-queues only the rows no
+shard finished and stitches the old rows and the new into the tier file. It refuses a different
+HEAD, different filters, or an unfinished run whose tree went dirty (`bench merge` would refuse
+what it stitched), and it measures only the tiers that have an unfinished queue. A run started
+WITHOUT `--resume` discards an unfinished queue and says how many rows it dropped. A run whose
+shards exit nonzero, or whose shards left a planned row unmeasured, keeps its queue for `--resume`.
 
 ### Two full benches must never overlap on this machine
 

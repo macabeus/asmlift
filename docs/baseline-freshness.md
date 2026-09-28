@@ -120,6 +120,11 @@ no `node_modules`:
 git fetch origin && git worktree add <dir> -b <branch> origin/main && (cd <dir> && pnpm install)
 ```
 
+`scripts/lane-setup.sh <dir> <branch>` does that, links the main checkout's bench-owned
+`checkouts/` and `toolchains/` into it, and writes its `.envrc.local` from this shell's `ASMLIFT_*`
+(or from `--env <file>`) — refusing first when there is none, or when `cpp` is Apple's. Its header
+says what the shared checkouts cost.
+
 Then give it the projects the real tier compiles. `pnpm bench setup` materializes the bench-owned
 checkouts (`apps/benchmark/checkouts/`) by itself; a checkout you already have is picked up by
 pointing `ASMLIFT_PROJ_<PROJECT>` at it, or as a sibling of the workspace — in that precedence, which

@@ -174,8 +174,7 @@ export function runCases(
       return;
     }
     const out: PartFile = { meta: benchMeta(results), results, ...(claimer ? { skipped } : {}) };
-    // written whole and renamed into place: a shard killed mid-flush leaves the previous flush, not
-    // a truncated file
+    // written whole and renamed into place, so a shard killed mid-flush leaves its previous flush
     writeFileSync(`${outPath}.tmp`, JSON.stringify(out, null, 2));
     renameSync(`${outPath}.tmp`, outPath);
   };
