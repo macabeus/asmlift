@@ -126,13 +126,13 @@ function spellings(
 // spells moves these populations by a few seeds at a time, which a floor does not record.
 //
 // THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,506 at depth 1 where
-// `namecoalesce-fuzz` judges 2,511 — five FEWER — and the two files lose different seeds.
-// `ADMIT_NOTHING` declines on 7 seeds the shipped spelling structures (291, 1089, 1489, 1724, 3021,
-// 3923, each `unrecovered back-edge into block #k`, and 1504, whose fresh exit param makes a
-// header→exit copy a `break` would run), and `spellings` needs both, so those seven leave here and
+// `namecoalesce-fuzz` judges 2,512 — six FEWER — and the two files lose different seeds.
+// `ADMIT_NOTHING` declines on 8 seeds the shipped spelling structures (291, 1089, 1489, 1724, 3021,
+// 3923, each `unrecovered back-edge into block #k`, and 1504 and 2921, whose fresh exit param makes
+// a header→exit copy a `break` would run), and `spellings` needs both, so those eight leave here and
 // stay there. `coalesceMergeNames` declines on 2 the shipped spelling structures (3601, 3947), which
-// stay here and leave there. Instrumented at depth 1: declines are 1,335 for `ADMIT_NOTHING`, 1,344
-// for the shipped spelling and 1,346 for `coalesceMergeNames`.
+// stay here and leave there. Instrumented at depth 1: declines are 1,335 for `ADMIT_NOTHING`, 1,343
+// for the shipped spelling and 1,345 for `coalesceMergeNames`.
 //
 // RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and

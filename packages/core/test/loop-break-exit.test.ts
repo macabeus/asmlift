@@ -11,9 +11,10 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { readabilityRewrites } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { StructureError, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
@@ -69,9 +70,10 @@ test('a header value read after a break is not re-derived from the updated name'
 // mis-models the new statement shape (dce once let a mid-body `break` fall through and dropped the
 // copy it carried) is invisible to the first judgement.
 //
-// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`); a `break` whose other
-// edge is the back edge, left to the latch path, which refuses it here (`LATCH_READS_OLD_VALUE`); a
-// `do-while` (`DO_WHILE_BREAK`). Three have no witness, and are kept as the conditions this spelling
+// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), and a `do-while`
+// (`DO_WHILE_BREAK`). A refusal is loud only where the exit is a live merge; an exit that ends in a
+// `ret` can take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break` the
+// latch path refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no witness, and are kept as the conditions this spelling
 // rests on rather than as rules any input is known to need: an edge out of a nested loop's body (a
 // loop this recognizer admits leaves only to its own exit, which lies inside ours); an in-body branch
 // whose other edge leaves the loop as well (if-recovery declines those branches first); and an exit
@@ -319,7 +321,8 @@ test('an edge to a pure `ret` exit stays an early `return`', () => {
 });
 
 /** The exit takes a param: `-1` from the header, `j` from the break. The header's copy runs after
- *  the loop, so a `break` would reach it and overwrite `j`. */
+ *  the loop, so a `break` would reach it and overwrite `j`. The exit is a live merge, not a `ret`
+ *  block, so nothing else can spell the edge. */
 const HEADER_EXIT_COPIES = `fn exitcopies {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -340,6 +343,8 @@ const HEADER_EXIT_COPIES = `fn exitcopies {
   br ^bb1(%10)
 ^bb4(%11: s32):
   %12: s32 = call %11 {target="g"}
+  br ^bb5()
+^bb5():
   ret %11
 }`;
 
@@ -347,7 +352,10 @@ test('a `break` the header-exit copies would overwrite declines', () => {
   expect(() => emit(HEADER_EXIT_COPIES)).toThrow(/would run the copies the loop header hands its exit/);
 });
 
-/** The break test sits in the latch, after the update, and the exit reads the header's `v1`. */
+/** The break test sits in the latch, after the update, and the exit reads the header's `v1`. The
+ *  latch path spells a latch break update-first, which would hand the exit `v2`, and refuses; the
+ *  break is spelled first instead, ahead of the update copy. `MERGE_BEFORE_BREAK` is the same
+ *  program with the update copy in a block of its own, and lifts to the same C. */
 const LATCH_READS_OLD_VALUE = `fn latchold {
 ^bb0(%0: s32, %1: s32):
   br ^bb1(%1)
@@ -376,8 +384,59 @@ const LATCH_READS_OLD_VALUE = `fn latchold {
   ret %3
 }`;
 
-test('a latch `break` whose exit reads the value before the update declines', () => {
-  expect(() => emit(LATCH_READS_OLD_VALUE)).toThrow(/leaves from the latch/);
+test('a latch `break` whose exit reads the value before the update leaves ahead of the update', () => {
+  const { src, agreement, shipped } = judged(LATCH_READS_OLD_VALUE);
+  expect(src).toBe(judged(MERGE_BEFORE_BREAK).src.replace('mergebefore', 'latchold'));
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** agbcc -O2 of `int m8(int *p, int n, int m, int k) { int i = 0; int x; while ((x = p[i]) != k) {
+ *  if (*p == 0) return 1; if (k < m) break; i++; x = x + 1; if (i > n) break; } G = 0; return x; }`.
+ *  The exit `.L4` ends in a return and takes `x` from three edges, so the header hands it a copy and
+ *  the mid-body `break` is refused. Before breaks were recognised this lifted by copying the exit's
+ *  tail into each arm, and it still does. */
+const M8_RET_EXIT_WITH_COPIES = `m8:
+	push	{r4, r5, r6, r7, lr}
+	add	r5, r0, #0
+	add	r7, r1, #0
+	add	r6, r2, #0
+	mov	r4, #0x0
+	add	r1, r5, #0
+.L3:
+	ldr	r2, [r1]
+	cmp	r2, r3
+	beq	.L4
+	ldr	r0, [r5]
+	cmp	r0, #0
+	bne	.L6
+	mov	r0, #0x1
+	b	.L10
+.L6:
+	cmp	r3, r6
+	blt	.L4
+	add	r1, r1, #0x4
+	add	r4, r4, #0x1
+	add	r2, r2, #0x1
+	cmp	r4, r7
+	ble	.L3
+.L4:
+	ldr	r1, .L11
+	mov	r0, #0x0
+	str	r0, [r1]
+	add	r0, r2, #0
+.L10:
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.L11:
+	.word	G
+`;
+
+test('a refused `break` to an exit that ends in a return copies the tail instead', () => {
+  const src = decompile('m8', M8_RET_EXIT_WITH_COPIES, ARMV4T_AGBCC, { prototypes: { m8: { params: 4 } } }).source;
+  expect(src).not.toContain('break');
+  expect(src.match(/G = 0;/g)).toHaveLength(3);
 });
 
 /** A bottom-tested loop with a mid-body edge to its exit, which is not a `ret` block. */

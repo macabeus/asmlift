@@ -2600,8 +2600,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // loop and running the exit region once, after it. A second exit that lands on any OTHER live
     // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
     // body (that is a two-level exit) and any `break` of a `do-while` (its exit copies are judged
-    // differently, and no row has asked). The arms and breaks are kept: emission needs to know
-    // which edges out of the body end an iteration rather than continue it.
+    // differently, and no row has asked). An edge to the header's exit when that exit ends in a
+    // `ret` is a break too, though the older route still serves it: the arm can copy the exit's
+    // tail and return instead, so where the break spelling refuses, emission falls back to that
+    // and the edge is spelled as it was before breaks existed. The arms and breaks are kept:
+    // emission needs to know which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
     const breaks: LoopEdge[] = [];
     let singleExit = true;
@@ -5560,75 +5563,87 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
 
     // A `break` from INSIDE the body: one edge of this cond_br is an admitted break edge (it lands on
-    // the `while`'s own exit), the other stays in the body. Spelled `if (c) { <edge copies>; break; }`
-    // and then the rest of the body, which is what the asm runs: the exit region renders once, after
-    // the loop, for the header's exit and this edge alike. No update has run on this path, so the
-    // loop variables still hold what the header read, unless a block between the header and here
-    // wrote one of their names. The loop was admitted on the promise of this spelling, so each
-    // refusal is LOUD:
+    // the `while`'s own exit). Spelled `if (c) { <edge copies>; break; }` and then what the other edge
+    // runs, which is what the asm runs: the exit region renders once, after the loop, for the
+    // header's exit and this edge alike. The break leaves before any update copy on this path, so
+    // the loop variables still hold what the header read, unless a block between the header and here
+    // wrote one of their names.
+    //
+    // The other edge may be the BACK edge. The latch path above spells a latch break update-first
+    // and refuses when the test or the exit reads a value the update overwrites; reaching here
+    // means it refused, and this spelling puts the update copies after the `if`, where the break has
+    // already left. Whether the update sits in the latch or in a block of its own is a layout
+    // accident, and both lift the same way.
+    //
+    // Refused:
     //   • the header→exit edge has copies: they run after the loop on the break path too, and
     //     clobber what the break carried (the latch path's break-clobber rule);
-    //   • the other edge is the back edge: the latch path above owns that one, and reaching here
-    //     means it refused;
     //   • the other edge leaves the body too;
     //   • the exit region reads a value under a name written earlier in this iteration.
+    // A refusal is LOUD, since the loop was admitted on the promise of this spelling — except where
+    // the exit ends in a `ret`: then the arm can copy the exit's tail and return, and if-recovery
+    // below spells it that way, as it did before breaks were recognised.
     // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
-    const brk = loopCtx?.breaks.find((e) => e.from === b) ?? null;
-    if (loopCtx && brk) {
-      const breakIsTaken = takenB === brk.to;
+    if (loopCtx && loopCtx.breaks.some((e) => e.from === b)) {
+      const frame = loopCtx;
+      const breakIsTaken = takenB === frame.exit;
       const stayB = breakIsTaken ? fallB : takenB;
-      const refuse = (why: string): never => {
-        throw new StructureError(`cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${why}`);
-      };
-      if (argAssigns(loopCtx.header, loopCtx.exit).length !== 0) {
-        refuse('would run the copies the loop header hands its exit');
-      }
-      if (stayB === loopCtx.header) {
-        refuse('leaves from the latch, after an update the exit test or the exit region cannot read past');
-      }
-      if (!loopCtx.body.has(stayB)) {
-        refuse('has no edge beside it that stays in the loop');
-      }
-      const before = new Set<Block>([b]);
-      for (const stack = [b]; stack.length;) {
-        for (const p of preds.get(stack.pop()!) ?? []) {
-          if (p !== loopCtx.header && loopCtx.body.has(p) && !before.has(p)) {
-            before.add(p);
-            stack.push(p);
+      const refusal = ((): string | null => {
+        if (argAssigns(frame.header, frame.exit).length !== 0) {
+          return 'would run the copies the loop header hands its exit';
+        }
+        if (!frame.body.has(stayB)) {
+          return 'has no edge beside it that stays in the loop';
+        }
+        const ahead = new Set<Block>([b]);
+        for (const stack = [b]; stack.length;) {
+          for (const p of preds.get(stack.pop()!) ?? []) {
+            if (p !== frame.header && frame.body.has(p) && !ahead.has(p)) {
+              ahead.add(p);
+              stack.push(p);
+            }
           }
         }
-      }
-      // A param is written by its in-edges' copies, except where every one of them already holds
-      // the name (an identity copy, which `argAssigns` elides); a materialized def is written in place.
-      const writtenBefore = new Set<string>();
-      for (const x of before) {
-        const ins = [...inEdgeRecords(preds, x)];
-        x.params.forEach((p, k) => {
-          const n = varName.get(p);
-          if (n !== undefined && ins.some(({ succ }) => varName.get(succ.args[k]) !== n)) {
-            writtenBefore.add(n);
-          }
-        });
-        for (const o of x.ops) {
-          const n = materialize.has(o) && o.results[0] !== undefined ? varName.get(o.results[0]) : undefined;
-          if (n !== undefined) {
-            writtenBefore.add(n);
+        // A param is written by its in-edges' copies, except where every one of them already holds
+        // the name (an identity copy, which `argAssigns` elides); a materialized def is written in place.
+        const writtenBefore = new Set<string>();
+        for (const x of ahead) {
+          const ins = [...inEdgeRecords(preds, x)];
+          x.params.forEach((p, k) => {
+            const n = varName.get(p);
+            if (n !== undefined && ins.some(({ succ }) => varName.get(succ.args[k]) !== n)) {
+              writtenBefore.add(n);
+            }
+          });
+          for (const o of x.ops) {
+            const n = materialize.has(o) && o.results[0] !== undefined ? varName.get(o.results[0]) : undefined;
+            if (n !== undefined) {
+              writtenBefore.add(n);
+            }
           }
         }
+        const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+        if (loopEscapeHazard(frame.body, new Map(), writtenBefore, exitRegion)) {
+          return 'reaches an exit region that reads a loop value under a name this iteration already rewrote';
+        }
+        return null;
+      })();
+      if (refusal === null) {
+        let leaveCond = expr(term.operands[0]);
+        if (!breakIsTaken) {
+          leaveCond = negateCond(leaveCond);
+        }
+        const [breakEdge, stayEdge] = breakIsTaken ? term.successors : [term.successors[1], term.successors[0]];
+        out.push(mkIf(leaveCond, [...argAssignsFor(b, breakEdge), { k: 'break' }], []));
+        out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
+        return out;
       }
-      const exitRegion = new Set([loopCtx.exit, ...reachFrom(loopCtx.exit)].filter((x) => !loopCtx!.body.has(x)));
-      if (loopEscapeHazard(loopCtx.body, new Map(), writtenBefore, exitRegion)) {
-        refuse('reaches an exit region that reads a loop value under a name this iteration already rewrote');
+      if (!isRet(frame.exit)) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${refusal}`,
+        );
       }
-      let leaveCond = expr(term.operands[0]);
-      if (!breakIsTaken) {
-        leaveCond = negateCond(leaveCond);
-      }
-      const [breakEdge, stayEdge] = breakIsTaken ? term.successors : [term.successors[1], term.successors[0]];
-      out.push(mkIf(leaveCond, [...argAssignsFor(b, breakEdge), { k: 'break' }], []));
-      out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
-      return out;
     }
 
     // Regime-A switch: if this cond_br roots a comparison tree over a single scrutinee, emit a
