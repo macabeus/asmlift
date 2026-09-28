@@ -83,6 +83,9 @@ readers, none of which compiles anything:
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
+  A fan of 500 candidates or more compiles on four threads (`PARALLEL_FAN`, `ROW_COMPILE_WORKERS`
+  in `apps/benchmark/src/eval/asmlift.ts`), so its `rank=` is wall over those threads — a quarter
+  of its compile time or more, depending on what else the machine is running.
   Use it before you launch a scoped run, not after. A `noncompile` row may carry
   `fanNotCompiled` — its fan was declared stillborn (core `stillborn.ts`) and only each signedness
   half's default and one probe per variation were compiled — and prints as `fan=30240 (35 compiled)`: `fanSize` is
@@ -632,7 +635,7 @@ sample is sticky and reverting does not undo it. Stop it, revert or commit, star
 
 **`kill -TERM` does not stop a `bench run`** — measured 2026-09-10: one sent SIGTERM 6 s in ran all 291 cases
 and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
-case, so no signal handler can run until it is done, and `lock.ts` has no handlers by design for
+compile on its own thread, so no signal handler can run until it is done, and `lock.ts` has no handlers by design for
 the same reason.
 
 `kill -9` is the stop that works — **and, sent to the parent alone, it orphans the shards.** They

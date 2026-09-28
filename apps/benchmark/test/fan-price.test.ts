@@ -70,7 +70,7 @@ describe('fanSize (pure)', () => {
   // fan is their sum. Counting only `candidates` would under-report a row by its whole refused
   // half — `kleod:ProcessInputAndUpdateEntities:agbcc` publishes 51,840 dropped spellings — and
   // a stillborn fan by everything it never compiled.
-  test('is scored + dropped + withheld + not compiled, the four lists rankBy partitions the fan into', async () => {
+  test('is scored + dropped + withheld + not compiled, the four lists rankBy partitions the fan into', () => {
     expect(fanSize({ candidates: [1, 2, 3], dropped: [4], withheld: [5, 6] })).toBe(6);
     expect(fanSize({ candidates: [], dropped: [4], withheld: [], notCompiled: [7, 8] })).toBe(3);
   });
@@ -84,13 +84,13 @@ describe('notCompiledDigest (pure)', () => {
     { variations: [names[0]], source: a },
     { variations: [names[1]], source: b },
   ];
-  test('moves with any source, and with their order', async () => {
+  test('moves with any source, and with their order', () => {
     const d = notCompiledDigest(rest('f(1);', 'f(2);'));
     expect(notCompiledDigest(rest('f(1);', 'f(3);'))).not.toBe(d);
     expect(notCompiledDigest(rest('f(2);', 'f(1);'))).not.toBe(d);
     expect(notCompiledDigest(rest('f(1);f(2);', ''))).not.toBe(d);
   });
-  test('reads neither the variation names nor a scratch path', async () => {
+  test('reads neither the variation names nor a scratch path', () => {
     const d = notCompiledDigest(rest('/* /tmp/asmlift-ranked-a1b2c3 */ f(1);', 'f(2);'));
     expect(notCompiledDigest(rest('/* /tmp/asmlift-ranked-z9y8x7 */ f(1);', 'f(2);', ['p', 'q']))).toBe(d);
   });
@@ -100,7 +100,7 @@ describe('fanSizeOfError (pure)', () => {
   // A row whose every spelling was refused is published `noncompile` and the ranking THREW — but
   // the fan is not unknown there, it rides on the error. Not recording it makes exactly the rows
   // whose whole fan failed the rows with no price.
-  test('reads the fan off the error a fully-refused row throws', async () => {
+  test('reads the fan off the error a fully-refused row throws', () => {
     const e = new NoScorableCandidateError(
       'no scorable candidate',
       [{ variations: ['a'], error: 'x' }],
@@ -113,7 +113,7 @@ describe('fanSizeOfError (pure)', () => {
   // …and says nothing about a throw that is not a fan at all. A scorer infrastructure error is
   // caught by the same `catch`, and inventing a 0 there would publish "this row enumerated
   // nothing" for a row nobody counted.
-  test('is undefined for a throw that carries no fan', async () => {
+  test('is undefined for a throw that carries no fan', () => {
     expect(fanSizeOfError(new TypeError('x is not a function'))).toBeUndefined();
     expect(fanSizeOfError(null)).toBeUndefined();
   });
@@ -303,7 +303,7 @@ describe('what the gates do with a recorded cost', () => {
   // Wall clock differs on every row of every run — machine load, docker, ~5× cold vs warm
   // candidate cache. Compared, `stale-check` would answer `stale` unconditionally and stop being
   // a question.
-  test('stale-check ignores rankSeconds — otherwise every run is stale by construction', async () => {
+  test('stale-check ignores rankSeconds — otherwise every run is stale by construction', () => {
     expect(comparableRow(row(side({ fanSize: 96, rankSeconds: 1.2 })))).toBe(
       comparableRow(row(side({ fanSize: 96, rankSeconds: 41.7 }))),
     );
@@ -311,13 +311,13 @@ describe('what the gates do with a recorded cost', () => {
 
   // …and an artifact written before the field existed must compare equal to a fresh run carrying
   // it, or the first run after this lands reports every row stale over a value nobody can read.
-  test('stale-check reads an artifact that predates rankSeconds as unchanged', async () => {
+  test('stale-check reads an artifact that predates rankSeconds as unchanged', () => {
     expect(comparableRow(row(side({ fanSize: 96 })))).toBe(comparableRow(row(side({ fanSize: 96, rankSeconds: 3.3 }))));
   });
 
   // The fan is deterministic, so a fan that moved IS a change worth committing — and is the change
   // this artifact started recording in order to stop losing.
-  test('stale-check DOES compare fanSize', async () => {
+  test('stale-check DOES compare fanSize', () => {
     expect(comparableRow(row(side({ fanSize: 96 })))).not.toBe(comparableRow(row(side({ fanSize: 384 }))));
   });
 });
@@ -328,7 +328,7 @@ describe('the per-row run line', () => {
   const side = (over: Partial<DecompilerResult>): DecompilerResult =>
     ({ decompiler: 'asmlift', outcome: 'nonmatch', score: 12, maxScore: 40, ...over }) as DecompilerResult;
 
-  test('is index, id, both outcomes, then the cost — fan included', async () => {
+  test('is index, id, both outcomes, then the cost — fan included', () => {
     const r = {
       id: 'kleod:CountCollectedGems:agbcc',
       asmlift: side({ score: 18, maxScore: 344, fanSize: 5952 }),
@@ -339,7 +339,7 @@ describe('the per-row run line', () => {
     );
   });
 
-  test('a stillborn row prints how much of its fan was compiled', async () => {
+  test('a stillborn row prints how much of its fan was compiled', () => {
     const r = {
       id: 'x:y:agbcc',
       asmlift: side({ outcome: 'noncompile', compileErrors: 1, fanSize: 8, fanNotCompiled: 3 }),
@@ -350,7 +350,7 @@ describe('the per-row run line', () => {
     );
   });
 
-  test('a row that never ranked prints no fan, and the rest of the line is unchanged', async () => {
+  test('a row that never ranked prints no fan, and the rest of the line is unchanged', () => {
     const r = {
       id: 'x:y:agbcc',
       asmlift: side({ outcome: 'declined', errorMarkers: ['gap'] }),
@@ -361,19 +361,19 @@ describe('the per-row run line', () => {
 });
 
 describe('costNote', () => {
-  test('prints the fan beside the seconds, so a run says what it is paying for', async () => {
+  test('prints the fan beside the seconds, so a run says what it is paying for', () => {
     expect(costNote({ fanSize: 5952 } as DecompilerResult, '518.3')).toBe('(518.3s, fan 5952)');
   });
 
   // On a stillborn fan the enumerated count is not what was paid for.
-  test('prints how much of a stillborn fan was compiled, beside the count that was enumerated', async () => {
+  test('prints how much of a stillborn fan was compiled, beside the count that was enumerated', () => {
     expect(costNote({ fanSize: 30240, fanNotCompiled: 30205 } as DecompilerResult, '97.0')).toBe(
       '(97.0s, fan 30240 (35 compiled))',
     );
   });
 
   // A row that never ranked has no fan. `fan 0` would read as a claim about its enumeration.
-  test('says nothing about a fan on a row that never ranked', async () => {
+  test('says nothing about a fan on a row that never ranked', () => {
     expect(costNote({} as DecompilerResult, '1.2')).toBe('(1.2s)');
   });
 });

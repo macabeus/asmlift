@@ -17,12 +17,12 @@ vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
 const CODEGEN: Case['codegen'] = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
 
 describe('parseShard (pinned)', () => {
-  test('parses i/N', async () => {
+  test('parses i/N', () => {
     expect(parseShard('0/1')).toEqual({ idx: 0, n: 1 });
     expect(parseShard('3/8')).toEqual({ idx: 3, n: 8 });
   });
 
-  test('rejects malformed input loudly', async () => {
+  test('rejects malformed input loudly', () => {
     for (const bad of ['8/8', '-1/4', '2', 'a/b', '1/0', '']) {
       expect(() => parseShard(bad), bad).toThrow(/bad --shard/);
     }
@@ -118,7 +118,7 @@ describe('runCases build failures (pinned)', () => {
   test('an evaluation that throws fails the shard loudly, after the rows that follow it are written', async () => {
     const row = { id: 'synthetic:kept:agbcc', asmlift: {}, m2c: {} } as FunctionResult;
     vi.mocked(evaluate)
-      .mockImplementationOnce(async () => {
+      .mockImplementationOnce(() => {
         throw new Error("'nosuch' names no registered variation");
       })
       .mockImplementationOnce(async () => row);
@@ -146,7 +146,7 @@ describe('runCases build failures (pinned)', () => {
 });
 
 describe('benchMeta (pinned)', () => {
-  test('counts tiers and dedupes toolchains', async () => {
+  test('counts tiers and dedupes toolchains', () => {
     const rows = [
       { tier: 'synthetic', toolchain: 'agbcc' },
       { tier: 'synthetic', toolchain: 'ido7.1' },
@@ -169,23 +169,23 @@ describe('fmt renders a gap over its denominator', () => {
   const d = (over: Partial<DecompilerResult>): DecompilerResult =>
     ({ outcome: 'nonmatch', ...over }) as DecompilerResult;
 
-  test('a scored gap prints score/maxScore', async () => {
+  test('a scored gap prints score/maxScore', () => {
     expect(fmt(d({ score: 171, maxScore: 387 }))).toBe('diff:171/387');
     expect(fmt(d({ score: 290, maxScore: 404 }))).toBe('diff:290/404');
   });
 
-  test('an unscored denominator degrades to the bare numerator rather than printing null', async () => {
+  test('an unscored denominator degrades to the bare numerator rather than printing null', () => {
     expect(fmt(d({ score: 12, maxScore: null }))).toBe('diff:12');
   });
 
   // The artifact types it `number | null`, but this renderer also runs over hand-built and older
   // objects where the key is simply ABSENT, and `diff:12/undefined` is a worse answer than
   // `diff:12`.
-  test('an ABSENT denominator degrades the same way a null one does', async () => {
+  test('an ABSENT denominator degrades the same way a null one does', () => {
     expect(fmt(d({ score: 12, maxScore: undefined as unknown as null }))).toBe('diff:12');
   });
 
-  test('the other outcomes are untouched', async () => {
+  test('the other outcomes are untouched', () => {
     expect(fmt(d({ outcome: 'match' }))).toBe('MATCH');
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
     expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
@@ -194,7 +194,7 @@ describe('fmt renders a gap over its denominator', () => {
 });
 
 describe('the in-row progress line', () => {
-  test('says nothing for a minute, then once a minute, with the best score so far', async () => {
+  test('says nothing for a minute, then once a minute, with the best score so far', () => {
     let t = 1_000_000;
     const lines: string[] = [];
     const on = rankProgress(

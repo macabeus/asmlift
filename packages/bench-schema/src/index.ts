@@ -131,6 +131,10 @@ export interface DecompilerResult {
    *  key for exactly that reason — a nondeterministic field in either would report every row as
    *  moved on every run. Read it as what this run cost, alongside the count that explains it.
    *
+   *  A fan of `PARALLEL_FAN` candidates or more (apps/benchmark eval/asmlift.ts) compiles on
+   *  `ROW_COMPILE_WORKERS` threads, so its seconds are wall over those threads, not compile time:
+   *  such a row's seconds per candidate are not a single compiler's.
+   *
    *  ITS READER is `bench diff`'s cost section (`compareCost`/`costLines` in report/diff.ts),
    *  which reports the tier total and names only rows over both floors, and says in the line
    *  itself that it is wall clock. THE CACHE STATE IS NOT IN THIS ARTIFACT: the ~5× above is the

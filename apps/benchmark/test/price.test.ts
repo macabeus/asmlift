@@ -47,15 +47,17 @@ describe('the artifact rate', () => {
       asmlift: { fanSize, rankSeconds, ...(fanNotCompiled ? { fanNotCompiled } : {}) },
     }) as FunctionResult;
   const rates = rankRates([
-    row('agbcc', 'real', 1000, 12),
+    row('agbcc', 'real', 400, 4.8),
     row('mwcc_233_163n', 'real', 100, 50),
     row('mwcc_233_163n', 'real', 1000, 5, 990),
+    row('mwcc_233_163n', 'real', 700, 90),
     row('mwcc_233_163n', 'synthetic', 10, 3),
     { toolchain: 'ido7.1', tier: 'real', asmlift: { rankSeconds: 9 } } as FunctionResult,
   ]);
 
-  it('is measured over whole fans only, per toolchain and tier', () => {
-    // the stillborn row (990 of 1,000 never compiled) prices nothing
+  it('is measured over whole fans on one compiler only, per toolchain and tier', () => {
+    // the stillborn row (990 of 1,000 never compiled) prices nothing, and nor does the fan past
+    // PARALLEL_FAN, whose seconds are wall over its compile threads
     expect(rates.get('mwcc_233_163n real')).toBeCloseTo(0.5);
     expect(rates.get('mwcc_233_163n')).toBeCloseTo(53 / 110);
     expect(rates.has('ido7.1')).toBe(false);

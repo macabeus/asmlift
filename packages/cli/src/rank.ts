@@ -52,7 +52,7 @@ export interface RankOptions {
    *  can print it. Core's header states why the distinction matters ("a variation that never fires
    *  because it always throws is a defect, and without this it looks identical to a variation that
    *  correctly declined"). Only this CLI and `pnpm bench fan` supply one: `pnpm bench run` reaches
-   *  `decompileRanked` without it, so a whole pre-respell half of a row's fan can still vanish from
+   *  `decompileRankedParallel` without it, so a whole pre-respell half of a row's fan can still vanish from
    *  a `pnpm bench run` with nothing printed. Read an absent `[threw]` line as a fact
    *  about the wiring before reading it as a fact about the variations. */
   onEnumerationError?: (variations: readonly string[], error: string) => void;
@@ -185,7 +185,7 @@ export async function decompileRankedParallel(
   targetObj: string,
   opts: RankOptions & {
     /** how many workers compile at once — a count, or a count chosen from the fan's size once it is
-     *  enumerated */
+     *  enumerated, asked once and before the first `worker()` */
     jobs: number | ((fan: number) => number);
     /** mints one INDEPENDENT async compiler per worker (compile-command.ts `worker()`) */
     worker: () => AsyncCandidateCompiler;

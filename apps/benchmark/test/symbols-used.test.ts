@@ -144,7 +144,7 @@ describe('symbolShape formatting (pinned)', () => {
     expect(symbolShape(info)).toBe(want);
   });
 
-  test('a SYNTHESIZED ref is not a symbolsUsed row — the field answers a MAP question', async () => {
+  test('a SYNTHESIZED ref is not a symbolsUsed row — the field answers a MAP question', () => {
     // This field is the symbolMap A/B's provenance — "which MAP symbols did the winner use" — so
     // a pool name the map never knew must not appear under it (see symbolsUsedFrom's header for
     // the population that would).
@@ -155,7 +155,7 @@ describe('symbolShape formatting (pinned)', () => {
     expect(used).toEqual([{ name: 'gAlpha', shape: 'scalar u16' }]);
   });
 
-  test('symbolsUsedFrom sorts by name and omits absent shapes', async () => {
+  test('symbolsUsedFrom sorts by name and omits absent shapes', () => {
     const used = symbolsUsedFrom([
       { name: 'gZeta', info: { name: 'gZeta', kind: 'data' } },
       { name: 'gAlpha', info: COUNTER },

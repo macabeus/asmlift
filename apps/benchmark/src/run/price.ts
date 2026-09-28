@@ -3,6 +3,7 @@
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 import type { Case } from '../cases/types';
+import { PARALLEL_FAN } from '../eval/asmlift';
 import { readWorktreeArtifact } from '../report/committed';
 
 /** Seconds per candidate on the SCORING path — a compile plus an objdiff alignment — PER TIER,
@@ -48,10 +49,12 @@ export function estimatedScoreTime(n: number, perCandidate: number): string {
 type PricedRow = Pick<FunctionResult, 'toolchain' | 'tier' | 'asmlift'>;
 
 /** Seconds per candidate that an artifact's ranked passes took, keyed `toolchain tier` and
- *  `toolchain`, over the rows that compiled their WHOLE fan. Per toolchain because the toolchains are
- *  not on one scale — an mwcc compile runs in Docker, an agbcc one natively. Whole fans only because
- *  a stillborn row's `rankSeconds` is mostly enumeration and the stop's own checks over a handful of
- *  compiles, so it prices a compile neither per candidate enumerated nor per candidate compiled. */
+ *  `toolchain`, over the rows that compiled their WHOLE fan on ONE compiler. Per toolchain because
+ *  the toolchains are not on one scale — an mwcc compile runs in Docker, an agbcc one natively.
+ *  Whole fans only because a stillborn row's `rankSeconds` is mostly enumeration and the stop's own
+ *  checks over a handful of compiles, so it prices a compile neither per candidate enumerated nor
+ *  per candidate compiled. One compiler only because a fan past `PARALLEL_FAN` is wall over
+ *  `ROW_COMPILE_WORKERS` threads, which prices a compile at a fraction of what it costs. */
 export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
   const sums = new Map<string, { n: number; s: number }>();
   const add = (k: string, n: number, s: number): void => {
@@ -60,7 +63,13 @@ export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
   };
   for (const r of recorded) {
     const { fanSize, fanNotCompiled, rankSeconds } = r.asmlift ?? {};
-    if (typeof rankSeconds === 'number' && typeof fanSize === 'number' && fanSize > 0 && !fanNotCompiled) {
+    if (
+      typeof rankSeconds === 'number' &&
+      typeof fanSize === 'number' &&
+      fanSize > 0 &&
+      fanSize < PARALLEL_FAN &&
+      !fanNotCompiled
+    ) {
       add(`${r.toolchain} ${r.tier}`, fanSize, rankSeconds);
       add(r.toolchain, fanSize, rankSeconds);
     }

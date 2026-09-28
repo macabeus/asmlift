@@ -208,10 +208,11 @@ CTX_PROTO`
 # The exact context header the benchmark passed via --context.${
           fn.tier === 'real'
             ? `
-# This is one of the six rows whose callees the project's own vendored headers do not declare, so
-# the benchmark states them here instead; the same callees are named to asmlift through its
-# --proto hints, and a test holds the two lists equal. Everything else the project declares
-# reaches asmlift as a symbol map and does not reach m2c on this row.`
+# This row's unit is C++, whose own context m2c's C parser cannot read. So m2c is given, as C, the
+# declarations of the callees asmlift's lift read from that context — the same facts asmlift is
+# given as --proto below, through m2c's own channel — after the row's hand-written declarations,
+# where it has any. Everything else the project declares reaches asmlift as a symbol map and does
+# not reach m2c on this row.`
             : usesAuthoredMap(fn)
               ? `
 # Prototypes AND the declarations of this row's authored symbol map. The synthetic tier measures
@@ -237,7 +238,7 @@ ${flagLine(`--target ${m2cTarget(fn.compiler, fn.language)}`, "ISA + compiler di
 ${flagLine(`--function ${fn.sym}`, 'the symbol to decompile from in.s')}${
     fn.ctx || fn.ctxRef
       ? `
-${flagLine('--context ctx.h', fn.ctxRef ? 'the project context header written above' : fn.tier === 'real' ? "this row's authored callee prototypes, above" : 'the prototype header written above')}`
+${flagLine('--context ctx.h', fn.ctxRef ? 'the project context header written above' : fn.tier === 'real' ? "this row's callee declarations, above" : 'the prototype header written above')}`
       : ''
   }
 ${flagLine('--no-cache', "bypass m2c's on-disk cache — always a fresh run")}
@@ -268,7 +269,7 @@ DUMP_INPUT`
   const protoBlock = fn.proto
     ? `
 
-# The prototype hints the benchmark fed asmlift (callee arities / void-ness).
+# The prototypes the benchmark fed asmlift: its callees' arities, void-ness and declared types.
 cat > proto.json <<'PROTO_INPUT'
 ${JSON.stringify(fn.proto, null, 2)}
 PROTO_INPUT`

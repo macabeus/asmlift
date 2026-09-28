@@ -234,8 +234,9 @@ describe('the prototype line appended to a vendored m2c context', () => {
 
   // THE OTHER UNCAPPED PATH. A C++ unit's vendored context is not C, so m2c cannot be handed it.
   // A row on that unit then makes one of TWO decisions, and they are not the same decision: it
-  // hand-writes a `ctx` — which `m2cOwnPrototype` never sees, README residual 5 — or it gives m2c
-  // NOTHING and lets it infer the signature from the asm, as asmlift does. Each is pinned on its
+  // hand-writes a `ctx` — which `m2cOwnPrototype` never sees, README residual 5 — or it gives m2c no
+  // project context, only the callee declarations asmlift's lift read (cases/context-proto.ts
+  // `m2cDeclarations`), and lets it infer its own signature from the asm, as asmlift does. Each is pinned on its
   // own, for the same reason as the rule above: a new row on either path is a decision, not a
   // detail. (They were one predicate, `!fn.m2cCtx`, while only one row was on either.)
   test('only the known rows hand-write the context m2c reads', () => {
@@ -245,11 +246,12 @@ describe('the prototype line appended to a vendored m2c context', () => {
     expect(hand).toEqual(['ac-decomp:JW_JUTGamePad_read']);
   });
 
-  // A row given NO context at all is fair only where the SAME withholding applies to both tools:
-  // m2c infers the signature from the asm, and asmlift is given a symbol map with no layouts. What
+  // A row given no project context is fair only where the SAME withholding applies to both tools:
+  // each reads the unit's callee declarations and nothing else of it, m2c infers the function's own
+  // signature from the asm, and asmlift is given a symbol map with no layouts. What
   // must never happen silently is a C row losing the context every other C row has — that is the
   // #119 defect class — so the language is what this pins, and the count is in the README table.
-  test('a row given no m2c context at all is a C++ row', () => {
+  test('a row given no m2c project context is a C++ row', () => {
     const cRows = manifests.flatMap(({ man }) =>
       man.functions
         .filter((fn) => !fn.m2cCtx && !fn.ctx)

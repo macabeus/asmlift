@@ -155,8 +155,9 @@ _Favouring m2c._
    `ac-decomp:JW_JUTGamePad_read`, declares `OSTime OSGetTime(void)` — so m2c is told the callee
    returns 64 bits, where asmlift's `proto` says only `{"params": []}`, and m2c's output uses it
    (`s64 temp_ret = OSGetTime();`). It is on that path because its unit is C++: the vendored
-   context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given
-   NOTHING and infer its signature from the asm as asmlift does, which is what pikmin's 42 take;
+   context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given no
+   project context — only the callee declarations asmlift's lift read, as C (`m2cDeclarations`) —
+   and infer its own signature from the asm as asmlift does, which is what pikmin's 42 take;
    `authored-facts.test.ts` pins each path by itself, and which of the two a C++ row should take is
    open. Both tools decline the row on other causes today. The callee
    NAMES either side is told are already held equal by `test/authored-facts.test.ts`, and the same

@@ -219,10 +219,10 @@ function compilerText(e: unknown): string {
  *  synthetic tier. */
 const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).toFixed(2));
 
-// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous variations
+// asmlift runs in its differ-ranked production mode (`rankRow`): genuinely-ambiguous variations
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
-// winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
-// scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
+// winner — single-shot `decompile` would under-score what asmlift can match. Every candidate
+// compiles with the row's compiler (`rowCompiler`) and is scored against the row's target object.
 export async function runAsmlift(
   tc: Toolchain,
   codegen: ResolvedTarget,
