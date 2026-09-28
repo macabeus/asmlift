@@ -1,5 +1,5 @@
-// Pin tests for the runner's pure pieces: the shard math the orchestrator's parent/child
-// contract rides on, the ONE meta builder, and the no-silent-row-loss build-fail contract.
+// Pin tests for the runner's pure pieces: the shard child's `--shard` argument, the in-row
+// progress line, the ONE meta builder, and the no-silent-row-loss build-fail contract.
 import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import { TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type { Case } from '../src/cases/types';
 import { evaluate } from '../src/eval/evaluate';
-import { benchMeta, fmt, inShard, parseShard, runCases } from '../src/run/runner';
+import { benchMeta, fmt, parseShard, rankProgress, rankProgressLine, runCases } from '../src/run/runner';
 
 // No case below reaches a decompiler; the one that evaluates says what evaluation returns.
 vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
@@ -26,15 +26,6 @@ describe('parseShard (pinned)', () => {
     for (const bad of ['8/8', '-1/4', '2', 'a/b', '1/0', '']) {
       expect(() => parseShard(bad), bad).toThrow(/bad --shard/);
     }
-  });
-
-  test('inShard partitions every index into exactly one shard', () => {
-    const idxs = Array.from({ length: 17 }, (_, i) => i);
-    for (const i of idxs) {
-      expect([0, 1, 2].filter((s) => inShard(i, { idx: s, n: 3 }))).toHaveLength(1);
-    }
-    const union = [0, 1, 2].flatMap((s) => idxs.filter((i) => inShard(i, { idx: s, n: 3 })));
-    expect(union.sort((a, b) => a - b)).toEqual(idxs);
   });
 });
 
@@ -87,7 +78,7 @@ describe('runCases toolchain availability (pinned)', () => {
     const sentinel = JSON.stringify({ meta: { counts: { total: 1 } }, results: [{ id: 'synthetic:kept:agbcc' }] });
     writeFileSync(outPath, sentinel);
 
-    expect(runCases([c], outPath, { idx: 0, n: 1 }, { writeEmpty: false })).toEqual([]);
+    expect(runCases([c], outPath, { writeEmpty: false })).toEqual([]);
     expect(readFileSync(outPath, 'utf8'), 'the previous tier file survives a run that measured nothing').toBe(sentinel);
 
     // …and the DEFAULT still clobbers it, which is what makes `writeEmpty: false` the load-bearing
@@ -199,5 +190,33 @@ describe('fmt renders a gap over its denominator', () => {
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
     expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
     expect(fmt(d({ outcome: 'failed' }))).toBe('failed');
+  });
+});
+
+describe('the in-row progress line', () => {
+  test('says nothing for a minute, then once a minute, with the best score so far', () => {
+    let t = 1_000_000;
+    const lines: string[] = [];
+    const on = rankProgress(
+      'mp4:getCardStatus:mwcc_233_163n',
+      t,
+      (l) => lines.push(l),
+      () => t,
+    );
+    for (const [at, done] of [
+      [30, 10],
+      [59, 20],
+      [61, 21],
+      [90, 30],
+      [125, 40],
+    ] as const) {
+      t = 1_000_000 + at * 1000;
+      on(done, 1408, done > 25 ? ({ score: 12, rows: 300 } as never) : undefined);
+    }
+    expect(lines).toEqual([
+      '  … mp4:getCardStatus:mwcc_233_163n still ranking: 21/1408 candidates (61s)',
+      '  … mp4:getCardStatus:mwcc_233_163n still ranking: 40/1408 candidates, best diff:12/300 (125s)',
+    ]);
+    expect(rankProgressLine('x', 1, 2, undefined, 0.4)).toBe('  … x still ranking: 1/2 candidates (0s)');
   });
 });

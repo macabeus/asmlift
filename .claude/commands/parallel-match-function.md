@@ -57,12 +57,14 @@ in the same files and the merge queue spends more than the parallelism saved.
 author, tree and assumptions are gone, and a reader cannot tell a live fact from a dead one.
 
 1. **Derive the path; do not invent one.** The board is
-   `/tmp/asmlift-board-$(id -u)/<run-id>`, where `<run-id>` is `date -u +%Y%m%dT%H%M%SZ`. Not
+   `$HOME/.cache/asmlift-board/<run-id>`, where `<run-id>` is `date -u +%Y%m%dT%H%M%SZ`. Not
    `mktemp -d`: `$TMPDIR` disagrees with `/tmp` between a login shell and a plain node process on
    this machine, and this directory is a rendezvous several agents in several worktrees must all
-   resolve identically. Freshness comes from `<run-id>`, not from the directory being anonymous —
-   and a derivable path is one you can still find after an interruption, where an anonymous one
-   exists only in a context that may not survive.
+   resolve identically. Not `/tmp` either: macOS deletes files there that have not been touched
+   for three days, and the 2026-09-23 run, which lasted five, lost its `env.sh` that way halfway
+   through. Freshness comes from `<run-id>`, not from the directory being anonymous — and a
+   derivable path is one you can still find after an interruption, where an anonymous one exists
+   only in a context that may not survive.
 2. **Print the absolute path to the user now**, in your first message. It is the only handle they
    have if this session dies.
 3. Create the layout. Folders before files, so the first agent to arrive cannot find a `README.md`
@@ -70,8 +72,9 @@ author, tree and assumptions are gone, and a reader cannot tell a live fact from
 
    ```
    <board>/board/facts/    <board>/board/traps/    <board>/board/rounds/
-   <board>/queue/          <board>/bin/
+   <board>/queue/          <board>/bin/            <board>/args/
    <board>/README.md       <board>/INDEX.md        <board>/MERGE-QUEUE.md    <board>/LANES.md
+   <board>/env.sh
    ```
 
    `board/` is append-only publication. `queue/` is a mailbox with an owner. `MERGE-QUEUE.md` and
@@ -91,6 +94,10 @@ author, tree and assumptions are gone, and a reader cannot tell a live fact from
    numbers, and the compiler-facts file for whichever toolchains the targets use. Restate each as a
    post; do not post a path to the memory file, because the round agents are told not to read
    outside their worktree for specs.
+7. **Write `env.sh`**: the `export`s every lane sources — `PATH` with the directories `node`,
+   `pnpm` and the `cpp` shim resolve from, and every `ASMLIFT_*` toolchain variable. Take them from a
+   shell where `which cpp` is the shim and a scoped `pnpm bench run` works, and verify the file by
+   sourcing it in a fresh shell and running `which cpp`. Every lane is set up from it (Phase 1).
 
 Do not create a folder for questions-addressed-to-nobody. The last run's equivalent received
 nothing: a question worth asking is worth publishing as a post, and a question that genuinely
@@ -104,11 +111,17 @@ blocks goes on the queue, where somebody owns it.
 other branches to re-measure, and the merge-time consistency read (Phase 3) is pairwise against
 every other open PR — so depth in the merge queue costs more than depth in the lanes.
 
-- **Never exceed two un-merged PRs.** When two are open, no lane opens, however many are idle.
-- **Never exceed three running rounds.** Three is an untested default — neither of the two runs
-  this command was written from tried two or four — so treat it as a ceiling, not a target, and
-  record in the closing report what the open-PR depth actually was when each lane opened. That is
-  the number a future revision needs.
+- **Never exceed two un-merged PRs**, not counting a HELD one. When two are open, no lane opens,
+  however many are idle. A PR held in `MERGE-QUEUE.md` on a runnable release condition waits on
+  that condition, not on the queue, and counting it idles a lane for as long as the hold lasts —
+  the 2026-09-23 run held one for a harness fix. A held PR is still an open branch for every
+  Phase 3 consistency read.
+- **Never exceed two running rounds** on this 10-core machine. The 2026-09-23 run ran three, and
+  the bench register serialises full benches only: the other heavy jobs three rounds run — ranked
+  runs, `bench fan`, gate suites — starved Docker under the benches, and a starved bench is not a
+  slow one but an invalid one (a shard a neighbour starves writes a partial tier with no error
+  line, `docs/bench-cost.md` §5). Record in the closing report what the open-PR depth was when
+  each lane opened.
 
 Open the first lanes with a pass (Phase 2) — **Phase 1 begins by running a pass**, before any round
 exists. The first pick has no running round to compare file surface against, so pick on the target
@@ -117,9 +130,22 @@ list alone and say so.
 `LANES.md` is the registry, one row per lane: `handle | worktree path | branch | started (UTC) | state`.
 `state` is `running`, `returned`, or `dead`. **Nothing is ever launched into a worktree named in
 `LANES.md`** — the duplicate-agent-into-a-live-worktree failure is on record, and this row is the
-only thing that prevents it. You create the worktree (`git worktree add`) before launching the
-round and remove it (`git worktree remove`) after that round's PR has merged or been closed —
-never the round itself, which cannot outlive its own worktree.
+only thing that prevents it. You create the lane before launching the round, in one command, and
+remove the worktree (`git worktree remove`) after that round's PR has merged or been closed —
+never the round itself, which cannot outlive its own worktree:
+
+```
+sh <a checkout on origin/main>/scripts/lane-setup.sh <worktree> <branch> \
+   --env <board>/env.sh --board <board> --handle <HANDLE> --args '<the exact Workflow args, as JSON>'
+```
+
+It fetches `origin/main` and adds the worktree there (refusing a path that exists), links the
+bench-owned `checkouts/` and `toolchains/`, writes `.envrc.local` from `env.sh`, runs `pnpm install`,
+and saves the args to `<board>/args/<HANDLE>.json` **before** the launch. Save them even when you
+set a lane up another way: resuming a run needs the args it was launched with, byte for byte, and
+the only other copy is in a context that may not survive — the 2026-09-23 run had to write six of
+them out from its own context before it could stop and resume its lanes. The script prints
+`lane: ready <worktree>` last; anything else is a lane that is not set up.
 
 **Every round is a run of the `match-round` workflow** (`.claude/workflows/match-round.js`), never a
 single agent you brief by hand:
@@ -210,7 +236,9 @@ above is written to make them the same event:
 
 1. **A round returns.** Because a round files its `merge-slot` and *then* returns, a returning
    round is both "a lane freed" and "a message was filed". This is why the brief forbids a round
-   from blocking on its merge.
+   from blocking on its merge. **Read the round's whole return** — `diagnosis`, `build`, `ledger`,
+   `shipped`, `finalReview`, `slot` — not only the slot it filed: the slot is the round's summary of
+   itself, and what a summary leaves out cannot be seen from the summary.
 2. **You finish handling something and the state has moved** — a merge landed, an escalation came
    back from the user, a PR's `pr-wait` verdict arrived.
 
@@ -233,7 +261,8 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
 4. **Update `LANES.md`** — a returned round's row becomes `returned`; a round that returned without
    a PR and without a refuted-brief report becomes `dead`, and its target goes back to pending with
    a note — as does a `match-round` run whose result carries `stoppedAt`, the phase whose agent
-   returned nothing. There is no other way for a dead round to be noticed: it will never file
+   returned nothing. Such a run still returns what it had: a `shipped.pr` in it is an open PR with
+   no merge slot, and it goes on the merge queue by hand. There is no other way for a dead round to be noticed: it will never file
    anything.
 5. **Close the pass**: run `bin/pass-check.sh`, read its exit status, and report to the user what
    was handled, what moved, and what was started.
@@ -279,6 +308,13 @@ The merge, in order:
    under this branch at all, the order [`/match-function`](./match-function.md) fixes applies again,
    and `scripts/check-artifact-provenance.sh` is what says whether the artifact is owed. Read that
    script's verdict; do not predict it.
+
+   **Code the merge agent changes gets a breaker before it merges.** A conflict resolved by editing
+   code, a gate fixed, a hunk re-spelled against the new `main`: run one Phase 5 Agent A (the
+   breaker) of [`/match-function`](./match-function.md) on exactly those commits, as a separate
+   agent, and fix what it confirms before step 2. The same goes for any code the slot names as
+   read by no reviewer. A merge-time change is written against a moved `main` by an agent that did
+   not write the branch, which is the change a round's own waves can never have read.
 2. **Mergeable** — no textual conflict against `main` as it now is. An artifact conflict is
    regenerated, never resolved by hand.
 3. **Architecturally consistent with every other open PR.** Not just the next one — a duplicated
@@ -398,7 +434,11 @@ is `queue/<stamp>-<AUTHOR>-<kind>.md`; its reply is **`queue/<same stem>.reply.m
 makes "unhandled" mechanical rather than remembered. Three kinds:
 
 - **`merge-slot`** — "my PR is ready, here is its number." A round files this and returns; it never
-  merges itself.
+  merges itself. The slot also lists, each written out and "none" when empty: every
+  CONFIRMED-OPEN finding in the round's ledger, with its reason; every decline→wrong — a row
+  `bench diff` shows leaving `declined` for `nonmatch`/`noncompile`/`failed`, and every confirmed
+  finding of severity `silent-wrong`; and any code no reviewer read. A slot that says only "ready"
+  hands the merge agent a PR whose open defects it has to rediscover.
 - **`blocked-external`** — "something outside my worktree is wrong and I cannot fix it from here."
   Rare, and worth the whole channel: the recorded instances are a duplicate agent launched into a
   live worktree, and a landed correction that a later rebase had silently reverted.

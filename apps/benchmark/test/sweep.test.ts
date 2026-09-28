@@ -30,6 +30,8 @@ import {
   type SweepRecord,
   compareSweeps,
   fanGuard,
+  newlyRanked,
+  newlyRankedLines,
   recordFileRefusal,
   rekeyFans,
   renderDiff,
@@ -127,6 +129,55 @@ describe('the sweep comparison', () => {
     const h = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '222222222222' })];
     const d = compareSweeps(b, h);
     expect(d.moved[0].fields).toEqual([{ field: 'fanHash', from: '111111111111', to: '222222222222' }]);
+  });
+});
+
+describe('a row that declined on the base and ranks here is priced', () => {
+  const CARD = 'pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n';
+  const rates = new Map([
+    ['mwcc_233_163n real', 0.5],
+    ['agbcc real', 0.012],
+  ]);
+  const rec = (id: string, mapMode: string, extra: Partial<SweepRecord>): SweepRecord => ({
+    id,
+    mapMode,
+    src: 'x',
+    ...extra,
+  });
+
+  it('prices the harness record of a row whose enumeration threw on the base, dearest first', () => {
+    const baseSide = [
+      rec(CARD, 'harness', { fanThrew: 'declined: X' }),
+      rec(CARD, 'nomap', { fanThrew: 'declined: X' }),
+      rec('kleod:small:agbcc', 'harness', { fanThrew: 'declined: Y' }),
+      rec('kleod:grew:agbcc', 'harness', { fan: 4 }),
+      rec('asm:foo.s', 'harness', { fanThrew: 'declined: Z' }),
+    ];
+    const headSide = [
+      rec(CARD, 'harness', { fan: 1408 }),
+      rec(CARD, 'nomap', { fan: 1408 }),
+      rec('kleod:small:agbcc', 'harness', { fan: 50 }),
+      rec('kleod:grew:agbcc', 'harness', { fan: 8 }),
+      rec('asm:foo.s', 'harness', { fan: 3 }),
+    ];
+    const rows = newlyRanked(compareSweeps(baseSide, headSide), rates);
+    expect(rows.map((r) => r.id)).toEqual(['asm:foo.s', CARD, 'kleod:small:agbcc']);
+    expect(rows[1]!.seconds).toBeCloseTo(704);
+    // agbcc's warm rate is under the cold floor, so the floor prices it
+    expect(rows[2]!.seconds).toBeCloseTo(50 * 0.085);
+    const lines = newlyRankedLines(rows, 'results.json: Unexpected end of JSON input');
+    expect(lines[0]).toContain('unpriced (no toolchain)');
+    expect(lines[1]).toContain('fan 1408 here, rank up to ~12 min');
+    expect(lines.at(-1)).toMatch(/3 row\(s\) newly ranked: 1461 candidate\(s\), rank up to ~12 min .*cold floor alone/);
+  });
+
+  it('prints nothing when no row newly ranks', () => {
+    expect(newlyRankedLines(newlyRanked(compareSweeps(base(), base()), rates))).toEqual([]);
+  });
+
+  it('prices nothing against a base swept without --fan, whose rows never threw', () => {
+    const noFan = [rec(CARD, 'harness', {})];
+    expect(newlyRanked(compareSweeps(noFan, [rec(CARD, 'harness', { fan: 1408 })]), rates)).toEqual([]);
   });
 });
 

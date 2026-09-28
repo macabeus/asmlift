@@ -4,6 +4,7 @@ import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@as
 import { describe, expect, test } from 'vitest';
 
 import { sameRun } from '../src/report/committed';
+import { baseNotice } from '../src/report/committed';
 import { notRegenerated } from '../src/report/diff';
 import { compareOutcomes, rowsAddedSince } from '../src/report/regression';
 
@@ -261,5 +262,26 @@ describe('sameRun — the artifact-compared-with-itself guard both added-row sec
   test('diff.ts notRegenerated is this same predicate', () => {
     expect(notRegenerated(at('x'), at('x'))).toBe(sameRun(at('x'), at('x')));
     expect(notRegenerated(at('x'), at('y'))).toBe(sameRun(at('x'), at('y')));
+  });
+});
+
+describe('baseNotice — what a comparison gate compared against, printed before the verdict', () => {
+  const at = { base: 'origin/main', sha: 'bfbee33', generatedAt: '2026-09-24T03:52:28.306Z' };
+
+  test('names the base by sha', () => {
+    expect(baseNotice({ ...at, contains: true, mergeBase: 'bfbee33' })).toEqual({
+      named: 'base origin/main = bfbee33 (artifact generated 2026-09-24T03:52:28.306Z)',
+    });
+  });
+
+  test('a base that moved past the branch is reported with where the branch forked, not refused', () => {
+    const { warning } = baseNotice({ ...at, contains: false, mergeBase: '40a12ca' });
+    expect(warning).toContain('HEAD does not contain origin/main (the branch forked at 40a12ca)');
+    expect(warning).toContain('reads below as a change this branch made');
+  });
+
+  test('HEAD as the base, or a git that cannot answer, warns of nothing', () => {
+    expect(baseNotice({ ...at, base: 'HEAD', contains: false }).warning).toBeUndefined();
+    expect(baseNotice({ ...at, contains: undefined }).warning).toBeUndefined();
   });
 });

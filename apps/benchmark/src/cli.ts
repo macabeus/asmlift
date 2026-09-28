@@ -2,7 +2,11 @@
 // subcommand here — there are no other executable scripts.
 //
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
-//                  [--serial] [--shard i/N] [--toolchain id] [--no-lock]
+//                  [--serial] [--toolchain id] [--no-lock] [--resume] [--detach]
+//                                        # --resume continues the last fanned run that did not
+//                                        # finish (same HEAD, same filters), measuring only the
+//                                        # rows it had not; --detach runs it in the background,
+//                                        # logging to results/run-<time>.log (docs/bench-cost.md §5)
 //   pnpm bench in-flight                 # is a `bench run` measuring this worktree RIGHT NOW?
 //                                        # exit 1 if so, naming the record, its pid, argv and age.
 //                                        # Run it before ANY phase that edits the tree: the
@@ -78,8 +82,8 @@
 //                                        # and whether each row's target is the ROM's function
 //
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
-// in-process — the debugging path, and also HOW the shard children themselves run (the parent
-// spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
+// in-process — the debugging path. A shard child is `run --tier <t> --claim <gen> --shard i/N`,
+// which takes rows off the tier's queue (run/queue.ts); nobody types it.
 import { type FunctionResult, moduleOf, resolveRow } from '@asmlift/bench-schema';
 import {
   CACHE_MISMATCH_EXIT,
@@ -92,7 +96,8 @@ import {
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { symbolMapToJson } from '@asmlift/core/symbols';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -102,13 +107,14 @@ import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
 import { syntheticCases } from './cases/synthetic';
 import { resolveScoringPrelude, richestRung, scoringLadder } from './compile/real';
-import { RESULTS_DIR } from './config';
+import { REPO_ROOT, RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
-import { acquireBenchLock, benchLockStatus } from './run/lock';
+import { acquireBenchLock, benchLockStatus, readBenchLock } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
+import { claimer, partPath, planCases, runDir } from './run/queue';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -129,6 +135,11 @@ const { values: opts, positionals } = parseArgs({
     // out loud on stderr. It exists so that the way past a refusal is not `rm`ing a record someone
     // else's live run depends on.
     'no-lock': { type: 'boolean', default: false },
+    // run only: continue the tier's unfinished queue (run/queue.ts), and run in the background.
+    // `--claim <gen>` is what the orchestrator hands its shard children; nobody types it.
+    resume: { type: 'boolean', default: false },
+    detach: { type: 'boolean', default: false },
+    claim: { type: 'string' },
     build: { type: 'boolean', default: false },
     out: { type: 'string' },
     'project-root': { type: 'string' },
@@ -224,17 +235,51 @@ function casesFor(tier: Tier) {
     : realCases({ project: opts.project, only: opts.only });
 }
 
+/** What the cross-run candidate-object cache did in THIS process, when it did anything — a shard
+ *  child's or a `--serial` run's. */
+function reportCandCache(): void {
+  // Gate E ("run the whole workload in verify mode and count") reads these lines; a shard
+  // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
+  // whole namespace is suspect. An `on` shard reports the same way: it compiles a sampled
+  // fraction of the keys it serves anyway and audits them, and the `sample=…%/seed=…` field
+  // says at what rate — a bench run is where the negative half of the store (84% of what this
+  // run's shards were served, and 0 of the LoadBGTilemapData fan) gets sampled at all. Absent
+  // only when the cache is off, which is not the default — an unset ASMLIFT_CANDCACHE serves,
+  // so a shard with no line here was turned off on purpose (ASMLIFT_CANDCACHE=0/off/empty,
+  // ASMLIFT_BENCH_CACHE=0, or a refusal).
+  if (cacheMode() !== 'off') {
+    const stats = cacheStats();
+    if (Object.keys(stats).length > 0) {
+      console.log(`[candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(stats)}`);
+    }
+    // A mismatch FAILS THE SHARD, with the CLI's own code for it. Printing is not enough: one
+    // line among sixteen shard logs and a zero exit makes a "0 differing" result rest on a
+    // human's grep — and a throw here would exit 1, which on this path is also what an
+    // ordinary build failure exits, so the status would carry no more than the grep did.
+    // `process.exitCode` rather than `process.exit`: the parent reads this child's stdout
+    // through a pipe, and exiting outright can truncate the very lines that say why.
+    if (cacheMismatches() > 0) {
+      console.error(
+        `[candcache] ${cacheMismatches()} stored answer(s) disagreed with a fresh compile — the store is ` +
+          `serving objects this toolchain no longer produces. See ${MISMATCH_LOG}, then drop the store ` +
+          `(ASMLIFT_CANDCACHE_DIR).`,
+      );
+      process.exitCode = CACHE_MISMATCH_EXIT;
+    }
+  }
+}
+
 switch (command) {
   case 'run': {
-    // `--shard` is meaningful only on the `--serial` path — the fan-out branch below never reads
-    // `opts.shard`. Left to run, `run --shard i/N` discards the shard, fans every child over the
-    // whole tier and rewrites `results/<tier>.json`, while looking to a reader like the one argv
-    // the preflight exempts. Reject the argv rather than interpret it.
-    if (opts.shard && !opts.serial) {
-      console.error(
-        `--shard ${opts.shard} without --serial: this path fans out across --jobs children and ignores the shard.\n` +
-          'Use `--serial --shard i/N` (what orchestrate.ts spawns), or drop --shard.',
-      );
+    // `--claim` and `--shard` are the shard child's argv (orchestrate.ts), and only together: a
+    // `--shard` anywhere else would name a slice no path reads, while the argv looked like the one
+    // the preflight exempts.
+    if ((opts.claim === undefined) !== (opts.shard === undefined) || (opts.claim !== undefined && tiers.length !== 1)) {
+      console.error("--claim <gen> --shard i/N is the shard child's argv (orchestrate.ts), with one --tier.");
+      process.exit(2);
+    }
+    if (opts.resume && opts.serial) {
+      console.error("--resume continues a FANNED run's queue; --serial has none. Drop one of them.");
       process.exit(2);
     }
     // BEFORE anything that costs: the conditions that make a run's numbers worthless — or that
@@ -246,8 +291,7 @@ switch (command) {
       only: opts.only,
       project: opts.project,
       toolchain: opts.toolchain,
-      shard: opts.shard,
-      serial: opts.serial,
+      claim: opts.claim,
     };
     const preflight = preflightRefusals(runOpts, { ignoreLock: opts['no-lock'] });
     for (const w of preflight.warnings) {
@@ -256,6 +300,67 @@ switch (command) {
     if (preflight.refusals.length > 0) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
+    }
+    // DETACHED: the same argv minus `--detach`, in its own process group with its output in a log.
+    // After the preflight, so a refusal is still answered here and now. This process returns only
+    // once the detached run's record is in the register — the record `pnpm bench in-flight` answers
+    // from, so a waiter that starts polling the moment this returns cannot see "no run" — or once
+    // the run has already exited, whose log tail it then prints.
+    if (opts.detach) {
+      if (opts['no-lock']) {
+        console.error(
+          '--detach with --no-lock: a detached run is waited on through its record, and --no-lock takes none.',
+        );
+        process.exit(2);
+      }
+      mkdirSync(RESULTS_DIR, { recursive: true });
+      const log = join(RESULTS_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+      const fd = openSync(log, 'a');
+      const t0 = Date.now();
+      const argv = process.argv.slice(2).filter((a) => a !== '--detach');
+      const child = spawn('tsx', [import.meta.filename, ...argv], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: ['ignore', fd, fd],
+      });
+      let exit: number | null | undefined;
+      child.on('exit', (code) => (exit = code));
+      child.on('error', (e) => {
+        console.error(`bench run could not be started detached: ${e.message}`);
+        process.exit(1);
+      });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 250));
+        const state = readBenchLock();
+        const mine =
+          state.state === 'held'
+            ? // this argv's own record: a run of another tier may take one at this root meanwhile
+              state.records.find(
+                (r) =>
+                  r.root === REPO_ROOT &&
+                  r.command === `bench ${argv.join(' ')}` &&
+                  Date.parse(r.startedAt) >= t0 - 1000,
+              )
+            : undefined;
+        if (mine) {
+          child.unref();
+          // `detached` made the wrapper a process-group leader and every shard inherits the group,
+          // so one signal to the group stops the run and all of its children.
+          console.log(
+            `bench run detached: pid ${mine.pid} (process group ${child.pid}), log ${log}\n` +
+              `  follow:  tail -f ${log}\n` +
+              `  running? pnpm bench in-flight   (exit 0 once it is gone)\n` +
+              `  stop:    kill -9 -- -${child.pid}   (a fanned run then continues with --resume)`,
+          );
+          process.exit(0);
+        }
+        if (exit !== undefined) {
+          console.error(
+            `bench run exited ${exit} before it took its record:\n${readFileSync(log, 'utf8').split('\n').slice(-20).join('\n')}`,
+          );
+          process.exit(exit ?? 1);
+        }
+      }
     }
     // Then record that this worktree is being measured, so the phases that EDIT it — and the next
     // `bench run` on this machine — can tell. Taking the record is a WRITE and not a verdict,
@@ -279,21 +384,30 @@ switch (command) {
     // EVERY run, shard children and `--only` included, and throws its own remediation line.
     const { assertM2cPinned } = await import('./eval/m2c');
     assertM2cPinned();
-    if (opts.serial) {
+    if (opts.claim !== undefined) {
+      // A shard child of a fanned run: rows come off the tier's shared queue, in the plan's order.
+      const shard = parseShard(opts.shard!);
+      const [tier] = tiers;
+      const dir = runDir(tier);
+      const out = partPath(dir, Number(opts.claim), shard.idx);
+      const n = runCases(planCases(dir, casesFor(tier)), out, {
+        claimer: claimer(dir, `pid ${process.pid} shard ${shard.idx}`),
+        tag: ` s${shard.idx}`,
+      }).length;
+      console.log(`\nWrote ${n} ${tier} results → ${out}`);
+      reportCandCache();
+    } else if (opts.serial) {
       mkdirSync(RESULTS_DIR, { recursive: true });
-      const shard = opts.shard ? parseShard(opts.shard) : { idx: 0, n: 1 };
       // The same empty-selection verdict the fanned-out path takes, because this path writes
       // <tier>.json DIRECTLY: `--tier synthetic --only <typo> --toolchain agbcc --serial` — the
       // per-toolchain smoke shape /attribute-function instructs — replaced a 594-row
       // synthetic.json with an empty one and exited 0, and the next `bench merge` published the
-      // other tier alone. A shard CHILD is exempt: it always writes its part file (even 0 rows —
-      // the stitcher owns <tier>.json), and a filter narrower than the shard count legitimately
-      // leaves most shards empty.
+      // other tier alone.
       let selected: number | null = null;
       const untouched: Tier[] = [];
       for (const tier of tiers) {
-        const out = join(RESULTS_DIR, opts.shard ? `${tier}.part${shard.idx}.json` : `${tier}.json`);
-        const filtered = !opts.shard && tierIsFiltered(tier, opts);
+        const out = join(RESULTS_DIR, `${tier}.json`);
+        const filtered = tierIsFiltered(tier, opts);
         const cases = casesFor(tier);
         if (filtered && cases.length === 0) {
           selected = selected ?? 0;
@@ -301,7 +415,7 @@ switch (command) {
           console.log(`\nNo ${tier} row selected — ${out} left unchanged`);
           continue;
         }
-        const n = runCases(cases, out, shard, { writeEmpty: !filtered }).length;
+        const n = runCases(cases, out, { writeEmpty: !filtered }).length;
         if (filtered) {
           selected = (selected ?? 0) + n;
         }
@@ -319,43 +433,22 @@ switch (command) {
       if (selected === 0) {
         throw emptySelectionError(opts, untouched);
       }
-      // What the cross-run candidate-object cache did in THIS shard, when it did anything.
-      // Gate E ("run the whole workload in verify mode and count") reads these lines; a shard
-      // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
-      // whole namespace is suspect. An `on` shard reports the same way: it compiles a sampled
-      // fraction of the keys it serves anyway and audits them, and the `sample=…%/seed=…` field
-      // says at what rate — a bench run is where the negative half of the store (84% of what this
-      // run's shards were served, and 0 of the LoadBGTilemapData fan) gets sampled at all. Absent
-      // only when the cache is off, which is not the default — an unset ASMLIFT_CANDCACHE serves,
-      // so a shard with no line here was turned off on purpose (ASMLIFT_CANDCACHE=0/off/empty,
-      // ASMLIFT_BENCH_CACHE=0, or a refusal).
-      if (cacheMode() !== 'off') {
-        const stats = cacheStats();
-        if (Object.keys(stats).length > 0) {
-          console.log(`[candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(stats)}`);
-        }
-        // A mismatch FAILS THE SHARD, with the CLI's own code for it. Printing is not enough: one
-        // line among sixteen shard logs and a zero exit makes a "0 differing" result rest on a
-        // human's grep — and a throw here would exit 1, which on this path is also what an
-        // ordinary build failure exits, so the status would carry no more than the grep did.
-        // `process.exitCode` rather than `process.exit`: the parent reads this child's stdout
-        // through a pipe, and exiting outright can truncate the very lines that say why.
-        if (cacheMismatches() > 0) {
-          console.error(
-            `[candcache] ${cacheMismatches()} stored answer(s) disagreed with a fresh compile — the store is ` +
-              `serving objects this toolchain no longer produces. See ${MISMATCH_LOG}, then drop the store ` +
-              `(ASMLIFT_CANDCACHE_DIR).`,
-          );
-          process.exitCode = CACHE_MISMATCH_EXIT;
-        }
-      }
+      reportCandCache();
     } else {
       const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
       if (!Number.isInteger(jobs) || jobs < 1) {
         console.error(`bad --jobs ${opts.jobs}; want a positive integer`);
         process.exit(2);
       }
-      await orchestrate({ jobs, tiers, only: opts.only, project: opts.project, toolchain: opts.toolchain });
+      await orchestrate({
+        jobs,
+        tiers,
+        only: opts.only,
+        project: opts.project,
+        toolchain: opts.toolchain,
+        resume: opts.resume,
+        caseIds: (tier) => casesFor(tier).map((c) => c.id),
+      });
     }
     break;
   }

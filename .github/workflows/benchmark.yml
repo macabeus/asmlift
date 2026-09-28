@@ -140,8 +140,10 @@ jobs:
       # The byte-level regression gate. It needs the same toolchains the benchmark does, which is
       # why it runs here and not in ci.yml — and why it must run BEFORE the benchmark: a lost match
       # should fail the workflow rather than be published as a moved number.
+      # vitest itself, not `pnpm test:matching`: that gate fails on a skipped file, and the suites
+      # that read a project checkout skip here by design — this job has none (see the header).
       - name: Matching suite (byte-exact guards)
-        run: pnpm test:matching
+        run: pnpm exec vitest run --config vitest.matching.config.ts
 
       - name: Run the benchmark (synthetic + real tiers)
         run: pnpm bench run

@@ -1,17 +1,33 @@
 // Shard fan-out + stitch — the whole parent/child contract. Fans each tier across N worker
-// PROCESSES (each a `cli.ts run --serial --tier X --shard i/N` child writing a part file), then
-// stitches the parts into the canonical per-tier file. Process-level sharding: the hot path per
+// PROCESSES (each a `cli.ts run --tier X --shard i/N --claim <gen>` child taking rows off
+// the tier's shared queue and writing a part file — queue.ts), then stitches the parts into the
+// canonical per-tier file. Process-level sharding: the hot path per
 // case is a synchronous cross-compile + m2c/asmlift that spawnSync-blocks the event loop, so
 // intra-process async gives no speedup; independent processes each get their own blocking
 // pipeline, and the Docker container pool is shared by name across processes.
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import type { BenchOutput } from '@asmlift/bench-schema';
 import { CACHE_MISMATCH_EXIT } from '@asmlift/cli/candcache';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
 import { asmliftProvenance, combineProvenance } from '../provenance';
+import {
+  ORCHESTRATOR_PID_ENV,
+  type PlanKey,
+  claimOrder,
+  committedRankSeconds,
+  journalRows,
+  liveClaimers,
+  readJournal,
+  readPlan,
+  releaseUnfinished,
+  resumeRefusal,
+  runDir,
+  unaccounted,
+  writePlan,
+} from './queue';
 import { benchMeta } from './runner';
 
 const CLI = join(import.meta.dirname, '..', 'cli.ts');
@@ -24,6 +40,10 @@ export interface OrchestrateOptions {
   only?: string; // symbol substring (both tiers)
   project?: string; // real: project name
   toolchain?: string; // synthetic: single-toolchain filter
+  /** the tier's selected row ids, in dataset order — what the queue is planned over */
+  caseIds: (tier: Tier) => string[];
+  /** continue the tier's unfinished queue instead of discarding it (queue.ts) */
+  resume?: boolean;
 }
 
 /**
@@ -43,9 +63,10 @@ export interface ShardOutcome {
 
 /** One shard child (a tsx subprocess), stdout streamed with a shard prefix. Resolves on exit. */
 function runShard(tier: Tier, shard: string, extra: string[]): Promise<ShardOutcome> {
-  const child = spawn('tsx', [CLI, 'run', '--serial', '--tier', tier, '--shard', shard, ...extra], {
+  const child = spawn('tsx', [CLI, 'run', '--tier', tier, '--shard', shard, ...extra], {
     cwd: join(import.meta.dirname, '..', '..', '..', '..'),
     stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, [ORCHESTRATOR_PID_ENV]: String(process.pid) },
   });
   const tag = `[${tier} ${shard}]`;
   let buf = '';
@@ -127,6 +148,8 @@ export function emptySelectionError(
 export interface StitchResult {
   wrote: boolean;
   rows: number;
+  /** planned rows no part file measured or skipped */
+  lost?: number;
   why?: 'no-parts' | 'no-row-selected';
 }
 
@@ -141,18 +164,21 @@ export function tierLine(a: {
   secs: string;
   skips: number;
 }): string {
-  const glyph = a.failedShards ? '✗' : a.stitched.wrote ? '✓' : '–';
+  const glyph = a.failedShards || a.stitched.lost ? '✗' : a.stitched.wrote ? '✓' : '–';
   const wrote = a.stitched.wrote
     ? ` → results/${a.tier}.json`
     : ` — ${a.stitched.why === 'no-row-selected' ? 'no row selected' : 'no shard wrote a part file'}, results/${a.tier}.json left unchanged`;
   // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
   // costs whole projects and `bench regression` reads them as MISSING.
   const skipNote = a.skips ? ` — ⚠ ${a.skips} row(s) SKIPPED, toolchain unavailable` : '';
-  const failNote = a.failedShards ? ` (${a.failedShards} shard(s) exited nonzero)` : '';
+  const failNote =
+    (a.failedShards ? ` (${a.failedShards} shard(s) exited nonzero)` : '') +
+    (a.stitched.lost ? ` (${a.stitched.lost} planned row(s) neither measured nor skipped)` : '');
   return `${glyph} ${a.tier}: ${a.stitched.rows} results in ${a.secs}s${failNote}${wrote}${skipNote}`;
 }
 
-/** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
+/** Stitch every part file in the tier's run directory into the canonical `${tier}.json` — every
+ *  GENERATION's, so a resumed run publishes the rows its interrupted predecessor finished.
  *  `filtered` says a filter could have selected rows here, which makes an empty result a typo.
  *
  *  The parts' `meta.asmlift` is CARRIED FORWARD, not re-sampled. Only the shard children sample git
@@ -160,32 +186,39 @@ export function tierLine(a: {
  *  tree the numbers were read from; a tier re-stamped from the parent's own sample alone loses
  *  them — measured, an untracked file in `packages/core` removed 40s into a 129s fanned run left
  *  the tier reading `dirty: false` while the part file it was stitched from said `dirty: true`.
- *  See ../provenance.ts for what combining does with them. */
-function stitch(tier: Tier, n: number, filtered: boolean): StitchResult {
-  const results: FunctionResult[] = [];
-  const stamps: ({ commit: string; dirty: boolean } | undefined)[] = [];
-  let parts = 0;
-  for (let i = 0; i < n; i++) {
-    const part = join(RESULTS_DIR, `${tier}.part${i}.json`);
-    if (!existsSync(part)) {
-      continue;
-    }
-    parts++;
-    const out = JSON.parse(readFileSync(part, 'utf8')) as BenchOutput;
-    results.push(...out.results);
-    stamps.push(out.meta.asmlift);
-    rmSync(part);
-  }
-  if (parts === 0) {
+ *  See ../provenance.ts for what combining does with them.
+ *
+ *  The run directory is removed only by a stitch of a run whose shards all exited 0 (`keep`
+ *  false): after a failure it is what `--resume` continues from. */
+function stitch(tier: Tier, filtered: boolean, keep: boolean): StitchResult {
+  const dir = runDir(tier);
+  const { parts } = readJournal(dir);
+  if (parts.length === 0) {
     // every shard died before writing anything (e.g. a dataset guard threw at enumeration);
     // keep the last good canonical file instead of clobbering it with an empty set
     return { wrote: false, rows: 0, why: 'no-parts' };
+  }
+  const plan = readPlan(dir);
+  const journal = journalRows(parts);
+  // only the plan's rows: a part an earlier run's shard wrote into this directory is not this run's
+  const planned = plan ? new Set(plan.ids) : undefined;
+  const results = planned ? journal.results.filter((r) => planned.has(r.id)) : journal.results;
+  const { stamps, repeated } = journal;
+  const lost = plan ? unaccounted(plan, journal).length : 0;
+  keep ||= lost > 0;
+  if (repeated > 0) {
+    console.log(
+      `⚠ ${tier}: ${repeated} row(s) were measured twice — by a shard of an earlier, killed run that was still writing; the later measurement is kept`,
+    );
   }
   if (filtered && results.length === 0) {
     // Same reason, one step earlier: a filter that selects nothing still has every shard write
     // its own (empty) part file, so this is reached with parts > 0 and the write would replace a
     // good, fully-measured `real.json` with `results: []` — which is what `bench merge` reads
     // next.
+    if (!keep) {
+      rmSync(dir, { recursive: true, force: true });
+    }
     return { wrote: false, rows: 0, why: 'no-row-selected' };
   }
   const out: BenchOutput = {
@@ -193,7 +226,75 @@ function stitch(tier: Tier, n: number, filtered: boolean): StitchResult {
     results,
   };
   writeFileSync(join(RESULTS_DIR, `${tier}.json`), JSON.stringify(out, null, 2));
-  return { wrote: true, rows: results.length };
+  if (!keep) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return { wrote: true, rows: results.length, ...(lost > 0 ? { lost } : {}) };
+}
+
+/** Why this tier's queue cannot be started or resumed, or undefined when it can. Reads, never
+ *  writes: every tier is checked before any tier's queue is touched. */
+function queueRefusal(tier: Tier, opts: OrchestrateOptions, key: PlanKey): string | undefined {
+  const dir = runDir(tier);
+  const live = liveClaimers(dir);
+  if (live.length > 0) {
+    return (
+      `${tier}: a shard of an earlier run is still measuring — ${live.join(', ')}. It would claim from ` +
+      `this run's queue and write into its journal: stop it first (\`kill -9 <pid>\`)`
+    );
+  }
+  if (!opts.resume) {
+    return undefined;
+  }
+  const plan = readPlan(dir);
+  if (plan === undefined) {
+    return undefined;
+  }
+  const refusal = resumeRefusal(plan, key);
+  if (refusal !== undefined) {
+    return `--resume ${tier}: ${refusal}. Drop --resume to measure the tier from the start`;
+  }
+  if (journalRows(readJournal(dir).parts).stamps.some((st) => st?.dirty)) {
+    return (
+      `--resume ${tier}: the unfinished run's tree went dirty while it measured, so \`bench merge\` would ` +
+      `refuse any tier stitched from it. Drop --resume to measure the tier from the start`
+    );
+  }
+  return undefined;
+}
+
+/** Plan the tier's queue, or pick up the unfinished one (`queueRefusal` has passed). Returns the
+ *  generation the children claim under. */
+function prepareQueue(tier: Tier, opts: OrchestrateOptions, key: PlanKey): number {
+  const dir = runDir(tier);
+  if (opts.resume) {
+    const journal = readJournal(dir);
+    const rows = journalRows(journal.parts);
+    for (const path of rows.unreadable) {
+      console.log(`⚠ ${tier}: ${path} will not parse — its rows are measured again`);
+      rmSync(path);
+    }
+    const plan = readPlan(dir)!;
+    const done = new Set(rows.results.map((r) => r.id));
+    const released = releaseUnfinished(dir, plan, done);
+    console.log(
+      `\n▶ ${tier}: resuming — ${done.size} of ${plan.ids.length} row(s) already measured, ${released} unfinished claim(s) re-queued`,
+    );
+    return journal.nextGen;
+  }
+  if (existsSync(dir)) {
+    const kept = journalRows(readJournal(dir).parts).results.length;
+    console.log(`\n▶ ${tier}: discarding an unfinished run's ${kept} measured row(s) — \`--resume\` keeps them`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const prices = committedRankSeconds();
+  if (prices.unreadable !== undefined) {
+    console.log(
+      `\n⚠ ${tier}: the committed artifact will not parse (${prices.unreadable}) — rows are queued in dataset order`,
+    );
+  }
+  writePlan(dir, { ...key, ids: claimOrder(opts.caseIds(tier), prices.seconds) });
+  return 0;
 }
 
 /** Tiers are enqueued in this order (any tier not named keeps its `--tier` order, after these).
@@ -219,7 +320,29 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   // parent's stamp then covers the whole run rather than only the instant after the last shard
   // exits — belt to the shard stamps' braces, and the only cover a tier whose parts carry no stamp
   // has at all.
-  asmliftProvenance();
+  const stamp = asmliftProvenance();
+  const key: PlanKey = {
+    commit: stamp?.commit ?? 'unknown',
+    ...(opts.only ? { only: opts.only } : {}),
+    ...(opts.project ? { project: opts.project } : {}),
+    ...(opts.toolchain ? { toolchain: opts.toolchain } : {}),
+  };
+  // Every tier is checked before any tier's queue is touched, and before any child: a refusal
+  // refuses the whole run. A `--resume` measures only the tiers that have an unfinished queue — a
+  // tier whose last run finished keeps its tier file.
+  const refusals = opts.tiers.flatMap((t) => queueRefusal(t, opts, key) ?? []);
+  if (refusals.length > 0) {
+    throw new Error(refusals.join('\n'));
+  }
+  const tiers = opts.resume ? opts.tiers.filter((t) => readPlan(runDir(t)) !== undefined) : opts.tiers;
+  if (tiers.length === 0) {
+    throw new Error(`--resume: ${resumeRefusal(undefined, key)}, or drop --resume`);
+  }
+  for (const t of opts.tiers.filter((t) => !tiers.includes(t))) {
+    console.log(`\n▶ ${t}: nothing to resume — results/${t}.json is left as it is`);
+  }
+  opts = { ...opts, tiers };
+  const gens = new Map(tiers.map((t) => [t, prepareQueue(t, opts, key)]));
 
   // ONE queue across ALL tiers, drained by exactly `opts.jobs` slots. Fanning the tiers one after
   // the other (a `Promise.all` per tier) made every run pay both tiers' TAILS: the real fan could
@@ -232,12 +355,13 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   // split fan always paid.
   //
   // Concurrency is still capped at `opts.jobs`, so the Docker container pool and the machine see
-  // the load they always saw, and the same shard children run the same `idx % jobs` slices over
-  // the same rows in the same order — only scheduled to overlap. The canonical artifact cannot
-  // notice: merge.ts already sorts rows by id precisely because the shard count, and so the
-  // per-tier row order, differs by machine.
+  // the load they always saw. Within a tier the children take rows off one shared queue
+  // (queue.ts), so a slot is freed only when the tier has no row left to hand out — the last
+  // expensive row runs while the other slots have already moved on to the next tier. The
+  // canonical artifact cannot notice: merge.ts already sorts rows by id precisely because the
+  // shard count, and so the per-tier row order, differs by machine.
   const extraFor = (tier: Tier): string[] => {
-    const extra: string[] = [];
+    const extra: string[] = ['--claim', String(gens.get(tier))];
     if (opts.only) {
       extra.push('--only', opts.only);
     }
@@ -275,6 +399,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   await Promise.all(Array.from({ length: opts.jobs }, () => slot()));
 
   let failedShards = 0;
+  let lostRows = 0;
   // Rows selected across every tier a filter could have selected in. Stays null on an unfiltered
   // run, which is the only kind that reaches a branch — so this verdict cannot move a number.
   let selected: number | null = null;
@@ -287,8 +412,9 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     failedShards += failed;
     const skips = mine.reduce((sum, o) => sum + o.skips, 0);
     const filtered = tierIsFiltered(tier, opts);
-    const stitched = stitch(tier, opts.jobs, filtered);
+    const stitched = stitch(tier, filtered, failed > 0);
     const n = stitched.rows;
+    lostRows += stitched.lost ?? 0;
     if (filtered) {
       selected = (selected ?? 0) + n;
     }
@@ -314,7 +440,16 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
       process.exitCode = CACHE_MISMATCH_EXIT;
       return;
     }
-    throw new Error(`${failedShards} shard(s) exited nonzero — see BUILD-FAIL/error lines above`);
+    throw new Error(
+      `${failedShards} shard(s) exited nonzero — see BUILD-FAIL/error lines above. The finished rows are kept: ` +
+        `\`pnpm bench run --resume\` with the same filters measures only the rest.`,
+    );
+  }
+  if (lostRows > 0) {
+    throw new Error(
+      `${lostRows} planned row(s) were neither measured nor skipped, though every shard exited 0 — a shard ` +
+        `claimed them and never wrote them. The queue is kept: \`pnpm bench run --resume\` measures them.`,
+    );
   }
   if (selected === 0) {
     throw emptySelectionError(opts, untouched);

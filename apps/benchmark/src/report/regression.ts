@@ -20,7 +20,7 @@ import { join } from 'node:path';
 
 import { retiredRows } from '../cases/retired';
 import { RESULTS_DIR } from '../config';
-import { readCommitted, sameRun } from './committed';
+import { baseNotice, gitFacts, readCommitted, sameRun } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -135,6 +135,11 @@ export function regressionGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
   const report = compareOutcomes(committed, fresh, retiredRows());
+  const notice = baseNotice({ base, generatedAt: committed.meta.generatedAt, ...gitFacts(base) });
+  console.log(`regression: ${notice.named}`);
+  if (notice.warning) {
+    console.log(notice.warning);
+  }
 
   for (const f of report.gained) {
     console.log(`GAINED  ${f.id} [${f.decompiler}] ${f.from} → match`);

@@ -7,6 +7,7 @@ import {
   FAN_ROWS_SHOWN,
   FLAG_ROWS_SHOWN,
   type FanReport,
+  appearedLines,
   compareCost,
   compareFans,
   compareMeasurements,
@@ -625,5 +626,27 @@ describe('flags', () => {
       ['flags changed (no level → -O2)', ['old asmlift.score']],
       ['flags unchanged', ['kept asmlift.score']],
     ]);
+  });
+});
+
+describe('appearedLines — the rows the multiplier cannot see', () => {
+  test('a row that declined at the base and ranks here is named with its fan and seconds', () => {
+    const base = out(row('p:dear', { outcome: 'declined' }), row('a', { fanSize: 4, rankSeconds: 1 }));
+    const fresh = out(
+      row('p:dear', { outcome: 'noncompile', fanSize: 1408, rankSeconds: 900.5 }),
+      row('a', { fanSize: 4, rankSeconds: 1 }),
+    );
+    expect(appearedLines(compareFans(base, fresh), compareCost(base, fresh), 'origin/main')).toEqual([
+      'FAN     p:dear: none → 1408, ranked in 900.5s — not counted at origin/main (it declined there, failed, or is new)',
+    ]);
+    // the multiplier alone reads neutral: the reason the rows are named
+    expect(fanLines(compareFans(base, fresh), 'origin/main', 2).at(-1)).toContain('(1.00×)');
+  });
+
+  test('dearest first, and silent when nothing newly ranks', () => {
+    const fresh = out(row('cheap', { fanSize: 900, rankSeconds: 2 }), row('dear', { fanSize: 8, rankSeconds: 90 }));
+    expect(appearedLines(compareFans(out(), fresh), compareCost(out(), fresh), 'main')[0]).toMatch(/^FAN {5}dear:/);
+    const same = out(row('a', { fanSize: 4 }));
+    expect(appearedLines(compareFans(same, same), compareCost(same, same), 'main')).toEqual([]);
   });
 });

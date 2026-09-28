@@ -17,8 +17,19 @@ agent. [`/parallel-match-function`](../commands/parallel-match-function.md) laun
    the waves before it.
 4. **Remediate** — reproduces every finding, fixes the confirmed ones as commits, records a reason for
    each one it declines.
-5. **Ship** — Phases 6–7 up to a green `pr-wait`, then a `merge-slot` message on the board. It never
-   merges.
+5. **Ship** — Phases 6–7 up to a green `pr-wait`. It lists every commit of its own that changes
+   code (a conflict resolved by editing code, a gate fix).
+6. **Final review** — one breaker on every commit no wave read: the last wave's remediation when it
+   changed code, and the ship agent's code changes. What it confirms is fixed, gated and pushed;
+   those fixes are named as unreviewed rather than reviewed again.
+7. **Merge slot** — the `merge-slot` message on the board, carrying every CONFIRMED-OPEN finding,
+   every decline→wrong row and finding, and any code no reviewer read — "none" written, never
+   omitted. Nothing in the run merges.
+
+The run returns every phase's result (`diagnosis`, `build`, `ledger`, `shipped`, `finalReview`,
+`slot`) — a run whose agent returned nothing returns what it had, plus `stoppedAt` — and each ledger
+entry carries its finding's severity and location. The coordinator reads all of it, not only the
+slot.
 
 What each phase does is the command file's; every agent reads it from the lane's worktree, and the
 rules a parallel run adds are the list in `parallel-match-function.md` Phase 1. The script holds

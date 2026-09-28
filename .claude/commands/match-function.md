@@ -225,7 +225,7 @@ Per commit:
   files — do not re-open whether a file should adopt `Gate<Ctx>` wholesale.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
-- Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
+- Gate: `pnpm test:root` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
   runs three directories and CI runs five) + `pnpm typecheck` + `pnpm lint`, and re-run
   `pnpm bench run --tier real --only $1` plus the rows you predicted are affected. Report the diff
   number movement.
@@ -323,10 +323,14 @@ Four things this gate does not catch by itself:
   A gate list spelled as `test:offline` + `apps/benchmark/test` +
   `test:matching` — which is what several rounds have run — leaves `apps/web/test` collected by
   nobody, and a change to the DEFAULT map-less spelling lands there: the playground preset pins its
-  own map-less source byte for byte. Run `npx vitest run` (the root config, which is a strict
+  own map-less source byte for byte. Run `pnpm test:root` (the root config, which is a strict
   SUPERSET of those three CI suites — `packages/{core,cli/test/offline,toolchains}/test` plus
   `apps/*/test`; read `include` in `vitest.config.ts`) and `pnpm test:matching`, and **quote both
-  counts**. The shapes to expect are in [`docs/bench-cost.md`](../../docs/bench-cost.md) §1, dated
+  `gate:` lines**. Both run through `scripts/gate-vitest.sh`, which exits 0 only when every
+  collected file and test passed and vitest exited 0 — vitest alone exits 0 on a run that skipped
+  files and 1 on a green run that hit a load timeout, and a gate read off its exit status alone has
+  been wrong both ways. It runs 3 workers; that was the faster run on this machine, not only the
+  quieter one (the script's header has the measurement). The shapes to expect are in [`docs/bench-cost.md`](../../docs/bench-cost.md) §1, dated
   and re-measured there rather than here — **both counts GROW as tests are added, so yours
   disagreeing is not a failure; yours missing a whole suite is.** The skips are the tell: a
   `test:matching` run that
@@ -377,7 +381,7 @@ written for the first version is the likeliest thing in the diff to have become 
 while a bench is in flight** — this phase rewrites files across the whole diff, the mid-run sampler
 is sticky, and a round has paid for a whole voided real tier on exactly this pair
 (`docs/bench-cost.md` §5). **Run `pnpm bench in-flight` first**:
-exit 1 means a run is measuring this worktree, so wait for its `EXIT=` line before you touch a
+exit 1 means a run is measuring this worktree, so wait until it exits 0 before you touch a
 file.
 
 Inventory first — `git diff main HEAD`, added lines matching `^\+\s*(//|/\*|\*)`, counted per

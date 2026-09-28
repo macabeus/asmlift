@@ -233,7 +233,7 @@ ${JSON.stringify(findings, null, 2)}
 
 Then build the survivors:
 - \`cd /tmp/wt-meta-impl && source /tmp/wt-env.sh && git fetch origin && git checkout -B meta/v3-${i} origin/main\`
-- \`pnpm typecheck\`, \`npx vitest run --maxWorkers=3\`, \`pnpm lint\`, \`pnpm format\`.
+- \`pnpm typecheck\`, \`pnpm test:root\`, \`pnpm lint\`, \`pnpm format\`.
 - **PROVE OUTPUT NEUTRALITY** exactly as the scope section specifies; put the comparison script and
   its output in your report. Any difference blocks the change.
 - Commit saying what defect it closes and what proved it. Push, open a PR titled for iteration ${i}.

@@ -21,7 +21,10 @@ mistaken for a passing one.
 2. `pnpm run lint` — 0 errors (warnings are pre-existing)
 3. `pnpm run format:check`
 4. `pnpm run test:offline`
-5. **`pnpm test` — the FULL suite, including the toolchain-backed matching tests.**
+5. **`pnpm test` — the FULL suite, including the toolchain-backed matching tests.** It fails on a
+   skipped file or test (`scripts/gate-vitest.sh`), so it needs every toolchain, the Docker drive,
+   the project checkouts `pnpm bench setup` materializes, and the hand-cloned klonoa checkout whose
+   remedy `packages/cli/test/matching/checkout-gate.ts` prints.
 6. `pnpm bench run && pnpm bench merge`, then BOTH comparisons — they answer different
    questions, and `regression` alone passes a release that republishes different numbers:
    - `pnpm bench regression` — OUTCOME only: 0 match→non-match flips, 0 committed rows missing.

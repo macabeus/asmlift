@@ -33,7 +33,7 @@ Key facts about the setup (verified 2026-08-05):
    rule for which of two numbers wins.
 3. Write the new sha to `apps/benchmark/M2C_COMMIT`; `git -C ../m2c checkout <NEW>`. **`pnpm bench in-flight`
    first**: exit 1 means a bench is measuring this worktree, and any save — this file included —
-   stamps its whole run dirty, stickily. Wait for its `EXIT=` line.
+   stamps its whole run dirty, stickily. Wait until it exits 0.
 4. Smoke-test the new m2c under the local Python before the full run: `python3 m2c.py --help`
    (upstream occasionally breaks on newer Pythons; catch it in 2 seconds, not mid-run).
 5. `pnpm bench run` (background it), then `pnpm bench merge` — `run` only writes the per-tier

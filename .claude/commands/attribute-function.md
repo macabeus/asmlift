@@ -202,8 +202,8 @@ exclusions) get written down for their own future family, not smuggled into this
 
 This phase writes files, and the mid-run provenance sampler counts every path but the benchmark's
 own regenerated artifacts — so **run `pnpm bench in-flight` first**: exit 1 means a bench is
-measuring this worktree and one save stamps its whole run dirty, stickily. Wait for that run's
-`EXIT=` line.
+measuring this worktree and one save stamps its whole run dirty, stickily. Wait until
+`pnpm bench in-flight` exits 0.
 
 One family, one block comment, modeled on the existing families in `dataset/synthetic.ts` (the
 uninit-local block is the reference): what each row isolates, which are controls, and an
@@ -262,7 +262,7 @@ attribution line for every decline naming its first blocker. Constraints learned
    no synthetic row preprocesses. **So a real-tier `noncompile` you see in Phase 6 is a real
    attribution signal, not your shell: the preflight has already ruled that out.**
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
-   they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
+   they must pass after. `pnpm test:root`, `pnpm test:matching`, `pnpm typecheck`,
    `pnpm lint`, `pnpm format` check. **`pnpm format` is `prettier --write .`, a tree WRITE**, and
    step 1 above is a bench you were told to background: `pnpm bench in-flight` first, exit 1 means
    wait.
