@@ -1,5 +1,5 @@
-// Pin tests for the runner's pure pieces: the shard math the orchestrator's parent/child
-// contract rides on, the ONE meta builder, and the no-silent-row-loss build-fail contract.
+// Pin tests for the runner's pure pieces: the shard child's `--shard` argument, the in-row
+// progress line, the ONE meta builder, and the no-silent-row-loss build-fail contract.
 import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import { TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,8 +9,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type { Case } from '../src/cases/types';
 import { evaluate } from '../src/eval/evaluate';
-import { claimer, writePlan } from '../src/run/queue';
-import { benchMeta, fmt, inShard, parseShard, rankProgress, rankProgressLine, runCases } from '../src/run/runner';
+import { benchMeta, fmt, parseShard, rankProgress, rankProgressLine, runCases } from '../src/run/runner';
 
 // No case below reaches a decompiler; the one that evaluates says what evaluation returns.
 vi.mock('../src/eval/evaluate', () => ({ evaluate: vi.fn() }));
@@ -27,15 +26,6 @@ describe('parseShard (pinned)', () => {
     for (const bad of ['8/8', '-1/4', '2', 'a/b', '1/0', '']) {
       expect(() => parseShard(bad), bad).toThrow(/bad --shard/);
     }
-  });
-
-  test('inShard partitions every index into exactly one shard', () => {
-    const idxs = Array.from({ length: 17 }, (_, i) => i);
-    for (const i of idxs) {
-      expect([0, 1, 2].filter((s) => inShard(i, { idx: s, n: 3 }))).toHaveLength(1);
-    }
-    const union = [0, 1, 2].flatMap((s) => idxs.filter((i) => inShard(i, { idx: s, n: 3 })));
-    expect(union.sort((a, b) => a - b)).toEqual(idxs);
   });
 });
 
@@ -88,7 +78,7 @@ describe('runCases toolchain availability (pinned)', () => {
     const sentinel = JSON.stringify({ meta: { counts: { total: 1 } }, results: [{ id: 'synthetic:kept:agbcc' }] });
     writeFileSync(outPath, sentinel);
 
-    expect(runCases([c], outPath, { idx: 0, n: 1 }, { writeEmpty: false })).toEqual([]);
+    expect(runCases([c], outPath, { writeEmpty: false })).toEqual([]);
     expect(readFileSync(outPath, 'utf8'), 'the previous tier file survives a run that measured nothing').toBe(sentinel);
 
     // …and the DEFAULT still clobbers it, which is what makes `writeEmpty: false` the load-bearing
@@ -200,39 +190,6 @@ describe('fmt renders a gap over its denominator', () => {
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
     expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
     expect(fmt(d({ outcome: 'failed' }))).toBe('failed');
-  });
-});
-
-describe('runCases off the shared queue', () => {
-  test('two shards claiming from one queue measure every row once, in plan order, numbered by queue place', () => {
-    vi.mocked(evaluate).mockImplementation(
-      (_tc, spec) => ({ id: `synthetic:${spec.sym}:agbcc`, asmlift: {}, m2c: {} }) as FunctionResult,
-    );
-    const c = (sym: string): Case => ({
-      id: `synthetic:${sym}:agbcc`,
-      tier: 'synthetic',
-      sym,
-      project: 'synthetic',
-      language: 'c',
-      features: [],
-      loc: 1,
-      refSource: `int ${sym};`,
-      toolchain: { available: () => true } as Case['toolchain'],
-      codegen: CODEGEN,
-      build: () => ({ obj: '/nonexistent.o', asm: '' }),
-    });
-    const cases = ['a', 'b', 'c'].map(c);
-    const dir = mkdtempSync(join(tmpdir(), 'bench-runner-test-'));
-    writePlan(dir, { commit: 'c', ids: cases.map((x) => x.id) });
-    const lines: string[] = [];
-    const spy = vi.spyOn(console, 'log').mockImplementation((l: string) => void lines.push(l));
-    const first = runCases(cases, join(dir, 'p0.json'), { idx: 0, n: 2 }, { claimer: claimer(dir, 3, 's0') });
-    const second = runCases(cases, join(dir, 'p1.json'), { idx: 1, n: 2 }, { claimer: claimer(dir, 3, 's1') });
-    spy.mockRestore();
-    // the first shard drained the queue, so the second found nothing — no row twice
-    expect(first.map((r) => r.id)).toEqual(cases.map((x) => x.id));
-    expect(second).toEqual([]);
-    expect(lines.filter((l) => l.startsWith('[')).map((l) => l.split(' ')[0])).toEqual(['[1/3]', '[2/3]', '[3/3]']);
   });
 });
 

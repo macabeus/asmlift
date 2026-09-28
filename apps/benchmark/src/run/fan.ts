@@ -48,6 +48,7 @@ import { commitsSinceArtifact } from '../report/baseline';
 import { readCommitted } from '../report/committed';
 import { fanMove } from '../report/diff';
 import { TOOLCHAINS, type Toolchain } from '../toolchains';
+import { SCORE_SECONDS_PER_CANDIDATE, estimatedScoreTime, recordedRankRates, secondsPerCandidate } from './price';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
@@ -67,46 +68,6 @@ import { TOOLCHAINS, type Toolchain } from '../toolchains';
  *  included (~120 candidates/s), so LBG's fan is ~30 minutes to merely LIST — and this guard is
  *  checked after the pre-count enumeration, so the refusal itself pays that. */
 export const FAN_SCORE_LIMIT = 2000;
-
-/** Seconds per candidate on the SCORING path — a compile plus an objdiff alignment — PER TIER,
- *  because the two tiers do not compile the same thing.
- *
- *  Both numbers are cold measurements on this machine with `ASMLIFT_CANDCACHE=0`:
- *
- *  | tier | row | candidates | SCORING wall | per candidate |
- *  |---|---|---|---|---|
- *  | synthetic | `synthetic:sizebound:agbcc` | 800 | 47.9 s | 60 ms |
- *  | real | `kleod:CountCollectedGems:agbcc` | 5,952 | 518 s | 87 ms |
- *  | real | the same row, a second run on a quieter machine | 5,952 | 483 s | 81 ms |
- *
- *  (Both real-tier walls are the total minus a separately measured 50 s of target build plus
- *  enumeration, and both runs reproduced the published `171/387`. The constant is the middle of
- *  the two; the spread is machine load, and the tier gap is 40% either way.)
- *
- *  ONE rate for both under-prices the real tier by ~35%, and that is the tier the refusal quotes
- *  on `CountCollectedGems`. The mechanism is in `compile/real.ts`: a real candidate escalates
- *  through up to three preludes (`makeRealCompile`), where a synthetic one is a single small
- *  prelude — so the real tier pays more compiler invocations per candidate, and the gap is
- *  structural rather than noise.
- *
- *  The point of the constant is that the refusal QUOTES a price instead of asserting one: a reader
- *  steered off `--force` by a wrong number loses the answer the command exists to give. */
-export const SCORE_SECONDS_PER_CANDIDATE: Record<Case['tier'], number> = {
-  synthetic: 0.06,
-  real: 0.085,
-};
-
-/** The price of scoring `n` candidates of this row's tier, rounded to a unit a reader can act on.
- *  Never a bare second-count above a minute: the decision this informs is "do I start this now",
- *  and 357 s is a number one has to divide before it means anything. */
-export function estimatedScoreTime(n: number, tier: Case['tier']): string {
-  const seconds = n * SCORE_SECONDS_PER_CANDIDATE[tier];
-  if (seconds < 90) {
-    return `about ${Math.max(1, Math.round(seconds))} s`;
-  }
-  const minutes = seconds / 60;
-  return minutes < 90 ? `about ${Math.round(minutes)} min` : `about ${(minutes / 60).toFixed(1)} h`;
-}
 
 export interface FanOptions {
   /** print this candidate's SOURCE after the table: `winner`, or the candidate's variations
@@ -1101,12 +1062,13 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       }
       return 0;
     }
+    const perCandidate = secondsPerCandidate(c.toolchain.id, c.tier, recordedRankRates().rates);
     if (cands.length > FAN_SCORE_LIMIT) {
       note(
         `${c.id} enumerates ${cands.length} candidates — over the ${FAN_SCORE_LIMIT} this command will ` +
-          `compile without being told to. That is a compile each: ${estimatedScoreTime(cands.length, c.tier)} ` +
-          `at this machine's measured cold rate for the ${c.tier} tier ` +
-          `(${SCORE_SECONDS_PER_CANDIDATE[c.tier] * 1000} ms/candidate, and several times faster warm). ` +
+          `compile without being told to. That is a compile each: ${estimatedScoreTime(cands.length, perCandidate)} ` +
+          `at ${Math.round(perCandidate * 1000)} ms/candidate for ${c.toolchain.id} ` +
+          `(the slower of the committed artifact's rate and the cold ${c.tier}-tier floor of ${SCORE_SECONDS_PER_CANDIDATE[c.tier] * 1000} ms). ` +
           `Re-run with --enumerate for the variations and sources without ` +
           `compiling, or --force to score them all.`,
       );
@@ -1145,7 +1107,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     }
     note(
       `asmlift: [whole] compiling the ${e.notCompiled.length} candidate(s) the stillborn stop did not compile: ` +
-        `${estimatedScoreTime(e.notCompiled.length, c.tier)} at this machine's measured cold rate`,
+        `${estimatedScoreTime(e.notCompiled.length, secondsPerCandidate(c.toolchain.id, c.tier, recordedRankRates().rates))}`,
     );
     const check = checkStop(
       e.notCompiled,

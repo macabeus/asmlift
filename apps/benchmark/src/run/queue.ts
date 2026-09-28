@@ -2,30 +2,33 @@
 // and — after an interruption — which are already done. One directory per tier, beside the tier
 // file it will be stitched into:
 //
-//   results/.<tier>.run/plan.json          the rows, dearest first, and the tree they were planned on
+//   results/.<tier>.run/plan.json          the rows, in claim order, and the tree they were planned on
 //   results/.<tier>.run/claims/<k>         row k taken — created exclusively (O_EXCL), never rewritten
-//   results/.<tier>.run/part-<g>-<s>.json  what shard s of generation g finished, flushed per row
+//   results/.<tier>.run/part-<g>-<s>.json  what shard s of generation g finished or skipped, flushed per row
 //
-// WHY A QUEUE AND NOT `idx % jobs`. A static slice decides at spawn time which shard runs which row,
-// so a shard whose slice holds the one expensive row runs alone at the end while the others idle.
-// Measured on the 2026-09-23 run: `mp4:getCardStatus:mwcc_233_163n` ranked 1,408 candidates in
-// 10,276 s — 7.9× the whole real tier's 1,305 s — in one shard, with every other slot free for
-// most of three hours. A queue cannot make that row cheaper; it makes every OTHER row finish on the
-// idle shards, and, dearest first, starts the dear rows before the cheap ones instead of after.
+// WHY A QUEUE. A tier ends when its dearest row ends, whatever the scheduling; what the scheduling
+// decides is whether the other shards finish the rest of the tier meanwhile. With a fixed slice per
+// shard they cannot: the rows are handed out at spawn time. With a queue each shard takes the next
+// unclaimed row, so a shard is idle only once the queue is empty.
 //
-// WHY EXCLUSIVE FILES AND NOT A PARENT DISPATCHING OVER IPC. The shard children are separate
-// `tsx` processes that block their event loop in `spawnSync` for every compile, so a message from
-// the parent cannot be read while a row runs; `open(…, 'wx')` is atomic on every local filesystem
-// and needs no reader. The same files are the journal: a claim with no finished row in any part
-// file is a row that was in flight when the run died, and `--resume` re-queues exactly those.
+// WHY EXCLUSIVE FILES. The shard children are separate `tsx` processes that block their event loop
+// in `spawnSync` for every compile, so a message from the parent could not be read while a row
+// runs; `open(…, 'wx')` is atomic on a local filesystem and needs no reader. The same files are the
+// journal: a claim no part file finished is a row that was in flight when the run died, and
+// `--resume` re-queues exactly those.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { realRowIdentities } from '../cases/manifests';
 import { RESULTS_DIR } from '../config';
+import { readWorktreeArtifact, rekeyToCurrent } from '../report/committed';
 import type { Tier } from './orchestrate';
 
 export const runDir = (tier: Tier, root = RESULTS_DIR): string => join(root, `.${tier}.run`);
+
+/** The environment variable a shard child reads its orchestrator's pid from (see `claimer`). */
+export const ORCHESTRATOR_PID_ENV = 'ASMLIFT_BENCH_ORCHESTRATOR_PID';
 
 /** What a plan was made FROM. A resume against a different tree or a different selection would
  *  stitch rows two trees measured into one tier file, and nothing downstream could tell. */
@@ -41,40 +44,43 @@ export interface Plan extends PlanKey {
   ids: string[];
 }
 
+/** A shard's part file: the tier file's shape, plus the rows it SKIPPED (toolchain unavailable),
+ *  so the stitch can tell a skipped row from a lost one. */
+export interface PartFile extends BenchOutput {
+  skipped?: string[];
+}
+
 /** The claim order: rows whose price the committed artifact does NOT record first, then the rest by
  *  its `rankSeconds`, dearest first; ties keep dataset order.
  *
- *  Unpriced first, deliberately. It is the new rows and the rows that declined last time — and a
- *  row that declined last time and ranks now is exactly the one no one priced (getCardStatus
- *  above). Most of them still decline in about a second, so putting them first costs a few
- *  seconds per shard; putting a three-hour row last costs three hours of an idle machine. */
+ *  Unpriced first, because an unpriced row is new or declined last time — and a row that declined
+ *  last time and ranks now is the one row nobody has priced, possibly the tier's dearest. Starting
+ *  it last would put its whole ranked pass after the rest of the tier. */
 export function claimOrder(ids: readonly string[], rankSeconds: ReadonlyMap<string, number>): string[] {
   const at = new Map(ids.map((id, i) => [id, i]));
   const cost = (id: string): number => rankSeconds.get(id) ?? Infinity;
   return [...ids].sort((a, b) => cost(b) - cost(a) || at.get(a)! - at.get(b)!);
 }
 
-/** row id → the ranked pass's seconds, off an artifact's rows */
-export function recordedRankSeconds(results: readonly Pick<FunctionResult, 'id' | 'asmlift'>[]): Map<string, number> {
+/** Current row id → the ranked pass's seconds, off an artifact's rows, re-keyed to the current
+ *  dataset so a renamed row keeps its price. */
+export function recordedRankSeconds(results: readonly FunctionResult[]): Map<string, number> {
   const out = new Map<string, number>();
-  for (const r of results) {
+  for (const [id, r] of rekeyToCurrent(results, realRowIdentities())) {
     if (typeof r.asmlift?.rankSeconds === 'number') {
-      out.set(r.id, r.asmlift.rankSeconds);
+      out.set(id, r.asmlift.rankSeconds);
     }
   }
   return out;
 }
 
-/** The committed artifact's prices, read off this worktree's `results.json`. Empty — every row
- *  unpriced, dataset order — when there is none or it will not parse: this orders, it decides
- *  nothing a number depends on. */
-export function committedRankSeconds(root = RESULTS_DIR): Map<string, number> {
-  try {
-    const { results } = JSON.parse(readFileSync(join(root, 'results.json'), 'utf8')) as BenchOutput;
-    return Array.isArray(results) ? recordedRankSeconds(results) : new Map();
-  } catch {
-    return new Map();
-  }
+/** The committed artifact's prices, and why there are none when it will not parse — the caller
+ *  says so and plans in dataset order. */
+export function committedRankSeconds(): { seconds: Map<string, number>; unreadable?: string } {
+  const a = readWorktreeArtifact();
+  return a.results
+    ? { seconds: recordedRankSeconds(a.results) }
+    : { seconds: new Map(), ...(a.unreadable ? { unreadable: a.unreadable } : {}) };
 }
 
 export function writePlan(dir: string, plan: Plan): void {
@@ -90,10 +96,30 @@ export function readPlan(dir: string): Plan | undefined {
   }
 }
 
+/** The plan's rows as this tree's cases, in plan order. Throws on a plan row this tree does not
+ *  select: that plan was made on another tree or selection. */
+export function planCases<C extends { id: string }>(dir: string, cases: readonly C[]): C[] {
+  const plan = readPlan(dir);
+  if (plan === undefined) {
+    throw new Error(`no plan in ${dir} — the orchestrator writes it before spawning a shard`);
+  }
+  const byId = new Map(cases.map((c) => [c.id, c]));
+  return plan.ids.map((id) => {
+    const c = byId.get(id);
+    if (c === undefined) {
+      throw new Error(`the plan in ${dir} names ${id}, which this tree does not select`);
+    }
+    return c;
+  });
+}
+
 /** Why `plan` cannot be resumed under `key`, or undefined when it can. */
 export function resumeRefusal(plan: Plan | undefined, key: PlanKey): string | undefined {
   if (plan === undefined) {
     return 'this tier has no unfinished run — its last run finished, or none was fanned out. Narrow --tier to the tier that has one';
+  }
+  if (key.commit === 'unknown' || plan.commit === 'unknown') {
+    return 'git cannot say which commit this tree is, so a resume cannot be checked against the one the unfinished run measured';
   }
   if (plan.commit !== key.commit) {
     return `the unfinished run measured ${plan.commit.slice(0, 8)} and HEAD is ${key.commit.slice(0, 8)}: its rows and this tree's would be stitched into one tier file`;
@@ -110,16 +136,31 @@ export function resumeRefusal(plan: Plan | undefined, key: PlanKey): string | un
 export interface Claimer {
   /** the claimed row's index into the plan, or undefined when the queue is spent */
   claim(): number | undefined;
-  total: number;
 }
 
-export function claimer(dir: string, total: number, who: string): Claimer {
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/** A claimer over the plan in `dir`. It stops claiming once the orchestrator named by
+ *  `ORCHESTRATOR_PID_ENV` is gone: a `kill -9` of the orchestrator orphans its shards, and an
+ *  orphan still claiming would race the next `--resume` for the same rows, writing into a
+ *  generation that has already been stitched. */
+export function claimer(dir: string, who: string, orchestrator = Number(process.env[ORCHESTRATOR_PID_ENV])): Claimer {
+  const total = readPlan(dir)?.ids.length ?? 0;
   // Claims are only ever CREATED during a run, so every index below the cursor is taken by
   // someone and this process never has to look back.
   let cursor = 0;
   return {
-    total,
     claim() {
+      if (Number.isInteger(orchestrator) && orchestrator > 0 && !alive(orchestrator)) {
+        return undefined;
+      }
       for (; cursor < total; cursor++) {
         try {
           const fd = openSync(join(dir, 'claims', String(cursor)), 'wx');
@@ -157,19 +198,30 @@ export function readJournal(dir: string): Journal {
   return { parts, nextGen: parts.reduce((g, p) => Math.max(g, p.gen + 1), 0) };
 }
 
-/** The rows the journal holds, one per id, and the provenance stamp of every part they came from.
- *  A row twice is a claim that was re-queued while its first shard was still alive (an orphaned
- *  child of a killed parent): the later generation's measurement wins, and it is counted. */
+/** The rows the journal holds, one per id, the rows it skipped, the provenance stamp of every
+ *  part, and the parts that will not parse. A row twice is a claim re-queued while its first shard
+ *  was still writing: the later generation's measurement wins, and it is counted. An unparsable part
+ *  contributes nothing, so its rows read as unfinished and a resume re-queues them. */
 export function journalRows(parts: readonly { path: string }[]): {
   results: FunctionResult[];
+  skipped: Set<string>;
   stamps: BenchOutput['meta']['asmlift'][];
   repeated: number;
+  unreadable: string[];
 } {
   const byId = new Map<string, FunctionResult>();
+  const skipped = new Set<string>();
   const stamps: BenchOutput['meta']['asmlift'][] = [];
+  const unreadable: string[] = [];
   let repeated = 0;
   for (const p of parts) {
-    const out = JSON.parse(readFileSync(p.path, 'utf8')) as BenchOutput;
+    let out: PartFile;
+    try {
+      out = JSON.parse(readFileSync(p.path, 'utf8')) as PartFile;
+    } catch {
+      unreadable.push(p.path);
+      continue;
+    }
     stamps.push(out.meta.asmlift);
     for (const r of out.results) {
       if (byId.has(r.id)) {
@@ -177,13 +229,42 @@ export function journalRows(parts: readonly { path: string }[]): {
       }
       byId.set(r.id, r);
     }
+    for (const id of out.skipped ?? []) {
+      skipped.add(id);
+    }
   }
-  return { results: [...byId.values()], stamps, repeated };
+  return { results: [...byId.values()], skipped, stamps, repeated, unreadable };
 }
 
-/** Before a resume: release every claim whose row no part file holds — the rows that were in
- *  flight when the run died, plus rows that were SKIPPED or failed to build, which left no row
- *  either and are re-attempted. Returns how many were released. */
+/** Every claim in `dir` whose claiming process is still alive, as `<pid> (<who>)`. A live claimer
+ *  that is not this run's own shard is an orphan of a killed run, still measuring: starting a run
+ *  beside it would have it claim from the new queue and write into the new journal. */
+export function liveClaimers(dir: string): string[] {
+  const claims = join(dir, 'claims');
+  const out = new Set<string>();
+  for (const f of existsSync(claims) ? readdirSync(claims) : []) {
+    const who = readFileSync(join(claims, f), 'utf8');
+    const pid = Number(/^pid (\d+)/.exec(who)?.[1]);
+    if (pid > 0 && alive(pid)) {
+      out.add(`${pid} (${who})`);
+    }
+  }
+  return [...out];
+}
+
+/** The plan's rows the journal neither measured nor skipped. Non-empty after every shard exited 0
+ *  means rows were lost — claimed by a process that never flushed them. */
+export function unaccounted(
+  plan: Plan,
+  journal: { results: readonly { id: string }[]; skipped: ReadonlySet<string> },
+): string[] {
+  const done = new Set(journal.results.map((r) => r.id));
+  return plan.ids.filter((id) => !done.has(id) && !journal.skipped.has(id));
+}
+
+/** Before a resume: release every claim whose row no part file MEASURED — the rows in flight when
+ *  the run died, and the rows that were skipped or failed to build, which are re-attempted. Returns
+ *  how many were released. */
 export function releaseUnfinished(dir: string, plan: Plan, done: ReadonlySet<string>): number {
   const claims = join(dir, 'claims');
   let released = 0;

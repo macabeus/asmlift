@@ -47,15 +47,17 @@
 // whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
 // your branch SPELLS differently, which is the question a round asks twenty times before it asks
 // the other one once.
-import { type Identifiable, joinArtifacts, onlySelects } from '@asmlift/bench-schema';
+import { type Identifiable, onlySelects } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { realRowIdentities } from '../cases/manifests';
-import { REPO_ROOT, RESULTS_DIR } from '../config';
+import { REPO_ROOT } from '../config';
+import { readWorktreeArtifact, rekeyToCurrent } from '../report/committed';
 import { TOOLCHAINS } from '../toolchains';
+import { estimatedScoreTime, recordedRankRates, secondsPerCandidate } from './price';
 import { MAP_MODES, type SweepSelection, TREE_MODULES } from './sweep-driver';
 
 /** One row, one map mode, in one tree. Every field is a fact a hand rig recorded, and the set is
@@ -212,40 +214,18 @@ export function renderDiff(d: SweepDiff): string[] {
   return lines;
 }
 
-type PricedRow = { toolchain: string; tier: string; asmlift?: { fanSize?: number; rankSeconds?: number } };
-
-/** Seconds per candidate the ranked pass ACTUALLY took, per `toolchain tier` and per toolchain
- *  alone, off an artifact's own `rankSeconds / fanSize`. Measured rather than a constant because
- *  the spread is 60×: on the artifact of 2026-09-23 agbcc ranked at 8–12 ms a candidate and mwcc
- *  at 290–860 ms, so one rate misprices nearly every row that is not agbcc. */
-export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
-  const sums = new Map<string, { n: number; s: number }>();
-  const add = (k: string, n: number, s: number): void => {
-    const v = sums.get(k) ?? { n: 0, s: 0 };
-    sums.set(k, { n: v.n + n, s: v.s + s });
-  };
-  for (const r of recorded) {
-    const n = r.asmlift?.fanSize;
-    const s = r.asmlift?.rankSeconds;
-    if (typeof n === 'number' && typeof s === 'number' && n > 0) {
-      add(`${r.toolchain} ${r.tier}`, n, s);
-      add(r.toolchain, n, s);
-    }
-  }
-  return new Map([...sums].map(([k, v]) => [k, v.s / v.n]));
-}
-
 export interface NewlyRanked {
   id: string;
   fan: number;
-  /** `undefined` when the artifact ranked no row of this toolchain, so there is no rate to quote */
+  /** the ranked pass's price if every candidate compiles; `undefined` for a record that names no
+   *  toolchain (`--asm-dir`) */
   seconds?: number;
 }
 
 /** Records whose enumeration THREW on the base and produced a fan on this tree: rows that declined
- *  there and will be RANKED by the next `bench run` — a price no field in the diff shows, because
- *  `fan -> 1408` reads as a count and not as an evening of mwcc. Only the `harness` map mode, the
- *  one `bench run` ranks; the `nomap` record of the same row would count its price twice. */
+ *  there and will be RANKED by the next `bench run`. The `fan` move alone reads as a count, not as
+ *  a price. Only the `harness` map mode, the one `bench run` ranks; the `nomap` record of the same
+ *  row would count its price twice. */
 export function newlyRanked(d: SweepDiff, rates: ReadonlyMap<string, number>): NewlyRanked[] {
   const out: NewlyRanked[] = [];
   for (const m of d.moved) {
@@ -257,20 +237,21 @@ export function newlyRanked(d: SweepDiff, rates: ReadonlyMap<string, number>): N
     // matched as a suffix, not cut off the id: identity.test.ts censuses every `:` cut
     const toolchain = Object.keys(TOOLCHAINS).find((t) => m.id.endsWith(`:${t}`));
     const tier = m.id.startsWith('synthetic:') ? 'synthetic' : 'real';
-    const rate = toolchain === undefined ? undefined : (rates.get(`${toolchain} ${tier}`) ?? rates.get(toolchain));
-    out.push({ id: m.id, fan: fan.to, ...(rate !== undefined ? { seconds: fan.to * rate } : {}) });
+    out.push({
+      id: m.id,
+      fan: fan.to,
+      ...(toolchain !== undefined ? { seconds: fan.to * secondsPerCandidate(toolchain, tier, rates) } : {}),
+    });
   }
   return out.sort((a, b) => (b.seconds ?? Infinity) - (a.seconds ?? Infinity) || b.fan - a.fan);
 }
 
 const priced = (s: number | undefined): string =>
-  s === undefined
-    ? 'unpriced (the artifact ranked no row of this toolchain)'
-    : `~${s < 60 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`}`;
+  s === undefined ? 'unpriced (no toolchain)' : `up to ${estimatedScoreTime(1, s).replace(/^about /, '~')}`;
 
-/** One line per newly ranked row, dearest first, and a total — the lines `bench run`'s wall clock
- *  will be explained by. */
-export function newlyRankedLines(rows: readonly NewlyRanked[]): string[] {
+/** One line per newly ranked row, dearest first, and a total. "Up to", because a stillborn stop can
+ *  end a fan before most of it compiles, and `fan` counts what enumeration produced. */
+export function newlyRankedLines(rows: readonly NewlyRanked[], unreadable?: string): string[] {
   if (rows.length === 0) {
     return [];
   }
@@ -278,25 +259,13 @@ export function newlyRankedLines(rows: readonly NewlyRanked[]): string[] {
     (r) => `asmlift: [newly-ranked] ${r.id} — declined on the base, fan ${r.fan} here, rank ${priced(r.seconds)}`,
   );
   const fan = rows.reduce((a, r) => a + r.fan, 0);
-  const known = rows.filter((r) => r.seconds !== undefined);
-  const secs = known.reduce((a, r) => a + r.seconds!, 0);
+  const secs = rows.reduce((a, r) => a + (r.seconds ?? 0), 0);
   lines.push(
-    `asmlift: [sweep] ${rows.length} row(s) newly ranked: ${fan} candidate(s), rank ${priced(secs)} at the committed artifact's per-toolchain rate${
-      known.length < rows.length ? ` (${rows.length - known.length} row(s) unpriced)` : ''
-    } — what the next \`bench run\` pays for them, before one of them matches`,
+    `asmlift: [sweep] ${rows.length} row(s) newly ranked: ${fan} candidate(s), rank ${priced(secs)} — what the next \`bench run\` pays for them before one of them matches${
+      unreadable ? ` (priced at the cold floor alone: ${unreadable})` : ''
+    }`,
   );
   return lines;
-}
-
-/** The committed artifact's measured rates; empty (every row unpriced, and each line says so) when
- *  there is no artifact or it will not parse — this prices, it guards nothing. */
-function recordedRates(): Map<string, number> {
-  try {
-    const { results } = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as { results: PricedRow[] };
-    return Array.isArray(results) ? rankRates(results) : new Map();
-  } catch {
-    return new Map();
-  }
 }
 
 /** Rows whose recorded fan is larger than this are SKIPPED by `--fan` and named, unless `--force`.
@@ -352,16 +321,7 @@ type RecordedRow = Identifiable & { asmlift?: { fanSize?: number } };
  *  dataset no longer carries prices nothing. Synthetic rows are keyed by id on both sides. */
 export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Identifiable[]): Map<string, number> {
   const priced = recorded.filter((r) => typeof r.asmlift?.fanSize === 'number');
-  const join = joinArtifacts(priced, current);
-  const currentId = new Map(current.map((r) => [join.headKey(r), r.id]));
-  const out = new Map<string, number>();
-  for (const r of priced) {
-    const id = r.tier === 'real' ? currentId.get(join.baseKey(r)) : r.id;
-    if (id !== undefined) {
-      out.set(id, r.asmlift!.fanSize!);
-    }
-  }
-  return out;
+  return new Map([...rekeyToCurrent(priced, current)].map(([id, r]) => [id, r.asmlift!.fanSize!]));
 }
 
 /** sym → the fan the committed artifact recorded, for the `--fan` guard. Read off the COMMITTED
@@ -377,7 +337,6 @@ export function recordedFans(): {
   /** the CURRENT dataset's real rows — what a selection can name, priced or not (see fanGuard) */
   current?: readonly Pick<Identifiable, 'id' | 'project' | 'aliases'>[];
 } {
-  const path = join(RESULTS_DIR, 'results.json');
   // NO ARTIFACT AT ALL is this guard's documented open case: a checkout that has never published
   // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
   // PARSE must not read as the same thing — a truncated file mid-`bench merge`, or a shape change.
@@ -386,20 +345,15 @@ export function recordedFans(): {
   // nothing and was still enumerating 77,760 spellings at 120 s, against 0.3 s to refuse with the
   // artifact intact. A guard that disappears without a word is worse than no guard, so the caller
   // refuses instead.
-  if (!existsSync(path)) {
+  const { path, results, unreadable } = readWorktreeArtifact();
+  if (unreadable !== undefined) {
+    return { fans: new Map(), path, unreadable };
+  }
+  if (results === undefined) {
     return { fans: new Map() };
   }
-  const out = new Map<string, number>();
-  try {
-    const { results } = JSON.parse(readFileSync(path, 'utf8')) as { results: RecordedRow[] };
-    if (!Array.isArray(results)) {
-      return { fans: out, path, unreadable: `${path} has no top-level \`results\` array` };
-    }
-    const current = realRowIdentities();
-    return { fans: rekeyFans(results, current), path, rows: results.length, current };
-  } catch (e) {
-    return { fans: out, path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
-  }
+  const current = realRowIdentities();
+  return { fans: rekeyFans(results, current), path, rows: results.length, current };
 }
 
 /** Does this selection name that row? The same three filters `collect` applies, over a row ID
@@ -977,7 +931,8 @@ function reportDiff(d: SweepDiff, what: string, o: SweepOptions): number {
   }
   // not gated on `--fan`: `--compare` reads two record files whatever flag wrote them, and a sweep
   // without fans moves no `fan` field, so this prints nothing there
-  for (const line of newlyRankedLines(newlyRanked(d, recordedRates()))) {
+  const { rates, unreadable } = recordedRankRates();
+  for (const line of newlyRankedLines(newlyRanked(d, rates), unreadable)) {
     console.log(line);
   }
   const moved = d.moved.length + d.baseOnly.length + d.headOnly.length;

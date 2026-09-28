@@ -77,21 +77,20 @@ export interface PreflightOptions {
   only?: string;
   project?: string;
   toolchain?: string;
-  shard?: string;
-  serial?: boolean;
+  /** a shard child's generation (`--claim`) */
+  claim?: string;
 }
 
 /** A shard CHILD, exempt from EVERY verdict in this file and from taking a lock record: the parent
  *  that spawned it has already answered them once, and every child re-answering would print the
- *  same refusal N times — or, for the record, would say eight runs are in flight. `--shard` alone
- *  is NOT that child — `cli.ts`'s fan-out branch ignores the shard and runs the tier whole — so
- *  the test is `--shard` AND `--serial`, exactly how `orchestrate.ts` spawns one
- *  (`run --serial --tier X --shard i/N`). `cli.ts` rejects the other combination outright.
+ *  same refusal N times — or, for the record, would say eight runs are in flight. A child is what
+ *  carries `--claim` (`orchestrate.ts` spawns `run --tier X --shard i/N --claim <gen>`); `cli.ts`
+ *  rejects a `--shard` without it.
  *
  *  Private: the three predicates below are the exported surface, so that every exemption is
  *  spelled in the file that owns the sentence above rather than re-derived by a caller. */
 function isShardChild(opts: PreflightOptions): boolean {
-  return opts.shard !== undefined && opts.serial === true;
+  return opts.claim !== undefined;
 }
 
 /** Does this invocation write a record into `run/lock.ts`'s register, so the phases that edit the

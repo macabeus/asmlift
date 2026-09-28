@@ -32,7 +32,6 @@ import {
   fanGuard,
   newlyRanked,
   newlyRankedLines,
-  rankRates,
   recordFileRefusal,
   rekeyFans,
   renderDiff,
@@ -134,11 +133,10 @@ describe('the sweep comparison', () => {
 });
 
 describe('a row that declined on the base and ranks here is priced', () => {
-  const rates = rankRates([
-    { toolchain: 'agbcc', tier: 'real', asmlift: { fanSize: 1000, rankSeconds: 12 } },
-    { toolchain: 'mwcc_233_163n', tier: 'real', asmlift: { fanSize: 100, rankSeconds: 50 } },
-    { toolchain: 'mwcc_233_163n', tier: 'synthetic', asmlift: { fanSize: 10, rankSeconds: 3 } },
-    { toolchain: 'ido7.1', tier: 'real', asmlift: { rankSeconds: 9 } },
+  const CARD = 'pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n';
+  const rates = new Map([
+    ['mwcc_233_163n real', 0.5],
+    ['agbcc real', 0.012],
   ]);
   const rec = (id: string, mapMode: string, extra: Partial<SweepRecord>): SweepRecord => ({
     id,
@@ -147,41 +145,30 @@ describe('a row that declined on the base and ranks here is priced', () => {
     ...extra,
   });
 
-  it('measures a rate per toolchain AND tier, because mwcc ranks 60× slower than agbcc', () => {
-    expect(rates.get('agbcc real')).toBeCloseTo(0.012);
-    expect(rates.get('mwcc_233_163n real')).toBeCloseTo(0.5);
-    expect(rates.get('mwcc_233_163n')).toBeCloseTo(53 / 110);
-    expect(rates.has('ido7.1')).toBe(false);
-  });
-
   it('prices the harness record of a row whose enumeration threw on the base, dearest first', () => {
     const baseSide = [
-      rec('mp4:getCardStatus:mwcc_233_163n', 'harness', { fanThrew: 'declined: X' }),
-      rec('mp4:getCardStatus:mwcc_233_163n', 'nomap', { fanThrew: 'declined: X' }),
+      rec(CARD, 'harness', { fanThrew: 'declined: X' }),
+      rec(CARD, 'nomap', { fanThrew: 'declined: X' }),
       rec('kleod:small:agbcc', 'harness', { fanThrew: 'declined: Y' }),
       rec('kleod:grew:agbcc', 'harness', { fan: 4 }),
-      rec('pikmin:noRate:ido7.1', 'harness', { fanThrew: 'declined: Z' }),
+      rec('asm:foo.s', 'harness', { fanThrew: 'declined: Z' }),
     ];
     const headSide = [
-      rec('mp4:getCardStatus:mwcc_233_163n', 'harness', { fan: 1408 }),
-      rec('mp4:getCardStatus:mwcc_233_163n', 'nomap', { fan: 1408 }),
+      rec(CARD, 'harness', { fan: 1408 }),
+      rec(CARD, 'nomap', { fan: 1408 }),
       rec('kleod:small:agbcc', 'harness', { fan: 50 }),
       rec('kleod:grew:agbcc', 'harness', { fan: 8 }),
-      rec('pikmin:noRate:ido7.1', 'harness', { fan: 3 }),
+      rec('asm:foo.s', 'harness', { fan: 3 }),
     ];
     const rows = newlyRanked(compareSweeps(baseSide, headSide), rates);
-    expect(rows.map((r) => r.id)).toEqual([
-      'pikmin:noRate:ido7.1',
-      'mp4:getCardStatus:mwcc_233_163n',
-      'kleod:small:agbcc',
-    ]);
+    expect(rows.map((r) => r.id)).toEqual(['asm:foo.s', CARD, 'kleod:small:agbcc']);
     expect(rows[1]!.seconds).toBeCloseTo(704);
-    const lines = newlyRankedLines(rows);
-    expect(lines[0]).toContain('unpriced');
-    expect(lines[1]).toContain('fan 1408 here, rank ~11.7 min');
-    expect(lines.at(-1)).toMatch(
-      /3 row\(s\) newly ranked: 1461 candidate\(s\), rank ~11.7 min .*\(1 row\(s\) unpriced\)/,
-    );
+    // agbcc's warm rate is under the cold floor, so the floor prices it
+    expect(rows[2]!.seconds).toBeCloseTo(50 * 0.085);
+    const lines = newlyRankedLines(rows, 'results.json: Unexpected end of JSON input');
+    expect(lines[0]).toContain('unpriced (no toolchain)');
+    expect(lines[1]).toContain('fan 1408 here, rank up to ~12 min');
+    expect(lines.at(-1)).toMatch(/3 row\(s\) newly ranked: 1461 candidate\(s\), rank up to ~12 min .*cold floor alone/);
   });
 
   it('prints nothing when no row newly ranks', () => {

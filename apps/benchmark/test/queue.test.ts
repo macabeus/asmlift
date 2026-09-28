@@ -2,6 +2,7 @@
 // takes rows through, and the journal a `--resume` continues from. Everything here is files in a
 // scratch directory — the same files the shard children write, without a child.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ import {
   recordedRankSeconds,
   releaseUnfinished,
   resumeRefusal,
+  unaccounted,
   writePlan,
 } from '../src/run/queue';
 
@@ -52,8 +54,8 @@ describe('the claims', () => {
   it('hand every row to exactly one of several claimers, whichever asks first', () => {
     const dir = scratch();
     writePlan(dir, { commit: 'c', ids: ['a', 'b', 'c', 'd', 'e'] });
-    const one = claimer(dir, 5, 'one');
-    const two = claimer(dir, 5, 'two');
+    const one = claimer(dir, 'one');
+    const two = claimer(dir, 'two');
     const got: [string, number][] = [];
     // interleaved unevenly, as a slow shard and a fast one would ask
     for (const who of [one, one, two, one, two, two, one, two]) {
@@ -72,6 +74,14 @@ describe('the claims', () => {
     ]);
     expect(one.claim()).toBeUndefined();
   });
+
+  it('stop once the orchestrator is gone, so an orphaned shard cannot race a resume', () => {
+    const dir = scratch();
+    writePlan(dir, { commit: 'c', ids: ['a', 'b'] });
+    const gone = spawnSync('true').pid!;
+    expect(claimer(dir, 'orphan', gone).claim()).toBeUndefined();
+    expect(claimer(dir, 'live', process.pid).claim()).toBe(0);
+  });
 });
 
 describe('the journal and --resume', () => {
@@ -82,12 +92,15 @@ describe('the journal and --resume', () => {
     expect(resumeRefusal(plan, { commit: 'deadbeef', only: 'x' })).toMatch(/measured c0ffee and HEAD is deadbeef/);
     expect(resumeRefusal(plan, { commit: 'c0ffee' })).toMatch(/--only x .* --only \(none\)/);
     expect(resumeRefusal(undefined, { commit: 'c0ffee' })).toMatch(/no unfinished run/);
+    expect(resumeRefusal({ ...plan, commit: 'unknown' }, { commit: 'unknown', only: 'x' })).toMatch(
+      /cannot say which commit/,
+    );
   });
 
   it('re-queues exactly the claims no part file finished, and the next generation keeps the old rows', () => {
     const dir = scratch();
     writePlan(dir, plan);
-    const c = claimer(dir, 4, 'dead run');
+    const c = claimer(dir, 'dead run');
     [0, 1, 2].forEach(() => c.claim());
     part(dir, 0, 0, ['a']);
     part(dir, 0, 1, ['c']);
@@ -98,13 +111,23 @@ describe('the journal and --resume', () => {
     expect(releaseUnfinished(dir, readPlan(dir)!, done)).toBe(1);
     expect(readdirSync(join(dir, 'claims')).sort()).toEqual(['0', '2']);
 
-    const resumed = claimer(dir, 4, 'resumed');
+    const resumed = claimer(dir, 'resumed');
     expect([resumed.claim(), resumed.claim(), resumed.claim()]).toEqual([1, 3, undefined]);
     part(dir, 1, 0, ['b', 'd']);
     const all = journalRows(readJournal(dir).parts);
     expect(all.results.map((r) => r.id).sort()).toEqual(['a', 'b', 'c', 'd']);
     expect(all.stamps).toHaveLength(3);
     expect(all.repeated).toBe(0);
+  });
+
+  it('accounts a skipped row as accounted, and a claimed-but-unwritten one as not', () => {
+    const dir = scratch();
+    writeFileSync(
+      partPath(dir, 0, 0),
+      JSON.stringify({ meta: { asmlift: undefined }, results: [row('a')], skipped: ['b'] }),
+    );
+    const plan: Plan = { commit: 'c', ids: ['a', 'b', 'c'] };
+    expect(unaccounted(plan, journalRows(readJournal(dir).parts))).toEqual(['c']);
   });
 
   it('counts a row two generations both measured, and keeps the later one', () => {

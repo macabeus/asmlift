@@ -1,28 +1,22 @@
 // The ONE case loop: skip-if-unavailable, build, evaluate both decompilers, log, and flush
 // incrementally so a mid-run failure keeps prior progress. Used identically by the serial path
 // and by every shard child.
-import {
-  type BenchMeta,
-  type BenchOutput,
-  type DecompilerResult,
-  type FunctionResult,
-  rowTier,
-} from '@asmlift/bench-schema';
+import { type BenchMeta, type DecompilerResult, type FunctionResult, rowTier } from '@asmlift/bench-schema';
 import type { RankOptions } from '@asmlift/cli/rank';
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import type { Case } from '../cases/types';
 import { type EvalSpec, evaluate } from '../eval/evaluate';
 import { asmliftProvenance } from '../provenance';
-import type { Claimer } from './queue';
+import type { Claimer, PartFile } from './queue';
 
 export interface Shard {
   idx: number; // 0-based shard index
   n: number; // shard count (1 = the whole set)
 }
 
-/** Parse "i/N" (the CLI's --shard form). Throws on malformed input. */
+/** Parse "i/N" (the shard child's --shard). Throws on malformed input. */
 export function parseShard(s: string): Shard {
   const [i, n] = s.split('/').map(Number);
   if (!Number.isInteger(i) || !Number.isInteger(n) || n < 1 || i < 0 || i >= n) {
@@ -101,9 +95,8 @@ export function rowLine(n: number, total: number, tag: string, r: FunctionResult
 }
 
 /** How long a row ranks before it says so, and how often after that. A row's own line is printed
- *  when it FINISHES, so a row ranking for hours printed nothing at all: the 2026-09-23 run showed
- *  one shard silent for 10,276 s on `getCardStatus`, and "stuck or slow?" was unanswerable from
- *  the log. Rows under a minute — nearly all of them — print exactly what they printed before. */
+ *  when it FINISHES, so without this a row ranking for hours leaves its shard's log silent, and
+ *  "stuck or slow?" cannot be read off the log. */
 export const ROW_PROGRESS_SECONDS = 60;
 
 /** The in-row line. Pure, for the test. */
@@ -136,12 +129,8 @@ export function rankProgress(
   };
 }
 
-/** Whether flat index `idx` belongs to `shard` — the slicing contract the orchestrator rides on. */
-export function inShard(idx: number, shard: Shard): boolean {
-  return idx % shard.n === shard.idx;
-}
-
-/** Run this shard's slice of `cases`, writing `outPath` after every case. Returns the results.
+/** Run `cases` — or, with a `claimer`, whichever of them the tier's shared queue hands this shard
+ *  (queue.ts) — writing `outPath` after every case. Returns the results.
  *
  *  `writeEmpty: false` suppresses the write while there is nothing to write — the same rule
  *  `orchestrate.ts`'s `stitch` already applies to the fanned path (`filtered && results.length
@@ -150,21 +139,20 @@ export function inShard(idx: number, shard: Shard): boolean {
  *  `--tier synthetic --only <row> --toolchain agbcc --serial` with that toolchain unavailable
  *  wrote a 287-byte `results: []` over the tier file and then threw an error announcing the file
  *  had been "left unchanged". A shard CHILD always writes its part file (the stitcher owns
- *  `<tier>.json`), so this stays opt-in. */
+ *  `<tier>.json`), so this stays opt-in.
+ *
+ *  With a claimer, `cases` is in plan order, a row's number is its place in the queue — so
+ *  `[312/892]` reads the same in every shard's lines — and the part file also names the rows it
+ *  SKIPPED, which the stitch needs to tell a skipped row from a lost one. */
 export function runCases(
   cases: Case[],
   outPath: string,
-  shard: Shard = { idx: 0, n: 1 },
-  { writeEmpty = true, claimer }: { writeEmpty?: boolean; claimer?: Claimer } = {},
+  { writeEmpty = true, claimer, tag = '' }: { writeEmpty?: boolean; claimer?: Claimer; tag?: string } = {},
 ): FunctionResult[] {
-  // With a CLAIMER the rows are not this shard's slice but whatever the shared queue hands it
-  // (queue.ts), `cases` is in plan order, and a row's number is its place in that queue — so
-  // `[312/892]` reads the same in every shard's lines.
-  const mine = claimer ? cases : cases.filter((_, idx) => inShard(idx, shard));
-  const total = claimer ? claimer.total : mine.length;
+  const total = cases.length;
   function* rows(): Generator<{ c: Case; k?: number }> {
     if (!claimer) {
-      yield* mine.map((c) => ({ c }));
+      yield* cases.map((c) => ({ c }));
       return;
     }
     for (let k = claimer.claim(); k !== undefined; k = claimer.claim()) {
@@ -172,7 +160,7 @@ export function runCases(
     }
   }
   const results: FunctionResult[] = [];
-  const tag = shard.n > 1 ? ` s${shard.idx}` : '';
+  const skipped: string[] = [];
   let done = 0;
   /** cases that yielded no row, each with why: the shard finishes, then fails on these */
   const noRow: string[] = [];
@@ -185,14 +173,19 @@ export function runCases(
     if (!writeEmpty && results.length === 0) {
       return;
     }
-    const out: BenchOutput = { meta: benchMeta(results), results };
-    writeFileSync(outPath, JSON.stringify(out, null, 2));
+    const out: PartFile = { meta: benchMeta(results), results, ...(claimer ? { skipped } : {}) };
+    // written whole and renamed into place: a shard killed mid-flush leaves the previous flush, not
+    // a truncated file
+    writeFileSync(`${outPath}.tmp`, JSON.stringify(out, null, 2));
+    renameSync(`${outPath}.tmp`, outPath);
   };
 
   for (const { c, k } of rows()) {
     if (!c.toolchain.available()) {
       console.log(`SKIP ${c.id}: toolchain unavailable`);
       skips++;
+      skipped.push(c.id);
+      flush();
       skippedToolchains.add(c.toolchain.id);
       continue;
     }
@@ -252,7 +245,7 @@ export function runCases(
   if (skips > 0) {
     // the shape the orchestrator greps for; keep the prefix and the `n/total` in step with it
     console.log(
-      `SKIPPED ${skips}/${claimer ? done + skips + noRow.length : mine.length} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
+      `SKIPPED ${skips}/${claimer ? done + skips + noRow.length : total} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
     );
   }
   if (noRow.length > 0) {

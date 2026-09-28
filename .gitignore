@@ -14,8 +14,6 @@ build/
 
 # benchmark run logs (noise); the merged results.json + report data ARE committed
 apps/benchmark/results/*.log
-# per-worker partials written mid-run then merged into synthetic.json (transient)
-apps/benchmark/results/*.part*.json
 # a fanned run's row queue and per-row journal (run/queue.ts), removed when the run finishes
 apps/benchmark/results/.*.run/
 # CI-fetched toolchains + pinned m2c (.github/workflows/benchmark.yml)

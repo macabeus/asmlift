@@ -53,15 +53,7 @@ describe('which runs are checked at all', () => {
   });
 
   test('a shard CHILD is exempt — its parent already answered, once', () => {
-    expect(runIsWholeTier({ tiers: ['real'], shard: '3/8', serial: true })).toBe(false);
-  });
-
-  test('`--shard` WITHOUT `--serial` is not a child and is not exempt', () => {
-    // That argv fans out across `--jobs` children and never reads the shard, so it rewrites the
-    // tier whole while looking like the one shape the exemption is for. `cli.ts` rejects it with
-    // exit 2; this is the second lock, in case the argv ever becomes meaningful.
-    expect(runIsWholeTier({ tiers: ['synthetic'], shard: '1/1' })).toBe(true);
-    expect(runUsesHostCpp({ tiers: ['real'], shard: '1/1' })).toBe(true);
+    expect(runIsWholeTier({ tiers: ['real'], claim: '0' })).toBe(false);
   });
 });
 
@@ -84,7 +76,7 @@ describe('which runs touch the host cpp at all', () => {
   });
 
   test('a shard child still asks neither question', () => {
-    expect(runUsesHostCpp({ tiers: ['real'], shard: '3/8', serial: true })).toBe(false);
+    expect(runUsesHostCpp({ tiers: ['real'], claim: '0' })).toBe(false);
   });
 });
 
@@ -245,7 +237,7 @@ describe('the concurrent-run verdict', () => {
   });
 
   test('a SHARD CHILD is exempt — eight of them would refuse each other', () => {
-    const child = { tiers: ['synthetic' as const], shard: '0/8', serial: true };
+    const child = { tiers: ['synthetic' as const], claim: '0' };
     expect(runTakesTheBenchLock(child)).toBe(false);
     expect(refusalsFor(child, live())).toEqual([]);
   });
