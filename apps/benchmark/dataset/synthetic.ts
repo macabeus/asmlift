@@ -2460,6 +2460,18 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['continue', 'memory'],
     toolchains: ALL,
   },
+  // A retry loop whose mid-body `continue` and bottom test are two latches of one header, which is
+  // neither one test at its top nor one at its bottom: `while (1)` with a `continue` and a `break`.
+  {
+    sym: 'retryloop',
+    src:
+      'int f(void);\nint g(int);\nvoid h(int);\n' +
+      'int retryloop(int n){ int t; for(;;){ t = f(); if (t == n) continue; h(t); if (g(t)) break; } return t; }',
+    features: [],
+    toolchains: CALL,
+    ctx: 'int f(void); int g(int); void h(int);',
+    proto: { f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } },
+  },
   // A do-while whose `||` test calls a function in a later term. The IR cannot fold the call's term
   // into the one before it — the fold would run `g` on every iteration — so the loop reaches the
   // structurer with several latches, chained at its bottom (`latchChain`).

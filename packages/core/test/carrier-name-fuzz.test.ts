@@ -125,22 +125,22 @@ function spellings(
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
 //
-// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,522 at depth 1 where
-// `namecoalesce-fuzz` judges 2,528 — six FEWER — and the two files lose different seeds.
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,621 at depth 1 where
+// `namecoalesce-fuzz` judges 2,627 — six FEWER — and the two files lose different seeds.
 // `ADMIT_NOTHING` declines on 8 judged seeds the shipped spelling structures (291, 1089, 1489, 1724,
 // 3923, each `unrecovered back-edge into block #k`; 1504 and 2921, whose fresh exit param makes
 // a header→exit copy a `break` would run; and 2603, whose fresh exit param makes a do-while's
 // `break` carry a value the copy after the loop does not spell), and `spellings` needs both, so
 // those eight leave here and stay there; a ninth, 415, hits the step cap in both files. `coalesceMergeNames` declines on 2
 // the shipped spelling structures (3601, 3947), which stay here and leave there. Instrumented at
-// depth 1: declines are 1,316 for `ADMIT_NOTHING`, 1,324 for the shipped spelling and 1,326 for
+// depth 1: declines are 1,094 for `ADMIT_NOTHING`, 1,102 for the shipped spelling and 1,104 for
 // `coalesceMergeNames`.
 //
 // RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2522, 2: 1556, 3: 653 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2621, 2: 1556, 3: 653 };
 
 describe.each([
   ['acyclic', 0],

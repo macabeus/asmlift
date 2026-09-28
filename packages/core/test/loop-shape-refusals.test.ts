@@ -7,7 +7,8 @@
 // which counts `continue;` tokens and so reddens on every ablation alike:
 //
 //   1. guarded self-loop  `nl.selfLoop && loops.has(h)`         2 failed — THIS FILE  (GUARDED_SELFLOOP, GSL2)
-//   2. multi-latch        several latches that are no chain       1 failed — THIS FILE  (MULTILATCH)
+//   2. multi-latch        several latches that are no chain       left to `while (1)` — loop-forever.test.ts,
+//                                                                 and THIS FILE's MULTILATCH
 //   3. overlapping inner  a nested header whose body escapes ours  0 failed — UNWITNESSED
 //   4. irreducible        `!reducible`                             0 failed — UNWITNESSED
 //   5. neither shape      no clean pre-tested/bottom-tested exit  2 failed — latch.test.ts,
@@ -23,9 +24,9 @@
 // further down on every input the suite holds. Naming all three is the point: an unwitnessed refusal that nobody
 // has written down reads exactly like a witnessed one.
 //
-// WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". Ablating the
-// multi-latch refusal structures the fixture below — correctly, on all 64 seeds `irTraceOf` judges.
-// So these are CAPABILITY limits, and the loud decline is the contract they ship under: a row that
+// WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". The multi-latch
+// fixture below, which #2 leaves to the `while (1)` recognizer, structures there correctly on all
+// 64 seeds `irTraceOf` judges. So these are CAPABILITY limits, and the loud decline is the contract they ship under: a row that
 // hits one gets an `ASMLIFT_ERROR` marker rather than a plausible wrong answer, which is this
 // project's first hard rule. Pinning them is pinning that contract, so that widening the recognizer
 // is a deliberate act with a measurement attached rather than a line someone deletes.
@@ -174,8 +175,15 @@ const GSL2 = `fn gsl2 {
 }
 `;
 
-test('a loop with several latches declines LOUD rather than being judged as a single-latch one', () => {
-  expect(() => lift(MULTILATCH)).toThrow(/unrecovered back-edge/);
+test('a loop with several latches that are no chain is left to the `while (1)` recognizer', () => {
+  const fn = parse(MULTILATCH);
+  verify(fn);
+  recoverTypes(fn);
+  const tree = structure(fn, {});
+  expect(cBackend.emit(tree)).toContain('while (1) {');
+  for (let seed = 1; seed <= 64; seed++) {
+    expect(tracesDiffer({ off: irTraceOf(fn, seed), on: traceOf(tree, seed) }), `seed ${seed}`).toBe(false);
+  }
 });
 
 test('a guarded self-loop entered from TWO predecessors declines LOUD', () => {
