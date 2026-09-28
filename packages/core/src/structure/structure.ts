@@ -1091,13 +1091,7 @@ interface WhileLoopInfo {
   forwardPreds: Block[]; // header preds outside the loop body (the entry/init side)
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   arms: LoopArm[]; // the early-`return` exits out of the body (`earlyReturnArm`)
-  breaks: LoopEdge[]; // the body edges that land on `exit` itself: each one is a `break`
-}
-
-/** One edge out of a loop body, keyed like a {@link LoopArm}: by edge, not by target. */
-interface LoopEdge {
-  from: Block;
-  to: Block;
+  breaks: Set<Block>; // the body blocks whose edge to `exit` itself is a `break`
 }
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -2606,7 +2600,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // and the edge is spelled as it was before breaks existed. The arms and breaks are kept:
     // emission needs to know which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
-    const breaks: LoopEdge[] = [];
+    const breaks = new Set<Block>();
     let singleExit = true;
     for (const e of nl.exitEdges) {
       if (e.from === exitFrom && e.to === exit) {
@@ -2620,7 +2614,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         e.to === exit &&
         ![...forest.byHeader.values()].some((l2) => l2.header !== h && nl.body.has(l2.header) && l2.body.has(e.from))
       ) {
-        breaks.push({ from: e.from, to: e.to });
+        breaks.add(e.from);
       } else if (!isRet(e.to)) {
         singleExit = false;
         break;
@@ -4240,6 +4234,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     sinkablePreUpdateSlots,
     sameAtEntry,
     loopWriteSet,
+    loopWriteSetAhead,
   } = makeLoopHazards({
     defs,
     varName,
@@ -4894,7 +4889,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[]; breaks: LoopEdge[] };
+  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[]; breaks: ReadonlySet<Block> };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -5579,13 +5574,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //   • the header→exit edge has copies: they run after the loop on the break path too, and
     //     clobber what the break carried (the latch path's break-clobber rule);
     //   • the other edge leaves the body too;
-    //   • the exit region reads a value under a name written earlier in this iteration.
+    //   • the exit region reads a value under a loop variable's name this iteration already wrote.
     // A refusal is LOUD, since the loop was admitted on the promise of this spelling — except where
     // the exit ends in a `ret`: then the arm can copy the exit's tail and return, and if-recovery
     // below spells it that way, as it did before breaks were recognised.
     // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
-    if (loopCtx && loopCtx.breaks.some((e) => e.from === b)) {
+    if (loopCtx && loopCtx.breaks.has(b)) {
       const frame = loopCtx;
       const breakIsTaken = takenB === frame.exit;
       const stayB = breakIsTaken ? fallB : takenB;
@@ -5605,26 +5600,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             }
           }
         }
-        // A param is written by its in-edges' copies, except where every one of them already holds
-        // the name (an identity copy, which `argAssigns` elides); a materialized def is written in place.
-        const writtenBefore = new Set<string>();
-        for (const x of ahead) {
-          const ins = [...inEdgeRecords(preds, x)];
-          x.params.forEach((p, k) => {
-            const n = varName.get(p);
-            if (n !== undefined && ins.some(({ succ }) => varName.get(succ.args[k]) !== n)) {
-              writtenBefore.add(n);
-            }
-          });
-          for (const o of x.ops) {
-            const n = materialize.has(o) && o.results[0] !== undefined ? varName.get(o.results[0]) : undefined;
-            if (n !== undefined) {
-              writtenBefore.add(n);
-            }
-          }
-        }
+        const incoming = (x: Block) => [...inEdgeRecords(preds, x)].map(({ succ }) => succ.args);
         const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
-        if (loopEscapeHazard(frame.body, new Map(), writtenBefore, exitRegion)) {
+        if (loopEscapeHazard(frame.body, new Map(), loopWriteSetAhead(ahead, incoming, frame.header), exitRegion)) {
           return 'reaches an exit region that reads a loop value under a name this iteration already rewrote';
         }
         return null;
@@ -6244,7 +6222,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const inner =
       dw.header === dw.latch
         ? [] // single-block self-loop: the header IS the latch — its ops render via sideEffects below
-        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: [] }, () =>
+        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: new Set() }, () =>
             structureBlock(dw.header, dw.latch),
           ); // header..latch (exclusive of latch)
     dwActive.delete(dw.header);

@@ -119,6 +119,7 @@ export interface LoopHazards {
   ): Map<number, Op | null>;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
+  loopWriteSetAhead(ahead: Iterable<Block>, incoming: (b: Block) => Value[][], header: Block): Set<string>;
 }
 
 /** The names a loop update assigns (its non-identity copies) — the write set every loop-emission
@@ -464,6 +465,32 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
           writes.add(nm);
         }
       }
+    }
+    return writes;
+  };
+
+  // The same set, for an iteration that leaves part-way through its body rather than at its latch:
+  // the loop-variable names written by the time control reaches the end of `ahead` (the body blocks
+  // between the header and a mid-body `break`). No update copy has run there; a name is written by
+  // a param copy on an edge INTO one of those blocks (`incoming` gives each in-edge's args), unless
+  // every such copy is an identity — the elision `argAssigns` makes — or by a materialized def in
+  // place, as `loopWriteSet` counts it. Only loop-variable names, for `loopWriteSet`'s reason: any
+  // other name is written once per iteration, so a read of it is this iteration's value.
+  const loopWriteSetAhead = (ahead: Iterable<Block>, incoming: (b: Block) => Value[][], header: Block): Set<string> => {
+    const blocks = [...ahead];
+    const writes = loopWriteSet([], blocks, header);
+    const paramNames = new Set(header.params.map((p) => varName.get(p)));
+    for (const bb of blocks) {
+      if (bb === header) {
+        continue;
+      }
+      const ins = incoming(bb);
+      bb.params.forEach((p, k) => {
+        const nm = varName.get(p);
+        if (nm !== undefined && paramNames.has(nm) && ins.some((args) => varName.get(args[k]) !== nm)) {
+          writes.add(nm);
+        }
+      });
     }
     return writes;
   };
@@ -996,6 +1023,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sinkablePreUpdateSlots,
     sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
     loopWriteSet,
+    loopWriteSetAhead,
   };
 }
 
