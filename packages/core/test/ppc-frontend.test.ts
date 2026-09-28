@@ -467,7 +467,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '1c:\tlwz     r31,12(r1)\n20:\tlwz     r0,20(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
     expect(() => dis('passed', passed)).toThrow(used);
   });
-  test('the return address is saved only in the link register save word, and only where every path holds it', () => {
+  test('the return address is saved only in the link register save word, and only where no other value reaches it', () => {
     const eightArgs = (at: number) =>
       Array.from({ length: 8 }, (_, k) => `${(at + 4 * k).toString(16)}:\tli      r${k + 3},${k + 1}\n`).join('');
     const call = (sym: string, at: number) =>
@@ -477,10 +477,10 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const ninth =
       pro(16) + 'c:\tmflr    r0\n10:\tstw     r0,8(r1)\n' + eightArgs(0x14) + call('ra9', 0x34) + epi(0x38, 16);
     expect(() => dis('ra9', ninth)).toThrow(
-      /the store to '8\(r1\)' at 0x10 is not the link register's save — the return address the 'mflr' at 0xc copies out lands -8 bytes/,
+      /the store to '8\(r1\)' at 0x10 is not the link register's save — the return address an 'mflr' copies out lands -8 bytes/,
     );
     // mwcc 2.3.3 -O2, `register unsigned ra = a; if (c) { asm { mflr ra } } return g9(1, …, 8, ra);`:
-    // on the fall-through path r3 still holds the argument.
+    // on the fall-through path r3 still holds the argument, and the word is the ninth argument either way.
     const onePath =
       pro(24) +
       'c:\tcmpwi   r4,0\n10:\tbeq-    18 <rap+0x18>\n14:\tmflr    r3\n18:\tstw     r3,8(r1)\n' +
@@ -488,8 +488,24 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       call('rap', 0x3c) +
       epi(0x40, 24);
     expect(() => dis('rap', onePath)).toThrow(
-      /the store to '8\(r1\)' at 0x18 is not the link register's save — r3 holds the return address an 'mflr' copies out on some paths and not on others/,
+      /the store to '8\(r1\)' at 0x18 is not the link register's save — the return address an 'mflr' copies out lands -16 bytes/,
     );
+    // Into the save word itself, a register the return address reaches on one path and another value
+    // on the other is no save: the restore would hand that value to `blr`.
+    const mixed =
+      '0:\tli      r0,0\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <mixed+0x10>\nc:\tmflr    r0\n10:\tstw     r0,4(r1)\n' +
+      '14:\tstwu    r1,-8(r1)\n18:\tbl      18 <mixed+0x18>\n\t\t\t18: R_PPC_REL24\tf\n' +
+      epi(0x1c, 8);
+    expect(() => dis('mixed', mixed)).toThrow(
+      /the store to '4\(r1\)' at 0x10 is not the link register's save — r0 holds the return address an 'mflr' copies out on some paths and another value on others/,
+    );
+  });
+  test('control: the return address saved after a join is still the save', () => {
+    const joined =
+      '0:\tmflr    r0\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <joined+0x10>\nc:\taddi    r3,r3,1\n10:\tstw     r0,4(r1)\n' +
+      '14:\tstwu    r1,-8(r1)\n18:\tbl      18 <joined+0x18>\n\t\t\t18: R_PPC_REL24\tf\n' +
+      epi(0x1c, 8);
+    expect(dis('joined', joined)).toBe('s32 joined(s32 a0) {\n    if (a0 != 0) a0 = a0 + 1;\n    return f(a0);\n}\n');
   });
   // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
   // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes

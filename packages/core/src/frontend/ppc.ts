@@ -757,18 +757,17 @@ export function lift(
       // The LR SAVE stores the return address `mflr` copied out, and only into the link register's
       // save word, 4 bytes above the entry r1. Anywhere else the word is a value — past the push,
       // 8 bytes up is the callee's parameter area, where it is a ninth argument — and a register
-      // holding the return address on some paths and anything else on others is not a save at all.
+      // holding the return address on some paths and another value on others is not a save at all.
       if (ssa.hasReachingDef(srcReg, bi, (v) => returnAddresses.has(v))) {
-        const v = readVar(srcReg, bi);
-        if (!returnAddresses.has(v) || off !== LR_SAVE_WORD) {
+        const mixed = ssa.hasReachingDef(srcReg, bi, (v) => !returnAddresses.has(v));
+        if (mixed || off !== LR_SAVE_WORD) {
           throw new PpcUnsupportedError(
             `cannot lift '${name}': the store to '${mem}' at 0x${ins.addr.toString(16)} is not the link ` +
               `register's save — ${
-                returnAddresses.has(v)
-                  ? `the return address the 'mflr' at 0x${returnAddresses.get(v)!.toString(16)} copies out lands ` +
-                    `${off} bytes from the entry r1, not in the save word ${LR_SAVE_WORD} bytes up, so it is ` +
-                    'used as a value'
-                  : `${srcReg} holds the return address an 'mflr' copies out on some paths and not on others`
+                mixed
+                  ? `${srcReg} holds the return address an 'mflr' copies out on some paths and another value on others`
+                  : `the return address an 'mflr' copies out lands ${off} bytes from the entry r1, not in the ` +
+                    `save word ${LR_SAVE_WORD} bytes up, so it is used as a value`
               }`,
           );
         }
