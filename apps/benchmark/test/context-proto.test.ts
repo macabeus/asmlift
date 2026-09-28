@@ -58,18 +58,24 @@ describe('a real row prototype table', () => {
 });
 
 describe('what m2c is given where it gets no project context', () => {
-  test('the same entries, as C its parser reads — an unspellable pointer as void *, nothing unsized', () => {
+  test('the same entries in their own spellings, each project type declared opaque, nothing unsized', () => {
     const proto = {
       self: { returnsVoid: true, params: [] },
-      probe: { returns: 'int', params: ['s32'] },
-      mount: { returns: 's32', params: ['s32', 'struct Card *', 'void (*)(s32 chan)'] },
+      probe: { returns: 'int', params: ['s32', 'size_t'] },
+      lock: { returnsVoid: true, params: ['OSMutex *'] },
+      mount: { returns: 's32', params: ['s32', 'struct Card *', 'void (*)(s32 chan, s32 result)'] },
       byval: { returnsVoid: true, params: ['Vec'] },
       declared: { returns: 's32', params: ['s32'] },
       opaque: { params: ['s32'] },
     };
-    expect(m2cDeclarations(proto, 'self', 's32 declared(s32 x);')).toBe(
-      'int probe(s32);\ns32 mount(s32, void *, void *);',
-    );
+    expect(m2cDeclarations(proto, 'self', 's32 declared(s32 x);').split('\n')).toEqual([
+      'typedef unsigned int size_t;',
+      'typedef struct OSMutex OSMutex;',
+      'struct Card;',
+      'int probe(s32, size_t);',
+      'void lock(OSMutex *);',
+      's32 mount(s32, struct Card *, void (*)(s32, s32));',
+    ]);
   });
 });
 

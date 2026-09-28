@@ -2,7 +2,7 @@
 // compiled against (core `prototypesFromContext`), under the symbol map's signatures and the
 // manifest's own `proto`, each of which wins per symbol. The context is the same one every candidate compiles in and m2c reads its signatures
 // from, so asmlift lifts each call at the arity the compiler will check it against.
-import { type Prototypes, declaredWidth, declaresVoidReturn, spellableType } from '@asmlift/core/proto';
+import { PRELUDE_TYPEDEFS, type Prototypes, declaredWidth, declaresVoidReturn } from '@asmlift/core/proto';
 import { contextPrototypesUnder, prototypesFromContext } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
@@ -51,29 +51,100 @@ export function referencedPrototypes(proto: Prototypes | undefined, text: string
 }
 
 /** The callee declarations m2c is given on a row where it is not given the project's context — the
- *  same entries asmlift's lift reads (`referencedPrototypes`), as C m2c's parser reads: every
- *  parameter it can size, a pointer — to data or a function — whose type it cannot spell written
- *  `void *` (m2c reads a
- *  declaration for its signature; its output is compiled against the project's own headers).
- *  An entry with a parameter or a return nothing sizes is left out, and so is a name the row's
- *  context already declares. */
+ *  same entries asmlift's lift reads (`referencedPrototypes`), as C m2c's parser reads. Each keeps the
+ *  header's own spelling, and each project type a spelling names is declared opaque ahead of them
+ *  (`typedef struct OSMutex OSMutex;`): m2c reads a declaration for its signature, and its output is
+ *  compiled against the project's own headers, where a pointer of another type than the declared
+ *  one is a C++ compile error. An entry with a parameter or a return nothing sizes is left out, and
+ *  so is a name the row's context already declares. */
 export function m2cDeclarations(proto: Prototypes | undefined, sym: string, ctx: string | undefined): string {
+  const opaque = new Map<string, string>();
   const lines: string[] = [];
   for (const [name, p] of Object.entries(proto ?? {})) {
     if (name === sym || !Array.isArray(p.params) || (ctx !== undefined && new RegExp(`\\b${name}\\s*\\(`).test(ctx))) {
       continue;
     }
-    const ret = declaresVoidReturn(p)
-      ? 'void'
-      : p.returns !== undefined && spellableType(p.returns)
-        ? p.returns
-        : undefined;
-    const pointer = (t: string): boolean => /\*\s*$/.test(t) || /\(\s*\*\s*\)/.test(t);
-    const params = p.params.map((t) => (spellableType(t) ? t : pointer(t) ? 'void *' : undefined));
-    if (ret === undefined || params.some((t) => t === undefined || declaredWidth(t) === undefined)) {
+    const ret = declaresVoidReturn(p) ? 'void' : p.returns;
+    if (ret === undefined || p.params.some((t) => declaredWidth(t) === undefined)) {
       continue;
+    }
+    const params = p.params.map(unnamed);
+    for (const t of [ret, ...params]) {
+      for (const [spelled, decl] of projectTypes(t)) {
+        opaque.set(spelled, decl);
+      }
     }
     lines.push(`${ret} ${name}(${params.length === 0 ? 'void' : params.join(', ')});`);
   }
-  return lines.join('\n');
+  return [...opaque.values(), ...lines].join('\n');
+}
+
+const C_WORDS = new Set([
+  'void',
+  'char',
+  'short',
+  'int',
+  'long',
+  'float',
+  'double',
+  'signed',
+  'unsigned',
+  'const',
+  'volatile',
+  'struct',
+  'union',
+  'enum',
+]);
+
+/** A function-pointer declarator's own parameters without their names: `void (*)(s32 channel)` →
+ *  `void (*)(s32)`, the spelling a prototype's parameter list takes. */
+function unnamed(t: string): string {
+  const fn = /^(.*\(\s*\*\s*\)\s*)\((.*)\)$/.exec(t);
+  if (!fn) {
+    return t;
+  }
+  const inner = fn[2].split(',').map((q) => {
+    const words = q.replace(/\*/g, ' * ').trim().split(/\s+/);
+    const last = words[words.length - 1];
+    if (words.length > 1 && /^[A-Za-z_]\w*$/.test(last) && !C_WORDS.has(last) && !PRELUDE_TYPEDEFS.has(last)) {
+      words.pop();
+    }
+    return words.join(' ').replace(/ \*/g, ' *');
+  });
+  return `${fn[1]}(${inner.join(', ')})`;
+}
+
+/** The standard names a declaration spells a width with and m2c's parser does not know, as C89
+ *  typedefs of the same width. */
+const STANDARD_TYPEDEFS: ReadonlyMap<string, string> = new Map([
+  ['size_t', 'unsigned int'],
+  ['ssize_t', 'int'],
+  ['ptrdiff_t', 'int'],
+  ['intptr_t', 'int'],
+  ['uintptr_t', 'unsigned int'],
+  ['int8_t', 'signed char'],
+  ['uint8_t', 'unsigned char'],
+  ['int16_t', 'short'],
+  ['uint16_t', 'unsigned short'],
+  ['int32_t', 'int'],
+  ['uint32_t', 'unsigned int'],
+  ['int64_t', 'long long'],
+  ['uint64_t', 'unsigned long long'],
+]);
+
+/** The project types a spelling names, each with the declaration m2c is given for it. */
+function projectTypes(t: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const m of t.matchAll(/\b(struct|union|enum)?\s*([A-Za-z_]\w*)\b/g)) {
+    const [, tag, word] = m;
+    const standard = STANDARD_TYPEDEFS.get(word);
+    if (tag !== undefined) {
+      out.push([`${tag} ${word}`, `${tag} ${word};`]);
+    } else if (standard !== undefined) {
+      out.push([word, `typedef ${standard} ${word};`]);
+    } else if (!C_WORDS.has(word) && !PRELUDE_TYPEDEFS.has(word) && declaredWidth(word) === undefined) {
+      out.push([word, `typedef struct ${word} ${word};`]);
+    }
+  }
+  return out;
 }
