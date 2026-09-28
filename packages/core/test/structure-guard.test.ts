@@ -152,8 +152,8 @@ const LATCH_BREAK = `fn latchbreak {
 // SOUNDNESS (pre-update-read hazard): a conditional-latch loop
 // whose EXIT TEST reads the PRE-update induction value (`%6`, the loop-top counter) while the update
 // decrements it (`%10 = %6 - 1`). Emitting the update before the test would make `if (v0 <= 3) break;`
-// read the DECREMENTED v0 → break one iteration early (a silent miscompile). Must DECLINE (loud-fail),
-// not recover. Contrast MERGED_RETURN_LOOP, whose test reads the POST-update back-edge arg (safe).
+// read the DECREMENTED v0 → break one iteration early (a silent miscompile). Contrast
+// MERGED_RETURN_LOOP, whose test reads the POST-update back-edge arg (safe).
 const PREUPDATE_READ_HAZARD = `fn breakoldval {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -232,13 +232,13 @@ test('P2 keeps the update BEHIND an exit test that reads the pre-update inductio
   recoverTypes(fn);
   const src = cBackend.emit(structure(fn));
   // The exit test reads `%6` (loop-top counter) while the update overwrites its name with `%6 - 1`,
-  // so the conditional-latch form — which hoists the update ahead of the test — is refused. What
-  // stands in for it emits the test first and the update inside the arm that continues, which is
-  // what the IR says; the decrement must NOT precede the test.
+  // so the conditional-latch form — which hoists the update ahead of the test — is refused. The
+  // break is spelled ahead of the update instead, which is what the IR says; the decrement must NOT
+  // precede the test.
   expect(src).toBe(
     's32 breakoldval(s32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = a0;\n    v1 = 0;\n' +
-      '    while (v0 != 0) {\n        if (v0 > 3) {\n            v1 = v1 + v0;\n            v0 = v0 - 1;\n' +
-      '        } else {\n            v1 = v1 + v0;\n            return v1;\n        }\n    }\n    return v1;\n}\n',
+      '    while (v0 != 0) {\n        if (v0 <= 3) {\n            v1 = v1 + v0;\n            break;\n' +
+      '        }\n        v1 = v1 + v0;\n        v0 = v0 - 1;\n    }\n    return v1;\n}\n',
   );
 });
 

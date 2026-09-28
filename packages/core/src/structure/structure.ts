@@ -2594,11 +2594,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // loop and running the exit region once, after it. A second exit that lands on any OTHER live
     // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
     // body (that is a two-level exit) and any `break` of a `do-while` (its exit copies are judged
-    // differently, and no row has asked). An edge to the header's exit when that exit ends in a
-    // `ret` is a break too, though the older route still serves it: the arm can copy the exit's
-    // tail and return instead, so where the break spelling refuses, emission falls back to that
-    // and the edge is spelled as it was before breaks existed. The arms and breaks are kept:
-    // emission needs to know which edges out of the body end an iteration rather than continue it.
+    // differently, and no row has asked). An edge to the header's exit is a break whatever the exit
+    // holds: the asm runs ONE copy of the exit region for both edges, and agbcc and mwcc keep a
+    // source-duplicated return tail duplicated, so copying the tail into the arm spells another
+    // object. Where that exit ends in a return, the edge is also an arm or a ret target, and emission
+    // copies the tail where the break spelling refuses. The arms and breaks are kept: emission
+    // needs to know which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
     const breaks = new Set<Block>();
     let singleExit = true;
@@ -2609,13 +2610,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
-      } else if (
+      }
+      if (
         kind === 'while' &&
         e.to === exit &&
         ![...forest.byHeader.values()].some((l2) => l2.header !== h && nl.body.has(l2.header) && l2.body.has(e.from))
       ) {
         breaks.add(e.from);
-      } else if (!isRet(e.to)) {
+      } else if (!owned && !isRet(e.to)) {
         singleExit = false;
         break;
       }
@@ -5604,8 +5606,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //
     // Refused by the break rule (`breakRefusal`) over the names written ahead of this edge, and where
     // the other edge leaves the body too. A refusal is LOUD, since the loop was admitted on the
-    // promise of this spelling — except where the exit ends in a `ret`: then if-recovery below copies
-    // the exit's tail into the arm and returns.
+    // promise of this spelling — except where an arm owns the edge or the exit ends in a `ret`: then
+    // if-recovery below copies the exit's tail into the arm and returns.
     // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
     if (loopCtx && loopCtx.breaks.has(b)) {
@@ -5625,7 +5627,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
-      if (!isRet(frame.exit)) {
+      if (!isArm(frame.exit) && !isRet(frame.exit)) {
         throw new StructureError(
           `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${refusal}`,
         );

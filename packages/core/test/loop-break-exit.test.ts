@@ -1,11 +1,11 @@
 // A `break` OUT OF A LOOP LANDS WHERE THE HEADER'S OWN EXIT DOES.
 //
 // A test-at-top `while` renders its exit region once, after the loop, and both of its exits reach
-// it: the header's test, and any `break` from the latch. That region is rendered raw — no back-edge
-// substitution — and on the header exit that is right, since the loop variables still hold the
-// values the header read. A `break` leaves AFTER the latch's update copies, so a header value the
-// region re-derives from an updated name is computed one iteration on. `structure.ts` then does not
-// spell the `break` (the arm returns instead, where the copies have not run).
+// it: the header's test, and any `break`. That region is rendered raw — no back-edge substitution —
+// and on the header exit that is right, since the loop variables still hold the values the header
+// read. A `break` from the latch leaves AFTER the latch's update copies, so a header value the region
+// re-derives from an updated name would be computed one iteration on; that break is spelled ahead of
+// the update instead.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -55,9 +55,8 @@ const HEADER_VALUE_READ_AFTER_BOTH_EXITS = `fn g3 {
 test('a header value read after a break is not re-derived from the updated name', () => {
   expect(emit(HEADER_VALUE_READ_AFTER_BOTH_EXITS)).toBe(
     's32 g3(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    s32 v1;\n    v0 = a1;\n    v1 = a3;\n' +
-      '    while (a2 <= 2) {\n        if (v1 + -1 <= 0) {\n            return (a0 ^ v0 + a0 ^ (a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0) * ' +
-      '(a0 * ((a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0));\n        } else {\n            v0 = a0 ^ v0 + a0;\n' +
-      '            v1 = v1 + -1;\n        }\n    }\n    return (a0 ^ v0 + a0 ^ (a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0) * ' +
+      '    while (a2 <= 2) {\n        if (v1 + -1 <= 0) break;\n        v0 = a0 ^ v0 + a0;\n        v1 = v1 + -1;\n' +
+      '    }\n    return (a0 ^ v0 + a0 ^ (a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0) * ' +
       '(a0 * ((a0 ^ v0 + a0) + (a0 ^ v0 + a0) * a0));\n}\n',
   );
 });
@@ -67,8 +66,8 @@ test('a header value read after a break is not re-derived from the updated name'
 // Each accepted fixture is also run against its own IR (`irAgreement`), so a break spelled on the
 // wrong edge or with the wrong sense changes an observable rather than only a string. It is judged
 // twice: as `structure()` returns it, and as it ships, after `readabilityRewrites` — a rewrite that
-// mis-models the new statement shape (dce once let a mid-body `break` fall through and dropped the
-// copy it carried) is invisible to the first judgement.
+// mis-models the statement shape (a dce that lets a mid-body `break` fall through drops the copy it
+// carries) is invisible to the first judgement.
 //
 // Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), and a `do-while`
 // (`DO_WHILE_BREAK`). A refusal is loud only where the exit is a live merge; an exit that ends in a
@@ -289,8 +288,8 @@ test('a latch `break` to an exit that is not a `ret` block is spelled by the lat
   expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
 
-/** A `ret`-terminated exit with no effects makes the edge an early-`return` arm, not a break: the
- *  shape `kleod:UpdateEntityAnimationInfoEntries:agbcc` has, spelled as it was before breaks. */
+/** A `ret`-terminated exit with no effects: the shape `kleod:UpdateEntityAnimationInfoEntries:agbcc`
+ *  has, whose source is a `for` with a `break`. */
 const EDGE_TO_RET_EXIT = `fn retexit {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -312,12 +311,51 @@ const EDGE_TO_RET_EXIT = `fn retexit {
   ret
 }`;
 
-test('an edge to a pure `ret` exit stays an early `return`', () => {
-  expect(emit(EDGE_TO_RET_EXIT)).toBe(
-    'void retexit(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (v0 < a0) {\n' +
-      '        if (f(a1 + v0) != 0) {\n            return;\n        } else {\n            v0 = v0 + 1;\n' +
-      '        }\n    }\n    return;\n}\n',
+test('an edge to a pure `ret` exit is a `break` too', () => {
+  const { src, agreement, shipped } = judged(EDGE_TO_RET_EXIT);
+  expect(src).toBe(
+    'void retexit(s32 a0, s32 a1) {\n    s32 v0;\n    for (v0 = 0; v0 < a0; v0 = v0 + 1) {\n' +
+      '        if (f(a1 + v0) != 0) break;\n    }\n    return;\n}\n',
   );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** agbcc -O2 of `int x(int n, int *p) { int i = 0; while (i < n) { if (f(p[i])) break; i++; }
+ *  return i * 3 + n; }`. agbcc keeps a source-duplicated return tail duplicated: the tail-copying
+ *  spelling (`if (f(*v1) != 0) { return v0 * 3 + a0; }`) compiles to 26 instructions, and only the
+ *  `break` spelling gives back these 20. */
+const PURE_TAIL_BREAK = `x:
+	push	{r4, r5, r6, lr}
+	add	r6, r0, #0
+	mov	r5, #0x0
+	add	r4, r1, #0
+	b	.L3
+.L6:
+	add	r4, r4, #0x4
+	add	r5, r5, #0x1
+.L3:
+	cmp	r5, r6
+	bge	.L4
+	ldr	r0, [r4]
+	bl	f
+	cmp	r0, #0
+	beq	.L6
+.L4:
+	lsl	r0, r5, #0x1
+	add	r0, r0, r5
+	add	r0, r0, r6
+	pop	{r4, r5, r6}
+	pop	{r1}
+	bx	r1
+`;
+
+test('an edge to an exit whose tail agbcc keeps single is spelled `break`', () => {
+  const src = decompile('x', PURE_TAIL_BREAK, ARMV4T_AGBCC, {
+    prototypes: { x: { params: 2 }, f: { params: 1 } },
+  }).source;
+  expect(src).toContain('break;');
+  expect(src.match(/return /g)).toHaveLength(1);
 });
 
 /** The exit takes a param: `-1` from the header, `j` from the break. The header's copy runs after
@@ -394,8 +432,7 @@ test('a latch `break` whose exit reads the value before the update leaves ahead 
 /** agbcc -O2 of `int m8(int *p, int n, int m, int k) { int i = 0; int x; while ((x = p[i]) != k) {
  *  if (*p == 0) return 1; if (k < m) break; i++; x = x + 1; if (i > n) break; } G = 0; return x; }`.
  *  The exit `.L4` ends in a return and takes `x` from three edges, so the header hands it a copy and
- *  the mid-body `break` is refused. Before breaks were recognised this lifted by copying the exit's
- *  tail into each arm, and it still does. */
+ *  the mid-body `break` is refused; the edge copies the exit's tail into its arm instead. */
 const M8_RET_EXIT_WITH_COPIES = `m8:
 	push	{r4, r5, r6, r7, lr}
 	add	r5, r0, #0
