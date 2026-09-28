@@ -757,7 +757,12 @@ const modifiesSp = (ins: Instr): boolean =>
 // constancy proof exactly like a literal [sp,#k] access, and ends the prologue for localArea.
 const capturesSp = (ins: Instr): boolean =>
   /^movs?$/.test(ins.mnemonic) && !isSpReg(ins.ops[0] ?? '') && isSpReg(ins.ops[1] ?? '');
-const touchesFrame = (ins: Instr): boolean => spMemAccess(ins) !== null || capturesSp(ins);
+// …and so does a COMPUTED one, `add rD, sp, #k`: it is the frame base plus a constant, so it rests
+// on the same constancy. Not a `capturesSp` — that names the frame BASE, which the two escape
+// licences below are about, and `[sp,#k]` is not it.
+const computesFrameAddress = (ins: Instr): boolean =>
+  /^adds?$/.test(ins.mnemonic) && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o));
+const touchesFrame = (ins: Instr): boolean => spMemAccess(ins) !== null || capturesSp(ins) || computesFrameAddress(ins);
 const spMemAccess = (ins: Instr): { off: number; width: number; regOff: boolean } | null => {
   if (!/^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(ins.mnemonic)) {
     return null;
@@ -2523,7 +2528,8 @@ function auditFrameObjects({
         }
         for (const u of accesses) {
           const res = mkValue(T.unk(32));
-          const object = mkOp('laddr', { results: [res], attrs: { off: u.op.attrs.off as number } });
+          const at = (capture.attrs.off as number) + (u.op.attrs.off as number);
+          const object = mkOp('laddr', { results: [res], attrs: { off: at } });
           u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
           minted.push(object);
           // The ADDRESS operand only — the stored value (operand 1) is passed through
@@ -2863,9 +2869,9 @@ function auditFrameObjects({
     // acceptance did not fire is as much an attribution as the reason a lift declined, and one
     // sentence covering all of them is how several gaps come to look like one.
     //
-    // FOUR CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an address that
-    // reaches memory rather than a callee, and the callee's declared return — and each has a test
-    // that fails without it. The precautionary ones are marked where they sit.
+    // FIVE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an object that does
+    // not start at the bottom of it, an address that reaches memory rather than a callee, and the
+    // callee's declared return — and each has a test that fails without it. The precautionary ones are marked where they sit.
     const notTheWholeArea = (off: number): string | null => {
       if (objects.size !== 1) {
         return 'another address-taken object shares the frame, so the reservation is not this one alone';
@@ -2875,7 +2881,7 @@ function auditFrameObjects({
         return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
       }
       // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not read
-      // three dead lines as live rules, and knows what would wake each one. They are kept
+      // two dead lines as live rules, and knows what would wake each one. They are kept
       // because every one of them guards a SILENT wrong answer: storage declared over bytes the
       // object does not own is a frame the recompile lays out differently, with no diagnostic.
       //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
@@ -2885,8 +2891,6 @@ function auditFrameObjects({
       //     model OFF — and no untyped object survives that, because every `laddr` mint is behind
       //     `slotsOk`. The second half is also why nothing here asks whether the analysis LICENSED
       //     the block: an `laddr` exists only in a function where it did, by construction.
-      //   • `off` is 0 for an untyped object because a capture is spelled `mov rD, sp` and
-      //     nothing else is modelled — `add rD, sp, #k` declines at the sp guard, by name.
       //   • An address that neither accesses nor escapes already declines where the audit
       //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
       if (outgoingArea > 0) {
@@ -3990,30 +3994,27 @@ export function lift(
             ? 'a register-offset sp access can alias any slot'
             : 'a sub-word sp access aliases the word-slot model';
         }
-        // sp escaping into a register: a computed form is still a refusal, but a plain COPY
-        // (`mov rD, sp`) is now the address-taken-local capability — the mov arm emits a `laddr`
-        // for it and the post-lift frame-object audit proves every use, so the model's remaining
-        // precondition is that the frame has a reserved local area for the object to live in. A
-        // frameless function taking sp's address has nothing to model and refuses.
+        // sp escaping into a register. A plain COPY (`mov rD, sp`) and a CONSTANT offset from it
+        // (`add rD, sp, #k`) are the address-taken-local capability — the mov and add arms emit a
+        // `laddr` at that frame offset and the post-lift frame-object audit proves every use, so
+        // the model's remaining precondition is that the frame has a reserved local area for the
+        // object to live in. A frameless function taking sp's address has nothing to model and
+        // refuses.
         //
-        // TWO GAPS, NOT ONE, and one sentence covering both is how they come to look like one. A
-        // CONSTANT frame offset (`add rD, sp, #k`) names a fixed object the model could already
-        // represent — `laddr` carries an `off` attr and the audit keys objects per offset — so what
-        // is missing is only the lowering that spells it. A RUNTIME one (`add rD, sp, rX`, and the
-        // two-operand `add rD, sp` that adds the base to whatever rD held) names no offset at all:
-        // there is no extent, no object and nothing for the audit to prove. Whichever of them is
-        // ever lifted, the other must keep refusing, and it can only be seen to if it says so.
+        // A RUNTIME offset (`add rD, sp, rX`, and the two-operand `add rD, sp` that adds the base
+        // to whatever rD held) is a different gap and keeps refusing here: it names no offset, so
+        // there is no object and nothing for the audit to prove. A runtime index added to a
+        // captured base AFTER the capture is the audit's to judge (`indexedAccess`), because there
+        // the object it indexes is known.
         //
-        // THE ARM-DECIDING WORD SURVIVES TRUNCATION; THE TAIL NEED NOT. The benchmark slices a
+        // THE DECIDING WORD SURVIVES TRUNCATION; THE TAIL NEED NOT. The benchmark slices a
         // diagnostic's REASON to 200 characters and prepends the stage afterwards
         // (`apps/benchmark/src/eval/asmlift.ts`), so a published marker runs to 206 and what is
         // lost is the end of the sentence. Both readers of it look early: the class pattern
-        // (`apps/web/.../declines.ts`) matches the opening phrase, and CONSTANT/RUNTIME is the
-        // next word after the instruction. On the longest agbcc symbol in the dataset the REASON
-        // does overrun and its tail is cut, while the arm word ends well inside the slice — so the
-        // sentence is shortened and the decision is not. Both arms are measured at that symbol by
-        // `packages/core/test/thumb-frontend.test.ts`, which holds the bound; no length is pinned
-        // here, because a number in a comment goes stale on any rewording and nothing looks.
+        // (`apps/web/.../declines.ts`) matches the opening phrase, and RUNTIME is the next word
+        // after the instruction. `packages/core/test/thumb-frontend.test.ts` measures it at the
+        // longest agbcc symbol in the dataset and holds the bound; no length is pinned here,
+        // because a number in a comment goes stale on any rewording and nothing looks.
         //
         // THE SPLIT ASKS FOR A SIGN-LESS LITERAL AND THE SIGN IS NOT AN OVERSIGHT. Thumb-1 ADD(6)
         // (`add rD, sp, #imm`) encodes an unsigned word-scaled immediate: there is no negative
@@ -4029,10 +4030,10 @@ export function lift(
         //     (the same scan for `add sp, [sp,] #-N` finds 102, and `add rD, sp, #k` 264)
         if (ins.mnemonic === 'add' && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o))) {
           const srcs = ins.ops.slice(1).filter((o) => !isSpReg(o));
-          const written = `\`${ins.mnemonic} ${ins.ops.join(', ')}\``;
-          return srcs.length === 1 && IMM_LITERAL.test(srcs[0])
-            ? `the address of a stack local is computed (${written}) — a CONSTANT frame offset; only \`mov rD, sp\` is modelled`
-            : `the address of a stack local is computed (${written}) — a RUNTIME index into the frame, which has no extent to model`;
+          if (!(srcs.length === 1 && IMM_LITERAL.test(srcs[0]))) {
+            const written = `\`${ins.mnemonic} ${ins.ops.join(', ')}\``;
+            return `the address of a stack local is computed (${written}) — a RUNTIME index into the frame, which has no extent to model`;
+          }
         }
       }
     }
@@ -4795,6 +4796,18 @@ export function lift(
           if (carryPair(ins, ab.instrs[ii + 1], bi)) {
             consumed = ab.instrs[ii + 1];
             break;
+          }
+          // `add rD, sp, #k` is `mov rD, sp`'s capture at a CONSTANT frame offset: the object agbcc
+          // places above an outgoing argument block or beside another local. Same gate, same
+          // audit; only the offset differs.
+          if (isSpReg(b ?? '') && !isSpReg(a ?? '') && c !== undefined && IMM_LITERAL.test(c)) {
+            if (slotsOk && localArea > 0) {
+              const res = mkValue(T.unk(32));
+              irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));
+              writeData(reg(a), bi, res);
+              break;
+            }
+            throw spAsDataError();
           }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
           // low regs isn't always available). Model it as a pure copy — the SAME SSA VALUE — not

@@ -1311,18 +1311,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // A COMPUTED CAPTURE IS TWO GAPS. `add rD, sp, #k` names a fixed frame offset — an object the
-  // `laddr`/audit model could already represent, missing only its lowering — and `add rD, sp, rX`
-  // names no offset at all, so there is no extent and nothing for the audit to prove. One refusal
-  // covering both is how several gaps come to look like one, and whichever is lifted first the
-  // other has to keep refusing where a reader can see it do so.
+  // `laddr`/audit model represents, and it lifts — and `add rD, sp, rX` names no offset at all, so
+  // there is no extent and nothing for the audit to prove. That one keeps refusing, and says which
+  // form it is.
   test('the computed capture names WHICH computed form it refuses', () => {
     const frame = (capture: string) =>
       `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr0, [r4]\n` +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    // the constant form says it is constant, and says what IS modelled
-    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(
-      /computed \(`add r4, sp, #0x4`\) — a CONSTANT frame offset; only `mov rD, sp` is modelled/,
-    );
+    // the constant form is a capture at that offset
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).not.toThrow();
     // There is no SIGNED row here and the reason is at the predicate: Thumb-1 ADD(6) has no
     // negative form, the assembler refuses `add r4, sp, #-0x4`, and the one negative spelling
     // agbcc does write has sp as its destination and never reaches this guard. A row for it would
@@ -1335,8 +1332,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // already held. It has no immediate operand at all, so a split keyed on "is there a `#`"
     // would put it on the constant arm and claim an offset nothing names.
     expect(() => decompile('f', frame('\tadd\tr4, sp\n'), ARMV4T_AGBCC)).toThrow(/a RUNTIME index into the frame/);
-    // both keep the class prefix, so the published marker still classifies as address-taken-local
-    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // it keeps the class prefix, so the published marker still classifies as address-taken-local
     expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
@@ -1354,22 +1350,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // the artifact, the longest symbol is 37 characters:
   //   python3 -c "import json;a=json.load(open('apps/benchmark/results/results.json'));\
   //     print(max((r['id'].split(':')[1] for r in a['results'] if r['id'].endswith(':agbcc')),key=len))"
-  // and at that name, with the widest immediate ADD(6) can encode, the constant arm's reason is
-  // 202 characters and the runtime arm's 204 — each loses its last few in the artifact. That is
-  // acceptable and it is why the assertion below is about CONTENT and not length: both readers of
-  // a marker look at the front of it. The class pattern (`apps/web/.../declines.ts`) matches the
-  // opening phrase, and the word saying which of the two gaps this is ends at 158 and 153. What
-  // must never be true is a marker whose ARM word is cut off, because two different capabilities
-  // then publish the same string — so the bound is on where that word ENDS, with 20 characters of
-  // margin, rather than on a total length no caller controls.
+  // and at that name the runtime refusal's reason loses its last few characters in the artifact.
+  // That is acceptable and it is why the assertion below is about CONTENT and not length: both
+  // readers of a marker look at the front of it. The class pattern (`apps/web/.../declines.ts`)
+  // matches the opening phrase, and the word saying which gap this is comes next. What must never
+  // be true is a marker whose deciding word is cut off, so the bound is on where that word ENDS,
+  // with 20 characters of margin, rather than on a total length no caller controls.
   const LONGEST_AGBCC_SYMBOL = 'AnimTask_FlashHealthboxOnLevelUp_Step';
-  // the widest `add rD, sp, #k` Thumb-1 can encode: ADD(6)'s immediate is 8 bits, word-scaled
-  const WIDEST_OFFSET = '#0x3fc';
 
-  test.each([
-    ['CONSTANT', `\tadd\tr0, sp, ${WIDEST_OFFSET}\n`],
-    ['RUNTIME', '\tadd\tr0, sp, r1\n'],
-  ])('the computed-capture refusal survives the slice the artifact applies: %s', (arm, capture) => {
+  test('the computed-capture refusal survives the slice the artifact applies', () => {
+    const [arm, capture] = ['RUNTIME', '\tadd\tr0, sp, r1\n'];
     const sym = LONGEST_AGBCC_SYMBOL;
     const worst =
       `${sym}:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr1, [r0]\n` +
@@ -1388,32 +1378,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(sliced.indexOf(arm) + arm.length).toBeLessThanOrEqual(REASON_CHARS - 20);
   });
 
-  // …and on the one row the corpus actually publishes this from, nothing is lost at all. The
-  // assertion is the BOUND, not today's length: pinned to an exact number, the one way to make
-  // this green after lengthening the message is to update the number — the failure it exists to
-  // prevent — and an improvement that SHORTENS the message fails it for nothing.
-  test('the corpus instance loses nothing to the slice', () => {
-    const real =
-      'ProcessOamBuffers:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, sp, #0x4\n\tstr\tr1, [r0]\n' +
-      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    let reason = '';
-    try {
-      decompile('ProcessOamBuffers', real, ARMV4T_AGBCC);
-    } catch (e) {
-      reason = (e as Error).message.split('\n')[0];
-    }
-    expect(reason).toMatch(/a CONSTANT frame offset; only `mov rD, sp` is modelled$/);
-    expect(reason.length).toBeLessThanOrEqual(REASON_CHARS);
-  });
-
   test('a refused function names the capability actually missing', () => {
     // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
     // a false attribution that sent the loop to build a thing that already works. Each blocker now
     // names itself. The generic message survives only for sp uses no sub-family claims.
-    // (the plain `mov rD, sp` capture is now the laddr capability — its refusals carry their own
-    // attributed messages, tested with the capability below; the COMPUTED capture still refuses)
+    // (the `mov rD, sp` and `add rD, sp, #k` captures are the laddr capability — their refusals
+    // carry their own attributed messages, tested with the capability below; a RUNTIME offset
+    // from sp still refuses here)
     const addrComputed =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
@@ -1474,8 +1447,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // argument 5 at [sp,#0] and the address-taken local moves ABOVE it — so `&w` is COMPUTED and
     // there is no bare `mov rD, sp` anywhere. Compiled, `void f(u32 i, s32 a, s32 b){ s32 w;
     // w = gEnts[i].h; five(a,b,a+b,a-b,a*b); use(&w); }` is this, verbatim. A frame with a genuine
-    // outgoing area must keep declining, and it does — one gate earlier, on the spelling the
-    // layout forces.
+    // outgoing area must keep declining, and it does — on the argument itself, since `five` is
+    // declared nowhere.
     test('a frame with a GENUINE outgoing argument area still declines', () => {
       const withArea =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r2, #0\n\tlsl\tr2, r0, #0x2\n\tadd\tr2, r2, r0\n' +
@@ -1484,8 +1457,24 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tr0, r1, #0\n\tadd\tr1, r4, #0\n\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tbl\tuse\n' +
         '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x8057acc\n';
       expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-      // and the message stays TRUE for what it refuses: the local really is at a computed address
-      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/it may be an outgoing stack argument/);
+    });
+
+    // …and with the call DECLARED, the block is licensed and the local above it is the object its
+    // computed address names. agbcc's own output for `s32 f(s32 a, s32 b){ u16 h; five(a, b, a, b,
+    // a); geth(&h); return h; }`, at the corpus's flags.
+    test('a local above a licensed outgoing block is the object `add rD, sp, #k` names', () => {
+      const above =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tadd\tr3, r1, #0\n\tstr\tr2, [sp]\n' +
+        '\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tbl\tgeth\n\tadd\tr0, sp, #0x4\n\tldrh\tr0, [r0]\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        geth: { params: ['u16 *'], returnsVoid: true },
+      };
+      expect(decompile('f', above, ARMV4T_AGBCC, { prototypes }).source).toBe(
+        's32 f(s32 a0, s32 a1) {\n    u16 sp4;\n    five(a0, a1, a0, a1, a0);\n    geth(&sp4);\n    return sp4;\n}\n',
+      );
     });
 
     // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =
@@ -2422,8 +2411,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
       ),
     ).toThrow(laddr);
-    // a COMPUTED capture is not the modelled shape at all
-    expect(() => decompile('f', wrap('\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+    // a RUNTIME offset from sp is not the modelled shape at all
+    expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       /address of a stack local is computed/,
     );
   });

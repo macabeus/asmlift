@@ -463,18 +463,17 @@ describe('the audit judges each frame object on its own bytes', () => {
       });
     });
 
+    test('an object that does not start at the bottom of the area is not the whole area', () => {
+      // `add rD, sp, #k` names an object at [sp,#k), so the bytes below it are something else
+      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
+        /the object does not start at the bottom of the reserved area/,
+      );
+    });
+
     // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
     // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
     // the shape — these assert that the earlier refusal is the one that fires, so a change that
     // relaxes one of them shows up here as a message that moved.
-    test('a computed capture declines before the extent is ever considered', () => {
-      // `off` can only be 0 for an untyped object because this is what happens to any other
-      // spelling — the clause guarding a nonzero offset is precaution, not a live rule
-      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
-        /a CONSTANT frame offset; only `mov rD, sp` is modelled/,
-      );
-    });
-
     test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
       expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
         /the captured address flows into `ret` — not an access, an escape, or a phi/,
