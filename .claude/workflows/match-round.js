@@ -320,6 +320,7 @@ const list = (items) => (items.length ? items.map((x) => `- ${x}`).join('\n') : 
 const open = ledger.filter((f) => f.verdict === 'CONFIRMED-OPEN')
 const silentWrong = ledger.filter((f) => f.severity === 'silent-wrong' && f.verdict.startsWith('CONFIRMED'))
 const remediated = finalReview?.triage?.changedCode
+const unmatched = ledger.filter((f) => f.severity === 'unknown')
 const body = `PR ${shipped.pr}
 
 CONFIRMED-OPEN findings:
@@ -328,6 +329,8 @@ ${list(open.map((f) => `${f.id} (${f.severity}) ${f.location}: ${f.reason}`))}
 decline→wrong rows (bench diff): ${shipped.declineToWrong}
 confirmed silent-wrong findings:
 ${list(silentWrong.map((f) => `${f.id} [${f.verdict}] ${f.location}: ${f.reason}`))}
+ledger entries whose finding (and so severity) could not be matched by id — read them yourself:
+${list(unmatched.map((f) => `${f.id} [${f.verdict}]: ${f.reason}`))}
 
 code no reviewer read: ${remediated ? `the final remediation, \`${shipped.head}..${finalReview.triage.head}\`` : 'none'}
 
@@ -338,9 +341,9 @@ const slot = /^none\b/i.test(shipped.pr)
   ? { mergeSlot: `none — the round shipped no PR: ${shipped.pr}` }
   : await agent(
     `${PREAMBLE}
-File the \`merge-slot\` message for PR ${shipped.pr}, as the board's README describes, with the body
-below verbatim, and stop.${remediated ? ` The final remediation pushed after the ship agent's \`pr-wait\`: run
-\`scripts/pr-wait.sh ${shipped.pr}\` first, file only on a green verdict, and otherwise return "none" and the verdict.` : ''}
+Run \`scripts/pr-wait.sh ${shipped.pr}\`. On a green verdict, file the \`merge-slot\` message for PR
+${shipped.pr}, as the board's README describes, with the body below verbatim, and stop; otherwise
+file nothing and return "none" and the verdict.
 
 ${body}`,
     { label: `${handle}: merge slot`, phase: 'Merge slot', schema: SLOT, agentType: 'general-purpose', effort: 'low' },

@@ -57,9 +57,10 @@ fi
 [ -z "$env_file" ] || [ -f "$env_file" ] || die "--env $env_file does not exist"
 [ ! -e "$wt" ] || die "$wt already exists — never launch into a worktree that may be live; pick a new path"
 case $wt in /*) ;; *) die "give <worktree> as an absolute path: the round is briefed with it verbatim" ;; esac
-# The environment the lane will run in: this shell's, or the one `--env` produces when sourced.
+# The environment the lane will run in: this shell's, or the one `--env` produces when sourced into
+# an otherwise empty one — a lane's shells do not inherit this one's.
 if [ -n "$env_file" ]; then
-  lane_env() { (. "$env_file" && "$@"); }
+  lane_env() { env -i HOME="$HOME" PATH=/usr/bin:/bin sh -c '. "$1" && shift && exec "$@"' sh "$env_file" "$@"; }
 else
   lane_env() { "$@"; }
 fi

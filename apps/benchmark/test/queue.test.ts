@@ -2,7 +2,7 @@
 // takes rows through, and the journal a `--resume` continues from. Everything here is files in a
 // scratch directory — the same files the shard children write, without a child.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ import {
   claimOrder,
   claimer,
   journalRows,
+  liveClaimers,
   partPath,
   readJournal,
   readPlan,
@@ -118,6 +119,27 @@ describe('the journal and --resume', () => {
     expect(all.results.map((r) => r.id).sort()).toEqual(['a', 'b', 'c', 'd']);
     expect(all.stamps).toHaveLength(3);
     expect(all.repeated).toBe(0);
+  });
+
+  it('blocks a run only on an unfinished claim held by a live shard child, never on a recycled pid', async () => {
+    const dir = scratch();
+    writePlan(dir, { commit: 'c', ids: ['a', 'b', 'c', 'd'] });
+    const idle = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
+    const shard = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)', 'cli.ts', 'run', '--claim', '0']);
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      writeFileSync(join(dir, 'claims', '0'), 'pid 1 shard 0');
+      writeFileSync(join(dir, 'claims', '1'), `pid ${idle.pid} shard 1`);
+      writeFileSync(join(dir, 'claims', '2'), `pid ${shard.pid} shard 2`);
+      writeFileSync(join(dir, 'claims', '3'), `pid ${shard.pid} shard 2`);
+      part(dir, 0, 2, ['c']);
+      expect(liveClaimers(dir)).toEqual([`${shard.pid} (pid ${shard.pid} shard 2)`]);
+      part(dir, 1, 2, ['d']);
+      expect(liveClaimers(dir)).toEqual([]);
+    } finally {
+      idle.kill();
+      shard.kill();
+    }
   });
 
   it('accounts a skipped row as accounted, and a claimed-but-unwritten one as not', () => {

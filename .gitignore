@@ -14,6 +14,8 @@ build/
 
 # benchmark run logs (noise); the merged results.json + report data ARE committed
 apps/benchmark/results/*.log
+# a flush in progress (run/runner.ts writes the file whole, then renames it into place)
+apps/benchmark/results/*.tmp
 # a fanned run's row queue and per-row journal (run/queue.ts), removed when the run finishes
 apps/benchmark/results/.*.run/
 # CI-fetched toolchains + pinned m2c (.github/workflows/benchmark.yml)

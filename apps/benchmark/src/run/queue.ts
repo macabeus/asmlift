@@ -17,6 +17,7 @@
 // journal: a claim no part file finished is a row that was in flight when the run died, and
 // `--resume` re-queues exactly those.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -236,16 +237,30 @@ export function journalRows(parts: readonly { path: string }[]): {
   return { results: [...byId.values()], skipped, stamps, repeated, unreadable };
 }
 
-/** Every claim in `dir` whose claiming process is still alive, as `<pid> (<who>)`. A live claimer
- *  that is not this run's own shard is an orphan of a killed run, still measuring: starting a run
- *  beside it would have it claim from the new queue and write into the new journal. */
+/** Is `pid` a live bench shard child? Its command line carries `--claim`; any other process that
+ *  holds a recycled pid of a long-dead shard does not. */
+const isShardChild = (pid: number): boolean => {
+  const ps = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+  return ps.status === 0 && /\bcli\.ts run\b.*--claim\b/.test(ps.stdout);
+};
+
+/** Every UNFINISHED claim in `dir` whose claimer is still a live shard child, as `<pid> (<who>)`.
+ *  At the start of a run none of this run's own shards exist yet, so a live one is an orphan of a
+ *  killed run, still measuring: a run beside it would have it claim from the new queue and write
+ *  into the new journal. A claim whose row a part file measured names a shard that finished it. */
 export function liveClaimers(dir: string): string[] {
   const claims = join(dir, 'claims');
+  const plan = readPlan(dir);
+  const done = new Set(journalRows(readJournal(dir).parts).results.map((r) => r.id));
   const out = new Set<string>();
   for (const f of existsSync(claims) ? readdirSync(claims) : []) {
+    const id = plan?.ids[Number(f)];
+    if (id !== undefined && done.has(id)) {
+      continue;
+    }
     const who = readFileSync(join(claims, f), 'utf8');
     const pid = Number(/^pid (\d+)/.exec(who)?.[1]);
-    if (pid > 0 && alive(pid)) {
+    if (pid > 0 && isShardChild(pid)) {
       out.add(`${pid} (${who})`);
     }
   }

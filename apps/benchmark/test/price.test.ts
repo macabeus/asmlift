@@ -54,10 +54,10 @@ describe('the artifact rate', () => {
     { toolchain: 'ido7.1', tier: 'real', asmlift: { rankSeconds: 9 } } as FunctionResult,
   ]);
 
-  it('divides by the candidates COMPILED, per toolchain and tier', () => {
-    // the stillborn row compiled 10 of its 1,000 in 5 s
-    expect(rates.get('mwcc_233_163n real')).toBeCloseTo(55 / 110);
-    expect(rates.get('mwcc_233_163n')).toBeCloseTo(58 / 120);
+  it('is measured over whole fans only, per toolchain and tier', () => {
+    // the stillborn row (990 of 1,000 never compiled) prices nothing
+    expect(rates.get('mwcc_233_163n real')).toBeCloseTo(0.5);
+    expect(rates.get('mwcc_233_163n')).toBeCloseTo(53 / 110);
     expect(rates.has('ido7.1')).toBe(false);
   });
 

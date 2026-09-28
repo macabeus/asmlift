@@ -317,7 +317,8 @@ switch (command) {
       const log = join(RESULTS_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
       const fd = openSync(log, 'a');
       const t0 = Date.now();
-      const child = spawn('tsx', [import.meta.filename, ...process.argv.slice(2).filter((a) => a !== '--detach')], {
+      const argv = process.argv.slice(2).filter((a) => a !== '--detach');
+      const child = spawn('tsx', [import.meta.filename, ...argv], {
         cwd: process.cwd(),
         detached: true,
         stdio: ['ignore', fd, fd],
@@ -333,7 +334,13 @@ switch (command) {
         const state = readBenchLock();
         const mine =
           state.state === 'held'
-            ? state.records.find((r) => r.root === REPO_ROOT && Date.parse(r.startedAt) >= t0 - 1000)
+            ? // this argv's own record: a run of another tier may take one at this root meanwhile
+              state.records.find(
+                (r) =>
+                  r.root === REPO_ROOT &&
+                  r.command === `bench ${argv.join(' ')}` &&
+                  Date.parse(r.startedAt) >= t0 - 1000,
+              )
             : undefined;
         if (mine) {
           child.unref();

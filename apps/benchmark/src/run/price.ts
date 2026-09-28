@@ -47,10 +47,11 @@ export function estimatedScoreTime(n: number, perCandidate: number): string {
 
 type PricedRow = Pick<FunctionResult, 'toolchain' | 'tier' | 'asmlift'>;
 
-/** Seconds per COMPILED candidate that an artifact's ranked passes took, keyed `toolchain tier` and
- *  `toolchain`. Per toolchain because the toolchains are not on one scale — an mwcc compile runs in
- *  Docker, an agbcc one natively — and per COMPILED candidate because a stillborn fan's
- *  `rankSeconds` paid for the candidates it compiled, not for the ones it enumerated. */
+/** Seconds per candidate that an artifact's ranked passes took, keyed `toolchain tier` and
+ *  `toolchain`, over the rows that compiled their WHOLE fan. Per toolchain because the toolchains are
+ *  not on one scale — an mwcc compile runs in Docker, an agbcc one natively. Whole fans only because
+ *  a stillborn row's `rankSeconds` is mostly enumeration and the stop's own checks over a handful of
+ *  compiles, so it prices a compile neither per candidate enumerated nor per candidate compiled. */
 export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
   const sums = new Map<string, { n: number; s: number }>();
   const add = (k: string, n: number, s: number): void => {
@@ -59,10 +60,9 @@ export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
   };
   for (const r of recorded) {
     const { fanSize, fanNotCompiled, rankSeconds } = r.asmlift ?? {};
-    const compiled = (fanSize ?? 0) - (fanNotCompiled ?? 0);
-    if (typeof rankSeconds === 'number' && compiled > 0) {
-      add(`${r.toolchain} ${r.tier}`, compiled, rankSeconds);
-      add(r.toolchain, compiled, rankSeconds);
+    if (typeof rankSeconds === 'number' && typeof fanSize === 'number' && fanSize > 0 && !fanNotCompiled) {
+      add(`${r.toolchain} ${r.tier}`, fanSize, rankSeconds);
+      add(r.toolchain, fanSize, rankSeconds);
     }
   }
   return new Map([...sums].map(([k, v]) => [k, v.s / v.n]));
