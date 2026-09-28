@@ -29,6 +29,7 @@ const DECLARED = {
   toVoidp: ['void *'],
   toConstS32p: ['const s32 *'],
   toS32p: ['s32 *'],
+  toConstPtr: ['s32 * const'],
   toS32: ['s32'],
   toStruct: [undefined],
 };
@@ -44,6 +45,7 @@ describe('C++ call arguments', () => {
     expect(printed(a0, 'toU32p')).toBe('return toU32p((u32 *)a0);');
     expect(printed(a1, 'toU32p')).toBe('return toU32p((u32 *)a1);');
     expect(printed(a0, 'toS32')).toBe('return toS32((s32)a0);');
+    expect(printed(a1, 'toConstPtr')).toBe('return toConstPtr((s32 * const)a1);');
   });
 
   test('leaves every implicit conversion alone', () => {
@@ -56,7 +58,7 @@ describe('C++ call arguments', () => {
     expect(printed(a1, 'toStruct')).toBe('return toStruct(a1);');
   });
 
-  test('a function compiled as C prints its arguments as it always did', () => {
+  test('a function compiled as C gets no casts', () => {
     expect(cBackend.emit(fnWith(a0, 'toU32p'))).toContain('return toU32p(a0);');
   });
 });

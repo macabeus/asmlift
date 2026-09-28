@@ -30,12 +30,58 @@ interface Statement {
   definition: boolean;
 }
 
+/** The source with every comment and preprocessor line (continuation lines included) blanked, and
+ *  every brace, parenthesis and semicolon inside a string or character literal blanked — so what
+ *  follows counts only the ones that are code, and still reads `extern "C"`. */
+function clean(src: string): string {
+  let out = '';
+  let lineStart = true;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') {
+        i++;
+      }
+      i--;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end < 0 ? src.length : end + 1;
+      out += ' ';
+      continue;
+    }
+    if (ch === '#' && lineStart) {
+      while (i < src.length && !(src[i] === '\n' && src[i - 1] !== '\\')) {
+        i++;
+      }
+      out += '\n';
+      lineStart = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== ch) {
+        j += src[j] === '\\' ? 2 : 1;
+      }
+      out += src.slice(i, j + 1).replace(/[{}();]/g, ' ');
+      i = j;
+      lineStart = false;
+      continue;
+    }
+    out += ch;
+    if (ch === '\n') {
+      lineStart = true;
+    } else if (!/\s/.test(ch)) {
+      lineStart = false;
+    }
+  }
+  return out;
+}
+
 /** Top-level statements, descending into `extern "C"` blocks and skipping every other block. */
 function statements(src: string): Statement[] {
-  const text = src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\/\/[^\n]*/g, ' ')
-    .replace(/^[ \t]*#[^\n]*/gm, ' ');
+  const text = clean(src);
   const out: Statement[] = [];
   let cur = '';
   const flush = (definition: boolean): void => {
@@ -47,14 +93,7 @@ function statements(src: string): Statement[] {
   };
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
-    if (ch === '"' || ch === "'") {
-      let j = i + 1;
-      while (j < text.length && text[j] !== ch) {
-        j += text[j] === '\\' ? 2 : 1;
-      }
-      cur += text.slice(i, j + 1);
-      i = j;
-    } else if (ch === ';') {
+    if (ch === ';') {
       flush(false);
     } else if (ch === '}') {
       // the end of an `extern "C"` block: it holds no statement of its own
@@ -74,7 +113,10 @@ function statements(src: string): Statement[] {
         }
       }
       i = j - 1;
-      if (/\)\s*(?:const\s*)?$/.test(cur.trim())) {
+      if (/^\s*(?:namespace\b|extern\s*"C\+\+")/.test(cur)) {
+        // a namespace or C++-linkage block ends with its brace, not a `;`
+        cur = '';
+      } else if (/\)\s*(?:const\s*)?$/.test(cur.trim())) {
         flush(true);
       } else {
         cur += ' {} ';

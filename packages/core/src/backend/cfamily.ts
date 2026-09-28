@@ -244,25 +244,25 @@ function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt
 }
 
 /** Does passing `a` to a parameter declared `to` take a conversion C++ will not make implicitly?
- *  Three do, and each is a cast that changes no generated code — every value involved is one
- *  register wide: an object pointer to a pointer of another pointee (a conversion to `void *`, or
- *  one that only adds a qualifier, is implicit), an integer to a pointer (the literal `0` is the one
- *  integer that converts), and a pointer to an integer. Only reached on a function compiled as C++
- *  (`SFn.declaredArgs`). */
+ *  Three do, and C makes each of them implicitly, so the cast spells the conversion C would have
+ *  made and the compiled code is C's: an object pointer to a pointer of another pointee (a conversion
+ *  to `void *`, or one that only adds a qualifier, is implicit in C++ too), an integer to a pointer
+ *  (the literal `0` is the one integer that converts), and a pointer to an integer. Only reached on a
+ *  function compiled as C++ (`SFn.declaredArgs`). */
 function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   const from = exprCType(a, vt.type);
-  const target = to.replace(/\s+/g, ' ').trim();
-  if (target.endsWith('*')) {
+  // qualifiers never decide it: a `T * const` parameter is a pointer parameter
+  const bare = to
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (bare.endsWith('*')) {
     if (a.k === 'const' && a.value === 0) {
       return false;
     }
     if (from?.kind !== 'ptr') {
       return true;
     }
-    const bare = target
-      .replace(/\b(?:const|volatile)\b/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
     return bare !== 'void *' && bare !== cType(from).replace(/\s+/g, ' ').trim();
   }
   return from?.kind === 'ptr';

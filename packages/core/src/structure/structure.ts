@@ -6616,8 +6616,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // absent stays absent: the backend asks "is a direction known?", and there is no third state
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
-    ...(declaredArgs !== undefined ? { declaredArgs } : {}),
+    ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
   };
+}
+
+/** Of the declared callees' parameter types, the ones this body calls — every tree the ranked pass
+ *  structures carries its own, and is keyed by its whole text. */
+function calledArgs(
+  declared: NonNullable<StructureOptions['declaredArgs']>,
+  body: Stmt[],
+): { declaredArgs?: NonNullable<StructureOptions['declaredArgs']> } {
+  const called: Record<string, readonly (string | undefined)[]> = {};
+  for (const e of walkExprs(body)) {
+    if (e.k === 'call' && Object.hasOwn(declared, e.fn)) {
+      called[e.fn] = declared[e.fn];
+    }
+  }
+  return Object.keys(called).length > 0 ? { declaredArgs: called } : {};
 }
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/

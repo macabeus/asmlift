@@ -637,12 +637,20 @@ export function storedFlags(family: FlagFamily, argv: readonly string[]): string
  *  option, and only mwcc has a C++ front end, so every other family answers `c` unless its unit is
  *  named for C++ — which none is, and where one is, real.ts refuses the row by name. */
 export function unitLanguage(unit: string, cflags: readonly string[]): 'c' | 'c++' {
-  const stated = parseFlags('mwcc', cflags).slots.lang;
+  return dialectOf(parseFlags('mwcc', cflags).slots.lang, unit);
+}
+
+/** The dialect a `-lang` word states — the one reading of it, for `unitLanguage` and for the target
+ *  `targetFor` resolves at a flag set. With no word, the unit's extension when there is a unit, C
+ *  otherwise; a word outside `c | c++ | ec++` is refused. */
+export function dialectOf(stated: string | undefined, unit?: string): 'c' | 'c++' {
   if (stated === undefined) {
-    return /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
+    return unit !== undefined && /\.(cc|cp|cpp|cxx)$/i.test(unit) ? 'c++' : 'c';
   }
   if (stated !== 'c' && stated !== 'c++' && stated !== 'ec++') {
-    throw new Error(`${unit}: CodeWarrior dialect '${stated}' is not one of c, c++, ec++`);
+    throw new Error(
+      `${unit === undefined ? '' : `${unit}: `}CodeWarrior dialect '${stated}' is not one of c, c++, ec++`,
+    );
   }
   return stated === 'c' ? 'c' : 'c++';
 }

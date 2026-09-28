@@ -43,7 +43,7 @@
 // This module is browser-pure by contract (no Node APIs, enforced by
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
-import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
+import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
@@ -1005,7 +1005,7 @@ export interface ResolvedTarget {
 export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): ResolvedTarget {
   const t: ToolchainTarget = TOOLCHAIN_TARGETS[toolchain];
   const profile = parseFlags(t.family, cflags);
-  const cpp = profile.slots.lang === 'c++' || profile.slots.lang === 'ec++';
+  const cpp = dialectOf(profile.slots.lang) === 'c++';
   return { toolchain, cflags, target: cpp ? { ...t.description, dialect: 'c++' } : t.description, profile };
 }
 

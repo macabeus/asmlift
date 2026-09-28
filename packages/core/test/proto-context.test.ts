@@ -85,6 +85,21 @@ describe('prototypes from a declaration context', () => {
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test('a literal or a comment holds no brace, and a namespace ends at its own brace', () => {
+    const p = prototypesFromContext(
+      `struct Prop { Prop() : name("}{") {} virtual void read(int s); };
+       const char *msg = "// not a comment; int fake(int);";
+       #define LONG_MACRO(x) \\
+         int macroFake(int x);
+       namespace std { inline float fmod(float x, float m) { return x; } }
+       double fmod(double x, double y);
+       int after(int v);`,
+      'c++',
+    );
+    expect(Object.keys(p).sort()).toEqual(['after', 'fmod']);
+    expect(p.fmod?.params).toEqual(['double', 'double']);
+  });
+
   test('C++ default arguments and comments do not reach a spelling', () => {
     const p = prototypesFromContext('/* a */ int f(int a = 3, /* b */ int b = 4); // c', 'c++');
     expect(p.f).toEqual({ returns: 'int', params: ['int', 'int'] });
