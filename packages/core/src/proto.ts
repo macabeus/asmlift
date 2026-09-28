@@ -1,4 +1,4 @@
-import type { SymbolMap, SymbolTypeFacts } from './symbols';
+import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
 // matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
@@ -590,6 +590,19 @@ function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   return null;
 }
 
+/** The prototype a code symbol's DWARF signature states, or `undefined` when it states none this
+ *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`). */
+export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
+  if (info.kind !== 'code' || !info.signature) {
+    return undefined;
+  }
+  const params = info.signature.params.map(typeSpelling);
+  if (params.some((p) => p === null)) {
+    return undefined;
+  }
+  return { params: params as ParamType[], ...(info.signature.returns === null ? { returnsVoid: true } : {}) };
+}
+
 /**
  * Prototypes the project's own DWARF states, merged UNDER the caller's.
  *
@@ -633,17 +646,13 @@ export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prot
           out[info.name] = rest;
         }
       }
-      if (info.kind !== 'code' || !info.signature || out[info.name] !== undefined) {
+      if (out[info.name] !== undefined) {
         continue;
       }
-      const params = info.signature.params.map(typeSpelling);
-      if (params.some((p) => p === null)) {
-        continue;
+      const signed = symbolPrototype(info);
+      if (signed !== undefined) {
+        out[info.name] = signed;
       }
-      out[info.name] = {
-        params: params as ParamType[],
-        ...(info.signature.returns === null ? { returnsVoid: true } : {}),
-      };
     }
   }
   return out;

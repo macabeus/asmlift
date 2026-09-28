@@ -1,5 +1,5 @@
 import type { FnProto, ParamType, Prototypes } from './proto';
-import { declaredWidth, validatePrototypes } from './proto';
+import { declaredArgWidths, declaredWidth, symbolPrototype, validatePrototypes } from './proto';
 import type { SymbolMap } from './symbols';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -285,22 +285,26 @@ function readSignature(
 
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
 
-/** A context's prototypes minus the names the symbol map signs. The map's signature comes from the
- *  compiled definition and sizes what a declaration cannot — a by-value struct, by its byte size —
- *  while an entry here that cannot size a parameter makes the call's arity a guess again. Either
- *  source wins over the other only through `prototypesFromSymbols`, where any caller-supplied entry
- *  shadows the map's; so a context entry is withdrawn wherever the map has one. */
+/** A context's prototypes, less the entries the symbol map states better. `prototypesFromSymbols`
+ *  lets any entry it is handed shadow the map's signature for that name, so what reaches it decides
+ *  which source wins, per name: a context entry that sizes every parameter wins — it is the
+ *  declaration the candidate is compiled against, and its spellings are the ones a C++ call's casts
+ *  need; an entry that cannot size one yields to a map signature that can be spelled, which sizes by
+ *  byte count what a declaration names (a by-value struct of a register's width); and where the map
+ *  spells nothing either, the context entry stays. */
 export function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefined): Prototypes {
   if (symbols === undefined) {
     return context;
   }
-  const signed = new Set<string>();
+  const mapped = new Set<string>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
-      if (info.kind === 'code' && info.signature !== undefined) {
-        signed.add(info.name);
+      if (symbolPrototype(info) !== undefined) {
+        mapped.add(info.name);
       }
     }
   }
-  return Object.fromEntries(Object.entries(context).filter(([name]) => !signed.has(name)));
+  return Object.fromEntries(
+    Object.entries(context).filter(([name, p]) => declaredArgWidths(p) !== undefined || !mapped.has(name)),
+  );
 }

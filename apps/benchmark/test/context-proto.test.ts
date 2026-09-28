@@ -18,12 +18,23 @@ describe('a real row prototype table', () => {
     expect(p).toEqual({ callee: { returns: 's32', params: ['s32'] }, other: { params: 3 } });
   });
 
-  test('a name the symbol map signs keeps the map signature: the context entry is withdrawn', () => {
+  test('per name: a sized context entry over the map, a spellable map signature over an unsized entry', () => {
+    const ctx =
+      'typedef signed long s32; typedef struct S { s32 v; } S; s32 callee(s32 a); void byval(S s); void opaque(S s);';
+    const code = (name: string, params: { size: number; signed: boolean | null }[]) => ({
+      name,
+      kind: 'code' as const,
+      signature: { params, returns: null },
+    });
     const map = new Map([
-      [0x100, [{ name: 'callee', kind: 'code' as const, signature: { params: [], returns: null } }]],
+      [0x100, [code('callee', [])]],
+      [0x104, [code('byval', [{ size: 4, signed: null }])]],
+      // a signless narrow parameter spells nothing, so the map states no prototype for it
+      [0x108, [code('opaque', [{ size: 2, signed: null }])]],
     ]);
-    expect(rowPrototypes(undefined, CTX, 'c', 'self', map as never)).toEqual({
-      other: { returns: 's32', params: ['s32', 's32'] },
+    expect(rowPrototypes(undefined, ctx, 'c', 'self', map as never)).toEqual({
+      callee: { returns: 's32', params: ['s32'] },
+      opaque: { returnsVoid: true, params: ['S'] },
     });
   });
 
