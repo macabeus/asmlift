@@ -69,12 +69,14 @@ test('a header value read after a break is not re-derived from the updated name'
 // mis-models the statement shape (a dce that lets a mid-body `break` fall through drops the copy it
 // carries) is invisible to the first judgement.
 //
-// Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), a `do-while`
+// Refusals and their witnesses: header→exit copies the break cannot share (`HEADER_EXIT_COPIES`,
+// and `LATCH_BREAK_SHARES_UPDATED_NAME` for copies reading a name the update wrote; a break handing
+// the exit the header's own values shares them, `BREAK_SHARES_HEADER_COPIES`), a `do-while`
 // (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit, where the
 // implicit continue does not hold (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
 // refusal is otherwise loud only where the exit is a live merge; an exit that ends in a `ret` can
-// take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break`
-// the latch path refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
+// take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break` the latch path
+// refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
 // witness, and are kept as the conditions this spelling rests on rather than as rules any input is
 // known to need: an edge out of a nested loop's body (a loop this recognizer admits leaves only to its
 // own exit, which lies inside ours); an in-body branch whose other edge leaves the loop as well
@@ -393,6 +395,75 @@ test('a `break` the header-exit copies would overwrite declines', () => {
   expect(() => emit(HEADER_EXIT_COPIES)).toThrow(/would run the copies the loop header hands its exit/);
 });
 
+/** A loop rotated so its header computes `i + 1` and hands it to the exit, and a mid-body `break`
+ *  that hands the exit that same value: agbcc's layout of `for (i = 0; i < n; i++) if (…) break;
+ *  return i;` (pokeemerald `FindFirstActiveTask`). The header's copy runs after the loop on both
+ *  paths, so the break leaves bare. `f` returns 2 on its first call, so every seed that enters the
+ *  loop takes the break at once: a break that carried its own copy too would add 1 twice. */
+const BREAK_SHARES_HEADER_COPIES = `fn midshare {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %0
+  cond_br %5, ^bb2(), ^bb4(%4)
+^bb2():
+  %6: s32 = call %4 {target="f"}
+  %7: s32 = const {value=2}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb4(%4), ^bb3()
+^bb3():
+  %9: s32 = call {target="h"}
+  br ^bb1(%4)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="g"}
+  ret %10
+}`;
+
+test('a `break` that hands the exit what the header hands it shares the header copies', () => {
+  const { src, agreement, shipped } = judged(BREAK_SHARES_HEADER_COPIES);
+  expect(src).toBe(
+    's32 midshare(s32 a0) {\n    s32 v0;\n    for (v0 = 0; v0 + 1 < a0; v0 = v0 + 1) {\n' +
+      '        if (f(v0 + 1) == 2) break;\n        h();\n    }\n    v0 = v0 + 1;\n    g(v0);\n    return v0;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The same values from the LATCH. The latch path spells a latch break after the update, and the
+ *  header's copy `v0 = v0 + 1` reads the name that update wrote: shared, the loop would add 1 twice
+ *  on the break path. The latch path refuses, and the break is spelled ahead of the update. */
+const LATCH_BREAK_SHARES_UPDATED_NAME = `fn latchshare {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %0
+  cond_br %5, ^bb2(), ^bb3(%4)
+^bb2():
+  %6: s32 = call {target="f"}
+  %7: s32 = const {value=2}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb3(%4), ^bb1(%4)
+^bb3(%9: s32):
+  %10: s32 = call %9 {target="g"}
+  ret %9
+}`;
+
+test('a latch `break` does not share header copies that read a name its update wrote', () => {
+  const { src, agreement, shipped } = judged(LATCH_BREAK_SHARES_UPDATED_NAME);
+  expect(src).toBe(
+    's32 latchshare(s32 a0) {\n    s32 v0;\n    for (v0 = 0; v0 + 1 < a0; v0 = v0 + 1) {\n' +
+      '        if (f() == 2) break;\n    }\n    v0 = v0 + 1;\n    g(v0);\n    return v0;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
 /** The break test sits in the latch, after the update, and the exit reads the header's `v1`. The
  *  latch path spells a latch break update-first, which would hand the exit `v2`, and refuses; the
  *  break is spelled first instead, ahead of the update copy. `MERGE_BEFORE_BREAK` is the same
@@ -434,8 +505,9 @@ test('a latch `break` whose exit reads the value before the update leaves ahead 
 
 /** agbcc -O2 of `int m8(int *p, int n, int m, int k) { int i = 0; int x; while ((x = p[i]) != k) {
  *  if (*p == 0) return 1; if (k < m) break; i++; x = x + 1; if (i > n) break; } G = 0; return x; }`.
- *  The exit `.L4` ends in a return and takes `x` from three edges, so the header hands it a copy and
- *  the mid-body `break` is refused; the edge copies the exit's tail into its arm instead. */
+ *  The exit `.L4` ends in a return and takes `x` from three edges, so the header hands it a copy.
+ *  The mid-body `if (k < m) break;` hands it the header's own `x` and shares that copy; the latch
+ *  break hands it `x + 1`, is refused, and copies the exit's tail into its arm instead. */
 const M8_RET_EXIT_WITH_COPIES = `m8:
 	push	{r4, r5, r6, r7, lr}
 	add	r5, r0, #0
@@ -475,8 +547,9 @@ const M8_RET_EXIT_WITH_COPIES = `m8:
 
 test('a refused `break` to an exit that ends in a return copies the tail instead', () => {
   const src = decompile('m8', M8_RET_EXIT_WITH_COPIES, ARMV4T_AGBCC, { prototypes: { m8: { params: 4 } } }).source;
-  expect(src).not.toContain('break');
-  expect(src.match(/G = 0;/g)).toHaveLength(3);
+  expect(src).toContain('            if (a3 < a2) break;\n');
+  expect(src.match(/break/g)).toHaveLength(1);
+  expect(src.match(/G = 0;/g)).toHaveLength(2);
 });
 
 /** agbcc -O2 of `int f(int *p, int n, int m, int k) { int t = 0; while (*p != k) { if (p[1] == m) {
