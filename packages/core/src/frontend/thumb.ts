@@ -4329,6 +4329,49 @@ export function lift(
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
     localArea === 4;
 
+  // THE FRAME OFFSETS A CONSTANT CAPTURE NAMES, read off the text the way the mov and add arms
+  // will lower it: `add rD, sp, #k`, and a held capture moved by a constant. Nonzero only — the
+  // frame base has its own licence, `capturedObjectIsTheWholeFrame`. Block-local, and any mention
+  // of a held register or a call drops it, so the set can only be too SMALL, which costs a decline.
+  //
+  // A word whose address is taken is not an outgoing argument — C gives an argument no address —
+  // so the outgoing-argument analysis below does not see these offsets either: a store there
+  // reaching a call unread is the object being filled for the callee that is handed it.
+  const constantCaptureOffsets = ((): ReadonlySet<number> => {
+    const offs = new Set<number>();
+    for (const b of entryReachable) {
+      const held = new Map<string, number>();
+      for (const ins of asmBlocks[b].instrs) {
+        const [d, s1, s2] = ins.ops;
+        let next: number | undefined;
+        if (capturesSp(ins)) {
+          next = 0;
+        } else if (/^adds?$/.test(ins.mnemonic) && d !== undefined && !isSpReg(d)) {
+          const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+          if (src !== undefined && by !== undefined && IMM_LITERAL.test(by)) {
+            const from = isSpReg(src) ? 0 : held.get(reg(src));
+            next = from === undefined ? undefined : from + imm(by);
+          }
+        }
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+          held.clear();
+        }
+        for (const r of [...held.keys()]) {
+          if (mentionsReg(ins, r)) {
+            held.delete(r);
+          }
+        }
+        if (next !== undefined && d !== undefined) {
+          held.set(reg(d), next);
+          if (next > 0) {
+            offs.add(next);
+          }
+        }
+      }
+    }
+    return offs;
+  })();
+
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
   // slots, which instructions are calls, and what each callee's DECLARATION asks for. `blx rN`
@@ -4440,7 +4483,7 @@ export function lift(
     blocks: asmBlocks.map((ab) => ({
       events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
         const off = slotAcc(ins);
-        if (off !== null) {
+        if (off !== null && !constantCaptureOffsets.has(off)) {
           return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
@@ -4481,8 +4524,20 @@ export function lift(
   // Word accesses only, and only while the slot model is on: a sub-word or register-offset
   // `[sp,#k]` anywhere turns the whole model off (slotModelBlocker), and the `mov rD, sp` arm then
   // declines the capture rather than reaching this.
+  //
+  // THE SAME HOLDS AT EVERY OFFSET A CONSTANT CAPTURE NAMES. `vu32 t = -1; CpuSet(&t, …)` above an
+  // outgoing block is `str r4, [sp, #0x4] / add r0, sp, #0x4 / bl CpuSet`: the store is to the
+  // object whose address the call is handed. Those offsets are read off the text before the lift
+  // (`constantCaptureOffsets`), and one it misses keeps the slot, which the audit refuses as two
+  // models for one byte. Above the outgoing block only — a word staged there is an argument the
+  // call reads as a slot — and inside the reserved area, where a slot could have been.
   const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
-    slotsOk && capturedObjectIsTheWholeFrame && isSpReg(base) && regOff === undefined && off === 0 && width === 4;
+    slotsOk &&
+    isSpReg(base) &&
+    regOff === undefined &&
+    width === 4 &&
+    ((capturedObjectIsTheWholeFrame && off === 0) ||
+      (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea));
 
   // A WHOLE WORD OF THIS FUNCTION'S OWN RESERVED LOCAL AREA — the shape the ldr and str arms model
   // as an SSA slot (`sp@<off>`) instead of memory. The two arms spelled these seven terms out
@@ -5242,13 +5297,13 @@ export function lift(
               break;
             }
           }
-          // The address-taken object at offset 0 comes FIRST: it is memory, not a slot, so it is
+          // An address-taken object comes FIRST: it is memory, not a slot, so it is
           // read with a real `load` through its `laddr` (see isFrameObjectAccess). No
           // reaching-def test — the callee holding the address is a writer this function cannot
           // see, so "never stored here" is not "holds nothing".
           if (isFrameObjectAccess(base, off, regOff, width)) {
             const addr = mkValue(T.unk(32));
-            irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off: 0 } }));
+            irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off } }));
             const res = mkValue(T.unk(32));
             irb.ops.push(mkOp('load', { operands: [addr], results: [res], attrs: { off: 0, width, signed } }));
             writeData(reg(a), bi, res);
@@ -5292,11 +5347,11 @@ export function lift(
           // A word spill into this function's own frame: record the slot's value in SSA rather than
           // emitting a store through sp (which bytes qualify: see isOwnFrameWordSlot). A spill that
           // is never reloaded becomes a dead def and drops.
-          // …unless offset 0 is the address-taken object (see isFrameObjectAccess), where the
+          // …unless the offset is an address-taken object (see isFrameObjectAccess), where the
           // store is a real write to memory that the callee holding the address reads back.
           if (isFrameObjectAccess(base, off, regOff, width)) {
             const addr = mkValue(T.unk(32));
-            irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off: 0 } }));
+            irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off } }));
             irb.ops.push(mkOp('store', { operands: [addr, readData(reg(a), bi)], attrs: { off: 0, width } }));
             break;
           }

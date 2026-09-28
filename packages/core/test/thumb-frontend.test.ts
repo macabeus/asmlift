@@ -1477,6 +1477,38 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …and a WORD local there is stored with `str rX, [sp, #0x4]`, which the slot model would key
+    // as an SSA slot and the outgoing-argument analysis would read as a sixth staged argument. The
+    // capture names it, so it is the object. agbcc's own output for `void f(s32 a, s32 b){ s32 w;
+    // five(a, b, a, b, a); w = b; getw(&w); five(w, a, a, a, a); }`, at the corpus's flags.
+    describe('a word the capture names is the object at every access', () => {
+      const word = (capture: string) =>
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n\tstr\tr5, [sp, #0x4]\n' +
+        `${capture}\tbl\tgetw\n\tldr\tr0, [sp, #0x4]\n\tstr\tr4, [sp]\n\tadd\tr1, r4, #0\n` +
+        '\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tfive\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n' +
+        '\tpop\t{r0}\n\tbx\tr0\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        getw: { params: ['s32 *'], returnsVoid: true },
+      };
+
+      test('the store, the capture and the reload are one local', () => {
+        expect(decompile('f', word('\tadd\tr0, sp, #0x4\n'), ARMV4T_AGBCC, { prototypes }).source).toBe(
+          'void f(s32 a0, s32 a1) {\n    s32 sp4;\n    five(a0, a1, a0, a1, a0);\n    sp4 = a1;\n    getw(&sp4);\n' +
+            '    five(sp4, a0, a0, a0, a0);\n}\n',
+        );
+      });
+
+      test('a capture the text scan cannot follow leaves the slot, and the audit refuses the pair', () => {
+        // a register copy is not a spelling the scan tracks, so [sp,#4] keeps both of its old
+        // readings — a slot, and a word staged for the call — and the second refuses, loudly
+        expect(() =>
+          decompile('f', word('\tmov\tr0, sp\n\tmov\tr1, r0\n\tadd\tr0, r1, #0x4\n'), ARMV4T_AGBCC, { prototypes }),
+        ).toThrow(/the store to \[sp,#4\] reaches `bl getw` unread .* it may be that call's outgoing stack argument/);
+      });
+    });
+
     // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =
     // (u32)&tmp` gives a DEVICE the address; the function need not contain a `bl` at all, and
     // `sa3:sa2__sub_80078D4` contains none. The licence is the same licence — something outside

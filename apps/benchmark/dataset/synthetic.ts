@@ -7272,6 +7272,22 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
   {
+    sym: 'stkslot',
+    // `stkoff` with a WORD local: `str r5, [sp, #0x4]` is a store the slot model would key and the
+    // outgoing-argument analysis would read as a staged argument, and `add r0, sp, #0x4` names it
+    // as the object `getw` is handed, so it is that object at every access.
+    src:
+      'extern void five(s32, s32, s32, s32, s32);\nextern void getw(s32 *);\n' +
+      'void stkslot(s32 a, s32 b){ s32 w; five(a, b, a, b, a); w = b; getw(&w); five(w, a, a, a, a); }',
+    features: ['stack-addr', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'void five(s32, s32, s32, s32, s32);\nvoid getw(s32 *);\nvoid stkslot(s32 a, s32 b);',
+    proto: {
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+      getw: { params: ['s32 *'], returnsVoid: true },
+    },
+  },
+  {
     sym: 'stkextsret',
     // NO `stack-addr` TAG, and that is the floor holding rather than an omission: the tag's floor
     // is the `&`, and this source never writes one. The address is taken by the ABI, not by the
