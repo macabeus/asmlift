@@ -70,9 +70,10 @@ test('a header value read after a break is not re-derived from the updated name'
 // carries) is invisible to the first judgement.
 //
 // Refusals and their witnesses: header→exit copies (`HEADER_EXIT_COPIES`), a `do-while`
-// (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit
-// (`IF_JOINING_AT_THE_EXIT`). A refusal is loud only where the exit is a live merge; an exit that ends
-// in a `ret` can take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break`
+// (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit, where the
+// implicit continue does not hold (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
+// refusal is otherwise loud only where the exit is a live merge; an exit that ends in a `ret` can
+// take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break`
 // the latch path refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
 // witness, and are kept as the conditions this spelling rests on rather than as rules any input is
 // known to need: an edge out of a nested loop's body (a loop this recognizer admits leaves only to its
@@ -521,7 +522,7 @@ const IF_JOINING_AT_THE_EXIT = `f:
 
 test('a latch break under an `if` that joins at the loop exit declines', () => {
   expect(() => decompile('f', IF_JOINING_AT_THE_EXIT, ARMV4T_AGBCC, { prototypes: { f: { params: 4 } } })).toThrow(
-    /unrecovered back-edge/,
+    /a break out of block #\d+ would continue the loop from a region that ends past the loop bottom/,
   );
 });
 

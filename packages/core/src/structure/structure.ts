@@ -4903,6 +4903,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   };
 
+  // THE IMPLICIT CONTINUE. A branch with one edge back to the loop header spells that edge as
+  // nothing at all: control falls to the bottom of the body and the loop goes round. That holds only
+  // where the region being structured ends at the loop bottom (`stop === frame.header`). An `if` in
+  // the body whose join lies outside it, at the loop's exit, hands its arms that exit as `stop` and
+  // renders the exit region after itself, still inside the body: an implicit continue there falls
+  // into that region and the loop runs at most once. Both spellings of a branch that leaves the loop
+  // beside such an edge consult this.
+  const continueFallsToBottom = (frame: LoopFrame, stop: Block | null): boolean => stop === frame.header;
+
   // THE BREAK RULE, for a `break` out of `frame`'s body wherever the edge sits. A `break` lands
   // after the loop, where the header→exit copies render and then the exit region, raw. Refused:
   //   • a `do-while`: its exit copies live post-loop too, but are judged differently;
@@ -5537,12 +5546,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // edges only (`!body.has(exitB)` AND a break/return target); an in-body conditional continue still
     // declines (falls through → the header re-entry trips `onStack`, an honest loud fail).
     //
-    // The implicit continue holds only where the region being structured ends at the loop bottom
-    // (`stop === header`). An `if` in the body whose join lies OUTSIDE it, at the loop's exit, hands
-    // its arms that exit as `stop` and renders the exit region after itself, still inside the body:
-    // spelled here, the continue arm would fall into that region and the loop would run at most once.
-    // Refused, the arm re-enters the header and declines loud.
-    if (loopCtx && stop === loopCtx.header && (takenB === loopCtx.header || fallB === loopCtx.header)) {
+    // Taken only where the implicit continue holds (`continueFallsToBottom`). Where it does not, a
+    // break edge is refused by name below, and an arm re-enters the header and declines loud.
+    if (loopCtx && continueFallsToBottom(loopCtx, stop) && (takenB === loopCtx.header || fallB === loopCtx.header)) {
       const contIsTaken = takenB === loopCtx.header;
       const exitB = contIsTaken ? fallB : takenB;
       const isBreak = exitB === loopCtx.exit;
@@ -5599,10 +5605,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // wrote one of their names.
     //
     // The other edge may be the BACK edge. The latch path above spells a latch break update-first
-    // and refuses when the test or the exit reads a value the update overwrites; reaching here
-    // means it refused, and this spelling puts the update copies after the `if`, where the break has
-    // already left. Whether the update sits in the latch or in a block of its own is a layout
-    // accident, and both lift the same way.
+    // and refuses when the test or the exit reads a value the update overwrites; reaching here with
+    // a back edge means it refused, or never judged the edge because the implicit continue does not
+    // hold (`continueFallsToBottom`). Where it refused, this spelling puts the update copies after
+    // the `if`, where the break has already left. Whether the update sits in the latch or in a block
+    // of its own is a layout accident, and both lift the same way. Where the continue does not hold,
+    // no spelling does: every route to the header re-enters it, so that refusal is always loud.
     //
     // Refused by the break rule (`breakRefusal`) over the names written ahead of this edge, and where
     // the other edge leaves the body too. A refusal is LOUD, since the loop was admitted on the
@@ -5614,9 +5622,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const frame = loopCtx;
       const breakIsTaken = takenB === frame.exit;
       const stayB = breakIsTaken ? fallB : takenB;
-      const refusal = frame.body.has(stayB)
-        ? breakRefusal(frame, writtenAhead(frame, b))
-        : 'has no edge beside it that stays in the loop';
+      const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
+      const refusal = continueRefused
+        ? 'would continue the loop from a region that ends past the loop bottom'
+        : frame.body.has(stayB)
+          ? breakRefusal(frame, writtenAhead(frame, b))
+          : 'has no edge beside it that stays in the loop';
       if (refusal === null) {
         let leaveCond = expr(term.operands[0]);
         if (!breakIsTaken) {
@@ -5627,7 +5638,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
-      if (!isArm(frame.exit) && !isRet(frame.exit)) {
+      if (continueRefused || (!isArm(frame.exit) && !isRet(frame.exit))) {
         throw new StructureError(
           `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${refusal}`,
         );
