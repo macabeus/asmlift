@@ -4901,6 +4901,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   };
 
+  // THE BREAK RULE, for a `break` out of `frame`'s body wherever the edge sits. A `break` lands
+  // after the loop, where the header→exit copies render and then the exit region, raw. Refused:
+  //   • a `do-while`: its exit copies live post-loop too, but are judged differently;
+  //   • the header→exit edge has copies: the break path runs them too, and they overwrite what the
+  //     break carried;
+  //   • the exit region reads a loop value under a loop variable's name that `writes` holds —
+  //     the names this iteration has rewritten by the time the break leaves.
+  const breakRefusal = (frame: LoopFrame, writes: Set<string>): string | null => {
+    if (!whileLoops.has(frame.header)) {
+      return 'leaves a do-while';
+    }
+    if (argAssigns(frame.header, frame.exit).length !== 0) {
+      return 'would run the copies the loop header hands its exit';
+    }
+    const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+    if (loopEscapeHazard(frame.body, new Map(), writes, exitRegion)) {
+      return 'reaches an exit region that reads a loop value under a name this iteration already rewrote';
+    }
+    return null;
+  };
+  // The loop-variable names an iteration has written on its way from the header to `b`, before any
+  // update copy (`loopWriteSetAhead`).
+  const writtenAhead = (frame: LoopFrame, b: Block): Set<string> => {
+    const ahead = new Set<Block>([b]);
+    for (const stack = [b]; stack.length;) {
+      for (const p of preds.get(stack.pop()!) ?? []) {
+        if (p !== frame.header && frame.body.has(p) && !ahead.has(p)) {
+          ahead.add(p);
+          stack.push(p);
+        }
+      }
+    }
+    const incoming = (x: Block) => [...inEdgeRecords(preds, x)].map(({ succ }) => succ.args);
+    return loopWriteSetAhead(ahead, incoming, frame.header);
+  };
+
   // Branch-sense sites, numbered as the walk below first reaches them (`branchSenseFlipSites`).
   const senseOrdinal = new Map<number, number>();
 
@@ -5508,15 +5544,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const contIsTaken = takenB === loopCtx.header;
       const exitB = contIsTaken ? fallB : takenB;
       const isBreak = exitB === loopCtx.exit;
-      // SOUNDNESS (break-clobber): a structured `break` jumps to AFTER the loop, where the header→exit
-      // phi copies are emitted (emitTestAtTopWhile / emitDoWhile). If those copies are NON-identity, the
-      // break path would fall through them and CLOBBER the value the break carried into the exit param.
-      // Only emit `break` for a WHILE header whose header→exit copy is empty (the exit param already
-      // coalesces across both edges); otherwise decline (fall through → honest loud fail). A do-while
-      // `break` declines here (its exit copies live post-loop too, but the check differs) — the
-      // return-trampoline path below still serves both. Trampolines are immune (the `return` terminates
-      // the arm, so nothing falls through).
-      const breakSafe = whileLoops.has(loopCtx.header) && argAssigns(loopCtx.header, loopCtx.exit).length === 0;
       // The back-edge substitution: each header param's back-edge arg → the param's name, so a test that
       // reads a POST-update value (the value carried to the header) shows the header var name.
       const sub = subFor(loopCtx.header.params, successorTo(b, loopCtx.header)!.args);
@@ -5540,16 +5567,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // `if (found) { *out = i; return; }` would store `i + 1`. Handing the arm's own region makes
       // the escape check judge exactly those reads.
       const exitRegion = new Set([exitB, ...reachFrom(exitB)].filter((x) => !loopCtx!.body.has(x)));
-      // A `break`'s exit region is NOT rendered under `sub`: it is the `while`'s own exit region,
-      // shared with the header exit and rendered once after the loop, raw. Where the break leaves
-      // behind the update, a header value re-derived there from a name the update wrote is
-      // computed once more — `do { b = t / (b + t); if (c > 2) break; } while (--d > 0); return b;`
-      // renders `return t / (v + t)` after `v = t / (v + t)` already ran. So the region is judged
-      // with no substitution as well.
-      const hazard =
-        loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion) ||
-        (isBreak && loopEscapeHazard(loopCtx.body, new Map(), updateWrites, exitRegion));
-      if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {
+      // A `break` is judged by the break rule, with the update among the writes ahead of it: the
+      // exit region renders raw after the loop, so a header value re-derived there from a name the
+      // update wrote is computed once more — `do { b = t / (b + t); if (c > 2) break; } while
+      // (--d > 0); return b;` renders `return t / (v + t)` after `v = t / (v + t)` already ran. An
+      // early `return` needs none of it: its `return` ends the arm, so nothing after the loop runs.
+      const hazard = loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion);
+      const breakRefused =
+        isBreak && breakRefusal(loopCtx, new Set([...updateWrites, ...writtenAhead(loopCtx, b)])) !== null;
+      if (!hazard && !loopCtx.body.has(exitB) && (isBreak ? !breakRefused : isArm(exitB))) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
         if (contIsTaken) {
@@ -5576,43 +5602,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already left. Whether the update sits in the latch or in a block of its own is a layout
     // accident, and both lift the same way.
     //
-    // Refused:
-    //   • the header→exit edge has copies: they run after the loop on the break path too, and
-    //     clobber what the break carried (the latch path's break-clobber rule);
-    //   • the other edge leaves the body too;
-    //   • the exit region reads a value under a loop variable's name this iteration already wrote.
-    // A refusal is LOUD, since the loop was admitted on the promise of this spelling — except where
-    // the exit ends in a `ret`: then the arm can copy the exit's tail and return, and if-recovery
-    // below spells it that way, as it did before breaks were recognised.
+    // Refused by the break rule (`breakRefusal`) over the names written ahead of this edge, and where
+    // the other edge leaves the body too. A refusal is LOUD, since the loop was admitted on the
+    // promise of this spelling — except where the exit ends in a `ret`: then if-recovery below copies
+    // the exit's tail into the arm and returns.
     // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
     if (loopCtx && loopCtx.breaks.has(b)) {
       const frame = loopCtx;
       const breakIsTaken = takenB === frame.exit;
       const stayB = breakIsTaken ? fallB : takenB;
-      const refusal = ((): string | null => {
-        if (argAssigns(frame.header, frame.exit).length !== 0) {
-          return 'would run the copies the loop header hands its exit';
-        }
-        if (!frame.body.has(stayB)) {
-          return 'has no edge beside it that stays in the loop';
-        }
-        const ahead = new Set<Block>([b]);
-        for (const stack = [b]; stack.length;) {
-          for (const p of preds.get(stack.pop()!) ?? []) {
-            if (p !== frame.header && frame.body.has(p) && !ahead.has(p)) {
-              ahead.add(p);
-              stack.push(p);
-            }
-          }
-        }
-        const incoming = (x: Block) => [...inEdgeRecords(preds, x)].map(({ succ }) => succ.args);
-        const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
-        if (loopEscapeHazard(frame.body, new Map(), loopWriteSetAhead(ahead, incoming, frame.header), exitRegion)) {
-          return 'reaches an exit region that reads a loop value under a name this iteration already rewrote';
-        }
-        return null;
-      })();
+      const refusal = frame.body.has(stayB)
+        ? breakRefusal(frame, writtenAhead(frame, b))
+        : 'has no edge beside it that stays in the loop';
       if (refusal === null) {
         let leaveCond = expr(term.operands[0]);
         if (!breakIsTaken) {
