@@ -1,9 +1,10 @@
 // A real row's callee prototypes: the declarations in the vendored context its candidates are
-// compiled against (core `prototypesFromContext`), under the manifest's own `proto`, which wins per
-// symbol. The context is the same one every candidate compiles in and m2c reads its signatures
+// compiled against (core `prototypesFromContext`), under the symbol map's signatures and the
+// manifest's own `proto`, each of which wins per symbol. The context is the same one every candidate compiles in and m2c reads its signatures
 // from, so asmlift lifts each call at the arity the compiler will check it against.
 import type { Prototypes } from '@asmlift/core/proto';
-import { prototypesFromContext } from '@asmlift/core/proto-context';
+import { contextPrototypesUnder, prototypesFromContext } from '@asmlift/core/proto-context';
+import type { SymbolMap } from '@asmlift/core/symbols';
 
 /** parsed contexts, keyed by dialect and text: the rows of one unit share a context */
 const parsed = new Map<string, Prototypes>();
@@ -16,6 +17,7 @@ export function rowPrototypes(
   ctxI: string,
   language: 'c' | 'c++',
   sym: string,
+  symbols: SymbolMap | undefined,
 ): Prototypes | undefined {
   if (ctxI === '') {
     return manifest;
@@ -26,7 +28,7 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language);
     parsed.set(key, derived);
   }
-  const { [sym]: _own, ...callees } = derived;
+  const { [sym]: _own, ...callees } = contextPrototypesUnder(derived, symbols);
   const merged = { ...callees, ...manifest };
   return Object.keys(merged).length > 0 ? merged : undefined;
 }

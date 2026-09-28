@@ -1,5 +1,6 @@
 import type { FnProto, ParamType, Prototypes } from './proto';
 import { declaredWidth } from './proto';
+import type { SymbolMap } from './symbols';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
 // candidate is compiled against (a decomp project's `ctx.h`, m2c's `--context`). The compiler
@@ -270,3 +271,23 @@ function readSignature(
 }
 
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
+
+/** A context's prototypes minus the names the symbol map signs. The map's signature comes from the
+ *  compiled definition and sizes what a declaration cannot — a by-value struct, by its byte size —
+ *  while an entry here that cannot size a parameter makes the call's arity a guess again. Either
+ *  source wins over the other only through `prototypesFromSymbols`, where any caller-supplied entry
+ *  shadows the map's; so a context entry is withdrawn wherever the map has one. */
+export function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefined): Prototypes {
+  if (symbols === undefined) {
+    return context;
+  }
+  const signed = new Set<string>();
+  for (const infos of symbols.values()) {
+    for (const info of infos) {
+      if (info.kind === 'code' && info.signature !== undefined) {
+        signed.add(info.name);
+      }
+    }
+  }
+  return Object.fromEntries(Object.entries(context).filter(([name]) => !signed.has(name)));
+}
