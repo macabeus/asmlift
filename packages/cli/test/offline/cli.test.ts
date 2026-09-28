@@ -132,6 +132,28 @@ test('--proto: unreadable file and non-object JSON stay distinguishable (66 vs 6
   expect(scalar.stderr).toContain('must be an object mapping a symbol name to its prototype');
 });
 
+test('--context: a header declaration decides a call as the same --proto entry does', async () => {
+  // `callee`'s argument is the incoming a0, which the call's own block never set: the register scan
+  // drops it, and a declaration keeps it
+  const asm =
+    '\t.text\n\t.align\t2\n\t.globl\tf\n\t.type\t f,function\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr1, #3\n\tbl\tcallee\n\tpop\t{r1}\n\tbx\tr1\n';
+  const f = (...flags: string[]) => runCli(['f.s', '--target', 'agbcc', ...flags], () => asm);
+  const ctx = join(mkdtempSync(join(tmpdir(), 'asmlift-ctx-')), 'ctx.h');
+  writeFileSync(ctx, '# 1 "ctx.h"\nint callee(int v);\n');
+  const viaContext = await f('--context', ctx);
+  expect(viaContext.code).toBe(0);
+  expect(viaContext.stdout).toContain('return callee(a0);');
+  expect(viaContext.stdout).toBe(
+    (await f('--proto', JSON.stringify({ callee: { params: ['int'], returns: 'int' } }))).stdout,
+  );
+  expect((await f()).stdout).toContain('return callee();');
+  // --proto wins over the header per symbol
+  expect((await f('--context', ctx, '--proto', JSON.stringify({ callee: { params: 0 } }))).stdout).toContain(
+    'return callee();',
+  );
+  expect((await f('--context', join(tmpdir(), 'nope-asmlift.h'))).code).toBe(66);
+});
+
 // docs/ranked-repro.md's project-checkout command passes the table INLINE, and so does the
 // `[proto]` note's own printed remedy — but the flag used to resolve every value as a path, so
 // following either exited 66 on a missing file literally named `{"thunk_HeapFree":{"params":1}}`.
