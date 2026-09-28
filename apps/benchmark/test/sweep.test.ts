@@ -26,13 +26,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { rankOptionsFor } from '../src/eval/asmlift';
 import {
   FIELDS,
-  newlyRanked,
-  newlyRankedLines,
-  rankRates,
   SWEEP_FAN_LIMIT,
   type SweepRecord,
   compareSweeps,
   fanGuard,
+  newlyRanked,
+  newlyRankedLines,
+  rankRates,
   recordFileRefusal,
   rekeyFans,
   renderDiff,
@@ -140,7 +140,12 @@ describe('a row that declined on the base and ranks here is priced', () => {
     { toolchain: 'mwcc_233_163n', tier: 'synthetic', asmlift: { fanSize: 10, rankSeconds: 3 } },
     { toolchain: 'ido7.1', tier: 'real', asmlift: { rankSeconds: 9 } },
   ]);
-  const rec = (id: string, mapMode: string, extra: Partial<SweepRecord>): SweepRecord => ({ id, mapMode, src: 'x', ...extra });
+  const rec = (id: string, mapMode: string, extra: Partial<SweepRecord>): SweepRecord => ({
+    id,
+    mapMode,
+    src: 'x',
+    ...extra,
+  });
 
   it('measures a rate per toolchain AND tier, because mwcc ranks 60× slower than agbcc', () => {
     expect(rates.get('agbcc real')).toBeCloseTo(0.012);
@@ -165,12 +170,18 @@ describe('a row that declined on the base and ranks here is priced', () => {
       rec('pikmin:noRate:ido7.1', 'harness', { fan: 3 }),
     ];
     const rows = newlyRanked(compareSweeps(baseSide, headSide), rates);
-    expect(rows.map((r) => r.id)).toEqual(['pikmin:noRate:ido7.1', 'mp4:getCardStatus:mwcc_233_163n', 'kleod:small:agbcc']);
+    expect(rows.map((r) => r.id)).toEqual([
+      'pikmin:noRate:ido7.1',
+      'mp4:getCardStatus:mwcc_233_163n',
+      'kleod:small:agbcc',
+    ]);
     expect(rows[1]!.seconds).toBeCloseTo(704);
     const lines = newlyRankedLines(rows);
     expect(lines[0]).toContain('unpriced');
     expect(lines[1]).toContain('fan 1408 here, rank ~11.7 min');
-    expect(lines.at(-1)).toMatch(/3 row\(s\) newly ranked: 1461 candidate\(s\), rank ~11.7 min .*\(1 row\(s\) unpriced\)/);
+    expect(lines.at(-1)).toMatch(
+      /3 row\(s\) newly ranked: 1461 candidate\(s\), rank ~11.7 min .*\(1 row\(s\) unpriced\)/,
+    );
   });
 
   it('prints nothing when no row newly ranks', () => {

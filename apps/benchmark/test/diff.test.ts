@@ -13,9 +13,9 @@ import {
   compareStops,
   costLines,
   fanLines,
-  newlyRankedLines,
   flagsLines,
   groupByFlags,
+  newlyRankedLines,
   notRegenerated,
   stopLines,
 } from '../src/report/diff';

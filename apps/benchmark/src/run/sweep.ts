@@ -254,16 +254,19 @@ export function newlyRanked(d: SweepDiff, rates: ReadonlyMap<string, number>): N
     if (m.mapMode !== 'harness' || typeof fan?.to !== 'number' || fan.from !== undefined || threw?.to !== undefined) {
       continue;
     }
-    const toolchain = m.id.slice(m.id.lastIndexOf(':') + 1);
+    // matched as a suffix, not cut off the id: identity.test.ts censuses every `:` cut
+    const toolchain = Object.keys(TOOLCHAINS).find((t) => m.id.endsWith(`:${t}`));
     const tier = m.id.startsWith('synthetic:') ? 'synthetic' : 'real';
-    const rate = rates.get(`${toolchain} ${tier}`) ?? rates.get(toolchain);
+    const rate = toolchain === undefined ? undefined : (rates.get(`${toolchain} ${tier}`) ?? rates.get(toolchain));
     out.push({ id: m.id, fan: fan.to, ...(rate !== undefined ? { seconds: fan.to * rate } : {}) });
   }
   return out.sort((a, b) => (b.seconds ?? Infinity) - (a.seconds ?? Infinity) || b.fan - a.fan);
 }
 
 const priced = (s: number | undefined): string =>
-  s === undefined ? 'unpriced (the artifact ranked no row of this toolchain)' : `~${s < 60 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`}`;
+  s === undefined
+    ? 'unpriced (the artifact ranked no row of this toolchain)'
+    : `~${s < 60 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`}`;
 
 /** One line per newly ranked row, dearest first, and a total — the lines `bench run`'s wall clock
  *  will be explained by. */
