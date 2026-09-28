@@ -580,10 +580,20 @@ switch (command) {
           : { rung: richestRung(man.tu, ladder), language: c.language };
         ctxRung = picked.rung.name;
         ctxLanguage = picked.language;
-        ctxFile = materializeScoringContext(picked.rung.prelude + macros, out);
+        // a C++ unit's candidate that only compiled as C: the command keeps the unit's `-lang=c++`
+        // (the CLI's emission dialect), and CodeWarrior's own pragma compiles the rest as C — the
+        // object is byte-identical to a `-lang=c` compile
+        const asC = picked.language === 'c' && c.language === 'c++' ? '#pragma cplusplus off\n' : '';
+        ctxFile = materializeScoringContext(asC + picked.rung.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, { elf, ctxFile, symbolsFile, language: ctxLanguage });
+    writeScoreConfig(c.toolchain.id, c.codegen.cflags, out, {
+      elf,
+      ctxFile,
+      symbolsFile,
+      language: ctxLanguage,
+      unitLanguage: c.language,
+    });
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id} ${shellJoinFlags(c.codegen.cflags)}${
         c.tier === 'real' ? `, the flags of ${c.unit}` : ''

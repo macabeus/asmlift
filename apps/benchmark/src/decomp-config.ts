@@ -177,6 +177,11 @@ export interface ScoreConfigParts {
   // legal only alongside a `ctxFile`, the one place the linkage block a C++ candidate needs can
   // be written; absent ⇒ C.
   language?: 'c' | 'c++';
+  // The dialect the UNIT is compiled in, which is the `-lang` the command states — it is what the
+  // CLI reads its emission dialect from. A C++ unit's candidate scored as C states `-lang=c++` and is
+  // compiled as C by a `#pragma cplusplus off` opening its scoring context (`bench target`); absent ⇒
+  // `language`.
+  unitLanguage?: 'c' | 'c++';
 }
 
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on
@@ -195,7 +200,7 @@ export function writeScoreConfig(
   id: ToolchainId,
   cflags: readonly string[],
   dir: string,
-  { elf, ctxFile, symbolsFile, language }: ScoreConfigParts = {},
+  { elf, ctxFile, symbolsFile, language, unitLanguage }: ScoreConfigParts = {},
 ): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   // `-lang=c++` without a context file is a config that cannot work: the linkage block lives in the
@@ -211,7 +216,7 @@ export function writeScoreConfig(
   // export an unmangled symbol the target has none of.
   doc.tools.asmlift.compiler = renderCflags(
     doc.tools.asmlift.compiler!,
-    TOOLCHAIN_TARGETS[id].family === 'mwcc' ? [...cflags, `-lang=${language ?? 'c'}`] : cflags,
+    TOOLCHAIN_TARGETS[id].family === 'mwcc' ? [...cflags, `-lang=${unitLanguage ?? language ?? 'c'}`] : cflags,
   );
   if (elf) {
     doc.tools.asmlift.elf = elf;
