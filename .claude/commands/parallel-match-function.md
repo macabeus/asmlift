@@ -261,7 +261,8 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
 4. **Update `LANES.md`** — a returned round's row becomes `returned`; a round that returned without
    a PR and without a refuted-brief report becomes `dead`, and its target goes back to pending with
    a note — as does a `match-round` run whose result carries `stoppedAt`, the phase whose agent
-   returned nothing. There is no other way for a dead round to be noticed: it will never file
+   returned nothing. Such a run still returns what it had: a `shipped.pr` in it is an open PR with
+   no merge slot, and it goes on the merge queue by hand. There is no other way for a dead round to be noticed: it will never file
    anything.
 5. **Close the pass**: run `bin/pass-check.sh`, read its exit status, and report to the user what
    was handled, what moved, and what was started.

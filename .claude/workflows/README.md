@@ -27,7 +27,9 @@ agent. [`/parallel-match-function`](../commands/parallel-match-function.md) laun
    omitted. Nothing in the run merges.
 
 The run returns every phase's result (`diagnosis`, `build`, `ledger`, `shipped`, `finalReview`,
-`slot`). The coordinator reads all of it, not only the slot.
+`slot`) — a run whose agent returned nothing returns what it had, plus `stoppedAt` — and each ledger
+entry carries its finding's severity and location. The coordinator reads all of it, not only the
+slot.
 
 What each phase does is the command file's; every agent reads it from the lane's worktree, and the
 rules a parallel run adds are the list in `parallel-match-function.md` Phase 1. The script holds

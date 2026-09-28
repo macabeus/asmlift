@@ -147,10 +147,12 @@ const SHIPPED = {
       description: '<sha> <subject> of every commit you made that changes code — a conflict resolved by editing code, a gate fix — not the regenerated artifact or a comment-only edit',
     },
     head: { type: 'string', description: 'the full sha of HEAD you pushed' },
+    preRebaseHead: { type: 'string', description: 'the full sha of HEAD before you rebased; equal to head when you did not' },
+    base: { type: 'string', description: 'the full sha of origin/main you rebased onto' },
     blocked: { type: 'string' },
     posts: { type: 'array', items: { type: 'string' } },
   },
-  required: ['pr', 'prWait', 'cells', 'bench', 'declineToWrong', 'commentBudget', 'codeChanges', 'head', 'blocked', 'posts'],
+  required: ['pr', 'prWait', 'cells', 'bench', 'declineToWrong', 'commentBudget', 'codeChanges', 'head', 'preRebaseHead', 'base', 'blocked', 'posts'],
 }
 
 const SLOT = {
@@ -161,9 +163,19 @@ const SLOT = {
   required: ['mergeSlot'],
 }
 
+// Everything the round has so far. A stopped round returns it all: after Ship, `shipped.pr` is a
+// PR the coordinator must still find.
+const round = { handle, target }
 const died = (stage) => {
   log(`${handle}: the ${stage} agent returned nothing; the round stops here`)
-  return { handle, target, stoppedAt: stage }
+  return { ...round, stoppedAt: stage }
+}
+
+// A ledger entry carries the finding's severity and location: the triage returns only a verdict,
+// and the slot must list every confirmed `silent-wrong`.
+const triaged = (entries, findings) => {
+  const byId = new Map(findings.map((f) => [f.id, f]))
+  return entries.map((e) => ({ ...e, severity: byId.get(e.id)?.severity ?? 'unknown', location: byId.get(e.id)?.location ?? '' }))
 }
 
 phase('Diagnose')
@@ -175,10 +187,12 @@ of the coordinator's context that you refute is posted the moment it is refuted.
   { label: `${handle}: diagnose`, phase: 'Diagnose', schema: DIAGNOSIS, agentType: 'general-purpose' },
 )
 if (!diagnosis) return died('Diagnose')
+round.diagnosis = diagnosis
 log(`${handle}: ${diagnosis.classification}${diagnosis.proceed ? '' : ' — nothing to build'}`)
 
 let build = null
 const ledger = []
+round.ledger = ledger
 // The commits no adversarial wave has read: `<from>..<to>`, set when the last wave's remediation
 // changed code. The final breaker reviews exactly these, plus the ship agent's own code changes.
 let unreviewed = null
@@ -191,6 +205,7 @@ full-bench zero-flip gate. Do not open a PR — a later agent ships.${handoff('D
     { label: `${handle}: implement`, phase: 'Implement', schema: BUILD, agentType: 'general-purpose' },
   )
   if (!build) return died('Implement')
+  round.build = build
 
   if (build.commits.length) {
     let reviewedHead = build.head
@@ -228,7 +243,7 @@ DECLINED or NOT-REPRODUCED.${handoff('Findings', findings)}${context}`,
         { label: `${handle}: remediate ${wave}`, phase: 'Remediate', schema: TRIAGE, agentType: 'general-purpose' },
       )
       if (!triage) return died(`Remediate ${wave}`)
-      ledger.push(...triage.ledger)
+      ledger.push(...triaged(triage.ledger, findings))
       if (!triage.changedCode) break
       if (wave === MAX_WAVES) {
         unreviewed = `${reviewedHead}..${triage.head}`
@@ -253,6 +268,7 @@ or no PR, and say why.${handoff('Diagnosis', diagnosis)}${handoff('Build', build
   { label: `${handle}: ship`, phase: 'Ship', schema: SHIPPED, agentType: 'general-purpose' },
 )
 if (!shipped) return died('Ship')
+round.shipped = shipped
 
 // ONE MORE BREAKER on every commit that reached the PR without a wave reading it: the last wave's
 // remediation, and whatever the ship agent changed while rebasing. A remediation is the likeliest
@@ -262,11 +278,13 @@ if (!shipped) return died('Ship')
 // those fixes are named as unreviewed in the slot rather than looping.
 let finalReview = null
 const pending = [
-  ...(unreviewed ? [`the last wave's remediation: \`git -C ${worktree} log -p ${unreviewed}\``] : []),
+  ...(unreviewed ? [`the last wave's remediation, as written before the rebase: \`git -C ${worktree} log -p ${unreviewed}\``] : []),
+  ...(shipped.preRebaseHead !== shipped.head
+    ? [`what the rebase changed in each commit — a conflict resolved by editing code lives here, inside a rewritten commit: \`git -C ${worktree} range-diff $(git -C ${worktree} merge-base ${shipped.preRebaseHead} ${shipped.base})..${shipped.preRebaseHead} ${shipped.base}..${shipped.head}\` (a commit shown with \`=\` is unchanged)`]
+    : []),
   ...shipped.codeChanges.map((c) => `a ship-time code change: ${c}`),
 ]
-const noPr = /^none\b/i.test(shipped.pr)
-if (pending.length && !noPr) {
+if (pending.length && !/^none\b/i.test(shipped.pr)) {
   const breaker = await agent(
     `${PREAMBLE}
 You are **Agent A** of Phase 5, in a final pass. Take your brief from the spec's Phase 5 (Agent A),
@@ -280,6 +298,7 @@ Change no file in the worktree; scratch goes outside it. Report only findings yo
   const findings = breaker.findings.map((f) => ({ ...f, id: `final-${f.id}` }))
   log(`${handle}: final breaker — ${findings.length} finding(s) on ${pending.length} unreviewed change(s)`)
   finalReview = { reviewed: pending, findings, triage: null }
+  round.finalReview = finalReview
   if (findings.length) {
     const triage = await agent(
       `${PREAMBLE}
@@ -291,29 +310,43 @@ the artifact if \`scripts/check-artifact-provenance.sh\` says one is owed, push,
       { label: `${handle}: final remediation`, phase: 'Final review', schema: TRIAGE, agentType: 'general-purpose' },
     )
     if (!triage) return died('Final review (remediation)')
-    ledger.push(...triage.ledger)
+    ledger.push(...triaged(triage.ledger, findings))
     finalReview.triage = triage
   }
 }
 
 phase('Merge slot')
+// The slot's body is assembled here, from what the round returned, so that what it lists does not
+// depend on an agent's reading of the ledger. `none` is written, never omitted.
+const list = (items) => (items.length ? items.map((x) => `- ${x}`).join('\n') : 'none')
 const open = ledger.filter((f) => f.verdict === 'CONFIRMED-OPEN')
-const unreviewedFixes = finalReview?.triage?.changedCode ? `the final remediation's commits, up to ${finalReview.triage.head}` : 'none'
-const slot = noPr
+const silentWrong = ledger.filter((f) => f.severity === 'silent-wrong' && f.verdict.startsWith('CONFIRMED'))
+const remediated = finalReview?.triage?.changedCode
+const body = `PR ${shipped.pr}
+
+CONFIRMED-OPEN findings:
+${list(open.map((f) => `${f.id} (${f.severity}) ${f.location}: ${f.reason}`))}
+
+decline→wrong rows (bench diff): ${shipped.declineToWrong}
+confirmed silent-wrong findings:
+${list(silentWrong.map((f) => `${f.id} [${f.verdict}] ${f.location}: ${f.reason}`))}
+
+code no reviewer read: ${remediated ? `the final remediation, \`${shipped.head}..${finalReview.triage.head}\`` : 'none'}
+
+cells: ${shipped.cells}
+bench: ${shipped.bench}
+`
+const slot = /^none\b/i.test(shipped.pr)
   ? { mergeSlot: `none — the round shipped no PR: ${shipped.pr}` }
   : await agent(
     `${PREAMBLE}
-File the \`merge-slot\` message for PR ${shipped.pr}, as the board's README describes, and stop.
-Run \`scripts/pr-wait.sh ${shipped.pr}\` first; file only on a green verdict, and otherwise return
-"none" and the verdict. The message must carry, each written out and never omitted ("none" when
-empty):
-- every CONFIRMED-OPEN finding below, with its reason: ${open.length} of them;
-- decline→wrong: ${JSON.stringify(shipped.declineToWrong)}, plus every CONFIRMED finding of severity
-  \`silent-wrong\` in the ledger;
-- code no reviewer read: ${unreviewedFixes};
-- the cells and the bench line below.${handoff('Ledger', ledger)}${handoff('Shipped', { pr: shipped.pr, cells: shipped.cells, bench: shipped.bench })}`,
+File the \`merge-slot\` message for PR ${shipped.pr}, as the board's README describes, with the body
+below verbatim, and stop.${remediated ? ` The final remediation pushed after the ship agent's \`pr-wait\`: run
+\`scripts/pr-wait.sh ${shipped.pr}\` first, file only on a green verdict, and otherwise return "none" and the verdict.` : ''}
+
+${body}`,
     { label: `${handle}: merge slot`, phase: 'Merge slot', schema: SLOT, agentType: 'general-purpose', effort: 'low' },
   )
 if (!slot) return died('Merge slot')
 
-return { handle, target, diagnosis, build, ledger, shipped, finalReview, slot }
+return { ...round, slot }
