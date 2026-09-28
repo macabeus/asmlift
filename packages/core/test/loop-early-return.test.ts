@@ -312,8 +312,8 @@ test('a conditional-latch arm returns the value the IR read, not the updated one
 
 // A conditional-latch `break` whose POST-LOOP region reads the induction variable directly. The
 // break edge carries the pre-update value, so the latch path's update-first spelling would render
-// the post-loop code after the update — `main` once emitted `(i + 1) * 100` — and the latch path
-// refuses it. The break is spelled ahead of the update instead: in the `for`, a `break` skips the
+// the post-loop code after the update, where it reads `(i + 1) * 100`, and the latch path refuses
+// it. The break is spelled ahead of the update instead: in the `for`, a `break` skips the
 // increment, and the post-loop read sees the value the test read.
 const BREAK_POSTLOOP_READ = `fn brkpost {
 ^bb0(%0: s32*):
