@@ -1047,6 +1047,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
+    ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
@@ -1055,7 +1056,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['address-taken-local', 'address-taken local / frame arithmetic', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'reload of a stack local', 'packages/core/src/frontend/ppc.ts'],
     ['stack-frames', 'sub-word stack-frame', 'packages/core/src/frontend/ppc.ts'],
-    ['stack-frames', 'spill of a live value', 'packages/core/src/frontend/ppc.ts'],
+    ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/ppc.ts'],
+    ['stack-frames', 'was saved into', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-flags', 'no reaching compare (', 'packages/core/src/frontend/ppc.ts'],
     ['cross-block-flags', 'no reaching compare: ', 'packages/core/src/frontend/thumb.ts'],
     ['cross-block-flags', 'no compare crosses the edge into ', 'packages/core/src/frontend/flags-edge.ts'],
@@ -1167,11 +1169,11 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 5],
+    ['frontend/ppc.ts', 7],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 76;
+  const RESIDUE_TOTAL = 78;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
@@ -1232,11 +1234,9 @@ describe('the classifier is measured against the messages core can throw, not on
   // exemption is inert and it is gone: `float` is harvested like every other class, which is the
   // only reason the list below can be read as a list of reasons.
   const NOT_IN_TEMPLATES: Record<string, string> = {
-    // These five are BUILT by a helper and RETURNED, then interpolated into a throw elsewhere, so
-    // the throw site carries a placeholder where the phrase is. `reloc-symbol.ts`'s
-    // `unspellableReason` returns four of them and `thumb.ts`'s `analyzeOutgoingArgs` the fifth.
-    // Each is pinned above against a published marker instead.
-    'outgoing-stack-args': "thumb.ts's outgoing-argument analysis returns the reason; the throw interpolates it",
+    // These four are BUILT by `reloc-symbol.ts`'s `unspellableReason` and RETURNED, then
+    // interpolated into a throw elsewhere, so the throw site carries a placeholder where the phrase
+    // is. Each is pinned above against a published marker instead.
     'pooled-literal': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",

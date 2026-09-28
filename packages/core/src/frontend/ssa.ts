@@ -85,6 +85,12 @@ export interface SsaBuilder {
    *  "a def reaches here" and "a value reaches here" are the same question only when every def is
    *  a value. */
   hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** The entry parameter `reg` still holds at this point of block `b`, taken WITHOUT a read. A read
+   *  leaves a definition behind, and `hasReachingDef` counts it as argument setup, so a frontend that
+   *  only moves the argument somewhere (a frame store) would raise the guessed arity of every later
+   *  prototype-less call. `undefined` where "still the entry value" is not shown: a definition or a
+   *  call reaches from some path, or a block on the way is not filled yet. */
+  entryValue(reg: string, b: number): Value | undefined;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
@@ -345,10 +351,11 @@ export function makeSsaBuilder(
   fn.writeOrder = writeOrder;
 
   // SLOT HOMES (ir/core.ts `SlotHomes`). Measured HERE, in the shared builder, for the same
-  // reason the clobber set and the write order are: BOTH frontends already spell a word spill as
-  // a write to the key `sp@k` (`stackSlotKey`, below), so the frontend supplies the coordinate
-  // and one rule applies it — a per-frontend stamp would be right only while each remembered to
-  // route every slot write past a wrapper, and a missed write is a local with no frame order.
+  // reason the clobber set and the write order are: every slot-modelling frontend (MIPS, Thumb,
+  // PowerPC) spells a word spill as a write to the key `sp@k` (`stackSlotKey`, below), so the
+  // frontend supplies the coordinate and one rule applies it — a per-frontend stamp would be right
+  // only while each remembered to route every slot write past a wrapper, and a missed write is a
+  // local with no frame order.
   // Empty rather than absent on a function that spills nothing: this builder measured it.
   const slotHomes: SlotHomes = new Map();
   fn.slotHomes = slotHomes;
@@ -359,7 +366,7 @@ export function makeSsaBuilder(
     }
     // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says below of a def-less
     // read: `sp@40` is a local on one ABI and the caller's fifth argument on another. So the stamp
-    // asks the frontend for a partition and refuses where no answer exists. The two frontends
+    // asks the frontend for a partition and refuses where no answer exists. The frontends
     // differ here and the refusal is what makes that safe: Thumb declares a range; MIPS declares NO
     // partition (frontend/mips.ts: `addiu sp,sp,±N` is transparent, so its slot keys span O32's
     // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above
@@ -416,7 +423,7 @@ export function makeSsaBuilder(
   };
   // PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`), measured HERE for the same reason the clobber
   // set, the write order and the slot homes are: a slot write is a `writeVar` and a slot read is a
-  // `readVar` in BOTH slot-modelling frontends, so one rule covers them and no frontend can forget
+  // `readVar` in every slot-modelling frontend, so one rule covers them and no frontend can forget
   // to route a store past a wrapper. The two directions are NOT symmetric: raise/paramwidth.ts reads
   // an absent observation as proof the declaration was wide, so a missed one costs a narrowing while
   // a spurious one retypes a parameter the machine never declared narrow.
@@ -655,6 +662,34 @@ export function makeSsaBuilder(
     return walk(b, new Set<number>());
   };
 
+  const entryValue = (reg: string, b: number): Value | undefined => {
+    // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
+    // back round to `b` carries writes this walk has not seen.
+    const untouched = (at: number, seen: Set<number>): boolean => {
+      if (at === b || !filled[at]) {
+        return false;
+      }
+      if (seen.has(at)) {
+        return true;
+      }
+      seen.add(at);
+      return clean(at, seen);
+    };
+    // `decidedLocal` holds a register a call destroyed as well as one this block wrote.
+    const clean = (at: number, seen: Set<number>): boolean => {
+      if (defs[at].has(reg) || decidedLocal[at].has(reg)) {
+        return false;
+      }
+      const ps = distinctPreds(at);
+      return ps.length === 0 ? at === 0 : ps.every((p) => untouched(p, seen));
+    };
+    if (!clean(b, new Set())) {
+      return undefined;
+    }
+    ensureParam(reg, 0);
+    return irBlocks[0].params.find((p) => paramReg.get(p) === reg);
+  };
+
   /** REFUSE a value the ABI destroyed. The builder is RIGHT that a caller-saved register has a
    *  reaching definition after a call; what it cannot see is that the call destroyed the bytes, so
    *  that definition names something the callee overwrote. Resolving the read to it is a silently
@@ -730,6 +765,7 @@ export function makeSsaBuilder(
     paramReg,
     ensureParam,
     hasReachingDef,
+    entryValue,
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see
@@ -1073,9 +1109,9 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   return changed;
 }
 
-/** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
- *  function's own frame. Shared so the two spell it identically and the frame-partition rule can
- *  recognise either frontend's slots. See the virtual-key note in the module header. */
+/** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
+ *  function's own frame. Shared so they spell it identically and the frame-partition rule can
+ *  recognise any frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 /** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary

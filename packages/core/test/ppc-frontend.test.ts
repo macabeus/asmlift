@@ -284,33 +284,41 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('stwxframe', '0:\tstwx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
     expect(() => dis('lwzxindex', '0:\tlwzx    r3,r4,r1\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
-  test('spill of a LIVE (computed) value to the stack FAILS LOUD, not a dropped spill', () => {
-    // `addi r0,r3,1` computes a value; `stw r0,8(r1)` spills it. A callee-saved SAVE stores an
-    // unchanged entry value (no reaching def) and stays transparent — this stores a live value.
-    expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
-      /spill of a live value/,
+  // A word stored to the frame with a VALUE is a stack-slot variable, as on MIPS and Thumb: a
+  // reload into any register reads it back, whichever register stored it.
+  test('a live value spilled to the frame is read back by its reload', () => {
+    expect(
+      dis('ls', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tli      r0,0\nc:\tlwz     r3,8(r1)\n10:\tblr\n'),
+    ).toBe('s32 ls(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+  test('an argument read back into another register is the argument', () => {
+    // `pikmin:__ct__7ActFreeFP4Piki` reads `this` back into r4 this way.
+    expect(dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n')).toBe(
+      's32 crossreload(s32 a0) {\n    return a0;\n}\n',
     );
   });
-  // A save slot is a register AND an offset. `stw r3,8(r1)` / `lwz r4,8(r1)` is mwcc reading an
-  // incoming argument back into a different register, not a callee-saved save/restore pair: an
-  // offset-only record calls it transparent, drops the load, leaves r4 with no definition, and the
-  // contiguous `fallbackArgc` scan then silently drops that argument AND every later one. Measured
-  // on `pikmin:__ct__7ActFreeFP4Piki`, which reads `this` back into r4, and on 28 Mario Party 4
-  // checkout functions that each lose an address the relocation fold recovered.
-  test('a reload into a register the slot was NOT saved from FAILS LOUD, not a dropped value', () => {
-    expect(() =>
-      dis('crossreload', '0:\tstw     r3,8(r1)\n4:\tlwz     r4,8(r1)\n8:\tmr      r3,r4\nc:\tblr\n'),
-    ).toThrow(/reload of '8\(r1\)' into r4, a slot r3 was saved into/);
-  });
-  test('and the call argument an offset-only record carries away is the reason', () => {
-    // Without the register in the slot this lifts to `return callee(1);` — r4's reload dropped, so
-    // the recovered `&gObj` in r5 goes with it.
+  test('and it keeps every later argument of the call it sets up', () => {
+    // Dropped, the reload would leave r4 undefined, and the contiguous arity guess would take the
+    // recovered `&gObj` in r5 with it: `callee(1)`.
     const asm =
       '0:\tstw     r3,8(r1)\n4:\tli      r3,1\n8:\tlwz     r4,8(r1)\n' +
       'c:\tlis     r5,0\n\t\t\te: R_PPC_ADDR16_HA\tgObj\n' +
       '10:\taddi    r5,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tgObj\n' +
       '14:\tbl      18 <argdrop+0x18>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tblr\n';
-    expect(() => dis('argdrop', asm)).toThrow(/reload of '8\(r1\)' into r4/);
+    expect(dis('argdrop', asm)).toBe('s32 argdrop(s32 a0) {\n    return callee(1, a0, &gObj);\n}\n');
+  });
+  test('a slot stored on one path and reloaded at the join refuses: the other path reads nothing', () => {
+    // The reload at 0x14 reads uninitialised stack when r3 (or r4) is 0.
+    const join = (reg: string) =>
+      `0:\tstwu    r1,-24(r1)\n4:\tcmpwi   ${reg},0\n8:\tbeq-    10 <join+0x10>\nc:\tstw     r3,16(r1)\n` +
+      '10:\tli      r3,5\n14:\tlwz     r3,16(r1)\n18:\taddi    r3,r3,1\n1c:\taddi    r1,r1,24\n20:\tblr\n';
+    expect(() => dis('join', join('r3'))).toThrow(/sp@-8 is read on a path that never stores it/);
+    expect(() => dis('join', join('r4'))).toThrow(/sp@-8 is read on a path that never stores it/);
+  });
+  test('a word both saved and stored with a value refuses', () => {
+    expect(() =>
+      dis('mixed', '0:\tstw     r31,12(r1)\n4:\tstw     r3,12(r1)\n8:\tlwz     r31,12(r1)\nc:\tblr\n'),
+    ).toThrow(/'12\(r1\)' at 0x4 is a word this function both saves a register in and stores a value to/);
   });
   test('control: a save and restore of the SAME register stays transparent', () => {
     expect(dis('saverestore', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r4\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
@@ -325,6 +333,258 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
     expect(() => dis('mwskew', '0:\tstmw    r30,8(r1)\n4:\tlmw     r29,8(r1)\n8:\tblr\n')).toThrow(
       /reload of '8\(r1\)' into r29, a slot r30 was saved into/,
+    );
+  });
+  // An argument register's saved entry value is a parameter, and its restore writes it back.
+  const epi = (at: number, frame: number) =>
+    `${at.toString(16)}:\tlwz     r0,${frame + 4}(r1)\n${(at + 4).toString(16)}:\taddi    r1,r1,${frame}\n` +
+    `${(at + 8).toString(16)}:\tmtlr    r0\n${(at + 12).toString(16)}:\tblr\n`;
+  const pro = (frame: number) => `0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-${frame}(r1)\n`;
+  test('an argument reloaded after the body reused its register is the argument, not the reuse', () => {
+    // mwcc 2.3.3 -O0, `int h(int a) { g[1] = 0; return e1(a); }`: r3 carries &g between the home
+    // store and its reload.
+    const asm =
+      pro(16) +
+      'c:\tstw     r3,8(r1)\n10:\tli      r0,0\n14:\tlis     r3,0\n\t\t\t16: R_PPC_ADDR16_HA\tg\n' +
+      '18:\taddi    r3,r3,0\n\t\t\t1a: R_PPC_ADDR16_LO\tg\n1c:\tstw     r0,4(r3)\n20:\tlwz     r3,8(r1)\n' +
+      '24:\tbl      24 <h+0x24>\n\t\t\t24: R_PPC_REL24\te1\n' +
+      epi(0x28, 16);
+    expect(dis('h', asm)).toBe('s32 h(s32 a0) {\n    ((s32 *)&g)[1] = 0;\n    return e1(a0);\n}\n');
+  });
+  test('a reload into a register nothing touched is still the argument a call is passed', () => {
+    // pikmin `getCollPartPtr__9@unnamed@FR4TekiUl`: the reload is the only write of r4 before the
+    // `bl`, and the prototype-less arity guess counts arguments by definition.
+    const asm =
+      pro(16) +
+      'c:\tstw     r4,12(r1)\n10:\tlwz     r3,544(r3)\n14:\tlwz     r4,12(r1)\n' +
+      '18:\tbl      18 <gcp+0x18>\n\t\t\t18: R_PPC_REL24\tgetSphere\n' +
+      epi(0x1c, 16);
+    expect(dis('gcp', asm)).toBe('s32 gcp(s32 *a0, s32 a1) {\n    return getSphere(a0[136], a1);\n}\n');
+  });
+  test('an argument stored to its home is not set up for the call before its reload', () => {
+    // mwcc 2.3.3 -O0, `int q1(int a) { e0(); return a; }`. Counted as setup, the store would make it
+    // `e0(a0)`.
+    const asm =
+      pro(16) +
+      'c:\tstw     r3,8(r1)\n10:\tbl      10 <q1+0x10>\n\t\t\t10: R_PPC_REL24\te0\n14:\tlwz     r3,8(r1)\n' +
+      epi(0x18, 16);
+    expect(dis('q1', asm)).toBe('s32 q1(s32 a0) {\n    e0();\n    return a0;\n}\n');
+  });
+  test('an argument saved to two slots is saved twice, not spilled, and either reload is the argument', () => {
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tstw     r3,12(r1)\n8:\tli      r3,0\nc:\tlwz     r3,12(r1)\n10:\tlwz     r3,8(r1)\n14:\tblr\n';
+    expect(dis('twice', asm)).toBe('s32 twice(s32 a0) {\n    return a0;\n}\n');
+  });
+  test('a value stored to the frame and never read back refuses', () => {
+    // The class phrase leads, because the benchmark publishes a reason cut at 200 characters and a
+    // long C++ name alone can push a later phrase past the cut (apps/web declines.ts).
+    expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
+      /^cannot lift 'livespill': local stack frames not supported — '8\(r1\)' is stored at 0x4 and never read back/,
+    );
+  });
+  // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
+  // ninth argument, in g9's parameter area 8 bytes above the pushed r1. `tail` follows the eight
+  // `li`s; `head` goes between the store and them.
+  const s9 = (sym: string, head: string, tail: (at: number) => string) => {
+    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n' + head;
+    let at = 0x10 + (head ? 4 : 0);
+    for (let k = 1; k <= 8; k++, at += 4) {
+      asm += `${at.toString(16)}:\tli      r${k + 2},${k}\n`;
+    }
+    const bl = at.toString(16);
+    return asm + `${bl}:\tbl      ${bl} <${sym}+0x${bl}>\n\t\t\t${bl}: R_PPC_REL24\tg9\n` + tail(at + 4);
+  };
+  test('a store in the parameter area of a call that fills every argument register refuses, read back or not', () => {
+    const ninth =
+      /^cannot lift '\w+': outgoing stack arguments not modelled — the undeclared call to 'g9' at 0x\w+ fills 8 argument registers/;
+    expect(() =>
+      dis(
+        's9',
+        s9('s9', '', (at) => epi(at, 24)),
+      ),
+    ).toThrow(ninth);
+    // Reading the word back, after the call or before it, does not make it any less the ninth argument.
+    const after = s9('s9a', '', (at) => `${at.toString(16)}:\tlwz     r3,8(r1)\n` + epi(at + 4, 24));
+    expect(() => dis('s9a', after)).toThrow(ninth);
+    const before = s9(
+      's9b',
+      '10:\tlwz     r31,8(r1)\n',
+      (at) => `${at.toString(16)}:\tmr      r3,r31\n` + epi(at + 4, 24),
+    );
+    expect(() => dis('s9b', before)).toThrow(ninth);
+    // A declaration says where the list ends: eight parameters, and the word is a local.
+    expect(
+      decompile('s9a', `0 <s9a>:\n${after}`, PPC_MWCC, { prototypes: { g9: { params: Array(8).fill('int') } } }).source,
+    ).toBe('s32 s9a(s32 a0) {\n    g9(1, 2, 3, 4, 5, 6, 7, 8);\n    return a0;\n}\n');
+    // Nine parameters are more than the argument registers carry, and refuse by name.
+    expect(() =>
+      decompile('s9', `0 <s9>:\n${s9('s9', '', (at) => epi(at, 24))}`, PPC_MWCC, {
+        prototypes: { g9: { params: Array(9).fill('int') } },
+      }),
+    ).toThrow(
+      "outgoing stack arguments not modelled — 'g9' is declared with 9 parameters and the argument registers carry 8",
+    );
+  });
+  test('a 64-bit argument after seven words is in the parameter area of a call that fills seven', () => {
+    // mwcc 2.3.3 -O4,p, `int ll1(long long x) { return g7l(1, 2, 3, 4, 5, 6, 7, x); }`: the pair skips
+    // r10 and goes to 8(r1)/12(r1). Reading it back after the call must not make it a local.
+    const asm =
+      '0:\tmflr    r0\n4:\tli      r5,3\n8:\tstw     r0,4(r1)\nc:\tli      r6,4\n10:\tli      r7,5\n' +
+      '14:\tstwu    r1,-24(r1)\n18:\tli      r8,6\n1c:\tli      r9,7\n20:\tstw     r4,12(r1)\n24:\tli      r4,2\n' +
+      '28:\tstw     r3,8(r1)\n2c:\tli      r3,1\n30:\tbl      30 <ll1r+0x30>\n\t\t\t30: R_PPC_REL24\tg7l\n' +
+      '34:\tlwz     r4,8(r1)\n38:\tlwz     r5,12(r1)\n3c:\tadd     r3,r3,r4\n40:\tadd     r3,r3,r5\n' +
+      epi(0x44, 24);
+    expect(() => dis('ll1r', asm)).toThrow(
+      /^cannot lift 'll1r': outgoing stack arguments not modelled — the undeclared call to 'g7l' at 0x30 fills 7 argument registers/,
+    );
+  });
+  test('control: a call that leaves an argument register free has no ninth argument to hide', () => {
+    let asm = pro(24) + 'c:\tstw     r3,8(r1)\n';
+    for (let k = 1; k <= 7; k++) {
+      asm += `${(0xc + 4 * k).toString(16)}:\tli      r${k + 2},${k}\n`;
+    }
+    asm += '2c:\tbl      2c <s7+0x2c>\n\t\t\t2c: R_PPC_REL24\tg7\n30:\tlwz     r3,8(r1)\n' + epi(0x34, 24);
+    expect(dis('s7', asm)).toBe('s32 s7(s32 a0) {\n    g7(1, 2, 3, 4, 5, 6, 7);\n    return a0;\n}\n');
+  });
+  test('the frame push stores the back chain: its word holds the caller r1, not a value stored there before', () => {
+    expect(() =>
+      dis(
+        'bchain',
+        '0:\tstw     r3,-16(r1)\n4:\tstwu    r1,-16(r1)\n8:\tlwz     r3,0(r1)\nc:\taddi    r1,r1,16\n10:\tblr\n',
+      ),
+    ).toThrow(/'-16\(r1\)' at 0x4 is a word this function both saves a register in and stores a value to/);
+    expect(() =>
+      dis('bchain2', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,0(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of '0\(r1\)' into r3, a slot r1 was saved into/);
+  });
+  test('a return address read as a value refuses, whichever register `mflr` put it in', () => {
+    // MP4 `HuMemDirectMalloc` reads it with `asm { mflr retaddr }` and passes it on.
+    const used = /the return address the 'mflr' at 0x\w+ copies out is used as a value/;
+    expect(() => dis('getpc', '0:\tmflr    r3\n4:\tblr\n')).toThrow(used);
+    const passed =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tstw     r31,12(r1)\n10:\tmflr    r31\n' +
+      '14:\tmr      r3,r31\n18:\tbl      18 <passed+0x18>\n\t\t\t18: R_PPC_REL24\tHuMemMemoryFree\n' +
+      '1c:\tlwz     r31,12(r1)\n20:\tlwz     r0,20(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
+    expect(() => dis('passed', passed)).toThrow(used);
+  });
+  test('the return address is saved only in the link register save word, and only where no other value reaches it', () => {
+    const eightArgs = (at: number) =>
+      Array.from({ length: 8 }, (_, k) => `${(at + 4 * k).toString(16)}:\tli      r${k + 3},${k + 1}\n`).join('');
+    const call = (sym: string, at: number) =>
+      `${at.toString(16)}:\tbl      ${at.toString(16)} <${sym}+0x${at.toString(16)}>\n\t\t\t${at.toString(16)}: R_PPC_REL24\tg9\n`;
+    // mwcc 2.3.3 -O4,p, `register unsigned ra; asm { mflr ra } return g9(1, 2, 3, 4, 5, 6, 7, 8, ra);`:
+    // the copy stored 8 bytes above the pushed r1 is g9's ninth argument, not a second LR save.
+    const ninth =
+      pro(16) + 'c:\tmflr    r0\n10:\tstw     r0,8(r1)\n' + eightArgs(0x14) + call('ra9', 0x34) + epi(0x38, 16);
+    expect(() => dis('ra9', ninth)).toThrow(
+      /the store to '8\(r1\)' at 0x10 is not the link register's save — the return address an 'mflr' copies out lands -8 bytes/,
+    );
+    // mwcc 2.3.3 -O2, `register unsigned ra = a; if (c) { asm { mflr ra } } return g9(1, …, 8, ra);`:
+    // on the fall-through path r3 still holds the argument, and the word is the ninth argument either way.
+    const onePath =
+      pro(24) +
+      'c:\tcmpwi   r4,0\n10:\tbeq-    18 <rap+0x18>\n14:\tmflr    r3\n18:\tstw     r3,8(r1)\n' +
+      eightArgs(0x1c) +
+      call('rap', 0x3c) +
+      epi(0x40, 24);
+    expect(() => dis('rap', onePath)).toThrow(
+      /the store to '8\(r1\)' at 0x18 is not the link register's save — the return address an 'mflr' copies out lands -16 bytes/,
+    );
+    // Into the save word itself, a register the return address reaches on one path and another value
+    // on the other is no save: the restore would hand that value to `blr`.
+    const mixed =
+      '0:\tli      r0,0\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <mixed+0x10>\nc:\tmflr    r0\n10:\tstw     r0,4(r1)\n' +
+      '14:\tstwu    r1,-8(r1)\n18:\tbl      18 <mixed+0x18>\n\t\t\t18: R_PPC_REL24\tf\n' +
+      epi(0x1c, 8);
+    expect(() => dis('mixed', mixed)).toThrow(
+      /the store to '4\(r1\)' at 0x10 is not the link register's save — r0 holds the return address an 'mflr' copies out on some paths and another value on others/,
+    );
+  });
+  test('control: the return address saved after a join is still the save', () => {
+    const joined =
+      '0:\tmflr    r0\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <joined+0x10>\nc:\taddi    r3,r3,1\n10:\tstw     r0,4(r1)\n' +
+      '14:\tstwu    r1,-8(r1)\n18:\tbl      18 <joined+0x18>\n\t\t\t18: R_PPC_REL24\tf\n' +
+      epi(0x1c, 8);
+    expect(dis('joined', joined)).toBe('s32 joined(s32 a0) {\n    if (a0 != 0) a0 = a0 + 1;\n    return f(a0);\n}\n');
+  });
+  // A frame slot is named by its offset from the ENTRY r1. mwcc 2.3.3 (Pikmin) saves the link
+  // register at 4(r1) BEFORE `stwu r1,-N(r1)` and restores it from N+4(r1) after; mwcc 2.4.x pushes
+  // first and saves at N+4(r1). Named by the current r1, the 2.3.3 restore would find no slot.
+  const frameBody = (sym: string) =>
+    `10:\tmr      r31,r3\n14:\tbl      14 <${sym}+0x14>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tadd     r3,r3,r31\n`;
+  test('the link register saved BEFORE the frame push is restored from the same slot after it', () => {
+    const pre233 =
+      '0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-16(r1)\nc:\tstw     r31,12(r1)\n' +
+      frameBody('lr233') +
+      '1c:\tlwz     r0,20(r1)\n20:\tlwz     r31,12(r1)\n24:\taddi    r1,r1,16\n28:\tmtlr    r0\n2c:\tblr\n';
+    expect(dis('lr233', pre233)).toBe('s32 lr233(s32 a0) {\n    return callee(a0) + a0;\n}\n');
+  });
+  test('control: the push-first prologue lifts to the same function', () => {
+    const post242 =
+      '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\nc:\tstw     r31,12(r1)\n' +
+      frameBody('lr242') +
+      '1c:\tlwz     r0,20(r1)\n20:\tlwz     r31,12(r1)\n24:\tmtlr    r0\n28:\taddi    r1,r1,16\n2c:\tblr\n';
+    expect(dis('lr242', post242)).toBe('s32 lr242(s32 a0) {\n    return callee(a0) + a0;\n}\n');
+  });
+  test('one printed offset on both sides of the push is two different words', () => {
+    // `4(r1)` before the push is the caller's LR word; after it, it is a word of this frame that
+    // nothing saved.
+    const asm =
+      '0:\tmflr    r0\n4:\tstw     r0,4(r1)\n8:\tstwu    r1,-16(r1)\nc:\tlwz     r0,4(r1)\n' +
+      '10:\taddi    r1,r1,16\n14:\tmtlr    r0\n18:\tblr\n';
+    expect(() => dis('twowords', asm)).toThrow(/reload of a stack local \('4\(r1\)'\)/);
+  });
+  test('a local nobody saved, and an argument the caller passed on the stack, still refuse', () => {
+    expect(() =>
+      dis('unsaved', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,8(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of a stack local \('8\(r1\)'\)/);
+    expect(() =>
+      dis('stkarg', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,24(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
+    ).toThrow(/reload of a stack local \('24\(r1\)'\)/);
+  });
+  test('an argument stored before the push is read back after it from the same word', () => {
+    const asm =
+      '0:\tstw     r3,8(r1)\n4:\tstwu    r1,-16(r1)\n8:\tlwz     r4,24(r1)\nc:\tmr      r3,r4\n' +
+      '10:\taddi    r1,r1,16\n14:\tblr\n';
+    expect(dis('spillback', asm)).toBe('s32 spillback(s32 a0) {\n    return a0;\n}\n');
+  });
+  test('where r1 is not at a known depth, a frame access refuses instead of naming a slot', () => {
+    expect(() =>
+      dis('twopush', '0:\tstwu    r1,-16(r1)\n4:\tstwu    r1,-16(r1)\n8:\taddi    r1,r1,32\nc:\tblr\n'),
+    ).toThrow(/at 0x4 is not the one frame push from the entry stack pointer — r1 had already moved \(-16\)/);
+    expect(() => dis('notchain', '0:\tstwu    r31,-16(r1)\n4:\taddi    r1,r1,16\n8:\tblr\n')).toThrow(
+      /it stores r31, not the back chain/,
+    );
+    expect(() =>
+      dis(
+        'mrr1',
+        '0:\tstw     r31,-4(r1)\n4:\tstwu    r1,-16(r1)\n8:\tmr      r1,r11\nc:\tlwz     r31,-4(r1)\n10:\tblr\n',
+      ),
+    ).toThrow(/'-4\(r1\)' at 0xc — .* 'mr r1,r11' at 0x8 sets r1 to a value this frontend does not track/);
+    // Two paths meet at 0x10, one through the push and one around it.
+    const depths =
+      '0:\tstw     r31,-4(r1)\n4:\tcmpwi   r3,0\n8:\tbeq-    10 <depths+0x10>\nc:\tstwu    r1,-16(r1)\n' +
+      '10:\tlwz     r31,-4(r1)\n14:\tblr\n';
+    expect(() => dis('depths', depths)).toThrow(/arrive with r1 at two depths \(0 and -16 bytes/);
+  });
+  // mwcc 2.3.3 moves a register with `addi rD,rS,0` where 2.4.x prints `mr`.
+  test('`addi rD,rS,0` with no relocation is a move: the address it carries keeps its type', () => {
+    const asm =
+      '0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tgTable\n4:\taddi    r4,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tgTable\n' +
+      '8:\taddi    r3,r4,0\nc:\tb       10 <mv+0x10>\n10:\tblr\n';
+    const src = decompile('mv', `0 <mv>:\n${asm}`, PPC_MWCC).source;
+    expect(src).toContain('return &gTable;');
+    expect(src).not.toContain('+ 0');
+    expect(dis('mvp', '0:\taddi    r4,r3,0\n4:\tlwz     r3,4(r4)\n8:\tblr\n')).toBe(
+      's32 mvp(s32 *a0) {\n    return a0[1];\n}\n',
+    );
+  });
+  test('an rA field of 0 is the literal 0: `addi rD,r0,SIMM` is `li`, not a read of r0', () => {
+    expect(dis('mvr0', '0:\tli      r0,7\n4:\taddi    r3,r0,0\n8:\tblr\n')).toBe(
+      's32 mvr0(void) {\n    return 0;\n}\n',
+    );
+    expect(dis('adr0', '0:\tli      r0,7\n4:\taddis   r3,r0,1\n8:\tblr\n')).toBe(
+      's32 adr0(void) {\n    return 65536;\n}\n',
     );
   });
   test('SDA/global access (non-register memory base) FAILS LOUD, not a fabricated pointer param', () => {

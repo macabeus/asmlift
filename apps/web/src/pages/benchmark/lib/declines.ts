@@ -11,12 +11,11 @@
 // a marker as `<stage>: ` + `firstLine(reason)`, and `firstLine` in
 // `apps/benchmark/src/eval/asmlift.ts` is `split('\n')[0].slice(0, 200)`, so a pattern keyed on the
 // tail of a long message tests a string the artifact does not carry. 18 markers in the published
-// artifact sit at that cap. The reload refusal in `packages/core/src/frontend/ppc.ts` is the shape
-// that pays for it: one throw with two arms, and on `pikmin:__ct__7ActFreeFP4Piki:mwcc_233_163n`
-// the second arm's "a local stack frame this frontend does not model" begins at character 197 —
-// the published marker ends "which is a l". `stack-frames` keys on `a slot … was saved into`
-// instead, which that message reaches at character 64. A reason opens with the function's own
-// name, so a long C++ name pushes every later phrase toward the cap on its own.
+// artifact sit at that cap. A reason opens with the function's own name, so a long C++ name pushes
+// every later phrase toward the cap on its own — which is why `packages/core/src/frontend/ppc.ts`
+// puts `local stack frames not supported` straight after the name in its unread-store and
+// mixed-slot refusals, and why `stack-frames` keys its cross-register reload refusal on the early
+// `a slot … was saved into` rather than on anything later in that message.
 //
 // `declines.test.ts` classifies every marker in the committed artifact and requires "other" to be
 // EMPTY — the residue this list deliberately leaves unclassified is zero rows of the artifact's
@@ -27,11 +26,11 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 140 distinct decline messages (the texts reached by
+// `packages/core/src` throws 148 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 76 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 78 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -56,8 +55,10 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          5  `stwu` with update, a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), the
+//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), a return
+//                               address `mflr` copied out and the body read as a value, the same
+//                               address stored anywhere but the link register's save word, the
 //                               reaching-compare throw whose reason is interpolated (as Thumb's), and
 //                               the two-armed branch denylist, whose template is interpolation end to end
 //                               (its two 64-bit refusals are NOT here — both carry `wide-call-arg`'s
@@ -164,10 +165,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // Thumb `stack pointer used as data` — so one alternative with a wildcard between "pointer"
     // and "used" reads as ISA-neutral and is not: a space on both sides requires a word there, so
     // it takes the PPC form alone.
+    //
+    // `stack-frame access` is PPC's refusal where r1's depth below its entry value is not known
+    // (`r1Displacements` in `frontend/ppc.ts`), so no slot can be named there: this class's gap seen
+    // one step earlier. `not the one frame push` refuses a push that is not `stwu r1,-N(r1)` from the
+    // entry r1 — a second push, or `stwu` storing another register, whose store and r1 move are both
+    // unmodelled.
     key: 'stack-frames',
     label: 'Local stack frames (other sp uses)',
     pattern:
-      /stack pointer used as data|local stack frames not supported|spill of a live value|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame/,
+      /stack pointer used as data|local stack frames not supported|reload of a stack local|a slot \S+ was saved into|sub-word stack-frame|stack-frame access|not the one frame push/,
   },
   {
     // A branch whose block has NO predecessor reads flags nothing in this function set: at the
