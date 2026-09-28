@@ -18,8 +18,8 @@
 // #6 all that is measured is the ablation — the whole core suite is green without them — which says
 // no existing test distinguishes them and says nothing about whether a fixture could. A `while`'s
 // edges to its own exit are admitted as `break`s ahead of #6 (loop-break-exit.test.ts); what #6
-// refuses — a second exit to some other merge, or any `do-while` break — declines further down on
-// every input the suite holds. Naming all three is the point: an unwitnessed refusal that nobody
+// refuses — a second exit to some other merge, a break out of a nested loop's body, or a
+// `do-while`'s break to a live exit — declines further down on every input the suite holds. Naming all three is the point: an unwitnessed refusal that nobody
 // has written down reads exactly like a witnessed one.
 //
 // WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". Ablating the

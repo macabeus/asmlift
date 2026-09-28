@@ -2594,13 +2594,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // `while` — a `break`: an edge landing on the header's own exit, which C spells by leaving the
     // loop and running the exit region once, after it. A second exit that lands on any OTHER live
     // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
-    // body (that is a two-level exit) and any `break` of a `do-while` (its exit copies are judged
-    // differently, and no row has asked). An edge to the header's exit is a break whatever the exit
-    // holds: the asm runs ONE copy of the exit region for both edges, and agbcc and mwcc keep a
-    // source-duplicated return tail duplicated, so copying the tail into the arm spells another
-    // object. Where that exit ends in a return, the edge is also an arm or a ret target, and emission
-    // copies the tail where the break spelling refuses. The arms and breaks are kept: emission
-    // needs to know which edges out of the body end an iteration rather than continue it.
+    // body (a two-level exit) and a `do-while`'s `break` to a live exit (its exit copies are judged
+    // differently). An edge to the header's exit is a break whatever the exit holds: the asm runs
+    // ONE copy of the exit region for both edges, and agbcc and mwcc keep a source-duplicated return
+    // tail duplicated, so copying the tail into the arm spells another object. Where that exit ends
+    // in a return, the edge is also an arm or a ret target, and emission copies the tail where the
+    // break spelling refuses. The arms and breaks are kept: emission needs to know which edges out
+    // of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
     const breaks = new Set<Block>();
     let singleExit = true;
@@ -5625,18 +5625,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // the loop variables still hold what the header read, unless a block between the header and here
     // wrote one of their names.
     //
-    // The other edge may be the BACK edge. The latch path above spells a latch break update-first
-    // and refuses when the test or the exit reads a value the update overwrites; reaching here with
-    // a back edge means it refused, or never judged the edge because the implicit continue does not
-    // hold (`continueFallsToBottom`). Where it refused, this spelling puts the update copies after
-    // the `if`, where the break has already left. Whether the update sits in the latch or in a block
-    // of its own is a layout accident, and both lift the same way. Where the continue does not hold,
-    // no spelling does: every route to the header re-enters it, so that refusal is always loud.
+    // The other edge may be the BACK edge, where the latch path above refused (its update-first
+    // spelling would let the test or the exit read a value the update overwrites). The update copies
+    // then follow the `if`, where the break has already left — the same C as when the update sits in
+    // a block of its own, which is a layout accident.
     //
-    // Refused by the break rule (`breakRule`) over the names written ahead of this edge, and where
-    // the other edge leaves the body too. A refusal is LOUD, since the loop was admitted on the
-    // promise of this spelling — except where an arm owns the edge or the exit ends in a `ret`: then
-    // if-recovery below copies the exit's tail into the arm and returns.
+    // Refused: by the break rule over the names written ahead of this edge; where the other edge
+    // leaves the body too; and where the other edge is the back edge but the implicit continue does
+    // not hold (`continueFallsToBottom`) — every route to the header re-enters it, so that refusal is
+    // always loud. The others are loud, since the loop was admitted on the promise of this spelling,
+    // unless an arm owns the edge or the exit ends in a `ret`: then if-recovery below copies the
+    // exit's tail into the arm and returns.
     // A `switch` case body never holds one: the exit is a block no switch in the body dominates,
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
     if (loopCtx && loopCtx.breaks.has(b)) {
