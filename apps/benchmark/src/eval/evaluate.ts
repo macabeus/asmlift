@@ -11,6 +11,7 @@ import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
+import { referencedPrototypes } from '../cases/context-proto';
 import { rowFeatures } from '../cases/features';
 import { benchScorer } from '../decomp-config';
 import type { Toolchain } from '../toolchains';
@@ -261,7 +262,9 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, spec.proto, compile, spec.symbols, onRankProgress);
+  // the entries this lift can look up: what the row publishes and its script passes as `--proto`
+  const proto = referencedPrototypes(spec.proto, asm, spec.sym);
+  const asmlift = runAsmlift(tc, spec.codegen, spec.sym, asm, obj, proto, compile, spec.symbols, onRankProgress);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
@@ -292,7 +295,7 @@ export function evaluate(
     ctx: spec.ctxRef ? undefined : spec.ctx,
     ctxRef: spec.ctxRef,
     ctxProto: spec.ctxProto,
-    proto: spec.proto,
+    proto,
     asmDump,
     asmlift,
     m2c,

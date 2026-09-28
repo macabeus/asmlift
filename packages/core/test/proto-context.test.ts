@@ -34,7 +34,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.CARDGetSectorSize).toEqual({ returns: 's32', params: ['s32', 'u32 *'] });
     expect(p.CARDCheckAsync).toEqual({ returns: 's32', params: ['s32', 'void (*)(s32 channel, s32 result)'] });
     // a struct keeps its name: it sizes only as the pointee of a pointer
-    expect(p.CARDMountAsync?.params?.[1]).toBe('CARDMemoryCard *');
+    expect((p.CARDMountAsync?.params as string[])[1]).toBe('CARDMemoryCard *');
     expect(declaredArgWidths(p.CARDMountAsync)).toEqual([32, 32, 32, 32]);
     // `()` is an empty list in C++
     expect(p.CARDInit).toEqual({ returnsVoid: true, params: [] });
