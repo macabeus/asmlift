@@ -44,7 +44,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, parseFlags } from './codegen-flags';
-import { PRELUDE_TYPEDEFS } from './proto';
+import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StructureOptions } from './structure/structure';
 import type { SwitchBoundCase } from './structure/switch-recover';
@@ -57,9 +57,13 @@ export interface TargetDescription {
   id: string; // the ISA — 'armv4t' / 'mips' / 'ppc'. Selects the frontend (registry.ts).
   // The COMPILER is a first-class field distinct from the ISA (matching = deoptimize to a specific
   // compiler): two targets can share an ISA (⇒ one frontend) yet differ here — e.g. MIPS_IDO vs
-  // MIPS_GCC. Consumed by pattern gating (patternApplies) and the report. (version/flags/language
-  // are future fields, added when earned.)
+  // MIPS_GCC. Consumed by pattern gating (patternApplies) and the report. (version/flags are future
+  // fields, added when earned.)
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
+  /** `'c++'` when the build compiles its unit as C++ (mwcc `-lang=c++`/`ec++`), which is what
+   *  `targetFor` reads off the flags; absent is C. A candidate is C-shaped text either way — only
+   *  what the C++ front end refuses differs, and `structureOptionsFor` is where that is answered. */
+  dialect?: 'c++';
   argRegs: string[];
   returnReg: string;
   /** The floating-point ABI: where a float argument and a float return travel, on a target whose
@@ -1000,7 +1004,9 @@ export interface ResolvedTarget {
  *  those flags describe. Throws on a level word the toolchain's family cannot read. */
 export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): ResolvedTarget {
   const t: ToolchainTarget = TOOLCHAIN_TARGETS[toolchain];
-  return { toolchain, cflags, target: t.description, profile: parseFlags(t.family, cflags) };
+  const profile = parseFlags(t.family, cflags);
+  const cpp = profile.slots.lang === 'c++' || profile.slots.lang === 'ec++';
+  return { toolchain, cflags, target: cpp ? { ...t.description, dialect: 'c++' } : t.description, profile };
 }
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every
@@ -1013,7 +1019,11 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
  *  `nearBaseSpan` / `foldsConstAddrOffset` are read off the target by rank.ts. So the field names
  *  are a SUPERSET of StructureOptions', not a bijection, and nothing may derive one from the other
  *  by enumerating keys. */
-export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
+export function structureOptionsFor(
+  t: TargetDescription,
+  returnsVoid: boolean,
+  prototypes: Prototypes = {},
+): StructureOptions {
   // `littleEndian` and `deviceRegisters` are the HARDWARE capabilities the structurer consumes
   // (bitfield extract recognition is LSB-first; the dead-read spelling refuses outside the device
   // window); everything else is a compiler behavior.
@@ -1027,6 +1037,7 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
   const { spillSlotOrder, ...behaviors } = t.compilerBehaviors;
   return {
     returnsVoid,
+    ...(t.dialect === 'c++' ? { declaredArgs: declaredArgTypes(prototypes) } : {}),
     littleEndian: t.capabilities.endianness === 'little',
     ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
     ...behaviors,
@@ -1042,3 +1053,16 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
  *  The decomp checkouts all define the same names, and the harness keeps typedefs per NAME against
  *  the vendored ctx, so a unit that already has them gets no redefinition. */
 export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typedef ${base} ${name};`).join('')}\n`;
+
+/** Each declared callee's parameter types, where one can be PRINTED as a cast — the argument
+ *  conversions C++ refuses to make implicitly (backend/cfamily.ts `argConversion`). An entry this
+ *  cannot spell is `undefined`, and that argument prints as it always did. */
+function declaredArgTypes(prototypes: Prototypes): Record<string, readonly (ParamType | undefined)[]> {
+  const out: Record<string, readonly (ParamType | undefined)[]> = {};
+  for (const [name, p] of Object.entries(prototypes)) {
+    if (Array.isArray(p.params)) {
+      out[name] = p.params.map((t) => (spellableType(t) && declaredWidth(t) !== undefined ? t : undefined));
+    }
+  }
+  return out;
+}

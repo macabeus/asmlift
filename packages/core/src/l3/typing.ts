@@ -55,6 +55,8 @@ export function ptrElemBytes(to: IrType): number {
 export interface PrintEnv {
   readonly type: VarTypes;
   readonly volatilePointee: (name: string) => boolean;
+  /** a callee's declared parameter types, on a function compiled as C++ (`SFn.declaredArgs`) */
+  readonly declaredArgs: (callee: string) => readonly (string | undefined)[] | undefined;
 }
 
 export function printEnv(fn: SFn): PrintEnv {
@@ -63,7 +65,12 @@ export function printEnv(fn: SFn): PrintEnv {
   const vol = new Set(
     fn.locals.filter((l) => l.type.kind === 'ptr' && (l.pointeeVolatile || l.volatile)).map((l) => l.name),
   );
-  return { type: declaredTypes(fn), volatilePointee: (n) => vol.has(n) };
+  return {
+    type: declaredTypes(fn),
+    volatilePointee: (n) => vol.has(n),
+    declaredArgs: (callee) =>
+      fn.declaredArgs && Object.hasOwn(fn.declaredArgs, callee) ? fn.declaredArgs[callee] : undefined,
+  };
 }
 
 /** Does anything under `e` assert a VOLATILE POINTEE? The two spellings that carry the qualifier
