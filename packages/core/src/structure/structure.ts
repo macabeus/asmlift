@@ -6082,6 +6082,41 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return ipdom.get(b) ?? null;
   };
 
+  // Does rendering `root` under `map` re-derive one of `targets`: reach it through the def tree
+  // without passing a mapped or a named value, either of which renders as a name?
+  const rendersThrough = (
+    root: Value,
+    map: ReadonlyMap<Value, string> | null,
+    targets: ReadonlySet<Value>,
+  ): boolean => {
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x) || map?.has(x) === true || varName.has(x)) {
+        return false;
+      }
+      if (targets.has(x)) {
+        return true;
+      }
+      seen.add(x);
+      return defs.get(x)?.operands.some(walk) ?? false;
+    };
+    return walk(root);
+  };
+  // What a loop's exit region renders after the loop, before `stop`, and the values it reads.
+  const exitRegion = (exit: Block, loopBody: ReadonlySet<Block>, stop: Block | null): Set<Block> => {
+    const region = new Set<Block>();
+    for (const work = [exit]; work.length > 0;) {
+      const x = work.pop()!;
+      if (x !== stop && !loopBody.has(x) && !region.has(x)) {
+        region.add(x);
+        work.push(...successorsOf(x));
+      }
+    }
+    return region;
+  };
+  const rootsOf = (region: Iterable<Block>): Value[] =>
+    [...region].flatMap((x) => x.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((sc) => sc.args)]));
+
   // A `break` of the loop whose body `ss` is — not of a loop or `switch` inside it.
   const breaksOut = (ss: Stmt[]): boolean =>
     ss.some((s) => s.k === 'break' || (!isLoop(s) && s.k !== 'switch' && breaksOut(stmtChildren(s))));
@@ -6090,15 +6125,32 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Where no edge out rendered as a `break` — each one an early `return`, the exit's tail copied
   // into it — nothing reaches the end of the loop, and the exit rendered after it would be a dead
   // second copy of that tail.
+  //
+  // The exit region runs after every break, so an inner loop that runs before each of them has left
+  // its last value in its variable's name, and the region reads it there (`latchInnerSub`, with the
+  // breaks as its readers). Read raw it would re-derive that value from the name that holds it. Where
+  // neither reading is the value, decline LOUD, as the do-while latch does.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const body = withLoop({ header: fl.header, exit: fl.exit, body: fl.body, arms: fl.arms, breaks: fl.breaks }, () =>
       structureBlock(fl.header, fl.header),
     );
     dwActive.delete(fl.header);
+    const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body };
+    if (!breaksOut(body)) {
+      return [loop];
+    }
+    const region = exitRegion(fl.exit, fl.body, stop);
+    const { sub: innerSub, unreadable } = latchInnerSub(fl.header, fl.body, [...fl.breaks], region);
+    if (unreadable.size > 0 && rootsOf(region).some((r) => rendersThrough(r, innerSub, unreadable))) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the code after a while (1) reads an inner loop's value whose name was ` +
+          `rewritten after the inner loop, and re-deriving it reads a name the inner loop wrote`,
+      );
+    }
     return [
-      { k: 'while', cond: { k: 'const', value: 1 }, body },
-      ...(breaksOut(body) ? structureRegion(fl.exit, stop) : []),
+      loop,
+      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(fl.exit, stop)) : structureRegion(fl.exit, stop)),
     ];
   };
 
@@ -6172,16 +6224,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const ins = [...inEdgeRecords(preds, b)];
     return ins.length > 0 && ins.every(({ succ }) => aliasOf(succ.args[k], v, seen));
   };
+  // `readers` are the blocks the substitution is read after: the latch, or every block a `while (1)`
+  // breaks from, whose exit region renders after the loop. `after` adds the blocks of that region,
+  // whose writes land before some of its reads.
   const latchInnerSub = (
-    dw: DoWhileInfo,
+    header: Block,
+    loopBody: ReadonlySet<Block>,
+    readers: Block[],
+    after: ReadonlySet<Block> = new Set(),
   ): { sub: Map<Value, string>; unreadable: Set<Value>; writtenAfter: Map<Value, Set<string>> } => {
     const out = new Map<Value, string>();
     const refused = new Set<Value>();
     const writtenAfter = new Map<Value, Set<string>>();
-    const latchDoms = dom.get(dw.latch)!;
     const kids = [...forest.byHeader.values()]
       .filter(
-        (l) => l.header !== dw.header && dw.body.has(l.header) && !l.body.has(dw.latch) && latchDoms.has(l.header),
+        (l) =>
+          l.header !== header &&
+          loopBody.has(l.header) &&
+          readers.every((r) => !l.body.has(r) && dom.get(r)!.has(l.header)),
       )
       .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size);
     for (const l of kids) {
@@ -6196,7 +6256,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       for (const [v, n] of varName) {
         const d = defs.get(v);
         const home = paramBlock.get(v) ?? (d !== undefined && materialize.has(d) ? opBlock.get(d) : undefined);
-        if (home === undefined || !dw.body.has(home) || home === dw.header) {
+        if (home === undefined || !(loopBody.has(home) || after.has(home)) || home === header) {
           continue;
         }
         written.add(n);
@@ -6246,7 +6306,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // renders (`exprWith`), but identity elision consults the map alone, so the merge is what drops
     // a copy that `activeSub` spells `n = n` rather than writing it. The two programs are the same,
     // and it is left conditional so an empty `innerSub` keeps the line exactly as it was.
-    const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw);
+    const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw.header, dw.body, [dw.latch]);
     const latchMap = innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null;
     const updates = argAssigns(dw.latch, dw.header, latchMap);
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
@@ -6449,20 +6509,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
     if (condUnreadable.size > 0) {
-      const needs = (root: Value, stop: ReadonlyMap<Value, string> | null, targets: ReadonlySet<Value>): boolean => {
-        const seen = new Set<Value>();
-        const walk = (x: Value): boolean => {
-          if (seen.has(x) || stop?.has(x) === true || varName.has(x)) {
-            return false;
-          }
-          if (targets.has(x)) {
-            return true;
-          }
-          seen.add(x);
-          return defs.get(x)?.operands.some(walk) ?? false;
-        };
-        return walk(root);
-      };
       const bodyMap = latchMap ?? activeSub;
       const effectRoots = dw.latch.ops
         .slice(0, -1)
@@ -6471,21 +6517,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
         .flatMap((op) => op.operands);
       const updateRoots = successorTo(dw.latch, dw.header)!.args;
-      // What the exit region renders before `stop`, the end of this withSub scope.
-      const region = new Set<Block>();
-      for (const work = [dw.exit]; work.length > 0;) {
-        const x = work.pop()!;
-        if (x !== stop && !dw.body.has(x) && !region.has(x)) {
-          region.add(x);
-          work.push(...successorsOf(x));
-        }
-      }
-      const regionRoots = [...region].flatMap((x) =>
-        x.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((sc) => sc.args)]),
-      );
+      const regionRoots = rootsOf(exitRegion(dw.exit, dw.body, stop));
       if (
-        [...effectRoots, ...updateRoots].some((r) => needs(r, bodyMap, unreadable)) ||
-        [lterm.operands[0], ...exitArgs, ...regionRoots].some((r) => needs(r, condMap, condUnreadable))
+        [...effectRoots, ...updateRoots].some((r) => rendersThrough(r, bodyMap, unreadable)) ||
+        [lterm.operands[0], ...exitArgs, ...regionRoots].some((r) => rendersThrough(r, condMap, condUnreadable))
       ) {
         throw new StructureError(
           `cannot structure '${fn.name}': a loop latch reads an inner loop's value whose name was rewritten ` +

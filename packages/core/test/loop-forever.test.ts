@@ -17,18 +17,22 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { CARRIER_NAME_GATES, StructureError, type StructureHooks, structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
-const judged = (ir: string) => {
+const lifted = (ir: string) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const sfn = structure(fn);
+  return fn;
+};
+const judged = (ir: string, hooks: StructureHooks = {}) => {
+  const sfn = structure(lifted(ir), {}, hooks);
   return {
     src: cBackend.emit(sfn),
     agreement: irAgreement(ir, sfn, SEEDS),
@@ -391,6 +395,99 @@ test('a loop whose only way out is an early `return` renders nothing after it', 
   expect(r.src).toMatch(/\n    }\n}\n$/);
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+/** An inner loop runs before every break, and the code after the loop reads its update:
+ *  `i = 0; t = 1; while (1) { j = g(i); do { t = g(t); j += t; } while (g(t) < 9); i += j;
+ *  if (40 < i) break; if (i >= a0) break; } return k(t, j);` */
+const EXIT_READS_INNER = `fn foreverinner {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = const {value=1}
+  br ^bb1(%1, %2)
+^bb1(%3: s32, %4: s32):
+  %5: s32 = call %3 {target="g"}
+  br ^bb2(%5, %4)
+^bb2(%6: s32, %7: s32):
+  %8: s32 = call %7 {target="g"}
+  %9: s32 = add %6, %8
+  %10: s32 = call %8 {target="g"}
+  %11: s32 = const {value=9}
+  %12: u32 = icmp_slt %10, %11
+  cond_br %12, ^bb2(%9, %8), ^bb3()
+^bb3():
+  %13: s32 = add %3, %9
+  %14: s32 = const {value=40}
+  %15: u32 = icmp_slt %14, %13
+  cond_br %15, ^bb5(), ^bb4()
+^bb4():
+  %16: u32 = icmp_slt %13, %0
+  cond_br %16, ^bb1(%13, %8), ^bb5()
+^bb5():
+  %17: s32 = call %8, %9 {target="k"}
+  ret %17
+}`;
+
+test('the code after a `while (1)` reads an inner loop’s update in the name the inner loop left it in', () => {
+  const r = judged(EXIT_READS_INNER);
+  expect(r.src).toContain('while (1) {');
+  expect(r.src).toMatch(/return k\(v\d+, v\d+\);/);
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+/** `EXIT_READS_INNER`'s refusal: the name the inner value `j + a0` would be read under is a merge
+ *  the body writes after the inner loop, and `j`'s name holds its updated value by then, so neither
+ *  reading is the value. `latch-inner-sub.test.ts`'s `T2_MERGE` with a break out of the outer loop.
+ *  Run with the naming gate that keeps the merge off that name dropped, as `T2_MERGE`'s refusal is.
+ *  In `INNER_INVARIANT` the value reads nothing the loops write, and the re-derivation is it. */
+const INNER_REWRITTEN = `fn foreverrewritten {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = const {value=0}
+  br ^bb1(%1, %2)
+^bb1(%3: s32, %4: s32):
+  %5: s32 = const {value=1}
+  %6: s32 = add %3, %5
+  %7: s32 = const {value=0}
+  br ^bb2(%7, %4)
+^bb2(%8: s32, %9: s32):
+  %10: s32 = add %8, %0
+  %12: s32 = const {value=1}
+  %13: s32 = add %8, %12
+  %14: s32 = const {value=3}
+  %15: u32 = icmp_slt %13, %14
+  cond_br %15, ^bb2(%13, %10), ^bb3()
+^bb3():
+  %16: u32 = icmp_slt %6, %0
+  cond_br %16, ^bb5(%10), ^bb4()
+^bb4():
+  %30: s32 = const {value=7}
+  %31: u32 = icmp_eq %6, %30
+  cond_br %31, ^bb6(), ^bb7()
+^bb7():
+  %17: s32 = const {value=0}
+  br ^bb5(%17)
+^bb5(%18: s32):
+  %20: s32 = const {value=2}
+  %21: u32 = icmp_slt %6, %20
+  cond_br %21, ^bb1(%6, %18), ^bb6()
+^bb6():
+  %19: s32 = call %10 {target="f1"}
+  ret %19
+}`;
+const INNER_INVARIANT = INNER_REWRITTEN.replace(
+  '%10: s32 = add %8, %0',
+  '%40: s32 = const {value=3}\n  %10: s32 = add %0, %40',
+);
+const ADMIT_BACK_ARG: StructureHooks = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
+
+test('the code after a `while (1)` declines where neither reading is the inner loop’s value', () => {
+  expect(() => structure(lifted(INNER_REWRITTEN), {}, ADMIT_BACK_ARG)).toThrow(StructureError);
+  expect(() => structure(lifted(INNER_REWRITTEN), {}, ADMIT_BACK_ARG)).toThrow(/whose name was rewritten/);
+  const r = judged(INNER_INVARIANT, ADMIT_BACK_ARG);
+  expect(r.src).toContain('return f1(a0 + 3);');
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
 test('a header that is its own latch beside an unconditional latch is `while (1)`', () => {
