@@ -1027,6 +1027,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(withMap).toContain('if (sp0 != 0) v0 = sp0;'); // …and the undef still stands
     });
 
+    // …nor on which side of which operator the constant sits: `DMA3DAD - 4` is DMA3SAD
+    test('a source register reached by subtracting a constant is the same source register', () => {
+      const bySub = escapeTo('0x00')
+        .replace('\tldr\tr2, .L9\n', '\tldr\tr2, .L9\n\tsub\tr2, #0x4\n')
+        .replace('\t.word\t0x040000D4\n', '\t.word\t0x040000D8\n');
+      expect(decompile('f', bySub, ARMV4T_AGBCC).source).toContain('if (sp0 != 0) v0 = sp0;');
+    });
+
     // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
     // with `r5 = 0` names the same one as `[r2, #0]`. An offset it cannot fold does not.
     test('a register offset resolves when it is a literal and refuses when it is not', () => {
@@ -2453,14 +2461,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // A STORE TO A NAMED SYMBOL PLUS A CONSTANT does not re-arm the channel: agbcc compiles as if
-    // no such address is a device register, and with a symbol map that places the name the
-    // overlap test decides it exactly. An index, or a pointer loaded from the symbol, may still be
-    // the control halfword, and then `s.b` at [sp,#8] is kept in memory with `s.a`. Verbatim agbcc, one body with three endings: `struct P { u32 a, b; }
-    // s; five(1,2,3,4,5); s.a = x; s.b = y; REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst;
-    // REG_DMA3CNT = 0x85000001;` then `gNamed.g = y` (n1), `gArr[x] = y` (n3), or
-    // `*gCnt = 0x84000002` with `extern vu32 *gCnt` (e4).
-    test('a named symbol plus a constant cannot re-arm the channel, an index or a loaded pointer can', () => {
+    // A STORE TO A NAMED SYMBOL PLUS A CONSTANT does not re-arm the channel where a symbol map
+    // places the name away from the control halfword, and the overlap test decides it exactly.
+    // A name no map places may be a device register the disassembly spelled by name, and an
+    // index or a pointer loaded from the symbol may be the control halfword: each leaves the read
+    // unbounded, and then `s.b` at [sp,#8] is kept in memory with `s.a`. Verbatim agbcc, one body
+    // with three endings: `struct P { u32 a, b; } s; five(1,2,3,4,5); s.a = x; s.b = y;
+    // REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x85000001;` then
+    // `gNamed.g = y` (n1), `gArr[x] = y` (n3), or `*gCnt = 0x84000002` with `extern vu32 *gCnt`
+    // (e4); and e4's re-arm stored through `.word REG_DMA3CNT`, as sa2 spells an I/O register (e4s).
+    test('a placed symbol plus a constant cannot re-arm the channel, an unplaced name, an index or a loaded pointer can', () => {
       const armed = (name: string, tail: string, pool: string) =>
         `${name}:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n` +
         '\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n' +
@@ -2473,7 +2483,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         pool;
       const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
       const n1 = armed('n1', '\tldr\tr0, .L6+0x10\n\tstr\tr5, [r0, #0x4]\n', '\t.word\tgNamed\n');
-      const bounded = decompile('n1', n1, ARMV4T_AGBCC, five).source;
+      const inIwram = new Map([[0x03000000, [{ name: 'gNamed', kind: 'data' as const }]]]);
+      const bounded = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: inIwram }).source;
       expect(bounded).toContain('volatile u32 sp4;');
       expect(bounded).toContain('((s32 *)&gNamed)[1] = a1;');
       // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
@@ -2491,9 +2502,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tldr\tr0, .L6+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L6+0x14\n\tstr\tr0, [r1]\n',
         '\t.word\tgCnt\n\t.word\t-0x7bfffffe\n',
       );
+      const e4s = armed(
+        'e4s',
+        '\tldr\tr1, .L6+0x10\n\tldr\tr0, .L6+0x14\n\tstr\tr0, [r1]\n',
+        '\t.word\tREG_DMA3CNT\n\t.word\t-0x7bfffffe\n',
+      );
       for (const [name, asm] of [
+        ['n1', n1],
         ['n3', n3],
         ['e4', e4],
+        ['e4s', e4s],
       ]) {
         const src = decompile(name, asm, ARMV4T_AGBCC, five).source;
         expect(src).toContain('volatile u8 sp4[8];');

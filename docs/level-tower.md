@@ -1307,7 +1307,7 @@ object keys on what the escape may REACH rather than on whether it writes, becau
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
 control halfword), read per transfer, and an unresolved store after the transfer is handed the
-address leaves the read unbounded. What no fact about one function can check is stated as a premise
+address — through a pointer, or to a name no symbol map places — leaves the read unbounded. What no fact about one function can check is stated as a premise
 instead: a callee or an interrupt handler arms only a transfer it set up itself, source register
 first, so neither a call on the path nor an interrupt at any instruction re-arms this frame's
 transfer. Where the read is still unbounded and nothing but devices holds the address, the audit
