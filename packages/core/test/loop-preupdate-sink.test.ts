@@ -168,9 +168,10 @@ const UNRELATED_GUARD = `fn badguard {
 }
 `;
 
-// REFUSAL — the guard→exit edge carries a value (const 5) that the post-loop copies do not
-// reproduce on a zero-trip run. That edge is not emitted at all once the guard is fused away, so
-// the zero-trip path would read the loop's value instead.
+// The guard→exit edge carries a value (const 5) that the post-loop copy does not reproduce on a
+// zero-trip run. That edge is not emitted at all once the guard is fused away, so the copy moves into
+// the body and the edge's value seeds it — or, where the sink refuses the slot, the loop declines
+// rather than let the zero-trip path read the loop's value.
 const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 ^bb0(%0: s32*):
   %1: s32* = gaddr {sym="head"}
@@ -213,9 +214,16 @@ test('a guard not provably the loop test is not sinkable — declines instead of
   expect(() => emit(UNRELATED_GUARD)).toThrow(StructureError);
 });
 
-test('a zero-trip value the post-loop copies cannot reproduce declines instead of being dropped', () => {
-  expect(() => emit(TRAILING_PTR)).not.toThrow();
-  expect(() => emit(ZERO_TRIP_VALUE_LOST)).toThrow(/zero-trip run/);
+test('a zero-trip value the post-loop copy cannot reproduce seeds a copy sunk into the body', () => {
+  // `return x == &head ? 5 : <head[2] read on the last iteration>`, spelled as the loop writes it.
+  expect(emit(ZERO_TRIP_VALUE_LOST)).toMatch(
+    /v1 = 5;\n\s+for \(v0 = \(s32 \*\)&head; a0 != v0; v0 = \(s32 \*\)\*v0\) \{\n\s+v1 = \(\(s32 \*\)&head\)\[2\];\n\s+\}\n\s+return v1;/,
+  );
+});
+
+test('where the sink refuses that slot, the loop declines instead of dropping the value', () => {
+  const refuseAll = { preUpdateSinkGates: [{ ...PREUPDATE_SINK_GATES[0], rejects: () => true }] };
+  expect(() => structured(ZERO_TRIP_VALUE_LOST, {}, refuseAll)).toThrow(/zero-trip run/);
 });
 
 // The trailing variable may be the PARAMETER the list head came from: the guard→exit edge then

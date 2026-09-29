@@ -280,3 +280,43 @@ test('agbcc’s __divsi3 above a branch is named there through the pipeline', ()
   expect(src).toMatch(/v0 = a0 \/ a1;\n\s+if /);
   expect(src.match(/ \/ /g)).toHaveLength(1);
 });
+
+// agbcc, `int t = 0, i; for (i = 0; i < a; i++) { t = k / (i + n); h(4); } return t;`. The divide
+// is named ahead of `h`, in the loop's only block, and it is also the value the loop exits with:
+// a loop that never ran exits with the guard's 0. The named value writes the exit's name in the
+// body, so the guard's value seeds it ahead of the loop.
+const THUMB_DIV_LOOP_EXIT = `s2:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, r8
+	push	{r7}
+	mov	r8, r0
+	add	r7, r1, #0
+	add	r5, r2, #0
+	mov	r6, #0x0
+	mov	r4, #0x0
+	cmp	r6, r5
+	bge	.L4
+.L6:
+	add	r1, r4, r7
+	mov	r0, r8
+	bl	__divsi3
+	add	r6, r0, #0
+	mov	r0, #0x4
+	bl	h
+	add	r4, r4, #0x1
+	cmp	r4, r5
+	blt	.L6
+.L4:
+	add	r0, r6, #0
+	pop	{r3}
+	mov	r8, r3
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+`;
+
+test('a named divide a loop exits with is seeded for the loop that never runs', () => {
+  const prototypes = { s2: { params: 3 }, h: { params: 1, returnsVoid: true } };
+  const src = decompile('s2', THUMB_DIV_LOOP_EXIT, ARMV4T_AGBCC, { prototypes }).source;
+  expect(src).toMatch(/(v\d+) = 0;[^]*do \{\n\s+\1 = a0 \/ \(v\d+ \+ a1\);\n\s+h\(4\);[^]*return \1;/);
+});

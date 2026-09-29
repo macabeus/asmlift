@@ -116,6 +116,7 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates?: readonly Gate<SinkCandidate>[],
+    staleOnZeroTrip?: (slot: number) => boolean,
   ): Map<number, Op | null>;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
@@ -771,6 +772,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // op of the latch, or null for the copies that open the body — and the caller drops each one from
   // the post-loop copies.
   //
+  // `staleOnZeroTrip` offers the fused-guard emitter's other slots too: one whose post-loop copy
+  // would not reproduce the value the guard's exit edge carries past a loop that never ran, such as
+  // a value the body names (`t = g(i); h(4);` in `for (…)`, exiting with `t`). Moved into the body
+  // and seeded from that edge like a pre-update copy, it is the same program on both paths, and it
+  // is weighed by the same gates.
+  //
   // The idiom reaches here at all because the compiler DID keep a second register for the trailing
   // value and SSA construction folded the copy away, leaving the exit edge as the only place the
   // value is still named. Where the compiler kept two loop-carried registers instead, the value is
@@ -804,6 +811,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates: readonly Gate<SinkCandidate>[] = PREUPDATE_SINK_GATES,
+    staleOnZeroTrip: (slot: number) => boolean = () => false,
   ): Map<number, Op | null> => {
     const none = new Map<number, Op | null>();
     const headerNames = new Set(header.params.map((p) => varName.get(p)));
@@ -840,9 +848,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       return (defs.get(w)?.operands ?? []).some((o) => rendersName(o, name, self, seen));
     };
-    const busyInLoop = (name: string, self: Value): boolean => {
+    const busyInLoop = (name: string, self: Value, alsoSelf?: Value): boolean => {
       for (const [v, n] of varName) {
-        if (n !== name || v === self || header.params.includes(v)) {
+        if (n !== name || v === self || v === alsoSelf || header.params.includes(v)) {
           continue;
         }
         if (liveIn.get(header)!.has(v) || definedInBody(v)) {
@@ -941,13 +949,16 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // the loop also answers to (`busyInLoop`) still refuse. So does every other body-defined name —
     // one defined AFTER the home, in another body block, or not named by a def at all (a block
     // param) — and the copy that opens the body (`home === null`) has no position to be behind.
+    // The home ITSELF counts as ahead: `sideEffects` spells a copy homed at an op after that op's
+    // own statement, so a copy of the named value its home computes reads what that statement
+    // just wrote.
     const writtenAheadOf = (x: Value, home: Op | null): boolean => {
       const d = defs.get(x);
       if (home === null || d === undefined || !materialize.has(d)) {
         return false;
       }
       const i = latch.ops.indexOf(d);
-      return i >= 0 && i < latch.ops.indexOf(home);
+      return i >= 0 && i <= latch.ops.indexOf(home);
     };
     const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
@@ -989,7 +1000,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     const cleared = new Map<number, { name: string; home: Op | null }>();
     exitArgs.forEach((a, j) => {
-      if (!readsClobbered(a, sub, updateWrites)) {
+      if (!readsClobbered(a, sub, updateWrites) && !staleOnZeroTrip(j)) {
         return; // no hazard on this slot — nothing to repair
       }
       const destName = varName.get(exit.params[j]);
@@ -999,7 +1010,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         destName,
         headerNames,
         updateWrites,
-        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j]),
+        // The arg itself under the destination's name is the one write that name already has in
+        // the body: its copy is `dest = dest`, and the seed is all the slot needs.
+        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j], a),
       };
       if (firstRejection(gates, c) === null) {
         cleared.set(j, { name: destName!, home });

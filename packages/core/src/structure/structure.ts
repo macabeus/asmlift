@@ -5465,6 +5465,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               sub,
               updateWrites,
               hooks.preUpdateSinkGates ?? PREUPDATE_SINK_GATES,
+              (j) => !sameAtEntry(hexitArgs[j], guardExit.args[j] as Value, entryVals),
             )
           : new Map<number, Op | null>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
@@ -5997,6 +5998,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       const name = varName.get(exit.params[j])!;
       sunkCopyHomes.push({ name, home });
+      // A value the body already names under the destination writes it where it is computed, so
+      // its copy would be `dest = dest`: the slot needs only the seed and the dropped post-loop copy.
+      if (varName.get(exitArgs[j]) === name) {
+        continue;
+      }
       const st = { k: 'assign' as const, name, value: exprWith(null)(exitArgs[j]) };
       if (at === null) {
         out.leading.push(st);

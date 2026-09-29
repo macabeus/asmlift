@@ -237,6 +237,15 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']))).toEqual(new Map());
   });
 
+  test('…unless the caller says its post-loop copy is stale on a zero-trip run', () => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    const stale = () => true;
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']), undefined, stale)).toEqual(
+      new Map([[0, null]]),
+    );
+  });
+
   // The arg's def-tree, rebuilt inside the body. `bodyOp` registers an op the way analysis.ts does,
   // so `definedInBody` sees it where the fixture says it is.
   const bodyOp = (header: Block, op: Op) => {
