@@ -130,7 +130,7 @@ export interface LiveInModel {
    *
    *  Asserts more than ownership: that this function's own stores are the ONLY writer. An address
    *  into the frame that escapes to anything which could write it stops that holding, and the
-   *  retraction is the frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
+   *  retraction is the frontend's obligation (the frame-object audit, frontend/frame-objects.ts). */
   ownedLocals?: { from: number; to: number };
   /** Storage this function DECLARES as locals ⇒ a `[sp,#k]` spill here is a DECLARATION RANK
    *  (`ir/core.ts` `SlotHomes`, ordered by `l3/slotorder.ts`). `[from, to)`.
@@ -410,8 +410,8 @@ export function makeSsaBuilder(
     // expand time.
     //
     // A FORM OF THAT RECOVERY EXISTS, and what keeps the condition unmet is a guard in another
-    // file. The Thumb frame-object audit declares an untyped frame object as `u8 name[N]` from
-    // the reservation (`notTheWholeArea`, frontend/thumb.ts), but only where the slot model keys
+    // file. The frame-object audit declares an untyped frame object as `u8 name[N]` from
+    // the reservation (`notTheWholeArea`, frontend/frame-objects.ts), but only where the slot model keys
     // NOTHING in the reserved area — so no reload spill can share a frame with one of those
     // arrays and nothing here is ever asked to order the two. Widening that arm to a frame
     // carrying slots is what meets the condition, and it has to bring `l3/slotorder.ts` with it.

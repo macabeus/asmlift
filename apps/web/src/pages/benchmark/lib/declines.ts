@@ -110,8 +110,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   // classes first — the classifier is first-match.
   {
     // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts`
-    // decides the cause at the throw and spells it ("address-taken stack local", "the address of a
-    // stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
+    // and the frame-object audit it calls (`frontend/frame-objects.ts`) decide the cause at the
+    // throw and spell it ("address-taken stack local", "the address of a stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that

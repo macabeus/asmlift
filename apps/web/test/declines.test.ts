@@ -1039,7 +1039,7 @@ describe('a class may not outlive the message it classifies', () => {
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
-    ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
+    ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/frame-objects.ts'],
     ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],

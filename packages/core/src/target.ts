@@ -13,7 +13,7 @@
 //   • capabilities.endianness → structureOptionsFor (`littleEndian`), gating LSB-first
 //     bitfield-extract recognition in the structurer.
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
-//   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
+//   • capabilities.readOnlyAddressSinks → the frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
 //   • capabilities.readSourceControl → the same audit: which frame bytes beside the object that
 //     device may read, so a slot it cannot reach is not refused.
@@ -148,7 +148,7 @@ export interface TargetDescription {
     // over as a transfer SOURCE, and two facts together are what make that safe to model: the
     // device only ever reads from it, and the register is WRITE-ONLY, so nobody can read the
     // address back out and turn it into a destination. The only code that can name the frame is
-    // therefore this function's own, which the Thumb frame-object audit walks.
+    // therefore this function's own, which the frame-object audit walks.
     //
     // Hardware, so it belongs here — `endianness` above is a board fact rather than an ISA one too
     // (ARMv4T is bi-endian). ABSENT ⇒ every escape is assumed to write, which is the safe

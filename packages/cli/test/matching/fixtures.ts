@@ -606,7 +606,7 @@ export const FIXTURES: DecompFixture[] = [
     // The DMA-fill idiom's essential shape: a volatile stack temporary whose ADDRESS escapes into
     // a global (the hardware reads it), stored THROUGH the captured register — agbcc hoists the
     // capture out of the loop (`mov r3, sp` … `strh r0, [r3]` … `mov r0, sp`), which is exactly the
-    // laddr capability (frontend/thumb.ts frame-object audit). This is the level-tower "differ-
+    // laddr capability (frontend/frame-objects.ts). This is the level-tower "differ-
     // proven payoff" leg for the laddr opcode: real agbcc recompiles the emitted `u16 sp0; …
     // &sp0` byte-exact against its own codegen for the vu16 original.
     referenceC:
