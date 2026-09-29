@@ -1011,9 +1011,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         destName,
         headerNames,
         updateWrites,
-        // The arg itself under the destination's name is the one write that name already has in
-        // the body: its copy is `dest = dest`, and the seed is all the slot needs.
-        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j], a),
+        // An arg the BODY defines under the destination's name is the one write that name already
+        // has there: its own statement rewrites the name each iteration, so its copy is `dest =
+        // dest` and the seed is all the slot needs. An arg from outside the loop under that name
+        // (a parameter kmc keeps in the destination's register) is read by the body, and a seed
+        // ahead of the loop would overwrite it.
+        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j], definedInBody(a) ? a : undefined),
       };
       if (firstRejection(gates, c) === null) {
         cleared.set(j, { name: destName!, home });

@@ -226,6 +226,35 @@ test('where the sink refuses that slot, the loop declines instead of dropping th
   expect(() => structured(ZERO_TRIP_VALUE_LOST, {}, refuseAll)).toThrow(/zero-trip run/);
 });
 
+// kmc forwards `q[i & 7] = m` into `u = q[i & 7]` and keeps `move a3,a1` in the back branch's
+// delay slot, so the header's exit edge carries the PARAMETER `a1` itself while the guard edge
+// carries 0. `int x50(int *q, int m, int n){ int i, u = 0; for (i = 1; i < n; i++) { q[i & 7] = m;
+// u = u + i; u = q[i & 7]; } return u + 3; }`. The parameter is read by the body under the name the
+// seed would write, so `a1 = 0` ahead of the loop would store 0 and return 3.
+const X50 = `00000000 <x50>:
+   0:\tli\tv1,1
+   4:\tslt\tv0,v1,a2
+   8:\tbeqz\tv0,30 <x50+0x30>
+   c:\tmove\ta3,zero
+  10:\tandi\tv0,v1,0x7
+  14:\tsll\tv0,v0,0x2
+  18:\taddu\tv0,v0,a0
+  1c:\tsw\ta1,0(v0)
+  20:\taddiu\tv1,v1,1
+  24:\tslt\tv0,v1,a2
+  28:\tbnez\tv0,10 <x50+0x10>
+  2c:\tmove\ta3,a1
+  30:\tjr\tra
+  34:\taddiu\tv0,a3,3
+`;
+
+test('a zero-trip seed never overwrites a parameter the loop reads under the same name', () => {
+  const fn = frontendFor(MIPS_GCC).lift('x50', X50, MIPS_GCC, { x50: { params: 3 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 3 });
+  expect(() => structure(fn, structureOptionsFor(MIPS_GCC, false))).toThrow(/zero-trip run/);
+});
+
 // The trailing variable may be the PARAMETER the list head came from: the guard→exit edge then
 // carries it unchanged, so the seed is an identity and the loop writes the parameter directly.
 test('a trailing copy into an existing name needs no seed', () => {
