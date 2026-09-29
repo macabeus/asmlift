@@ -392,7 +392,7 @@ test('the IR names a static by its linker name, so a map global of its source na
   );
   const plain = decompile('f', asm, ARMV4T_AGBCC);
   expect(plain.ir.raw).toContain('gaddr {sym="tide.3"}');
-  expect(plain.source).toContain('    static const u8 tide[4] = { 1, 2, 3, 4 };\n    use(tide);\n');
+  expect(plain.source).toContain('    static const u8 tide[4] = { 1, 2, 3, 4 };\n    use((u8 *)tide);\n');
   const symbols: SymbolMap = new Map([
     [0x03000000, [{ name: 'gBase', kind: 'data', size: 4, shape: 'scalar' }]],
     [0x03000004, [{ name: 'tide', kind: 'data', size: 4, shape: 'scalar' }]],

@@ -60,6 +60,8 @@ export interface PrintEnv {
   readonly volatilePointee: (name: string) => boolean;
   /** a callee's declared parameter types, on a function compiled as C++ (`SFn.declaredArgs`) */
   readonly declaredArgs: (callee: string) => readonly (string | undefined)[] | undefined;
+  /** a function-scope static this function defines `const` (`SFn.statics`) */
+  readonly constStatic: (name: string) => boolean;
 }
 
 export function printEnv(fn: SFn): PrintEnv {
@@ -68,11 +70,13 @@ export function printEnv(fn: SFn): PrintEnv {
   const vol = new Set(
     fn.locals.filter((l) => l.type.kind === 'ptr' && (l.pointeeVolatile || l.volatile)).map((l) => l.name),
   );
+  const constStatics = new Set((fn.statics ?? []).filter((s) => s.const).map((s) => s.name));
   return {
     type: declaredTypes(fn),
     volatilePointee: (n) => vol.has(n),
     declaredArgs: (callee) =>
       fn.declaredArgs && Object.hasOwn(fn.declaredArgs, callee) ? fn.declaredArgs[callee] : undefined,
+    constStatic: (n) => constStatics.has(n),
   };
 }
 

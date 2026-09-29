@@ -63,7 +63,8 @@ function dataSections(obj: string): Record<string, { align: number; bytes: numbe
  *  `agbccScore` is the default candidate's objdiff score where it is not 0: the same function
  *  reading an `extern` instead of a static lifts to the same body and scores the same, so the
  *  difference is a spelling gap of the access, not of the static. A `layoutOnly` case is scored by
- *  nothing but its data: its access has a spelling gap of that kind on both compilers. */
+ *  nothing but its data: its access has a spelling gap of that kind on both compilers. `context` is
+ *  what a project's headers would declare beside the candidate. */
 const CASES: {
   sym: string;
   c: string;
@@ -71,6 +72,7 @@ const CASES: {
   mwccSpelled?: RegExp;
   agbccScore?: number;
   layoutOnly?: true;
+  context?: string;
 }[] = [
   {
     sym: 'tidef',
@@ -141,6 +143,14 @@ const CASES: {
     layoutOnly: true,
   },
   {
+    // a read-only table's address handed to a pointer parameter the context declares: mwcc does
+    // not convert its `const` away implicitly
+    sym: 'constarg',
+    c: 'extern s32 g(u8 *p); s32 constarg(void) { static const u8 tbl[4] = {1, 2, 3, 4}; return g((u8 *)tbl); }',
+    context: 'extern s32 g(u8 *p);\n',
+    spelled: /return g\(\(u8 \*\)tbl\);/,
+  },
+  {
     sym: 'fields',
     c: 's32 fields(s32 i) { static const struct { s32 a; s32 b; } t[3] = {{1, 2}, {3, 4}, {5, 6}}; return t[i].b; }',
     spelled: /static const u32 t\[6\] = \{ 1, 2, 3, 4, 5, 6 \};/,
@@ -150,14 +160,14 @@ const CASES: {
 
 describe('function-scope statics — real agbcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0, layoutOnly }) => {
+  test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0, layoutOnly, context = '' }) => {
     const asm = compileTargetAsm(c, FLAGS);
     const target = assembleTarget(asm);
     const r = decompile(sym, asm, ARMV4T_AGBCC);
     expect(r.source).toMatch(spelled);
-    expect(dataSections(compileCandAgbcc(r.source, FLAGS))).toEqual(dataSections(target));
+    expect(dataSections(compileCandAgbcc(context + r.source, FLAGS))).toEqual(dataSections(target));
     if (!layoutOnly) {
-      expect(scoreC(r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
+      expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
     }
   });
 
@@ -177,13 +187,13 @@ const HAVE_MWCC = ppcDockerGate('local-statics', 'mwcc_242_81');
 
 describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled, layoutOnly }) => {
+  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled, layoutOnly, context = '' }) => {
     const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, FLAGS);
     const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
     expect(r.source).toMatch(mwccSpelled);
-    expect(dataSections(compileCandPpc('mwcc_242_81', r.source, FLAGS))).toEqual(dataSections(obj));
+    expect(dataSections(compileCandPpc('mwcc_242_81', context + r.source, FLAGS))).toEqual(dataSections(obj));
     if (!layoutOnly) {
-      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, FLAGS);
+      const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
       expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
     }
   });

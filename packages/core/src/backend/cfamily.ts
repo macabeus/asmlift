@@ -268,6 +268,28 @@ function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   return from?.kind === 'ptr';
 }
 
+/** The unqualified pointer a `const` static's address is spelled as where it reaches a place that
+ *  converts it implicitly — an argument, an assigned or stored value, a returned one — or null for
+ *  any other expression. The static is `const` because the target holds it in read-only data, not
+ *  because the source's pointer types say so: mwcc rejects the implicit `const u8[4]` → `u8 *` a
+ *  bare `g(tbl)` makes (compiled), and a pointer cast changes no instruction. */
+function constEscape(e: Expr, vt: PrintEnv): IrType | null {
+  if (e.k === 'addr' && vt.constStatic(e.name)) {
+    const t = vt.type(e.name);
+    return t === undefined ? null : T.ptr(t.kind === 'array' ? t.elem : t);
+  }
+  if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
+    return constEscape(e.l, vt) ?? (e.op === '+' ? constEscape(e.r, vt) : null);
+  }
+  return null;
+}
+
+/** `e` printed where C converts it implicitly, with a `const` static's address cast (constEscape). */
+function printConverted(e: Expr, vt: PrintEnv, leaf?: LeafHook): string {
+  const to = constEscape(e, vt);
+  return to === null ? printExpr(e, 99, vt, leaf) : `(${cType(to)})${printExpr(e, 2, vt, leaf)}`;
+}
+
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
   const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
@@ -304,7 +326,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return `${e.fn}(${e.args
         .map((a, i) => {
           const to = declared?.[i];
-          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : rec(a, 99);
+          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : printConverted(a, vt, leaf);
         })
         .join(', ')})`;
     }
@@ -418,15 +440,15 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
     case 'assign':
-      return [`${indent}${s.name} = ${pe(s.value, 99)};`];
+      return [`${indent}${s.name} = ${printConverted(s.value, vt, leaf)};`];
     case 'store':
       // The lvalue is a full Expr (`index` or `field`), so the leaf hook spells a member write
       // (`this->x = …`) exactly as it spells a member read.
-      return [`${indent}${pe(s.lval, 2)} = ${pe(s.value, 99)};`];
+      return [`${indent}${pe(s.lval, 2)} = ${printConverted(s.value, vt, leaf)};`];
     case 'exprstmt':
       return [`${indent}${pe(s.value, 99)};`];
     case 'return':
-      return [`${indent}return${s.value ? ' ' + pe(s.value, 99) : ''};`];
+      return [`${indent}return${s.value ? ' ' + printConverted(s.value, vt, leaf) : ''};`];
     case 'if': {
       const cond = pe(s.cond, 99);
       if (s.then.length === 1 && s.else.length === 0 && s.then[0].k !== 'if') {
