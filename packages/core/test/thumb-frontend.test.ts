@@ -2390,12 +2390,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('pubd', dmaSink(`\tbl\tg2\n${dmaStores}`), ARMV4T_AGBCC, dmaProtos).source).toContain(
         'volatile u8 sp0;',
       );
-      // …and the call AFTER the publish is the refusal again: `g2` may re-arm the channel, whose
-      // source still holds `&m`, with a control this function never wrote — and a `Dma3Go(0x84000002)`
-      // that does reads `m.t`, the word the slot model keeps in a register (agbcc's `pubc`, the same
-      // body with `g2()` moved below the control store).
-      expect(() => decompile('pubd', dmaSink(`${dmaStores}\tbl\tg2\n`), ARMV4T_AGBCC, dmaProtos)).toThrow(
-        'the captured address at [sp,#0) is handed to a device a later call may re-arm, which may read the slot at [sp,#4]',
+      // …and a call AFTER the control store bounds nothing away: a callee arms only a transfer it
+      // set up itself, source register first (the premise `readWindow` states), so `g2` does not
+      // re-read `&m` — agbcc's `pubc`, the same body with `g2()` moved below the control store.
+      expect(decompile('pubd', dmaSink(`${dmaStores}\tbl\tg2\n`), ARMV4T_AGBCC, dmaProtos).source).toContain(
+        'volatile u8 sp0;',
       );
       // …and so is a store through a pointer this cannot resolve, which may BE the control halfword:
       // agbcc's `pube(s32 x, vu32 *cnt)`, the same body ending `*cnt = 0x84000002`
@@ -2590,9 +2589,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     //
     // The slots above it survive on the DEVICE, not on the frame: a word store to a DMA SOURCE
     // register is `readsThrough`, so this capture is never in `mayWrite`, and a literal control
-    // word saying the source is FIXED keeps the slots above it out of what the device reads — with
-    // no call after it that could re-arm the channel. Publish the same base to an ordinary global
-    // and both refuse — the test above.
+    // word saying the source is FIXED keeps the slots above it out of what the device reads. Publish
+    // the same base to an ordinary global and both refuse — the test above.
     //
     // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
     // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);

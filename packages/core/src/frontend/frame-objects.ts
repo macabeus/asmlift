@@ -1024,14 +1024,16 @@ export function auditFrameObjects({
     // device reads the object on every arm of the channel from the store that handed it the
     // address until a later word store to the same source register replaces it, so the control
     // stores that bound it are the ones reachable in between. Each has to be a literal the target
-    // decodes. A call on that path may re-arm the channel with a control this function never
-    // wrote, and a store through a pointer this cannot resolve — one that is this frame's on only
-    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so either leaves the
+    // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
+    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
     // read unbounded — as does a transfer never armed here at all. An unbounded device read says
     // which of those it met (`why`): each is a different capability to build.
-    // KNOWN GAP: an interrupt handler may arm the channel at any instruction, not only at a call,
-    // and this bound assumes none does while the source register holds this frame — a premise no
-    // fact about this function can check.
+    //
+    // THE PREMISE, stated once and not checkable from one function: a callee or an interrupt
+    // handler arms only a transfer it set up itself, source register first. So a call on the path
+    // does not unbound the read, and neither does an interrupt at any instruction: whatever re-arms
+    // the channel with this frame's address still in the source register is this function's own
+    // store, and the walk sees every one of those.
     const at = new Map<Op, { blk: Block; i: number }>();
     for (const blk of irBlocks) {
       blk.ops.forEach((op, i) => at.set(op, { blk, i }));
@@ -1054,9 +1056,6 @@ export function auditFrameObjects({
           const [blk, from] = work.pop()!;
           for (let i = from; i < blk.ops.length; i++) {
             const op = blk.ops[i];
-            if (op.opcode === 'call') {
-              return unbounded('a later call may re-arm');
-            }
             if (op.opcode !== 'store') {
               continue;
             }

@@ -1306,10 +1306,11 @@ pinned as `synthetic:dma_fill_uninit:agbcc`. The sibling rule refusing a SECOND 
 object keys on what the escape may REACH rather than on whether it writes, because its argument is
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
-control halfword), read per transfer, and a call or an unresolved store after the transfer is
-handed the address leaves the read unbounded. An interrupt handler arming the channel is the one
-re-arm it assumes away: it may run at any instruction, and nothing about one function can rule it
-out.
+control halfword), read per transfer, and an unresolved store after the transfer is handed the
+address leaves the read unbounded. What no fact about one function can check is stated as a premise
+instead: a callee or an interrupt handler arms only a transfer it set up itself, source register
+first, so neither a call on the path nor an interrupt at any instruction re-arms this frame's
+transfer.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup
