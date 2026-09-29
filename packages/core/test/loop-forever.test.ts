@@ -528,6 +528,40 @@ test('a latch both arms of an `if` reach is the `if`’s join, written once', ()
   }
 });
 
+/** An early `return` laid out inside the loop's span, the code after the loop after it:
+ *  `for (;;) { x = g(n); if (x == 0) break; if (x == 7) return 0; n += x; } h(n); return n;` */
+const RETURN_INSIDE_SPAN = `fn retspan {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = call %1 {target="g"}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb4(), ^bb2()
+^bb2():
+  %5: s32 = const {value=7}
+  %6: u32 = icmp_eq %2, %5
+  cond_br %6, ^bb3(), ^bb5()
+^bb3():
+  %7: s32 = const {value=0}
+  ret %7
+^bb5():
+  %8: s32 = add %1, %2
+  br ^bb1(%8)
+^bb4():
+  %9: s32 = call %1 {target="h"}
+  ret %1
+}`;
+
+test('the exit is the target laid out after the loop, not an early `return` inside its span', () => {
+  const r = judged(RETURN_INSIDE_SPAN);
+  expect(r.src).toMatch(/\n    }\n    h\(v\d+\);\n    return v\d+;\n}\n$/);
+  for (const { judged: runs, disagree } of [r.agreement, r.shipped]) {
+    expect(disagree).toBe(0);
+    expect(runs).toBeGreaterThan(20);
+  }
+});
+
 test('a header that is its own latch beside an unconditional latch is `while (1)`', () => {
   const r = judged(NEST_WITHOUT_TEST);
   expect(r.src).toContain('while (1) {');

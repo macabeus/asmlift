@@ -2655,13 +2655,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // mid-tested loop) — is `while (1)`: every edge back to the header is the
   // implicit continue at the foot of its region, and every edge out is a `break` to the one exit
   // chosen below or an early `return`. Same fail-closed preconditions as above: `admissible`, and
-  // no break out of an inner loop's body. The exit is the first target, in block order, under which
-  // every other edge out is an early-return arm or lands on a `ret` block with no effect in it.
+  // no break out of an inner loop's body. The exit is the first target under which every other edge
+  // out is an early-return arm or lands on a `ret` block with no effect in it, trying first, in
+  // block order, the targets laid out after the loop's last body block: a compiler places the code
+  // after a loop there, and an early `return` inside the loop's span, so block order alone makes
+  // that `return` the break and the code after the loop an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
-    const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort(
-      (x, y) => fn.blocks.indexOf(x) - fn.blocks.indexOf(y),
-    );
+    const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
+    const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
+    const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
     for (const exit of targets) {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
