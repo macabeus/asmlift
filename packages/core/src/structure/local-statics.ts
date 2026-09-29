@@ -32,11 +32,11 @@
 // REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
 // in the definition settles the width and the accesses disagree on it, when the width is no
 // integer type's or does not divide the size, when the loads disagree on the signedness, when the
-// definition is aligned narrower than its declaration here would be, when a bss static's offset,
-// in the section whose order says so, says it was initialized to zero and it is no scalar (or the
-// input does not show the offset); and, at the rename, when two statics share a source name (one
-// block cannot declare both) or when the function names anything else by it — a global, a callee,
-// a parameter, a local, itself — which the block-scope static would hide.
+// definition is aligned narrower than its declaration here would be, when a bss static's offset
+// says it was initialized to zero and it is no scalar (or the input does not show the offset);
+// and, at the rename, when two statics share a source name (one block cannot declare both) or
+// when the function names anything else by it — a global, a callee, a parameter, a local, itself —
+// which the block-scope static would hide.
 import { type Fn, type LocalObject, type LocalObjects, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import {
@@ -63,21 +63,31 @@ export interface StaticLayout {
   /** where a scalar initialized to zero goes: kept in `.data`, or moved to bss — where its
    *  initializer is gone, and one element of zero in `.data` must then have been an aggregate */
   zeroScalar: 'data' | 'bss';
-  /** the bss section in which such a compiler lays the scalars it moved there ahead of the statics
-   *  with no initializer, in declaration order, and those after them in reverse (mwcc's `.sbss`:
-   *  `a = 0; b; c = 0;` at +0, +8, +4), so that there the offsets say which statics had the `= 0`.
-   *  Absent where no section keeps both orders: in mwcc's `.bss` the statics with no initializer
-   *  are laid out by first use, and a static ahead of a later-declared one may have none. */
-  zeroFirstSection?: string;
+  /** The bss sections of such a compiler, each laying out the scalars it moved there first, in
+   *  declaration order, and then the statics with no initializer: in reverse declaration order
+   *  (mwcc's `.sbss`: `a = 0; b; c = 0;` at +0, +8, +4), or in the order its code first uses them
+   *  (mwcc's `.bss`: `a; b = 0;` used a first at +4, +0). Either way the offsets say which statics
+   *  had the `= 0`. */
+  uninitOrder?: Readonly<Record<string, 'reversed' | 'first-use'>>;
 }
 
-/** The statics of `objs` in `section` ({@link StaticLayout.zeroFirstSection}) that were initialized
- *  to zero, or the symbol of a bss static whose placement the input does not show. There a
- *  function's zero-initialized statics come first with their counters rising, the others after
- *  with their counters falling; so a static with a later-declared one at a higher offset had the
+/** The bss statics of `objs` that were initialized to zero ({@link StaticLayout.uninitOrder}), or
+ *  the symbol of one whose placement the input does not show. In a section of either order a
+ *  function's zero-initialized statics come first, scalars with their counters rising.
+ *
+ *  Where the others follow reversed, a static with a later-declared one at a higher offset had the
  *  initializer. The last of the rising run cannot be told from the first of the falling one, and
- *  both declarations put it in the same place: it is left without. */
-function zeroInitialized(objs: readonly LocalObject[], section: string): Set<string> | { symbol: string } {
+ *  both declarations put it in the same place: it is left without.
+ *
+ *  Where the others follow by first use, the leading run of `scalarShaped` statics with rising
+ *  counters had it, save that a run that is the whole section leaves its last without, which lands
+ *  after the rest either way. Any of that run may have had none and been used first, and the `= 0`
+ *  puts it where it was, which the candidate's code would decide otherwise. */
+function zeroInitialized(
+  objs: readonly LocalObject[],
+  uninitOrder: NonNullable<StaticLayout['uninitOrder']>,
+  scalarShaped: (o: LocalObject) => boolean,
+): Set<string> | { symbol: string } {
   const out = new Set<string>();
   const bss = objs.filter((o) => o.section === 'bss');
   for (const o of bss) {
@@ -85,9 +95,23 @@ function zeroInitialized(objs: readonly LocalObject[], section: string): Set<str
       return { symbol: o.symbol };
     }
   }
-  const run = bss.filter((o) => o.placement!.section === section);
-  for (const o of run) {
-    if (run.some((p) => p.placement!.offset > o.placement!.offset && p.order > o.order)) {
+  for (const [section, order] of Object.entries(uninitOrder)) {
+    const run = bss
+      .filter((o) => o.placement!.section === section)
+      .sort((a, b) => a.placement!.offset - b.placement!.offset);
+    if (order === 'reversed') {
+      for (const o of run) {
+        if (run.some((p) => p.placement!.offset > o.placement!.offset && p.order > o.order)) {
+          out.add(o.symbol);
+        }
+      }
+      continue;
+    }
+    let lead = 0;
+    while (lead < run.length && scalarShaped(run[lead]) && (lead === 0 || run[lead].order > run[lead - 1].order)) {
+      lead++;
+    }
+    for (const o of run.slice(0, lead === run.length ? lead - 1 : lead)) {
       out.add(o.symbol);
     }
   }
@@ -180,6 +204,26 @@ function elements(obj: LocalObject, width: number, signed: boolean): number[] {
   return out;
 }
 
+/** The width of `obj`'s element: the one its definition's directives write, else the one every
+ *  access agrees on; with no access either, the whole object where it is aligned below the
+ *  compiler's aggregate floor, as only a scalar is, and a byte where it is not. */
+function elementWidth(
+  obj: LocalObject,
+  accesses: readonly Access[],
+  layout: StaticLayout,
+): number | { refused: string } {
+  if (obj.directives?.unit !== undefined) {
+    return obj.directives.unit;
+  }
+  const widths = [...new Set(accesses.map((x) => x.width))];
+  if (widths.length > 1) {
+    return { refused: `whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)` };
+  }
+  const shown = obj.directives?.align ?? obj.placement?.align;
+  const scalarOnly = shown !== undefined && shown < layout.aggregateAlign;
+  return widths[0] ?? (scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1);
+}
+
 /** The shape and definition of every static `fn` defines, or the refusal: the static's linker name
  *  and the tail of the sentence. */
 export function localStaticShapes(
@@ -197,9 +241,25 @@ export function localStaticShapes(
     return { symbol: first, refused: "whose layout rules this target's compiler does not declare" };
   }
   const access = accessesOf(fn, new Set(objs.keys()));
+  const widthOf = (o: LocalObject) => elementWidth(o, access.get(o.symbol) ?? [], layout);
+  /** Sized and aligned as a scalar is — the compiler aligns one to its width — and declared here as
+   *  one, or as an array only for want of anything to say otherwise: no access gives its element,
+   *  or it is aligned wider than an array of its elements would be (an `s64` read a word at a
+   *  time). One of these where only a zero scalar sits is refused below unless it is a scalar. */
+  const scalarShaped = (o: LocalObject): boolean => {
+    const width = widthOf(o);
+    if (typeof width !== 'number' || width === o.size) {
+      return width === o.size;
+    }
+    const align = o.placement?.align;
+    const unsaid = o.directives?.unit === undefined && !access.get(o.symbol)?.length;
+    return (
+      [1, 2, 4, 8].includes(o.size) && align === o.size && (unsaid || align > Math.max(width, layout.aggregateAlign))
+    );
+  };
   const zeroed =
-    layout.zeroFirstSection !== undefined
-      ? zeroInitialized([...objs.values()], layout.zeroFirstSection)
+    layout.uninitOrder !== undefined
+      ? zeroInitialized([...objs.values()], layout.uninitOrder, scalarShaped)
       : new Set<string>();
   if (!(zeroed instanceof Set)) {
     return { symbol: zeroed.symbol, refused: 'in bss at an offset this input does not show' };
@@ -214,17 +274,9 @@ export function localStaticShapes(
     const dir = obj.directives;
     // the alignment the target shows
     const shown = dir?.align ?? obj.placement?.align;
-    let width: number;
-    if (dir?.unit !== undefined) {
-      width = dir.unit;
-    } else {
-      const widths = [...new Set(accesses.map((x) => x.width))];
-      if (widths.length > 1) {
-        return say(`whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)`);
-      }
-      // with no access either, an object aligned below the compiler's aggregate floor is a scalar
-      const scalarOnly = shown !== undefined && shown < layout.aggregateAlign;
-      width = widths[0] ?? (scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1);
+    const width = widthOf(obj);
+    if (typeof width !== 'number') {
+      return say(width.refused);
     }
     if (![1, 2, 4].includes(width)) {
       return say(`whose ${width}-byte elements are no integer type`);
@@ -242,9 +294,7 @@ export function localStaticShapes(
     const elem = T.int(width * 8, signed);
     const init = zeroed.has(obj.symbol) ? [0] : obj.bytes === undefined ? undefined : elements(obj, width, signed);
     if (zeroed.has(obj.symbol) && count !== 1) {
-      return say(
-        `laid out ahead of a static declared after it, as only a scalar initialized to zero is, but of ${count} elements`,
-      );
+      return say(`laid out where only a scalar initialized to zero is, but of ${count} elements`);
     }
     // One element is a scalar — unless it is initialized data holding zero on a compiler that
     // moves a zero scalar to bss, where it can only have been an aggregate, which the compiler

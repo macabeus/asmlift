@@ -69,12 +69,13 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   (a candidate whose static is `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`).
   Its ORDER is not left to anyone: both compilers count declarations, so the counters of one
   function's statics record the order the source declared them in, which is the order the
-  compiler lays them out by — and the lift declares them in that order. In `.sbss` mwcc puts the
-  scalars it moved there for their `= 0` first, in that order, and reverses the ones with no
-  initializer after them, so there the offsets also say which statics had the `= 0`, and the lift
-  writes it. In `.bss` (an array over 8 bytes, every scalar at `-sdata 0`) it lays the ones with no
-  initializer out by first use, so their offsets say nothing about an initializer, and the lift
-  writes none. The same measurement means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
+  compiler lays them out by — and the lift declares them in that order. In bss mwcc puts the
+  scalars it moved there for their `= 0` first, in that order, and lays the ones with no
+  initializer out after them: reversed in `.sbss`, and in `.bss` (an object over the `-sdata`
+  threshold: an array over 8 bytes, every scalar at `-sdata 0`) in the order its code first uses
+  them. So the offsets also say which statics had the `= 0`, and the lift writes it — in `.bss` on
+  every scalar of the leading run, since one used first with no initializer sits there too and only
+  the `= 0` keeps it there in a candidate whose code uses another first. The same measurement means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
   wrong alignment all MATCH, and only the section and the local linkage are scored — so the
   matching suite compares the candidate's data sections with the target's byte for byte, with
   their alignment (`packages/cli/test/matching/local-statics.test.ts`).

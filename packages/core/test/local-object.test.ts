@@ -13,6 +13,8 @@
 //     u32 zeromix(void) { static u32 a = 0; static u32 b; static u32 c = 0; return a + b + c; }
 //   corpus/mwcc-bss-statics.{txt,asm}  the same, over
 //     s32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }
+//   corpus/mwcc-bss-zero-statics.{txt,asm}  the same with `-sdata 0 -sdata2 0`, over
+//     s32 bsszero(s32 i) { static s32 c; static s32 a = 0; if (i) return c; return a; }
 //
 // agbcc-local-statics.s:
 //   int fa(int i) { static const u8 tide[] = {1,2,3}; return tide[i]; }
@@ -224,17 +226,24 @@ test('mwcc: a bss static laid out ahead of a later-declared one had `= 0`', () =
   // eight bytes read a word at a time are two elements, and no array is moved to bss for its zeros
   ad.symbols.set('a$4', { ...ad.symbols.get('a$4')!, size: 8 });
   expect(() => decompile('zeromix', asm, PPC_MWCC, { asmData: ad })).toThrow(
-    "names a function-scope static ('a$4') laid out ahead of a static declared after it, as only a scalar " +
-      'initialized to zero is, but of 2 elements',
+    "names a function-scope static ('a$4') laid out where only a scalar initialized to zero is, but of 2 elements",
   );
 });
 
-test('mwcc: in .bss a static ahead of a later-declared one says nothing about an initializer', () => {
+test('mwcc: in .bss an array ahead of a later-declared one had no `= 0`', () => {
   // .bss holds a$4 +0, b$5 +64: mwcc lays the statics with no initializer out there by first use,
-  // so declaration order and first use agree and neither had one
+  // and moves no array there for its zeros
   const asm = corpus('mwcc-bss-statics.asm');
   expect(decompile('bssuse', asm, PPC_MWCC, { asmData: dump('mwcc-bss-statics.txt') }).source).toContain(
     '    static u8 a[64];\n    static u8 b[64];\n',
+  );
+});
+
+test('mwcc: in .bss a scalar laid out ahead of one declared before it had `= 0`', () => {
+  // .bss holds a$5 +0, c$4 +4: the zero scalar first, then the one with no initializer
+  const asm = corpus('mwcc-bss-zero-statics.asm');
+  expect(decompile('bsszero', asm, PPC_MWCC, { asmData: dump('mwcc-bss-zero-statics.txt') }).source).toContain(
+    '    static u32 c;\n    static u32 a = 0;\n',
   );
 });
 

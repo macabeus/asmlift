@@ -330,4 +330,49 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
       new RegExp(`names the function's predefined name \\('${id}\\$\\d+'\\)`),
     );
   });
+
+  // At `-sdata 0`, a real project's flags, every static is in .bss: the zero scalars first in
+  // declaration order, the others after in the order the code first uses them. Each of these lifted
+  // without the `= 0` lands `a` after the other static, and still scores a MATCH.
+  const SDATA0 = [...FLAGS, '-sdata', '0', '-sdata2', '0'];
+  test.each([
+    {
+      sym: 'zfirst',
+      c: 's32 zfirst(s32 i) { static s32 a = 0; static s32 b; if (i) return b; return a; }',
+      spelled: /static u32 a = 0;\n {4}static u32 b;/,
+    },
+    {
+      sym: 'zboth',
+      c: 's32 zboth(s32 i) { static s32 a = 0; static s32 b = 0; if (i) return b; return a; }',
+      spelled: /static u32 a = 0;\n {4}static u32 b;/,
+    },
+    {
+      sym: 'zarr',
+      c: 's32 zarr(s32 i) { static s32 a = 0; static u8 arr[64]; if (i) return arr[i]; return a; }',
+      spelled: /static u32 a = 0;\n {4}static u8 arr\[64\];/,
+    },
+    {
+      sym: 'zlater',
+      c: 's32 zlater(s32 i) { static s32 c; static s32 a = 0; if (i) return c; return a; }',
+      spelled: /static u32 c;\n {4}static u32 a = 0;/,
+    },
+  ])('-sdata 0: $sym', ({ sym, c, spelled }) => {
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, SDATA0);
+    const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
+    expect(r.source).toMatch(spelled);
+    const cand = compileCandPpc('mwcc_242_81', r.source, SDATA0);
+    expect(dataSections(cand)).toEqual(dataSections(obj));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
+    const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, SDATA0);
+    expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+  });
+
+  test('-sdata 0: a static no access gives an element, where only a zero scalar sits, declines', () => {
+    // `a` at +0 is a zero `s32` or four bytes used first; declared as bytes it would land after `c`
+    const c = 'extern void use(s32 *); void zaddr(void) { static s32 c; static s32 a = 0; use(&c); use(&a); }';
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, 'zaddr', SDATA0);
+    expect(() => decompile('zaddr', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'zaddr') })).toThrow(
+      /names a function-scope static \('a\$\d+'\) laid out where only a scalar initialized to zero is, but of 4 elements/,
+    );
+  });
 });
