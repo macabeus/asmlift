@@ -249,6 +249,18 @@ export function auditFrameObjects({
       const off = op.attrs.off as number;
       (objects.get(off) ?? objects.set(off, []).get(off)!).push(op);
     }
+    // A LOCAL STARTS INSIDE THE RESERVED AREA. Above it are the registers the prologue saved and
+    // then the caller's outgoing block, so an address there is an incoming stack argument's or a
+    // saved register's — `g(&e)` for a fifth parameter `e` is `add r0, sp, #0x8` over a one-word
+    // local area — and no rule below is about that gap.
+    for (const off of objects.keys()) {
+      if (off >= localArea) {
+        fail(
+          `the captured address at [sp,#${off}) is above the reserved local area of ${localArea} bytes — ` +
+            'an incoming stack argument or a saved register, whose address is not modelled',
+        );
+      }
+    }
     // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
     // edge arg taints the receiving block param. A phi that merges two objects has no single
     // answer, and picking one would put an access on the wrong storage: `get(c ? &a : &b)` is

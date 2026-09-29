@@ -1574,6 +1574,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(moved).toContain('return sp4 + sp5;');
     });
 
+    // …and an address ABOVE the reserved area is not a local's. agbcc's own output for `s32 f(s32
+    // a, s32 b, s32 c, s32 d, s32 e){ s32 t = a; g(&t); g(&e); return e + t; }`: [sp,#8] is the
+    // fifth parameter, over one local word and the saved `lr`, and the refusal says so rather than
+    // judging it as a local nothing types.
+    test('the address of an incoming stack argument is refused as one', () => {
+      const inArg =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tr0, sp, #0x8\n' +
+        '\tbl\tg\n\tldr\tr0, [sp, #0x8]\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { params: 1, returnsVoid: true };
+      expect(() => decompile('f', inArg, ARMV4T_AGBCC, { prototypes: { g } })).toThrow(
+        /the captured address at \[sp,#8\) is above the reserved local area of 4 bytes — an incoming stack argument/,
+      );
+    });
+
     // …and the same frame word READ back after a call that took its address at argument 0 is,
     // instruction for instruction, a struct return's hidden temp. agbcc's own output for
     // `struct S4 { char a, b, c, d; }; s32 f(s32 x){ struct S4 s; five(x, x, x, x, x); s = mk(x);
