@@ -1232,6 +1232,7 @@ test('every withholding on the `default:` position, one call each', () => {
       writeOrder: undefined,
       slotHomes: undefined,
       paramEvidence: undefined,
+      localObjects: undefined,
     },
     defs: new Map(),
     dom: new Map(),

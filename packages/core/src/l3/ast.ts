@@ -391,6 +391,10 @@ export interface SFn {
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */
   globals?: { name: string; type: IrType }[];
+  /** The function-scope statics this function DEFINES (structure/local-statics.ts), declared at
+   *  the top of its body ahead of the locals. Unlike `globals`, the backend declares these: no
+   *  header does, because the source defined them here. */
+  statics?: SStatic[];
   retType: IrType;
   body: Stmt[];
   /** Struct types this function's fields reference, declared above it by the backend. Empty
@@ -413,6 +417,15 @@ export interface SFn {
    *  any pointer or integer argument to its parameter type, C++ refuses three of those conversions,
    *  and the printer spells the cast for exactly those (backend/cfamily.ts `argConversion`). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+}
+
+/** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
+ *  the initial elements in order, absent for a static with no initializer (the target's bss). */
+export interface SStatic {
+  name: string;
+  type: IrType;
+  const?: true;
+  init?: number[];
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

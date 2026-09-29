@@ -196,6 +196,7 @@ describe('sdiv variadic invariant (verifier)', () => {
       writeOrder: undefined,
       slotHomes: undefined,
       paramEvidence: undefined,
+      localObjects: undefined,
     };
   };
   test('1 operand WITH imm is valid', () => {

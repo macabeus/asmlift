@@ -15,6 +15,7 @@ const fnOf = (blocks: Block[]): Fn => ({
   writeOrder: undefined,
   slotHomes: undefined,
   paramEvidence: undefined,
+  localObjects: undefined,
 });
 
 test('rejects: block without a terminator', () => {

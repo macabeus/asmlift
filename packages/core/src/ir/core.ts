@@ -56,7 +56,34 @@ export interface Fn {
   /** L1 SIDE DATA (see {@link ParamEvidence}); set by the SSA builder, `undefined` on parsed IR.
    *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` and `slotHomes` are. */
   paramEvidence: ParamEvidence | undefined;
+  /** L1 SIDE DATA (see {@link LocalObjects}); set by a frontend that recovered one, `undefined` on
+   *  every other `Fn`. REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is. */
+  localObjects: LocalObjects | undefined;
 }
+
+/** Where a function-scope static lives, which decides how its definition is spelled: `rodata` is
+ *  `const` with an initializer, `data` has an initializer, `bss` has none. */
+export type LocalObjectSection = 'rodata' | 'data' | 'bss';
+
+/** One function-scope static, as the target defines it (frontend/local-object.ts). */
+export interface LocalObject {
+  /** the name the source wrote — the linker name without the compiler's counter */
+  name: string;
+  /** the linker name the target carries (`tide.3`, `sprHideTbl$797`) */
+  symbol: string;
+  section: LocalObjectSection;
+  /** bytes */
+  size: number;
+  /** the initial contents in target byte order; absent exactly for a `bss` object */
+  bytes?: Uint8Array;
+  bigEndian: boolean;
+}
+
+/** The function-scope statics a function DEFINES, keyed by {@link LocalObject.name} — the object a
+ *  `gaddr` of that name denotes. A `gaddr` names a symbol some declaration elsewhere describes;
+ *  these have none, because the source defined them inside the function, so the definition
+ *  travels with the function to the emitter, which writes it in the body (structure/local-statics.ts). */
+export type LocalObjects = ReadonlyMap<string, LocalObject>;
 
 /** What the machine's own object shows about each ENTRY PARAMETER, beyond the value graph — two
  *  observations the lift destroys, recorded so raise/paramwidth.ts can read them. Every entry

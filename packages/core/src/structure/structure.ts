@@ -104,6 +104,7 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from './hazards';
+import { localStaticShapes } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -2078,11 +2079,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
   // of symbols — copying it per structuring is work proportional to the project, and a ranked run
   // structures one function thousands of times (the same argument the `laddr` name minter makes).
+  //
+  // A function-scope static comes FIRST: it is this function's own definition, and a project
+  // global of the same name elsewhere is a different object the static hides.
+  const localStatics = localStaticShapes(fn);
+  if ('refused' in localStatics) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': names a function-scope static ('${localStatics.symbol}') ${localStatics.refused}`,
+    );
+  }
+  const staticInfo = localStatics.infos;
   const symbols: SymbolLookup | undefined =
-    mapSymbols !== undefined || (inferredSymbols !== undefined && inferredSymbols.size > 0)
+    mapSymbols !== undefined || (inferredSymbols !== undefined && inferredSymbols.size > 0) || staticInfo.size > 0
       ? {
-          get: (n) => mapSymbols?.get(n) ?? inferredSymbols?.get(n),
-          has: (n) => mapSymbols?.has(n) === true || inferredSymbols?.has(n) === true,
+          get: (n) => staticInfo.get(n) ?? mapSymbols?.get(n) ?? inferredSymbols?.get(n),
+          has: (n) => staticInfo.has(n) || mapSymbols?.has(n) === true || inferredSymbols?.has(n) === true,
         }
       : undefined;
   // Only the MAP makes the named bitfield spelling available, so with no map this is not a question.
@@ -6799,6 +6810,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             .sort((a, b) => a.name.localeCompare(b.name)),
         }
       : {}),
+    ...(localStatics.statics.length ? { statics: localStatics.statics } : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),

@@ -1241,11 +1241,10 @@ describe('the classifier is measured against the messages core can throw, not on
   // exemption is inert and it is gone: `float` is harvested like every other class, which is the
   // only reason the list below can be read as a list of reasons.
   const NOT_IN_TEMPLATES: Record<string, string> = {
-    // These four are BUILT by `reloc-symbol.ts`'s `unspellableReason` and RETURNED, then
+    // These three are BUILT by `reloc-symbol.ts`'s `unspellableReason` and RETURNED, then
     // interpolated into a throw elsewhere, so the throw site carries a placeholder where the phrase
     // is. Each is pinned above against a published marker instead.
     'pooled-literal': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
-    'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'section-label': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     // Same shape one level in: the reaching-compare throws of thumb.ts and ppc.ts interpolate
@@ -1292,6 +1291,9 @@ describe('the classifier is measured against the messages core can throw, not on
     // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
     // its single `switch-shapes` row declines on `the jump table's case arms do not linearize`.
     'switch-shapes > block-boundary',
+    // thumb.ts's refusals of a function-scope static read from a literal pool open with the pool
+    // reader's own prefix, which `pool-word-shape` is keyed on; the static is the answer.
+    'tu-scoped-name > pool-word-shape',
   ];
 
   test('every core message more than one class matches is attributed by a listed ordering', () => {

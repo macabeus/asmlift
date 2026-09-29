@@ -231,5 +231,6 @@ export function structuredCloneFn(fn: Fn): Fn {
   const pe = fn.paramEvidence;
   const paramEvidence: ParamEvidence | undefined =
     pe && new Map([...pe].filter(([v]) => map.has(v)).map(([v, obs]) => [map.get(v)!, obs]));
-  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence };
+  // The statics are plain data keyed by name, and no pass rewrites them: shared, not copied.
+  return { name: fn.name, blocks, writeOrder, slotHomes, paramEvidence, localObjects: fn.localObjects };
 }

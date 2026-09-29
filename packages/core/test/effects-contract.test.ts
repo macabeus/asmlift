@@ -29,6 +29,7 @@ const irWith = (calls: string[], unreachable: string[] = []): Fn => {
     writeOrder: undefined,
     slotHomes: undefined,
     paramEvidence: undefined,
+    localObjects: undefined,
   };
 };
 

@@ -290,7 +290,14 @@ export function makeSsaBuilder(
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
-  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined };
+  const fn: Fn = {
+    name,
+    blocks: irBlocks,
+    writeOrder: undefined,
+    slotHomes: undefined,
+    paramEvidence: undefined,
+    localObjects: undefined,
+  };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const sealed: boolean[] = irBlocks.map(() => false);

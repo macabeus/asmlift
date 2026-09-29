@@ -31,6 +31,9 @@ export function declaredTypes(fn: SFn): VarTypes {
   for (const g of fn.globals ?? []) {
     m.set(g.name, g.type);
   }
+  for (const st of fn.statics ?? []) {
+    m.set(st.name, st.type);
+  }
   for (const p of fn.params) {
     m.set(p.name, p.type);
   }

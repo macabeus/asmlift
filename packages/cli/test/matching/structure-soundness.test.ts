@@ -244,6 +244,7 @@ describe('C7 — switch_br edges carry their phi copies', () => {
       writeOrder: undefined,
       slotHomes: undefined,
       paramEvidence: undefined,
+      localObjects: undefined,
     };
   };
 

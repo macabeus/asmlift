@@ -41,6 +41,8 @@ import {
   readGasLocalObject,
   readObjectLocalObject,
 } from '../src/frontend/local-object';
+import { decompile } from '../src/pipeline';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 const agbcc = corpus('agbcc-local-statics.s');
@@ -99,15 +101,19 @@ test('agbcc: words, strings, `.space` padding and a long `.space` tail all read 
 
 test('agbcc: an initializer holding an address refuses — the word is relocated', () => {
   expect(readGasLocalObject(agbcc, 's.23')).toEqual({
-    refused:
-      "names a function-scope static ('s.23') whose initializer holds the address '.LC5' — a relocation inside the object",
+    refused: "whose initializer holds the address '.LC5' — a relocation inside the object",
   });
   expect(readGasLocalObject(agbcc, 'p.27')).toMatchObject({ refused: expect.stringContaining("the address 'g'") });
+  // the lift opens the sentence with the static it could not define
+  expect(() => decompile('fg', agbcc, ARMV4T_AGBCC)).toThrow(
+    "cannot lift 'fg': literal-pool load of a pool word that names a function-scope static ('p.27') whose " +
+      "initializer holds the address 'g'",
+  );
 });
 
-test('agbcc: no definition, a doubled label and a non-static name refuse, naming the static', () => {
+test('agbcc: no definition, a doubled label and a non-static name refuse', () => {
   expect(readGasLocalObject(agbcc, 'nope.9')).toEqual({
-    refused: "names a function-scope static ('nope.9') whose definition this asm does not carry",
+    refused: 'whose definition this asm does not carry',
   });
   expect(readGasLocalObject(`${agbcc}\n.data\ntide.3:\n\t.byte 1\n`, 'tide.3')).toMatchObject({
     refused: expect.stringContaining('defined twice'),
@@ -148,7 +154,7 @@ test('mwcc: the symbol table gives the section and size, the section contents th
 test("mwcc: a static every inliner names is not one function's", () => {
   // -inline auto: `counter`, A and B all address `n$4`.
   expect(readObjectLocalObject(dump('mwcc-local-statics.txt'), 'n$4', 'A')).toMatchObject({
-    refused: expect.stringContaining("'n$4') that .text also names at 0x2 — it is not this function's alone"),
+    refused: expect.stringContaining("that .text also names at 0x2 — it is not this function's alone"),
   });
 });
 
@@ -180,4 +186,85 @@ test('mwcc: an absent symbol and a section that is not data refuse', () => {
   expect(readObjectLocalObject(ad, 'odd$1', 'rtab')).toMatchObject({
     refused: expect.stringContaining("section '.ctors'"),
   });
+});
+
+// ── The lift: a static becomes a definition in the body, or a decline naming why ────────────────
+
+/** One agbcc-shaped function reading pool words `words` through `body`, after `data`. */
+const thumbFn = (data: string, body: string, words: string[]) =>
+  [
+    data,
+    '.text',
+    '\t.align\t2, 0',
+    '\t.globl\tf',
+    '\t.type\t f,function',
+    '\t.thumb_func',
+    'f:',
+    body,
+    '\tbx\tlr',
+    '.L4:',
+    '\t.align\t2, 0',
+    '.L3:',
+    ...words.map((w) => `\t.word\t${w}`),
+  ].join('\n');
+const rodata = (sym: string, bytes: number[]) =>
+  ['\t.section .rodata', `${sym}:`, ...bytes.map((b) => `\t.byte\t0x${b.toString(16)}`)].join('\n');
+
+test('the static is defined in the body under its source name, typed by the access', () => {
+  // corpus functions, sliced out of one file: an unsized rodata table, a bss array, `= 0` data
+  expect(decompile('fa', agbcc, ARMV4T_AGBCC).source).toBe(
+    's32 fa(s32 a0) {\n    static const u8 tide[3] = { 1, 2, 3 };\n    return tide[a0];\n}\n',
+  );
+  expect(decompile('fc', agbcc, ARMV4T_AGBCC).source).toContain('    static u8 z[3];\n');
+  // one element holding zero is an ARRAY: mwcc moves a zero scalar to .bss and keeps an aggregate
+  expect(decompile('fd', agbcc, ARMV4T_AGBCC).source).toContain('    static u32 q[1] = { 0 };\n');
+  // a sign-extending load types the elements signed, and a long table wraps eight to a line
+  expect(decompile('fb', agbcc, ARMV4T_AGBCC).source).toContain('    static const s16 cs[3] = { -1, 2, 3 };\n');
+  expect(decompile('fj', agbcc, ARMV4T_AGBCC).source).toContain(
+    '    static const u16 big[40] = {\n        1, 2, 0, 0, 0, 0, 0, 0,\n',
+  );
+});
+
+test('two statics sharing a source name decline — one block cannot declare both', () => {
+  const asm = thumbFn(
+    `${rodata('a.3', [1, 2])}\n${rodata('a.7', [3, 4])}`,
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r1]\n\tldr\tr1, .L3+0x4\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1',
+    ['a.3', 'a.7'],
+  );
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('a.7') whose source name 'a' another static here ('a.3') also has",
+  );
+});
+
+test('a static sharing its name with a global the function names declines — the static would hide it', () => {
+  const asm = thumbFn(
+    rodata('tide.3', [1, 2]),
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r1]\n\tldr\tr1, .L3+0x4\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1',
+    ['tide.3', 'tide'],
+  );
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('tide.3') whose source name 'tide' is also a global this function names",
+  );
+});
+
+test('accesses that disagree on the element, or do not divide the object, decline', () => {
+  const twoWidths = thumbFn(
+    rodata('t.3', [1, 2, 3, 4]),
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r1]\n\tldrh\tr1, [r1, #0x2]\n\tadd\tr0, r0, r1',
+    ['t.3'],
+  );
+  expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('t.3') whose accesses disagree on its element width (1 and 2 bytes)",
+  );
+  const odd = thumbFn(rodata('t.3', [1, 2, 3]), '\tldr\tr1, .L3\n\tldrh\tr0, [r1]', ['t.3']);
+  expect(() => decompile('f', odd, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('t.3') whose 2-byte accesses do not divide its 3 bytes into elements",
+  );
+});
+
+test('a static named like a function this one calls declines', () => {
+  const asm = thumbFn(rodata('g.3', [1, 2]), '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tg\n\tpop\t{r0}', ['g.3']);
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('g.3') whose source name 'g' is also a function this one names",
+  );
 });

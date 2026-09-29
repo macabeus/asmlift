@@ -57,8 +57,9 @@ import { assertInputFormat } from './format';
 import { fpuArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
+import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
-import { unspellableReason } from './reloc-symbol';
+import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
 import { clobberedByCall, makeSsaBuilder } from './ssa';
 
@@ -498,16 +499,33 @@ export function lift(
    *  `R_PPC_EMB_SDA21` is `a0 & 0`). An UNmodelled instruction refuses earlier and for a better
    *  reason: `lfs`/`lfd` under either relocation name the float gap, not this one. */
   let relocTaken = false;
+  const statics = makeLocalStatics((symbol, why) => {
+    throw new PpcUnsupportedError(`cannot lift '${name}': names a function-scope static ('${symbol}') ${why}`);
+  });
   /** The symbol a relocation names, once the naming policy has passed it. Every recovery below goes
    *  through here FIRST, so an unspellable name can never reach the declaration minter looking like
-   *  an ordinary identifier — recovering the address is only half of being able to write it down. */
+   *  an ordinary identifier — recovering the address is only half of being able to write it down.
+   *
+   *  A function-scope static is the one kind no `extern` can name that a lift can still WRITE: the
+   *  function defines it, so the name returned is the source's, and the definition, read out of the
+   *  side table, is recorded beside the Fn. */
   const spellableSym = (ins: Instr): string => {
     relocTaken = true;
     const sym = ins.reloc?.sym ?? '';
+    if (classifyRelocSymbol(sym) === 'local-static') {
+      const read = asmData
+        ? readObjectLocalObject(asmData, sym, name)
+        : { refused: "whose definition needs the object's data, which this lift was not given" };
+      if ('refused' in read) {
+        throw new PpcUnsupportedError(`${relocSite(ins)} names a function-scope static ('${sym}') ${read.refused}`);
+      }
+      return statics.define(read);
+    }
     const why = unspellableReason(sym);
     if (why) {
       throw new PpcUnsupportedError(`${relocSite(ins)} ${why}`);
     }
+    statics.plain(sym);
     return sym;
   };
   const relocPlaceholder = (ins: Instr): never => {
@@ -942,8 +960,14 @@ export function lift(
       }
       // The per-ISA rest of the match: PowerPC is RELA, so the two records must agree on the addend
       // as well as the symbol — two `@ha`/`@l` pairs into the same array at different offsets are
-      // different addresses.
-      const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
+      // different addresses. The symbol is compared as SPELLED, which is how the `@ha` recorded it.
+      const hi = highHalves.pair(
+        relocSite(ins),
+        rHi,
+        readVar(rHi, bi),
+        spellableSym(ins),
+        (h) => h.addend === lo.addend,
+      );
       return emitGaddr(hi.sym);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
@@ -1744,6 +1768,7 @@ export function lift(
   }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
+  ssa.fn.localObjects = statics.finish();
   return ssa.fn;
 }
 

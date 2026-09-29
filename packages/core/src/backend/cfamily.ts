@@ -11,7 +11,7 @@
 // legalizing casts, and the recovered-struct declaration spelling (which is why that lives here
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
+import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
   type PrintEnv,
@@ -639,6 +639,9 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   // reader will see.
   const vt: PrintEnv = printEnv(fn);
   const lines: string[] = [];
+  for (const st of fn.statics ?? []) {
+    lines.push(...staticDefinition(st));
+  }
   for (const l of fn.locals) {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
@@ -653,6 +656,36 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     lines.push(...printStmt(s, '    ', vt, leaf));
   }
   return lines;
+}
+
+/** One initial element: hex from 10 up, a negative one with its sign, so a byte table reads as the
+ *  bytes and a signed one as its values. */
+const initElement = (v: number): string =>
+  Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
+
+/** A function-scope static's definition, as the first lines of the body. An array's elements are
+ *  laid out eight to a line. */
+function staticDefinition(st: SStatic): string[] {
+  const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}`;
+  if (st.init === undefined) {
+    return [`${head};`];
+  }
+  if (st.type.kind !== 'array') {
+    return [`${head} = ${initElement(st.init[0])};`];
+  }
+  if (st.init.length <= 8) {
+    return [`${head} = { ${st.init.map(initElement).join(', ')} };`];
+  }
+  const rows: string[] = [];
+  for (let i = 0; i < st.init.length; i += 8) {
+    rows.push(
+      `        ${st.init
+        .slice(i, i + 8)
+        .map(initElement)
+        .join(', ')},`,
+    );
+  }
+  return [`${head} = {`, ...rows, '    };'];
 }
 
 /** Struct declarations this function references, one `struct N { ... };` per recovered aggregate.

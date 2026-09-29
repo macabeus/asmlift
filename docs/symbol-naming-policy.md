@@ -26,7 +26,7 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
 | plain external          |       79 |   212 | `minimumVcount`, `g_fdinfo`, `lbl_1_bss_8` | recovered; the declaration minter may declare it |
 | anonymous constant pool |      129 |   362 | `@193`, `@1135`                            | **refused**                                      |
 | C++ mangled class scope |        9 |    16 | `statbuff__9CmdStream`                     | **refused**                                      |
-| function-scope static   |        7 |    22 | `sprHideTbl$797`                           | **refused**                                      |
+| function-scope static   |        7 |    22 | `sprHideTbl$797`                           | defined in the body, from the target's data      |
 | C++ vtable              |        4 |     8 | `__vt__6System`                            | **refused**                                      |
 | section-relative label  |        2 |     8 | `...bss.0`, `...data.0`                    | **refused**                                      |
 
@@ -39,10 +39,40 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
 - **Section-relative label** `...bss.0` — denotes an offset into a section, not an object. There is
   nothing to declare.
 
-- **Function-scope static** `name$N` — the honest spelling is to re-declare the static _inside_ the
-  candidate and let mwcc re-mangle it, but `$N` is a translation-unit-wide counter the compiler
-  assigned, so whether the re-mangled name lands on the same symbol is a **measurement** nobody has
-  taken. Refused until someone takes it.
+- **Function-scope static** `name$N` (mwcc), `name.N` (agbcc) — the source DEFINED the object
+  inside the function, so no declaration anywhere names it and minting an `extern` would name
+  nothing. The lift defines it instead, in the function body under the source name `name`, from
+  what the target carries (`frontend/local-object.ts`): the section gives the qualifier and whether
+  there is an initializer (`.rodata` → `static const`, `.data` → `static` with one, bss → `static`
+  without), the size gives the extent, the bytes give the initializer, and the function's own
+  accesses give the element type (`structure/local-statics.ts`). The counter is left to the
+  candidate's compiler, and it does not matter whether it lands on the target's: agbcc's
+  assembler reduces the relocation to `.rodata`+offset, so the name never reaches the object, and
+  objdiff at its defaults does not compare a local symbol's name (a candidate whose static is
+  `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`). The same measurement means
+  **no score checks the definition**: a wrong initializer, a wrong name and a wrong offset all
+  MATCH, and only the section and the local linkage are scored — so the matching suite compares
+  the candidate's data sections with the target's byte for byte
+  (`packages/cli/test/matching/local-statics.test.ts`).
+
+  The definition is refused when the target does not carry it, when a relocation falls inside it
+  (an initializer holding an address), when its extent cannot be read, and when another function
+  names it too. The last is a static of an inlined same-unit function — agbcc puts `static inline
+counter`'s `n.3` ahead of its first caller, mwcc `-inline auto` has every caller address `n$4` —
+  and re-declaring it in one of them would split one object in two. Only the functions the input
+  shows can be checked: a single function's listing cannot show a second referrer, and the
+  benchmark's mwcc side table is narrowed to the function's own relocations.
+
+  **Block scope, not file scope**, and it is a decision rather than a measurement: both spellings
+  compile to the same bytes and score 0 on both compilers. Block scope is what the source wrote and
+  cannot collide with a file-scope name in a project's context; a file-scope `static` would claim
+  only unit-local linkage, which is all the target shows, but collides with a same-named file-scope
+  object in the unit. The block-scope claim that this function owns the object is exactly the claim
+  the referrer check above tests.
+
+- **Static of an inlined function** `name$localstaticN$fn` — mwcc's name for a static inside an
+  inline function from a header (`_half$localstatic3$sqrtf`). It belongs to that function's
+  definition, which a source reaches by calling it, so it is refused, in its own sentence.
 
 - **C++ vtable** `__vt__X` — no C++ source spells its own vtable; the compiler emits it from the
   class definition. It is the kind whose declaration would compile, which is exactly why it needs an

@@ -28,7 +28,9 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {
     const d = defs.get(v);
-    return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
+    return d?.opcode === 'gaddr' && d.attrs.code !== true && !fn.localObjects?.has(d.attrs.sym as string)
+      ? (d.attrs.sym as string)
+      : null;
   };
   const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
   const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
@@ -167,6 +169,9 @@ export type RefusedDeclarationReason =
  *  could put straight back. Every refusal is decided once, over the collector's output, in
  *  `refsOf` (see `RefusedDeclarationReason`).
  *
+ *  A function-scope static the function DEFINES (`Fn.localObjects`) is not among them: its
+ *  definition is in the emitted body, and a declaration beside it would be a second object.
+ *
  *  A declaration built from this half is a HYPOTHESIS, and where `bareGlobalAccessFacts` gives it
  *  a width that width came out of the asm the candidate is scored against. The marker is
  *  `SymbolRef.synthesized`; the argument, and its price against the vendored maps, is declare.ts's
@@ -175,7 +180,7 @@ export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
   const out = new Map<string, SymbolInfo>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
+      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string' && !fn.localObjects?.has(op.attrs.sym)) {
         out.set(op.attrs.sym, { name: op.attrs.sym, kind: 'data' });
       }
     }
@@ -213,7 +218,22 @@ export function makeRefCollector(ctx: {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
     const bound = new Set<string>([...tree.params.map((p) => p.name), ...tree.locals.map((l) => l.name)]);
+    // A function-scope static is declared in the body beside the locals, so it shares their
+    // namespace: one the emitter's own names can reach dies with the spelling, as below.
+    const statics = new Set((tree.statics ?? []).map((st) => st.name));
+    for (const st of statics) {
+      if (bound.has(st) || EMITTER_NAME.test(st)) {
+        refuse(st, 'emitter-name');
+        throw new Error(
+          `cannot spell '${tree.name}': the target names a function-scope static '${st}', which is a ` +
+            `name the emitted C uses for its own locals and parameters — no declaration can bind it`,
+        );
+      }
+    }
     const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, refuse).flatMap((r) => {
+      if (statics.has(r.name)) {
+        return []; // defined in the body — the map's global of the same name is another object
+      }
       // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage
       // kills the SPELLING, because no declaration makes that candidate right and no declaration
       // makes it fail either. Two shapes, and the second is why the test is the emitter's whole

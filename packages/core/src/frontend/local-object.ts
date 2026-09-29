@@ -10,7 +10,8 @@
 // This module reads that and nothing else. Which C type the bytes are is a question about the
 // function's accesses, answered where those are spelled.
 //
-// It REFUSES rather than guesses, each in a sentence naming the static, when:
+// It REFUSES rather than guesses — with the tail of a sentence the caller opens by naming the
+// static — when:
 //   • the target does not carry the definition (the symbol is absent, or its label heads no data);
 //   • the object sits in a section that is not read-only data, initialized data or bss;
 //   • a relocation falls inside its bytes — the initializer holds an address, which is a
@@ -23,36 +24,15 @@
 //     re-declaring it inside one of them would split one object in two. Only the functions this
 //     input shows can be checked, which is the limit of this refusal: a single-function input
 //     cannot show a second referrer.
+import type { LocalObject, LocalObjects } from '../ir/core';
 import type { AsmData } from './asmdata';
 import { localStaticSourceName } from './reloc-symbol';
 
-/** Where a static lives, which decides how its definition is spelled: `rodata` is `const` with an
- *  initializer, `data` has an initializer, `bss` has none. */
-export type LocalObjectSection = 'rodata' | 'data' | 'bss';
-
-/** One function-scope static, as the target defines it. */
-export interface LocalObject {
-  /** the name the source wrote — the linker name without the compiler's counter */
-  name: string;
-  /** the linker name the target carries (`tide.3`, `sprHideTbl$797`) */
-  symbol: string;
-  section: LocalObjectSection;
-  /** bytes */
-  size: number;
-  /** the initial contents in target byte order; absent exactly for a `bss` object */
-  bytes?: Uint8Array;
-  bigEndian: boolean;
-}
-
-/** A function's statics, keyed by {@link LocalObject.name}. */
-export type LocalObjects = ReadonlyMap<string, LocalObject>;
-
-/** A definition, or the reason there is none as the tail of a refusal sentence. */
+/** A definition, or why there is none: the tail of a refusal sentence the caller opens with
+ *  "names a function-scope static ('<symbol>')", so every refusal of the kind reads the same. */
 export type LocalObjectRead = LocalObject | { refused: string };
 
-const refused = (symbol: string, why: string): { refused: string } => ({
-  refused: `names a function-scope static ('${symbol}') ${why}`,
-});
+const refused = (why: string): { refused: string } => ({ refused: why });
 
 // ── GNU as text (agbcc) ──────────────────────────────────────────────────────────────────────────
 
@@ -78,7 +58,7 @@ function sectionSwitch(line: string): string | null {
   return m ? (m[1] ?? `.${m[2]}`) : null;
 }
 
-const GAS_SECTIONS: Readonly<Record<string, LocalObjectSection>> = {
+const GAS_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
   '.rodata': 'rodata',
   '.data': 'data',
   '.bss': 'bss',
@@ -169,7 +149,7 @@ function dataBytes(directive: string, operands: string): number[] | { address: s
 export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead {
   const name = localStaticSourceName(symbol);
   if (name === null) {
-    return refused(symbol, 'whose name has no source spelling this reader knows');
+    return refused('whose name has no source spelling this reader knows');
   }
   const lines = asm.split('\n').map(code);
   let declaredSize: number | null = null;
@@ -182,7 +162,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     if (lcomm && lcomm[1] === symbol) {
       const size = gasInteger(lcomm[2]);
       if (size === null || size <= 0) {
-        return refused(symbol, `whose '.lcomm' size '${lcomm[2]}' is not a positive number`);
+        return refused(`whose '.lcomm' size '${lcomm[2]}' is not a positive number`);
       }
       return { name, symbol, section: 'bss', size, bigEndian: false };
     }
@@ -197,18 +177,18 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     const lab = line.match(/^([A-Za-z_.$][\w.$]*):/);
     if (lab && lab[1] === symbol) {
       if (at !== -1) {
-        return refused(symbol, 'whose label is defined twice in this asm');
+        return refused('whose label is defined twice in this asm');
       }
       at = i;
       labelSection = section;
     }
   }
   if (at === -1) {
-    return refused(symbol, 'whose definition this asm does not carry');
+    return refused('whose definition this asm does not carry');
   }
   const kind = labelSection === null ? undefined : GAS_SECTIONS[labelSection];
   if (kind === undefined) {
-    return refused(symbol, `defined in section '${labelSection ?? '(none)'}', which is not data this reader defines`);
+    return refused(`defined in section '${labelSection ?? '(none)'}', which is not data this reader defines`);
   }
   const bytes: number[] = [];
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
@@ -230,25 +210,25 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     const b = dataBytes(d[1], d[2]);
     if (b === null) {
       if (bytes.length === 0) {
-        return refused(symbol, `whose data starts with '.${d[1]}', a directive this reader does not read as bytes`);
+        return refused(`whose data starts with '.${d[1]}', a directive this reader does not read as bytes`);
       }
       break; // `.align` and the like: the run ended
     }
     if (!Array.isArray(b)) {
-      return refused(symbol, `whose initializer holds the address '${b.address}' — a relocation inside the object`);
+      return refused(`whose initializer holds the address '${b.address}' — a relocation inside the object`);
     }
     bytes.push(...b);
   }
   if (bytes.length === 0) {
-    return refused(symbol, 'whose label heads no data');
+    return refused('whose label heads no data');
   }
   if (declaredSize !== null && declaredSize !== bytes.length) {
-    return refused(symbol, `whose '.size' (${declaredSize}) disagrees with the ${bytes.length} bytes under its label`);
+    return refused(`whose '.size' (${declaredSize}) disagrees with the ${bytes.length} bytes under its label`);
   }
   if (kind === 'bss') {
     return bytes.every((b) => b === 0)
       ? { name, symbol, section: 'bss', size: bytes.length, bigEndian: false }
-      : refused(symbol, 'defined in bss with non-zero bytes');
+      : refused('defined in bss with non-zero bytes');
   }
   return { name, symbol, section: kind, size: bytes.length, bytes: Uint8Array.from(bytes), bigEndian: false };
 }
@@ -287,7 +267,7 @@ export function gasPoolReferrers(asm: string, symbol: string): Set<string> {
 
 // ── An object file's side table (mwcc) ───────────────────────────────────────────────────────────
 
-const OBJECT_SECTIONS: Readonly<Record<string, LocalObjectSection>> = {
+const OBJECT_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
   '.rodata': 'rodata',
   '.sdata2': 'rodata',
   '.data': 'data',
@@ -306,23 +286,23 @@ const isDebugSection = (s: string): boolean => /^\.(debug|line)/.test(s);
 export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): LocalObjectRead {
   const name = localStaticSourceName(symbol);
   if (name === null) {
-    return refused(symbol, 'whose name has no source spelling this reader knows');
+    return refused('whose name has no source spelling this reader knows');
   }
   const sym = ad.symbols.get(symbol);
   if (sym === undefined) {
-    return refused(symbol, "whose definition the object's symbol table does not carry");
+    return refused("whose definition the object's symbol table does not carry");
   }
   const kind = OBJECT_SECTIONS[sym.section];
   if (kind === undefined) {
-    return refused(symbol, `defined in section '${sym.section}', which is not data this reader defines`);
+    return refused(`defined in section '${sym.section}', which is not data this reader defines`);
   }
   if (sym.size <= 0) {
-    return refused(symbol, 'whose symbol-table size is 0, so its extent is unknown');
+    return refused('whose symbol-table size is 0, so its extent is unknown');
   }
   const self = ad.symbols.get(fn);
   for (const r of ad.relocs) {
     if (r.section === sym.section && r.offset >= sym.value && r.offset < sym.value + sym.size) {
-      return refused(symbol, `whose initializer holds the address '${r.sym}' — a relocation inside the object`);
+      return refused(`whose initializer holds the address '${r.sym}' — a relocation inside the object`);
     }
     if (r.sym !== symbol || isDebugSection(r.section)) {
       continue;
@@ -330,10 +310,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     const inSelf =
       self !== undefined && r.section === self.section && r.offset >= self.value && r.offset < self.value + self.size;
     if (!inSelf) {
-      return refused(
-        symbol,
-        `that ${r.section} also names at 0x${r.offset.toString(16)} — it is not this function's alone`,
-      );
+      return refused(`that ${r.section} also names at 0x${r.offset.toString(16)} — it is not this function's alone`);
     }
   }
   if (kind === 'bss') {
@@ -341,7 +318,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
   }
   const contents = ad.sections.get(sym.section);
   if (contents === undefined || sym.value + sym.size > contents.length) {
-    return refused(symbol, `whose bytes the side table's '${sym.section}' contents do not hold`);
+    return refused(`whose bytes the side table's '${sym.section}' contents do not hold`);
   }
   return {
     name,
@@ -350,5 +327,52 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     size: sym.size,
     bytes: contents.slice(sym.value, sym.value + sym.size),
     bigEndian: ad.bigEndian,
+  };
+}
+
+/** The statics one lift names, gathered as the frontend meets them. */
+export interface LocalStatics {
+  /** Record a static this function names, and answer the name its source wrote. */
+  define(obj: LocalObject): string;
+  /** Record a global this function names that is not one of its statics. */
+  plain(sym: string): void;
+  /** Every static, once every name is in, or undefined for none. */
+  finish(): LocalObjects | undefined;
+}
+
+/** The registry a frontend collects its statics in. It refuses, through `fail` (the static's linker
+ *  name and the sentence's tail), the two ways a block-scope definition would misname an object:
+ *  two statics sharing a source name (inlined scopes each declaring an `n`), and a static sharing
+ *  its name with a global the same function names, which the static would hide. */
+export function makeLocalStatics(fail: (symbol: string, why: string) => never): LocalStatics {
+  const byName = new Map<string, LocalObject>();
+  const plain = new Set<string>();
+  return {
+    define(obj) {
+      const seen = byName.get(obj.name);
+      if (seen !== undefined && seen.symbol !== obj.symbol) {
+        fail(
+          obj.symbol,
+          `whose source name '${obj.name}' another static here ('${seen.symbol}') also has — one block ` +
+            `cannot declare both`,
+        );
+      }
+      byName.set(obj.name, obj);
+      return obj.name;
+    },
+    plain(sym) {
+      plain.add(sym);
+    },
+    finish() {
+      for (const obj of byName.values()) {
+        if (plain.has(obj.name)) {
+          fail(
+            obj.symbol,
+            `whose source name '${obj.name}' is also a global this function names — the static would hide it`,
+          );
+        }
+      }
+      return byName.size > 0 ? byName : undefined;
+    },
   };
 }

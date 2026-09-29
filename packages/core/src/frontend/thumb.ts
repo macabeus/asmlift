@@ -39,8 +39,9 @@ import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
+import { gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
-import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
+import { classifyRelocSymbol } from './reloc-symbol';
 import {
   type ArgSlots,
   abiSortEntryParams,
@@ -1867,7 +1868,13 @@ const POOL_LABEL_LEAD = new RegExp(String.raw`^${POOL_LABEL_NAME}`);
 // sign. The whole sign RUN multiplies, which is the assembler's rule and not an inference: built
 // with this project's `as` and the addends read back out of `.data`, `gX+-0x8`, `gX+-8`,
 // `gX+ -0x8` and `gX-+0x8` are all -8, while `gX--0x8`, `gX++0x8` and `gX+--0x8` are all +8.
-const POOL_WORD_SYMBOL = new RegExp(String.raw`^([A-Za-z_]\w*)\s*(?:([+-])((?:\s*[+-])*)\s*(${POOL_MAGNITUDE}))?$`);
+//
+// The name is a C identifier, or one plus the `.N` counter gcc hangs on a function-scope static
+// (`tide.3`, `zeroes.13`): that is a symbol too, and agbcc folds an element offset into it the same
+// way (`.word tide.3+0x4`). The caller tells the two apart (reloc-symbol.ts `classifyRelocSymbol`).
+const POOL_WORD_SYMBOL = new RegExp(
+  String.raw`^([A-Za-z_]\w*(?:\.\d+)?)\s*(?:([+-])((?:\s*[+-])*)\s*(${POOL_MAGNITUDE}))?$`,
+);
 
 // A pool word that is a plain number, sign and all. Same magnitude, so the numeric and the
 // symbolic reader cannot disagree about what a digit string means.
@@ -1882,9 +1889,8 @@ const POOL_WORD_NUMBER = new RegExp(String.raw`^(-?)(${POOL_MAGNITUDE})$`);
 //
 // The expression words are INHABITED, unlike the refusals around them: 42 operand occurrences over
 // the 198,831 `.word`/`.4byte`/`.long` operands of the 1,484 `.s` files in the three ARM/Thumb
-// checkouts. `gMultiSioRecv+{1,2,3}*0x18` is 20 of them over two files, and agbcc's own libc has
-// function-scope statics spelt `zeroes.13`. Each names a symbol as plainly as a bare `gSym` does,
-// and the grammar that reads EXPRESSIONS rejects every one.
+// checkouts, `gMultiSioRecv+{1,2,3}*0x18` 20 of them over two files. Each names a symbol as
+// plainly as a bare `gSym` does, and the grammar that reads EXPRESSIONS rejects every one.
 const POOL_WORD_LEAD = new RegExp(String.raw`^[A-Za-z_]\w*`);
 
 /** The value of a pool magnitude, or null when this reader cannot decide it. A pool word is 32
@@ -1952,6 +1958,7 @@ function recordedWords(
 type PoolRef =
   | { kind: 'const'; value: number }
   | { kind: 'gaddr'; sym: string; addend: number }
+  | { kind: 'local-static'; symbol: string; addend: number }
   | { kind: 'unmodelled'; why: string };
 
 /** Classify a word-load operand `LABEL[+N]` against the captured literal pools. Returns null when
@@ -2054,10 +2061,16 @@ function poolRef(operand: string, dataWords: Map<string, string[]>, nonWordData:
   // ADDRESS rather than a lucky one, and checked on objects rather than off C89's typing rules —
   // agbcc compiles that expression and `(u32)&gTab + 1` to byte-identical `.s` AND `.o`,
   // `.word gTab+0x1` under `R_ARM_ABS32 gTab`, as it does `+ -2147483649` and `+ 2147483647`.
+  //
+  // A function-scope static (`tide.3`) is a symbol of its own kind: the caller defines it, from
+  // the data the same asm carries under its label.
   const sm = poolWordSymbol(w);
   if (sm) {
-    return sm.addend === null
-      ? { kind: 'unmodelled', why: `pool word '${w}' carries an addend that is not a 32-bit value` }
+    if (sm.addend === null) {
+      return { kind: 'unmodelled', why: `pool word '${w}' carries an addend that is not a 32-bit value` };
+    }
+    return classifyRelocSymbol(sm.sym) === 'local-static'
+      ? { kind: 'local-static', symbol: sm.sym, addend: sm.addend }
       : { kind: 'gaddr', sym: sm.sym, addend: sm.addend };
   }
   // A leading-zero decimal gets its own message, because "not a number" is FALSE about `010` — it
@@ -2068,17 +2081,6 @@ function poolRef(operand: string, dataWords: Map<string, string[]>, nonWordData:
       kind: 'unmodelled',
       why: `pool word '${w}' has a leading-zero magnitude, which is octal to the assembler`,
     };
-  }
-  // "Not a symbol" would be FALSE about a function-scope static. agbcc spells one `tide.3` —
-  // `POOL_WORD_SYMBOL` rejects it only because a C identifier carries no dot, not because nothing
-  // is named there, and the comment on POOL_WORD_LEAD above already names `zeroes.13` as this
-  // shape. It is a symbol, and an unspellable one, which is a different gap from a grammar this
-  // reader does not parse: one is answered by naming the static, the other by widening a pattern.
-  // The sentence comes from reloc-symbol.ts — the ONE place deciding whether a LINKER name can be
-  // written into a candidate — so the Thumb pool path and the PPC relocation path say the same
-  // thing about the same kind of name.
-  if (classifyRelocSymbol(w) === 'local-static') {
-    return { kind: 'unmodelled', why: `a pool word that ${unspellableReason(w)}` };
   }
   return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
@@ -3389,6 +3391,28 @@ export function lift(
       : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
+  const statics = makeLocalStatics((symbol, why) => {
+    throw new FrontendUnsupportedError(`cannot lift '${name}': names a function-scope static ('${symbol}') ${why}`);
+  });
+  /** The source name of a function-scope static a pool word names, its definition read out of this
+   *  same asm — or a decline naming why there is none, or why it is not this function's alone. */
+  const localStatic = (symbol: string): string => {
+    const read = readGasLocalObject(asm, symbol);
+    if ('refused' in read) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
+          `('${symbol}') ${read.refused}`,
+      );
+    }
+    const others = [...gasPoolReferrers(asm, symbol)].filter((f) => f !== name);
+    if (others.length > 0) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
+          `('${symbol}') that ${others.join(', ')} also names — it is not this function's alone`,
+      );
+    }
+    return statics.define(read);
+  };
 
   const constVal = (n: number, b: number): Value => {
     const v = mkValue(T.unk(32));
@@ -5001,7 +5025,14 @@ export function lift(
           // through it to `gSym`), anything else → loud decline. It must NEVER fall to the load
           // path below, which would materialise the pool label as a phantom pointer parameter.
           if (ins.mnemonic === 'ldr' && b !== undefined) {
-            const pr = poolRef(b, dataWords, nonWordData);
+            const ref = poolRef(b, dataWords, nonWordData);
+            if (ref?.kind === 'gaddr') {
+              statics.plain(ref.sym);
+            }
+            // A function-scope static is the address of an object this function DEFINES: the
+            // `gaddr` below under its source name, with the definition recorded beside the Fn.
+            const pr: PoolRef | null =
+              ref?.kind === 'local-static' ? { kind: 'gaddr', sym: localStatic(ref.symbol), addend: ref.addend } : ref;
             if (pr?.kind === 'const') {
               // Numeric-pool PROMOTION (symbols.ts): a pool-loaded word whose value the
               // project's symbol map knows becomes the NAMED global's address — the same
@@ -5024,6 +5055,7 @@ export function lift(
               const found = symbols ? lookupSymbol(symbols, pr.value) : null;
               const si = found && (!poolNamesSymbols || found.macroBody !== undefined) ? found : null;
               if (si) {
+                statics.plain(si.name);
                 const res = mkValue(T.unk(32));
                 irb.ops.push(
                   mkOp('gaddr', {
@@ -5042,6 +5074,7 @@ export function lift(
               // relocated — so the veto applies to it without the macro exemption above.
               const interior = symbols && !poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
               if (interior) {
+                statics.plain(interior.info.name);
                 const g = mkValue(T.unk(32));
                 const k = mkValue(T.unk(32));
                 const res = mkValue(T.unk(32));
@@ -5445,6 +5478,7 @@ export function lift(
   });
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
+  fn.localObjects = statics.finish();
   return fn;
 }
 
