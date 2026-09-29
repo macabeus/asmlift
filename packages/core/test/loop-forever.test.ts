@@ -393,7 +393,7 @@ test('a loop whose only way out is an early `return` renders nothing after it', 
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
-test('a nest with no bottom test is left to `while (1)`', () => {
+test('a header that is its own latch beside an unconditional latch is `while (1)`', () => {
   const r = judged(NEST_WITHOUT_TEST);
   expect(r.src).toContain('while (1) {');
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
