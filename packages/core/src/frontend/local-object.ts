@@ -7,8 +7,10 @@
 // everything a definition needs is in the target: the section says the qualifier and whether it
 // has an initializer, the size says how big it is, and the bytes are the initializer.
 //
-// This module reads that and nothing else. Which C type the bytes are is a question about the
-// function's accesses, answered where those are spelled.
+// This module reads that, and what an assembler listing shows beyond it — the directives the
+// compiler wrote the initializer with and the alignment it placed the object at, which are facts
+// about the source's type. Which C type the definition gets is decided where the accesses are
+// spelled (structure/local-statics.ts).
 //
 // It REFUSES rather than guesses — with the tail of a sentence the caller opens by naming the
 // static — when:
@@ -103,9 +105,17 @@ function gasString(body: string): number[] | null {
 const le = (value: number, width: number): number[] =>
   Array.from({ length: width }, (_, i) => (value >>> (8 * i)) & 0xff);
 
-/** One data directive's bytes; `{ address }` when an operand is not a number (a symbol — the
- *  word is relocated), null when the directive is not a data directive this reader parses. */
-function dataBytes(directive: string, operands: string): number[] | { address: string } | null {
+/** What one data directive writes: its bytes, the width of each value it writes (null for
+ *  padding, which writes none), and whether one of those values is negative. */
+interface DirectiveData {
+  bytes: number[];
+  width: number | null;
+  negative: boolean;
+}
+
+/** One data directive's data; `{ address }` when an operand is not a number (a symbol — the word is
+ *  relocated), null when the directive is not a data directive this reader parses. */
+function dataBytes(directive: string, operands: string): DirectiveData | { address: string } | null {
   const width = /^(byte)$/.test(directive)
     ? 1
     : /^(short|hword|2byte)$/.test(directive)
@@ -115,27 +125,48 @@ function dataBytes(directive: string, operands: string): number[] | { address: s
         : 0;
   if (width > 0) {
     const out: number[] = [];
+    let negative = false;
     for (const op of operands.split(',')) {
       const v = gasInteger(op);
       if (v === null) {
         return { address: op.trim() };
       }
+      negative ||= v < 0;
       out.push(...le(v, width));
     }
-    return out;
+    return { bytes: out, width, negative };
   }
   if (/^(space|skip|zero)$/.test(directive)) {
     const [n, fill, ...rest] = operands.split(',').map((s) => gasInteger(s));
     return n === null || n < 0 || rest.length > 0 || fill === null
       ? null
-      : new Array<number>(n).fill((fill ?? 0) & 0xff);
+      : { bytes: new Array<number>(n).fill((fill ?? 0) & 0xff), width: null, negative: false };
   }
   if (/^(ascii|asciz|string)$/.test(directive)) {
     const m = operands.trim().match(/^"((?:[^"\\]|\\.)*)"$/);
     const s = m ? gasString(m[1]) : null;
-    return s === null ? null : directive === 'ascii' ? s : [...s, 0];
+    return s === null ? null : { bytes: directive === 'ascii' ? s : [...s, 0], width: 1, negative: false };
   }
   return null;
+}
+
+/** The alignment written ahead of the label on line `at`, in bytes. agbcc writes `.align N` there
+ *  exactly when the object's alignment exceeds a byte — after the section switch, before `.type`,
+ *  `.size` and the label (varasm.c:1327-1329 `assemble_variable`) — so none means 1. Null for an
+ *  alignment directive this reader does not read. */
+function alignAhead(lines: readonly string[], at: number): number | null {
+  for (let i = at - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line === '' || /^\.(type|size|globl)\b/.test(line)) {
+      continue;
+    }
+    const a = line.match(/^\.align\s+(\d+)\s*(?:,.*)?$/);
+    if (a) {
+      return 2 ** Number(a[1]);
+    }
+    return /^\.(balign|p2align)\b/.test(line) ? null : 1;
+  }
+  return 1;
 }
 
 /** Read a function-scope static's definition out of GNU as text (agbcc's `.s`).
@@ -192,6 +223,8 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     return refused(`defined in section '${labelSection ?? '(none)'}', which is not data this reader defines`);
   }
   const bytes: number[] = [];
+  const widths = new Set<number>();
+  let negative = false;
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
   for (let i = at; i < lines.length; i++) {
     const line = i === at ? first : lines[i];
@@ -215,10 +248,14 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
       }
       break; // `.align` and the like: the run ended
     }
-    if (!Array.isArray(b)) {
+    if ('address' in b) {
       return refused(`whose initializer holds the address '${b.address}' — a relocation inside the object`);
     }
-    bytes.push(...b);
+    bytes.push(...b.bytes);
+    if (b.width !== null) {
+      widths.add(b.width);
+      negative ||= b.negative && b.width < 4;
+    }
   }
   if (bytes.length === 0) {
     return refused('whose label heads no data');
@@ -231,7 +268,25 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
       ? { name, symbol, order, section: 'bss', size: bytes.length, bigEndian: false }
       : refused('defined in bss with non-zero bytes');
   }
-  return { name, symbol, order, section: kind, size: bytes.length, bytes: Uint8Array.from(bytes), bigEndian: false };
+  const align = alignAhead(lines, at);
+  if (align === null) {
+    return refused('whose alignment directive this reader does not read');
+  }
+  // A word's negative value says nothing: agbcc's constants are 32-bit host integers (machmode.h:30),
+  // so an unsigned word past 0x7fffffff prints negative too, while a narrower constant keeps its
+  // type's extension (varasm.c:1706-1710 `immed_double_const`) — `.short 0xffff` is a u16,
+  // `.short -0x1` an s16.
+  const unit = widths.size === 1 ? [...widths][0] : undefined;
+  return {
+    name,
+    symbol,
+    order,
+    section: kind,
+    size: bytes.length,
+    bytes: Uint8Array.from(bytes),
+    bigEndian: false,
+    directives: { align, ...(unit !== undefined && bytes.length % unit === 0 ? { unit } : {}), negative },
+  };
 }
 
 /** The functions whose literal pools name `symbol` in GNU as text, by the function each pool

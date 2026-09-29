@@ -62,6 +62,23 @@ test('agbcc: an unsized initialized static is the data run under its label', () 
     size: 3,
     bytes: Uint8Array.from([1, 2, 3]),
     bigEndian: false,
+    directives: { align: 1, unit: 1, negative: false },
+  });
+});
+
+test('agbcc: the directives say the element width, a narrow negative says signed, `.align` the alignment', () => {
+  const dir = (sym: string) => {
+    const r = readGasLocalObject(agbcc, sym);
+    return 'refused' in r ? r.refused : r.directives;
+  };
+  expect(dir('cs.7')).toEqual({ align: 2, unit: 2, negative: true }); // `.short -0x1` under `.align 1`
+  // `.word -0x80000000` is the u32 0x80000000: a word's sign says nothing
+  expect(dir('w.19')).toEqual({ align: 4, unit: 4, negative: false });
+  expect(dir('str.31')).toEqual({ align: 4, unit: 1, negative: false }); // a string is word-aligned
+  expect(dir('st.35')).toEqual({ align: 4, negative: false }); // `.byte`, `.space`, `.word`: no one width
+  expect(dir('big.39')).toEqual({ align: 2, unit: 2, negative: false }); // the `.space` tail is padding
+  expect(readGasLocalObject('.data\n\t.balign 4\nx.1:\n\t.word 1\n', 'x.1')).toMatchObject({
+    refused: 'whose alignment directive this reader does not read',
   });
 });
 
@@ -263,18 +280,53 @@ test('a static sharing its name with a global the function names declines — th
   );
 });
 
-test('accesses that disagree on the element, or do not divide the object, decline', () => {
+test('the definition decides the element: a byte table read a halfword at a time is still bytes', () => {
+  const asm = thumbFn(rodata('t.3', [1, 2, 3, 4]), '\tldr\tr1, .L3\n\tldrh\tr0, [r1, #0x2]', ['t.3']);
+  expect(decompile('f', asm, ARMV4T_AGBCC).source).toContain('    static const u8 t[4] = { 1, 2, 3, 4 };\n');
+});
+
+test('an alignment wider than the elements is stated, one narrower declines', () => {
+  // a struct of bytes: `.align 2` over `.byte`s, handed to a callee
+  const struct = thumbFn(
+    ['\t.section .rodata', '\t.align\t2, 0', 't.3:', '\t.byte\t0x1', '\t.byte\t0x2', '\t.short\t0x3'].join('\n'),
+    '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r0}',
+    ['t.3'],
+  );
+  expect(decompile('f', struct, ARMV4T_AGBCC).source).toContain(
+    '    static const u8 t[4] __attribute__((aligned(4))) = { 1, 2, 3, 0 };\n',
+  );
+  const packed = thumbFn(['\t.section .rodata', 't.3:', '\t.word\t0x1'].join('\n'), '\tldr\tr1, .L3\n\tldr\tr0, [r1]', [
+    't.3',
+  ]);
+  expect(() => decompile('f', packed, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('t.3') whose definition is aligned to 1 bytes, less than its 4-byte elements are",
+  );
+});
+
+test('without one width in the definition, accesses that disagree or do not divide the object decline', () => {
+  const mixed = (lines: string[]) => ['\t.section .rodata', '\t.align\t1, 0', 't.3:', ...lines].join('\n');
   const twoWidths = thumbFn(
-    rodata('t.3', [1, 2, 3, 4]),
+    mixed(['\t.byte\t0x1', '\t.byte\t0x2', '\t.short\t0x403']),
     '\tldr\tr1, .L3\n\tldrb\tr0, [r1]\n\tldrh\tr1, [r1, #0x2]\n\tadd\tr0, r0, r1',
     ['t.3'],
   );
   expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow(
     "names a function-scope static ('t.3') whose accesses disagree on its element width (1 and 2 bytes)",
   );
-  const odd = thumbFn(rodata('t.3', [1, 2, 3]), '\tldr\tr1, .L3\n\tldrh\tr0, [r1]', ['t.3']);
+  const odd = thumbFn(mixed(['\t.byte\t0x1', '\t.short\t0x2']), '\tldr\tr1, .L3\n\tldrh\tr0, [r1]', ['t.3']);
   expect(() => decompile('f', odd, ARMV4T_AGBCC)).toThrow(
-    "names a function-scope static ('t.3') whose 2-byte accesses do not divide its 3 bytes into elements",
+    "names a function-scope static ('t.3') whose 2-byte elements do not divide its 3 bytes",
+  );
+});
+
+test('a negative element read zero-extended declines — the definition says signed, the load unsigned', () => {
+  const asm = thumbFn(
+    ['\t.section .rodata', 't.3:', '\t.byte\t-0x1', '\t.byte\t0x2'].join('\n'),
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r1]',
+    ['t.3'],
+  );
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('t.3') whose definition holds negative elements that its loads read zero-extended",
   );
 });
 

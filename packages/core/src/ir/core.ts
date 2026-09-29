@@ -80,6 +80,22 @@ export interface LocalObject {
   /** the initial contents in target byte order; absent exactly for a `bss` object */
   bytes?: Uint8Array;
   bigEndian: boolean;
+  /** What an assembler LISTING shows of an initialized definition beyond its bytes, absent where
+   *  the target is an object file (which records neither). */
+  directives?: LocalObjectDirectives;
+}
+
+/** An initialized static's data directives, as the compiler wrote them. The compiler writes each
+ *  scalar of the initializer with the directive of its width, and aligns the object to its type's
+ *  alignment; both are facts about the source's TYPE that the bytes alone have lost. */
+export interface LocalObjectDirectives {
+  /** the alignment the object was placed at, in bytes (`.align N` ahead of the label: 2^N; none: 1) */
+  align: number;
+  /** the width every value directive writes, when they all agree (`.word` → 4); padding does not count */
+  unit?: number;
+  /** a directive narrower than a word wrote a negative value, which the compiler only does for a
+   *  signed element type */
+  negative: boolean;
 }
 
 /** The function-scope statics a function DEFINES, keyed by {@link LocalObject.name} — the object a

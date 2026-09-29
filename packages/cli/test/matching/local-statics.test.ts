@@ -97,6 +97,26 @@ const CASES: { sym: string; c: string; spelled: RegExp; mwccSpelled?: RegExp; ag
     c: 's32 ord(s32 i) { static const u8 zeta[4] = {1, 2, 3, 4}; static const u8 alpha[4] = {5, 6, 7, 8}; return alpha[i] + zeta[i]; }',
     spelled: /static const u8 zeta\[4\] = \{ 1, 2, 3, 4 \};\n {4}static const u8 alpha\[4\]/,
   },
+  {
+    // a word table no access reads, after an odd-sized one: agbcc's `.word`s say the element, and
+    // with it the alignment that puts `t` at +4
+    sym: 'handed',
+    c:
+      'extern void use(const void *); void handed(void) { static const u8 a[3] = {7, 8, 9}; ' +
+      'static const u32 t[2] = {1, 2}; use(a); use(t); }',
+    spelled: /static const u32 t\[2\] = \{ 1, 2 \};/,
+    mwccSpelled: /static const u8 t\[8\] = \{ 0, 0, 0, 1, 0, 0, 0, 2 \};/,
+  },
+  {
+    // a struct of bytes and a halfword, aligned as agbcc aligns every struct
+    sym: 'window',
+    c:
+      'struct W { u8 a, b, c, d, e, f; u16 g; }; extern u8 AddWindow(const struct W *); u8 window(void) { ' +
+      'static const u8 odd[3] = {1, 2, 3}; static const struct W t = {0, 1, 1, 6, 2, 15, 8}; ' +
+      'AddWindow((const void *)odd); return AddWindow(&t); }',
+    spelled: /static const u8 t\[8\] __attribute__\(\(aligned\(4\)\)\) = \{ 0, 1, 1, 6, 2, 0xf, 8, 0 \};/,
+    mwccSpelled: /static const u8 t\[8\] = \{ 0, 1, 1, 6, 2, 0xf, 0, 8 \};/,
+  },
 ];
 
 describe('function-scope statics — real agbcc: the candidate defines the target’s bytes', () => {

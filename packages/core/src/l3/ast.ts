@@ -420,11 +420,13 @@ export interface SFn {
 }
 
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
- *  the initial elements in order, absent for a static with no initializer (the target's bss). */
+ *  the initial elements in order, absent for a static with no initializer (the target's bss).
+ *  `align` is an alignment in bytes wider than the type's own, which the definition must state. */
 export interface SStatic {
   name: string;
   type: IrType;
   const?: true;
+  align?: number;
   init?: number[];
 }
 

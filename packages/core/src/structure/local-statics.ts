@@ -1,19 +1,29 @@
 // asmlift — the C DEFINITION of each function-scope static a function names (ir/core.ts
-// `LocalObjects`), typed from the accesses the function makes.
+// `LocalObjects`), typed from the target's own definition and the accesses the function makes.
 //
-// The frontend hands over what the target shows: section, size and bytes. What it cannot hand
-// over is the element TYPE, which the object file does not record and the accesses do: a `ldrb`
-// through the address reads a byte, a `lwz` a word. So the element width is the one width every
-// access agrees on, and the element signedness the one extension every narrow load agrees on. An
-// object the function only passes around has no access to ask, and is defined as bytes.
+// The frontend hands over what the target shows: section, size and bytes, and where the target is
+// an assembler listing (agbcc's `.s`) the definition's directives too. Those say the element: the
+// compiler writes each scalar of the initializer with the directive of its width, so a table of
+// `.short`s is one of 16-bit elements whatever the function reads out of it, and a narrow negative
+// value is only ever written for a signed type. An object file (mwcc) shows no directives, and
+// there the element is the one width every access agrees on. The accesses of the element's width
+// then settle its signedness, and an object nothing says anything about is bytes.
+//
+// The listing also shows the ALIGNMENT, which decides where the object lands after the statics
+// declared before it. An element type aligns its array to its own width; a definition aligned
+// wider — a struct, a string, an `ALIGNED(4)` — keeps that alignment in an attribute, because a
+// word table one byte off is misread by the machine and scored as a MATCH. mwcc aligns every
+// object in a data section to at least a word (compiled: `u8[9]` then `s16[5]` land at 0 and 12),
+// so no element type this pass picks moves one there.
 //
 // The definition is a SymbolInfo as well as a declaration, because the structurer spells an access
 // through a symbol's declared shape (`tide[i]` for an array, the bare `q` for a scalar): the shape
 // it spells against and the object the backend defines are one reading of the same facts.
 //
-// REFUSES, naming the static, when the accesses disagree on the width or on the extension, when
-// the width does not divide the size, or when a callee carries the static's name (the block-scope
-// static would hide the function in the call).
+// REFUSES, naming the static, when nothing in the definition settles the width and the accesses
+// disagree on it, when the width does not divide the size, when the loads and the definition
+// disagree on the signedness, when the definition is aligned narrower than its elements, or when a
+// callee carries the static's name (the block-scope static would hide the function in the call).
 import { type Fn, type LocalObject, type Value, defOpMap } from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import type { SStatic } from '../l3/ast';
@@ -25,8 +35,14 @@ export interface LocalStaticShapes {
   statics: SStatic[];
 }
 
-/** The element each access through `obj`'s address reads or writes: width and load extension. */
-function accessesOf(fn: Fn, names: ReadonlySet<string>): Map<string, { widths: Set<number>; signs: Set<boolean> }> {
+/** One access through a static's address: the width it reads or writes, and a load's extension. */
+interface Access {
+  width: number;
+  signed?: boolean;
+}
+
+/** Every access through each static's address. */
+function accessesOf(fn: Fn, names: ReadonlySet<string>): Map<string, Access[]> {
   const defs = defOpMap(fn);
   /** the static an address is computed from — its `gaddr`, through adds of anything else */
   const baseOf = (v: Value, seen = new Set<Value>()): string | null => {
@@ -45,7 +61,7 @@ function accessesOf(fn: Fn, names: ReadonlySet<string>): Map<string, { widths: S
     }
     return null;
   };
-  const out = new Map<string, { widths: Set<number>; signs: Set<boolean> }>();
+  const out = new Map<string, Access[]>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const plain = op.opcode === 'load' || op.opcode === 'store';
@@ -57,12 +73,13 @@ function accessesOf(fn: Fn, names: ReadonlySet<string>): Map<string, { widths: S
       if (sym === null) {
         continue;
       }
-      const a = out.get(sym) ?? out.set(sym, { widths: new Set(), signs: new Set() }).get(sym)!;
       const width = (plain ? op.attrs.width : op.attrs.elemSize) as number;
-      a.widths.add(width);
-      if (op.opcode === 'load' || op.opcode === 'aload') {
-        a.signs.add(accessSignedness(width, op.attrs.signed as boolean | undefined));
-      }
+      const isLoad = op.opcode === 'load' || op.opcode === 'aload';
+      const list = out.get(sym) ?? out.set(sym, []).get(sym)!;
+      list.push({
+        width,
+        ...(isLoad ? { signed: accessSignedness(width, op.attrs.signed as boolean | undefined) } : {}),
+      });
     }
   }
   return out;
@@ -102,19 +119,34 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     if (callees.has(obj.name) || obj.name === fn.name) {
       return say(`whose source name '${obj.name}' is also a function this one names — the static would hide it`);
     }
-    const a = access.get(obj.name);
-    const widths = [...(a?.widths ?? [])];
-    if (widths.length > 1) {
-      return say(`whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)`);
+    const accesses = access.get(obj.name) ?? [];
+    const dir = obj.directives;
+    let width: number;
+    if (dir?.unit !== undefined) {
+      width = dir.unit;
+    } else {
+      const widths = [...new Set(accesses.map((x) => x.width))];
+      if (widths.length > 1) {
+        return say(`whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)`);
+      }
+      width = widths[0] ?? 1;
     }
-    const width = widths[0] ?? 1;
     if (![1, 2, 4].includes(width) || obj.size % width !== 0) {
-      return say(`whose ${width}-byte accesses do not divide its ${obj.size} bytes into elements`);
+      return say(`whose ${width}-byte elements do not divide its ${obj.size} bytes`);
     }
-    if ((a?.signs.size ?? 0) > 1) {
+    // an access of another width reads through a cast, and says nothing about these elements
+    const signs = new Set(accesses.filter((x) => x.width === width && x.signed !== undefined).map((x) => x.signed));
+    if (signs.size > 1) {
       return say('whose loads disagree on whether its elements are signed');
     }
-    const signed = a?.signs.has(true) ?? false;
+    if (dir?.negative === true && signs.has(false)) {
+      return say('whose definition holds negative elements that its loads read zero-extended');
+    }
+    const signed = dir?.negative === true || signs.has(true);
+    if (dir !== undefined && dir.align < width) {
+      return say(`whose definition is aligned to ${dir.align} bytes, less than its ${width}-byte elements are`);
+    }
+    const align = dir !== undefined && dir.align > width ? dir.align : undefined;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
     const init = obj.bytes === undefined ? undefined : elements(obj, width, signed);
@@ -133,7 +165,13 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
         : { shape: 'array' as const, elemSize: width, elemSigned: signed, dims: [count] }),
       ...(isConst ? { const: true } : {}),
     });
-    statics.push({ name: obj.name, type, ...(isConst ? { const: true as const } : {}), ...(init ? { init } : {}) });
+    statics.push({
+      name: obj.name,
+      type,
+      ...(isConst ? { const: true as const } : {}),
+      ...(align !== undefined ? { align } : {}),
+      ...(init ? { init } : {}),
+    });
   }
   return { infos, statics };
 }

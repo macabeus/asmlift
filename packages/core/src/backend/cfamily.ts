@@ -664,9 +664,11 @@ const initElement = (v: number): string =>
   Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
 
 /** A function-scope static's definition, as the first lines of the body. An array's elements are
- *  laid out eight to a line. */
+ *  laid out eight to a line; an alignment the type does not give is an attribute, which gcc and
+ *  mwcc both read after the declarator. */
 function staticDefinition(st: SStatic): string[] {
-  const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}`;
+  const aligned = st.align === undefined ? '' : ` __attribute__((aligned(${st.align})))`;
+  const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}${aligned}`;
   if (st.init === undefined) {
     return [`${head};`];
   }

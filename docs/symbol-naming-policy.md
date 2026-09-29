@@ -44,8 +44,10 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   nothing. The lift defines it instead, in the function body under the source name `name`, from
   what the target carries (`frontend/local-object.ts`): the section gives the qualifier and whether
   there is an initializer (`.rodata` → `static const`, `.data` → `static` with one, bss → `static`
-  without), the size gives the extent, the bytes give the initializer, and the function's own
-  accesses give the element type (`structure/local-statics.ts`). The counter's VALUE is left to
+  without), the size gives the extent, the bytes give the initializer, and the element type comes
+  from the definition's own data directives where the target is an assembler listing (agbcc's
+  `.word`s are a word table, and its `.align` an alignment the definition keeps), else from the
+  function's accesses (`structure/local-statics.ts`). The counter's VALUE is left to
   the candidate's compiler: agbcc's assembler reduces the relocation to `.rodata`+offset, so the
   name never reaches the object, and objdiff at its defaults does not compare a local symbol's name
   (a candidate whose static is `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`).
