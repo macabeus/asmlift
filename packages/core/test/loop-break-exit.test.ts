@@ -73,8 +73,8 @@ test('a header value read after a break is not re-derived from the updated name'
 // and `LATCH_BREAK_SHARES_UPDATED_NAME` for copies reading a name the update wrote,
 // `LATCH_BREAK_SHARES_IDENTITY_SLOT` for an exit value whose copy renders nothing; a break handing
 // the exit the header's own values shares them, `BREAK_SHARES_HEADER_COPIES`), and a latch `break`
-// under an `if` whose join is the loop's exit, where the
-// implicit continue does not hold (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
+// under an `if` whose join is the loop's exit, where the implicit continue does not hold
+// (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
 // refusal is otherwise loud only where the exit is a live merge; an exit that ends in a `ret` can
 // take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break` the latch path
 // refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
@@ -82,8 +82,8 @@ test('a header value read after a break is not re-derived from the updated name'
 // known to need: an edge out of a nested loop's body (a loop this recognizer admits leaves only to its
 // own exit, which lies inside ours); an in-body branch whose other edge leaves the loop as well
 // (if-recovery declines those branches first); and an exit region reading a name this iteration
-// already wrote (naming gives no header value such a name). A bottom-tested loop with such a break
-// is no `do-while` at all: `while (1)` takes it (`DO_WHILE_BREAK`, and `loop-dowhile-break.test.ts`).
+// already wrote (naming gives no header value such a name). A bottom-tested loop with a `break` is
+// no `do-while` at all: `while (1)` takes it (`DO_WHILE_BREAK`, and `loop-dowhile-break.test.ts`).
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
 type Agreement = { judged: number; disagree: number };

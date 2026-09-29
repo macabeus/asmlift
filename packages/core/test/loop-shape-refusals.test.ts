@@ -28,7 +28,8 @@
 //
 // WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". The multi-latch
 // fixture below, which #2 leaves to the `while (1)` recognizer, structures there correctly on all
-// 64 seeds `irTraceOf` judges. So these are CAPABILITY limits, and the loud decline is the contract they ship under: a row that
+// 64 seeds `irTraceOf` judges. So these are CAPABILITY limits of the do-while recognizer, and where
+// no other recognizer takes the loop, the loud decline is the contract they ship under: a row that
 // hits one gets an `ASMLIFT_ERROR` marker rather than a plausible wrong answer, which is this
 // project's first hard rule. Pinning them is pinning that contract, so that widening the recognizer
 // is a deliberate act with a measurement attached rather than a line someone deletes.

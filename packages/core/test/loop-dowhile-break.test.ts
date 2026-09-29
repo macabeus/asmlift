@@ -4,10 +4,10 @@
 // bottom-tested loop whose body has a second edge to the loop's exit. A do-while spelling would
 // leave that edge with no copies of its own, falling into the ones the latch hands the exit, which
 // read the loop variables' names after the loop: sound only where the two edges hand the exit what
-// those names spell, a condition three fixtures below break. `while (1)` spells each edge out with
-// its own copies and its own test, so it takes the loop whether or not they agree, and whether the
-// exit is a live merge or a return tail (`RET_TAIL_BREAK`, which the do-while claimed and then
-// declined on).
+// those names spell, which `BREAK_CARRIES_ANOTHER_VALUE`, `EXIT_READS_THE_UPDATE` and
+// `EXIT_HANDS_ON_THE_UPDATE` do not. `while (1)` spells each edge out with its own copies and its
+// own test, so it takes the loop whether or not they agree, and whether the exit is a live merge or
+// a return tail (`RET_TAIL_BREAK`).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

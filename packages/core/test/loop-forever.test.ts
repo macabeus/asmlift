@@ -2,13 +2,14 @@
 //
 // A loop no other recognizer takes — several latches, such as a `continue` in mid-body beside the
 // bottom latch, a `do-while` whose `||` test stayed as branches, or an inner self-loop on the outer
-// loop's own header; or one latch under a header that computes before it tests — has no single test to put
-// at its top or bottom. It is spelled `while (1)`: every edge back to the header is a continue
-// (implicit at the foot of the region, `continue;` above it), every edge out is a `break` to the one
-// exit the loop is given or an early `return`. An `if` in the body joins where the paths that do
-// not end meet (`foreverJoin`), so an arm that continues does not drag the rest of the iteration
-// into its sibling. The header's params are named as any loop's are, before the body's values: a
-// value the body computes never takes the name of a param the body still reads.
+// loop's own header; one latch under a header that computes before it tests; or a bottom-tested
+// loop with a `break` (`loop-dowhile-break.test.ts`) — is spelled `while (1)`: every edge back to
+// the header is a continue (implicit at the foot of the region, `continue;` above it), every edge
+// out is a `break` to the one exit the loop is given or an early `return`. An `if` in the body
+// joins where the paths that do not end meet (`foreverJoin`), so an arm that continues does not
+// drag the rest of the iteration into its sibling. The header's params are named as any loop's are,
+// before the body's values: a value the body computes never takes the name of a param the body
+// still reads.
 //
 // Each accepted fixture is run against its own IR (`irAgreement`), as `structure()` returns it and
 // as it ships after `readabilityRewrites`.

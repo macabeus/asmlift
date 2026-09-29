@@ -134,9 +134,9 @@ anything the narrow models cannot honour declines),
 **condition flags at a join** (a compare two or more edges bring to one branch, or one the caller
 set), computed tail calls, PIC and `gp`-relative access outside PowerPC's
 small-data relocation — MIPS refuses `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` alike —
-switch fall-through, irreducible loops and loops that exit to more than one live merge, floats, and 64-bit memory ops. Prototypes
-(callee arities, void-ness) come from a caller-supplied map, as a real project takes them from
-headers.
+switch fall-through, irreducible loops and loops that exit to more than one live merge, floats,
+and 64-bit memory ops. Prototypes (callee arities, void-ness) come from a caller-supplied map, as a
+real project takes them from headers.
 
 ## Tests
 

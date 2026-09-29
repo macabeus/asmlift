@@ -35,8 +35,9 @@
 // mid-tested header), PROPERLY-nested loops, in-body `break`/early-`return`, comparison-tree and
 // jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
 // `ArmExit` in switch-recover.ts). Still DECLINED (loud StructureError, never wrong code):
-// irreducible/overlapping loops, exits to more than one live merge, a `break` whose exit copies
-// would clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
+// irreducible/overlapping loops, exits to more than one live merge, a `break` out of a nested loop's
+// body, a `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
+// entered by a plain br).
 // Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
@@ -2606,12 +2607,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // merge has no single-level spelling → decline, as does a `break` edge out of a NESTED loop's
     // body (a two-level exit). A `do-while` takes no break: an edge into its exit that no arm owns
     // leaves the loop to `while (1)`, whose breaks carry their own copies, where the do-while's
-    // would fall into the latch's. An edge to the header's exit is a break whatever the exit holds: the asm runs
-    // ONE copy of the exit region for both edges, and agbcc and mwcc keep a source-duplicated return
-    // tail duplicated, so copying the tail into the arm spells another object. Where that exit ends
-    // in a return, the edge is also an arm or a ret target, and emission copies the tail where the
-    // break spelling refuses. The arms and breaks are kept: emission needs to know which edges out
-    // of the body end an iteration rather than continue it.
+    // would fall into the latch's. An edge to the header's exit is a break whatever the exit holds:
+    // the asm runs ONE copy of the exit region for both edges, and agbcc and mwcc keep a
+    // source-duplicated return tail duplicated, so copying the tail into the arm spells another
+    // object. Where that exit ends in a return, the edge is also an arm or a ret target, and emission
+    // copies the tail where the break spelling refuses. The arms and breaks are kept: emission needs
+    // to know which edges out of the body end an iteration rather than continue it.
     const arms: LoopArm[] = [];
     const breaks = new Set<Block>();
     let singleExit = true;
@@ -2658,8 +2659,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // no break out of an inner loop's body. The exit is the first target under which every other edge
   // out is an early-return arm or lands on a `ret` block with no effect in it, trying first, in
   // block order, the targets laid out after the loop's last body block: a compiler places the code
-  // after a loop there, and an early `return` inside the loop's span, so block order alone makes
-  // that `return` the break and the code after the loop an early return.
+  // after a loop there and an early `return` inside the loop's span, so block order alone would take
+  // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
@@ -6074,7 +6075,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // and so is a latch two body paths reach: the foot of `for (…) { if (c) {…} }`, where deleting it
   // moves the `if`'s join into one arm, which then copies the latch and adds a `continue` the
   // source never wrote. A break block two paths share stays an end, each path its own `break`.
-  // Computed once per loop.
   const foreverJoins = new Map<Block, Map<Block, Block | null>>();
   const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
     let ipdom = foreverJoins.get(fl.header);
@@ -6315,7 +6315,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The update copies take it MERGED with `activeSub`. A map extends the ambient naming where it
     // renders (`exprWith`), but identity elision consults the map alone, so the merge is what drops
     // a copy that `activeSub` spells `n = n` rather than writing it. The two programs are the same,
-    // and it is left conditional so an empty `innerSub` keeps the line exactly as it was.
+    // and it is left conditional so an empty `innerSub` takes the map-less path.
     const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw.header, dw.body, [dw.latch]);
     const latchMap = innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null;
     const updates = argAssigns(dw.latch, dw.header, latchMap);
@@ -7048,8 +7048,8 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
 
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it. Over the
 // subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
-// with `onward`, over the edges it names between members of `keep`: a block none of whose edges
-// is named ends its paths itself, and a block is where the paths into it meet.
+// with `onward`, over only the edges it names between members of `keep`: a block it names no edge
+// from ends its paths, post-dominated by nothing but itself.
 function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) => Block[]): Map<Block, Block | null> {
   const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
   const nodes: (Block | null)[] = [null, ...blocks];
