@@ -173,8 +173,8 @@ describe('the instruction cause beats the shape symptom', () => {
     expect(
       classOf(
         "structure: cannot structure 'f': unrecovered back-edge into block #1 (loop-recovery declined " +
-          'this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe ' +
-          "break) — and the function carries unmodelled instruction 'clz', which is the more likely cause",
+          'this shape: irreducible/overlapping loops, exits to more than one live merge, a break out of a ' +
+          "nested loop, or an unsafe break or continue) — and the function carries unmodelled instruction 'clz', which is the more likely cause",
       ),
     ).toBe('opaque-ops');
   });

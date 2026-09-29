@@ -401,7 +401,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'loop-shapes',
-    label: 'Loop shapes declined (multi-latch / irreducible / hazards)',
+    label: 'Loop shapes declined (irreducible / multi-exit / hazards)',
     pattern: /unrecovered back-edge|loop-recovery declined|pre-update loop variable|a break out of block/,
   },
   {

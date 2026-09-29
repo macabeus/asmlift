@@ -29,17 +29,18 @@
 // coalescing (canTakeName + seeding) and emission (structureBlock + the loop emitters) — they
 // share varName/backArgName mutation and the activeSub/loopCtx dynamic state.
 //
-// Scope: reducible single-latch natural loops — GUARDED self-loop `while` (the guard-fusion
-// un-rotation), UNGUARDED self-loop `do-while` (single block, header === latch), test-at-top
-// `while`, bottom-test `do-while`, PROPERLY-nested loops, in-body `break`/early-`return`,
-// comparison-tree and jump-table `switch`, and a switch arm that FALLS THROUGH into the next one
-// (both regimes — see `ArmExit` in switch-recover.ts). Still DECLINED (loud StructureError, never
-// wrong code): multi-latch headers, irreducible/overlapping loops, conditional `continue`, a
-// `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
-// entered by a plain br). Fall-through carries two REFUSALS of its own rather than a decline: a
-// target language whose `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A
-// back to if-recovery, and arms that do not linearize into one chain — two arms falling into the
-// same sibling, or a fall into the `default:` — refuse in `chainArms`, which answers null.
+// Scope: reducible natural loops — GUARDED self-loop `while` (the guard-fusion un-rotation),
+// UNGUARDED self-loop `do-while` (single block, header === latch), test-at-top `while`,
+// bottom-test `do-while`, `while (1)` for any other latch set (a conditional `continue`, a
+// mid-tested header), PROPERLY-nested loops, in-body `break`/early-`return`, comparison-tree and
+// jump-table `switch`, and a switch arm that FALLS THROUGH into the next one (both regimes — see
+// `ArmExit` in switch-recover.ts). Still DECLINED (loud StructureError, never wrong code):
+// irreducible/overlapping loops, exits to more than one live merge, a `break` whose exit copies
+// would clobber, and mixed-entry self-loops (a guarded header also entered by a plain br).
+// Fall-through carries two REFUSALS of its own rather than a decline: a target language whose
+// `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
+// and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
+// into the `default:` — refuse in `chainArms`, which answers null.
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
@@ -5171,8 +5172,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (onStack.has(b)) {
       throw new StructureError(
         `cannot structure '${fn.name}': unrecovered back-edge into block #${fn.blocks.indexOf(b)} ` +
-          `(loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, ` +
-          `a conditional continue, or an unsafe break)`,
+          `(loop-recovery declined this shape: irreducible/overlapping loops, exits to more than one ` +
+          `live merge, a break out of a nested loop, or an unsafe break or continue)`,
       );
     }
     onStack.add(b);
