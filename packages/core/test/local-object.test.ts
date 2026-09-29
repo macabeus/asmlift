@@ -73,7 +73,7 @@ test('agbcc: an unsized initialized static is the data run under its label', () 
     size: 3,
     bytes: Uint8Array.from([1, 2, 3]),
     bigEndian: false,
-    directives: { align: 1, unit: 1, negative: false },
+    directives: { align: 1, unit: 1, negative: false, string: false },
   });
 });
 
@@ -82,12 +82,12 @@ test('agbcc: the directives say the element width, a narrow negative says signed
     const r = readGasLocalObject(agbcc, sym);
     return 'refused' in r ? r.refused : r.directives;
   };
-  expect(dir('cs.7')).toEqual({ align: 2, unit: 2, negative: true }); // `.short -0x1` under `.align 1`
+  expect(dir('cs.7')).toEqual({ align: 2, unit: 2, negative: true, string: false }); // `.short -0x1` under `.align 1`
   // `.word -0x80000000` is the u32 0x80000000: a word's sign says nothing
-  expect(dir('w.19')).toEqual({ align: 4, unit: 4, negative: false });
-  expect(dir('str.31')).toEqual({ align: 4, unit: 1, negative: false }); // a string is word-aligned
-  expect(dir('st.35')).toEqual({ align: 4, negative: false }); // `.byte`, `.space`, `.word`: no one width
-  expect(dir('big.39')).toEqual({ align: 2, unit: 2, negative: false }); // the `.space` tail is padding
+  expect(dir('w.19')).toEqual({ align: 4, unit: 4, negative: false, string: false });
+  expect(dir('str.31')).toEqual({ align: 4, unit: 1, negative: false, string: true }); // a string is word-aligned
+  expect(dir('st.35')).toEqual({ align: 4, negative: false, string: false }); // `.byte`, `.space`, `.word`: no one width
+  expect(dir('big.39')).toEqual({ align: 2, unit: 2, negative: false, string: false }); // the `.space` tail is padding
   expect(readGasLocalObject('.data\n\t.balign 4\nx.1:\n\t.word 1\n', 'x.1')).toMatchObject({
     refused: 'whose alignment directive this reader does not read',
   });
@@ -202,7 +202,7 @@ test('mwcc: the symbol table gives the section and size, the section contents th
     size: 12,
     bytes: Uint8Array.from([0, 0, 0, 7, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 9]),
     bigEndian: true,
-    placement: { align: 4, aggregateFloor: 4 },
+    placement: { align: 4 },
   });
   // an aggregate initialized to zero stays in .data under mwcc
   expect(bytes(readObjectLocalObject(ad, 'zz$23', 'zdata'))).toEqual([0, 0, 0, 0]);
@@ -230,7 +230,7 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
     section: 'bss',
     size: 8,
     bigEndian: true,
-    placement: { align: 8, aggregateFloor: 4 },
+    placement: { align: 8 },
   });
   expect(
     readObjectLocalObject(dump('mwcc-dump-mCoBG_MakeJumpFlag.txt'), 'make_jump_flag_proc$320', 'mCoBG_MakeJumpFlag'),
@@ -276,8 +276,8 @@ test('the static is defined in the body under its source name, typed by the acce
     's32 fa(s32 a0) {\n    static const u8 tide[3] = { 1, 2, 3 };\n    return tide[a0];\n}\n',
   );
   expect(decompile('fc', agbcc, ARMV4T_AGBCC).source).toContain('    static u8 z[3];\n');
-  // one element holding zero is an ARRAY: mwcc moves a zero scalar to .bss and keeps an aggregate
-  expect(decompile('fd', agbcc, ARMV4T_AGBCC).source).toContain('    static u32 q[1] = { 0 };\n');
+  // agbcc keeps `= 0` in .data, so one element holding zero there is the scalar it reads as
+  expect(decompile('fd', agbcc, ARMV4T_AGBCC).source).toContain('    static u32 q = 0;\n');
   // a sign-extending load types the elements signed, and a long table wraps eight to a line
   expect(decompile('fb', agbcc, ARMV4T_AGBCC).source).toContain('    static const s16 cs[3] = { -1, 2, 3 };\n');
   expect(decompile('fj', agbcc, ARMV4T_AGBCC).source).toContain(
@@ -339,6 +339,29 @@ test('an alignment wider than the elements is stated, one narrower declines', ()
   ]);
   expect(() => decompile('f', packed, ARMV4T_AGBCC)).toThrow(
     "names a function-scope static ('t.3') whose definition is aligned to 1 bytes, less than the 4 its declaration here would get",
+  );
+});
+
+test('a byte array the listing wrote as a string, at the string alignment, is initialized by a string literal', () => {
+  // agbcc word-aligns `static const char str[] = "hello"` for its STRING_CST initializer; the
+  // literal is what gives the definition that alignment, where a byte list would need an attribute
+  expect(decompile('fh', agbcc, ARMV4T_AGBCC).source).toContain('    static const u8 str[6] = "hello";\n');
+  // an array of strings is no string literal and keeps its element's alignment: a byte list
+  const escapes = corpus('agbcc-static-escapes.s');
+  expect(decompile('k1', escapes, ARMV4T_AGBCC).source).toContain('    static const u8 t[12] = {\n');
+  // quotes, backslashes, a trigraph's second `?` and unprintables are octal; trailing zeros are the size's
+  const odd = thumbFn(
+    ['\t.section .rodata', '\t.align\t2, 0', 't.3:', '\t.ascii\t"a\\"b\\\\??\\001\\000\\000"'].join('\n'),
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r1, r0]',
+    ['t.3'],
+  );
+  expect(decompile('f', odd, ARMV4T_AGBCC).source).toContain('    static const u8 t[9] = "a\\042b\\134?\\077\\001";\n');
+});
+
+test('a target whose compiler declares no static layout declines the static', () => {
+  const { staticLayout: _, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+  expect(() => decompile('fa', agbcc, { ...ARMV4T_AGBCC, compilerBehaviors: behaviors })).toThrow(
+    "names a function-scope static ('tide.3') whose layout rules this target's compiler does not declare",
   );
 });
 

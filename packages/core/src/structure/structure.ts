@@ -104,7 +104,7 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from './hazards';
-import { localStaticShapes, nameLocalStatics } from './local-statics';
+import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -1705,6 +1705,10 @@ export interface StructureOptions {
   // compiles to the unfused pair the object holds. A compiler opts in; the target says which
   // (`compilerBehaviors.contractsFloatProducts`).
   contractsFloatProducts?: boolean;
+  // How this compiler lays out a function-scope static (`compilerBehaviors.staticLayout`), which
+  // decides the definition that puts one where the target has it. Absent ⇒ unmeasured, and a
+  // function that defines a static declines.
+  staticLayout?: StaticLayout;
   // Materialize a pure value that one join's incoming edges render into the SAME parameter slot
   // from 2+ places — the value the source computed once above the branch and the copy machinery
   // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
@@ -2066,6 +2070,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
+    staticLayout,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     freshParamMerge = false,
@@ -2082,7 +2087,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //
   // A function-scope static is asked by its linker name, which no map holds, and comes FIRST: its
   // shape is its definition's, never the one raise/globalshape.ts infers from its accesses.
-  const localStatics = localStaticShapes(fn);
+  const localStatics = localStaticShapes(fn, staticLayout);
   if ('refused' in localStatics) {
     throw new StructureError(
       `cannot structure '${fn.name}': names a function-scope static ('${localStatics.symbol}') ${localStatics.refused}`,

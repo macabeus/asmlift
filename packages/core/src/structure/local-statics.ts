@@ -15,10 +15,12 @@
 // The target also shows the ALIGNMENT — the listing's `.align`, mwcc's `.comment` record — which
 // decides where the object lands after the statics declared before it, and whether a DMA or GX
 // buffer is where the hardware needs it. The definition this pass picks gets its compiler's own
-// alignment: agbcc aligns an array to its element, mwcc an array or struct to at least a word and
-// a scalar to its width. A target aligned wider — a struct, a string, an `s64`, an
-// `ALIGNED(32)` — keeps that alignment in an attribute, because a table one element off is misread
-// by the machine and scored as a MATCH.
+// alignment, which the target declares ({@link StaticLayout}): a scalar to its width, an array to
+// its element or the compiler's aggregate floor, a string literal to the compiler's string
+// alignment. A target aligned wider — a struct, an `s64`, an `ALIGNED(32)` — keeps that alignment
+// in an attribute, because a table one element off is misread by the machine and scored as a
+// MATCH. A byte array the listing wrote as strings and placed at the string alignment is spelled
+// with a string literal, which is what gives it that alignment.
 //
 // The definition is a SymbolInfo as well as a declaration, because the structurer spells an access
 // through a symbol's declared shape (`tide[i]` for an array, the bare `q` for a scalar): the shape
@@ -47,6 +49,19 @@ import {
 } from '../l3/ast';
 import { takenNames } from '../l3/hoist';
 import { type SymbolInfo, accessSignedness } from '../symbols';
+
+/** How a compiler lays out a function-scope static — facts about the COMPILER, declared per target
+ *  (target.ts `compilerBehaviors.staticLayout`), from which the definition that puts a static where
+ *  the target has it follows. */
+export interface StaticLayout {
+  /** the least alignment it gives an array or a struct, whatever the element */
+  aggregateAlign: number;
+  /** the alignment it gives a declaration initialized by a string literal */
+  stringAlign: number;
+  /** where a scalar initialized to zero goes: kept in `.data`, or moved to bss — where its
+   *  initializer is gone, and one element of zero in `.data` must then have been an aggregate */
+  zeroScalar: 'data' | 'bss';
+}
 
 /** Each static's shape for the structurer, and its definition for the backend. */
 export interface LocalStaticShapes {
@@ -136,12 +151,19 @@ function elements(obj: LocalObject, width: number, signed: boolean): number[] {
 
 /** The shape and definition of every static `fn` defines, or the refusal: the static's linker name
  *  and the tail of the sentence. */
-export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string; refused: string } {
+export function localStaticShapes(
+  fn: Fn,
+  layout: StaticLayout | undefined,
+): LocalStaticShapes | { symbol: string; refused: string } {
   const objs = fn.localObjects;
   const infos = new Map<string, SymbolInfo>();
   const statics: SStatic[] = [];
   if (objs === undefined) {
     return { infos, statics };
+  }
+  if (layout === undefined) {
+    const [first] = objs.keys();
+    return { symbol: first, refused: "whose layout rules this target's compiler does not declare" };
   }
   const access = accessesOf(fn, new Set(objs.keys()));
   // Declared in the target's declaration order, which the compiler lays the objects out by (mwcc
@@ -150,6 +172,8 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
     const accesses = access.get(obj.symbol) ?? [];
     const dir = obj.directives;
+    // the alignment the target shows
+    const shown = dir?.align ?? obj.placement?.align;
     let width: number;
     if (dir?.unit !== undefined) {
       width = dir.unit;
@@ -158,8 +182,8 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
       if (widths.length > 1) {
         return say(`whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)`);
       }
-      // with no access either, an object mwcc aligned below its aggregate floor is a scalar
-      const scalarOnly = obj.placement !== undefined && obj.placement.align < obj.placement.aggregateFloor;
+      // with no access either, an object aligned below the compiler's aggregate floor is a scalar
+      const scalarOnly = shown !== undefined && shown < layout.aggregateAlign;
       width = widths[0] ?? (scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1);
     }
     if (![1, 2, 4].includes(width)) {
@@ -177,14 +201,15 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
     const init = obj.bytes === undefined ? undefined : elements(obj, width, signed);
-    // One element is a scalar — unless it is initialized data holding zero, which mwcc moves to
-    // .bss as a scalar and keeps in .data as an aggregate (`static int q = 0;` against
-    // `static int q[1] = {0};`, compiled), so the array keeps the section the target shows.
-    const scalar = count === 1 && !(obj.section === 'data' && init!.every((v) => v === 0));
+    // One element is a scalar — unless it is initialized data holding zero on a compiler that
+    // moves a zero scalar to bss, where it can only have been an aggregate, which the compiler
+    // keeps in .data.
+    const scalar =
+      count === 1 && !(layout.zeroScalar === 'bss' && obj.section === 'data' && init!.every((v) => v === 0));
     const type: IrType = scalar ? elem : T.array(elem, count);
+    const string = dir?.string === true && width === 1 && !scalar && shown !== undefined && shown >= layout.stringAlign;
     // The alignment the target shows against the one this definition gets from its compiler.
-    const shown = dir?.align ?? obj.placement?.align;
-    const own = obj.placement === undefined || scalar ? width : Math.max(width, obj.placement.aggregateFloor);
+    const own = scalar ? width : Math.max(width, layout.aggregateAlign, string ? layout.stringAlign : 1);
     if (shown !== undefined && shown < own) {
       return say(`whose definition is aligned to ${shown} bytes, less than the ${own} its declaration here would get`);
     }
@@ -205,6 +230,7 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
       ...(isConst ? { const: true as const } : {}),
       ...(align !== undefined ? { align } : {}),
       ...(init ? { init } : {}),
+      ...(string ? { string: true as const } : {}),
     });
   }
   return { infos, statics };

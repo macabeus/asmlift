@@ -46,6 +46,7 @@
 import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
+import type { StaticLayout } from './structure/local-statics';
 import type { StructureOptions } from './structure/structure';
 import type { SwitchBoundCase } from './structure/switch-recover';
 
@@ -537,6 +538,15 @@ export interface TargetDescription {
     // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
     // compute on a float at all.
     contractsFloatProducts?: boolean;
+    // How the compiler lays out a FUNCTION-SCOPE STATIC: the least alignment of an array, the
+    // alignment of a string-literal initializer, and whether a zero scalar keeps its `.data`. The
+    // bytes of a static do not say how the source declared it; these, with the alignment and
+    // section the target shows, say which declaration lands it there (structure/local-statics.ts).
+    // A LAYOUT fact like `aggregateBoundary`, and the compiler's, read by the structurer.
+    //
+    // ABSENT ⇒ unmeasured, and a function that defines a static declines: a wrong floor mislays
+    // every static after the first, which no score sees.
+    staticLayout?: StaticLayout;
   };
 }
 
@@ -608,6 +618,13 @@ export const ARMV4T_AGBCC: TargetDescription = {
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     aggregateBoundary: 4,
+    // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
+    // alignment (no DATA_ALIGNMENT); a declaration initialized by a STRING_CST is word-aligned —
+    // CONSTANT_ALIGNMENT (thumb.h:361) over DECL_INITIAL (varasm.c:1214-1216), so
+    // `static const char s[] = "hi"` is at 4 while `= {'h', 'i', 0}` and an array of strings
+    // (whose DECL_INITIAL is a CONSTRUCTOR) are at 1; and `= 0` keeps its `.data`, where only a
+    // declaration with no initializer is `.lcomm` (compiled).
+    staticLayout: { aggregateAlign: 1, stringAlign: 4, zeroScalar: 'data' },
     narrowParamWitness: 'prologue-extension',
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
     // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
@@ -849,6 +866,12 @@ export const PPC_MWCC: TargetDescription = {
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
     aggregateBoundary: 1,
+    // MEASURED on mwcc_242_81 through the `.comment` alignment record: an array or a struct is at
+    // 4 at least (`u8[1]`, a struct of two bytes), a scalar at its width; a string-literal
+    // initializer gets no more than the array does (`char s[] = "hello!"` and a `u8` list both 4);
+    // and a scalar `= 0` moves to bss, where `int q[1] = {0}` stays in `.data`. The other mwcc
+    // builds this description serves are not measured.
+    staticLayout: { aggregateAlign: 4, stringAlign: 4, zeroScalar: 'bss' },
     // MEASURED on all three builds at -O4,p and -O0,p: the note at the field. The two are one
     // declaration: without the layout gate a relational if-ladder reads as a `switch`. The gate's
     // reach is the committed probes alone — withdrawn, it moves 0 of the 180 PPC benchmark rows

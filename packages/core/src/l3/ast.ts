@@ -428,6 +428,9 @@ export interface SStatic {
   const?: true;
   align?: number;
   init?: number[];
+  /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
+   *  string (structure/local-statics.ts) */
+  string?: true;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

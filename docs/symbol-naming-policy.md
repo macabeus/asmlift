@@ -50,7 +50,12 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   signedness (`structure/local-statics.ts`). The ALIGNMENT is the target's too — agbcc's `.align`
   ahead of the label, and the record mwcc's `.comment` section keeps for every symbol (an `s64`
   records 8, an `aligned(32)` buffer 32; no section header or symbol value pins it) — and the
-  definition states it in an attribute wherever it is wider than its declaration gets. A `const`
+  definition states it in an attribute wherever it is wider than its declaration gets. What a
+  declaration gets is the compiler's, declared per target in `compilerBehaviors.staticLayout`: the
+  least alignment of an array, the alignment of a string-literal initializer (agbcc word-aligns
+  one, so a byte array its listing wrote as `.ascii` at that alignment is initialized with a string
+  literal rather than given an attribute), and whether a zero scalar keeps `.data` (agbcc) or moves
+  to bss (mwcc, where one zero element in `.data` must be an array of one). A `const`
   static's address that reaches an argument, an assignment or a return is cast to the unqualified
   pointer, because mwcc does not drop the qualifier implicitly.
 

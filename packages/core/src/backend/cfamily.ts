@@ -685,6 +685,27 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
 const initElement = (v: number): string =>
   Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
 
+/** A byte array's initial elements as a string literal: printable characters as themselves, every
+ *  other byte in three-digit octal (which no following digit can extend), and a `?` after a `?`
+ *  escaped so no trigraph forms. The trailing zeros are left to the declared size, which C fills
+ *  with zeros. */
+function stringLiteral(init: readonly number[]): string {
+  let end = init.length;
+  while (end > 0 && (init[end - 1] & 0xff) === 0) {
+    end--;
+  }
+  let out = '';
+  for (const v of init.slice(0, end)) {
+    const b = v & 0xff;
+    const c = String.fromCharCode(b);
+    out +=
+      b < 0x20 || b > 0x7e || c === '"' || c === '\\' || (c === '?' && out.endsWith('?'))
+        ? `\\${b.toString(8).padStart(3, '0')}`
+        : c;
+  }
+  return `"${out}"`;
+}
+
 /** A function-scope static's definition, as the first lines of the body. An array's elements are
  *  laid out eight to a line; an alignment the type does not give is an attribute, which gcc and
  *  mwcc both read after the declarator. */
@@ -693,6 +714,9 @@ function staticDefinition(st: SStatic): string[] {
   const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}${aligned}`;
   if (st.init === undefined) {
     return [`${head};`];
+  }
+  if (st.string) {
+    return [`${head} = ${stringLiteral(st.init)};`];
   }
   if (st.type.kind !== 'array') {
     return [`${head} = ${initElement(st.init[0])};`];

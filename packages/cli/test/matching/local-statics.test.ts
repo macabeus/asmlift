@@ -97,6 +97,23 @@ const CASES: {
     agbccScore: 5,
   },
   {
+    // agbcc keeps `= 0` in .data, so the one zero element there is a scalar; mwcc moves it to bss
+    sym: 'zeroed',
+    c: 's32 zeroed(void) { static s32 q = 0; q++; return q; }',
+    spelled: /static u32 q = 0;\n {4}s32 v0;\n {4}v0 = q;/,
+    mwccSpelled: /static u32 q;\n {4}s32 v0;\n {4}v0 = q;/,
+  },
+  {
+    // agbcc word-aligns a string-literal initializer, and the literal is what says so; mwcc's
+    // object shows no directives, and a byte list lands where the string did
+    sym: 'hello',
+    c:
+      'extern void use(const void *); void hello(void) { static const u8 a[3] = {1, 2, 3}; ' +
+      'static const char s[] = "hello!"; use(a); use(s); }',
+    spelled: /static const u8 a\[3\] = \{ 1, 2, 3 \};\n {4}static const u8 s\[7\] = "hello!";/,
+    mwccSpelled: /static const u8 s\[7\] = \{ 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0 \};/,
+  },
+  {
     sym: 'words',
     c: 'u32 words(s32 i) { static const u32 w[2] = {0x80000000, 5}; return w[i]; }',
     spelled: /static const u32 w\[2\] = \{ 0x80000000, 5 \};/,

@@ -88,13 +88,10 @@ export interface LocalObject {
   placement?: LocalObjectPlacement;
 }
 
-/** The alignment an object file records for a static, and the rule its compiler aligns by. */
+/** What an object file records of where a static sits. */
 export interface LocalObjectPlacement {
   /** the alignment the compiler gave the object (mwcc's `.comment` record for its symbol) */
   align: number;
-  /** the least alignment that compiler gives an array or a struct whatever its element: mwcc
-   *  records 4 for `u8[1]` and for a struct of two bytes, and 1 for a scalar `u8` (compiled) */
-  aggregateFloor: number;
 }
 
 /** An initialized static's data directives, as the compiler wrote them. The compiler writes each
@@ -108,6 +105,9 @@ export interface LocalObjectDirectives {
   /** the directives share a `unit` narrower than a word and one wrote a negative value, which the
    *  compiler only does for a signed element type */
   negative: boolean;
+  /** every value directive writes a string (`.ascii`), as the compiler writes a string literal —
+   *  whole, or as the elements of an array or struct of strings */
+  string: boolean;
 }
 
 /** The function-scope statics a function DEFINES, keyed by {@link LocalObject.symbol} — the object a

@@ -112,11 +112,13 @@ const le = (value: number, width: number): number[] =>
   Array.from({ length: width }, (_, i) => (value >>> (8 * i)) & 0xff);
 
 /** What one data directive writes: its bytes, the width of each value it writes (null for
- *  padding, which writes none), and whether one of those values is negative. */
+ *  padding, which writes none), whether one of those values is negative, and whether it writes a
+ *  string. */
 interface DirectiveData {
   bytes: number[];
   width: number | null;
   negative: boolean;
+  string: boolean;
 }
 
 /** One data directive's data; `{ address }` when an operand is not a number (a symbol — the word is
@@ -140,18 +142,20 @@ function dataBytes(directive: string, operands: string): DirectiveData | { addre
       negative ||= v < 0;
       out.push(...le(v, width));
     }
-    return { bytes: out, width, negative };
+    return { bytes: out, width, negative, string: false };
   }
   if (/^(space|skip|zero)$/.test(directive)) {
     const [n, fill, ...rest] = operands.split(',').map((s) => gasInteger(s));
     return n === null || n < 0 || rest.length > 0 || fill === null
       ? null
-      : { bytes: new Array<number>(n).fill((fill ?? 0) & 0xff), width: null, negative: false };
+      : { bytes: new Array<number>(n).fill((fill ?? 0) & 0xff), width: null, negative: false, string: false };
   }
   if (/^(ascii|asciz|string)$/.test(directive)) {
     const m = operands.trim().match(/^"((?:[^"\\]|\\.)*)"$/);
     const s = m ? gasString(m[1]) : null;
-    return s === null ? null : { bytes: directive === 'ascii' ? s : [...s, 0], width: 1, negative: false };
+    return s === null
+      ? null
+      : { bytes: directive === 'ascii' ? s : [...s, 0], width: 1, negative: false, string: true };
   }
   return null;
 }
@@ -250,6 +254,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
   const bytes: number[] = [];
   const widths = new Set<number>();
   let negative = false;
+  const strings = new Set<boolean>();
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
   for (let i = at; i < lines.length; i++) {
     const line = i === at ? first : lines[i];
@@ -277,6 +282,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     if (b.width !== null) {
       widths.add(b.width);
       negative ||= b.negative && b.width < 4;
+      strings.add(b.string);
     }
   }
   if (bytes.length === 0) {
@@ -308,7 +314,12 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     size: bytes.length,
     bytes: Uint8Array.from(bytes),
     bigEndian: false,
-    directives: { align, ...(unit !== undefined ? { unit } : {}), negative: unit !== undefined && negative },
+    directives: {
+      align,
+      ...(unit !== undefined ? { unit } : {}),
+      negative: unit !== undefined && negative,
+      string: strings.size === 1 && strings.has(true),
+    },
   };
 }
 
@@ -438,7 +449,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
   if (align === null) {
     return refused("whose alignment the object's `.comment` section does not record");
   }
-  const placement = { align, aggregateFloor: 4 };
+  const placement = { align };
   if (kind === 'bss') {
     return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian, placement };
   }
