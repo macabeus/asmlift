@@ -589,7 +589,12 @@ export function auditFrameObjects({
     // FIVE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an object that does
     // not start at the bottom of it, an address that reaches memory rather than a callee, and the
     // callee's declared return — and each has a test that fails without it. The precautionary ones are marked where they sit.
-    const notTheWholeArea = (off: number): string | null => {
+    //
+    // The last two are about an ESCAPE, and they are asked only of an object that escapes or that
+    // nothing in this function addresses. An object this function indexes and never lets go of is
+    // written and read by its own indexed accesses alone, so the reservation is all there is to
+    // size it by: `u8 a[8]; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i];`.
+    const notTheWholeArea = (off: number, indexedHere: boolean): string | null => {
       if (objects.size !== 1) {
         return 'another address-taken object shares the frame, so the reservation is not this one alone';
       }
@@ -617,7 +622,9 @@ export function auditFrameObjects({
         return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
       }
       if (!escaped.has(off)) {
-        return 'the address never leaves this function, so there is no writer of the storage to size it for';
+        return indexedHere
+          ? null
+          : 'the address never leaves this function, so there is no writer of the storage to size it for';
       }
       if (!passedToCallee.has(off)) {
         return 'the address is published rather than passed as an argument, and nothing declares what reads it';
@@ -638,11 +645,11 @@ export function auditFrameObjects({
         // model, which one byte is enough to decide; otherwise nothing in-function pins it at
         // all, and a guessed declaration is the plausible-but-wrong class.
         failIfSlotKeysIt(off, 1);
-        const why = notTheWholeArea(off);
+        const why = notTheWholeArea(off, byIndex.length > 0);
         if (why !== null) {
           fail(
             (byIndex.length > 0
-              ? 'the captured address is read only through a runtime index'
+              ? 'the captured address is addressed only through a runtime index'
               : 'the captured address is never dereferenced in this function') +
               `, so nothing pins the local object type — and ${why}`,
           );

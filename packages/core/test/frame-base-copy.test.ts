@@ -504,6 +504,20 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(/flows into `load`/);
       });
 
+      // …and the storage need not escape: its own indexed stores write it. agbcc's own output for
+      // `u32 f(u32 i){ u8 a[8]; u32 j; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i]; }`.
+      test('an indexed object that never escapes is written by its own indexed stores', () => {
+        const local =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr2, #0x0\n\tldr\tr3, .L8\n' +
+          '.L6:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tadd\tr1, r2, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n' +
+          '\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n\tbls\t.L6\n\tmov\tr1, sp\n\tadd\tr0, r1, r4\n\tldrb\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L8:\n\t.word\ttbl\n';
+        const src = lift(local).source;
+        expect(src).toContain('u8 sp0[8];');
+        expect(src).toContain('((u8 *)sp0)[v0] = ((u8 *)&tbl)[v0];');
+        expect(src).toContain('return ((u8 *)sp0)[a0];');
+      });
+
       test('an object an access of its own types as a scalar is not indexed', () => {
         expect(() => lift(indexed('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n'))).toThrow(
           /a runtime index into the object at \[sp,#0\), which an access of its own types as one scalar/,
