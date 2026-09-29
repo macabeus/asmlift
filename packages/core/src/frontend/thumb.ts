@@ -2378,8 +2378,10 @@ interface FrameObjectAudit {
  *  used, and an object NO access reaches is sized by the frame reservation and left untyped.
  *
  *  Takes its inputs explicitly rather than closing over `lift`. Every one of them is READ, none is
- *  reassigned, and the only mutation is to the ops reachable through `irBlocks` — the widths,
- *  signedness and `volatile` this stamps onto each surviving `laddr`. */
+ *  reassigned, and the only mutations are to the ops reachable through `irBlocks`: a moved-from
+ *  capture nothing reads is dropped, a capture addressed through at fixed offsets is split into
+ *  the objects its accesses name, and each surviving `laddr` is stamped with its width,
+ *  signedness, count and `volatile`. */
 function auditFrameObjects({
   name,
   irBlocks,
@@ -2581,10 +2583,8 @@ function auditFrameObjects({
     }
     // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
     // edge arg taints the receiving block param. A phi that merges two objects has no single
-    // answer, and picking one would put an access on the wrong storage. Nothing builds one today,
-    // and the reason is worth knowing before changing the split: an object at a nonzero offset
-    // exists only where the split ran, the split refuses any capture with an edge-argument use,
-    // and every frame-base object is the same object.
+    // answer, and picking one would put an access on the wrong storage: `get(c ? &a : &b)` is
+    // `add r0, sp, #0x4 / beq / add r0, sp, #0x8 / bl get`, and refuses here.
     const taint = new Map<Value, number>();
     for (const [off, ops] of objects) {
       for (const op of ops) {

@@ -1529,6 +1529,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
     });
 
+    // …and a value that is one object on one path and another on the other names neither. agbcc's
+    // own output for `s32 a, b; five(x, y, x, y, x); a = x; b = y; return get(c ? &a : &b);`.
+    test('a phi of two objects refuses', () => {
+      const select =
+        'f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tadd\tr6, r2, #0\n\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n' +
+        '\tstr\tr4, [sp, #0x8]\n\tstr\tr5, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tcmp\tr6, #0\n\tbeq\t.L3\n' +
+        '\tadd\tr0, sp, #0x8\n.L3:\n\tbl\tget\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        get: { params: ['const s32 *'], returns: 's32' },
+      };
+      expect(() => decompile('f', select, ARMV4T_AGBCC, { prototypes })).toThrow(
+        /a phi merges the frame objects at \[sp,#4\] and \[sp,#8\] — one value, two objects/,
+      );
+    });
+
     // …and a move the walk cannot follow — the capture in one block, the move in the next — is
     // refused by that name, not as the slot the unfolded offset left behind.
     test('a capture moved in another block is refused as the move', () => {
