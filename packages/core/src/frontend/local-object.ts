@@ -18,8 +18,8 @@
 //   • the object sits in a section that is not read-only data, initialized data or bss;
 //   • a relocation falls inside its bytes — the initializer holds an address, which is a
 //     declaration of another object this reader does not make;
-//   • its extent cannot be read: a data directive this reader does not parse, a size that
-//     disagrees with the bytes under the label, or an empty object;
+//   • its extent cannot be read: a directive inside its data run this reader does not parse, a
+//     size that disagrees with the bytes under the label, or an empty object;
 //   • its alignment cannot be read: an `.align` form this reader does not parse, or an object file
 //     whose `.comment` section does not record it;
 //   • another function names it too. A static of an inlined same-unit function is named by every
@@ -79,6 +79,10 @@ function gasInteger(s: string): number | null {
   return m[1] ? -mag : mag;
 }
 
+/** The named escapes agbcc's ASM_OUTPUT_ASCII writes (agbcc/gcc/thumb.h:195-260); every other
+ *  unprintable byte it writes as `\ooo` octal. */
+const GAS_ESCAPES: Readonly<Record<string, number>> = { n: 10, t: 9, r: 13, f: 12, b: 8, '\\': 92, '"': 34 };
+
 /** The bytes of a GNU as string literal body (between its quotes), or null for an escape this
  *  reader does not decode. */
 function gasString(body: string): number[] | null {
@@ -94,8 +98,8 @@ function gasString(body: string): number[] | null {
     if (oct) {
       out.push(parseInt(oct[0], 8) & 0xff);
       i += oct[0].length - 1;
-    } else if (n === 'n' || n === 't' || n === 'r' || n === '\\' || n === '"') {
-      out.push({ n: 10, t: 9, r: 13, '\\': 92, '"': 34 }[n]);
+    } else if (n in GAS_ESCAPES) {
+      out.push(GAS_ESCAPES[n]);
     } else {
       return null;
     }
@@ -171,14 +175,33 @@ function alignAhead(lines: readonly string[], at: number): number | null {
   return 1;
 }
 
+/** The directives that end an object's data run without being part of it: the next object's
+ *  alignment or bss allocation, and what ends a file or opens code. Any other directive inside the
+ *  run is one this reader cannot size, so it refuses there rather than end the object short — an
+ *  unsized object has no `.size` to catch the truncation (telf.h:297-316 prints one only when the
+ *  declaration knows the size). */
+const RUN_ENDS: ReadonlySet<string> = new Set([
+  'align',
+  'balign',
+  'p2align',
+  'lcomm',
+  'comm',
+  'ident',
+  'end',
+  'code',
+  'thumb',
+  'thumb_func',
+  'arm',
+]);
+
 /** Read a function-scope static's definition out of GNU as text (agbcc's `.s`).
  *
  *  Two shapes, both agbcc 2.9's (varasm.c `assemble_variable`): an object with NO initializer is
  *  `.lcomm name.N,size` — bss, with the exact size; an initialized one is a label under
  *  `.section .rodata` or `.data`, followed by its data directives. `.size name.N,K` is emitted for
  *  a sized declarator and NOT for an unsized one (`static const u8 tide[] = {…}` has none), so the
- *  extent is the data run under the label, which ends at the next label, section switch or any
- *  other directive, and `.size` where present must agree with it. */
+ *  extent is the data run under the label, which ends at the next label, section switch,
+ *  instruction or one of {@link RUN_ENDS}, and `.size` where present must agree with it. */
 export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead {
   const parts = localStaticName(symbol);
   if (parts === null) {
@@ -237,18 +260,15 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
       break;
     }
     const d = line.match(/^\.(\w+)\s*(.*)$/);
-    if (!d) {
-      break; // an instruction
+    if (!d || RUN_ENDS.has(d[1])) {
+      break; // an instruction, or what comes after an object
     }
     if (d[1] === 'type' || d[1] === 'size' || d[1] === 'globl') {
       continue;
     }
     const b = dataBytes(d[1], d[2]);
     if (b === null) {
-      if (bytes.length === 0) {
-        return refused(`whose data starts with '.${d[1]}', a directive this reader does not read as bytes`);
-      }
-      break; // `.align` and the like: the run ended
+      return refused(`whose data run holds '.${d[1]}', a directive this reader does not read as bytes`);
     }
     if ('address' in b) {
       return refused(`whose initializer holds the address '${b.address}' — a relocation inside the object`);

@@ -4,6 +4,7 @@
 //   corpus/agbcc-local-statics.s   agbcc 2.9 `-mthumb-interwork -O2 -fhex-asm` over the C below
 //   corpus/agbcc-inline-static.s   the same compiler over a `static inline` callee used by A and B
 //   corpus/agbcc-static-data-word.s  the same compiler over a static whose initializer names another
+//   corpus/agbcc-static-escapes.s  the same compiler over statics whose strings carry `\b` and `\f`
 //   corpus/mwcc-local-statics.txt  `objdump -s -r -t` of mwcc_242_81 `-O4,s -inline auto` over m2.c
 //   corpus/mwcc-dump-*.txt         the published `asmDump` of three benchmark rows, as the harness
 //                                  hands it to asmlift
@@ -23,6 +24,11 @@
 // agbcc-static-data-word.s:
 //   s32 X(s32 i) { return i + 1; }
 //   s32 T(s32 i) { static const u8 tide[2] = {1, 2}; static const u8 *const ptr = tide; return tide[i] + *ptr; }
+// agbcc-static-escapes.s:
+//   struct E { u8 a; char s[3]; };
+//   const char *k1(s32 i) { static const char t[][4] = {"ab", "c\b", "de"}; return t[i]; }
+//   const u8 *h5(void) { static const struct E t[] = {{1, "\f"}, {2, "x"}}; return &t[0].a; }
+//   u8 g1(s32 i) { static const char s[] = "hello!"; return s[i]; }
 // agbcc-inline-static.s:
 //   static inline int counter(void) { static int n; return ++n; }
 //   static inline int tab(int i) { static const unsigned char t[4] = {9,8,7,6}; return t[i]; }
@@ -121,6 +127,24 @@ test('agbcc: words, strings, `.space` padding and a long `.space` tail all read 
   expect(readGasLocalObject('.data\nx.1:\n\t.space\t010\n', 'x.1')).toMatchObject({ size: 8 });
   // a float word carries its value in a trailing `@` comment, which is not an operand
   expect(bytes(readGasLocalObject(agbcc, 'fl.43'))).toEqual([0, 0, 0x80, 0x3f, 0, 0, 0x20, 0x40]);
+});
+
+test('agbcc: every escape agbcc writes in a string decodes, so an unsized object keeps its whole run', () => {
+  // neither object has a `.size` to catch a run that ended early
+  const asm = corpus('agbcc-static-escapes.s');
+  expect(bytes(readGasLocalObject(asm, 't.3'))).toEqual([0x61, 0x62, 0, 0, 0x63, 8, 0, 0, 0x64, 0x65, 0, 0]);
+  expect(bytes(readGasLocalObject(asm, 't.7'))).toEqual([1, 12, 0, 0, 2, 0x78, 0, 0]);
+});
+
+test('agbcc: a directive inside the run that is not data refuses rather than ending the object', () => {
+  expect(readGasLocalObject('.data\nx.1:\n\t.byte 1\n\t.fill 2, 1, 0\n\t.byte 2\n', 'x.1')).toEqual({
+    refused: "whose data run holds '.fill', a directive this reader does not read as bytes",
+  });
+  expect(readGasLocalObject('.data\nx.1:\n\t.ascii "a\\v"\n', 'x.1')).toMatchObject({
+    refused: expect.stringContaining("'.ascii'"),
+  });
+  // the next object's alignment ends it
+  expect(bytes(readGasLocalObject('.data\nx.1:\n\t.byte 1\n\t.align 2, 0\ny.2:\n\t.word 3\n', 'x.1'))).toEqual([1]);
 });
 
 test('agbcc: an initializer holding an address refuses — the word is relocated', () => {

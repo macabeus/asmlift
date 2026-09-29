@@ -184,6 +184,15 @@ const CASES: {
       /static u16 b1;\n {4}static u8 a3 __attribute__\(\(aligned\(4\)\)\);\n {4}static u8 l\[16\] __attribute__\(\(aligned\(8\)\)\);/,
   },
   {
+    // strings agbcc writes with `\b` and `\f`, in objects with no `.size`: the whole run is the object
+    sym: 'escapes',
+    c:
+      'struct E { u8 a; char s[3]; }; extern void use(const void *); void escapes(void) { ' +
+      'static const char t[][4] = {"ab", "c\\b", "de"}; static const struct E e[] = {{1, "\\f"}, {2, "x"}}; ' +
+      'use(t); use(e); }',
+    spelled: /static const u8 t\[12\] = \{/,
+  },
+  {
     sym: 'fields',
     c: 's32 fields(s32 i) { static const struct { s32 a; s32 b; } t[3] = {{1, 2}, {3, 4}, {5, 6}}; return t[i].b; }',
     spelled: /static const u32 t\[6\] = \{ 1, 2, 3, 4, 5, 6 \};/,
