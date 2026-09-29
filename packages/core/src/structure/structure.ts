@@ -2533,6 +2533,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // (pure test-at-top) → `while`; the LATCH exits (body-first) → `do-while`. Anything that fails
   // is left to `while (1)` (below), or declines to plain if-recovery, which re-enters the header and
   // fails loud via `onStack`.
+  //
+  // What every loop form asks first (`admissible`): each inner loop whose header sits in this body
+  // is PROPERLY nested — its ENTIRE body is contained in ours (a forest descendant). Structuring
+  // then recurses naturally: when the outer body reaches the inner header, structureBlock
+  // dispatches to the inner's own emitter. An OVERLAPPING loop (shared blocks, neither containing
+  // the other → irreducible) DECLINES. If a contained inner is itself unstructurable, the outer's
+  // body structuring loud-fails at the inner back-edge (onStack) — a safe decline, not a
+  // miscompile. And the body is single-entry: every block but the header is entered ONLY from
+  // inside it — no jump into the loop interior. A `break` edge must also not leave from an inner
+  // loop's body (`innerBodyHas`), which would be a two-level exit.
+  const innerBodyHas = (nl: NaturalLoop, b: Block): boolean =>
+    [...forest.byHeader.values()].some((l2) => l2.header !== nl.header && nl.body.has(l2.header) && l2.body.has(b));
+  const admissible = (nl: NaturalLoop): boolean =>
+    [...forest.byHeader.values()].every(
+      (l2) => l2.header === nl.header || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
+    ) && [...nl.body].every((bb) => bb === nl.header || (preds.get(bb) ?? []).every((p) => nl.body.has(p)));
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
@@ -2544,32 +2560,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       continue;
     } // single latch only
     const latch = nl.selfLoop ? h : nl.latches[0];
-    // Nested loops: an inner loop whose header sits in this body is fine ONLY if it is PROPERLY
-    // nested — its ENTIRE body is contained in ours (a forest descendant). Structuring then recurses
-    // naturally: when the outer body reaches the inner header, structureBlock dispatches to the inner's
-    // own emitWhile/emitDoWhile. An OVERLAPPING loop (shared blocks, neither containing the other →
-    // irreducible) DECLINES. If a contained inner is itself unstructurable, the outer's body
-    // structuring loud-fails at the inner back-edge (onStack) — a safe decline, not a miscompile.
-    if (
-      [...forest.byHeader.keys()].some(
-        (h2) => h2 !== h && nl.body.has(h2) && ![...forest.byHeader.get(h2)!.body].every((b) => nl.body.has(b)),
-      )
-    ) {
-      continue;
-    }
-    // Reducible entry (single-entry): every body block except the header is entered ONLY from
-    // inside the body — no jump into the loop interior.
-    let reducible = true;
-    for (const bb of nl.body) {
-      if (bb === h) {
-        continue;
-      }
-      if ((preds.get(bb) ?? []).some((p) => !nl.body.has(p))) {
-        reducible = false;
-        break;
-      }
-    }
-    if (!reducible) {
+    if (!admissible(nl)) {
       continue;
     }
 
@@ -2632,11 +2623,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
       }
-      if (
-        kind === 'while' &&
-        e.to === exit &&
-        ![...forest.byHeader.values()].some((l2) => l2.header !== h && nl.body.has(l2.header) && l2.body.has(e.from))
-      ) {
+      if (kind === 'while' && e.to === exit && !innerBodyHas(nl, e.from)) {
         breaks.add(e.from);
       } else if (!owned && (!isRet(e.to) || (kind === 'dowhile' && e.to === exit))) {
         singleExit = false;
@@ -2667,13 +2654,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // mid-body beside the bottom one, or one latch under a header that computes before it tests (a
   // mid-tested loop) — is `while (1)`: every edge back to the header is the
   // implicit continue at the foot of its region, and every edge out is a `break` to the one exit
-  // chosen below or an early `return`. Same fail-closed preconditions as above: properly nested
-  // inner loops, a single-entry body, and no break out of an inner loop's body. The exit is the
-  // first target, in block order, under which every other edge out is an early-return arm or lands
-  // on a `ret` block with no effect in it.
+  // chosen below or an early `return`. Same fail-closed preconditions as above: `admissible`, and
+  // no break out of an inner loop's body. The exit is the first target, in block order, under which
+  // every other edge out is an early-return arm or lands on a `ret` block with no effect in it.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
-  const innerBodyHas = (nl: NaturalLoop, b: Block): boolean =>
-    [...forest.byHeader.values()].some((l2) => l2.header !== nl.header && nl.body.has(l2.header) && l2.body.has(b));
   const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort(
       (x, y) => fn.blocks.indexOf(x) - fn.blocks.indexOf(y),
@@ -2711,15 +2695,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     const shape =
-      !loops.has(h) &&
-      !whileLoops.has(h) &&
-      !doWhileLoops.has(h) &&
-      [...forest.byHeader.values()].every(
-        (l2) => l2.header === h || !nl.body.has(l2.header) || [...l2.body].every((b) => nl.body.has(b)),
-      ) &&
-      [...nl.body].every((bb) => bb === h || (preds.get(bb) ?? []).every((p) => nl.body.has(p)))
-        ? foreverShape(nl)
-        : null;
+      !loops.has(h) && !whileLoops.has(h) && !doWhileLoops.has(h) && admissible(nl) ? foreverShape(nl) : null;
     if (shape !== null) {
       foreverLoops.set(h, shape);
     }

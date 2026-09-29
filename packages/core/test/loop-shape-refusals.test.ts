@@ -1,27 +1,30 @@
 // THE LOOP SHAPES `structure()` REFUSES, and what removing each refusal actually does.
 //
-// SIX `continue`s in the do-while recognizer decide which loops it will judge at all, and the count
-// is asserted against the source below so a seventh cannot be added without landing here. Each is
+// FIVE `continue`s in the do-while recognizer decide which loops it will judge at all, and the count
+// is asserted against the source below so a sixth cannot be added without landing here. Each is
 // named with what ablating it costs — its `continue;` replaced by a no-op, then the whole of
-// `packages/core/test` (2,589 tests). The counts below EXCLUDE this file's own inventory assertion,
+// `packages/core/test` (3,744 tests). The counts below EXCLUDE this file's own inventory assertion,
 // which counts `continue;` tokens and so reddens on every ablation alike:
 //
 //   1. guarded self-loop  `nl.selfLoop && loops.has(h)`         2 failed — THIS FILE  (GUARDED_SELFLOOP, GSL2)
 //   2. multi-latch        several latches                         left to `while (1)` — loop-forever.test.ts,
 //                                                                 and THIS FILE's MULTILATCH
-//   3. overlapping inner  a nested header whose body escapes ours  0 failed — UNWITNESSED
-//   4. irreducible        `!reducible`                             0 failed — UNWITNESSED
-//   5. neither shape      no clean pre-tested/bottom-tested exit  left to `while (1)` — loop-forever.test.ts
-//   6. multiple exits     `!singleExit`                           0 failed — UNWITNESSED
+//   3. not admissible     an overlapping inner loop, or an entry   0 failed — UNWITNESSED
+//                         into the body past the header
+//                         (`admissible`, which `while (1)` asks too)
+//   4. neither shape      no clean pre-tested/bottom-tested exit  left to `while (1)` — loop-forever.test.ts
+//   5. multiple exits     `!singleExit`                           10 failed — loop-dowhile-break.test.ts,
+//                                                                 loop-break-exit.test.ts and the two
+//                                                                 loop-bearing fuzz sweeps
 //
-// So THREE of the six are unwitnessed. #4 is this file's named debt, instrumented below. For #3 and
-// #6 all that is measured is the ablation — the whole core suite is green without them — which says
-// no existing test distinguishes them and says nothing about whether a fixture could. A loop's
-// edges to its own exit are admitted as `break`s ahead of #6 (loop-break-exit.test.ts, and
-// loop-dowhile-break.test.ts for a `do-while`'s edges nothing else claims); what #6
-// refuses — a second exit to some other merge, or a break out of a nested loop's body — declines
-// further down on every input the suite holds. Naming all three is the point: an unwitnessed refusal that nobody
-// has written down reads exactly like a witnessed one.
+// So ONE of the five is unwitnessed, and its irreducible half is this file's named debt,
+// instrumented below. For its overlapping half all that is measured is the ablation — the whole
+// core suite is green without it — which says no existing test distinguishes it and says nothing
+// about whether a fixture could. #5 is where a `do-while` hands a break to `while (1)`: an edge into
+// its exit that no early-return arm owns refuses it, and ablated, the do-while claims loops it cannot
+// spell. A `while`'s edges to its own exit are admitted as `break`s ahead of #5
+// (loop-break-exit.test.ts). Naming the unwitnessed one is the point: an unwitnessed refusal that
+// nobody has written down reads exactly like a witnessed one.
 //
 // WHAT THE IR ORACLE SAYS ABOUT THEM IS NOT "they prevent a wrong program". The multi-latch
 // fixture below, which #2 leaves to the `while (1)` recognizer, structures there correctly on all
@@ -47,12 +50,12 @@
 //                    the wrong-answer count against the IR does not move. That probe also surfaces a
 //                    wrong answer at depth 1 (seed 327) that is not fixed here, which is why the
 //                    widening is not what ships. What ships is the decline, pinned.
-//   • irreducible  — the file's named debt: `irreducible` declines with `!reducible` ablated too.
+//   • irreducible  — the file's named debt: `irreducible` declines with `admissible` ablated too.
 //                    Instrumented rather than assumed — a two-block loop entered at BOTH blocks from
-//                    outside still declines with `!reducible` ablated, with the overlapping-loop
-//                    refusal stacked on top of it, and with the multi-latch refusal stacked on top
-//                    of that — so whatever refuses the shape is UPSTREAM of this recognizer, and no
-//                    fixture here can reach `!reducible` by ablating inside it.
+//                    outside still declines with the whole of `admissible` ablated, and with the
+//                    multi-latch refusal stacked on top of it — so whatever refuses the shape is
+//                    UPSTREAM of this recognizer, and no fixture here can reach the single-entry
+//                    check by ablating inside it.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -218,12 +221,11 @@ test('the oracle runs GSL2 body and never runs GUARDED_SELFLOOP body', () => {
   expect(reaches(GUARDED_SELFLOOP), 'the loop the oracle can never observe').toBe(0);
 });
 
-// THE INVENTORY, LINKED TO THE CODE. The header above lists six refusals as prose, and nothing but
+// THE INVENTORY, LINKED TO THE CODE. The header above lists five refusals as prose, and nothing but
 // this stops it drifting from them. Counting `continue;` in the recognizer's own region rather than
 // pattern-matching a line, so the assertion survives reformatting — the same shape
-// `locals-written.test.ts` uses over `rank.ts`. Eight: the six shape refusals plus the two
-// inner-`for` skips (`bb === h` in the reducibility walk, and the already-counted exit edge in the
-// single-exit walk), which are not refusals and are excluded by name in the header.
+// `locals-written.test.ts` uses over `rank.ts`. Six: the five shape refusals plus the inner-`for`
+// skip of the already-counted exit edge in the single-exit walk, which is not a refusal.
 test('the do-while recognizer has exactly the refusals this file inventories', () => {
   const src = readFileSync(join(import.meta.dirname, '..', 'src', 'structure', 'structure.ts'), 'utf8');
   const start = src.indexOf('const doWhileLoops = new Map<Block, DoWhileInfo>();');
@@ -231,7 +233,7 @@ test('the do-while recognizer has exactly the refusals this file inventories', (
   expect(start, 'recognizer start anchor').toBeGreaterThan(0);
   expect(end, 'recognizer end anchor').toBeGreaterThan(start);
   const region = src.slice(start, end);
-  expect(region.split('continue;').length - 1, 'six shape refusals + two inner-loop skips').toBe(8);
+  expect(region.split('continue;').length - 1, 'five shape refusals + one inner-loop skip').toBe(6);
 });
 
 // NOT a refusal pin, and named so it cannot be counted as one: this passes with the guarded
