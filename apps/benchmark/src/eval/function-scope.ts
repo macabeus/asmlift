@@ -24,9 +24,8 @@ export function functionDisassembly(asm: string, sym: string): string {
  *
  *  One kind of `.text` relocation outside the function stays: another function's naming a function-scope
  *  static this one names. That is the evidence asmlift reads to refuse re-declaring a static inside a
- *  function that does not own it alone (core `frontend/local-object.ts`) — an inlined static function's
- *  `n$4` is addressed by every caller and by the function itself — and narrowed away, the refusal could
- *  never fire on a row. */
+ *  function that does not own it alone (core `frontend/local-object.ts`): an inlined static function's
+ *  `n$4` is addressed by every caller and by the function itself. */
 export function functionScopedDump(dump: string, sym: string): string {
   const fn = new RegExp(`^([0-9a-f]{8})\\s.*\\sF \\.text\\t([0-9a-f]{8}) ${escapeRegExp(sym)}$`, 'm').exec(dump);
   if (fn === null) {

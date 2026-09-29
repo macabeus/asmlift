@@ -81,9 +81,9 @@ export interface LocalObject {
   bytes?: Uint8Array;
   bigEndian: boolean;
   /** What an assembler LISTING shows of an initialized definition beyond its bytes, absent where
-   *  the target is an object file (which records neither). */
+   *  the target is an object file, which keeps no directives. */
   directives?: LocalObjectDirectives;
-  /** What an object FILE records of the object's alignment, absent for an assembler listing, whose
+  /** What an object FILE records of where the object sits, absent for an assembler listing, whose
    *  `.align` is among its directives. */
   placement?: LocalObjectPlacement;
 }

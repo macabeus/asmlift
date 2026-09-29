@@ -883,8 +883,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  // `tu-scoped-name` is empty because the capability landed: its rows named a static the function
-  // defines, and the lift now defines it (frontend/local-object.ts). Four of its six lift; the other
+  // `tu-scoped-name` is empty because its rows named a static the function defines, and the lift
+  // defines it (frontend/local-object.ts). Four of its six lift; the other
   // two decline on their next link — `ac-decomp:JW_JUTGamePad_read` on the 64-bit value OSGetTime
   // returns in r3:r4, which is what inhabits `clobbered-value`, and `mAc_ActorShadowEllipse` on an
   // anonymous pool. Its refusals stand for a static whose definition the target does not carry

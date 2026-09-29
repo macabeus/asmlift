@@ -92,9 +92,10 @@
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls". So is the sixth kind of the naming family: `reloc-symbol.ts`
-// `unspellableReason` refuses six ways and five have a class here, while "names 'X', which is not
-// a C identifier" has none. They have no rows, so they wait for one.
+// gotos / register tail calls". So are two kinds of the naming family: `reloc-symbol.ts`
+// `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
+// a C identifier" and "names the function's predefined name" have none. They have no rows, so they
+// wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {

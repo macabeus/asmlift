@@ -15,11 +15,11 @@
 // Consumed by frontend/ppc.ts, which refuses before it recovers, and by frontend/thumb.ts's
 // literal-pool reader. A function-scope static is the one kind neither refuses by name: the
 // function DEFINES it, so both read its definition out of the target (frontend/local-object.ts) and
-// the lift writes it in the body under `localStaticSourceName`, refusing only where the definition
-// cannot be read. Thumb asks about that kind alone rather than taking `unspellableReason`'s answer
-// for every kind, because a pool word is not a relocation: agbcc packs `.L` labels into pools, and
-// this policy calls a leading dot `section-local` — an offset into a section, not an object — which
-// is false about a code label in the same file.
+// the lift writes it in the body under the name `localStaticName` takes apart, refusing only where
+// the definition cannot be read. Thumb asks about that kind and the predefined names alone rather
+// than taking `unspellableReason`'s answer for every kind, because a pool word is not a relocation:
+// agbcc packs `.L` labels into pools, and this policy calls a leading dot `section-local` — an
+// offset into a section, not an object — which is false about a code label in the same file.
 //
 // A kind is listed only when it behaves differently: the decomp projects' generated labels
 // (`lbl_1_bss_2464`, `fn_1_458`) are ordinary identifiers that the project's own headers declare

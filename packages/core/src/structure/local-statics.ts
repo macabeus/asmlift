@@ -30,13 +30,13 @@
 // anything else the function names can first be seen whole.
 //
 // REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
-// in the definition settles the width and the accesses disagree on it, when the width does not
-// divide the size, when the loads disagree on the signedness, when the definition is aligned
-// narrower than its elements, when a bss static's offset says it was initialized to zero and it
-// is no scalar (or the input does not show the offset); and, at
-// the rename, when two statics share a source name (one block cannot declare both) or when the
-// function names anything else by it — a global, a callee, a parameter, a local, itself — which the
-// block-scope static would hide.
+// in the definition settles the width and the accesses disagree on it, when the width is no
+// integer type's or does not divide the size, when the loads disagree on the signedness, when the
+// definition is aligned narrower than its declaration here would be, when a bss static's offset
+// says it was initialized to zero and it is no scalar (or the input does not show the offset);
+// and, at the rename, when two statics share a source name (one block cannot declare both) or when
+// the function names anything else by it — a global, a callee, a parameter, a local, itself —
+// which the block-scope static would hide.
 import { type Fn, type LocalObject, type LocalObjects, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import {

@@ -72,17 +72,16 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   compiler lays them out by — and the lift declares them in that order. In bss mwcc puts the
   scalars it moved there for their `= 0` first, in that order, and reverses the ones with no
   initializer after them, so the offsets also say which statics had the `= 0`, and the lift writes
-  it. The same measurement
-  means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
+  it. The same measurement means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
   wrong alignment all MATCH, and only the section and the local linkage are scored — so the
   matching suite compares the candidate's data sections with the target's byte for byte, with
   their alignment (`packages/cli/test/matching/local-statics.test.ts`).
 
   The definition is refused when the target does not carry it, when a relocation falls inside it
-  (an initializer holding an address), when its extent cannot be read, and when another function
-  names it too. The last is a static of an inlined same-unit function — agbcc puts `static inline
-counter`'s `n.3` ahead of its first caller, mwcc `-inline auto` has every caller address `n$4` —
-  and re-declaring it in one of them would split one object in two. Only the functions the input
+  (an initializer holding an address), when its extent or alignment cannot be read, and when
+  another function names it too. The last is a static of an inlined same-unit function — agbcc
+  puts `static inline counter`'s `n.3` ahead of its first caller, mwcc `-inline auto` has every
+  caller address `n$4` — and re-declaring it in one of them would split one object in two. Only the functions the input
   shows can be checked: a single function's listing cannot show a second referrer, and a
   benchmark row's input ends at the row's function — the unit's earlier functions are in it (the
   mwcc side table keeps their relocations that name the row's statics), its later ones are not.
