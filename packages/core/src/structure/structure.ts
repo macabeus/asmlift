@@ -5121,7 +5121,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       return !varName.has(x) && (defs.get(x)?.operands.some(readsSubbed) ?? false);
     };
-    if ([...exitRegion].some((b) => b.ops.some((op) => op.operands.some(readsSubbed)))) {
+    const reads = (op: Op): Value[] => [...op.operands, ...op.successors.flatMap((s) => s.args)];
+    if ([...exitRegion].some((b) => b.ops.some((op) => reads(op).some(readsSubbed)))) {
       return { refusal: "reaches an exit region that reads a value the latch's update hands the header" };
     }
     if (loopEscapeHazard(dw.body, new Map(), writes, exitRegion)) {

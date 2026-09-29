@@ -11,7 +11,8 @@
 //   • a break carrying a value the copy after the loop does not spell (`BREAK_CARRIES_ANOTHER_VALUE`);
 //   • an exit region reading a value the latch's update hands the header, which after the loop is
 //     spelled by the loop variable's name and on the break path still holds the old one
-//     (`EXIT_READS_THE_UPDATE`).
+//     (`EXIT_READS_THE_UPDATE`), whether an op reads it or an edge hands it on
+//     (`EXIT_HANDS_ON_THE_UPDATE`).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -134,6 +135,35 @@ const EXIT_READS_THE_UPDATE = `fn ubrk {
   ret %8
 }`;
 
+/** `u = 0; do { u += 4; if (g(a1) < 4) break; } while (g(0) < 10); return g(1) < 20 ? u : a0;` —
+ *  the exit reads the update `u + 4` only as the argument of an edge. */
+const EXIT_HANDS_ON_THE_UPDATE = `fn hbrku {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=4}
+  %5: s32 = add %3, %4
+  %6: s32 = call %1 {target="g"}
+  %7: s32 = const {value=4}
+  %8: u32 = icmp_slt %6, %7
+  cond_br %8, ^bb3(), ^bb2()
+^bb2():
+  %9: s32 = const {value=0}
+  %10: s32 = call %9 {target="g"}
+  %11: s32 = const {value=10}
+  %12: u32 = icmp_slt %10, %11
+  cond_br %12, ^bb1(%5), ^bb3()
+^bb3():
+  %13: s32 = const {value=1}
+  %14: s32 = call %13 {target="g"}
+  %15: s32 = const {value=20}
+  %16: u32 = icmp_slt %14, %15
+  cond_br %16, ^bb4(%5), ^bb4(%0)
+^bb4(%17: s32):
+  ret %17
+}`;
+
 test('a break from the header falls into the copy the latch hands the exit', () => {
   const r = judged(HEADER_BREAK);
   expect(r.src).toBe(
@@ -160,6 +190,12 @@ test('a break carrying a value the copy after the loop does not spell declines L
 
 test("an exit region reading the latch's update declines LOUD", () => {
   expect(() => judged(EXIT_READS_THE_UPDATE)).toThrow(
+    /a break out of block #1 reaches an exit region that reads a value the latch's update hands the header/,
+  );
+});
+
+test("an exit region handing the latch's update along an edge declines LOUD", () => {
+  expect(() => judged(EXIT_HANDS_ON_THE_UPDATE)).toThrow(
     /a break out of block #1 reaches an exit region that reads a value the latch's update hands the header/,
   );
 });
