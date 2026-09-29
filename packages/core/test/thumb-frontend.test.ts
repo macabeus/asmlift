@@ -952,14 +952,21 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       `.L9:\n\t.word\t0x040000D4\n\t.word\t${control}\n`;
 
     // …and it is the CONTROL WORD that keeps [sp,#4] out of the device's reach: an incrementing
-    // source reads upward from the object, and so does one this function never states.
-    test.each([
-      ['an incrementing source', '0x80000001', 'that reads through it'],
-      ['a control word that is not a literal', 'gCtl', 'whose control word is not a literal'],
-    ])('%s may read the slot above the object', (_, control, how) => {
-      expect(() => decompile('f', escapeTo('0x00', control), ARMV4T_AGBCC)).toThrow(
-        `the captured address at [sp,#0) is handed to a device ${how}, which may read the slot at [sp,#4]`,
+    // source reads upward from the object.
+    test('an incrementing source may read the slot above the object', () => {
+      expect(() => decompile('f', escapeTo('0x00', '0x80000001'), ARMV4T_AGBCC)).toThrow(
+        'the captured address at [sp,#0) is handed to a device that reads through it, which may read the slot at [sp,#4]',
       );
+    });
+
+    // …and a control word this function never states bounds nothing at all, so the whole local
+    // area is kept as ONE object in memory: the slot at [sp,#4] is a member the device may read,
+    // and its store stays a store.
+    test('a control word that is not a literal keeps the whole local area as one object', () => {
+      const src = decompile('f', escapeTo('0x00', 'gCtl'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('if (v0 != 0) ((s32 *)sp0)[1] = v0;');
+      expect(src).toContain('return v0 + ((s32 *)sp0)[1];');
     });
 
     test('DMA3SAD (+0) — the hardware reads the object, so the undef stands', () => {
@@ -983,18 +990,21 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // A SECOND OBJECT still refuses, and this rule is NOT narrowed with the other one. Its argument
-    // is about layout, which is symmetric: a device reading past the object it was given is as
-    // wrong as a callee writing past it. `DmaCopy` of two halfwords off `&sp0` transfers `[sp,#2]`
-    // too — and the store to that second object is DELETED, since only the escaping one is
-    // `volatile`, so the emitted source transfers whatever follows `sp0` instead.
-    test('a second object still refuses, even when the escape only reads', () => {
+    // A SECOND OBJECT a device may read is not declared as a second local. Two locals have no
+    // guaranteed adjacency, so a device reading past the one it was given reads whatever the
+    // recompile put there. Where nothing bounds the read — here no control word is written at all —
+    // both are members of ONE object in memory, and each store is a store into it.
+    test('a second object an unbounded read reaches is a member of one object', () => {
       const twoObjects =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n' +
         '\tmov\tr5, sp\n\tstrh\tr1, [r5, #0x2]\n\tldr\tr2, .L9\n\tstr\tr4, [r2, #0x0]\n' +
         '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
         '.L9:\n\t.word\t0x040000D4\n';
-      expect(() => decompile('f', twoObjects, ARMV4T_AGBCC)).toThrow(/including another object/);
+      const src = decompile('f', twoObjects, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[16];');
+      expect(src).toContain('p0 = (u16 *)sp0;');
+      expect(src).toContain('*p0 = a0;');
+      expect(src).toContain('p0[1] = a1;');
     });
 
     // Half an address is not the address: `strh` to a source register hands the device something
@@ -2396,8 +2406,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('pubd', dmaSink(`${dmaStores}\tbl\tg2\n`), ARMV4T_AGBCC, dmaProtos).source).toContain(
         'volatile u8 sp0;',
       );
-      // …and so is a store through a pointer this cannot resolve, which may BE the control halfword:
-      // agbcc's `pube(s32 x, vu32 *cnt)`, the same body ending `*cnt = 0x84000002`
+      // …but a store through a pointer this cannot resolve may BE the control halfword, re-arming
+      // the channel to read `m.t` as well — agbcc's `pube(s32 x, vu32 *cnt)`, the same body ending
+      // `*cnt = 0x84000002`. Nothing bounds the read, so the local area is kept as ONE object in
+      // memory and `m.t`'s store is a store into it, which is what agbcc emitted: recompiled, the
+      // lift keeps `strb r0, [r1]` and `str r0, [sp, #0x4]` both.
       const unresolved =
         'pube:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r1, #0\n\tmov\tr1, sp\n\tldrb\tr2, [r1]\n' +
         '\tstrb\tr0, [r1]\n\tmov\tr0, #0x1\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n\tldr\tr0, .L15\n\tmov\tr1, sp\n' +
@@ -2405,13 +2418,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tstr\tr0, [r4]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
         '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n' +
         '\t.word\t-0x7bfffffe\n';
-      expect(() => decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos)).toThrow(
-        'handed to a device a later store through an unresolved pointer may re-arm, which may read the slot at [sp,#4]',
-      );
+      const pube = decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos).source;
+      expect(pube).toContain('volatile u8 sp0[8];');
+      expect(pube).toContain('*(u8 *)sp0 = a0;');
+      expect(pube).toContain('((s32 *)sp0)[1] = h(1);');
+      expect(pube).toContain('return ((s32 *)sp0)[1];');
       // …and so is a pointer that is this frame's on only SOME paths: `p = cnt ? cnt : &o;
-      // *p = 0x84000002` may be the control halfword. Hand-written — the `pube` shape with that
-      // phi before the transfer; [sp,#4] is the object the device reads, [sp,#8] a slot, [sp,#0xc]
-      // `o` — and it assembles with GNU as.
+      // *p = 0x84000002` may be the control halfword, and `o` is then a member too. Hand-written —
+      // the `pube` shape with that phi before the transfer; [sp,#4] is the object the device reads,
+      // [sp,#8] a slot, [sp,#0xc] `o` — and it assembles with GNU as.
       const phiRearm = (pick: string) =>
         'e9:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
         pick +
@@ -2422,14 +2437,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x40000d4\n' +
         '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7affffff\n\t.word\t-0x7bfffffe\n';
       const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
-      expect(() =>
-        decompile(
-          'e9',
-          phiRearm('\tadd\tr6, r2, #0\n\tcmp\tr6, #0\n\tbne\t.L1\n\tadd\tr6, sp, #0xc\n.L1:\n'),
-          ARMV4T_AGBCC,
-          five,
-        ),
-      ).toThrow(/address-taken stack local — the captured address escapes, so something outside this function reaches/);
+      const e9 = decompile(
+        'e9',
+        phiRearm('\tadd\tr6, r2, #0\n\tcmp\tr6, #0\n\tbne\t.L1\n\tadd\tr6, sp, #0xc\n.L1:\n'),
+        ARMV4T_AGBCC,
+        five,
+      ).source;
+      expect(e9).toContain('volatile u8 sp4[12];');
+      expect(e9).toContain('if (a2 == 0) a2 = (s32 *)((u32)sp4 + 8);');
+      expect(e9).toContain('p0[1] = a1;');
+      expect(e9).toContain('*a2 = -2080374782;');
       // CONTROL: `o` on every path is this frame's own store, which re-arms nothing
       expect(decompile('e9', phiRearm('\tadd\tr6, sp, #0xc\n'), ARMV4T_AGBCC, five).source).toContain(
         'volatile u32 sp4;',
@@ -2439,7 +2456,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // A STORE TO A NAMED SYMBOL PLUS A CONSTANT does not re-arm the channel: agbcc compiles as if
     // no such address is a device register, and with a symbol map that places the name the
     // overlap test decides it exactly. An index, or a pointer loaded from the symbol, may still be
-    // the control halfword. Verbatim agbcc, one body with three endings: `struct P { u32 a, b; }
+    // the control halfword, and then `s.b` at [sp,#8] is kept in memory with `s.a`. Verbatim agbcc, one body with three endings: `struct P { u32 a, b; }
     // s; five(1,2,3,4,5); s.a = x; s.b = y; REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst;
     // REG_DMA3CNT = 0x85000001;` then `gNamed.g = y` (n1), `gArr[x] = y` (n3), or
     // `*gCnt = 0x84000002` with `extern vu32 *gCnt` (e4).
@@ -2456,12 +2473,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         pool;
       const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
       const n1 = armed('n1', '\tldr\tr0, .L6+0x10\n\tstr\tr5, [r0, #0x4]\n', '\t.word\tgNamed\n');
-      expect(decompile('n1', n1, ARMV4T_AGBCC, five).source).toContain('((s32 *)&gNamed)[1] = a1;');
+      const bounded = decompile('n1', n1, ARMV4T_AGBCC, five).source;
+      expect(bounded).toContain('volatile u32 sp4;');
+      expect(bounded).toContain('((s32 *)&gNamed)[1] = a1;');
       // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
       const onControl = new Map([[0x040000d8, [{ name: 'gNamed', kind: 'data' as const }]]]);
-      expect(() => decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl })).toThrow(
-        'handed to a device whose control word is not a literal',
-      );
+      const kept = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl }).source;
+      expect(kept).toContain('volatile u8 sp4[8];');
+      expect(kept).toContain('p0[1] = a1;');
       const n3 = armed(
         'n3',
         '\tldr\tr0, .L6+0x10\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, r0\n\tstr\tr5, [r4]\n',
@@ -2476,9 +2495,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ['n3', n3],
         ['e4', e4],
       ]) {
-        expect(() => decompile(name, asm, ARMV4T_AGBCC, five)).toThrow(
-          'handed to a device a later store through an unresolved pointer may re-arm, which may read the slot at [sp,#8]',
-        );
+        const src = decompile(name, asm, ARMV4T_AGBCC, five).source;
+        expect(src).toContain('volatile u8 sp4[8];');
+        expect(src).toContain('p0[1] = a1;');
       }
     });
 
@@ -2682,16 +2701,19 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toContain('volatile u16 sp0;');
       expect(src).toContain('*(s32 *)67109076 = &sp0;');
       // …and a count ORed in at run time bounds nothing: `n | 0x81000000` may carry any source
-      // mode, so the device may read the spilled `dst` above the object. Verbatim agbcc again, the
-      // same body with `n` moved from the sum into `REG_DMA3[2] = n | 0x81000000`.
+      // mode, so the device may read the spilled `dst` and `n` above the object, and all three are
+      // kept as one object in memory. Verbatim agbcc again, the same body with `n` moved from the
+      // sum into `REG_DMA3[2] = n | 0x81000000`.
       const runtimeCount = dmawide(
         '',
         '\tldr\tr2, [sp, #0x4]\n\tstr\tr2, [r0]\n\tldr\tr1, .L9+0x4\n\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n' +
           '\tldr\tr2, [sp, #0x8]\n\torr\tr0, r0, r2\n\tstr\tr0, [r1]\n',
       );
-      expect(() => decompile('dmawide', runtimeCount, ARMV4T_AGBCC, protos)).toThrow(
-        'handed to a device whose control word is not a literal, which may read the slot at [sp,#4]',
-      );
+      const kept = decompile('dmawide', runtimeCount, ARMV4T_AGBCC, protos).source;
+      expect(kept).toContain('volatile u8 sp0[12];');
+      expect(kept).toContain('((s32 *)sp0)[1] = a0;');
+      expect(kept).toContain('((s32 *)sp0)[2] = a1;');
+      expect(kept).toContain('*(s32 *)67109084 = 129 << 24 | ((s32 *)sp0)[2];');
     });
 
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one

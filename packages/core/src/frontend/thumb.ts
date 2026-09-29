@@ -37,7 +37,7 @@ import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { FRAME_OBJECT_AUDIT } from './frame-objects';
+import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
 import { gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
@@ -2378,15 +2378,41 @@ function recoverJumpTable(
 
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
  *  declared parameter count (from the project's headers); it is authoritative for recovering
- *  how many argument registers a `bl` passes (falling back to a heuristic when absent). */
+ *  how many argument registers a `bl` passes (falling back to a heuristic when absent).
+ *
+ *  AT MOST TWICE. The frame-object audit runs over the finished IR, and where a device may read
+ *  the frame without bound it answers with the bytes to keep in memory rather than a refusal
+ *  (`FrameObjectRelift`). Which `[sp,#k]` words are SSA slots is decided while the blocks are
+ *  filled, so the answer is taken by lifting again with those words routed through `laddr`; the
+ *  second audit judges them as one object, and refuses rather than asking again. */
 export function lift(
   name: string,
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes = {},
-  _asmData?: AsmData,
+  asmData?: AsmData,
   symbols?: SymbolMap,
 ): Fn {
+  const first = liftOnce(name, asm, target, prototypes, asmData, symbols, undefined);
+  if (!('oneObject' in first)) {
+    return first;
+  }
+  const again = liftOnce(name, asm, target, prototypes, asmData, symbols, first.oneObject);
+  if ('oneObject' in again) {
+    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
+  }
+  return again;
+}
+
+function liftOnce(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  _asmData: AsmData | undefined,
+  symbols: SymbolMap | undefined,
+  oneObject: FrameRange | undefined,
+): Fn | FrameObjectRelift {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
 
@@ -3657,13 +3683,17 @@ export function lift(
   // (`constantCaptureOffsets`), from the same walk the lift folds captures by. Above the outgoing
   // block only — a word staged there is an argument the call reads as a slot — and inside the
   // reserved area, where a slot could have been.
+  //
+  // …AND EVERY WORD OF THE BYTES A FIRST AUDIT ASKED TO KEEP AS ONE OBJECT (`oneObject`), where a
+  // device may read the frame without bound: a word there is memory the device reads, not a slot.
   const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
     slotsOk &&
     isSpReg(base) &&
     regOff === undefined &&
     width === 4 &&
     ((capturedObjectIsTheWholeFrame && off === 0) ||
-      (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea));
+      (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
+      (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
 
   // A WHOLE WORD OF THIS FUNCTION'S OWN RESERVED LOCAL AREA — the shape the ldr and str arms model
   // as an SSA slot (`sp@<off>`) instead of memory. The two arms spelled these seven terms out
@@ -4770,7 +4800,7 @@ export function lift(
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
   // a shape the machine states, or decline (auditFrameObjects).
-  FRAME_OBJECT_AUDIT.run({
+  const relift = FRAME_OBJECT_AUDIT.run({
     name,
     irBlocks,
     ...framePartition(),
@@ -4780,7 +4810,11 @@ export function lift(
     prototypes,
     symbols,
     target,
+    oneObject,
   });
+  if (relift !== undefined) {
+    return relift;
+  }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();

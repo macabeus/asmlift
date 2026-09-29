@@ -39,6 +39,21 @@ export interface FrameObjectAudit {
   /** the retraction rules an escape is judged by; `FRAME_ESCAPE_GATES` when absent, and a
    *  census or an ablation hands in its own (`FRAME_OBJECT_AUDIT`) */
   gates?: readonly Gate<FrameEscape>[];
+  /** the bytes a first audit asked to have kept as ONE object in memory (`FrameObjectRelift`):
+   *  the frontend routes every access inside them through an `laddr`, and the audit declares
+   *  them one object rather than judging each offset on its own */
+  oneObject?: FrameRange;
+}
+
+export interface FrameRange {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** What an audit answers instead of a refusal when a device may read the frame without bound: lift
+ *  again with `oneObject` set to these bytes. */
+export interface FrameObjectRelift {
+  readonly oneObject: FrameRange;
 }
 
 /** One escaped object, as the rules an escape retracts read it: what it may reach, `[lo, hi)`
@@ -226,7 +241,8 @@ export function auditFrameObjects({
   symbols,
   target,
   gates = FRAME_ESCAPE_GATES,
-}: FrameObjectAudit): void {
+  oneObject,
+}: FrameObjectAudit): FrameObjectRelift | undefined {
   // A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
   // `add` of a `laddr` and a `const` — a register the lift could not see through, `mov r0, sp /
   // movs r2, #0 / ldrsh r1, [r0, r2]`, or a move the pre-lift walk does not follow — is re-minted
@@ -662,6 +678,9 @@ export function auditFrameObjects({
     for (const off of objects.keys()) {
       accesses.set(off, []);
     }
+    // …and with `oneObject`, every fixed-offset access as the frame bytes it touches, since then an
+    // access at [+k] through a capture is a member of the one object rather than a second object
+    const members: { at: number; width: number }[] = [];
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         op.operands.forEach((v, idx) => {
@@ -670,6 +689,10 @@ export function auditFrameObjects({
             return;
           }
           const scalar = (kind: string) => {
+            if (oneObject !== undefined) {
+              members.push({ at: off + (op.attrs.off as number), width: op.attrs.width as number });
+              return;
+            }
             if ((op.attrs.off as number) !== 0) {
               fail(
                 `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
@@ -885,6 +908,119 @@ export function auditFrameObjects({
         }
       }
     };
+
+    // ONE OBJECT IN MEMORY, the answer a device read nothing bounds is given instead of a refusal
+    // (`oneObject`, requested below where the escapes are judged). Every byte of `[from, to)` is
+    // declared one `u8` array whose address the device holds, and every access inside it is a
+    // cast-spelled access to that array — so each store the machine made there is a store the
+    // recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
+    // every store to it, in order (flow.c deletes a memory store only when an identical later
+    // store in the same block overwrites it). And it is right whichever the source had there: a
+    // member of the escaped object, which the device may read, or a spill, which no one reads —
+    // the asm spells both as a store and a reload, and keeping a spill in memory changes no value.
+    if (oneObject !== undefined) {
+      const { from, to } = oneObject;
+      const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
+      for (const off of objects.keys()) {
+        if (off < from || off >= to) {
+          fail(`the object at [sp,#${off}) lies outside ${kept}`);
+        }
+      }
+      for (const slot of usedSlotOffsets) {
+        if (overlaps(slot, 4, from, to - from)) {
+          fail(`the SSA slot at [sp,#${slot}] lies inside ${kept} — one byte, two models`);
+        }
+      }
+      // A writer is not what this keeps: a callee handed an address inside the object may write
+      // any byte of the frame, and the object's extent says nothing about how far.
+      if (mayWrite.size > 0) {
+        fail(
+          `${kept} are reached by an address a callee or a store may write through, not only by a device that reads`,
+        );
+      }
+      if ([...indexed.values()].some((xs) => xs.length > 0)) {
+        fail(`a runtime index into ${kept} names no byte of it, so no access type can be checked`);
+      }
+      // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
+      // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
+      // `u16` store to the same bytes — a stale value. So a byte two accesses of different widths
+      // reach cannot be spelled through casts. A byte access is exempt, since character types
+      // alias everything, and so is a signedness difference, since the signed and unsigned types
+      // of one width share an alias set (c-common.c:1962-1974). PRECAUTIONARY in the Thumb lift:
+      // its first audit already refused an object read at two widths and an object over a slot,
+      // so the members it hands here never disagree. It is kept because a cast spelling that did
+      // would compile to a stale read with no diagnostic.
+      const widthAt = new Map<number, number>();
+      for (const m of members) {
+        if (m.at < from || m.at + m.width > to) {
+          fail(`an access of ${m.width} bytes at [sp,#${m.at}) reaches past ${kept}`);
+        }
+        if (m.width === 1) {
+          continue;
+        }
+        for (let b = m.at; b < m.at + m.width; b++) {
+          const had = widthAt.get(b);
+          if (had !== undefined && had !== m.width) {
+            fail(
+              `the byte at [sp,#${b}] of ${kept} is accessed ${had} and ${m.width} bytes wide, and agbcc at -O2 ` +
+                'lets a read of one type pass a store of the other (strict aliasing) — a cast spelling would read stale',
+            );
+          }
+          widthAt.set(b, m.width);
+        }
+      }
+      // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
+      // at `k - from` off the object, and a member address used any other way becomes the object's
+      // address moved by that constant.
+      const object = mkOp('laddr', {
+        results: [mkValue(T.unk(32))],
+        attrs: {
+          off: from,
+          width: 1,
+          signed: false,
+          count: to - from,
+          ...(published.size > 0 ? { volatile: true } : {}),
+        },
+      });
+      const base = object.results[0];
+      const memberAt = new Map<Value, number>();
+      for (const op of [...objects.values()].flat()) {
+        memberAt.set(op.results[0], op.attrs.off as number);
+      }
+      const stillUsed = new Set<Value>();
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          const at = memberAt.get(op.operands[0]);
+          if ((op.opcode === 'load' || op.opcode === 'store') && at !== undefined) {
+            op.operands = [base, ...op.operands.slice(1)];
+            op.attrs = { ...op.attrs, off: (op.attrs.off as number) + at - from };
+          }
+          op.operands.forEach((v) => memberAt.has(v) && stillUsed.add(v));
+          (op.successors ?? []).forEach((sx) => sx.args.forEach((v) => memberAt.has(v) && stillUsed.add(v)));
+        }
+      }
+      const atBase = (v: Value): Value => (memberAt.get(v) === from ? base : v);
+      for (const blk of irBlocks) {
+        blk.ops = blk.ops.flatMap((op) => {
+          const at = op.opcode === 'laddr' ? memberAt.get(op.results[0]) : undefined;
+          if (at === undefined) {
+            op.operands = op.operands.map(atBase);
+            (op.successors ?? []).forEach((sx) => (sx.args = sx.args.map(atBase)));
+            return [op];
+          }
+          if (!stillUsed.has(op.results[0]) || at === from) {
+            return [];
+          }
+          const by = mkValue(T.unk(32));
+          return [
+            mkOp('const', { results: [by], attrs: { value: at - from } }),
+            mkOp('add', { operands: [base, by], results: op.results }),
+          ];
+        });
+      }
+      irBlocks[0].ops.unshift(object);
+      return undefined;
+    }
 
     // THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
     // `add sp, sp, #-0x10` reserves sixteen bytes; if exactly one address-taken object sits at the
@@ -1227,6 +1363,20 @@ export function auditFrameObjects({
           );
       }
     };
+    // …unless every escape only READS and one of them reads without bound. Then the reach is the
+    // whole local area, and what the device may read there is kept rather than refused: lift again
+    // with those bytes as one object in memory (`oneObject` above). Below the local area are the
+    // outgoing arguments and above it the saved registers, neither of them an object.
+    if (
+      oneObject === undefined &&
+      escapes.every((e) => !e.writes) &&
+      escapes.some(
+        (e) =>
+          e.lo === -Infinity && e.hi === Infinity && (e.objectReached !== undefined || e.slotReached !== undefined),
+      )
+    ) {
+      return { oneObject: { from: declared.from, to: declared.to } };
+    }
     // RULE-MAJOR, not escape-major: every escape is asked a rule before any is asked the next, so
     // the refusal a function reports does not turn on the order its escapes were found in.
     for (const gate of gates) {
@@ -1280,12 +1430,13 @@ export function auditFrameObjects({
       }
     }
   }
+  return undefined;
 }
 
 /** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the
  *  binding above, so a process outside core can put a wrapped `gates` table in front of a real
  *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
  *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
-export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => void } = {
+export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectRelift | undefined } = {
   run: (audit) => auditFrameObjects(audit),
 };
