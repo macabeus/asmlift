@@ -46,8 +46,19 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   there is an initializer (`.rodata` → `static const`, `.data` → `static` with one, bss → `static`
   without), the size gives the extent, the bytes give the initializer, and the element type comes
   from the definition's own data directives where the target is an assembler listing (agbcc's
-  `.word`s are a word table, and its `.align` an alignment the definition keeps), else from the
-  function's accesses (`structure/local-statics.ts`). The counter's VALUE is left to
+  `.word`s are a word table), else from the function's accesses, whose loads also settle its
+  signedness (`structure/local-statics.ts`). The ALIGNMENT is the target's too — agbcc's `.align`
+  ahead of the label, and the record mwcc's `.comment` section keeps for every symbol (an `s64`
+  records 8, an `aligned(32)` buffer 32; no section header or symbol value pins it) — and the
+  definition states it in an attribute wherever it is wider than its declaration gets. A `const`
+  static's address that reaches an argument, an assignment or a return is cast to the unqualified
+  pointer, because mwcc does not drop the qualifier implicitly.
+
+  Through the raising tower the IR keeps the LINKER name (`gaddr {sym="tide.3"}`): its `.` or `$`
+  cannot equal a C identifier or a symbol-map name, so no pass can take a map's global `tide` for
+  the static. `structure` renames the finished tree to the source name once, and refuses there
+  when anything else the function names — another static, a global, a callee, a parameter or
+  local — carries that name, which the block-scope static would hide. The counter's VALUE is left to
   the candidate's compiler: agbcc's assembler reduces the relocation to `.rodata`+offset, so the
   name never reaches the object, and objdiff at its defaults does not compare a local symbol's name
   (a candidate whose static is `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`).
@@ -74,6 +85,11 @@ counter`'s `n.3` ahead of its first caller, mwcc `-inline auto` has every caller
   only unit-local linkage, which is all the target shows, but collides with a same-named file-scope
   object in the unit. The block-scope claim that this function owns the object is exactly the claim
   the referrer check above tests.
+
+- **Predefined identifier** `__FUNCTION__$2`, `__func__$1`, `__PRETTY_FUNCTION__$3` — mwcc names the
+  object behind the name every function body predefines like a static of that function. A
+  definition would redeclare it, so it is refused, in its own sentence. (agbcc puts the same string
+  in `.LC0`, an anonymous label.)
 
 - **Static of an inlined function** `name$localstaticN$fn` — mwcc's name for a static inside an
   inline function from a header (`_half$localstatic3$sqrtf`). It belongs to that function's
