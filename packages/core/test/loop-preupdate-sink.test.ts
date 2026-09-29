@@ -873,11 +873,11 @@ test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through
 });
 
 // `arg-safe-to-reevaluate` CAN BE REACHED THROUGH THE WHOLE PIPELINE BY A DIVIDE THE ISA
-// COMPUTES OUTSIDE THE LATCH. The analysis names a read or a call wherever something would cross
-// it, an op the asm called a runtime helper for wherever an effect would (the barrier scan,
-// `ridesEdge`, the helper clause), and a divide the sink would rebuild past a memory access or an
-// effect in the latch (`sinkMovesPast`); a named leaf is not rebuilt, so the rest of the gate is
-// guarded by a hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1;
+// COMPUTES IN A BODY BLOCK NOT EVERY ITERATION RUNS. The analysis names a read or a call wherever
+// something would cross it, an op the asm called a runtime helper for wherever an effect would (the
+// barrier scan, `ridesEdge`, the helper clause), and a divide a value read past the update would be
+// rebuilt behind a memory access or an effect from (`rebuiltPast`); a named leaf is not rebuilt, so
+// the rest of the gate is guarded by a hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1;
 // } while (--n);`: `bl __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the store,
 // so the divide is named there, the exit value reads the name and not the counter, and the sink is
 // never asked.
@@ -951,4 +951,85 @@ test('a divide the ISA computes ahead of a store is named there when the loop ex
   raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
   const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
   expect(src).toMatch(/(v\d+) = a3 \/ (a\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3`, `if (n <= 0) return 0; q = p + n; do { int t = k / n; *q = n; r =
+ *  t + 1; q = q - 1; } while (--n); return r * 2;`. The exit edge carries no arg: the code after the
+ *  loop reads the delay slot's add directly, and the `break` checks make the body more than one
+ *  block, which the escape rule does not name in. Inline at that read the divide would run behind
+ *  the store, and read the counter after its update. */
+const DIVIDE_READ_AFTER_LOOP_KMC = `00000000 <ex>:
+   0:\tbgtz\ta1,10 <ex+0x10>
+   4:\tsll\tv0,a1,0x2
+   8:\tj\t58 <ex+0x58>
+   c:\tmove\tv0,zero
+  10:\taddu\ta0,a0,v0
+  14:\tdiv\tzero,a3,a1
+  18:\tbnez\ta1,24 <ex+0x24>
+  1c:\tnop
+  20:\tbreak\t0x7
+  24:\tli\tat,-1
+  28:\tbne\ta1,at,3c <ex+0x3c>
+  2c:\tlui\tat,0x8000
+  30:\tbne\ta3,at,3c <ex+0x3c>
+  34:\tnop
+  38:\tbreak\t0x6
+  3c:\tmflo\tv1
+  40:\tsw\ta1,0(a0)
+  44:\taddiu\ta0,a0,-4
+  48:\taddiu\ta1,a1,-1
+  4c:\tbnez\ta1,14 <ex+0x14>
+  50:\taddiu\tv0,v1,1
+  54:\tsll\tv0,v0,0x1
+  58:\tjr\tra
+  5c:\tnop
+`;
+
+test('a divide ahead of a store is named there when the code after the loop reads its value', () => {
+  const fn = frontendFor(MIPS_GCC).lift('ex', DIVIDE_READ_AFTER_LOOP_KMC, MIPS_GCC, { ex: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (a\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+v\d+ = \1 \+ 1 << 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3`, `do { int t = k / n; if (*q > 3) *q = 0; r = t + 1; q++; } while
+ *  (--n);`. The divide's `mflo` is in the block ahead of the conditional store, which every
+ *  iteration runs; the add the loop exits with is in the latch. A name defined there holds this
+ *  iteration's value where the exit copy lands. */
+const DIVIDE_AHEAD_OF_ARM_KMC = `00000000 <db>:
+   0:\tblez\ta1,58 <db+0x58>
+   4:\tmove\tv0,a2
+   8:\tlw\tv0,0(a0)
+   c:\tdiv\tzero,a3,a1
+  10:\tbnez\ta1,1c <db+0x1c>
+  14:\tnop
+  18:\tbreak\t0x7
+  1c:\tli\tat,-1
+  20:\tbne\ta1,at,34 <db+0x34>
+  24:\tlui\tat,0x8000
+  28:\tbne\ta3,at,34 <db+0x34>
+  2c:\tnop
+  30:\tbreak\t0x6
+  34:\tmflo\ta2
+  38:\tslti\tv0,v0,4
+  3c:\tnop
+  40:\tbeqzl\tv0,48 <db+0x48>
+  44:\tsw\tzero,0(a0)
+  48:\taddiu\tv0,a2,1
+  4c:\taddiu\ta1,a1,-1
+  50:\tbnez\ta1,8 <db+0x8>
+  54:\taddiu\ta0,a0,4
+  58:\tjr\tra
+  5c:\tnop
+`;
+
+test('a divide in a block every iteration runs is named there when the loop exits with it', () => {
+  const fn = frontendFor(MIPS_GCC).lift('db', DIVIDE_AHEAD_OF_ARM_KMC, MIPS_GCC, { db: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(
+    /(v\d+) = a3 \/ (a\d+);\n\s+if \(\*a\d+ >= 4\) \*a\d+ = 0;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/,
+  );
 });

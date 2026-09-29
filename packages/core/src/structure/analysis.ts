@@ -1524,13 +1524,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         !consumers.every((c) => L.body.has(opBlock.get(c)!)) &&
         readsPreUpdate(L, op, r),
     );
-  /** Would the pre-update sink rebuild `op` (result `r`) past a memory access or an effect? It
-   *  rebuilds an exit value that reads a loop variable at the op computing it, when that op is the
-   *  latch's (`preUpdateCopyHome`, hazards.ts), so it moves `op` there when `op` sits in the same
-   *  latch, ahead of it, inside the tree it would inline. */
-  const sinkMovesPast = (op: Op, r: Value): boolean =>
+  /** Would a value that reads `op`'s result `r` past the update be rebuilt BEHIND a memory access
+   *  or an effect the asm ran after `op`? `op` sits in a block every iteration runs (the latch, or
+   *  one dominating it), and `r` reads a loop variable, so where that value renders the variable's
+   *  name no longer holds what `op` read, and the value is rebuilt from `op`'s operands:
+   *   • an arg of the latch's exit edge, rebuilt at the latch op computing it (`preUpdateCopyHome`,
+   *     hazards.ts) — by the sink, or where it is the back edge's arg too, by the update copy at
+   *     the foot of the body, which runs later still;
+   *   • a latch op read after the loop, rebuilt there. One the escape rule names first
+   *     (`escapesAheadOfUpdate`, a self-loop) is a materialized def this walk stops at, so it is
+   *     spelled at its own position with the divide inline.
+   *  Either way what `op` is carried past is everything the iteration runs between `op` and the
+   *  latch op the value is computed at. */
+  const rebuiltPast = (op: Op, r: Value): boolean =>
     bottomTested.some((L) => {
-      if (opBlock.get(op) !== L.latch || !readsPreUpdate(L, op, r)) {
+      const ob = opBlock.get(op)!;
+      if (!L.body.has(ob) || !dom!.get(L.latch)!.has(ob) || !readsPreUpdate(L, op, r)) {
         return false;
       }
       const seen = new Set<Value>();
@@ -1545,18 +1554,48 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const d = defOf.get(x);
         return !!d && L.body.has(opBlock.get(d)!) && !materialize.has(d) && d.operands.some(reaches);
       };
-      const from = L.latch.ops.indexOf(op);
-      return L.term.successors.some(
+      // The ops between `op` and latch index `to`: the rest of `op`'s block, then every body block
+      // it reaches ahead of the latch, then the latch's own ops ahead of `to`.
+      const between = (to: number): Op[] => {
+        if (ob === L.latch) {
+          return L.latch.ops.slice(L.latch.ops.indexOf(op) + 1, to);
+        }
+        const mid = new Set<Block>();
+        const stack = successorsOf(ob);
+        while (stack.length > 0) {
+          const b = stack.pop()!;
+          if (b !== L.header && b !== L.latch && L.body.has(b) && !mid.has(b)) {
+            mid.add(b);
+            stack.push(...successorsOf(b));
+          }
+        }
+        return [
+          ...ob.ops.slice(ob.ops.indexOf(op) + 1),
+          ...[...mid].flatMap((b) => b.ops),
+          ...L.latch.ops.slice(0, to),
+        ];
+      };
+      const crossesAt = (home: Op): boolean =>
+        home !== op &&
+        opBlock.get(home) === L.latch &&
+        between(L.latch.ops.indexOf(home)).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+      const exitArg = L.term.successors.some(
         (sc) =>
           !L.body.has(sc.block) &&
           sc.args.some((a) => {
             const home = defOf.get(a);
-            if (!home || home === op || opBlock.get(home) !== L.latch || !reaches(a)) {
-              return false;
-            }
-            const to = L.latch.ops.indexOf(home);
-            return L.latch.ops.slice(from + 1, to).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+            return !!home && reaches(a) && crossesAt(home);
           }),
+      );
+      return (
+        exitArg ||
+        L.latch.ops.some(
+          (h) =>
+            h.results[0] !== undefined &&
+            consumersOf(h).some((c) => !L.body.has(opBlock.get(c)!)) &&
+            reaches(h.results[0]) &&
+            crossesAt(h),
+        )
       );
     });
   /** Is `r` read where the update has run: after the loop, or by its bottom test? */
@@ -1789,7 +1828,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
-  /** the divides the pre-update exit rule below named (`sinkMovesPast`) */
+  /** the divides the pre-update exit rule below named (`rebuiltPast`) */
   const exitDivides = new Set<Op>();
   /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
   const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
@@ -1894,15 +1933,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               continue;
             }
           }
-          // A DIVIDE THE ISA COMPUTES, in a value the loop exits with that reads a loop variable, is
-          // named at its def when the pre-update sink would rebuild it past a memory access or an
-          // effect (`sinkMovesPast`) — once every other rule has settled (`escapePhase`), as the
-          // escape rule is. `arg-safe-to-reevaluate` (hazards.ts) refuses that move: kmc's `do { t
-          // = k / n; *q = n; r = t + 1; } while (--n);` is `div; …; sw; …; addiu v0, v1, 1`, and
-          // rebuilt at the add the divide runs behind the store. Named, the copy reads the name and
-          // the divide stays where the asm ran it. Where the sink moves nothing past it, it rebuilds
-          // the copy as it did, so a loop that lifts without the name is spelled as before.
-          if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && sinkMovesPast(op, pr)) {
+          // A DIVIDE THE ISA COMPUTES, in a value read past the loop's update that reads a loop
+          // variable, is named at its def when that value would be rebuilt behind a memory access
+          // or an effect the asm ran after it (`rebuiltPast`) — once every other rule has settled
+          // (`escapePhase`), as the escape rule is. kmc's `do { t = k / n; *q = n; r = t + 1; }
+          // while (--n);` is `div; …; sw; …; addiu v0, v1, 1`. Unnamed, the loop declines —
+          // `arg-safe-to-reevaluate` (hazards.ts) refuses the sink's move, and a read after the loop
+          // re-reads the updated counter — or, where the back edge carries the value too, the
+          // update copy rebuilds the divide behind the store. Named, the value reads the name and
+          // the divide stays where the asm ran it.
+          if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && rebuiltPast(op, pr)) {
             materialize.add(op);
             exitDivides.add(op);
             continue;
@@ -2255,6 +2295,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // when its value reads a loop variable and is read where the update has run. Named, it lifts the
   // loop the pre-update hazard declines, in a body of any size — so the structurer's refusal on
   // homes (`preUpdateHomes`) must see it, as it sees the escape rule's.
+  // KNOWN GAP: `readAfterUpdate` asks of the op's own consumers, so a divide whose value leaves the
+  // loop only through a body op it feeds (`t + 1`) is not a home. Walked through that op, it would
+  // be one, and the refusal would decline every such loop over a counter the function takes as a
+  // parameter: its post-loop names include the entry block's.
   for (const op of materialize) {
     const r = op.results[0];
     if (!r || preUpdateHomes.has(op) || !(isHelper(op) || exitDivides.has(op))) {

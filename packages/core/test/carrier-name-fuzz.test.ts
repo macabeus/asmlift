@@ -233,12 +233,12 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
   // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
   // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
   // declines on.
-  expect(judged, 'the measured arm judges the population it measured').toBe(1095);
+  expect(judged, 'the measured arm judges the population it measured').toBe(1097);
   // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
   // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
   // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
-  // from 254 firings to 1 would leave both arms green, with `judged` still at 1,095 vouching for it.
-  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(254);
+  // from 255 firings to 1 would leave both arms green, with `judged` still at 1,097 vouching for it.
+  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(255);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 
