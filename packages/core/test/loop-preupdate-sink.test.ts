@@ -843,10 +843,12 @@ test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through
   expect(run(withoutDestFree)).toMatch(/\n\s+a3 = v\d+ \+ v\d+;\n[^\n]*\(\(a3 & 3\) << 2\)/);
 });
 
-// `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE ONLY BY A DIVIDE IN A `&&`/`||`
-// GUARDED CONE. The analysis names a read, a call or any other divide wherever something would cross
-// it (the barrier scan, `ridesEdge`, the divide clause), and a named leaf is not rebuilt, so the rest
-// of the gate is guarded by a hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n;
+// `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE ONLY BY A DIVIDE THE ANALYSIS LEAVES
+// INLINE: one in a `&&`/`||` guarded cone, or on a target with a divider one that only a read
+// separates from the copy's home. The analysis names a read or a call wherever something would cross
+// it, and a divide wherever an effect would (the barrier scan, `ridesEdge`, the divide clause), and a
+// named leaf is not rebuilt, so the rest of the gate is guarded by a hand-built analysis
+// (hazards.test.ts). agbcc, `do { int t = k / n;
 // *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl __divsi3` (a `sdiv` once raise/softdiv.ts
 // folds it) runs ahead of the store, so the divide is named there, the exit value reads the name and
 // not the counter, and the sink is never asked.
