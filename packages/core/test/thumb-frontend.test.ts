@@ -2436,6 +2436,52 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // A STORE TO A NAMED SYMBOL PLUS A CONSTANT does not re-arm the channel: agbcc compiles as if
+    // no such address is a device register, and with a symbol map that places the name the
+    // overlap test decides it exactly. An index, or a pointer loaded from the symbol, may still be
+    // the control halfword. Verbatim agbcc, one body with three endings: `struct P { u32 a, b; }
+    // s; five(1,2,3,4,5); s.a = x; s.b = y; REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst;
+    // REG_DMA3CNT = 0x85000001;` then `gNamed.g = y` (n1), `gArr[x] = y` (n3), or
+    // `*gCnt = 0x84000002` with `extern vu32 *gCnt` (e4).
+    test('a named symbol plus a constant cannot re-arm the channel, an index or a loaded pointer can', () => {
+      const armed = (name: string, tail: string, pool: string) =>
+        `${name}:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n` +
+        '\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n' +
+        '\tbl\tfive\n\tstr\tr4, [sp, #0x4]\n\tstr\tr5, [sp, #0x8]\n\tldr\tr0, .L6\n\tadd\tr1, sp, #0x4\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr0, .L6+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L6+0xc\n\tstr\tr0, [r1]\n' +
+        tail +
+        '\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7affffff\n' +
+        pool;
+      const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
+      const n1 = armed('n1', '\tldr\tr0, .L6+0x10\n\tstr\tr5, [r0, #0x4]\n', '\t.word\tgNamed\n');
+      expect(decompile('n1', n1, ARMV4T_AGBCC, five).source).toContain('((s32 *)&gNamed)[1] = a1;');
+      // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
+      const onControl = new Map([[0x040000d8, [{ name: 'gNamed', kind: 'data' as const }]]]);
+      expect(() => decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl })).toThrow(
+        'handed to a device whose control word is not a literal',
+      );
+      const n3 = armed(
+        'n3',
+        '\tldr\tr0, .L6+0x10\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, r0\n\tstr\tr5, [r4]\n',
+        '\t.word\tgArr\n',
+      );
+      const e4 = armed(
+        'e4',
+        '\tldr\tr0, .L6+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L6+0x14\n\tstr\tr0, [r1]\n',
+        '\t.word\tgCnt\n\t.word\t-0x7bfffffe\n',
+      );
+      for (const [name, asm] of [
+        ['n3', n3],
+        ['e4', e4],
+      ]) {
+        expect(() => decompile(name, asm, ARMV4T_AGBCC, five)).toThrow(
+          'handed to a device a later store through an unresolved pointer may re-arm, which may read the slot at [sp,#8]',
+        );
+      }
+    });
+
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
     // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
     // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;

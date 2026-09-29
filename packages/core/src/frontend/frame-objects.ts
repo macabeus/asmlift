@@ -337,6 +337,34 @@ export function auditFrameObjects({
       }
       return undefined;
     };
+    // A named symbol moved by constants — `gNamed.g`, `gCamera + 8` — as that symbol and the sum of
+    // the constants, or undefined. A runtime index is not a constant, and neither is a pointer
+    // loaded from the symbol, a parameter or a phi.
+    const symbolPlusConstant = (v: Value, depth = 0): { sym: string; k: number } | undefined => {
+      const d = defOf.get(v);
+      if (d === undefined || depth > 8) {
+        return undefined;
+      }
+      if (d.opcode === 'gaddr') {
+        return { sym: d.attrs.sym as string, k: 0 };
+      }
+      if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
+        const [x, y] = d.operands;
+        const cy = constOfValue(y);
+        const cx = d.opcode === 'add' ? constOfValue(x) : undefined;
+        const inner =
+          cy !== undefined
+            ? symbolPlusConstant(x, depth + 1)
+            : cx !== undefined
+              ? symbolPlusConstant(y, depth + 1)
+              : undefined;
+        if (inner !== undefined) {
+          const by = cy ?? cx!;
+          return { sym: inner.sym, k: inner.k + (d.opcode === 'sub' ? -by : by) };
+        }
+      }
+      return undefined;
+    };
     // The register this store hands the WHOLE address to, when it is one a device only reads
     // through, else undefined. Word stores only: a `strh` to a source register hands over half an
     // address, so the device's source is not this object. A base this cannot resolve — computed,
@@ -1029,6 +1057,16 @@ export function auditFrameObjects({
     // read unbounded — as does a transfer never armed here at all. An unbounded device read says
     // which of those it met (`why`): each is a different capability to build.
     //
+    // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED, whether or not it has an address. With a symbol
+    // map that places the name, it is that address and the overlap test below decides it exactly.
+    // A name the map does not place is agbcc's own premise: its alias model never lets a symbol
+    // plus a constant meet a literal address (alias.c:812-819, 1064-1068), so it compiles as if no
+    // such store is a device register, and a program that arms the channel through one is outside
+    // what agbcc compiles faithfully anyway. It ends at a CONSTANT: `gArr[i] = 5` makes agbcc reload
+    // a literal address it read before, so an index, a loaded pointer, a parameter or a phi may
+    // still be the arming store. A name the map places twice places it nowhere, and stays
+    // unresolved.
+    //
     // THE PREMISE, stated once and not checkable from one function: a callee or an interrupt
     // handler arms only a transfer it set up itself, source register first. So a call on the path
     // does not unbound the read, and neither does an interrupt at any instruction: whatever re-arms
@@ -1059,7 +1097,15 @@ export function auditFrameObjects({
             if (op.opcode !== 'store') {
               continue;
             }
-            const base = literalAddrOf(op.operands[0]);
+            let base = literalAddrOf(op.operands[0]);
+            const named = base === undefined ? symbolPlusConstant(op.operands[0]) : undefined;
+            if (named !== undefined) {
+              const symAt = addrOfName.get(named.sym);
+              if (symAt === undefined) {
+                continue;
+              }
+              base = symAt === null ? undefined : symAt + named.k;
+            }
             if (base === undefined) {
               if (!frameOnEveryPath.has(op.operands[0])) {
                 return unbounded('a later store through an unresolved pointer may re-arm');
