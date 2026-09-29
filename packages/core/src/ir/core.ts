@@ -83,6 +83,18 @@ export interface LocalObject {
   /** What an assembler LISTING shows of an initialized definition beyond its bytes, absent where
    *  the target is an object file (which records neither). */
   directives?: LocalObjectDirectives;
+  /** What an object FILE records of the object's alignment, absent for an assembler listing, whose
+   *  `.align` is among its directives. */
+  placement?: LocalObjectPlacement;
+}
+
+/** The alignment an object file records for a static, and the rule its compiler aligns by. */
+export interface LocalObjectPlacement {
+  /** the alignment the compiler gave the object (mwcc's `.comment` record for its symbol) */
+  align: number;
+  /** the least alignment that compiler gives an array or a struct whatever its element: mwcc
+   *  records 4 for `u8[1]` and for a struct of two bytes, and 1 for a scalar `u8` (compiled) */
+  aggregateFloor: number;
 }
 
 /** An initialized static's data directives, as the compiler wrote them. The compiler writes each

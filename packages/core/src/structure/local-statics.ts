@@ -12,12 +12,13 @@
 // signed field, a cast) — and the definition settles it where no load does. An object nothing says
 // anything about is bytes.
 //
-// The listing also shows the ALIGNMENT, which decides where the object lands after the statics
-// declared before it. An element type aligns its array to its own width; a definition aligned
-// wider — a struct, a string, an `ALIGNED(4)` — keeps that alignment in an attribute, because a
-// word table one byte off is misread by the machine and scored as a MATCH. mwcc aligns every
-// object in a data section to at least a word (compiled: `u8[9]` then `s16[5]` land at 0 and 12),
-// so no element type this pass picks moves one there.
+// The target also shows the ALIGNMENT — the listing's `.align`, mwcc's `.comment` record — which
+// decides where the object lands after the statics declared before it, and whether a DMA or GX
+// buffer is where the hardware needs it. The definition this pass picks gets its compiler's own
+// alignment: agbcc aligns an array to its element, mwcc an array or struct to at least a word and
+// a scalar to its width. A target aligned wider — a struct, a string, an `s64`, an
+// `ALIGNED(32)` — keeps that alignment in an attribute, because a table one element off is misread
+// by the machine and scored as a MATCH.
 //
 // The definition is a SymbolInfo as well as a declaration, because the structurer spells an access
 // through a symbol's declared shape (`tide[i]` for an array, the bare `q` for a scalar): the shape
@@ -157,7 +158,9 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
       if (widths.length > 1) {
         return say(`whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)`);
       }
-      width = widths[0] ?? 1;
+      // with no access either, an object mwcc aligned below its aggregate floor is a scalar
+      const scalarOnly = obj.placement !== undefined && obj.placement.align < obj.placement.aggregateFloor;
+      width = widths[0] ?? (scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1);
     }
     if (![1, 2, 4].includes(width)) {
       return say(`whose ${width}-byte elements are no integer type`);
@@ -171,10 +174,6 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
       return say('whose loads disagree on whether its elements are signed');
     }
     const signed = signs.size > 0 ? signs.has(true) : dir?.negative === true;
-    if (dir !== undefined && dir.align < width) {
-      return say(`whose definition is aligned to ${dir.align} bytes, less than its ${width}-byte elements are`);
-    }
-    const align = dir !== undefined && dir.align > width ? dir.align : undefined;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
     const init = obj.bytes === undefined ? undefined : elements(obj, width, signed);
@@ -183,6 +182,13 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     // `static int q[1] = {0};`, compiled), so the array keeps the section the target shows.
     const scalar = count === 1 && !(obj.section === 'data' && init!.every((v) => v === 0));
     const type: IrType = scalar ? elem : T.array(elem, count);
+    // The alignment the target shows against the one this definition gets from its compiler.
+    const shown = dir?.align ?? obj.placement?.align;
+    const own = obj.placement === undefined || scalar ? width : Math.max(width, obj.placement.aggregateFloor);
+    if (shown !== undefined && shown < own) {
+      return say(`whose definition is aligned to ${shown} bytes, less than the ${own} its declaration here would get`);
+    }
+    const align = shown !== undefined && shown > own ? shown : undefined;
     const isConst = obj.section === 'rodata';
     infos.set(obj.symbol, {
       name: obj.symbol,

@@ -168,7 +168,7 @@ test("agbcc: a data word naming a static is another static's initializer, not a 
   expect(decompile('T', asm, ARMV4T_AGBCC).source).toContain('    static const u8 tide[2] = { 1, 2 };\n');
 });
 
-test('mwcc: the symbol table gives the section and size, the section contents the bytes', () => {
+test('mwcc: the symbol table gives the section and size, the section contents the bytes, .comment the alignment', () => {
   const ad = dump('mwcc-local-statics.txt');
   expect(readObjectLocalObject(ad, 'kt$18', 'rtab')).toEqual({
     name: 'kt',
@@ -178,6 +178,7 @@ test('mwcc: the symbol table gives the section and size, the section contents th
     size: 12,
     bytes: Uint8Array.from([0, 0, 0, 7, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 9]),
     bigEndian: true,
+    placement: { align: 4, aggregateFloor: 4 },
   });
   // an aggregate initialized to zero stays in .data under mwcc
   expect(bytes(readObjectLocalObject(ad, 'zz$23', 'zdata'))).toEqual([0, 0, 0, 0]);
@@ -194,7 +195,8 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
   const lbrk = readObjectLocalObject(dump('mwcc-dump-lbRk_SeirekiDays.txt'), 't_seiyo_days_tbl$32', 'lbRk_SeirekiDays');
   expect(lbrk).toMatchObject({ name: 't_seiyo_days_tbl', section: 'data', size: 0x1a });
   expect(bytes(lbrk).slice(0, 4)).toEqual([0x00, 0x1f, 0x1c, 0x1f]);
-  // the .debug section names the static too; debug information is not a referrer
+  // the .debug section names the static too; debug information is not a referrer. It is an OSTime,
+  // an s64, and mwcc's .comment records the 8 bytes it is aligned to
   expect(
     readObjectLocalObject(dump('mwcc-dump-JW_JUTGamePad_read.txt'), 'last_pad_read$256', 'JW_JUTGamePad_read'),
   ).toEqual({
@@ -204,6 +206,7 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
     section: 'bss',
     size: 8,
     bigEndian: true,
+    placement: { align: 8, aggregateFloor: 4 },
   });
   expect(
     readObjectLocalObject(dump('mwcc-dump-mCoBG_MakeJumpFlag.txt'), 'make_jump_flag_proc$320', 'mCoBG_MakeJumpFlag'),
@@ -215,7 +218,7 @@ test('mwcc: an absent symbol and a section that is not data refuse', () => {
   expect(readObjectLocalObject(ad, 'nope$9', 'rtab')).toMatchObject({
     refused: expect.stringContaining('does not carry'),
   });
-  ad.symbols.set('odd$1', { section: '.ctors', value: 0, size: 4 });
+  ad.symbols.set('odd$1', { section: '.ctors', value: 0, size: 4, index: ad.symbolCount + 1 });
   expect(readObjectLocalObject(ad, 'odd$1', 'rtab')).toMatchObject({
     refused: expect.stringContaining("section '.ctors'"),
   });
@@ -311,7 +314,7 @@ test('an alignment wider than the elements is stated, one narrower declines', ()
     't.3',
   ]);
   expect(() => decompile('f', packed, ARMV4T_AGBCC)).toThrow(
-    "names a function-scope static ('t.3') whose definition is aligned to 1 bytes, less than its 4-byte elements are",
+    "names a function-scope static ('t.3') whose definition is aligned to 1 bytes, less than the 4 its declaration here would get",
   );
 });
 
@@ -406,4 +409,15 @@ test("a pool word naming the function's predefined name declines rather than nam
   // agbcc puts `__FUNCTION__` in `.LC0`; a listing that names `__FUNCTION__.2` still has no spelling
   const asm = thumbFn(rodata('__FUNCTION__.2', [0x66, 0]), '\tldr\tr0, .L3', ['__FUNCTION__.2']);
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow("names the function's predefined name ('__FUNCTION__.2')");
+});
+
+test("mwcc: a .comment that is not mwcc's, or does not hold one record per symbol, refuses", () => {
+  const ad = dump('mwcc-local-statics.txt');
+  const comment = ad.sections.get('.comment')!;
+  ad.sections.set('.comment', comment.subarray(0, comment.length - 8));
+  expect(readObjectLocalObject(ad, 'kt$18', 'rtab')).toMatchObject({
+    refused: "whose alignment the object's `.comment` section does not record",
+  });
+  ad.sections.delete('.comment');
+  expect(readObjectLocalObject(ad, 'kt$18', 'rtab')).toMatchObject({ refused: expect.stringContaining('.comment') });
 });

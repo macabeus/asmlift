@@ -151,6 +151,39 @@ const CASES: {
     spelled: /return g\(\(u8 \*\)tbl\);/,
   },
   {
+    // a DMA buffer: mwcc's object records the 32 bytes it is aligned to only in its `.comment`, and
+    // agbcc's `.lcomm` carries no alignment at all
+    sym: 'dma',
+    c: 'extern s32 use(u8 *p, s32 n); s32 dma(s32 n) { static u8 buff[64] __attribute__((aligned(32))); return use(buff, n); }',
+    spelled: /static u8 buff\[64\];/,
+    mwccSpelled: /static u8 buff\[64\] __attribute__\(\(aligned\(32\)\)\);/,
+  },
+  {
+    // an `s64` after an `s32`: mwcc puts it at +8, which a definition of bytes must state
+    sym: 'wide',
+    c: 's32 wide(void) { static s32 a = 1; static s64 last = 3; return use2(&a, &last); }',
+    spelled: /static u32 last\[2\] = \{ 3, 0 \};/,
+    mwccSpelled: /static u8 last\[8\] __attribute__\(\(aligned\(8\)\)\) = \{ 0, 0, 0, 0, 0, 0, 0, 3 \};/,
+  },
+  {
+    sym: 'palette',
+    c: 's32 palette(s32 i) { static s16 pal[] __attribute__((aligned(32))) = {1, 2, 3, 4, 5, 6, 7, 8}; return pal[i]; }',
+    spelled: /static s16 pal\[8\] __attribute__\(\(aligned\(16\)\)\) = \{ 1, 2, 3, 4, 5, 6, 7, 8 \};/,
+    mwccSpelled: /static s16 pal\[8\] __attribute__\(\(aligned\(32\)\)\) = \{ 1, 2, 3, 4, 5, 6, 7, 8 \};/,
+    agbccScore: 2,
+  },
+  {
+    // scalars mwcc aligns to their width, an array of one byte it aligns to a word, and an array of
+    // `s64`s to eight; with no access to say otherwise, a scalar's alignment says it is one
+    sym: 'scalars',
+    c:
+      'extern void u(void *); void scalars(void) { static u8 a1; static u8 a2; static u16 b1; static u8 a3[1]; ' +
+      'static s64 l[2]; u(&a1); u(&a2); u(&b1); u(a3); u(l); }',
+    spelled: /static u8 a1;\n {4}static u8 a2;\n {4}static u8 b1\[2\];/,
+    mwccSpelled:
+      /static u16 b1;\n {4}static u8 a3 __attribute__\(\(aligned\(4\)\)\);\n {4}static u8 l\[16\] __attribute__\(\(aligned\(8\)\)\);/,
+  },
+  {
     sym: 'fields',
     c: 's32 fields(s32 i) { static const struct { s32 a; s32 b; } t[3] = {{1, 2}, {3, 4}, {5, 6}}; return t[i].b; }',
     spelled: /static const u32 t\[6\] = \{ 1, 2, 3, 4, 5, 6 \};/,

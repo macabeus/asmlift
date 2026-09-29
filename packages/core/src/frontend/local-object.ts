@@ -20,6 +20,8 @@
 //     declaration of another object this reader does not make;
 //   • its extent cannot be read: a data directive this reader does not parse, a size that
 //     disagrees with the bytes under the label, or an empty object;
+//   • its alignment cannot be read: an `.align` form this reader does not parse, or an object file
+//     whose `.comment` section does not record it;
 //   • another function names it too. A static of an inlined same-unit function is named by every
 //     function the compiler inlined it into — agbcc 2.9 puts `static inline counter`'s `n.3`
 //     ahead of its first caller, and mwcc -inline auto has `A` and `B` both address `n$4` — so
@@ -352,10 +354,35 @@ const OBJECT_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
 /** Sections whose relocations describe the program for a debugger, not for the machine. */
 const isDebugSection = (s: string): boolean => /^\.(debug|line)/.test(s);
 
+/** mwcc's `.comment` section: `CodeWarrior\n`, a header to 0x2c, then one 8-byte record per
+ *  symbol-table entry, the null one first, whose first word is the alignment mwcc gave that symbol
+ *  (compiled: `s64` records 8 and lands at 8 after an `s32`, `aligned(32)` records 32, a scalar
+ *  `u8` 1). No section header or symbol value says the same: a section's alignment is its widest
+ *  object's, and an object at offset 0 of one is aligned to anything. */
+const MW_COMMENT_MAGIC = 'CodeWarrior\n';
+const MW_COMMENT_RECORDS = 0x2c;
+
+/** The alignment mwcc's `.comment` records for the symbol at `index`, or null when the section is
+ *  absent, is not mwcc's, or holds another number of records than the listing has symbols — the
+ *  index would then name another symbol's. */
+function recordedAlign(ad: AsmData, index: number): number | null {
+  const c = ad.sections.get('.comment');
+  if (
+    c === undefined ||
+    String.fromCharCode(...c.subarray(0, MW_COMMENT_MAGIC.length)) !== MW_COMMENT_MAGIC ||
+    c.length !== MW_COMMENT_RECORDS + 8 * (ad.symbolCount + 1)
+  ) {
+    return null;
+  }
+  const at = MW_COMMENT_RECORDS + 8 * index;
+  const align = ((c[at] << 24) | (c[at + 1] << 16) | (c[at + 2] << 8) | c[at + 3]) >>> 0;
+  return align > 0 && (align & (align - 1)) === 0 ? align : null;
+}
+
 /** Read a function-scope static's definition out of an object's `objdump -s -r -t` side table:
- *  the symbol table gives its section, offset and size, the section contents its bytes.
- *  `fn` is the function reading it — a relocation naming the static from any other code, or from
- *  data, is another referrer. */
+ *  the symbol table gives its section, offset and size, the section contents its bytes, and mwcc's
+ *  `.comment` its alignment. `fn` is the function reading it — a relocation naming the static from
+ *  any other code, or from data, is another referrer. */
 export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): LocalObjectRead {
   const parts = localStaticName(symbol);
   if (parts === null) {
@@ -387,8 +414,13 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
       return refused(`that ${r.section} also names at 0x${r.offset.toString(16)} — it is not this function's alone`);
     }
   }
+  const align = recordedAlign(ad, sym.index);
+  if (align === null) {
+    return refused("whose alignment the object's `.comment` section does not record");
+  }
+  const placement = { align, aggregateFloor: 4 };
   if (kind === 'bss') {
-    return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian };
+    return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian, placement };
   }
   const contents = ad.sections.get(sym.section);
   if (contents === undefined || sym.value + sym.size > contents.length) {
@@ -402,6 +434,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     size: sym.size,
     bytes: contents.slice(sym.value, sym.value + sym.size),
     bigEndian: ad.bigEndian,
+    placement,
   };
 }
 

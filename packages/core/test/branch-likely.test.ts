@@ -318,9 +318,10 @@ test('a recovered jump table and a nullified slot refuse where they meet, both w
       { section: '.rodata', offset: 4, type: 'R_MIPS_32', sym: '.text', addend: 0 },
     ],
     symbols: new Map([
-      ['jt', { section: '.rodata', value: 0, size: 8 }],
-      ['.text', { section: '.text', value: 0, size: 0 }],
+      ['jt', { section: '.rodata', value: 0, size: 8, index: 1 }],
+      ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
     ]),
+    symbolCount: 2,
     bigEndian: true,
   };
   // Hardware entering 0x28 runs `li v0,7; li v0,3; jr ra` and returns 3. Read as an ordinary
