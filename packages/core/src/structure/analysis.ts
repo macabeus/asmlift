@@ -729,7 +729,8 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
-  /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
+  /** the members of `materialize` that name a pre-update read: the escape rule's
+   *  (`escapesAheadOfUpdate`), and a helper op the helper clause named over one */
   preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
@@ -1490,34 +1491,58 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Asked only once every other rule has settled (`escapePhase` below), so the walk stops at each
    *  def those rules name: a materialized def renders as its name. It stops at a BACK-EDGE ARG too —
    *  reading it is reading the post-update value, which is what the name holds. */
-  const escapeLoops = loopBodies.flatMap((L) => {
+  const bottomTested = loopBodies.flatMap((L) => {
     const term = L.latch.ops[L.latch.ops.length - 1];
     const back = term.successors.find((sc) => sc.block === L.header);
-    return back && L.body.size === 1 ? [{ ...L, back }] : [];
+    return back ? [{ ...L, term, back }] : [];
   });
+  const escapeLoops = bottomTested.filter((L) => L.body.size === 1);
   const preUpdateHomes = new Set<Op>();
-  const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
-    escapeLoops.some((L) => {
-      if (!L.body.has(opBlock.get(op)!) || consumers.every((c) => L.body.has(opBlock.get(c)!))) {
+  /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
+  const readsPreUpdate = (L: (typeof bottomTested)[number], op: Op, r: Value): boolean => {
+    const seen = new Set<Value>();
+    const readsUpdated = (x: Value): boolean => {
+      if (seen.has(x) || L.back.args.includes(x)) {
         return false;
       }
-      const seen = new Set<Value>();
-      const readsUpdated = (x: Value): boolean => {
-        if (seen.has(x) || L.back.args.includes(x)) {
-          return false;
-        }
-        seen.add(x);
-        if (L.header.params.includes(x)) {
-          return true;
-        }
-        const d = defOf.get(x);
-        if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && materialize.has(d))) {
-          return false;
-        }
-        return d.operands.some(readsUpdated);
-      };
-      return readsUpdated(r);
-    });
+      seen.add(x);
+      if (L.header.params.includes(x)) {
+        return true;
+      }
+      const d = defOf.get(x);
+      if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && materialize.has(d))) {
+        return false;
+      }
+      return d.operands.some(readsUpdated);
+    };
+    return readsUpdated(r);
+  };
+  const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
+    escapeLoops.some(
+      (L) =>
+        L.body.has(opBlock.get(op)!) &&
+        !consumers.every((c) => L.body.has(opBlock.get(c)!)) &&
+        readsPreUpdate(L, op, r),
+    );
+  /** Is `r` read where the update has run: after the loop, or by its bottom test? */
+  const readAfterUpdate = (L: (typeof bottomTested)[number], r: Value, consumers: Op[]): boolean => {
+    if (!consumers.every((c) => L.body.has(opBlock.get(c)!))) {
+      return true;
+    }
+    const seen = new Set<Value>();
+    const inTest = (x: Value): boolean => {
+      if (x === r) {
+        return true;
+      }
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const d = defOf.get(x);
+      return !!d && L.body.has(opBlock.get(d)!) && !materialize.has(d) && d.operands.some(inTest);
+    };
+    return L.term.opcode === 'cond_br' && inTest(L.term.operands[0]);
+  };
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -2169,6 +2194,24 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           materialize.add(op);
         }
       }
+    }
+  }
+  // A helper op the helper clause named is a pre-update home too when its value reads a loop
+  // variable and is read where the update has run. Named, it lifts the loop the pre-update hazard
+  // declines, in a body of any size — so the structurer's refusal on homes (`preUpdateHomes`) must
+  // see it, as it sees the escape rule's.
+  for (const op of materialize) {
+    const r = op.results[0];
+    if (!r || preUpdateHomes.has(op) || !isHelper(op)) {
+      continue;
+    }
+    const consumers = consumersOf(op);
+    if (
+      bottomTested.some(
+        (L) => L.body.has(opBlock.get(op)!) && readAfterUpdate(L, r, consumers) && readsPreUpdate(L, op, r),
+      )
+    ) {
+      preUpdateHomes.add(op);
     }
   }
   return {

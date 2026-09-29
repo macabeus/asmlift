@@ -344,3 +344,52 @@ test('a pre-update home does not unlock a loop whose variable name a later merge
   const admit = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
   expect(() => emit(AFTER_A_MERGE_ON_A_LOOP_NAME, admit)).toThrow(/reads a pre-update loop variable/);
 });
+
+// An op the asm reached by CALLING a runtime helper (`bl __divsi3`) is named where it ran by the
+// helper clause, not by the escape rule, and it covers the same pre-update read. It is a home all
+// the same, so the refusal above sees it.
+test('a helper op named where it ran is a pre-update home too', () => {
+  const admit = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
+  const helper = AFTER_A_MERGE_ON_A_LOOP_NAME.replace(
+    '%6: s32 = add %1, %4',
+    '%6: s32 = sdiv %1, %4 {helper="__divsi3"}',
+  );
+  expect(() => emit(helper, admit)).toThrow(/reads a pre-update loop variable/);
+});
+
+// In a body of more than one block, under the default gates (generated IR, seed 1015): `%8` reads
+// the outer loop's `%6` and the bottom test reads `%8`. Inline, the test re-reads `%6` after the
+// update and the loop declines. Named at its def as a helper, it lifts, and the post-loop merge
+// then takes `%7`'s name, `v4 = v3; f0(v4);`, where the IR calls `f0` on `%2`.
+const HELPER_READ_BY_THE_BOTTOM_TEST = `fn fz1015 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = call %0 {target="f0"}
+  %3: s32 = sub %0, %0
+  %4: s32 = call %3 {target="f0"}
+  %5: s32 = sub %0, %3
+  br ^bb1(%2, %0)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = add %3, %6 {helper="__h"}
+  %9: s32 = call %1 {target="f1"}
+  br ^bb2(%1)
+^bb2(%10: s32):
+  %11: s32 = add %6, %3
+  %12: s32 = sub %11, %1
+  br ^bb3(%9, %0)
+^bb3(%13: s32, %14: s32):
+  %15: s32 = call %6 {target="f0"}
+  %16: u32 = icmp_slt %9, %0
+  cond_br %16, ^bb2(%2), ^bb4()
+^bb4():
+  %17: s32 = sub %1, %1
+  %18: u32 = icmp_slt %2, %8
+  cond_br %18, ^bb1(%7, %2), ^bb5(%7, %0)
+^bb5(%19: s32, %20: s32):
+  %21: s32 = call %2 {target="f0"}
+  ret %19
+}
+`;
+
+test('a helper op the bottom test reads is a pre-update home in a body of any size', () => {
+  expect(() => emit(HELPER_READ_BY_THE_BOTTOM_TEST)).toThrow(/reads a pre-update loop variable/);
+});
