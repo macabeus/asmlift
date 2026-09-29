@@ -32,8 +32,9 @@
 // REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
 // in the definition settles the width and the accesses disagree on it, when the width is no
 // integer type's or does not divide the size, when the loads disagree on the signedness, when the
-// definition is aligned narrower than its declaration here would be, when a bss static's offset
-// says it was initialized to zero and it is no scalar (or the input does not show the offset);
+// definition is aligned narrower than its declaration here would be, when a bss static sits where
+// only a scalar initialized to zero is sure to land and it is no scalar (or the input does not
+// show where it sits);
 // and, at the rename, when two statics share a source name (one block cannot declare both) or
 // when the function names anything else by it — a global, a callee, a parameter, a local, itself —
 // which the block-scope static would hide.
@@ -71,7 +72,7 @@ export interface StaticLayout {
   uninitOrder?: Readonly<Record<string, 'reversed' | 'first-use'>>;
 }
 
-/** The bss statics of `objs` that were initialized to zero ({@link StaticLayout.uninitOrder}), or
+/** The bss statics of `objs` to write `= 0` ({@link StaticLayout.uninitOrder}), or
  *  the symbol of one whose placement the input does not show. In a section of either order a
  *  function's zero-initialized statics come first, scalars with their counters rising.
  *
@@ -242,12 +243,12 @@ export function localStaticShapes(
   }
   const access = accessesOf(fn, new Set(objs.keys()));
   const widthOf = (o: LocalObject) => elementWidth(o, access.get(o.symbol) ?? [], layout);
-  /** Declared here as a scalar, or sized and aligned as one — the compiler aligns a scalar to its
-   *  width. One declared as an array where only a zero scalar sits is refused below: an `s32 = 0`
-   *  read a byte at a time, or only through its address, lands there as well as four bytes used
-   *  first. */
+  /** Declared here as a scalar, or sized and aligned as one — the compiler aligns a scalar to at
+   *  least its width. One declared as an array where only a zero scalar sits is refused below: an
+   *  `s32 = 0` read a byte at a time, or only through its address, lands there as well as four
+   *  bytes used first. */
   const scalarShaped = (o: LocalObject): boolean =>
-    widthOf(o) === o.size || ([1, 2, 4, 8].includes(o.size) && o.placement?.align === o.size);
+    widthOf(o) === o.size || ([1, 2, 4, 8].includes(o.size) && (o.placement?.align ?? 0) >= o.size);
   const zeroed =
     layout.uninitOrder !== undefined
       ? zeroInitialized([...objs.values()], layout.uninitOrder, scalarShaped)

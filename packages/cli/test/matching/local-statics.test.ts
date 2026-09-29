@@ -377,6 +377,12 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
       sym: 'zbytes',
       c: 's32 zbytes(s32 i) { static s32 c; static s32 a = 0; if (i) return c; return *(u8 *)&a; }',
     },
+    {
+      sym: 'zwide',
+      c:
+        'extern void use(s32 *); void zwide(void) { static s32 c; ' +
+        'static s32 a __attribute__((aligned(8))) = 0; use(&c); use(&a); }',
+    },
   ])('-sdata 0: $sym, a static where only a zero scalar sits, declared here as bytes, declines', ({ sym, c }) => {
     const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, SDATA0);
     expect(() => decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) })).toThrow(
