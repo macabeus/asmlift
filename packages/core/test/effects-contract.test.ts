@@ -100,6 +100,32 @@ describe('assertEffectsPreserved — duplication that is legitimate', () => {
     const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body: [callStmt('f')] };
     expect(() => check(['f'], [loop])).not.toThrow();
   });
+
+  // A loop's exit tail copied into each of its two breaks: `if (a) { gA = f(); return x; } if (b) {
+  // gA = f(); return x; }`. A path that takes the first return never reaches the second.
+  const exitArm = (): Stmt => ({
+    k: 'if',
+    cond: { k: 'var', name: 'c' },
+    then: [callStmt('f'), { k: 'return', value: { k: 'var', name: 'x' } }],
+    else: [],
+  });
+
+  test('two sequenced arms that each return are one execution per path', () => {
+    expect(() =>
+      check(['f'], [{ k: 'while', cond: { k: 'const', value: 1 }, body: [exitArm(), exitArm()] }]),
+    ).not.toThrow();
+  });
+
+  test('an arm that returns does not excuse a render on the path that falls past it', () => {
+    const fallsPast: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [callStmt('f')], else: [] };
+    expect(() => check(['f'], [exitArm(), fallsPast, callStmt('f')])).toThrow(/emitted 2 calls to 'f' on one path/);
+  });
+
+  test('a break carries its calls to what follows the loop', () => {
+    const brk: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [callStmt('f'), { k: 'break' }], else: [] };
+    const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body: [brk] };
+    expect(() => check(['f'], [loop, callStmt('f')])).toThrow(/emitted 2 calls to 'f' on one path/);
+  });
 });
 
 describe('assertEffectsPreserved — fall-through chains', () => {

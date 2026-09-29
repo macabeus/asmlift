@@ -105,10 +105,11 @@ export function assertResolved(sfn: SFn): void {
 //     model, and the alias gate governs it); stores are checked by neither direction here because
 //     the readability DCE pass is allowed to drop a provably dead one.
 //   • PER PATH, not per tree. Structuring may legitimately emit one block twice — two exclusive
-//     switch arms sharing a body, a duplicated return merge — and each path still executes it
-//     once. So the duplication rule compares the maximum over syntactic root-to-leaf paths (a
-//     branch takes the max of its arms, a loop body counts once, a fall-through arm chains into
-//     the next) against the IR's static count.
+//     switch arms sharing a body, a duplicated return merge, an exit tail copied into each
+//     `if (…) { …; return; }` that leaves a loop — and each path still executes it once. So the
+//     duplication rule compares the maximum over syntactic root-to-leaf paths (a branch takes the
+//     max of its arms, a loop body counts once, a fall-through arm chains into the next, and a
+//     `return` ends its path) against the IR's static count.
 //   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
 //     (every frontend that emits `call` today stamps one).
 type CallCounts = Map<string, number>;
@@ -130,49 +131,98 @@ function callsInExpr(e: Expr, into: CallCounts): void {
   exprChildren(e).forEach((c) => callsInExpr(c, into));
 }
 
-/** `total` = every occurrence in the tree; `path` = the most any single syntactic path executes */
-function countCalls(stmts: Stmt[]): { total: CallCounts; path: CallCounts } {
+/** The calls on the paths through a statement list, split by how each path LEAVES it: falling off
+ *  the end, or by a `return`, `break` or `continue`. Null when no path leaves that way. Each is the
+ *  per-name maximum over the paths of that kind. */
+interface PathCounts {
+  through: CallCounts | null;
+  ret: CallCounts | null;
+  brk: CallCounts | null;
+  cont: CallCounts | null;
+}
+
+const sum = (a: CallCounts, b: CallCounts): CallCounts => combine(a, b, (x, y) => x + y);
+const most = (...xs: (CallCounts | null)[]): CallCounts | null =>
+  xs.reduce<CallCounts | null>((acc, x) => (x === null ? acc : acc === null ? x : combine(acc, x, Math.max)), null);
+/** `c` run ahead of every path of `p` */
+const after = (c: CallCounts, p: PathCounts): PathCounts => ({
+  through: p.through && sum(c, p.through),
+  ret: p.ret && sum(c, p.ret),
+  brk: p.brk && sum(c, p.brk),
+  cont: p.cont && sum(c, p.cont),
+});
+/** `a` then `b`: only a path that falls off the end of `a` reaches `b` */
+const seq = (a: PathCounts, b: PathCounts): PathCounts =>
+  a.through === null
+    ? a
+    : {
+        through: b.through && sum(a.through, b.through),
+        ret: most(a.ret, b.ret && sum(a.through, b.ret)),
+        brk: most(a.brk, b.brk && sum(a.through, b.brk)),
+        cont: most(a.cont, b.cont && sum(a.through, b.cont)),
+      };
+/** whichever of the alternatives runs */
+const either = (...ps: PathCounts[]): PathCounts => ({
+  through: most(...ps.map((p) => p.through)),
+  ret: most(...ps.map((p) => p.ret)),
+  brk: most(...ps.map((p) => p.brk)),
+  cont: most(...ps.map((p) => p.cont)),
+});
+const falls = (c: CallCounts): PathCounts => ({ through: c, ret: null, brk: null, cont: null });
+
+/** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
+ *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
+ *  `if (…) { f(); return; }` arms are one call on any path, not two. */
+function countCalls(stmts: Stmt[]): { total: CallCounts; paths: PathCounts } {
   let total: CallCounts = new Map();
-  let path: CallCounts = new Map();
-  const add = (r: { total: CallCounts; path: CallCounts }, pathF: (x: number, y: number) => number) => {
-    total = combine(total, r.total, (x, y) => x + y);
-    path = combine(path, r.path, pathF);
-  };
+  let paths = falls(new Map());
   for (const s of stmts) {
     const own: CallCounts = new Map();
     stmtExprs(s).forEach((e) => callsInExpr(e, own));
-    add({ total: own, path: own }, (x, y) => x + y);
+    total = sum(total, own);
+    let here: PathCounts;
     if (s.k === 'if') {
       const t = countCalls(s.then);
       const e = countCalls(s.else);
-      // exclusive arms: the path count is whichever arm runs, the total counts both
-      add(
-        { total: combine(t.total, e.total, (x, y) => x + y), path: combine(t.path, e.path, Math.max) },
-        (x, y) => x + y,
-      );
+      total = sum(total, sum(t.total, e.total));
+      here = after(own, either(t.paths, e.paths));
     } else if (s.k === 'switch') {
       const arms = s.cases.map((c) => countCalls(c.body));
       const dflt = countCalls(s.default ?? []);
+      total = arms.reduce((acc, a) => sum(acc, a.total), sum(total, dflt.total));
       // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
       // path through arm i runs the chain starting at i — the shape the fall-through round's
-      // CRITICAL took. Built from the end; `chain[i]` is that arm's per-path count.
-      const chain: CallCounts[] = new Array(arms.length);
+      // CRITICAL took. Built from the end; `chain[i]` is that arm's paths.
+      const chain: PathCounts[] = new Array(arms.length);
       for (let i = arms.length - 1; i >= 0; i--) {
-        const next = i + 1 < arms.length ? chain[i + 1] : dflt.path;
-        chain[i] = s.cases[i].fallsThrough ? combine(arms[i].path, next, (x, y) => x + y) : arms[i].path;
+        const next = i + 1 < arms.length ? chain[i + 1] : dflt.paths;
+        chain[i] = s.cases[i].fallsThrough ? seq(arms[i].paths, next) : arms[i].paths;
       }
-      const armTotal = arms.reduce((acc, a) => combine(acc, a.total, (x, y) => x + y), dflt.total);
-      const armPath = chain.reduce((acc, c) => combine(acc, c, Math.max), dflt.path);
-      add({ total: armTotal, path: armPath }, (x, y) => x + y);
+      // No `default` is one more alternative: no arm runs. A `break` leaves the switch, so it
+      // continues after it as a fall-off-the-end does.
+      const inner = either(...chain, s.default ? dflt.paths : falls(new Map()));
+      here = after(own, { through: most(inner.through, inner.brk), ret: inner.ret, brk: null, cont: inner.cont });
+    } else if (stmtChildren(s).length > 0) {
+      // A loop: its sequenced children (a body, a `for`'s init/inc) counted ONCE — a loop's dynamic
+      // trip count is not a syntactic occurrence, and the IR side is static too. A `break` or
+      // `continue` in the body lands after the loop or at its test, and the test may exit without
+      // running the body.
+      const body = countCalls(stmtChildren(s));
+      total = sum(total, body.total);
+      const p = body.paths;
+      here = after(own, { through: most(p.through, p.brk, p.cont, new Map()), ret: p.ret, brk: null, cont: null });
+    } else if (s.k === 'return') {
+      here = { through: null, ret: own, brk: null, cont: null };
+    } else if (s.k === 'break') {
+      here = { through: null, ret: null, brk: own, cont: null };
+    } else if (s.k === 'continue') {
+      here = { through: null, ret: null, brk: null, cont: own };
     } else {
-      // Sequenced children (a loop body, a `for`'s init/inc): counted ONCE — a loop's dynamic trip
-      // count is not a syntactic occurrence, and the IR side is static too.
-      for (const c of stmtChildren(s)) {
-        add(countCalls([c]), (x, y) => x + y);
-      }
+      here = falls(own);
     }
+    paths = seq(paths, here);
   }
-  return { total, path };
+  return { total, paths };
 }
 
 /**
@@ -221,7 +271,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   if (!irCalls.size) {
     return;
   }
-  const { total, path } = countCalls(sfn.body);
+  const { total, paths } = countCalls(sfn.body);
+  const path = most(paths.through, paths.ret, paths.brk, paths.cont) ?? new Map<string, number>();
   for (const [name, n] of irCalls) {
     if (!(total.get(name) ?? 0)) {
       throw new ContractError(`structuring dropped the call to '${name}' in '${sfn.name}' — its effect is lost`);
