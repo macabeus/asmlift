@@ -103,7 +103,7 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from './hazards';
-import { type HeaderNest, type NaturalLoop, analyzeLoops, sharedHeaderNest } from './loops';
+import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
@@ -2465,19 +2465,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // test and update live in ONE block, so the latch test reads the UPDATED value → emitWhile substitutes
   // the back-edge arg back to the header param. This is DISTINCT from a test-at-top multi-block `while`
   // (whileLoops, below) whose header is a pure test read on entry values.
-  // A header that is also its own latch beside one other latch is two loops, `do { while (c); … }
-  // while (d)` (`sharedHeaderNest`): the outer one a do-while, the inner one a single-block do-while
-  // its body opens with.
-  const nests = new Map<Block, HeaderNest>();
-  for (const nl of forest.byHeader.values()) {
-    const nest = sharedHeaderNest(nl);
-    if (nest !== null) {
-      nests.set(nl.header, nest);
-    }
-  }
   const loops = new Map<Block, LoopInfo>();
   for (const nl of forest.byHeader.values()) {
-    if (!nl.selfLoop || nests.has(nl.header)) {
+    if (!nl.selfLoop) {
       continue;
     } // multi-block loops go through whileLoops
     const b = nl.header;
@@ -2544,19 +2534,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // is left to `while (1)` (below), or declines to plain if-recovery, which re-enters the header and
   // fails loud via `onStack`.
   const whileLoops = new Map<Block, WhileLoopInfo>();
-  // The inner self-loop of a `nests` header, keyed by the header it shares with a `doWhileLoops` entry.
-  const sharedSelfLoops = new Map<Block, DoWhileInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
     const h = nl.header;
     if (nl.selfLoop && loops.has(h)) {
       continue;
     } // guarded self-loops use emitWhile (above); UNGUARDED ones are single-block do-whiles
-    const nest = nests.get(h);
-    if (nest === undefined && !nl.selfLoop && nl.latches.length !== 1) {
+    if (!nl.selfLoop && nl.latches.length !== 1) {
       continue;
     } // single latch only
-    const latch = nest?.latch ?? (nl.selfLoop ? h : nl.latches[0]);
+    const latch = nl.selfLoop ? h : nl.latches[0];
     // Nested loops: an inner loop whose header sits in this body is fine ONLY if it is PROPERLY
     // nested — its ENTIRE body is contained in ours (a forest descendant). Structuring then recurses
     // naturally: when the outer body reaches the inner header, structureBlock dispatches to the inner's
@@ -2673,16 +2660,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       });
     } else {
       doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, arms });
-      if (nest !== undefined) {
-        sharedSelfLoops.set(h, {
-          header: h,
-          latch: h,
-          exit: nest.innerExit,
-          forwardPreds: (preds.get(h) ?? []).filter((p) => p !== h),
-          body: new Set([h]),
-          arms: [],
-        });
-      }
     }
   }
 
@@ -5173,11 +5150,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (forever && !dwActive.has(b)) {
       return emitForever(forever, stop);
     }
-    // The enclosing do-while's body opens at the header its inner self-loop shares.
-    const shared = sharedSelfLoops.get(b);
-    if (shared && dwActive.has(b)) {
-      return emitDoWhile(shared, stop);
-    }
 
     const out: Stmt[] = [...sideEffects(b)];
     const term = b.ops[b.ops.length - 1];
@@ -6235,20 +6207,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       .filter(
         (l) => l.header !== dw.header && dw.body.has(l.header) && !l.body.has(dw.latch) && latchDoms.has(l.header),
       )
-      .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size)
-      .flatMap((l) => {
-        const self = loops.get(l.header);
-        const nested = doWhileLoops.get(l.header);
-        const s = self ? loopSub(self) : nested ? latchSub(nested) : null;
-        return s === null ? [] : [{ body: l.body, s }];
-      });
-    // A self-loop sharing this loop's header runs first of all, so it is the outermost of them.
-    const shared = sharedSelfLoops.get(dw.header);
-    if (shared !== undefined && shared !== dw) {
-      kids.unshift({ body: shared.body, s: latchSub(shared) });
-    }
+      .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size);
     for (const l of kids) {
-      const s = l.s;
+      const self = loops.get(l.header);
+      const nested = doWhileLoops.get(l.header);
+      const s = self ? loopSub(self) : nested ? latchSub(nested) : null;
+      if (s === null) {
+        continue;
+      }
       const rewrittenBy = new Map<string, Value[]>();
       const written = new Set<string>();
       for (const [v, n] of varName) {
@@ -6450,22 +6416,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           `which would move that effect out of it`,
       );
     }
+    dwActive.add(dw.header);
     // structure the header's own block up to the latch. Call structureBlock DIRECTLY (not
     // structureRegion): the header is already on `onStack` from the caller's structureRegion, so
     // re-entering it via structureRegion would trip the back-edge guard. dwActive masks the do-while
     // hook so this pass structures `header` as an ordinary block (its ifs reconverge at the latch=stop).
     // Structure the header..latch body under this loop's frame so an in-body conditional exit
     // (break / early return before the bottom test) is recognised rather than declining.
-    // A single-block self-loop masks nothing: the header IS the latch, its ops render via sideEffects
-    // below, and an enclosing loop sharing its header still holds the mask.
-    let inner: Stmt[] = [];
-    if (dw.header !== dw.latch) {
-      dwActive.add(dw.header);
-      inner = withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: new Set() }, () =>
-        structureBlock(dw.header, dw.latch),
-      ); // header..latch (exclusive of latch)
-      dwActive.delete(dw.header);
-    }
+    const inner =
+      dw.header === dw.latch
+        ? [] // single-block self-loop: the header IS the latch — its ops render via sideEffects below
+        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, arms: dw.arms, breaks: new Set() }, () =>
+            structureBlock(dw.header, dw.latch),
+          ); // header..latch (exclusive of latch)
+    dwActive.delete(dw.header);
     // The UPDATE is RAW (`v = v - 1`) — it IS the decrement; applying `sub` would make it look like the
     // identity `v = v` and drop it. Only the CONDITION and EXIT copies use `sub` (post-update the param
     // already holds the next value, so the latch-computed test reads `v`, not `v - 1`). `updates`

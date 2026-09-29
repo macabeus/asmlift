@@ -120,31 +120,3 @@ export function analyzeLoops(fn: Fn, dom: Map<Block, Set<Block>>): LoopForest {
 
   return { byHeader, parent };
 }
-
-/** A self-loop that shares its header with an enclosing loop: the natural loops of `do { while
- *  (c); … } while (d)`, which the back-edge analysis merges into one because both back edges
- *  target the same block. The header's own edge is the inner loop and the other latch the outer
- *  one's. */
-export interface HeaderNest {
-  /** the outer loop's latch */
-  latch: Block;
-  /** where the inner self-loop's test sends control when it fails — the rest of the outer body */
-  innerExit: Block;
-}
-
-/** The loop as a {@link HeaderNest}, or null. The header's terminator is a two-way branch with one
- *  edge to itself and the other staying in the loop, and exactly one other block latches. Null
- *  where that edge enters the other latch itself: with no outer body between them, the two tests
- *  are one loop's `do { … } while (a || b)` left as branches. */
-export function sharedHeaderNest(nl: NaturalLoop): HeaderNest | null {
-  const h = nl.header;
-  const rest = [...new Set(nl.latches)].filter((l) => l !== h);
-  const term = h.ops[h.ops.length - 1];
-  if (!nl.selfLoop || rest.length !== 1 || term.opcode !== 'cond_br') {
-    return null;
-  }
-  const out = term.successors.filter((s) => s.block !== h);
-  return out.length === 1 && nl.body.has(out[0].block) && out[0].block !== rest[0]
-    ? { latch: rest[0], innerExit: out[0].block }
-    : null;
-}

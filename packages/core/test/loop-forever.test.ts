@@ -1,8 +1,8 @@
 // A LOOP WITH NO TEST OF ITS OWN: `while (1)`.
 //
-// A loop no other recognizer takes — several latches that are no nest (`header-nest.test.ts`), such
-// as a `continue` in mid-body beside the bottom latch or a `do-while` whose `||` test stayed as
-// branches; or one latch under a header that computes before it tests — has no single test to put
+// A loop no other recognizer takes — several latches, such as a `continue` in mid-body beside the
+// bottom latch, a `do-while` whose `||` test stayed as branches, or an inner self-loop on the outer
+// loop's own header; or one latch under a header that computes before it tests — has no single test to put
 // at its top or bottom. It is spelled `while (1)`: every edge back to the header is a continue
 // (implicit at the foot of the region, `continue;` above it), every edge out is a `break` to the one
 // exit the loop is given or an early `return`. An `if` in the body joins where the paths that do
@@ -282,8 +282,8 @@ const RETURN_TAIL = `fn rettail {
   ret %11
 }`;
 
-/** A header that is its own latch beside one other, unconditional latch: `sharedHeaderNest` splits
- *  it, and no `do-while` has that latch for a bottom test. `for (;;) { i++; t = f(i); if (t == a0)
+/** A header that is its own latch beside one other, unconditional latch, which no `do-while` has for
+ *  a bottom test. `for (;;) { i++; t = f(i); if (t == a0)
  *  continue; h(t); if (g(t) < a1) { h(i); continue; } break; } return i;` */
 const NEST_WITHOUT_TEST = `fn nestfall {
 ^bb0(%0: s32, %1: s32):
@@ -398,4 +398,90 @@ test('a nest with no bottom test is left to `while (1)`', () => {
   expect(r.src).toContain('while (1) {');
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+// TWO LOOPS ON ONE HEADER. `do { while (c); … } while (d)` compiles to a block that branches back to
+// itself and a later latch that branches back to the same block, which is also the CFG of one loop
+// whose `||` test stayed as branches when the rest of the outer body fits in the latch block. The
+// asm does not say which the source wrote, so both are `while (1)`, the header's own edge a
+// `continue`.
+
+/** `do { while ((m = f(a0)) < a1); g(m); } while (h(m) < 0);` */
+const NEST = `fn nest {
+^bb0(%0: s32, %1: s32):
+  br ^bb1()
+^bb1():
+  %2: s32 = call %0 {target="f"}
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb1(), ^bb2()
+^bb2():
+  %4: s32 = call %2 {target="g"}
+  br ^bb3()
+^bb3():
+  %5: s32 = call %2 {target="h"}
+  %6: s32 = const {value=0}
+  %7: u32 = icmp_slt %5, %6
+  cond_br %7, ^bb1(), ^bb4()
+^bb4():
+  ret %2
+}`;
+/** A value both loops carry: `x = 0; do { do { x++; } while (x < a1); g(x); } while (h(x) < a0);` */
+const NEST_CARRIED = `fn nestc {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: u32 = icmp_slt %5, %1
+  cond_br %6, ^bb1(%5), ^bb2()
+^bb2():
+  %7: s32 = call %5 {target="g"}
+  br ^bb3()
+^bb3():
+  %8: s32 = call %5 {target="h"}
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%5), ^bb4()
+^bb4():
+  ret %5
+}`;
+/** The rest of the outer body reads the value the inner header was entered with. */
+const NEST_READS_PRE_UPDATE = `fn nestpre {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: u32 = icmp_slt %5, %1
+  cond_br %6, ^bb1(%5), ^bb2()
+^bb2():
+  %7: s32 = call %3 {target="g"}
+  br ^bb3()
+^bb3():
+  %8: s32 = call %5 {target="h"}
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%5), ^bb4()
+^bb4():
+  ret %5
+}`;
+
+test('a self-loop on the header of an enclosing loop is one `while (1)`', () => {
+  const r = judged(NEST);
+  expect(r.src).toBe(
+    's32 nest(s32 a0, s32 a1) {\n    s32 v0;\n    while (1) {\n        v0 = f(a0);\n' +
+      '        if (v0 < a1) continue;\n        g(v0);\n        if ((s32)h(v0) >= 0) break;\n    }\n' +
+      '    return v0;\n}\n',
+  );
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+test('a value both loops carry, read after the inner loop at either version, keeps each reading', () => {
+  for (const ir of [NEST_CARRIED, NEST_READS_PRE_UPDATE]) {
+    const r = judged(ir);
+    expect(r.src).toContain('while (1) {');
+    expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+  }
 });
