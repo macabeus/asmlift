@@ -6169,45 +6169,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // on, and the region's own `stop` ends it. Without the deletion, a branch whose one arm continues
   // joins at the loop bottom, and whatever the other arm runs before its own continue is copied into
   // both arms. A block that ends every path but TESTS first is still where its predecessors meet.
-  // Post-dominator sets, iterated to the greatest fixpoint once per loop.
-  const foreverPdoms = new Map<Block, Map<Block, Set<Block> | null>>();
+  // Computed once per loop.
+  const foreverJoins = new Map<Block, Map<Block, Block | null>>();
   const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
-    let pdom = foreverPdoms.get(fl.header);
-    if (pdom === undefined) {
-      const nodes = [...fl.body];
-      const onward = (n: Block): Block[] =>
+    let ipdom = foreverJoins.get(fl.header);
+    if (ipdom === undefined) {
+      const inBody = (n: Block): Block[] =>
         [...new Set(successorsOf(n))].filter((x) => fl.body.has(x) && x !== fl.header);
       const ends = (n: Block): boolean =>
-        onward(n).length === 0 &&
+        inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
         n.ops.every((op) => !EFFECTFUL_OPS.has(op.opcode) && !materialize.has(op));
-      // null: the block ends every path through it
-      pdom = new Map(nodes.map((n) => [n, ends(n) ? null : new Set(nodes)]));
-      for (let changed = true; changed;) {
-        changed = false;
-        for (const n of nodes) {
-          const mine = pdom.get(n);
-          if (mine === null) {
-            continue;
-          }
-          const sets = onward(n)
-            .map((x) => pdom!.get(x)!)
-            .filter((x) => x !== null);
-          const out = new Set(sets.length === 0 ? [] : [...sets[0]].filter((y) => sets.every((st) => st.has(y))));
-          out.add(n);
-          if (out.size !== mine!.size) {
-            pdom.set(n, out);
-            changed = true;
-          }
-        }
-      }
-      foreverPdoms.set(fl.header, pdom);
+      ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
+      foreverJoins.set(fl.header, ipdom);
     }
-    const mine = pdom.get(b) ?? new Set([b]);
-    // the nearest strict post-dominator is the one every other one also post-dominates
-    return [...mine]
-      .filter((x) => x !== b)
-      .reduce<Block | null>((best, x) => (best === null || pdom.get(x)!.size > pdom.get(best)!.size ? x : best), null);
+    return ipdom.get(b) ?? null;
   };
 
   // A `break` of the loop whose body `ss` is — not of a loop or `switch` inside it.
@@ -7140,11 +7116,16 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
 }
 
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it. Over the
-// subgraph `keep` induces when given, every member of which must still reach a `ret` inside it.
-function postDominators(fn: Fn, keep?: ReadonlySet<Block>): Map<Block, Block | null> {
+// subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
+// with `onward`, over the edges it names between members of `keep`: a block none of whose edges
+// is named ends its paths itself, and a block is where the paths into it meet.
+function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) => Block[]): Map<Block, Block | null> {
   const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
   const nodes: (Block | null)[] = [null, ...blocks];
   const succ = (b: Block): (Block | null)[] => {
+    if (onward !== undefined) {
+      return onward(b);
+    }
     const term = b.ops[b.ops.length - 1];
     return term.opcode === 'ret' ? [null] : successorsOf(b).filter((s) => keep === undefined || keep.has(s));
   };
