@@ -269,8 +269,10 @@ export function auditFrameObjects({
     }
   }
   // A capture MOVED by a constant and nothing else reads names no object — the moved one does —
-  // so it is dropped rather than judged as an object with no use. Only those: an unused `mov rD,
-  // sp` of the machine's own is still a capture, and is judged.
+  // so it is dropped rather than judged as an object with no use, and so is a fold nothing reads:
+  // the write-back of `stmia r1!, {r2, r3, r4}` through a capture is `add r1, r1, #12`, a pointer
+  // to the end of what was copied that the machine never uses. Only those: an unused `mov rD, sp`
+  // of the machine's own is still a capture, and is judged.
   const read = new Set<Value>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -280,7 +282,9 @@ export function auditFrameObjects({
   }
   let laddrs: Op[] = [];
   for (const blk of irBlocks) {
-    blk.ops = blk.ops.filter((op) => op.opcode !== 'laddr' || read.has(op.results[0]) || !moved.has(op.results[0]));
+    blk.ops = blk.ops.filter(
+      (op) => op.opcode !== 'laddr' || read.has(op.results[0]) || !(moved.has(op.results[0]) || foldedHere.has(op)),
+    );
     for (const op of blk.ops) {
       if (op.opcode === 'laddr') {
         laddrs.push(op);

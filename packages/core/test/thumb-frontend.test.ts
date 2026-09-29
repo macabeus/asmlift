@@ -1683,6 +1683,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('r1', endPtr, ARMV4T_AGBCC, { prototypes: { fill: g, count: { params: 2 } } })).toThrow(
         'is the top of the reserved local area of 8 bytes — one past the end of a local array',
       );
+      // …and the write-back of a block copy through a capture lands on the top too, but nothing
+      // reads it, so it is no pointer at all: agbcc's `struct U { u32 a, b, c; }; void c4(void){
+      // struct U s = gU; g(&s); }` declines at the multi-word store it really is
+      const copied =
+        'c4:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr1, sp\n\tldr\tr0, .L12\n\tldmia\tr0!, {r2, r3, r4}\n' +
+        '\tstmia\tr1!, {r2, r3, r4}\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r0}\n' +
+        '\tbx\tr0\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\tgU\n';
+      expect(() => decompile('c4', copied, ARMV4T_AGBCC, { prototypes: { g } })).toThrow(
+        'a store at [+4] through the captured address',
+      );
     });
 
     // …and the same frame word READ back after a call that took its address at argument 0 is,
