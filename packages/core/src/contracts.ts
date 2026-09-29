@@ -109,7 +109,9 @@ export function assertResolved(sfn: SFn): void {
 //     `if (…) { …; return; }` that leaves a loop — and each path still executes it once. So the
 //     duplication rule compares the maximum over syntactic root-to-leaf paths (a branch takes the
 //     max of its arms, a loop body counts once, a fall-through arm chains into the next, and a
-//     `return` ends its path) against the IR's static count.
+//     `return` ends its path) against the IR's static count. What follows a statement every path
+//     leaves is on no path, so it is refused rather than left uncounted: it is code the asm never
+//     ran, and a region duplicated there would pass the count unseen.
 //   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
 //     (every frontend that emits `call` today stamps one).
 type CallCounts = Map<string, number>;
@@ -172,23 +174,28 @@ const falls = (c: CallCounts): PathCounts => ({ through: c, ret: null, brk: null
 
 /** `total` = every occurrence in the tree; `paths` = the most any single syntactic path executes,
  *  by how it leaves `stmts`. A path that leaves by `return` runs nothing after it, so two sequenced
- *  `if (…) { f(); return; }` arms are one call on any path, not two. */
-function countCalls(stmts: Stmt[]): { total: CallCounts; paths: PathCounts } {
+ *  `if (…) { f(); return; }` arms are one call on any path, not two. `unreached` collects every
+ *  statement that follows one no path falls past: the path count skips it, so the caller refuses it
+ *  rather than let a duplicated region hide there. */
+function countCalls(stmts: Stmt[], unreached: Stmt[] = []): { total: CallCounts; paths: PathCounts } {
   let total: CallCounts = new Map();
   let paths = falls(new Map());
   for (const s of stmts) {
+    if (paths.through === null) {
+      unreached.push(s);
+    }
     const own: CallCounts = new Map();
     stmtExprs(s).forEach((e) => callsInExpr(e, own));
     total = sum(total, own);
     let here: PathCounts;
     if (s.k === 'if') {
-      const t = countCalls(s.then);
-      const e = countCalls(s.else);
+      const t = countCalls(s.then, unreached);
+      const e = countCalls(s.else, unreached);
       total = sum(total, sum(t.total, e.total));
       here = after(own, either(t.paths, e.paths));
     } else if (s.k === 'switch') {
-      const arms = s.cases.map((c) => countCalls(c.body));
-      const dflt = countCalls(s.default ?? []);
+      const arms = s.cases.map((c) => countCalls(c.body, unreached));
+      const dflt = countCalls(s.default ?? [], unreached);
       total = arms.reduce((acc, a) => sum(acc, a.total), sum(total, dflt.total));
       // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
       // path through arm i runs the chain starting at i — the shape the fall-through round's
@@ -207,7 +214,7 @@ function countCalls(stmts: Stmt[]): { total: CallCounts; paths: PathCounts } {
       // trip count is not a syntactic occurrence, and the IR side is static too. A `break` or
       // `continue` in the body lands after the loop or at its test, and the test may exit without
       // running the body.
-      const body = countCalls(stmtChildren(s));
+      const body = countCalls(stmtChildren(s), unreached);
       total = sum(total, body.total);
       const p = body.paths;
       here = after(own, { through: most(p.through, p.brk, p.cont, new Map()), ret: p.ret, brk: null, cont: null });
@@ -271,7 +278,13 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   if (!irCalls.size) {
     return;
   }
-  const { total, paths } = countCalls(sfn.body);
+  const unreached: Stmt[] = [];
+  const { total, paths } = countCalls(sfn.body, unreached);
+  if (unreached.length) {
+    throw new ContractError(
+      `structuring emitted ${unreached.length} statement(s) no path reaches in '${sfn.name}', after one every path leaves`,
+    );
+  }
   const path = most(paths.through, paths.ret, paths.brk, paths.cont) ?? new Map<string, number>();
   for (const [name, n] of irCalls) {
     if (!(total.get(name) ?? 0)) {

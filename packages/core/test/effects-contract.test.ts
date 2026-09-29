@@ -11,6 +11,8 @@ import { assertEffectsPreserved } from '../src/contracts';
 import { type Block, type Fn, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { decompile } from '../src/pipeline';
+import { PPC_MWCC } from '../src/target';
 
 /** an IR fn whose (reachable) entry block calls each name in `calls`, plus an optional
  *  UNREACHABLE block calling `unreachable` */
@@ -128,6 +130,39 @@ describe('assertEffectsPreserved — duplication that is legitimate', () => {
   });
 });
 
+describe('assertEffectsPreserved — a region no path reaches', () => {
+  // The per-path count skips what follows a statement every path leaves, so a region the
+  // structurer emitted there is refused rather than skipped: it holds statements the asm never ran,
+  // and a duplicated compare chain hides in it (mwcc's DVDCancelStream shape: a `switch` whose arms
+  // all `continue` or `return`, then the chain again with its calls).
+  const allLeave: Stmt = {
+    k: 'switch',
+    scrutinee: { k: 'var', name: 's' },
+    cases: [{ values: [1, 5], body: [callStmt('h'), { k: 'continue' }], fallsThrough: false }],
+    default: [callStmt('h'), { k: 'return', value: { k: 'const', value: 0 } }],
+  };
+
+  test('statements after a switch whose arms all leave are refused', () => {
+    const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body: [allLeave, callStmt('h'), { k: 'break' }] };
+    expect(() => check(['h', 'h'], [loop, callStmt('h')])).toThrow(/2 statement\(s\) no path reaches/);
+  });
+
+  test('the same switch with nothing after it is fine', () => {
+    const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body: [allLeave] };
+    expect(() => check(['h', 'h'], [loop])).not.toThrow();
+  });
+
+  test('a statement after an if whose arms both return is refused', () => {
+    const both: Stmt = {
+      k: 'if',
+      cond: { k: 'var', name: 'c' },
+      then: [{ k: 'return', value: { k: 'const', value: 1 } }],
+      else: [callStmt('f'), { k: 'return', value: { k: 'const', value: 0 } }],
+    };
+    expect(() => check(['f'], [both, callStmt('f')])).toThrow(/no path reaches/);
+  });
+});
+
 describe('assertEffectsPreserved — fall-through chains', () => {
   // The switch round's CRITICAL: an arm that falls through RUNS the next arm's body too, so the
   // two counts add on that path even though each arm spells the call once.
@@ -157,4 +192,49 @@ describe('assertEffectsPreserved — fall-through chains', () => {
     };
     expect(() => check(['f'], [sw])).toThrow(/emitted 2 calls to 'f' on one path/);
   });
+});
+
+// mwcc, `int e3(int *q){ int r = 0, e; e = f(); while (1) { int s = q[3]; if (s != 1 && s != 5)
+// break; h(0); q[3] = g(s); } h(e); return r; }`. The structurer emits the compare chain twice, once
+// as a `switch` whose arms all leave and once as a dead tail with its own read and calls after it.
+const MWCC_DEAD_TAIL = `00000000 <e3>:
+   0:\tstwu    r1,-32(r1)
+   4:\tmflr    r0
+   8:\tstw     r0,36(r1)
+   c:\tstw     r31,28(r1)
+  10:\tstw     r30,24(r1)
+  14:\tstw     r29,20(r1)
+  18:\tmr      r29,r3
+  1c:\tbl      1c <e3+0x1c>
+\t\t\t1c: R_PPC_REL24\tf
+  20:\tmr      r31,r3
+  24:\tlwz     r30,12(r29)
+  28:\tcmpwi   r30,1
+  2c:\tbeq-    38 <e3+0x38>
+  30:\tcmpwi   r30,5
+  34:\tbne-    50 <e3+0x50>
+  38:\tli      r3,0
+  3c:\tbl      3c <e3+0x3c>
+\t\t\t3c: R_PPC_REL24\th
+  40:\tmr      r3,r30
+  44:\tbl      44 <e3+0x44>
+\t\t\t44: R_PPC_REL24\tg
+  48:\tstw     r3,12(r29)
+  4c:\tb       24 <e3+0x24>
+  50:\tmr      r3,r31
+  54:\tbl      54 <e3+0x54>
+\t\t\t54: R_PPC_REL24\th
+  58:\tlwz     r0,36(r1)
+  5c:\tli      r3,0
+  60:\tlwz     r31,28(r1)
+  64:\tlwz     r30,24(r1)
+  68:\tlwz     r29,20(r1)
+  6c:\tmtlr    r0
+  70:\taddi    r1,r1,32
+  74:\tblr
+`;
+
+test('a lift carrying a region no path reaches declines through the pipeline', () => {
+  const prototypes = { e3: { params: 1 }, f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } };
+  expect(() => decompile('e3', MWCC_DEAD_TAIL, PPC_MWCC, { prototypes })).toThrow(/no path reaches/);
 });
