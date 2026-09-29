@@ -319,6 +319,21 @@ test('without one width in the definition, accesses that disagree or do not divi
   );
 });
 
+test('an element of a struct array is read at its field, not at the stride', () => {
+  // agbcc over `static const struct { s32 a; s16 b; s16 c; } t[2]; return t[i].a;` — the load is
+  // an 8-byte-stride aload of the 4-byte field at 0, and the directives name no one width
+  const asm = [
+    '\t.section .rodata',
+    '\t.align\t2, 0',
+    't.3:',
+    ...['0x1', '0x2', '0x3', '0x4', '0x5', '0x6'].map((v, i) => `\t.${i % 3 === 0 ? 'word' : 'short'}\t${v}`),
+    thumbFn('', '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x3\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]', ['t.3']),
+  ].join('\n');
+  expect(decompile('f', asm, ARMV4T_AGBCC).source).toContain(
+    '    static const u32 t[4] = { 1, 0x30002, 4, 0x60005 };\n',
+  );
+});
+
 test('a negative element read zero-extended declines — the definition says signed, the load unsigned', () => {
   const asm = thumbFn(
     ['\t.section .rodata', 't.3:', '\t.byte\t-0x1', '\t.byte\t0x2'].join('\n'),

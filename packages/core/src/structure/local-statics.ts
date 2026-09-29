@@ -24,7 +24,7 @@
 // disagree on it, when the width does not divide the size, when the loads and the definition
 // disagree on the signedness, when the definition is aligned narrower than its elements, or when a
 // callee carries the static's name (the block-scope static would hide the function in the call).
-import { type Fn, type LocalObject, type Value, defOpMap } from '../ir/core';
+import { type Fn, type LocalObject, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import type { SStatic } from '../l3/ast';
 import { type SymbolInfo, accessSignedness } from '../symbols';
@@ -39,6 +39,19 @@ export interface LocalStaticShapes {
 interface Access {
   width: number;
   signed?: boolean;
+}
+
+/** The width an `aload`/`astore` reads or writes. Its `elemSize` is the element's, which for an
+ *  element of a struct array (raise/struct-arrays.ts, `fieldOff`) is the STRIDE: the access itself
+ *  is the field's, whose type the base's struct carries. Null for a field that type does not hold. */
+function indexedWidth(op: Op): number | null {
+  const fieldOff = op.attrs.fieldOff as number | undefined;
+  if (fieldOff === undefined) {
+    return op.attrs.elemSize as number;
+  }
+  const bt = op.operands[0].type;
+  const field = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to.fields.find((f) => f.off === fieldOff) : undefined;
+  return field !== undefined && field.type.kind === 'int' ? field.type.width / 8 : null;
 }
 
 /** Every access through each static's address. */
@@ -73,7 +86,10 @@ function accessesOf(fn: Fn, names: ReadonlySet<string>): Map<string, Access[]> {
       if (sym === null) {
         continue;
       }
-      const width = (plain ? op.attrs.width : op.attrs.elemSize) as number;
+      const width = plain ? (op.attrs.width as number) : indexedWidth(op);
+      if (width === null) {
+        continue;
+      }
       const isLoad = op.opcode === 'load' || op.opcode === 'aload';
       const list = out.get(sym) ?? out.set(sym, []).get(sym)!;
       list.push({
@@ -131,7 +147,10 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
       }
       width = widths[0] ?? 1;
     }
-    if (![1, 2, 4].includes(width) || obj.size % width !== 0) {
+    if (![1, 2, 4].includes(width)) {
+      return say(`whose ${width}-byte elements are no integer type`);
+    }
+    if (obj.size % width !== 0) {
       return say(`whose ${width}-byte elements do not divide its ${obj.size} bytes`);
     }
     // an access of another width reads through a cast, and says nothing about these elements

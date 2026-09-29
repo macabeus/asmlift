@@ -62,8 +62,16 @@ function dataSections(obj: string): Record<string, { align: number; bytes: numbe
  *  `mwccSpelled` where mwcc's object shows less of the definition than agbcc's listing does.
  *  `agbccScore` is the default candidate's objdiff score where it is not 0: the same function
  *  reading an `extern` instead of a static lifts to the same body and scores the same, so the
- *  difference is a spelling gap of the access, not of the static. */
-const CASES: { sym: string; c: string; spelled: RegExp; mwccSpelled?: RegExp; agbccScore?: number }[] = [
+ *  difference is a spelling gap of the access, not of the static. A `layoutOnly` case is scored by
+ *  nothing but its data: its access has a spelling gap of that kind on both compilers. */
+const CASES: {
+  sym: string;
+  c: string;
+  spelled: RegExp;
+  mwccSpelled?: RegExp;
+  agbccScore?: number;
+  layoutOnly?: true;
+}[] = [
   {
     sym: 'tidef',
     c: 's32 tidef(s32 i) { static const u8 tide[] = {1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1}; return tide[i]; }',
@@ -117,17 +125,32 @@ const CASES: { sym: string; c: string; spelled: RegExp; mwccSpelled?: RegExp; ag
     spelled: /static const u8 t\[8\] __attribute__\(\(aligned\(4\)\)\) = \{ 0, 1, 1, 6, 2, 0xf, 8, 0 \};/,
     mwccSpelled: /static const u8 t\[8\] = \{ 0, 1, 1, 6, 2, 0xf, 0, 8 \};/,
   },
+  {
+    // an array of rows read one byte in: the load is the field's byte, not the 3-byte row
+    sym: 'rows',
+    c: 'u8 rows(s32 i) { static const u8 m[4][3] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}}; return m[i][1]; }',
+    spelled: /static const u8 m\[12\] = \{/,
+    layoutOnly: true,
+  },
+  {
+    sym: 'fields',
+    c: 's32 fields(s32 i) { static const struct { s32 a; s32 b; } t[3] = {{1, 2}, {3, 4}, {5, 6}}; return t[i].b; }',
+    spelled: /static const u32 t\[6\] = \{ 1, 2, 3, 4, 5, 6 \};/,
+    layoutOnly: true,
+  },
 ];
 
 describe('function-scope statics — real agbcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0 }) => {
+  test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0, layoutOnly }) => {
     const asm = compileTargetAsm(c, FLAGS);
     const target = assembleTarget(asm);
     const r = decompile(sym, asm, ARMV4T_AGBCC);
     expect(r.source).toMatch(spelled);
     expect(dataSections(compileCandAgbcc(r.source, FLAGS))).toEqual(dataSections(target));
-    expect(scoreC(r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
+    if (!layoutOnly) {
+      expect(scoreC(r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
+    }
   });
 
   test('a static every caller of an inlined function names declines, naming the others', () => {
@@ -146,13 +169,15 @@ const HAVE_MWCC = ppcDockerGate('local-statics', 'mwcc_242_81');
 
 describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled }) => {
+  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled, layoutOnly }) => {
     const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, FLAGS);
     const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
     expect(r.source).toMatch(mwccSpelled);
     expect(dataSections(compileCandPpc('mwcc_242_81', r.source, FLAGS))).toEqual(dataSections(obj));
-    const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, FLAGS);
-    expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+    if (!layoutOnly) {
+      const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, FLAGS);
+      expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+    }
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {
