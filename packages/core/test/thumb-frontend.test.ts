@@ -1040,6 +1040,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         /address-taken stack local/,
       );
     });
+
+    // …and the same bound keeps a SECOND object private. agbcc's own output for two fills in one
+    // function, `DMA_FILL16(0, a, 16); DMA_FILL32(0, b, 8);` with the macros writing a `vu16`/`vu32`
+    // tmp and a fixed-source control: each device read stays inside its own object.
+    const twoFills = (control16: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n\tstrh\tr2, [r3]\n' +
+      '\tldr\tr4, .L3\n\tstr\tr3, [r4]\n\tldr\tr3, .L3+0x4\n\tstr\tr0, [r3]\n\tldr\tr2, .L3+0x8\n' +
+      '\tldr\tr0, .L3+0xc\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n' +
+      '\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n\tstr\tr1, [r3]\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r2]\n' +
+      '\tldr\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\t0x40000d4\n' +
+      `\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\t${control16}\n\t.word\t-0x7afffff8\n`;
+
+    test('two fixed-source fills each read their own object', () => {
+      const src = decompile('f', twoFills('-0x7efffff0'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('volatile u32 sp4;');
+    });
+
+    test('an incrementing fill reads the object above its own', () => {
+      expect(() => decompile('f', twoFills('0x80000010'), ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the object at \[sp,#4\)/,
+      );
+    });
   });
 
   test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {

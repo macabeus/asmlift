@@ -733,50 +733,6 @@ export function auditFrameObjects({
         fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
       }
     }
-    // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
-    // does with the address it was handed — and a callee may write any offset from it. So an
-    // escape retracts two claims, both of them function-wide because one address reaches the
-    // whole frame.
-    //
-    // The first is that the other ADDRESS-TAKEN objects are private, and it keys on ANY escape —
-    // this is the rule `mayWrite` does NOT narrow. Its argument is about LAYOUT, and layout is
-    // symmetric: two objects are two separate C locals with no guaranteed adjacency, so a device
-    // that READS past the one it was given is as wrong as a callee that writes past it. `DmaCopy`
-    // with a count of two halfwords off `&sp0` transfers `[sp,#2]` too, and the emitted source
-    // transfers whatever the recompiler put after `sp0`, and the second object's own store is
-    // whatever the recompiler made of it. Marking both volatile would not repair that: the locals
-    // are still placed independently.
-    //
-    // It counts `laddr` objects. A neighbour SPILLED to an SSA slot is the slot rule's below,
-    // which bounds a device's read by its control word; this rule does not, since two objects
-    // are two placements whatever reads them.
-    if (escaped.size > 0 && objects.size > 1) {
-      fail(
-        'the captured address escapes, so something outside this function reaches the whole ' +
-          'frame — including another object',
-      );
-    }
-    // The second is `undef`, which rests on this function's own stores being the ONLY writer of
-    // its frame. A wider real object (`struct P p; g(&p);` where only `p.x` is read here) has its
-    // later words written by `g` and read back at a slot no store of ours reaches — declaring
-    // those uninitialised spells the callee's value as garbage. The extents here are inferred
-    // from OUR accesses, which is the number that is too small in this shape.
-    //
-    // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
-    // be written by anyone else, and the overlap checks above cover its aliasing.
-    //
-    // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
-    // pass arguments in, and no address reaches a register — the escape this retraction is about
-    // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
-    const undefSlots = irBlocks.some((blk) =>
-      blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
-    );
-    if (mayWrite.size > 0 && undefSlots) {
-      fail(
-        'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
-      );
-    }
-
     // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
     // that may write, and anything this cannot bound, reaches the whole frame. A device that only
     // reads is bounded by its channel's control halfword (`readSourceControl`), when every store
@@ -831,6 +787,71 @@ export function auditFrameObjects({
       }
       return [lo, hi];
     };
+    // …computed ONCE, with whether the escape may write and how it left, and read by every rule an
+    // escape retracts below. Four rules asking "what can this escape reach" with four predicates is
+    // four places a new bound — a callee's declared extent — has to be threaded into, and the one
+    // it misses is a rule that stays blunter than the others or, worse, looser.
+    const reach = new Map<number, { lo: number; hi: number; writes: boolean; how: string }>();
+    for (const off of escaped) {
+      const [lo, hi] = readWindow(off);
+      const how = passedToCallee.has(off)
+        ? 'is passed to a callee'
+        : mayWrite.has(off)
+          ? 'is stored to memory'
+          : 'is handed to a device that reads through it';
+      reach.set(off, { lo, hi, writes: mayWrite.has(off), how });
+    }
+    const aWriterEscapes = [...reach.values()].some((r) => r.writes);
+
+    // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
+    // does with the address it was handed — and a callee may write any offset from it. So an
+    // escape retracts two claims, both of them function-wide because one address reaches the
+    // whole frame.
+    //
+    // The first is that the other ADDRESS-TAKEN objects are private, and it keys on the REACH, not
+    // on `mayWrite`. Its argument is about LAYOUT, and layout is symmetric: two objects are two
+    // separate C locals with no guaranteed adjacency, so a device that READS past the one it was
+    // given is as wrong as a callee that writes past it. `DmaCopy` with a count of two halfwords
+    // off `&sp0` transfers `[sp,#2]` too, and the emitted source transfers whatever the recompiler
+    // put after `sp0`, and the second object's own store is whatever the recompiler made of it.
+    // Marking both volatile would not repair that: the locals are still placed independently. A
+    // read the control word bounds to the object's own bytes reaches no neighbour, whatever its
+    // placement: two fixed-source DMA fills in one function, each off its own `volatile` local.
+    //
+    // It counts `laddr` objects. A neighbour SPILLED to an SSA slot is the slot rule's below.
+    for (const [off, r] of reach) {
+      for (const [o, obj] of extent) {
+        if (o === off || !(o < off + r.hi && off + r.lo < o + span(obj))) {
+          continue;
+        }
+        fail(
+          r.lo === -Infinity && r.hi === Infinity
+            ? 'the captured address escapes, so something outside this function reaches the whole ' +
+                'frame — including another object'
+            : `the captured address at [sp,#${off}) ${r.how}, which may read the object at [sp,#${o})`,
+        );
+      }
+    }
+    // The second is `undef`, which rests on this function's own stores being the ONLY writer of
+    // its frame. A wider real object (`struct P p; g(&p);` where only `p.x` is read here) has its
+    // later words written by `g` and read back at a slot no store of ours reaches — declaring
+    // those uninitialised spells the callee's value as garbage. The extents here are inferred
+    // from OUR accesses, which is the number that is too small in this shape.
+    //
+    // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
+    // be written by anyone else, and the overlap checks above cover its aliasing.
+    //
+    // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
+    // pass arguments in, and no address reaches a register — the escape this retraction is about
+    // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
+    const undefSlots = irBlocks.some((blk) =>
+      blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
+    );
+    if (aWriterEscapes && undefSlots) {
+      fail(
+        'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
+      );
+    }
 
     // …and the SLOT MODEL is the third claim an escape retracts — the undef rule's argument
     // taken one step further. The extents above are inferred from OUR accesses, so an object
@@ -879,17 +900,11 @@ export function auditFrameObjects({
     // captured address need not BE a base: `add r0, sp, #0x4` is `&buf[1]` as readily as `&b`, and
     // `buf[0]` at [sp,#0] is then read or written through `p[-1]`. Only down to the outgoing
     // block, whose words are the callee's arguments and never part of a local.
-    for (const off of escaped) {
-      const [lo, hi] = readWindow(off);
-      const how = passedToCallee.has(off)
-        ? 'is passed to a callee'
-        : mayWrite.has(off)
-          ? 'is stored to memory'
-          : 'is handed to a device that reads through it';
+    for (const [off, { lo, hi, writes, how }] of reach) {
       for (const slot of usedSlotOffsets) {
         if (slot > off && slot < off + hi) {
           fail(
-            mayWrite.has(off)
+            writes
               ? `the captured address at [sp,#${off}) ${how}, which may write the slot at [sp,#${slot}] — ` +
                   "this function's own store there would be forwarded past the write"
               : `the captured address at [sp,#${off}) ${how}, which may read the slot at [sp,#${slot}] — ` +
@@ -924,8 +939,8 @@ export function auditFrameObjects({
     // account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
     // owns its word and the padding beside it is not a second local.
     //
-    // `mayWrite`, the predicate the undef rule takes: a device SOURCE register reads through the
-    // address and cannot write the frame back, and an unwritten word it reads holds nothing.
+    // On a WRITER, as the undef rule is: a device SOURCE register reads through the address and
+    // cannot write the frame back, and an unwritten word it reads holds nothing.
     //
     // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
     // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
@@ -941,7 +956,7 @@ export function auditFrameObjects({
     // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
     // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
     // that reaches memory rather than a callee, and the callee's declared return.
-    if (mayWrite.size > 0) {
+    if (aWriterEscapes) {
       const accountedWords = new Set<number>();
       for (const [off, obj] of extent) {
         for (let w = off - (off % 4); w < off + obj.width * obj.count; w += 4) {
