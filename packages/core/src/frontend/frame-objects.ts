@@ -306,9 +306,9 @@ export function auditFrameObjects({
     // hardware reads the object, and the DMA-fill idiom this capability was built for
     // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
     const mayWrite = new Set<number>();
-    // …and for the others, the source registers they reached, which is where `readWindow` below
-    // reads how far the device reads
-    const readerSinks = new Map<number, number[]>();
+    // …and for the others, the stores that handed the address to a source register, which is
+    // where `readWindow` below reads how far the device reads
+    const sourceStores = new Map<number, { op: Op; sink: number }[]>();
     // …and the two escapes SPLIT, because each decides something the other does not.
     // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
     // writer this frontend can name, which is what the struct-return premise re-check below rests
@@ -398,7 +398,7 @@ export function auditFrameObjects({
             if (sink === undefined) {
               mayWrite.add(off);
             } else {
-              (readerSinks.get(off) ?? readerSinks.set(off, []).get(off)!).push(sink);
+              (sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!).push({ op, sink });
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
@@ -735,57 +735,87 @@ export function auditFrameObjects({
     }
     // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
     // that may write, and anything this cannot bound, reaches the whole frame. A device that only
-    // reads is bounded by its channel's control halfword (`readSourceControl`), when every store
-    // to it that this function makes is a literal: fixed re-reads one unit, increment reads
-    // upward only, decrement downward only. A store to that halfword through a pointer this
-    // cannot resolve is not seen — the residue `readsThrough` already carries for the source
-    // register itself.
-    const readWindow = (off: number): readonly [number, number] => {
+    // reads is bounded by its channel's control halfword (`readSourceControl`), per TRANSFER: the
+    // device reads the object on every arm of the channel from the store that handed it the
+    // address until a later word store to the same source register replaces it, so the control
+    // stores that bound it are the ones reachable in between. Each has to be a literal the target
+    // decodes. A call on that path may re-arm the channel with a control this function never
+    // wrote, and a store through a pointer this cannot resolve may BE the control halfword, so
+    // either leaves the read unbounded — as does a transfer never armed here at all. An unbounded
+    // device read says which of those it met (`why`): each is a different capability to build.
+    const at = new Map<Op, { blk: Block; i: number }>();
+    for (const blk of irBlocks) {
+      blk.ops.forEach((op, i) => at.set(op, { blk, i }));
+    }
+    const unbounded = (why: string) => ({ lo: -Infinity, hi: Infinity, why });
+    const readWindow = (off: number): { lo: number; hi: number; why: string } => {
       const control = target.capabilities.readSourceControl;
-      const sinks = readerSinks.get(off);
-      if (mayWrite.has(off) || sinks === undefined || control === undefined) {
-        return [-Infinity, Infinity];
+      const stores = sourceStores.get(off);
+      if (mayWrite.has(off) || stores === undefined || control === undefined) {
+        return unbounded('that reads through it');
       }
+      const little = target.capabilities.endianness === 'little';
       const halves: number[] = [];
-      for (const sink of new Set(sinks)) {
-        const at = sink + control.offset;
-        let seen = false;
-        for (const blk of irBlocks) {
-          for (const op of blk.ops) {
-            const base = op.opcode === 'store' ? literalAddrOf(op.operands[0]) : undefined;
+      for (const { op: handed, sink } of stores) {
+        const cnt = sink + control.offset;
+        let armed = false;
+        const entered = new Set<Block>();
+        const work: [Block, number][] = [[at.get(handed)!.blk, at.get(handed)!.i + 1]];
+        walk: while (work.length > 0) {
+          const [blk, from] = work.pop()!;
+          for (let i = from; i < blk.ops.length; i++) {
+            const op = blk.ops[i];
+            if (op.opcode === 'call') {
+              return unbounded('a later call may re-arm');
+            }
+            if (op.opcode !== 'store') {
+              continue;
+            }
+            const base = literalAddrOf(op.operands[0]);
             if (base === undefined) {
+              if (taint.get(op.operands[0]) === undefined) {
+                return unbounded('a later store through an unresolved pointer may re-arm');
+              }
               continue;
             }
             const a = base + (op.attrs.off as number);
             const w = op.attrs.width as number;
-            // the channel's count and control halfwords, [at - 2, at + 2)
-            if (a + w <= at - 2 || a >= at + 2 || (a === at - 2 && w === 2)) {
+            if (a === sink && w === 4) {
+              continue walk;
+            }
+            if (a + w <= cnt || a >= cnt + 2) {
               continue;
             }
             const v = defOf.get(op.operands[1]);
-            const whole = a === at - 2 && w === 4 && target.capabilities.endianness === 'little';
-            if (v?.opcode !== 'const' || !(whole || (a === at && w === 2))) {
-              return [-Infinity, Infinity];
+            if (v?.opcode !== 'const' || a > cnt || a + w < cnt + 2) {
+              return unbounded('whose control word is not a literal');
             }
-            halves.push(((v.attrs.value as number) >>> (whole ? 16 : 0)) & 0xffff);
-            seen = true;
+            const shift = 8 * (little ? cnt - a : a + w - cnt - 2);
+            halves.push(((v.attrs.value as number) >>> shift) & 0xffff);
+            armed = true;
+          }
+          for (const s of blk.ops[blk.ops.length - 1]?.successors ?? []) {
+            if (!entered.has(s.block)) {
+              entered.add(s.block);
+              work.push([s.block, 0]);
+            }
           }
         }
-        if (!seen) {
-          return [-Infinity, Infinity];
+        if (!armed) {
+          return unbounded('this function never arms');
         }
       }
       let [lo, hi] = [0, 0];
       for (const h of halves) {
-        const unit = (h & control.wideBit) !== 0 ? 4 : 2;
-        const mode = (h >> control.modeShift) & 3;
-        if (mode === 3) {
-          return [-Infinity, Infinity];
+        const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
+        const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
+        if (mode === null || mode === undefined) {
+          return unbounded('whose control word bounds nothing');
         }
-        lo = Math.min(lo, mode === 1 ? -Infinity : 0);
-        hi = Math.max(hi, mode === 0 ? Infinity : unit);
+        lo = Math.min(lo, mode === 'decrement' ? -Infinity : 0);
+        hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
       }
-      return [lo, hi];
+      return { lo, hi, why: 'that reads through it' };
     };
     // …computed ONCE, with whether the escape may write and how it left, and read by every rule an
     // escape retracts below. Four rules asking "what can this escape reach" with four predicates is
@@ -793,12 +823,12 @@ export function auditFrameObjects({
     // it misses is a rule that stays blunter than the others or, worse, looser.
     const reach = new Map<number, { lo: number; hi: number; writes: boolean; how: string }>();
     for (const off of escaped) {
-      const [lo, hi] = readWindow(off);
+      const { lo, hi, why } = readWindow(off);
       const how = passedToCallee.has(off)
         ? 'is passed to a callee'
         : mayWrite.has(off)
           ? 'is stored to memory'
-          : 'is handed to a device that reads through it';
+          : `is handed to a device ${why}`;
       reach.set(off, { lo, hi, writes: mayWrite.has(off), how });
     }
     const aWriterEscapes = [...reach.values()].some((r) => r.writes);

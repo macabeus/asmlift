@@ -954,11 +954,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // …and it is the CONTROL WORD that keeps [sp,#4] out of the device's reach: an incrementing
     // source reads upward from the object, and so does one this function never states.
     test.each([
-      ['an incrementing source', '0x80000001'],
-      ['a control word that is not a literal', 'gCtl'],
-    ])('%s may read the slot above the object', (_, control) => {
+      ['an incrementing source', '0x80000001', 'that reads through it'],
+      ['a control word that is not a literal', 'gCtl', 'whose control word is not a literal'],
+    ])('%s may read the slot above the object', (_, control, how) => {
       expect(() => decompile('f', escapeTo('0x00', control), ARMV4T_AGBCC)).toThrow(
-        /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the slot at \[sp,#4\]/,
+        `the captured address at [sp,#0) is handed to a device ${how}, which may read the slot at [sp,#4]`,
       );
     });
 
@@ -2276,13 +2276,42 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('pubw', publishedTwoSlots, ARMV4T_AGBCC, protos)).toThrow(
         /is stored to memory, which may write the slot at \[sp,#4\]/,
       );
-      // CONTROL: the SAME publish to a DMA source register keeps lifting, because the device
+      // CONTROL: the same object published to a DMA source register lifts, because the device
       // reads through the address and never writes it (`readsThrough`), and its control word says
-      // it re-reads the one object. Only the sink word and that control store differ from `pub`.
-      const dmaSink = publishedSlot
-        .replace('\tstr\tr1, [r0]\n', '\tstr\tr1, [r0]\n\tldr\tr1, .L3+4\n\tstr\tr1, [r0, #0x8]\n')
-        .replace('.word\tgp', '.word\t0x40000d4\n\t.word\t0x81000001');
-      expect(decompile('pub', dmaSink, ARMV4T_AGBCC, protos).source).toContain('volatile u8 sp0;');
+      // it re-reads the one object. Verbatim agbcc for `struct M { vu8 b; u8 pad[3]; s32 t; }; s32
+      // pubd(s32 x){ struct M m; m.b = x; m.t = h(1); g2(); REG_DMA3[0] = (u32)&m; REG_DMA3[2] =
+      // 0x81000001; return m.t; }`.
+      const dmaSink = (tail: string) =>
+        'pubd:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tldrb\tr2, [r1]\n\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n' +
+        tail +
+        '\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n';
+      const dmaStores =
+        '\tldr\tr0, .L3\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tldr\tr1, .L3+0x4\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1]\n';
+      const dmaProtos = { prototypes: { h: { params: 1 }, g2: { params: 0, returnsVoid: true } } };
+      expect(decompile('pubd', dmaSink(`\tbl\tg2\n${dmaStores}`), ARMV4T_AGBCC, dmaProtos).source).toContain(
+        'volatile u8 sp0;',
+      );
+      // …and the call AFTER the publish is the refusal again: `g2` may re-arm the channel, whose
+      // source still holds `&m`, with a control this function never wrote — and a `Dma3Go(0x84000002)`
+      // that does reads `m.t`, the word the slot model keeps in a register (agbcc's `pubc`, the same
+      // body with `g2()` moved below the control store).
+      expect(() => decompile('pubd', dmaSink(`${dmaStores}\tbl\tg2\n`), ARMV4T_AGBCC, dmaProtos)).toThrow(
+        'the captured address at [sp,#0) is handed to a device a later call may re-arm, which may read the slot at [sp,#4]',
+      );
+      // …and so is a store through a pointer this cannot resolve, which may BE the control halfword:
+      // agbcc's `pube(s32 x, vu32 *cnt)`, the same body ending `*cnt = 0x84000002`
+      const unresolved =
+        'pube:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r1, #0\n\tmov\tr1, sp\n\tldrb\tr2, [r1]\n' +
+        '\tstrb\tr0, [r1]\n\tmov\tr0, #0x1\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n\tldr\tr0, .L15\n\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L15+0x4\n\tldr\tr0, .L15+0x8\n\tstr\tr0, [r1]\n\tldr\tr0, .L15+0xc\n' +
+        '\tstr\tr0, [r4]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n' +
+        '\t.word\t-0x7bfffffe\n';
+      expect(() => decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos)).toThrow(
+        'handed to a device a later store through an unresolved pointer may re-arm, which may read the slot at [sp,#4]',
+      );
     });
 
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
@@ -2434,24 +2463,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // …AND THE OTHER CONJUNCT, which is the one a wide frame actually meets. This gate needs the
     // base LIVE IN AN ARGUMENT REGISTER AT A `bl`; the DMA-fill idiom PUBLISHES the base to a
     // device register instead, and that path never asks the gate anything. So a published capture
-    // in a frame far wider than one word lifts today, slots above it and all — which is why no
-    // widening of `localArea === 4` can reach klonoa's `LoadBGTilemapData` (instrumented:
-    // localArea=60, frameBasePassedToCallee=false, and its lift is byte-identical with the
-    // conjunct widened).
+    // in a frame far wider than one word lifts, slots above it and all.
     //
     // The slots above it survive on the DEVICE, not on the frame: a word store to a DMA SOURCE
     // register is `readsThrough`, so this capture is never in `mayWrite`, and a literal control
-    // word saying the source is FIXED keeps the slots above it out of what the device reads.
-    // Publish the same base to an ordinary global and both refuse — the test above.
+    // word saying the source is FIXED keeps the slots above it out of what the device reads — with
+    // no call after it that could re-arm the channel. Publish the same base to an ordinary global
+    // and both refuse — the test above.
     //
     // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
     // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
-    // REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] = 0x81000010;
-    // use2(t0 + … + t7 + n); }`. The arities are declared because a GUESSED four-argument `h` reads
+    // use2(t0 + … + t7 + n); REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] =
+    // 0x81000010; }`. The arities are declared because a GUESSED four-argument `h` reads
     // the register that still holds the base as an argument, and the object is then "passed to a
     // callee" on the strength of a guess — the same lower-bound trap `--proto` exists for.
     test('a PUBLISHED capture in a wider frame lifts — this gate governs the callee-passed one', () => {
-      const dmawide =
+      const dmawide = (sum: string, dma: string) =>
         'dmawide:\n' +
         '\tpush\t{r4, r5, r6, r7, lr}\n' +
         '\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n' +
@@ -2469,38 +2496,34 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tmov\tr0, #0x5\n\tbl\th\n\tadd\tr6, r0, #0\n' +
         '\tmov\tr0, #0x6\n\tbl\th\n\tadd\tr5, r0, #0\n' +
         '\tmov\tr0, #0x7\n\tbl\th\n' +
-        '\tldr\tr1, .L3\n' +
-        '\tmov\tr2, sp\n' +
-        '\tstr\tr2, [r1]\n' +
-        '\tadd\tr1, r1, #0x4\n' +
-        '\tldr\tr2, [sp, #0x4]\n' +
-        '\tstr\tr2, [r1]\n' +
-        '\tldr\tr2, .L3+0x4\n' +
-        '\tldr\tr1, .L3+0x8\n' +
-        '\tstr\tr1, [r2]\n' +
         '\tadd\tr4, r4, r7\n\tadd\tr4, r4, sl\n\tadd\tr4, r4, r9\n\tadd\tr4, r4, r8\n' +
-        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n\tldr\tr0, [sp, #0x8]\n' +
-        '\tadd\tr4, r4, r0\n\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n' +
+        sum +
+        '\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tldr\tr0, .L9\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tadd\tr0, r0, #0x4\n' +
+        dma +
         '\tadd\tsp, sp, #0xc\n' +
         '\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n' +
         '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n' +
-        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7efffff0\n';
+        '.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7efffff0\n';
       const protos = { prototypes: { h: { params: 1 }, use2: { params: 1 } } };
-      const src = decompile('dmawide', dmawide, ARMV4T_AGBCC, protos).source;
+      const literal = dmawide(
+        '\tldr\tr0, [sp, #0x8]\n\tadd\tr4, r4, r0\n',
+        '\tldr\tr1, [sp, #0x4]\n\tstr\tr1, [r0]\n\tldr\tr1, .L9+0x4\n\tldr\tr0, .L9+0x8\n\tstr\tr0, [r1]\n',
+      );
+      const src = decompile('dmawide', literal, ARMV4T_AGBCC, protos).source;
       expect(src).toContain('volatile u16 sp0;');
       expect(src).toContain('*(s32 *)67109076 = &sp0;');
       // …and a count ORed in at run time bounds nothing: `n | 0x81000000` may carry any source
-      // mode, so the device may read the spilled `dst` above the object. Verbatim agbcc again.
-      const runtimeCount = dmawide
-        .replace(
-          '\tldr\tr2, .L3+0x4\n\tldr\tr1, .L3+0x8\n\tstr\tr1, [r2]\n',
-          '\tldr\tr2, .L3+0x4\n\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n\tldr\tr3, [sp, #0x8]\n' +
-            '\torr\tr1, r1, r3\n\tstr\tr1, [r2]\n',
-        )
-        .replace('\tldr\tr2, [sp, #0x4]\n\tstr\tr2, [r1]\n', '\tldr\tr3, [sp, #0x4]\n\tstr\tr3, [r1]\n')
-        .replace('\tldr\tr0, [sp, #0x8]\n\tadd\tr4, r4, r0\n', '');
+      // mode, so the device may read the spilled `dst` above the object. Verbatim agbcc again, the
+      // same body with `n` moved from the sum into `REG_DMA3[2] = n | 0x81000000`.
+      const runtimeCount = dmawide(
+        '',
+        '\tldr\tr2, [sp, #0x4]\n\tstr\tr2, [r0]\n\tldr\tr1, .L9+0x4\n\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n' +
+          '\tldr\tr2, [sp, #0x8]\n\torr\tr0, r0, r2\n\tstr\tr0, [r1]\n',
+      );
       expect(() => decompile('dmawide', runtimeCount, ARMV4T_AGBCC, protos)).toThrow(
-        /handed to a device that reads through it, which may read the slot at \[sp,#4\]/,
+        'handed to a device whose control word is not a literal, which may read the slot at [sp,#4]',
       );
     });
 
