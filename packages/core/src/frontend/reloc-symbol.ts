@@ -38,7 +38,19 @@
 
 /** What sort of name a relocation carries. Everything but `plain` is unspellable in C. */
 export type RelocSymbolKind =
-  'plain' | 'anon-pool' | 'section-local' | 'local-static' | 'cpp-vtable' | 'cpp-mangled' | 'not-an-identifier';
+  | 'plain'
+  | 'anon-pool'
+  | 'section-local'
+  | 'local-static'
+  | 'inline-local-static'
+  | 'cpp-vtable'
+  | 'cpp-mangled'
+  | 'not-an-identifier';
+
+/** `ident$N` (mwcc) or `ident.N` (gcc, and so agbcc): a static declared inside a function, whose
+ *  SOURCE name is `ident`. Anchored whole, one numeric suffix: see the ordering note in
+ *  {@link classifyRelocSymbol}. */
+const LOCAL_STATIC = /^([A-Za-z_][A-Za-z0-9_]*)[.$]\d+$/;
 
 /** Classify a relocation's symbol by its spelling. Order matters twice over. The shapes that ARE
  *  valid C identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C
@@ -56,6 +68,14 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   }
   if (sym.startsWith('__vt__')) {
     return 'cpp-vtable'; // `__vt__6System` — a compiler-emitted virtual table
+  }
+  // mwcc names a static of an inlined HEADER function `<name>$localstatic<N>$<function>`
+  // (`_half$localstatic3$sqrtf`, `…$sqrtf__Ff` in C++; weak, in every Animal Crossing target that
+  // includes the libm header). The object belongs to the inline function's definition, not to the
+  // function referencing it, so it is its own kind, and asked before the class-scope marker: the
+  // trailing function name is the one part of the symbol that may carry a mangling.
+  if (/^[A-Za-z_]\w*\$localstatic\d+\$/.test(sym)) {
+    return 'inline-local-static';
   }
   // mwcc mangles a class-scoped name as `<name>__<length><Class>` (`statbuff__9CmdStream`) or,
   // for a nested scope, `<name>__Q<depth><…>` (`__ct__Q26Action5ChildFv`). The marker is the `__`
@@ -78,14 +98,14 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   // one TU, compiled by this project's agbcc, give `pa.3`, `pb.7`, `pc.11` and `pc2.12` — the
   // number counts declarations across the whole unit and skips.
   //
-  // LAST of the named kinds, and the gcc pattern is anchored to a WHOLE identifier plus ONE
-  // numeric suffix, because `\.\d+$` alone is a suffix test and every other kind here can wear
-  // that suffix. Unanchored and placed first it claimed `__vt__6System.1` and
-  // `statbuff__9CmdStream.0` — each then refused with a sentence about a counter, for a name whose
-  // real problem is the class definition it comes from — and it claimed gcc's IPA clones
-  // (`foo.isra.0`, `foo.part.0`, `foo.cold.1`), which are not statics at all and fall to
-  // `not-an-identifier` where they belong.
-  if (sym.includes('$') || /^[A-Za-z_][A-Za-z0-9_]*\.\d+$/.test(sym)) {
+  // LAST of the named kinds, and anchored to a WHOLE identifier plus ONE numeric suffix, because
+  // `[.$]\d+$` alone is a suffix test and every other kind here can wear that suffix. Unanchored
+  // and placed first it claimed `__vt__6System.1` and `statbuff__9CmdStream.0` — each then refused
+  // with a sentence about a counter, for a name whose real problem is the class definition it
+  // comes from — and it claimed gcc's IPA clones (`foo.isra.0`, `foo.part.0`, `foo.cold.1`), which
+  // are not statics at all and fall to `not-an-identifier` where they belong. A `$` name of any
+  // other shape (`$L1`) is not a static either.
+  if (LOCAL_STATIC.test(sym)) {
     return 'local-static';
   }
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sym) ? 'plain' : 'not-an-identifier';
@@ -113,6 +133,11 @@ export function unspellableReason(sym: string): string | null {
         `names a function-scope static ('${sym}') — the suffix is a translation-unit-wide counter ` +
         `the compiler assigned, which no source can spell`
       );
+    case 'inline-local-static':
+      return (
+        `names a function-scope static of an inlined function ('${sym}') — the object belongs to ` +
+        `that function's definition, which a source reaches by calling it, never by naming the object`
+      );
     case 'cpp-vtable':
       return (
         `names a C++ virtual table ('${sym}') — the compiler emits it from a class definition, so ` +
@@ -128,4 +153,11 @@ export function unspellableReason(sym: string): string | null {
     case 'not-an-identifier':
       return `names '${sym}', which is not a C identifier`;
   }
+}
+
+/** The name a source wrote for a function-scope static — the linker name without the counter the
+ *  compiler appended (`tide.3` → `tide`, `sprHideTbl$797` → `sprHideTbl`) — or null for a name of
+ *  any other kind, a static of an inlined function among them. */
+export function localStaticSourceName(sym: string): string | null {
+  return classifyRelocSymbol(sym) === 'local-static' ? sym.match(LOCAL_STATIC)![1] : null;
 }
