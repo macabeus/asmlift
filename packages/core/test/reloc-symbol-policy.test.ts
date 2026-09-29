@@ -3,7 +3,7 @@
 // `R_PPC_ADDR16_*` / `R_PPC_EMB_SDA21` line in a benchmark row's own objdump listing.
 import { expect, test } from 'vitest';
 
-import { classifyRelocSymbol, unspellableReason } from '../src/frontend/reloc-symbol';
+import { classifyRelocSymbol, localStaticName, unspellableReason } from '../src/frontend/reloc-symbol';
 
 test('every corpus spelling classifies as the kind the policy names', () => {
   const corpus: [string, string][] = [
@@ -24,6 +24,8 @@ test('every corpus spelling classifies as the kind the policy names', () => {
     ['...data.0', 'section-local'],
     ['sprHideTbl$797', 'local-static'],
     ['t_seiyo_days_tbl$32', 'local-static'],
+    ['_half$localstatic3$sqrtf', 'inline-local-static'],
+    ['_three$localstatic4$sqrtf__Ff', 'inline-local-static'],
     ['__vt__6System', 'cpp-vtable'],
     ['__vt__12RefCountable', 'cpp-vtable'],
     ['statbuff__9CmdStream', 'cpp-mangled'],
@@ -37,7 +39,15 @@ test('every corpus spelling classifies as the kind the policy names', () => {
 test('exactly the plain kind is spellable; every other kind refuses naming what it saw', () => {
   expect(unspellableReason('minimumVcount')).toBeNull();
   expect(unspellableReason('lbl_1_bss_2464')).toBeNull();
-  for (const sym of ['@193', '...bss.0', 'sprHideTbl$797', '__vt__6System', 'statbuff__9CmdStream', 'a-b']) {
+  for (const sym of [
+    '@193',
+    '...bss.0',
+    'sprHideTbl$797',
+    '_half$localstatic3$sqrtf',
+    '__vt__6System',
+    'statbuff__9CmdStream',
+    'a-b',
+  ]) {
     expect(unspellableReason(sym)).toContain(sym); // the message says which name was refused
   }
 });
@@ -98,4 +108,35 @@ test('the gcc function-scope static still classifies, base name and counter', ()
   expect(classifyRelocSymbol('tide.3')).toBe('local-static');
   expect(classifyRelocSymbol('zeroes.13')).toBe('local-static');
   expect(unspellableReason('tide.3')).toMatch(/function-scope static/);
+});
+
+test("a static of an inlined function is its own kind, and is never read as this function's static", () => {
+  // mwcc spells a header inline's static `<name>$localstatic<N>$<function>`, and the trailing
+  // function name may be mangled (`sqrtf__Ff` under C++). Read as `local-static`, its prefix would
+  // be re-declared inside a function that only CALLED the inline one.
+  expect(unspellableReason('_half$localstatic3$sqrtf')).toMatch(/of an inlined function/);
+  expect(localStaticName('_half$localstatic3$sqrtf')).toBeNull();
+  expect(localStaticName('_three$localstatic4$sqrtf__Ff')).toBeNull();
+});
+
+test('a function-scope static is its source name and the counter the compiler appended', () => {
+  expect(localStaticName('tide.3')).toEqual({ name: 'tide', counter: 3 });
+  expect(localStaticName('sprHideTbl$797')).toEqual({ name: 'sprHideTbl', counter: 797 });
+  expect(localStaticName('t_seiyo_days_tbl$32')).toEqual({ name: 't_seiyo_days_tbl', counter: 32 });
+  // every other kind answers null, a `$` name that is not `ident$N` included
+  for (const sym of ['gFoo', '@193', '...bss.0', '__vt__6System.1', 'foo.isra.0', '$L1', 'a$b$3']) {
+    expect(localStaticName(sym), sym).toBeNull();
+  }
+  expect(classifyRelocSymbol('$L1')).toBe('not-an-identifier');
+});
+
+test('the name a compiler predefines in every function is not a static the function declared', () => {
+  // mwcc_242_81 over `void fnm(void) { use(__FUNCTION__); }` and `use(__func__)`: `.sdata` objects
+  // named `__FUNCTION__$2` and `__func__$1`, which a definition in the body would redeclare
+  for (const sym of ['__FUNCTION__$2', '__func__$1', '__PRETTY_FUNCTION__$3']) {
+    expect(classifyRelocSymbol(sym), sym).toBe('predefined-identifier');
+    expect(localStaticName(sym), sym).toBeNull();
+    expect(unspellableReason(sym)).toMatch(/predefined name .* a definition would redeclare it/);
+  }
+  expect(classifyRelocSymbol('__func.3')).toBe('local-static');
 });

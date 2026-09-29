@@ -162,6 +162,7 @@ function generateSharedTailFn(seed: number): Fn {
     writeOrder: undefined,
     slotHomes: undefined,
     paramEvidence: undefined,
+    localObjects: undefined,
   };
 }
 

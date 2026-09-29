@@ -56,7 +56,72 @@ export interface Fn {
   /** L1 SIDE DATA (see {@link ParamEvidence}); set by the SSA builder, `undefined` on parsed IR.
    *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` and `slotHomes` are. */
   paramEvidence: ParamEvidence | undefined;
+  /** L1 SIDE DATA (see {@link LocalObjects}); set by a frontend that recovered one, `undefined` on
+   *  every other `Fn`. REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is. */
+  localObjects: LocalObjects | undefined;
 }
+
+/** Where a function-scope static lives, which decides how its definition is spelled: `rodata` is
+ *  `const` with an initializer, `data` has an initializer, `bss` has none. */
+export type LocalObjectSection = 'rodata' | 'data' | 'bss';
+
+/** One function-scope static, as the target defines it (frontend/local-object.ts). */
+export interface LocalObject {
+  /** the name the source wrote — the linker name without the compiler's counter */
+  name: string;
+  /** the linker name the target carries (`tide.3`, `sprHideTbl$797`) */
+  symbol: string;
+  /** the counter in that name, which is the order the source declared the function's statics in
+   *  (frontend/reloc-symbol.ts `localStaticName`) */
+  order: number;
+  section: LocalObjectSection;
+  /** bytes */
+  size: number;
+  /** the initial contents in target byte order; absent exactly for a `bss` object */
+  bytes?: Uint8Array;
+  bigEndian: boolean;
+  /** What an assembler LISTING shows of an initialized definition beyond its bytes, absent where
+   *  the target is an object file, which keeps no directives. */
+  directives?: LocalObjectDirectives;
+  /** What an object FILE records of where the object sits, absent for an assembler listing, whose
+   *  `.align` is among its directives. */
+  placement?: LocalObjectPlacement;
+}
+
+/** What an object file records of where a static sits. */
+export interface LocalObjectPlacement {
+  /** the alignment the compiler gave the object (mwcc's `.comment` record for its symbol) */
+  align: number;
+  /** the object file's own section (`.sbss`, where {@link LocalObject.section} says `bss`) */
+  section: string;
+  /** its offset in that section */
+  offset: number;
+}
+
+/** An initialized static's data directives, as the compiler wrote them. The compiler writes each
+ *  scalar of the initializer with the directive of its width, and aligns the object to its type's
+ *  alignment; both are facts about the source's TYPE that the bytes alone have lost. */
+export interface LocalObjectDirectives {
+  /** the alignment the object was placed at, in bytes (`.align N` ahead of the label: 2^N; none: 1) */
+  align: number;
+  /** the width every value directive writes, when they all agree (`.word` → 4); padding does not count */
+  unit?: number;
+  /** the directives share a `unit` narrower than a word and one wrote a negative value, which the
+   *  compiler only does for a signed element type */
+  negative: boolean;
+  /** every value directive writes a string (`.ascii`), as the compiler writes a string literal —
+   *  whole, or as the elements of an array or struct of strings */
+  string: boolean;
+}
+
+/** The function-scope statics a function DEFINES, keyed by {@link LocalObject.symbol} — the object a
+ *  `gaddr` of that name denotes. The IR keeps the linker name because it carries a `.` or `$` that
+ *  no C identifier and no declared symbol has, so a static can never be one name with a global of
+ *  its source name (a symbol map's `tide` beside `tide.3`); structure spells it by its source name.
+ *  A `gaddr` names a symbol some declaration elsewhere describes; these have none, because the
+ *  source defined them inside the function, so the definition travels with the function to the
+ *  emitter, which writes it in the body (structure/local-statics.ts). */
+export type LocalObjects = ReadonlyMap<string, LocalObject>;
 
 /** What the machine's own object shows about each ENTRY PARAMETER, beyond the value graph — two
  *  observations the lift destroys, recorded so raise/paramwidth.ts can read them. Every entry

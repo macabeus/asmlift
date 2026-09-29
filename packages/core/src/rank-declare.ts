@@ -213,7 +213,22 @@ export function makeRefCollector(ctx: {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
     const bound = new Set<string>([...tree.params.map((p) => p.name), ...tree.locals.map((l) => l.name)]);
+    // A function-scope static is declared in the body beside the locals, so it shares their
+    // namespace: one the emitter's own names can reach dies with the spelling, as below.
+    const statics = new Set((tree.statics ?? []).map((st) => st.name));
+    for (const st of statics) {
+      if (bound.has(st) || EMITTER_NAME.test(st)) {
+        refuse(st, 'emitter-name');
+        throw new Error(
+          `cannot spell '${tree.name}': the target names a function-scope static '${st}', which is a ` +
+            `name the emitted C uses for its own locals and parameters — no declaration can bind it`,
+        );
+      }
+    }
     const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, refuse).flatMap((r) => {
+      if (statics.has(r.name)) {
+        return []; // defined in the body — the map's global of the same name is another object
+      }
       // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage
       // kills the SPELLING, because no declaration makes that candidate right and no declaration
       // makes it fail either. Two shapes, and the second is why the test is the emitter's whole

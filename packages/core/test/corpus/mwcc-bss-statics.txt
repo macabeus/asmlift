@@ -1,0 +1,40 @@
+
+/host-tmp/asmlift-ppc-ref-fa7a3267c5e09f03/ref.o:     file format elf32-powerpc
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 ref.c
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .bss	00000000 .bss
+00000000 l    d  .mwcats.text	00000000 .mwcats.text
+00000000 l     O .bss	00000040 a$4
+00000040 l     O .bss	00000040 b$5
+00000000 g     F .text	00000030 bssuse
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+00000002 R_PPC_ADDR16_HA   a$4
+00000006 R_PPC_ADDR16_HA   b$5
+0000000a R_PPC_ADDR16_LO   a$4
+00000016 R_PPC_ADDR16_LO   b$5
+
+
+RELOCATION RECORDS FOR [.mwcats.text]:
+OFFSET   TYPE              VALUE
+00000004 R_PPC_ADDR32      bssuse
+
+
+Contents of section .text:
+ 0000 3ca00000 3c800000 38a50000 38000001  <...<...8...8...
+ 0010 7c0519ae 38840000 38000002 7c0419ae  |...8...8...|...
+ 0020 88650000 88040001 7c630214 4e800020  .e......|c..N.. 
+Contents of section .mwcats.text:
+ 0000 02000030 00000000                    ...0....        
+Contents of section .comment:
+ 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....
+ 0010 01020016 2c000000 00000000 00000000  ....,...........
+ 0020 00000000 00000000 00000000 00000000  ................
+ 0030 00000000 00000001 00000000 00000004  ................
+ 0040 00000000 00000008 00000000 00000004  ................
+ 0050 00000000 00000004 00000000 00000004  ................
+ 0060 00000000 00000004 00000000           ............    

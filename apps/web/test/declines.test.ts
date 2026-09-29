@@ -874,9 +874,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // is the catch-all tail of the pool-word reader, it held exactly one row —
   // `pokeemerald:UpdateShoalTideFlag:agbcc`, on a pool word spelled `tide.3` — and the message it
   // held that row with was false about its own input: `tide.3` IS a symbol, a function-scope
-  // static, rejected only because a C identifier carries no dot. Naming that shape sent the row to
-  // `tu-scoped-name`, where the five mwcc rows spelling the same thing `sprHideTbl$797` already
-  // live, and emptied the catch-all. Its emptiness is the weak kind: an agbcc pool word that is a
+  // static, rejected only because a C identifier carries no dot. Naming that shape emptied the
+  // catch-all. Its emptiness is the weak kind: an agbcc pool word that is a
   // `.L` code label or an unreadable expression would inhabit it tomorrow.
   //
   // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
@@ -884,20 +883,18 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  // `clobbered-value` joins on the `pool-word-shape` reading: its one inhabitant,
-  // `synthetic:llfrom:agbcc`, was a callee returning a 64-bit value in a register PAIR — the one
-  // thing an `r1` read after a `bl` can legitimately be — and a prototype now states that return
-  // width, so the row matches. The refusal itself is untouched and still covers every other
-  // caller-saved register; what left is a population, not a capability.
+  // `tu-scoped-name` is empty because its rows named a static the function defines, and the lift
+  // defines it (frontend/local-object.ts). Four of its six lift; the other
+  // two decline on their next link — `ac-decomp:JW_JUTGamePad_read` on the 64-bit value OSGetTime
+  // returns in r3:r4, which is what inhabits `clobbered-value`, and `mAc_ActorShadowEllipse` on an
+  // anonymous pool. Its refusals stand for a static whose definition the target does not carry
+  // readably, so it is the weak kind of empty.
   //
   // THE ASSERTION BELOW COMPARES THE SORTED SET, so a membership SWAP that kept the length would
   // fail here — but the count in the test's NAME is derived from the length alone and would not.
-  // Read both when this list moves. TWO BRANCHES EMPTIED A DIFFERENT CLASS ON THE SAME NIGHT and
-  // this list is their union: `unread-data-directive` is #247's and `clobbered-value` is #250's,
-  // and a merge that took either side alone would have silently dropped the other's entry while
-  // the derived count in the name moved by one and looked right.
+  // Read both when this list moves.
   //
-  // `structs` joins on the `clobbered-value` reading: its thirteen inhabitants were overlaps on a
+  // `structs` joins on the population reading: its thirteen inhabitants were overlaps on a
   // base only this function's accesses describe, which raise/structs.ts declares as a union
   // member. The packed-layout refusal and the union layouts it cannot seat are untouched; what left
   // is a population, not a capability.
@@ -908,12 +905,12 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
-    'clobbered-value',
     'cross-block-flags',
     'no-prototype-args',
     'pool-word-shape',
     'store-class',
     'structs',
+    'tu-scoped-name',
     'unread-data-directive',
   ];
 
@@ -980,16 +977,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // measurable half of core naming the register file: `unmodelled floating-point instruction` is
   // matched by no other class, so the ordering is no longer load-bearing for any of them. The two
   // transfer pairs are the control-transfer capabilities sitting above `branch-form`.
-  //
-  // `tu-scoped-name > pool-word-shape` is the same shape one level down: `pool-word-shape` is the
-  // pool reader's catch-all and its pattern is that reader's own SENTENCE PREFIX, so every named
-  // pool gap overlaps it by construction and is answered by sitting above it. Splitting a message
-  // out of that catch-all therefore always adds a line here, and that is the intended signal.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 2],
-    ['tu-scoped-name > pool-word-shape', 1],
     ['address-taken-local > stack-frames', 1],
   ];
 
@@ -1241,11 +1232,10 @@ describe('the classifier is measured against the messages core can throw, not on
   // exemption is inert and it is gone: `float` is harvested like every other class, which is the
   // only reason the list below can be read as a list of reasons.
   const NOT_IN_TEMPLATES: Record<string, string> = {
-    // These four are BUILT by `reloc-symbol.ts`'s `unspellableReason` and RETURNED, then
+    // These three are BUILT by `reloc-symbol.ts`'s `unspellableReason` and RETURNED, then
     // interpolated into a throw elsewhere, so the throw site carries a placeholder where the phrase
     // is. Each is pinned above against a published marker instead.
     'pooled-literal': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
-    'tu-scoped-name': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'cxx-symbol': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     'section-label': "reloc-symbol.ts's unspellableReason returns the reason; the throw interpolates it",
     // Same shape one level in: the reaching-compare throws of thumb.ts and ppc.ts interpolate
@@ -1292,6 +1282,9 @@ describe('the classifier is measured against the messages core can throw, not on
     // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
     // its single `switch-shapes` row declines on `the jump table's case arms do not linearize`.
     'switch-shapes > block-boundary',
+    // thumb.ts's refusals of a function-scope static read from a literal pool open with the pool
+    // reader's own prefix, which `pool-word-shape` is keyed on; the static is the answer.
+    'tu-scoped-name > pool-word-shape',
   ];
 
   test('every core message more than one class matches is attributed by a listed ordering', () => {

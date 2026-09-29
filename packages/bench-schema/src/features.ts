@@ -1093,10 +1093,9 @@ export const FEATURES: readonly FeatureDef[] = [
     detail:
       'Function SCOPE with static STORAGE: the object is not in the frame, it survives the call, ' +
       'and the compiler emits it as an ordinary datum under a name it invents to keep it private ' +
-      '(`name$123` on Metrowerks, `name.0` on gcc). In the compiled code it is indistinguishable ' +
-      'from a file-scope global — the scope that makes it interesting is exactly the part that is ' +
-      'not in the bytes — so a decompiler can only recover WHERE the object lives, never that the ' +
-      'source declared it inside the function.',
+      '(`name$123` on Metrowerks, `name.0` on gcc). In the compiled code it is addressed like a ' +
+      'file-scope global, and only that invented name says the source declared it inside the ' +
+      'function; no header declares it, so a decompiler must define it again, initializer and all.',
     example: {
       c: 'void f(u8 h) { static const u8 tide[] = { 1, 1, 0 }; use(tide[h]); }',
       asm: '\tldr\tr0, .L4\t@ .word tide.0 — a plain address, like any global',

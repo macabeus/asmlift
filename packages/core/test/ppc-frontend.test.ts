@@ -666,9 +666,10 @@ test('a jump-table base pair must carry the @ha/@l relocation TYPES, not just a 
       addend: off,
     })),
     symbols: new Map([
-      ['jtbl', { section: '.data', value: 0 }],
-      ['swt', { section: '.text', value: 0 }],
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swt', { section: '.text', value: 0, size: 0x48, index: 2 }],
     ]),
+    symbolCount: 2,
     bigEndian: true,
   };
   const asm = [
@@ -711,9 +712,10 @@ test('a recovered jump table still lifts to a switch — its reloc lis/addi neve
       addend: off,
     })),
     symbols: new Map([
-      ['jtbl', { section: '.data', value: 0 }],
-      ['swf', { section: '.text', value: 0 }],
+      ['jtbl', { section: '.data', value: 0, size: 16, index: 1 }],
+      ['swf', { section: '.text', value: 0, size: 0x48, index: 2 }],
     ]),
+    symbolCount: 2,
     bigEndian: true,
   };
   const asm = [

@@ -169,7 +169,14 @@ const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
   const b = val();
   const entry: Block = { params: [], ops: [mkOp('ret', { operands: [a] })] };
   return {
-    fn: { name: 'r', blocks: [entry], writeOrder: undefined, slotHomes: new Map(), paramEvidence: undefined },
+    fn: {
+      name: 'r',
+      blocks: [entry],
+      writeOrder: undefined,
+      slotHomes: new Map(),
+      paramEvidence: undefined,
+      localObjects: undefined,
+    },
     a,
     b,
   };

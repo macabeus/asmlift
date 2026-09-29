@@ -11,7 +11,7 @@
 // legalizing casts, and the recovered-struct declaration spelling (which is why that lives here
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
+import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
   type PrintEnv,
@@ -268,6 +268,28 @@ function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   return from?.kind === 'ptr';
 }
 
+/** The unqualified pointer a `const` static's address is spelled as where it reaches a place that
+ *  converts it implicitly — an argument, an assigned or stored value, a returned one — or null for
+ *  any other expression. The static is `const` because the target holds it in read-only data, not
+ *  because the source's pointer types say so: mwcc rejects the implicit `const u8[4]` → `u8 *` a
+ *  bare `g(tbl)` makes (compiled), and a pointer cast changes no instruction. */
+function constEscape(e: Expr, vt: PrintEnv): IrType | null {
+  if (e.k === 'addr' && vt.constStatic(e.name)) {
+    const t = vt.type(e.name);
+    return t === undefined ? null : T.ptr(t.kind === 'array' ? t.elem : t);
+  }
+  if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
+    return constEscape(e.l, vt) ?? (e.op === '+' ? constEscape(e.r, vt) : null);
+  }
+  return null;
+}
+
+/** `e` printed where C converts it implicitly, with a `const` static's address cast (constEscape). */
+function printConverted(e: Expr, vt: PrintEnv, leaf?: LeafHook): string {
+  const to = constEscape(e, vt);
+  return to === null ? printExpr(e, 99, vt, leaf) : `(${cType(to)})${printExpr(e, 2, vt, leaf)}`;
+}
+
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
   const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
@@ -304,7 +326,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return `${e.fn}(${e.args
         .map((a, i) => {
           const to = declared?.[i];
-          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : rec(a, 99);
+          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : printConverted(a, vt, leaf);
         })
         .join(', ')})`;
     }
@@ -418,15 +440,15 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
     case 'assign':
-      return [`${indent}${s.name} = ${pe(s.value, 99)};`];
+      return [`${indent}${s.name} = ${printConverted(s.value, vt, leaf)};`];
     case 'store':
       // The lvalue is a full Expr (`index` or `field`), so the leaf hook spells a member write
       // (`this->x = …`) exactly as it spells a member read.
-      return [`${indent}${pe(s.lval, 2)} = ${pe(s.value, 99)};`];
+      return [`${indent}${pe(s.lval, 2)} = ${printConverted(s.value, vt, leaf)};`];
     case 'exprstmt':
       return [`${indent}${pe(s.value, 99)};`];
     case 'return':
-      return [`${indent}return${s.value ? ' ' + pe(s.value, 99) : ''};`];
+      return [`${indent}return${s.value ? ' ' + printConverted(s.value, vt, leaf) : ''};`];
     case 'if': {
       const cond = pe(s.cond, 99);
       if (s.then.length === 1 && s.else.length === 0 && s.then[0].k !== 'if') {
@@ -639,6 +661,9 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   // reader will see.
   const vt: PrintEnv = printEnv(fn);
   const lines: string[] = [];
+  for (const st of fn.statics ?? []) {
+    lines.push(...staticDefinition(st));
+  }
   for (const l of fn.locals) {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
@@ -653,6 +678,62 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     lines.push(...printStmt(s, '    ', vt, leaf));
   }
   return lines;
+}
+
+/** One initial element: hex from 10 up, a negative one with its sign, so a byte table reads as the
+ *  bytes and a signed one as its values. */
+const initElement = (v: number): string =>
+  Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
+
+/** A byte array's initial elements as a string literal: printable characters as themselves, every
+ *  other byte in three-digit octal (which no following digit can extend), and a `?` after a `?`
+ *  escaped so no trigraph forms. The trailing zeros are left to the declared size, which C fills
+ *  with zeros. */
+function stringLiteral(init: readonly number[]): string {
+  let end = init.length;
+  while (end > 0 && (init[end - 1] & 0xff) === 0) {
+    end--;
+  }
+  let out = '';
+  for (const v of init.slice(0, end)) {
+    const b = v & 0xff;
+    const c = String.fromCharCode(b);
+    out +=
+      b < 0x20 || b > 0x7e || c === '"' || c === '\\' || (c === '?' && out.endsWith('?'))
+        ? `\\${b.toString(8).padStart(3, '0')}`
+        : c;
+  }
+  return `"${out}"`;
+}
+
+/** A function-scope static's definition, as the first lines of the body. An array's elements are
+ *  laid out eight to a line; an alignment the type does not give is an attribute, which gcc and
+ *  mwcc both read after the declarator. */
+function staticDefinition(st: SStatic): string[] {
+  const aligned = st.align === undefined ? '' : ` __attribute__((aligned(${st.align})))`;
+  const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}${aligned}`;
+  if (st.init === undefined) {
+    return [`${head};`];
+  }
+  if (st.string) {
+    return [`${head} = ${stringLiteral(st.init)};`];
+  }
+  if (st.type.kind !== 'array') {
+    return [`${head} = ${initElement(st.init[0])};`];
+  }
+  if (st.init.length <= 8) {
+    return [`${head} = { ${st.init.map(initElement).join(', ')} };`];
+  }
+  const rows: string[] = [];
+  for (let i = 0; i < st.init.length; i += 8) {
+    rows.push(
+      `        ${st.init
+        .slice(i, i + 8)
+        .map(initElement)
+        .join(', ')},`,
+    );
+  }
+  return [`${head} = {`, ...rows, '    };'];
 }
 
 /** Struct declarations this function references, one `struct N { ... };` per recovered aggregate.

@@ -81,6 +81,7 @@ describe('P0-b — the structurer fails loud on an unknown (many-way) terminator
       writeOrder: undefined,
       slotHomes: undefined,
       paramEvidence: undefined,
+      localObjects: undefined,
     };
     expect(() => structure(fn)).toThrow(StructureError);
     expect(() => structure(fn)).toThrow(/unsupported terminator 'computed_br'/);

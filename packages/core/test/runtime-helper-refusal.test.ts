@@ -96,6 +96,7 @@ describe('the op each PPC runtime helper computes', () => {
       writeOrder: undefined,
       slotHomes: undefined,
       paramEvidence: undefined,
+      localObjects: undefined,
     };
     recognizeWideHelpers(fn, PPC_MWCC);
     return block.ops[0].opcode;
@@ -129,7 +130,14 @@ describe('the op each PPC runtime helper computes', () => {
       ],
     };
     recognizeWideHelpers(
-      { name: 'f', blocks: [block], writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined },
+      {
+        name: 'f',
+        blocks: [block],
+        writeOrder: undefined,
+        slotHomes: undefined,
+        paramEvidence: undefined,
+        localObjects: undefined,
+      },
       PPC_MWCC,
     );
     expect(block.ops[0].opcode).toBe('call');

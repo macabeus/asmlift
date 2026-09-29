@@ -19,6 +19,7 @@ const relocs = (rs: { off: number; type: string; sym: string }[]): AsmData => ({
   sections: new Map(),
   relocs: rs.map((r) => ({ section: '.text', offset: r.off, type: r.type, sym: r.sym, addend: 0 })),
   symbols: new Map(),
+  symbolCount: 0,
   bigEndian: true,
 });
 

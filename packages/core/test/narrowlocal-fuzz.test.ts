@@ -151,7 +151,14 @@ function generate(seed: number, withLoop: boolean): Fn {
       }),
     );
   }
-  return { name: `nl${seed}`, blocks, writeOrder: undefined, slotHomes: undefined, paramEvidence: undefined };
+  return {
+    name: `nl${seed}`,
+    blocks,
+    writeOrder: undefined,
+    slotHomes: undefined,
+    paramEvidence: undefined,
+    localObjects: undefined,
+  };
 }
 
 const UNDEF = null;

@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 151 distinct decline messages (the texts reached by
+// `packages/core/src` throws 155 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -92,9 +92,10 @@
 // fourth value a decline could carry. Two control-transfer capabilities are in that residue and
 // are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls". So is the sixth kind of the naming family: `reloc-symbol.ts`
-// `unspellableReason` refuses six ways and five have a class here, while "names 'X', which is not
-// a C identifier" has none. They have no rows, so they wait for one.
+// gotos / register tail calls". So are two kinds of the naming family: `reloc-symbol.ts`
+// `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
+// a C identifier" and "names the function's predefined name" have none. They have no rows, so they
+// wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {

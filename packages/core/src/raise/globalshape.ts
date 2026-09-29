@@ -955,6 +955,11 @@ export function inferGlobalArrays(
   }
   const pos = positions(fn);
   for (const [sym, accs] of accessesBySymbol(fn, target, gates.address)) {
+    // a function-scope static's shape is its definition's (structure/local-statics.ts), not an
+    // inference, and it is declared in the body rather than assumed
+    if (fn.localObjects?.has(sym)) {
+      continue;
+    }
     const si = Array.isArray(accs) ? shapeOf(accs, pos, gates.shape) : null;
     if (si !== null) {
       out.set(sym, si);

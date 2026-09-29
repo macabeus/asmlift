@@ -1,5 +1,9 @@
 // A unit row's object holds every function its unit defines before the row's; what the row publishes and
 // what its readers take is about its own function (eval/function-scope.ts).
+import { parseAsmData } from '@asmlift/core/frontend/asmdata';
+import { readObjectLocalObject } from '@asmlift/core/frontend/local-object';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { functionDisassembly, functionScopedDump } from '../src/eval/function-scope';
@@ -107,4 +111,35 @@ test('a listing whose FIRST function carries a TEMPLATE symbol is still scoped t
   expect(scoped.split(`<${sym}>:`)).toHaveLength(2);
   expect(scoped).not.toContain('somewhere_else');
   expect(scoped).not.toContain('<after>:');
+});
+
+// The object dump of mwcc_242_81 `-inline auto` over, among others, `static int counter(void) {
+// static int n; return ++n; }`, `int A(void) { return counter() + 1; }`, `int B(void) { return
+// counter(); }` and `s32 rtab(int i) { static const s32 kt[3] = {7, -1, 9}; return kt[i]; }`:
+// `counter` stays in the object and A and B inlined it, so all three address `n$4`. Its `.comment`
+// is what records each static's alignment.
+const STATICS_DUMP = readFileSync(
+  join(import.meta.dirname, '../../../packages/core/test/corpus/mwcc-local-statics.txt'),
+  'utf8',
+);
+
+describe('functionScopedDump — the evidence a function-scope static needs survives the narrowing', () => {
+  const read = (sym: string, stat: string) => {
+    const scoped = functionScopedDump(STATICS_DUMP, sym);
+    return readObjectLocalObject(parseAsmData(scoped, scoped, scoped, true), stat, sym);
+  };
+
+  test("another function's relocation naming a static this one names stays, so the lift sees it is shared", () => {
+    const scoped = functionScopedDump(STATICS_DUMP, 'A');
+    expect(scoped).toContain('00000002 R_PPC_ADDR16_HA   n$4');
+    expect(scoped).not.toContain('0000004e R_PPC_ADDR16_HA   kt$18');
+    expect(read('A', 'n$4')).toMatchObject({
+      refused: "that .text also names at 0x2 — it is not this function's alone",
+    });
+  });
+
+  test("a static only its own function names is read as that function's", () => {
+    expect(functionScopedDump(STATICS_DUMP, 'rtab')).not.toContain('00000002 R_PPC_ADDR16_HA   n$4');
+    expect(read('rtab', 'kt$18')).toMatchObject({ name: 'kt', section: 'rodata', size: 12 });
+  });
 });
