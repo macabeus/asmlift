@@ -3192,47 +3192,12 @@ export function lift(
             ? 'a register-offset sp access can alias any slot'
             : 'a sub-word sp access aliases the word-slot model';
         }
-        // sp escaping into a register. A plain COPY (`mov rD, sp`) and a CONSTANT offset from it
-        // (`add rD, sp, #k`) are the address-taken-local capability — the mov and add arms emit a
-        // `laddr` at that frame offset and the post-lift frame-object audit proves every use, so
-        // the model's remaining precondition is that the frame has a reserved local area for the
-        // object to live in. A frameless function taking sp's address has nothing to model and
-        // refuses.
-        //
-        // A RUNTIME offset (`add rD, sp, rX`, and the two-operand `add rD, sp` that adds the base
-        // to whatever rD held) is a different gap and keeps refusing here: it names no offset, so
-        // there is no object and nothing for the audit to prove. A runtime index added to a
-        // captured base AFTER the capture is the audit's to judge (`indexedAccess`), because there
-        // the object it indexes is known.
-        //
-        // THE DECIDING WORD SURVIVES TRUNCATION; THE TAIL NEED NOT. The benchmark slices a
-        // diagnostic's REASON to 200 characters and prepends the stage afterwards
-        // (`apps/benchmark/src/eval/asmlift.ts`), so a published marker runs to 206 and what is
-        // lost is the end of the sentence. Both readers of it look early: the class pattern
-        // (`apps/web/.../declines.ts`) matches the opening phrase, and RUNTIME is the next word
-        // after the instruction. `packages/core/test/thumb-frontend.test.ts` measures it at the
-        // longest agbcc symbol in the dataset and holds the bound; no length is pinned here,
-        // because a number in a comment goes stale on any rewording and nothing looks.
-        //
-        // THE SPLIT ASKS FOR A SIGN-LESS LITERAL AND THE SIGN IS NOT AN OVERSIGHT. Thumb-1 ADD(6)
-        // (`add rD, sp, #imm`) encodes an unsigned word-scaled immediate: there is no negative
-        // form. The only negative spelling agbcc writes is the prologue's `add sp, sp, #-N`, whose
-        // DESTINATION is sp — excluded by this guard's first clause, one line below. So a signed
-        // constant cannot arrive here, and reading one as a RUNTIME index costs nothing that can
-        // occur. Recompute both halves:
-        //   printf '\t.thumb\nf:\n\tadd r4, sp, #-0x4\n' > /tmp/t.s
-        //   "$ASMLIFT_ARM_AS" -mthumb /tmp/t.s -o /tmp/t.o
-        //   # Error: invalid immediate for address calculation (value = 0xFFFFFFFFFFFFFFFC)
-        //   find "$(git rev-parse --show-toplevel)/apps/benchmark/checkouts" -name '*.s' -print0 |
-        //     xargs -0 grep -hE 'add[ \t]+r[0-9]+,[ \t]*sp,[ \t]*#-' | wc -l        # 0
-        //     (the same scan for `add sp, [sp,] #-N` finds 102, and `add rD, sp, #k` 264)
-        if (ins.mnemonic === 'add' && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o))) {
-          const srcs = ins.ops.slice(1).filter((o) => !isSpReg(o));
-          if (!(srcs.length === 1 && IMM_LITERAL.test(srcs[0]))) {
-            const written = `\`${ins.mnemonic} ${ins.ops.join(', ')}\``;
-            return `the address of a stack local is computed (${written}) — a RUNTIME index into the frame, which has no extent to model`;
-          }
-        }
+        // sp escaping into a register is NOT a blocker. A plain COPY (`mov rD, sp`), a CONSTANT
+        // offset from it (`add rD, sp, #k`) and a RUNTIME one (`add rD, sp, rX`, `add rD, sp`) are
+        // the address-taken-local capability — the mov and add arms emit a `laddr`, plus the
+        // index for the runtime form, and the post-lift frame-object audit proves every use. The
+        // model's remaining precondition is a reserved local area for the object to live in: a
+        // frameless function taking sp's address has nothing to model and refuses in those arms.
       }
     }
     // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
@@ -4040,6 +4005,28 @@ export function lift(
               break;
             }
             throw spAsDataError();
+          }
+          // `add rD, sp, rX`, `add rD, rX, sp` and the two-operand `add rD, sp` are agbcc's
+          // one-instruction spelling of `a[i]` on a frame array (sa3 `sub_8050A78`: `ands r0, r6 /
+          // add r0, sp / ldrb r0, [r0]`). They are lowered as the frame base plus the index, which is
+          // the IR the two-instruction spelling `mov rB, sp / add rD, rB, rX` gives, so the audit
+          // judges both spellings by one rule (`indexedAccess`).
+          {
+            const [x, y] = c === undefined ? [a, b] : [b, c];
+            if (!isSpReg(a ?? '') && x !== undefined && y !== undefined && isSpReg(x) !== isSpReg(y)) {
+              const index = isSpReg(x) ? y : x;
+              if (!IMM_LITERAL.test(index)) {
+                if (!slotsOk || localArea <= 0) {
+                  throw spAsDataError();
+                }
+                const base = mkValue(T.unk(32));
+                irb.ops.push(mkOp('laddr', { results: [base], attrs: { off: 0 } }));
+                const res = mkValue(T.unk(32));
+                irb.ops.push(mkOp('add', { operands: [base, readData(reg(index), bi)], results: [res] }));
+                writeData(reg(a), bi, res);
+                break;
+              }
+            }
           }
           // …and a capture MOVED by a constant is the capture of that other offset, which is how
           // agbcc spells one it cannot reach in a single `add rD, sp, #k`: `mov r2, sp / add r2,

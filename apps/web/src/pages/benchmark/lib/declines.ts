@@ -111,7 +111,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts`
     // and the frame-object audit it calls (`frontend/frame-objects.ts`) decide the cause at the
-    // throw and spell it ("address-taken stack local", "the address of a stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
+    // throw and spell it ("address-taken stack local"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
@@ -123,8 +123,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // the artifact has"), which reads this comment's own text back and fails on either number.
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
-    pattern:
-      /address-taken stack local|address of a stack local is (taken|computed)|address-taken local \/ frame arithmetic/,
+    pattern: /address-taken stack local|address-taken local \/ frame arithmetic/,
   },
   {
     key: 'outgoing-stack-args',
@@ -590,8 +589,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // NOT a catch-all, and it may not become one. A pattern here reading `indirect|computed` as
     // bare lowercase words is a SECOND catch-all sitting ABOVE `other` — and `other` is the only
     // bucket the anchor watches, so whatever it absorbs goes unnamed for ever, control flow or not:
-    // `sa3:ProcessOamBuffers` declines because "the address of a stack local is computed", and a
-    // loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
+    // a loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
     // loop". So the pattern carries one producer phrase — the MIPS and PPC frontends' denylist for
     // a branch mnemonic no frontend models — and the label names that and nothing else. Everything
     // a wider pattern would swallow falls to `other`, where the residue list names it.

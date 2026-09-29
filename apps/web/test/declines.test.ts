@@ -286,12 +286,12 @@ describe('a pattern keyed on an English word claims sentences that are not about
     // …and its recovered-dispatch refusal says BOTH "jump-table" and "not a block boundary", so
     // the two classes have to be told apart by phrase, not by which one is listed first.
     ["lift: cannot lift 'f': jump-table target is not a block boundary", 'switch-shapes'],
-    // `branch-form` must not reach the bare words `indirect` and `computed`. This is an
-    // address-taken-local refusal and a published marker of `sa3:ProcessOamBuffers`.
+    // `branch-form` must not reach the bare words `indirect` and `computed`. This is a loop-naming
+    // refusal `structure/structure.ts` throws, and it names no control transfer.
     [
-      "lift: cannot lift 'ProcessOamBuffers': stack pointer used as data — the address of a stack local is " +
-        'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',
-      'address-taken-local',
+      "structure: cannot structure 'f': a pre-update exit copy would rebuild a computed value inside a loop " +
+        "nested in another loop's post-loop naming",
+      'other',
     ],
     // `cross-block-flags` must not reach the bare headline `no reaching compare: `. Thumb
     // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
@@ -1040,7 +1040,6 @@ describe('a class may not outlive the message it classifies', () => {
   // together and that the second app hears about it.
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/frame-objects.ts'],
-    ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
