@@ -338,8 +338,8 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
  *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does
  *  refuse them, so the pre-update sink is not exposed to it. A divide the asm reached through a
- *  runtime helper is not in the gap: raise/shortcircuit.ts refuses to hoist one (`hoistUnsafe`
- *  there), because its def block is where the structurer reads the call's placement from.
+ *  runtime helper, hoisted, drops the stamp that would have the structurer name it where it lands
+ *  (runtime-helpers.ts `forgetHelperPlacement`), so it stays in the connective too.
  *
  *  AND THE EXEMPTION IS NOT TRANSFERABLE, which is worth saying beside it: a second consumer once
  *  read this set to answer "would gcc have SPECULATED this arm above a compare", where nothing

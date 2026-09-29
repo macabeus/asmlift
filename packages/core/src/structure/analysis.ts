@@ -1655,8 +1655,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
    *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
-   *  the asm reached by calling a runtime helper, which the fold refuses to hoist too, and the
-   *  helper clause names it by the same argument.
+   *  the asm reached by calling a runtime helper and the fold did not hoist — one it hoists loses
+   *  the stamp — and the helper clause names it by the same argument.
    *
    *  Only the guarded side is SEEDED. A connective's own operand[0] is evaluated whenever the
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
@@ -1808,9 +1808,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           //     (`ridesEdge`): then it runs on the paths that render it, not where the asm ran it
           //     once. `t = k / n; if (c) return t + 1; return t - 3;` is one `bl`
           //     above the `cmp`, and inlined into both arms it recompiles to one per arm;
-          //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts hoists no helper op out
-          //     of the arm it guards, as it hoists no call, so one that reached the cone ran above
-          //     the branch, and C's short circuit would skip it (the guarded-call rule below).
+          //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts drops the stamp from a
+          //     helper op it hoists out of the arm it guards (`forgetHelperPlacement`), so one that
+          //     still carries it ran above the branch, and C's short circuit would skip it (the
+          //     guarded-call rule below).
           // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
           // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte.
           if (isHelper(op) && pr && useSitesOf.has(pr)) {

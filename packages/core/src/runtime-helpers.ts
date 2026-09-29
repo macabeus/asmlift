@@ -110,7 +110,8 @@ export function isWideHelper(h: RuntimeHelper): boolean {
  *  `sdiv` is a `divw` on mwcc and a `bl __divsi3` on agbcc, and an `shr_s` is a shift everywhere
  *  but a `bl __ashrdi3` where it is 64-bit on agbcc — which ops a compiler calls a helper for is a
  *  compiler fact, not an ISA one, and it was known exactly once, at the rewrite. What reads it is
- *  every rule that places a call: a call runs once, where the asm ran it (`raisedHelper`). */
+ *  every rule that places a call: a call runs once, where the asm ran it (`raisedHelper`), and a pass
+ *  that moves the op elsewhere drops the stamp (`forgetHelperPlacement`). */
 export function helperOp(opcode: Opcode, call: Op, helper: string): Op {
   return mkOp(opcode, { operands: [...call.operands], results: [call.results[0]], attrs: { helper } });
 }
@@ -120,6 +121,20 @@ export function helperOp(opcode: Opcode, call: Op, helper: string): Op {
 export function raisedHelper(op: Op): string | null {
   const h = op.attrs.helper;
   return op.opcode !== 'opaque' && typeof h === 'string' ? h : null;
+}
+
+/** Drop the stamp from an op a pass moves out of the block the asm called it in, and return the op.
+ *  The stamp is read as WHERE the call ran, so an op moved elsewhere must stop claiming it and
+ *  renders as the pure value it computes. raise/shortcircuit.ts hoists a `&&`/`||` guarded arm's
+ *  body above the branch, and there C's short circuit re-guards the op at its use: agbcc's `if (a >
+ *  0 && k / n != 0)` runs the `bl __divsi3` under the first compare, and named at its hoisted def
+ *  it would divide on the path the `&&` skips. */
+export function forgetHelperPlacement(op: Op): Op {
+  if (raisedHelper(op) !== null) {
+    const { helper: _, ...rest } = op.attrs;
+    op.attrs = rest;
+  }
+  return op;
 }
 
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.

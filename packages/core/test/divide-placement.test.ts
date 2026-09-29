@@ -77,10 +77,10 @@ test('a divide the ISA computes renders at its use', () => {
   expect(src).toMatch(/\*a0 = a1;\n\s+return a2 \/ a1 \+ 1;/);
 });
 
-// `t = k / n; if (a > 0 && t != 0)`, the connective already built. raise/shortcircuit.ts hoists no
-// helper op out of the arm it guards, so one in the guarded cone ran above the branch, where C's
-// short circuit would skip it; a divide the ISA computes may have been hoisted there by the fold, so
-// its def block says nothing and it stays in the connective.
+// `t = k / n; if (a > 0 && t != 0)`, the connective already built. raise/shortcircuit.ts drops the
+// stamp from a helper op it hoists out of the arm it guards, so one in the guarded cone that still
+// carries it ran above the branch, where C's short circuit would skip it; an unstamped divide may
+// have been hoisted there by the fold, so its def block says nothing and it stays in the connective.
 const GUARDED_DIV = `fn f {
 ^bb0(%0: unk32, %1: s32, %2: s32):
   %3: s32 = sdiv %2, %1 {helper="__divsi3"}
@@ -100,7 +100,7 @@ test('a helper divide in a connective’s guarded operand is named above the bra
   expect(emit(GUARDED_DIV)).toMatch(/v0 = a2 \/ a1;\n\s+if \(a1 <= 0 \|\| v0 == 0\)/);
 });
 
-test('a divide the ISA computes stays in the guarded operand', () => {
+test('an unstamped divide stays in the guarded operand', () => {
   expect(emit(GUARDED_DIV.replace(' {helper="__divsi3"}', ''))).toMatch(/if \(a1 <= 0 \|\| a2 \/ a1 == 0\)/);
 });
 
@@ -150,7 +150,7 @@ test('agbcc’s __divsi3 above a `&&` and under it lift to where each ran', () =
   const above = decompile('gd', THUMB_DIV_ABOVE_AND, ARMV4T_AGBCC, { prototypes }).source;
   const under = decompile('gd2', THUMB_DIV_UNDER_AND, ARMV4T_AGBCC, { prototypes }).source;
   expect(above).toMatch(/(v\d+) = a1 \/ a2;\n\s+if \(a0 > 0 && \1 != 0\)/);
-  expect(under).toMatch(/if \(a0 > 0\) \{\n\s+if \(a1 \/ a2 != 0\)/);
+  expect(under).toMatch(/if \(a0 > 0 && a1 \/ a2 != 0\)/);
 });
 
 // agbcc: `t = k / n; *q = n; return t + 1;` — the `bl __divsi3` ahead of the `str`, which

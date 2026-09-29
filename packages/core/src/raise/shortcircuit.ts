@@ -61,17 +61,9 @@ import {
 import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
-import { raisedHelper } from '../runtime-helpers';
+import { forgetHelperPlacement } from '../runtime-helpers';
 
 const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
-
-/** An op neither fold may lift out of the arm that guards it: HOIST_UNSAFE_OPS, and an op the asm
- *  reached by calling a runtime helper (`raisedHelper`). That one is pure as a value, and C's short
- *  circuit would re-guard it, but lifted it leaves its def block above the branch — which is where
- *  the structurer reads the asm's placement of a call from (structure/analysis.ts, the helper
- *  clause). agbcc runs `t = k / n; if (a > 0 && t != 0)` as a `bl __divsi3` above both compares and
- *  `if (a > 0 && k / n != 0)` as one under the first; lifting the second makes the two one IR. */
-const hoistUnsafe = (op: Op): boolean => HOIST_UNSAFE_OPS.has(op.opcode) || raisedHelper(op) !== null;
 
 /** Run `step` until it stops rewriting, and answer whether it ever did.
  *
@@ -236,7 +228,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // expression, where C's own short-circuit re-guards them. Any side effect ⇒ DECLINE the fold — the
         // merge-variable spelling the fall-through leaves is correct (the side effect stays in B's block),
         // just possibly non-matching.
-        if (bfeed.ops.slice(0, -1).some(hoistUnsafe)) {
+        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         // NEGATABLE only when the orientation actually inverts the head — asked here rather than up
@@ -253,7 +245,9 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (wantNeg && !negation) {
           continue;
         }
-        bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
+        // hoist B's pure body (defines Vb; harmless if a dead const). A helper op it moves no longer
+        // sits where the asm called it (runtime-helpers.ts `forgetHelperPlacement`).
+        bfeed.ops.slice(0, -1).forEach((op) => before(forgetHelperPlacement(op)));
         foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
         if (negation) {
@@ -589,7 +583,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
         // out of the arm that guards it is the reordering this refuses. Loud either way today — a
         // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
-        if (g.ops.slice(0, -1).some(hoistUnsafe)) {
+        if (g.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         // Which of ^g's edges rejoins ^h's other successor? That is the shared block. A DIRECT edge
@@ -657,7 +651,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           }
         }
         rereadInArm(fn, g, otherEdge.block, reread);
-        const body = g.ops.slice(0, -1);
+        const body = g.ops.slice(0, -1).map(forgetHelperPlacement);
         const second = negation ? negation.result : c2;
         const negated: Op[] = negation ? negation.ops : [];
         const res = mkValue(T.unk(32));
