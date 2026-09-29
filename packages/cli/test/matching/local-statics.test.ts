@@ -186,4 +186,12 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
       /names a function-scope static \('tide\$\d+'\) whose definition needs the object's data/,
     );
   });
+
+  test.each(['__FUNCTION__', '__func__'])('the predefined %s declines rather than being redefined', (id) => {
+    const c = `extern void use(const char *); void fnm(void) { use(${id}); }`;
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, 'fnm', FLAGS);
+    expect(() => decompile('fnm', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'fnm') })).toThrow(
+      new RegExp(`names the function's predefined name \\('${id}\\$\\d+'\\)`),
+    );
+  });
 });

@@ -45,6 +45,7 @@ export type RelocSymbolKind =
   | 'section-local'
   | 'local-static'
   | 'inline-local-static'
+  | 'predefined-identifier'
   | 'cpp-vtable'
   | 'cpp-mangled'
   | 'not-an-identifier';
@@ -53,6 +54,9 @@ export type RelocSymbolKind =
  *  SOURCE name is `ident`. Anchored whole, one numeric suffix: see the ordering note in
  *  {@link classifyRelocSymbol}. */
 const LOCAL_STATIC = /^([A-Za-z_][A-Za-z0-9_]*)[.$](\d+)$/;
+
+/** The identifiers a compiler defines inside every function, whose objects it names like a static. */
+const PREDEFINED = new Set(['__func__', '__FUNCTION__', '__PRETTY_FUNCTION__']);
 
 /** Classify a relocation's symbol by its spelling. Order matters twice over. The shapes that ARE
  *  valid C identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C
@@ -107,8 +111,14 @@ export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   // comes from — and it claimed gcc's IPA clones (`foo.isra.0`, `foo.part.0`, `foo.cold.1`), which
   // are not statics at all and fall to `not-an-identifier` where they belong. A `$` name of any
   // other shape (`$L1`) is not a static either.
-  if (LOCAL_STATIC.test(sym)) {
-    return 'local-static';
+  //
+  // The one static no source declares: the name the compiler predefines in every function body.
+  // mwcc emits `__FUNCTION__`, `__func__` and `__PRETTY_FUNCTION__` as `__FUNCTION__$2`,
+  // `__func__$1`, `__PRETTY_FUNCTION__$3` (compiled), and a definition under that name is a
+  // redefinition the compiler rejects.
+  const m = sym.match(LOCAL_STATIC);
+  if (m !== null) {
+    return PREDEFINED.has(m[1]) ? 'predefined-identifier' : 'local-static';
   }
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(sym) ? 'plain' : 'not-an-identifier';
 }
@@ -139,6 +149,11 @@ export function unspellableReason(sym: string): string | null {
       return (
         `names a function-scope static of an inlined function ('${sym}') — the object belongs to ` +
         `that function's definition, which a source reaches by calling it, never by naming the object`
+      );
+    case 'predefined-identifier':
+      return (
+        `names the function's predefined name ('${sym}') — the compiler declares it in every ` +
+        `function body, so a definition would redeclare it`
       );
     case 'cpp-vtable':
       return (

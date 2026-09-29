@@ -129,3 +129,14 @@ test('a function-scope static is its source name and the counter the compiler ap
   }
   expect(classifyRelocSymbol('$L1')).toBe('not-an-identifier');
 });
+
+test('the name a compiler predefines in every function is not a static the function declared', () => {
+  // mwcc_242_81 over `void fnm(void) { use(__FUNCTION__); }` and `use(__func__)`: `.sdata` objects
+  // named `__FUNCTION__$2` and `__func__$1`, which a definition in the body would redeclare
+  for (const sym of ['__FUNCTION__$2', '__func__$1', '__PRETTY_FUNCTION__$3']) {
+    expect(classifyRelocSymbol(sym), sym).toBe('predefined-identifier');
+    expect(localStaticName(sym), sym).toBeNull();
+    expect(unspellableReason(sym)).toMatch(/predefined name .* a definition would redeclare it/);
+  }
+  expect(classifyRelocSymbol('__func.3')).toBe('local-static');
+});

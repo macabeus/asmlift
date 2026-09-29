@@ -41,7 +41,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
-import { classifyRelocSymbol } from './reloc-symbol';
+import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
   type ArgSlots,
   abiSortEntryParams,
@@ -2069,8 +2069,13 @@ function poolRef(operand: string, dataWords: Map<string, string[]>, nonWordData:
     if (sm.addend === null) {
       return { kind: 'unmodelled', why: `pool word '${w}' carries an addend that is not a 32-bit value` };
     }
-    return classifyRelocSymbol(sm.sym) === 'local-static'
-      ? { kind: 'local-static', symbol: sm.sym, addend: sm.addend }
+    const kind = classifyRelocSymbol(sm.sym);
+    if (kind === 'local-static') {
+      return { kind: 'local-static', symbol: sm.sym, addend: sm.addend };
+    }
+    // the counter's other bearer, a compiler-predefined name, has no spelling as a symbol
+    return kind === 'predefined-identifier'
+      ? { kind: 'unmodelled', why: `a pool word that ${unspellableReason(sm.sym)}` }
       : { kind: 'gaddr', sym: sm.sym, addend: sm.addend };
   }
   // A leading-zero decimal gets its own message, because "not a number" is FALSE about `010` — it

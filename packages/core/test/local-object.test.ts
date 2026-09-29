@@ -387,3 +387,9 @@ test('the IR names a static by its linker name, so a map global of its source na
     "names a function-scope static ('tide.3') whose source name 'tide' is also a global this one names",
   );
 });
+
+test("a pool word naming the function's predefined name declines rather than naming a global", () => {
+  // agbcc puts `__FUNCTION__` in `.LC0`; a listing that names `__FUNCTION__.2` still has no spelling
+  const asm = thumbFn(rodata('__FUNCTION__.2', [0x66, 0]), '\tldr\tr0, .L3', ['__FUNCTION__.2']);
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow("names the function's predefined name ('__FUNCTION__.2')");
+});
