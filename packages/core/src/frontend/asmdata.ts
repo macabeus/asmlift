@@ -29,7 +29,7 @@ export interface Reloc {
 export interface AsmData {
   sections: Map<string, Uint8Array>; // section name → raw bytes (file order)
   relocs: Reloc[];
-  symbols: Map<string, { section: string; value: number }>; // symbol name → {section, offset-in-section}
+  symbols: Map<string, { section: string; value: number; size: number }>; // name → {section, offset-in-section, size}
   bigEndian: boolean;
 }
 
@@ -112,7 +112,7 @@ export function parseAsmData(
   }
 
   // --- `objdump -t`: `VALUE FLAGS SECTION\tSIZE NAME` (section/size split by TAB) ---
-  const symbols = new Map<string, { section: string; value: number }>();
+  const symbols = new Map<string, { section: string; value: number; size: number }>();
   for (const line of symbolsDump.split('\n')) {
     const tab = line.indexOf('\t');
     if (tab < 0) {
@@ -121,11 +121,11 @@ export function parseAsmData(
     const left = line.slice(0, tab),
       right = line.slice(tab + 1);
     const lm = left.match(/^([0-9a-f]+)\s+.{6,8}\s(\S+)\s*$/i); // value … flags(7) section
-    const rm = right.match(/^[0-9a-f]+\s+(.+?)\s*$/i); // size name
+    const rm = right.match(/^([0-9a-f]+)\s+(.+?)\s*$/i); // size name
     if (!lm || !rm) {
       continue;
     }
-    symbols.set(rm[1], { section: lm[2], value: parseInt(lm[1], 16) });
+    symbols.set(rm[2], { section: lm[2], value: parseInt(lm[1], 16), size: parseInt(rm[1], 16) });
   }
 
   return { sections, relocs, symbols, bigEndian };
