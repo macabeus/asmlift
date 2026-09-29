@@ -2731,6 +2731,11 @@ export function lift(
         `cannot lift '${name}': data label '${lead}' used as a register — not modelled`,
       );
     }
+    // …and anything else that is not a register — an immediate this frontend cannot evaluate
+    // (`#(4)`, `#SYM`) reaching an arm that reads a register operand — is the same phantom.
+    if (!REG_SPELLINGS.test(r)) {
+      throw new FrontendUnsupportedError(`cannot lift '${name}': operand '${r}' read as a register — not modelled`);
+    }
     return readVar(r, b);
   };
 

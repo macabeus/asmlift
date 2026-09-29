@@ -1368,6 +1368,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     for (const oneInsn of ['\tadd\tr4, sp, r1\n', '\tadd\tr4, r1, sp\n', '\tadd\tr4, r1, #0\n\tadd\tr4, sp\n']) {
       expect(decompile('f', frame(oneInsn), ARMV4T_AGBCC).source).toBe(twoInsn);
     }
+    // An immediate the constant form cannot evaluate is not the runtime form's register: read as
+    // one, `#(4)` became an entry parameter and the load `sp0[a0]`.
+    for (const imm of ['#(4)', '#OFF']) {
+      expect(() => decompile('f', `\t.set\tOFF, 4\n${frame(`\tadd\tr4, sp, ${imm}\n`)}`, ARMV4T_AGBCC)).toThrow(
+        `operand '${imm}' read as a register`,
+      );
+    }
   });
 
   // WHAT THE BENCHMARK ACTUALLY SLICES is the diagnostic's REASON, and the stage word is prepended
