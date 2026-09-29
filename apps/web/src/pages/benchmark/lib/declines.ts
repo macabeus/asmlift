@@ -30,14 +30,15 @@
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 80 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 81 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, a base alignment the
-//                               input does not determine, pc used as a data base, `stm` with its own
-//                               base in the list, control falling off the end, a register spelled in
-//                               upper case, a `bl` whose target this asm defines as a data label, and
+//   frontend/thumb.ts       28  ARM-mode function, raw data in the code stream, a base alignment the
+//                               input does not determine, pc used as a data base, an operand that
+//                               names no register read as one, `stm` with its own base in the list,
+//                               control falling off the end, a register spelled in upper case, a
+//                               `bl` whose target this asm defines as a data label, and
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
