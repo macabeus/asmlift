@@ -25,7 +25,7 @@
 //     ahead of its first caller, and mwcc -inline auto has `A` and `B` both address `n$4` — so
 //     re-declaring it inside one of them would split one object in two. Only the functions this
 //     input shows can be checked, which is the limit of this refusal: a single-function input
-//     cannot show a second referrer.
+//     cannot show a second referrer, and one that ends at this function cannot show a later one.
 import type { LocalObject, LocalObjects } from '../ir/core';
 import type { AsmData } from './asmdata';
 import { localStaticName } from './reloc-symbol';

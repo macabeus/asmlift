@@ -64,8 +64,9 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   names it too. The last is a static of an inlined same-unit function — agbcc puts `static inline
 counter`'s `n.3` ahead of its first caller, mwcc `-inline auto` has every caller address `n$4` —
   and re-declaring it in one of them would split one object in two. Only the functions the input
-  shows can be checked: a single function's listing cannot show a second referrer, and the
-  benchmark's mwcc side table is narrowed to the function's own relocations.
+  shows can be checked: a single function's listing cannot show a second referrer, and a
+  benchmark row's input ends at the row's function — the unit's earlier functions are in it (the
+  mwcc side table keeps their relocations that name the row's statics), its later ones are not.
 
   **Block scope, not file scope**, and it is a decision rather than a measurement: both spellings
   compile to the same bytes and score 0 on both compilers. Block scope is what the source wrote and

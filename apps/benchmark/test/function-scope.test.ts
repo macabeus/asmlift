@@ -1,5 +1,7 @@
 // A unit row's object holds every function its unit defines before the row's; what the row publishes and
 // what its readers take is about its own function (eval/function-scope.ts).
+import { parseAsmData } from '@asmlift/core/frontend/asmdata';
+import { readObjectLocalObject } from '@asmlift/core/frontend/local-object';
 import { describe, expect, test } from 'vitest';
 
 import { functionDisassembly, functionScopedDump } from '../src/eval/function-scope';
@@ -107,4 +109,61 @@ test('a listing whose FIRST function carries a TEMPLATE symbol is still scoped t
   expect(scoped.split(`<${sym}>:`)).toHaveLength(2);
   expect(scoped).not.toContain('somewhere_else');
   expect(scoped).not.toContain('<after>:');
+});
+
+// mwcc_242_81 `-inline auto` over `static int counter(void) { static int n; return ++n; }`, `int A(void) {
+// return counter() + 1; }` and `s32 rtab(int i) { static const s32 kt[3] = {7, -1, 9}; return kt[i]; }`:
+// `counter` stays in the object and A inlined it, so both address `n$4`.
+const STATICS_DUMP = [
+  '',
+  'u.o:     file format elf32-powerpc',
+  '',
+  'SYMBOL TABLE:',
+  '00000000 l     O .bss\t00000004 n$4',
+  '00000000 l     F .text\t00000018 counter',
+  '00000000 l     O .rodata\t0000000c kt$18',
+  '00000018 g     F .text\t0000001c A',
+  '00000034 g     F .text\t00000014 rtab',
+  '',
+  '',
+  'RELOCATION RECORDS FOR [.text]:',
+  'OFFSET   TYPE              VALUE',
+  '00000002 R_PPC_ADDR16_HA   n$4',
+  '00000006 R_PPC_ADDR16_LO   n$4',
+  '0000001a R_PPC_ADDR16_HA   n$4',
+  '0000001e R_PPC_ADDR16_LO   n$4',
+  '00000036 R_PPC_ADDR16_HA   kt$18',
+  '0000003e R_PPC_ADDR16_LO   kt$18',
+  '',
+  '',
+  'Contents of section .text:',
+  ' 0000 3c600000 38830000 80640000 38630001  <`..8....d..8c..',
+  ' 0010 90640000 4e800020 3c600000 38830000  .d..N.. <`..8...',
+  ' 0020 80640000 38630001 90640000 38630001  .d..8c...d..8c..',
+  ' 0030 4e800020 3c800000 5460103a 38640000  N.. <...T`.:8d..',
+  ' 0040 7c63002e 4e800020                    |c..N..         ',
+  'Contents of section .rodata:',
+  ' 0000 00000007 ffffffff 00000009           ............    ',
+  '',
+].join('\n');
+
+describe('functionScopedDump — the evidence a function-scope static needs survives the narrowing', () => {
+  const read = (sym: string, stat: string) => {
+    const scoped = functionScopedDump(STATICS_DUMP, sym);
+    return readObjectLocalObject(parseAsmData(scoped, scoped, scoped, true), stat, sym);
+  };
+
+  test("another function's relocation naming a static this one names stays, so the lift sees it is shared", () => {
+    const scoped = functionScopedDump(STATICS_DUMP, 'A');
+    expect(scoped).toContain('00000002 R_PPC_ADDR16_HA   n$4');
+    expect(scoped).not.toContain('00000036 R_PPC_ADDR16_HA   kt$18');
+    expect(read('A', 'n$4')).toMatchObject({
+      refused: "that .text also names at 0x2 — it is not this function's alone",
+    });
+  });
+
+  test("a static only its own function names is read as that function's", () => {
+    expect(functionScopedDump(STATICS_DUMP, 'rtab')).not.toContain('00000002 R_PPC_ADDR16_HA   n$4');
+    expect(read('rtab', 'kt$18')).toMatchObject({ name: 'kt', section: 'rodata', size: 12 });
+  });
 });
