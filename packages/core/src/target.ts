@@ -1072,7 +1072,6 @@ export function structureOptionsFor(
     returnsVoid,
     ...(t.dialect === 'c++' ? { declaredArgs: declaredArgTypes(prototypes) } : {}),
     littleEndian: t.capabilities.endianness === 'little',
-    divideIsCall: !t.capabilities.hwDivide,
     ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
     ...behaviors,
     ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),

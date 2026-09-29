@@ -23,7 +23,8 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS, opSig } from '../ir/opcodes';
+import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { raisedHelper } from '../runtime-helpers';
 
 export interface UseSite {
   blk: Block;
@@ -596,9 +597,9 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   // Every value an edge ARGUMENT renders — the argument itself plus its inlined operand cone,
   // memoized per value so one walk serves every slot. The walk stops DESCENDING at an
   // order-sensitive def: under a call or a memory read the value renders at that op's own position,
-  // never at this edge. It crosses a divide, which renders inline at the copy site with its operands
-  // unless an effect or a named divide lies between the two; `analyze` names that one at its def,
-  // which this walk runs before, so its operands are counted at the copy site anyway — an extra
+  // never at this edge. It crosses a trapping divide, which renders inline at the copy site with its
+  // operands — unless the asm called a helper for it and `analyze`'s helper clause names it at its
+  // def, which this walk runs before, so its operands are counted at the copy site anyway: an extra
   // render, which costs a candidate that homes a value rendered once. The stopping op is still
   // recorded, so a membership test over the cone sees it.
   const coneCache = new Map<Value, Set<Value>>();
@@ -858,9 +859,6 @@ export interface AnalyzeOptions {
   /** Name a float product a float add or subtract reads, so a contracting compiler cannot fuse the
    *  two (StructureOptions.contractsFloatProducts). */
   contractsFloatProducts?: boolean;
-  /** The target has no divider, so a register-form divide is a runtime helper call
-   *  (StructureOptions.divideIsCall). */
-  divideIsCall?: boolean;
   /** The merge-feed-home variation (rank.ts `/merge-home`). A pure value one join's incoming edges
    *  render into the SAME parameter slot from 2+ places materializes at its def: the copy machinery
    *  has no name to reference, so the default re-derives the whole expression per arm
@@ -1199,7 +1197,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
-    divideIsCall = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -1657,7 +1654,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *
    *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
-   *  materializes it there rather than letting C's short circuit skip it.
+   *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
+   *  the asm reached by calling a runtime helper, which the fold refuses to hoist too, and the
+   *  helper clause names it by the same argument.
    *
    *  Only the guarded side is SEEDED. A connective's own operand[0] is evaluated whenever the
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
@@ -1730,10 +1729,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
-  /** a divide or remainder (the registry's `traps`), whatever its divisor */
-  const isDivide = (op: Op): boolean => opSig(op.opcode)?.traps === true;
-  /** a divide the divide clause below named: a statement sequenced as a named call is */
-  const namedDivide = (op: Op): boolean => materialize.has(op) && isDivide(op);
+  /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
+  const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
+  /** one the helper clause below named: a statement sequenced as a named call is */
+  const namedHelper = (op: Op): boolean => materialize.has(op) && isHelper(op);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -1795,32 +1794,33 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
-          // A DIVIDE is named at its def when an effect, or another divide named there, lies between
-          // the def and any place it renders — any divisor, since what is kept is where the asm
-          // computed it. On agbcc the divide IS a call: `bl __divsi3` over a constant divisor too
-          // (Thumb has no high-part multiply to reduce it with), and agbcc schedules nothing (no
-          // sched.c in its tree), so the call stays where the source computes it. `t = k / n; *q = n;
-          // return t + 1;` is `bl; str`, and inlined it comes back `*q = n; return k / n + 1;`,
-          // `str; bl`. On a target with a divider the fault point is the compiler's own — kmc checks
-          // right after `div`, IDO schedules its `break 7` after later stores, mwcc's `divw` never
-          // traps — and C leaves a division by zero undefined, so there the name keeps the
-          // computation where the asm ran it and claims nothing about where it faults. A named divide
-          // bars what the barrier scan below places, as a named call does, so a call or a divide the
-          // asm ran ahead of it stays ahead of it.
-          // Where the divide IS a call (`divideIsCall`, a register-form divide: a constant power of
-          // two is the `imm` form, shifts in the asm), it keeps the call's path rule too: rendered in
-          // a block other than its own, or riding a branch's edge copy (`ridesEdge`), it would run on
-          // the paths that render it and not where the asm ran it once. `t = k / n; if (c) return
-          // t + 1; return t - 3;` is one `bl __divsi3` above the `cmp`, and inlined into both arms
-          // it recompiles to one per arm.
-          // Not in a `&&`/`||` guarded cone: raise/shortcircuit.ts may have lifted it out of the arm,
-          // so its def block is a fold artifact and a name there divides where the source did not.
-          if (isDivide(op) && pr && useSitesOf.has(pr) && !shortCircuitGuarded.has(pr)) {
+          // AN OP THE ASM CALLED A HELPER FOR is placed as the call it was (`isHelper`: `bl
+          // __divsi3` for `k / n` and `k / 5` on agbcc, `bl __ashrdi3` for a 64-bit `>>`, `bl
+          // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and a
+          // compiler with no scheduler (agbcc has no sched.c) leaves it where the source computed
+          // it; inlined at its use it moves there. So it is named at its def when:
+          //   • an effect, or another helper named there, lies between the def and a place it
+          //     renders — `t = k / n; *q = n; return t + 1;` is `bl; str`, and inlined it comes
+          //     back `*q = n; return k / n + 1;`, `str; bl`. A named one bars what the barrier
+          //     scan below places, as a named call does, so a call the asm ran ahead of it stays
+          //     ahead of it;
+          //   • it renders in a block other than its own, or rides a branch's edge copy
+          //     (`ridesEdge`): then it runs on the paths that render it, not where the asm ran it
+          //     once. `t = k / n; if (c) return t + 1; return t - 3;` is one `bl`
+          //     above the `cmp`, and inlined into both arms it recompiles to one per arm;
+          //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts hoists no helper op out
+          //     of the arm it guards, as it hoists no call, so one that reached the cone ran above
+          //     the branch, and C's short circuit would skip it (the guarded-call rule below).
+          // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
+          // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte.
+          if (isHelper(op) && pr && useSitesOf.has(pr)) {
             const at = emitPositions(op);
             if (
               !at ||
-              (divideIsCall && op.operands.length === 2 && (at.some((p) => p.blk !== b) || ridesEdge(op))) ||
-              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedDivide(x)))
+              shortCircuitGuarded.has(pr) ||
+              ridesEdge(op) ||
+              at.some((p) => p.blk !== b) ||
+              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedHelper(x)))
             ) {
               materialize.add(op);
               continue;
@@ -2131,7 +2131,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             }
             return true;
           }
-          if (x.opcode === 'astore' || x.opcode === 'opaque' || namedDivide(x)) {
+          if (x.opcode === 'astore' || x.opcode === 'opaque' || namedHelper(x)) {
             return true;
           }
           if (x.opcode === 'call') {

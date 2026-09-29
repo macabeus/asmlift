@@ -1633,10 +1633,6 @@ export interface StructureOptions {
   // `deviceMemoryWriters`, which no structurer rule reads). Used as a REFUSAL: absent, a dead read
   // at a literal address is dropped.
   deviceRegisters?: readonly [number, number];
-  // HARDWARE fact from TargetDescription.capabilities.hwDivide, threaded by `structureOptionsFor`
-  // like `littleEndian` above: a target with no divider lowers a register-form divide to a runtime
-  // helper call (`bl __divsi3`), which the analysis then places as it places a call.
-  divideIsCall?: boolean;
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` variation, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
@@ -2075,7 +2071,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
     staticLayout,
-    divideIsCall = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     freshParamMerge = false,
@@ -2188,7 +2183,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeEscapingExtensions,
     readsStayWhereWritten,
     contractsFloatProducts,
-    divideIsCall,
     // the map's own declaration truth: a volatile object's read may not be duplicated or moved.
     // A qualified MEMBER answers only for the bytes it spans — the `vu16 field;` idiom puts one in
     // a struct whose other members are ordinary cells — and a field of unknown extent spans

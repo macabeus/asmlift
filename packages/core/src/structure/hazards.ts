@@ -158,12 +158,11 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
     // Sound for a read, a call or a divide: rebuilt behind a store, a read answers with what the
-    // store wrote, and a call or a divide (a `bl __divsi3` on agbcc) runs behind it. The analysis
-    // names a read or a call something would cross, and a divide an effect would cross, and a named
-    // leaf is not rebuilt. What it leaves inline is a divide in a `&&`/`||` guarded cone and, on a
-    // target with a divider, one that only a read separates from the copy's home (structure/
-    // analysis.ts, the divide clause); those can reach the gate through the pipeline, and the rest
-    // of it is reached from a hand-built analysis, which is its guard.
+    // store wrote, and a call, or a divide the asm called a helper for (`bl __divsi3` on agbcc),
+    // runs behind it. The analysis names a read or a call something would cross, and a helper op an
+    // effect would cross, and a named leaf is not rebuilt. What it leaves inline is a divide the
+    // ISA computes, and that one can reach the gate through the pipeline; the rest of it is reached
+    // from a hand-built analysis, which is its guard.
     guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },
@@ -1016,7 +1015,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         // dest` and the seed is all the slot needs. An arg from outside the loop under that name
         // (a parameter kmc keeps in the destination's register) is read by the body, and a seed
         // ahead of the loop would overwrite it.
-        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j], definedInBody(a) ? a : undefined),
+        destBusyInLoop:
+          destName !== undefined && busyInLoop(destName, exit.params[j], definedInBody(a) ? a : undefined),
       };
       if (firstRejection(gates, c) === null) {
         cleared.set(j, { name: destName!, home });
