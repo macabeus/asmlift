@@ -67,7 +67,7 @@ export interface StaticLayout {
    *  declaration order, and then the statics with no initializer: in reverse declaration order
    *  (mwcc's `.sbss`: `a = 0; b; c = 0;` at +0, +8, +4), or in the order its code first uses them
    *  (mwcc's `.bss`: `a; b = 0;` used a first at +4, +0). Either way the offsets say which statics
-   *  had the `= 0`. */
+   *  sit where only one with the `= 0` is sure to land. */
   uninitOrder?: Readonly<Record<string, 'reversed' | 'first-use'>>;
 }
 
@@ -242,21 +242,12 @@ export function localStaticShapes(
   }
   const access = accessesOf(fn, new Set(objs.keys()));
   const widthOf = (o: LocalObject) => elementWidth(o, access.get(o.symbol) ?? [], layout);
-  /** Sized and aligned as a scalar is — the compiler aligns one to its width — and declared here as
-   *  one, or as an array only for want of anything to say otherwise: no access gives its element,
-   *  or it is aligned wider than an array of its elements would be (an `s64` read a word at a
-   *  time). One of these where only a zero scalar sits is refused below unless it is a scalar. */
-  const scalarShaped = (o: LocalObject): boolean => {
-    const width = widthOf(o);
-    if (typeof width !== 'number' || width === o.size) {
-      return width === o.size;
-    }
-    const align = o.placement?.align;
-    const unsaid = o.directives?.unit === undefined && !access.get(o.symbol)?.length;
-    return (
-      [1, 2, 4, 8].includes(o.size) && align === o.size && (unsaid || align > Math.max(width, layout.aggregateAlign))
-    );
-  };
+  /** Declared here as a scalar, or sized and aligned as one — the compiler aligns a scalar to its
+   *  width. One declared as an array where only a zero scalar sits is refused below: an `s32 = 0`
+   *  read a byte at a time, or only through its address, lands there as well as four bytes used
+   *  first. */
+  const scalarShaped = (o: LocalObject): boolean =>
+    widthOf(o) === o.size || ([1, 2, 4, 8].includes(o.size) && o.placement?.align === o.size);
   const zeroed =
     layout.uninitOrder !== undefined
       ? zeroInitialized([...objs.values()], layout.uninitOrder, scalarShaped)

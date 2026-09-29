@@ -239,7 +239,7 @@ test('mwcc: in .bss an array ahead of a later-declared one had no `= 0`', () => 
   );
 });
 
-test('mwcc: in .bss a scalar laid out ahead of one declared before it had `= 0`', () => {
+test('mwcc: in .bss a scalar laid out ahead of one declared before it is written `= 0`', () => {
   // .bss holds a$5 +0, c$4 +4: the zero scalar first, then the one with no initializer
   const asm = corpus('mwcc-bss-zero-statics.asm');
   expect(decompile('bsszero', asm, PPC_MWCC, { asmData: dump('mwcc-bss-zero-statics.txt') }).source).toContain(

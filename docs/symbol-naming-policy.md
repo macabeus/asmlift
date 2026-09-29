@@ -74,8 +74,9 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   initializer out after them: reversed in `.sbss`, and in `.bss` (an object over the `-sdata`
   threshold: an array over 8 bytes, every scalar at `-sdata 0`) in the order its code first uses
   them. So the offsets also say which statics had the `= 0`, and the lift writes it — in `.bss` on
-  every scalar of the leading run, since one used first with no initializer sits there too and only
-  the `= 0` keeps it there in a candidate whose code uses another first. The same measurement means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
+  the leading run of scalars, but for its last where that run is all of the function's `.bss`,
+  since one used first with no initializer sits there too and only the `= 0` keeps it there in a
+  candidate whose code uses another first. The same measurement means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
   wrong alignment all MATCH, and only the section and the local linkage are scored — so the
   matching suite compares the candidate's data sections with the target's byte for byte, with
   their alignment (`packages/cli/test/matching/local-statics.test.ts`).
