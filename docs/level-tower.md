@@ -1302,10 +1302,12 @@ register is write-only, so nobody can read the address back out and turn it into
 premise the guard _stated_ was false there. The fix was to ask the question the premise names — can
 anything write? — rather than the one that was easy to compute, and the addresses are target data
 (`capabilities.readOnlyAddressSinks`) so no shared pass learns a platform. The accepting half is
-pinned as `synthetic:dma_fill_uninit:agbcc`. Note what did NOT move with it: the sibling rule
-refusing a SECOND address-taken object still keys on any escape at all, because its argument is
-about frame LAYOUT, and a device reading past the object it was given is as wrong as a callee
-writing past it.
+pinned as `synthetic:dma_fill_uninit:agbcc`. The sibling rule refusing a SECOND address-taken
+object keys on what the escape may REACH rather than on whether it writes, because its argument is
+about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
+past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
+control halfword), read per transfer, and a call or an unresolved store after the transfer is
+handed the address leaves the read unbounded.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup
