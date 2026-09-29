@@ -3,6 +3,7 @@
 //
 //   corpus/agbcc-local-statics.s   agbcc 2.9 `-mthumb-interwork -O2 -fhex-asm` over the C below
 //   corpus/agbcc-inline-static.s   the same compiler over a `static inline` callee used by A and B
+//   corpus/agbcc-static-data-word.s  the same compiler over a static whose initializer names another
 //   corpus/mwcc-local-statics.txt  `objdump -s -r -t` of mwcc_242_81 `-O4,s -inline auto` over m2.c
 //   corpus/mwcc-dump-*.txt         the published `asmDump` of three benchmark rows, as the harness
 //                                  hands it to asmlift
@@ -19,6 +20,9 @@
 //   int fi(int i) { static struct S st = {1, 2}; return st.b + i; }   // struct S { u8 a; u32 b; }
 //   int fj(int i) { static const u16 big[40] = {1,2}; return big[i]; }
 //   int fk(int i) { static const float fl[2] = {1.0f, 2.5f}; return *(int*)&fl[i]; }
+// agbcc-static-data-word.s:
+//   s32 X(s32 i) { return i + 1; }
+//   s32 T(s32 i) { static const u8 tide[2] = {1, 2}; static const u8 *const ptr = tide; return tide[i] + *ptr; }
 // agbcc-inline-static.s:
 //   static inline int counter(void) { static int n; return ++n; }
 //   static inline int tab(int i) { static const unsigned char t[4] = {9,8,7,6}; return t[i]; }
@@ -154,6 +158,13 @@ test('agbcc: a static of an inlined callee sits ahead of its first caller, and e
   expect([...gasPoolReferrers(asm, 'n.3')].sort()).toEqual(['A', 'B']);
   expect([...gasPoolReferrers(asm, 't.7')]).toEqual(['A']);
   expect(readGasLocalObject(asm, 'n.3')).toMatchObject({ section: 'bss', size: 4 });
+});
+
+test("agbcc: a data word naming a static is another static's initializer, not a referrer", () => {
+  // `ptr.7`'s `.word tide.6` sits in .rodata after X's code and before T's: it is T's, and no pool
+  const asm = corpus('agbcc-static-data-word.s');
+  expect([...gasPoolReferrers(asm, 'tide.6')]).toEqual(['T']);
+  expect(decompile('T', asm, ARMV4T_AGBCC).source).toContain('    static const u8 tide[2] = { 1, 2 };\n');
 });
 
 test('mwcc: the symbol table gives the section and size, the section contents the bytes', () => {

@@ -291,13 +291,24 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
 
 /** The functions whose literal pools name `symbol` in GNU as text, by the function each pool
  *  follows: a pool word belongs to the most recent function start (`.thumb_func` then a label, or
- *  a pret `thumb_func_start NAME`). */
+ *  a pret `thumb_func_start NAME`).
+ *
+ *  Only words in code count. A word in a data section is another object's initializer, and one
+ *  naming a function-scope static belongs to a static of the same function, the only scope that
+ *  can spell that name — so it is no second referrer, and it sits wherever the compiler emitted
+ *  that object, which is ahead of the function's own code. */
 export function gasPoolReferrers(asm: string, symbol: string): Set<string> {
   const out = new Set<string>();
   let fn: string | null = null;
   let pendingFn = false;
+  let inCode = true;
   for (const raw of asm.split('\n')) {
     const line = code(raw);
+    const sw = sectionSwitch(line);
+    if (sw !== null) {
+      inCode = sw === '.text' || sw.startsWith('.text.');
+      continue;
+    }
     const start = line.match(/^(?:non_word_aligned_)?thumb_func_start\s+(\S+)$/);
     if (start) {
       fn = start[1];
@@ -314,7 +325,12 @@ export function gasPoolReferrers(asm: string, symbol: string): Set<string> {
     }
     const rest = lab ? lab[2] : line;
     const w = rest.match(/^\.(?:word|4byte|long)\s+(.+)$/);
-    if (w && fn !== null && w[1].split(',').some((op) => op.trim().match(/^[A-Za-z_.$][\w.$]*/)?.[0] === symbol)) {
+    if (
+      inCode &&
+      w &&
+      fn !== null &&
+      w[1].split(',').some((op) => op.trim().match(/^[A-Za-z_.$][\w.$]*/)?.[0] === symbol)
+    ) {
       out.add(fn);
     }
   }
