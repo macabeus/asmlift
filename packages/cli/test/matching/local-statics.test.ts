@@ -146,7 +146,7 @@ const CASES: {
     mwccSpelled: /static const u8 s\[7\] = \{ 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0 \};/,
   },
   {
-    // mwcc moves both to bss and lays them out in declaration order there, ahead of any static
+    // mwcc moves both to .sbss and lays them out in declaration order there, ahead of any static
     // with no initializer, whose order it reverses — so the offsets say which had the `= 0`. The
     // later of the two lands in the same place declared either way, and is left without
     sym: 'zeropair',
@@ -160,6 +160,13 @@ const CASES: {
     spelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c = 0;/,
     mwccSpelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c;/,
     layoutOnly: true,
+  },
+  {
+    // mwcc puts both in .bss, where the statics with no initializer are laid out by first use:
+    // `a` ahead of the later-declared `b` had no `= 0`
+    sym: 'bssuse',
+    c: 's32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }',
+    spelled: /static u8 a\[64\];\n {4}static u8 b\[64\];/,
   },
   {
     sym: 'words',

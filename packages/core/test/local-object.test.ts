@@ -11,6 +11,8 @@
 //   corpus/mwcc-zero-statics.{txt,asm}  the side table and disassembly of mwcc_242_81 at its
 //                                  canonical flags over
 //     u32 zeromix(void) { static u32 a = 0; static u32 b; static u32 c = 0; return a + b + c; }
+//   corpus/mwcc-bss-statics.{txt,asm}  the same, over
+//     s32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }
 //
 // agbcc-local-statics.s:
 //   int fa(int i) { static const u8 tide[] = {1,2,3}; return tide[i]; }
@@ -224,6 +226,15 @@ test('mwcc: a bss static laid out ahead of a later-declared one had `= 0`', () =
   expect(() => decompile('zeromix', asm, PPC_MWCC, { asmData: ad })).toThrow(
     "names a function-scope static ('a$4') laid out ahead of a static declared after it, as only a scalar " +
       'initialized to zero is, but of 2 elements',
+  );
+});
+
+test('mwcc: in .bss a static ahead of a later-declared one says nothing about an initializer', () => {
+  // .bss holds a$4 +0, b$5 +64: mwcc lays the statics with no initializer out there by first use,
+  // so declaration order and first use agree and neither had one
+  const asm = corpus('mwcc-bss-statics.asm');
+  expect(decompile('bssuse', asm, PPC_MWCC, { asmData: dump('mwcc-bss-statics.txt') }).source).toContain(
+    '    static u8 a[64];\n    static u8 b[64];\n',
   );
 });
 

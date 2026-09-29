@@ -869,9 +869,14 @@ export const PPC_MWCC: TargetDescription = {
     // MEASURED on mwcc_242_81 through the `.comment` alignment record: an array or a struct is at
     // 4 at least (`u8[1]`, a struct of two bytes), a scalar at its width; a string-literal
     // initializer gets no more than the array does (`char s[] = "hello!"` and a `u8` list both 4);
-    // and a scalar `= 0` moves to bss, where `int q[1] = {0}` stays in `.data`. The other mwcc
+    // and a scalar `= 0` moves to bss, where `int q[1] = {0}` stays in `.data`. In `.sbss` the
+    // moved scalars come first in declaration order and the statics with no initializer follow
+    // reversed; in `.bss` (an array over 8 bytes, every scalar at `-sdata 0`) those with no
+    // initializer are laid out in the order the compiler first uses them (`a[i]=1; b[i]=2;` puts
+    // a first, the swap b), which neither the source's text (`x = b[i]; a[i] = 1;` puts a first)
+    // nor the emitted code (`a[i] = b[i]` reads b first, puts a first) fixes. The other mwcc
     // builds this description serves are not measured.
-    staticLayout: { aggregateAlign: 4, stringAlign: 4, zeroScalar: 'bss' },
+    staticLayout: { aggregateAlign: 4, stringAlign: 4, zeroScalar: 'bss', zeroFirstSection: '.sbss' },
     // MEASURED on all three builds at -O4,p and -O0,p: the note at the field. The two are one
     // declaration: without the layout gate a relational if-ladder reads as a `switch`. The gate's
     // reach is the committed probes alone — withdrawn, it moves 0 of the 180 PPC benchmark rows
