@@ -11,7 +11,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { dominators, predecessors } from '../src/ir/core';
+import { dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { readabilityRewrites } from '../src/pipeline';
@@ -37,10 +37,8 @@ const judged = (ir: string) => {
 const nestOf = (ir: string) => {
   const fn = parse(ir);
   const [nl] = analyzeLoops(fn, dominators(fn)).byHeader.values();
-  const nest = sharedHeaderNest(nl, predecessors(fn));
-  return (
-    nest && { latches: nest.latches.map((b) => fn.blocks.indexOf(b)), innerExit: fn.blocks.indexOf(nest.innerExit) }
-  );
+  const nest = sharedHeaderNest(nl);
+  return nest && { latch: fn.blocks.indexOf(nest.latch), innerExit: fn.blocks.indexOf(nest.innerExit) };
 };
 
 /** `do { while ((m = f(a0)) < a1); g(m); } while (h(m) < 0);` */
@@ -104,8 +102,9 @@ const NEST_READS_PRE_UPDATE = `fn nestpre {
   ret %5
 }`;
 
-/** Two latches that are a chain with the header: one loop whose `||` test the header begins
- *  (`latch-chain.test.ts`), not a nest. */
+/** The other latch is the block the inner loop leaves for, with no outer body between them: one
+ *  loop's `do { m = f(a0); } while (m < a1 || h(m) < 0);` left as branches (`loop-forever.test.ts`),
+ *  not a nest. */
 const CHAIN = `fn chain {
 ^bb0(%0: s32, %1: s32):
   br ^bb1()
@@ -123,7 +122,7 @@ const CHAIN = `fn chain {
 }`;
 
 test('a header that is its own latch beside another latch is two loops', () => {
-  expect(nestOf(NEST)).toEqual({ latches: [3], innerExit: 2 });
+  expect(nestOf(NEST)).toEqual({ latch: 3, innerExit: 2 });
   expect(nestOf(CHAIN)).toBeNull();
 });
 

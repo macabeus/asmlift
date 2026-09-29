@@ -7,7 +7,7 @@
 // which counts `continue;` tokens and so reddens on every ablation alike:
 //
 //   1. guarded self-loop  `nl.selfLoop && loops.has(h)`         2 failed — THIS FILE  (GUARDED_SELFLOOP, GSL2)
-//   2. multi-latch        several latches that are no chain       left to `while (1)` — loop-forever.test.ts,
+//   2. multi-latch        several latches                         left to `while (1)` — loop-forever.test.ts,
 //                                                                 and THIS FILE's MULTILATCH
 //   3. overlapping inner  a nested header whose body escapes ours  0 failed — UNWITNESSED
 //   4. irreducible        `!reducible`                             0 failed — UNWITNESSED
@@ -174,7 +174,7 @@ const GSL2 = `fn gsl2 {
 }
 `;
 
-test('a loop with several latches that are no chain is left to the `while (1)` recognizer', () => {
+test('a loop with several latches is left to the `while (1)` recognizer', () => {
   const fn = parse(MULTILATCH);
   verify(fn);
   recoverTypes(fn);

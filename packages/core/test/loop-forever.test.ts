@@ -1,13 +1,14 @@
 // A LOOP WITH NO TEST OF ITS OWN: `while (1)`.
 //
-// A loop no other recognizer takes — latches that are no one latch, chain (`latch-chain.test.ts`)
-// or nest (`header-nest.test.ts`), such as a `continue` in mid-body beside the bottom latch; or one
-// latch under a header that computes before it tests — has no single test to put at its top or
-// bottom. It is spelled `while (1)`: every edge back to the header is a
-// continue (implicit at the foot of the region, `continue;` above it), every edge out is a `break`
-// to the one exit the loop is given or an early `return`. An `if` in the body joins where the paths
-// that do not end meet (`foreverJoin`), so an arm that continues does not drag the rest of the
-// iteration into its sibling.
+// A loop no other recognizer takes — several latches that are no nest (`header-nest.test.ts`), such
+// as a `continue` in mid-body beside the bottom latch or a `do-while` whose `||` test stayed as
+// branches; or one latch under a header that computes before it tests — has no single test to put
+// at its top or bottom. It is spelled `while (1)`: every edge back to the header is a continue
+// (implicit at the foot of the region, `continue;` above it), every edge out is a `break` to the one
+// exit the loop is given or an early `return`. An `if` in the body joins where the paths that do
+// not end meet (`foreverJoin`), so an arm that continues does not drag the rest of the iteration
+// into its sibling. The header's params are named as any loop's are, before the body's values: a
+// value the body computes never takes the name of a param the body still reads.
 //
 // Each accepted fixture is run against its own IR (`irAgreement`), as `structure()` returns it and
 // as it ships after `readabilityRewrites`.
@@ -147,6 +148,138 @@ const MID_TESTED = `fn midtest {
   ret %3
 }`;
 
+/** `do { t = f(a0); } while (t == a1 || g(t) < a0 || t < 3);` with the call keeping the `||`
+ *  test as three branches, the header the first of them. */
+const UNFOLDED_OR = `fn unfoldedor {
+^bb0(%0: s32, %1: s32):
+  br ^bb1()
+^bb1():
+  %2: s32 = call %0 {target="f"}
+  %3: u32 = icmp_eq %2, %1
+  cond_br %3, ^bb1(), ^bb2()
+^bb2():
+  %4: s32 = call %2 {target="g"}
+  %5: u32 = icmp_slt %4, %0
+  cond_br %5, ^bb1(), ^bb3()
+^bb3():
+  %6: s32 = const {value=3}
+  %7: u32 = icmp_slt %2, %6
+  cond_br %7, ^bb1(), ^bb4()
+^bb4():
+  ret %2
+}`;
+
+/** Two latches handing the header DIFFERENT values, one of them a constant: `i = 0; while (1) {
+ *  t = f(i + 1); if (t == a1) { i = i + 1; continue; } if (g(t) >= a0) break; i = 1; } return
+ *  i + 1;`. Named as the merge of its carriers, the param would take the constant's name, and the
+ *  constant's assignment at the top of the body would overwrite the `i` the call still reads. */
+const CONSTBACK = `fn constback {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: s32 = call %5 {target="f"}
+  br ^bb4()
+^bb4():
+  %7: u32 = icmp_eq %6, %1
+  cond_br %7, ^bb1(%5), ^bb2()
+^bb2():
+  %8: s32 = call %6 {target="g"}
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%4), ^bb3()
+^bb3():
+  ret %5
+}`;
+
+/** The same two back edges on a header that is its own first latch: `i = 0; while (1) { t =
+ *  f(i + 1); if (t == a1) { i = i + 1; continue; } if (g(t) >= a0) break; i = 1; } return i + 1;`. */
+const DIFFERENT_UPDATES = `fn diffupd {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: s32 = call %5 {target="f"}
+  %7: u32 = icmp_eq %6, %1
+  cond_br %7, ^bb1(%5), ^bb2()
+^bb2():
+  %8: s32 = call %6 {target="g"}
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%4), ^bb3()
+^bb3():
+  ret %5
+}`;
+
+/** A later test reading the value the header was entered with, which the first term's back edge
+ *  replaces: `i = 0; while (1) { if (f(i + 1) == a1) { i = i + 1; continue; } if (g(i) >= a0)
+ *  break; i = i + 1; } return i + 1;`. */
+const TERM_READS_ENTRY = `fn termentry {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: s32 = call %5 {target="f"}
+  %7: u32 = icmp_eq %6, %1
+  cond_br %7, ^bb1(%5), ^bb2()
+^bb2():
+  %8: s32 = call %3 {target="g"}
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%5), ^bb3()
+^bb3():
+  ret %5
+}`;
+
+/** ONE latch, handing the header a value the header computes before it is done reading the param:
+ *  `i = 0; for (;;) { t = g(a0); if (i == 5) break; h(i); i = t; } return i + i + t;`. Named after
+ *  its back-edge value, `i` would be overwritten by the call. */
+const MID_CLOBBER = `fn midclob {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = call %0 {target="g"}
+  %4: s32 = const {value=5}
+  %5: u32 = icmp_eq %2, %4
+  cond_br %5, ^bb3(), ^bb2()
+^bb2():
+  %6: s32 = call %2 {target="h"}
+  br ^bb1(%3)
+^bb3():
+  %8: s32 = add %2, %2
+  %9: s32 = add %8, %3
+  ret %9
+}`;
+
+/** A header that is its own latch beside one other, unconditional latch: `sharedHeaderNest` splits
+ *  it, and no `do-while` has that latch for a bottom test. `for (;;) { i++; t = f(i); if (t == a0)
+ *  continue; h(t); if (g(t) < a1) { h(i); continue; } break; } return i;` */
+const NEST_WITHOUT_TEST = `fn nestfall {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: s32 = call %5 {target="f"}
+  %7: u32 = icmp_eq %6, %0
+  cond_br %7, ^bb1(%5), ^bb2()
+^bb2():
+  %8: s32 = call %6 {target="h"}
+  %9: s32 = call %6 {target="g"}
+  %10: u32 = icmp_slt %9, %1
+  cond_br %10, ^bb3(), ^bb4()
+^bb3():
+  %11: s32 = call %5 {target="h"}
+  br ^bb1(%5)
+^bb4():
+  ret %5
+}`;
+
 test('a mid-body continue beside the bottom latch is a `while (1)` with a `break` to its exit', () => {
   const r = judged(MID_CONTINUE);
   expect(r.src).toBe(
@@ -181,6 +314,53 @@ test('a header that computes before it tests is a `while (1)` with its test in m
     's32 midtest(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    while (1) {\n' +
       '        if ((s32)f(v0) >= a0) break;\n        v0 = v0 + 1;\n    }\n    return v0;\n}\n',
   );
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+test('an `||` test left as branches is a `continue` per term and a `break` on the last', () => {
+  const r = judged(UNFOLDED_OR);
+  expect(r.src).toBe(
+    's32 unfoldedor(s32 a0, s32 a1) {\n    s32 v0;\n    while (1) {\n        v0 = f(a0);\n' +
+      '        if (v0 == a1) continue;\n        if ((s32)g(v0) < a0) continue;\n        if (v0 >= 3) break;\n' +
+      '    }\n    return v0;\n}\n',
+  );
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+test('latches handing the header different values leave the param a name of its own', () => {
+  for (const ir of [CONSTBACK, DIFFERENT_UPDATES]) {
+    const r = judged(ir);
+    expect(r.src).toContain('v2 = 0;');
+    expect(r.src).toContain('v1 = f(v2 + v0);');
+    expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+    expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+  }
+});
+
+test('a later test reads the value the iteration was entered with, ahead of any back-edge copy', () => {
+  const r = judged(TERM_READS_ENTRY);
+  expect(r.src).toContain('if ((s32)g(v0) >= a0) break;');
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
+});
+
+test('one latch whose value the header computes before its last read of the param keeps the two apart', () => {
+  const r = judged(MID_CLOBBER);
+  expect(r.src).toBe(
+    's32 midclob(s32 a0) {\n    s32 v0;\n    s32 v1;\n    v1 = 0;\n    while (1) {\n' +
+      '        v0 = g(a0);\n        if (v1 == 5) break;\n        h(v1);\n        v1 = v0;\n    }\n' +
+      '    return v1 + v1 + v0;\n}\n',
+  );
+  const { judged: runs, disagree } = r.agreement;
+  expect(disagree).toBe(0);
+  expect(runs).toBeGreaterThan(100);
+});
+
+test('a nest with no bottom test is left to `while (1)`', () => {
+  const r = judged(NEST_WITHOUT_TEST);
+  expect(r.src).toContain('while (1) {');
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });

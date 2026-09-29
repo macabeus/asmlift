@@ -2475,8 +2475,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A do-while whose `||` test calls a function in a later term. The IR cannot fold the call's term
   // into the one before it — the fold would run `g` on every iteration — so the loop reaches the
-  // structurer with several latches, chained at its bottom (`latchChain`). agbcc only: the MIPS and
-  // PPC compiles of it decline in the lift, on the call, before any loop is reached.
+  // structurer with a latch per term, which is `while (1)` with a `continue` per term. agbcc only:
+  // the MIPS and PPC compiles of it decline in the lift, on the call, before any loop is reached.
   {
     sym: 'orchain',
     src:

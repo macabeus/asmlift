@@ -121,84 +121,30 @@ export function analyzeLoops(fn: Fn, dom: Map<Block, Set<Block>>): LoopForest {
   return { byHeader, parent };
 }
 
-/** The loop's latches as a CHAIN at its bottom, in the order control reaches them — or null. Each
- *  latch is a two-way branch with one edge back to the header; each one's other edge enters the
- *  next latch, and the last one's leaves the loop. That is `do { … } while (a || b || c)` with its
- *  terms left as branches, which the IR keeps whenever it cannot fold one into a single test (a
- *  later term calls a function, and the fold would run the call unconditionally).
- *
- *  Every latch after the first is entered only from the one before it, takes no params, and hands
- *  the header the same arguments the first one does, so the loop's update is ONE set of copies
- *  whichever term sends it round. The first latch may be the header itself. A single latch, or any
- *  other latch set, is null. */
-export function latchChain(nl: NaturalLoop, preds: Map<Block, Block[]>): Block[] | null {
-  const latches = new Set(nl.latches);
-  if (latches.size < 2) {
-    return null;
-  }
-  const next = new Map<Block, Block>();
-  for (const l of latches) {
-    const term = l.ops[l.ops.length - 1];
-    const back = term.opcode === 'cond_br' ? term.successors.filter((s) => s.block === nl.header) : [];
-    if (term.successors.length !== 2 || back.length !== 1) {
-      return null;
-    }
-    next.set(l, term.successors.find((s) => s.block !== nl.header)!.block);
-  }
-  const entered = new Set(next.values());
-  const starts = [...latches].filter((l) => !entered.has(l));
-  if (starts.length !== 1) {
-    return null;
-  }
-  const chain = [starts[0]];
-  while (latches.has(next.get(chain[chain.length - 1])!) && chain.length <= latches.size) {
-    chain.push(next.get(chain[chain.length - 1])!);
-  }
-  if (chain.length !== latches.size || nl.body.has(next.get(chain[chain.length - 1])!)) {
-    return null;
-  }
-  const backArgs = (l: Block) => l.ops[l.ops.length - 1].successors.find((s) => s.block === nl.header)!.args;
-  const first = backArgs(chain[0]);
-  for (let i = 1; i < chain.length; i++) {
-    const l = chain[i];
-    const ps = preds.get(l) ?? [];
-    if (l === nl.header || l.params.length !== 0 || ps.length !== 1 || ps[0] !== chain[i - 1]) {
-      return null;
-    }
-    const args = backArgs(l);
-    if (args.length !== first.length || args.some((v, k) => v !== first[k])) {
-      return null;
-    }
-  }
-  return chain;
-}
-
 /** A self-loop that shares its header with an enclosing loop: the natural loops of `do { while
  *  (c); … } while (d)`, which the back-edge analysis merges into one because both back edges
- *  target the same block. The header's own edge is the inner loop and every other latch the outer
+ *  target the same block. The header's own edge is the inner loop and the other latch the outer
  *  one's. */
 export interface HeaderNest {
-  /** the outer loop's latches: one, or a chain of them (`latchChain`) */
-  latches: Block[];
+  /** the outer loop's latch */
+  latch: Block;
   /** where the inner self-loop's test sends control when it fails — the rest of the outer body */
   innerExit: Block;
 }
 
 /** The loop as a {@link HeaderNest}, or null. The header's terminator is a two-way branch with one
- *  edge to itself and the other staying in the loop, and the other latches form the outer loop's
- *  latch or chain. Null when all the latches together form a chain: that is a single loop whose
- *  test the header's branch begins. */
-export function sharedHeaderNest(nl: NaturalLoop, preds: Map<Block, Block[]>): HeaderNest | null {
+ *  edge to itself and the other staying in the loop, and exactly one other block latches. Null
+ *  where that edge enters the other latch itself: with no outer body between them, the two tests
+ *  are one loop's `do { … } while (a || b)` left as branches. */
+export function sharedHeaderNest(nl: NaturalLoop): HeaderNest | null {
   const h = nl.header;
   const rest = [...new Set(nl.latches)].filter((l) => l !== h);
   const term = h.ops[h.ops.length - 1];
-  if (!nl.selfLoop || rest.length === 0 || term.opcode !== 'cond_br' || latchChain(nl, preds) !== null) {
+  if (!nl.selfLoop || rest.length !== 1 || term.opcode !== 'cond_br') {
     return null;
   }
   const out = term.successors.filter((s) => s.block !== h);
-  if (out.length !== 1 || !nl.body.has(out[0].block)) {
-    return null;
-  }
-  const latches = rest.length === 1 ? rest : latchChain({ ...nl, latches: rest }, preds);
-  return latches === null ? null : { latches, innerExit: out[0].block };
+  return out.length === 1 && nl.body.has(out[0].block) && out[0].block !== rest[0]
+    ? { latch: rest[0], innerExit: out[0].block }
+    : null;
 }
