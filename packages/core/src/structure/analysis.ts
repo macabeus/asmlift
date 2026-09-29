@@ -596,11 +596,11 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   // Every value an edge ARGUMENT renders — the argument itself plus its inlined operand cone,
   // memoized per value so one walk serves every slot. The walk stops DESCENDING at an
   // order-sensitive def: under a call or a memory read the value renders at that op's own position,
-  // never at this edge. It crosses a trapping divide, which renders inline at the copy site with its
-  // operands unless an effect lies between the two; `analyze` names that one at its def, which this
-  // walk runs before, so its operands are counted at the copy site anyway — an extra render, which
-  // costs a candidate that homes a value rendered once. The stopping op is still recorded, so a
-  // membership test over the cone sees it.
+  // never at this edge. It crosses a divide, which renders inline at the copy site with its operands
+  // unless an effect or a named divide lies between the two; `analyze` names that one at its def,
+  // which this walk runs before, so its operands are counted at the copy site anyway — an extra
+  // render, which costs a candidate that homes a value rendered once. The stopping op is still
+  // recorded, so a membership test over the cone sees it.
   const coneCache = new Map<Value, Set<Value>>();
   const coneOf = (root: Value): Set<Value> => {
     const hit = coneCache.get(root);
@@ -1726,15 +1726,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
-  /** a trapping op whose divisor is not a nonzero constant, either operand or `imm` */
-  const mayFault = (op: Op): boolean => {
-    if (!opSig(op.opcode)?.traps) {
-      return false;
-    }
-    const divisor = op.operands.length > 1 ? defOf.get(op.operands[1]) : undefined;
-    const k = op.operands.length > 1 ? (divisor?.opcode === 'const' ? divisor.attrs.value : undefined) : op.attrs.imm;
-    return typeof k !== 'number' || k === 0;
-  };
+  /** a divide or remainder (the registry's `traps`), whatever its divisor */
+  const isDivide = (op: Op): boolean => opSig(op.opcode)?.traps === true;
+  /** a divide the divide clause below named: a statement sequenced as a named call is */
+  const namedDivide = (op: Op): boolean => materialize.has(op) && isDivide(op);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -1796,17 +1791,23 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
-          // A divide that may FAULT (the registry's `traps`, over a divisor that is not a nonzero
-          // constant) is named at its def when an effect lies between the def and any place it
-          // renders. Whether it faults is observable, so rendered past a store or a call it changes
-          // what had run when it faults — and on agbcc it IS a call (`bl __divsi3`), which no
-          // compiler moves past a store: `t = k / n; *q = n; return t + 1;` is `bl; str`, and
-          // inlined it comes back `*q = n; return k / n + 1;`, `str; bl`.
+          // A DIVIDE is named at its def when an effect, or another divide named there, lies between
+          // the def and any place it renders — any divisor, since what is kept is where the asm
+          // computed it. On agbcc the divide IS a call: `bl __divsi3` over a constant divisor too
+          // (Thumb has no high-part multiply to reduce it with), and agbcc schedules nothing (no
+          // sched.c in its tree), so the call stays where the source computes it. `t = k / n; *q = n;
+          // return t + 1;` is `bl; str`, and inlined it comes back `*q = n; return k / n + 1;`,
+          // `str; bl`. On a target with a divider the fault point is the compiler's own — kmc checks
+          // right after `div`, IDO schedules its `break 7` after later stores, mwcc's `divw` never
+          // traps — and C leaves a division by zero undefined, so there the name keeps the
+          // computation where the asm ran it and claims nothing about where it faults. A named divide
+          // bars what the barrier scan below places, as a named call does, so a call or a divide the
+          // asm ran ahead of it stays ahead of it.
           // Not in a `&&`/`||` guarded cone: raise/shortcircuit.ts may have lifted it out of the arm,
           // so its def block is a fold artifact and a name there divides where the source did not.
-          if (mayFault(op) && pr && useSitesOf.has(pr) && !shortCircuitGuarded.has(pr)) {
+          if (isDivide(op) && pr && useSitesOf.has(pr) && !shortCircuitGuarded.has(pr)) {
             const at = emitPositions(op);
-            if (!at || at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode)))) {
+            if (!at || at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedDivide(x)))) {
               materialize.add(op);
               continue;
             }
@@ -2116,7 +2117,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             }
             return true;
           }
-          if (x.opcode === 'astore' || x.opcode === 'opaque') {
+          if (x.opcode === 'astore' || x.opcode === 'opaque' || namedDivide(x)) {
             return true;
           }
           if (x.opcode === 'call') {

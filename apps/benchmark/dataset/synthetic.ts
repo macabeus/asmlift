@@ -638,9 +638,10 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['arithmetic', 'div-reg', 'unsigned'],
     toolchains: ALL,
   },
-  // A divide ahead of a store. It may fault, so inlined at the add it would fault after the store
-  // the asm ran behind it; on agbcc it is a `bl __divsi3`, which no compiler moves past a store.
-  // On every toolchain because the divide is a call on agbcc and an instruction everywhere else.
+  // A divide ahead of a store. On agbcc it is a `bl __divsi3`, which agbcc leaves where the source
+  // computes it, so inlined at the add it recompiles behind the store. On every toolchain because
+  // everywhere else it is an instruction the compiler schedules, and where its fault check lands is
+  // the compiler's own: kmc right after the `div`, IDO after the store, mwcc none.
   {
     sym: 'divstore',
     src: 'int divstore(int *q, int n, int k){ int t = k / n; *q = n; return t + 1; }',
@@ -1576,10 +1577,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // only against what it can conflict with.
   //
   // `preupdate_exit_div` is `t = k / n; *q = n; r = t + 1;`, where agbcc calls `__divsi3` ahead of
-  // the store. A divide is pure except that it may fault, so the analysis names it where it ran
-  // whenever an effect lies between it and its use (`divstore` is the straight-line row), and the
-  // exit value then reads the name rather than the counter. Rebuilt at the add instead, the divide
-  // would run behind the store, which `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses.
+  // the store. The analysis names a divide where it ran whenever an effect lies between it and its
+  // use (`divstore` is the straight-line row), and the exit value then reads the name rather than
+  // the counter. Rebuilt at the add instead, the divide would run behind the store, which
+  // `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
