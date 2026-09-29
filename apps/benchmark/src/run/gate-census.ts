@@ -24,11 +24,12 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Seven passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
+// holding the call. Eight passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a
-// script outside core swaps and the driver then calls, and `nameOffsetAddresses`, whose record stands alone
-// (`OFFSET_NAME_PASS`) because its seat in the tower is fixed rather than a position in a list. A
+// script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the Thumb
+// frontend's frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
+// `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
 // `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has
 // none, because the binding is a read-only module-namespace property — measured, not argued:
@@ -42,6 +43,12 @@
 // deliberately the only driver: it is the same entry `bench fan` and the runner use, so a census
 // here counts the refusals the BENCHMARK'S configuration produced rather than a rig's.
 import { enumerateRanked } from '@asmlift/cli/rank';
+import {
+  FRAME_ESCAPE_GATES,
+  FRAME_OBJECT_AUDIT,
+  type FrameEscape,
+  auditFrameObjects,
+} from '@asmlift/core/frontend/frame-objects';
 import type { Gate } from '@asmlift/core/l3/gates';
 import { tallying } from '@asmlift/core/l3/gates';
 import type { UnmergeGates } from '@asmlift/core/l3/unmerge';
@@ -169,6 +176,20 @@ export const PASSES: Record<string, CensusablePass> = {
       OFFSET_NAME_PASS.run = (fn, symbols) => nameOffsetAddresses(fn, symbols, gates);
       return () => {
         OFFSET_NAME_PASS.run = restore;
+      };
+    },
+  },
+  'frame-objects': {
+    // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.
+    // ONE table, asked once per escape in a lift that reaches it, rule-major, and the first
+    // rejection DECLINES the lift, so a row contributes at most one count per lift.
+    tables: [['escape', FRAME_ESCAPE_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      const restore = FRAME_OBJECT_AUDIT.run;
+      const gates = w[0] as readonly Gate<FrameEscape>[];
+      FRAME_OBJECT_AUDIT.run = (audit) => auditFrameObjects({ ...audit, gates });
+      return () => {
+        FRAME_OBJECT_AUDIT.run = restore;
       };
     },
   },

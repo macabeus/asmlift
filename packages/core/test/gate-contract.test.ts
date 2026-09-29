@@ -9,6 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { FRAME_ESCAPE_GATES } from '../src/frontend/frame-objects';
 import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from '../src/l3/advance';
 import { ARGCOPY_GATES, ARGCOPY_REGION_GATES } from '../src/l3/argcopy';
 import {
@@ -133,6 +134,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   // composition: without it, a `withheld-key` id appearing in the table it wraps is a duplicate
   // nothing checks, and `without()` would then ablate whichever came first.
   WITHHELD_KEY_OVER_LIVEBASE_BLOCK: withholdingKey(LIVEBASE_BLOCK_GATES, 'c:0 4 true') as readonly Gate<never>[],
+  // frontend/frame-objects.ts: the retractions an escaped frame address costs
+  FRAME_ESCAPE_GATES: FRAME_ESCAPE_GATES as readonly Gate<never>[],
 };
 
 /** Every core test file's text, by file name, so a guard is looked up in the file it names. */

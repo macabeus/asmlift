@@ -7,10 +7,12 @@
 // So this asserts the seam and the undo on a hand-built tree, with no toolchain: the CI mirror gate
 // (`vitest run apps/benchmark/test`) runs where no compiler is available, so the enumeration itself
 // is not what is exercised here.
+import { FRAME_OBJECT_AUDIT } from '@asmlift/core/frontend/frame-objects';
 import { parse } from '@asmlift/core/ir/parse';
 import { T } from '@asmlift/core/ir/types';
 import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
 import { tallying } from '@asmlift/core/l3/gates';
+import { decompile } from '@asmlift/core/pipeline';
 import { emptyScaleRecord } from '@asmlift/core/raise/extscale';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
@@ -43,7 +45,7 @@ describe('the gate census seam', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
     // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
-    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'truncload', 'offsetnames']);
+    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'truncload', 'offsetnames', 'frame-objects']);
   });
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {
@@ -100,6 +102,29 @@ describe('the gate census seam', () => {
     expect(entry().run).toBe(before);
     run(ARMV4T_AGBCC);
     expect(wrapped[0].refusals()).toEqual([['read-behind-effect', 1]]);
+  });
+
+  it('routes the Thumb lift through the WRAPPED escape table, and the undo restores the record', () => {
+    // agbcc's `u8 buf[12]; buf[0] = x; garr(buf); use2(buf[0]);`: `garr` may write the eight bytes
+    // no declaration covers. Lifted from asm text, which needs no toolchain.
+    const arrf =
+      'arrf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr1, sp\n\tstrb\tr0, [r1]\n\tmov\tr0, sp\n\tbl\tgarr\n' +
+      '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tbl\tuse2\n\tadd\tsp, sp, #0xc\n\tpop\t{r0}\n\tbx\tr0\n';
+    const lift = () =>
+      expect(() =>
+        decompile('arrf', arrf, ARMV4T_AGBCC, { prototypes: { garr: { params: 1 }, use2: { params: 1 } } }),
+      ).toThrow(/nothing bounds the captured object's extent/);
+    const pass = PASSES['frame-objects'];
+    const wrapped = pass.tables.map(([, t]) => tallying(t));
+    const before = FRAME_OBJECT_AUDIT.run;
+    const uninstall = pass.install(wrapped.map((w) => w.gates));
+    expect(FRAME_OBJECT_AUDIT.run).not.toBe(before);
+    lift();
+    expect(wrapped[0].refusals()).toEqual([['writer-over-unaccounted-word', 1]]);
+    uninstall();
+    expect(FRAME_OBJECT_AUDIT.run).toBe(before);
+    lift();
+    expect(wrapped[0].refusals()).toEqual([['writer-over-unaccounted-word', 1]]);
   });
 
   it('refuses a pass it cannot reach, rather than censusing zero', () => {

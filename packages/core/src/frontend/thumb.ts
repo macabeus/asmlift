@@ -37,7 +37,7 @@ import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { auditFrameObjects } from './frame-objects';
+import { FRAME_OBJECT_AUDIT } from './frame-objects';
 import type { Frontend } from './frontend';
 import { gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
@@ -4776,7 +4776,7 @@ export function lift(
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
   // a shape the machine states, or decline (auditFrameObjects).
-  auditFrameObjects({
+  FRAME_OBJECT_AUDIT.run({
     name,
     irBlocks,
     ...framePartition(),
