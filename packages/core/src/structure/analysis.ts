@@ -23,7 +23,7 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS, opSig } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
@@ -596,9 +596,11 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   // Every value an edge ARGUMENT renders — the argument itself plus its inlined operand cone,
   // memoized per value so one walk serves every slot. The walk stops DESCENDING at an
   // order-sensitive def: under a call or a memory read the value renders at that op's own position,
-  // never at this edge. It crosses a trapping divide, which nothing materializes — that renders
-  // inline at the copy site and its operands render there with it. The stopping op is still
-  // recorded, so a membership test over the cone sees it.
+  // never at this edge. It crosses a trapping divide, which renders inline at the copy site with its
+  // operands unless an effect lies between the two; `analyze` names that one at its def, which this
+  // walk runs before, so its operands are counted at the copy site anyway — an extra render, which
+  // costs a candidate that homes a value rendered once. The stopping op is still recorded, so a
+  // membership test over the cone sees it.
   const coneCache = new Map<Value, Set<Value>>();
   const coneOf = (root: Value): Set<Value> => {
     const hit = coneCache.get(root);
@@ -1724,6 +1726,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
+  /** a trapping op whose divisor is not a nonzero constant, either operand or `imm` */
+  const mayFault = (op: Op): boolean => {
+    if (!opSig(op.opcode)?.traps) {
+      return false;
+    }
+    const divisor = op.operands.length > 1 ? defOf.get(op.operands[1]) : undefined;
+    const k = op.operands.length > 1 ? (divisor?.opcode === 'const' ? divisor.attrs.value : undefined) : op.attrs.imm;
+    return typeof k !== 'number' || k === 0;
+  };
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -1785,6 +1796,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
+          // A divide that may FAULT (the registry's `traps`, over a divisor that is not a nonzero
+          // constant) is named at its def when an effect lies between the def and any place it
+          // renders. Whether it faults is observable, so rendered past a store or a call it changes
+          // what had run when it faults — and on agbcc it IS a call (`bl __divsi3`), which no
+          // compiler moves past a store: `t = k / n; *q = n; return t + 1;` is `bl; str`, and
+          // inlined it comes back `*q = n; return k / n + 1;`, `str; bl`.
+          // Not in a `&&`/`||` guarded cone: raise/shortcircuit.ts may have lifted it out of the arm,
+          // so its def block is a fold artifact and a name there divides where the source did not.
+          if (mayFault(op) && pr && useSitesOf.has(pr) && !shortCircuitGuarded.has(pr)) {
+            const at = emitPositions(op);
+            if (!at || at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode)))) {
+              materialize.add(op);
+              continue;
+            }
+          }
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
             if (cons.length > 1 && liveAcrossCall(op, cons)) {

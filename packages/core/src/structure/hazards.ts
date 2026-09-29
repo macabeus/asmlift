@@ -156,12 +156,10 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     id: 'arg-safe-to-reevaluate',
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
-    // Sound for a read or a call: rebuilt behind a store, a read answers with what the store wrote.
-    // The analysis names every read and call something would cross, and a named leaf is not
-    // rebuilt, so that half reaches the gate only from a hand-built analysis, which is its guard.
-    // What reaches it through the pipeline is a divide the asm ran ahead of a store
-    // (loop-preupdate-sink.test.ts, the preupdate_exit_div row). That is REACH and not a witness: the
-    // divisor there is the loop counter, never 0, so the refused program is correct on every input.
+    // Sound for a read, a call or a divide: rebuilt behind a store, a read answers with what the
+    // store wrote and a divide faults after it. The analysis names every one of them something
+    // would cross, and a named leaf is not rebuilt, so the gate is reached only from a hand-built
+    // analysis, which is its guard.
     guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },

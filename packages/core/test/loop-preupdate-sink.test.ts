@@ -835,16 +835,12 @@ test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through
   expect(run(withoutDestFree)).toMatch(/\n\s+a3 = v\d+ \+ v\d+;\n[^\n]*\(\(a3 & 3\) << 2\)/);
 });
 
-// WHERE `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory
-// read or a call never reaches it: the analysis names a read or a call wherever something would cross
-// it (the barrier scan, `ridesEdge`), and a named leaf is not rebuilt, so that half is guarded by a
-// hand-built analysis (hazards.test.ts). What the analysis does not name is a TRAPPING op. agbcc,
-// `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl __divsi3` (a `sdiv` once
-// raise/softdiv.ts folds it) runs ahead of the store, and the exit value rebuilt at the add would
-// divide after it. So the edge declines; with the gate dropped the copy sinks
-// and spells the divide behind the store. This test shows the gate FIRES, not that it is needed here:
-// the divisor is the loop counter, in [1, n] wherever the divide runs, so the sunk program never
-// traps and is correct on every input.
+// `arg-safe-to-reevaluate` IS NOT REACHED THROUGH THE WHOLE PIPELINE. The analysis names a read, a
+// call or a divide wherever something would cross it (the barrier scan, `ridesEdge`, the trapping-op
+// clause), and a named leaf is not rebuilt, so the gate is guarded by a hand-built analysis
+// (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`:
+// `bl __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the store, so the divide is
+// named there, the exit value reads the name and not the counter, and the sink is never asked.
 const DIVIDE_AHEAD_OF_STORE = `dv:
 	push	{r4, r5, r6, lr}
 	add	r5, r0, #0
@@ -871,14 +867,10 @@ const DIVIDE_AHEAD_OF_STORE = `dv:
 	bx	r1
 `;
 
-test('a divide the asm ran ahead of a store reaches arg-safe-to-reevaluate through the pipeline', () => {
-  const run = (hooks = {}): string => {
-    const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
-    applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
-    return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false), hooks));
-  };
-  expect(() => run()).toThrow(/reads a pre-update loop variable/);
-  const ablated = run({ preUpdateSinkGates: without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate') });
-  expect(ablated).toMatch(/\*v\d+ = v\d+;\n\s+a2 = a3 \/ v\d+ \+ 1;/);
+test('a divide the asm ran ahead of a store is named there, so the exit value reads no pre-update variable', () => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (v\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
 });
