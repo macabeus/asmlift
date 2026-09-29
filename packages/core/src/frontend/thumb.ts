@@ -2597,16 +2597,10 @@ export function lift(
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
   // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
   // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
-  // `slotOff` applies the same bound when minting keys, so this is the independent check.
-  //
-  // The register half needs both of its facts, and they come from different places. The target says
-  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
-  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
-  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
-  // the treatment a target claiming no partition gets. The save is asked only of the registers the
-  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
-  // local the compiler was entitled to put in place with no prologue at all.
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
+  // `slotOff` applies the same bound when minting keys, so this is the independent check. It is
+  // stated once, as ranges, for the two consumers that read it: this builder and the frame-object
+  // audit (`auditFrameObjects`), which is ISA-neutral because of it.
+  const framePartition = () => ({
     ownedLocals: { from: 0, to: localArea },
     // NOT THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here
     // an uninitialised local?" — and the outgoing stack-argument area IS owned, so it starts at 0.
@@ -2618,6 +2612,16 @@ export function lift(
     // ranges coincide exactly when no argument word was proved, and the narrowing can only ever
     // skip offsets a callee's declaration and this function's own stores agreed on.
     declaredLocals: { from: outgoingArgs.area, to: localArea },
+  });
+  // The register half needs both of its facts, and they come from different places. The target says
+  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
+  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
+  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
+  // the treatment a target claiming no partition gets. The save is asked only of the registers the
+  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
+  // local the compiler was entitled to put in place with no prologue at all.
+  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
+    ...framePartition(),
     ...(target.nonArgRegs
       ? {
           uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
@@ -4774,9 +4778,8 @@ export function lift(
   auditFrameObjects({
     name,
     irBlocks,
-    localArea,
+    ...framePartition(),
     usedSlotOffsets,
-    outgoingArea: outgoingArgs.area,
     capturedObjectIsTheWholeFrame,
     movedCaptures,
     prototypes,

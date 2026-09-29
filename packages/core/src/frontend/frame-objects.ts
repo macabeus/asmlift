@@ -2,8 +2,8 @@
  *
  *  NOTHING HERE DECODES. A frontend lowers each address it can name as a frame offset to an
  *  `laddr` (Thumb: `mov rD, sp`, `add rD, sp, #k`, a capture moved by a constant) and hands over
- *  what only it can measure — the reserved local area, the outgoing-argument block at its bottom,
- *  the offsets its slot model keyed, the one licence it grants on the text
+ *  what only it can measure — the frame partition, as the same two ranges its `LiveInModel`
+ *  carries, the offsets its slot model keyed, the one licence it grants on the text
  *  (`capturedObjectIsTheWholeFrame`), and the captures it moved. The rules that decide whether
  *  those `laddr`s are objects the emitted C can declare are asked of the IR here, the same for
  *  every ISA — the level-tower split for this frame model: the frontend supplies the PARTITION,
@@ -17,16 +17,18 @@ import { type Prototypes, returnsWithoutHiddenPointer } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
-import { slotKeyOffset } from './ssa';
+import { type LiveInModel, slotKeyOffset } from './ssa';
 
 export interface FrameObjectAudit {
   name: string;
   irBlocks: Block[];
-  localArea: number;
+  /** the frame this function owns (`LiveInModel.ownedLocals`): every local lies inside it, and
+   *  every word of it is an object, a slot, or storage nothing here describes */
+  ownedLocals: NonNullable<LiveInModel['ownedLocals']>;
+  /** where its locals are declared (`LiveInModel.declaredLocals`): `ownedLocals` less the outgoing
+   *  stack-argument block staged at its bottom, which is where an untyped object claims to start */
+  declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
   usedSlotOffsets: ReadonlySet<number>;
-  /** the outgoing stack-argument area the frame stages at [0, area) — the bottom of the reserved
-   *  area, which is where an untyped object claims to start */
-  outgoingArea: number;
   capturedObjectIsTheWholeFrame: boolean;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
@@ -52,9 +54,9 @@ export interface FrameObjectAudit {
 export function auditFrameObjects({
   name,
   irBlocks,
-  localArea,
+  ownedLocals: owned,
+  declaredLocals: declared,
   usedSlotOffsets,
-  outgoingArea,
   capturedObjectIsTheWholeFrame,
   movedCaptures,
   prototypes,
@@ -254,9 +256,9 @@ export function auditFrameObjects({
     // saved register's — `g(&e)` for a fifth parameter `e` is `add r0, sp, #0x8` over a one-word
     // local area — and no rule below is about that gap.
     for (const off of objects.keys()) {
-      if (off >= localArea) {
+      if (off >= owned.to) {
         fail(
-          `the captured address at [sp,#${off}) is above the reserved local area of ${localArea} bytes — ` +
+          `the captured address at [sp,#${off}) is above the reserved local area of ${owned.to - owned.from} bytes — ` +
             'an incoming stack argument or a saved register, whose address is not modelled',
         );
       }
@@ -615,10 +617,10 @@ export function auditFrameObjects({
       //     the block: an `laddr` exists only in a function where it did, by construction.
       //   • An address that neither accesses nor escapes already declines where the audit
       //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
-      if (outgoingArea > 0) {
-        return `[sp,#0) to [sp,#${outgoingArea}) stages outgoing stack arguments, which belong to the callee`;
+      if (declared.from > owned.from) {
+        return `[sp,#${owned.from}) to [sp,#${declared.from}) stages outgoing stack arguments, which belong to the callee`;
       }
-      if (off !== 0 || localArea <= 0) {
+      if (off !== declared.from || declared.to <= declared.from) {
         return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
       }
       if (!escaped.has(off)) {
@@ -670,7 +672,7 @@ export function auditFrameObjects({
         }
         // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
         // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
-        // and to nothing else: `u8 name[localArea]`, unsigned bytes because no access named an
+        // and to nothing else: `u8 name[n]` over the declared range, unsigned bytes because no access named an
         // element type and inventing one is the guess this refuses everywhere else.
         //
         // THE EXTENT IS A ROUNDED ONE, stated because it is not a defect. agbcc reserves the
@@ -685,7 +687,7 @@ export function auditFrameObjects({
         // reservation ROUNDS UP to some granularity, which is a property of every stack ABI, and
         // it declares the reservation rather than a guess inside it — so a coarser rounding makes
         // the declared extent coarser too, never wrong about the bytes the machine reserved.
-        extent.set(off, { width: 1, count: localArea });
+        extent.set(off, { width: 1, count: declared.to - declared.from });
         continue;
       }
       if (byIndex.length > 0) {
@@ -721,7 +723,7 @@ export function auditFrameObjects({
     const objs = [...extent].sort((x, y) => x[0] - y[0]);
     const span = (o: { width: number; count: number }) => o.width * o.count;
     for (const [off, obj] of objs) {
-      if (off < 0 || off + span(obj) > localArea) {
+      if (off < owned.from || off + span(obj) > owned.to) {
         fail(`the object at [sp,#${off}) of width ${span(obj)} lies outside the reserved local area`);
       }
       failIfSlotKeysIt(off, span(obj));
@@ -941,7 +943,7 @@ export function auditFrameObjects({
                   "this function's own store there is kept in a register, not the frame",
           );
         }
-        if (slot < off && slot >= outgoingArea && slot + 4 > off + lo) {
+        if (slot < off && slot >= declared.from && slot + 4 > off + lo) {
           fail(
             `the captured address at [sp,#${off}) ${how}, and it may point INTO an object that starts ` +
               `lower — the slot at [sp,#${slot}] below it is kept in a register, not the frame`,
@@ -996,7 +998,7 @@ export function auditFrameObjects({
       for (const slot of usedSlotOffsets) {
         accountedWords.add(slot - (slot % 4));
       }
-      for (let w = 0; w < localArea; w += 4) {
+      for (let w = owned.from; w < owned.to; w += 4) {
         if (!accountedWords.has(w)) {
           fail(
             `the word at [sp,#${w}] is neither an object this lift models nor a slot it keys, ` +
