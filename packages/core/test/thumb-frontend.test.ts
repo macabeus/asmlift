@@ -1058,6 +1058,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toContain('volatile u32 sp4;');
     });
 
+    // …and a fixed source reads the unit-ALIGNED word holding its address, because the GBA drops
+    // the low bits: agbcc's `void al(u16 x, u16 y){ vu16 a; vu16 b; a = x; b = y; … REG_DMA3SAD =
+    // &b; … REG_DMA3CNT = 0x85000004; }` puts `b` at [sp,#2], and a 32-bit read of it reads `a`.
+    const aligned = (control: string) =>
+      'al:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n\tmov\tr5, sp\n' +
+      '\tadd\tr5, r5, #0x2\n\tstrh\tr1, [r5]\n\tldr\tr4, .L3\n\tmov\tr0, sp\n\tstr\tr0, [r4]\n\tldr\tr3, .L3+0x4\n' +
+      '\tldr\tr1, .L3+0x8\n\tstr\tr1, [r3]\n\tldr\tr2, .L3+0xc\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r2]\n\tstr\tr5, [r4]\n' +
+      '\tstr\tr1, [r3]\n\tldr\tr0, .L3+0x14\n\tstr\tr0, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n' +
+      `\t.word\t0x40000dc\n\t.word\t-0x7efffffc\n\t.word\t${control}\n`;
+
+    test('a fixed source reads the whole aligned unit holding its address', () => {
+      expect(() => decompile('al', aligned('-0x7afffffc'), ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#2\) is handed to a device that reads through it, which may read the object at \[sp,#0\)/,
+      );
+      // CONTROL: 16-bit units, and the halfword at [sp,#2] is a unit of its own
+      expect(decompile('al', aligned('-0x7efffffc'), ARMV4T_AGBCC).source).toContain('volatile u16 sp2;');
+    });
+
     test('an incrementing fill reads the object above its own', () => {
       expect(() => decompile('f', twoFills('0x80000010'), ARMV4T_AGBCC)).toThrow(
         /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the object at \[sp,#4\)/,

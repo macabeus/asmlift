@@ -1032,7 +1032,10 @@ export function auditFrameObjects({
         if (mode === null || mode === undefined) {
           return unbounded('whose control word bounds nothing');
         }
-        lo = Math.min(lo, mode === 'decrement' ? -Infinity : 0);
+        // A device may force the address down to a unit boundary — the GBA's does — so a 32-bit
+        // read of the halfword at [sp,#2] reads from [sp,#0], and the object below shares its
+        // unit. The frame base is at least unit-aligned, so the offset says how far down.
+        lo = Math.min(lo, mode === 'decrement' ? -Infinity : -(off % unit));
         hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
       }
       return { lo, hi, why: 'that reads through it' };

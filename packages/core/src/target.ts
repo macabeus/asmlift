@@ -158,7 +158,8 @@ export interface TargetDescription {
     // off the control halfword at `sink + offset`. `modes`, indexed by `(control >> modeShift) &
     // (modes.length - 1)`, is the way the source address steps per unit, null for a setting that
     // bounds nothing; a unit is `units[1]` bytes when `wideBit` is set and `units[0]` when not. A
-    // fixed source re-reads one unit, so the frame bytes beside the object are provably not read.
+    // fixed source re-reads one unit — the unit-aligned one holding the address, since the device
+    // may drop its low bits — so the frame bytes outside that unit are provably not read.
     // ABSENT ⇒ the read is unbounded in both directions, the safe direction.
     readSourceControl?: {
       offset: number;
