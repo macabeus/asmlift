@@ -638,6 +638,15 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['arithmetic', 'div-reg', 'unsigned'],
     toolchains: ALL,
   },
+  // A divide ahead of a store. It may fault, so inlined at the add it would fault after the store
+  // the asm ran behind it; on agbcc it is a `bl __divsi3`, which no compiler moves past a store.
+  // On every toolchain because the divide is a call on agbcc and an instruction everywhere else.
+  {
+    sym: 'divstore',
+    src: 'int divstore(int *q, int n, int k){ int t = k / n; *q = n; return t + 1; }',
+    features: ['arithmetic', 'div-reg', 'signed', 'pointer'],
+    toolchains: ALL,
+  },
   { sym: 'neg', src: 'int neg(int a){ return -a; }', features: ['arithmetic'], toolchains: ALL },
   {
     sym: 'expr1',
@@ -1566,12 +1575,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // ahead of it (`movesPast`, structure/hazards.ts) — the control that the ORDER rule weighs a read
   // only against what it can conflict with.
   //
-  // What `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) still turns away once every read and call
-  // that something would cross is named is a TRAPPING op, which the analysis does not name:
   // `preupdate_exit_div` is `t = k / n; *q = n; r = t + 1;`, where agbcc calls `__divsi3` ahead of
-  // the store. Rebuilt at the add, the divide would run behind the store, so the row declines. It is
-  // a REACH row, not a soundness witness: the divisor is the loop counter, never 0 where the divide
-  // runs, so the program the gate refuses is correct on every input.
+  // the store. A divide is pure except that it may fault, so the analysis names it where it ran
+  // whenever an effect lies between it and its use (`divstore` is the straight-line row), and the
+  // exit value then reads the name rather than the counter. Rebuilt at the add instead, the divide
+  // would run behind the store, which `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1721,9 +1729,8 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
     note:
-      "the exit value's tree holds a DIVIDE the asm runs ahead of a store; rebuilt at the add it would " +
-      'run behind it, so the sink refuses (`arg-safe-to-reevaluate`); the divisor is the loop counter, ' +
-      'never 0, so the refused program would be correct: the row measures where the gate is reached',
+      "the exit value's tree holds a DIVIDE the asm runs ahead of a store in the body, so the divide " +
+      'has to keep its place there rather than be rebuilt after the loop behind the store',
   },
   {
     sym: 'preupdate_escape',
