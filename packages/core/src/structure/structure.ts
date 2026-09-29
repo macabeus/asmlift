@@ -4319,9 +4319,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       : mkGap(`no lowering for op '${d.opcode}'`, d.operands.map(e));
   };
 
+  // A map EXTENDS the ambient post-loop substitution (`activeSub`, below) and wins where both map a
+  // value: a loop's own reading is layered over the enclosing exit region's, which still holds
+  // inside it. Replacing the ambient one would re-derive a value a previous loop left in its
+  // variable's name from that name, which already holds it (`v1 + 1` for `v1`). `null` is no
+  // substitution at all.
   const exprWith = (sub: Map<Value, string> | null) => {
     const e = (v: Value): Expr => {
-      const subbed = sub?.get(v);
+      const subbed = sub === null ? undefined : (sub.get(v) ?? activeSub?.get(v));
       if (subbed) {
         if (zeroTripStale?.get(v) === subbed) {
           throw new StructureError(
@@ -6361,13 +6366,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // then every line below spells what it did before the substitution existed — unless an unnamed
     // value an inner loop computed could reach the latch.
     //
-    // The update copies take it MERGED with `activeSub`, because a map passed to `argAssigns`
-    // replaces the ambient `expr` it would otherwise render with: without the merge, a copy reading
-    // an ENCLOSING loop's post-loop value would re-derive it (`ACTIVE_SUB` in
-    // `latch-inner-sub.test.ts`). One thing a map changes that `expr` does not: identity elision
-    // consults it, so a copy that `activeSub` spells `n = n` is dropped rather than written. The
-    // two programs are the same, and it is left conditional so an empty `innerSub` keeps the line
-    // exactly as it was (the corpus census is byte-identical either side of this commit's parent).
+    // The update copies take it MERGED with `activeSub`. A map extends the ambient naming where it
+    // renders (`exprWith`), but identity elision consults the map alone, so the merge is what drops
+    // a copy that `activeSub` spells `n = n` rather than writing it. The two programs are the same,
+    // and it is left conditional so an empty `innerSub` keeps the line exactly as it was.
     const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw);
     const latchMap = innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null;
     const updates = argAssigns(dw.latch, dw.header, latchMap);
@@ -6555,6 +6557,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // update copies, so an inner name one of them really writes no longer holds the inner value, and
     // that entry keeps the raw reading — the same refusal `latchInnerSub` makes for a name written
     // before the latch, with the update's writes added to what the re-derivation must not read.
+    // The exit copies and the exit region run after the test and read under the same map: an inner
+    // loop's value is still in its name there, on the latch's path and on a break's, which leaves
+    // after every inner loop whose value the region can read and runs no update copy.
     const writtenByUpdate = innerSub.size > 0 ? updateWriteSet(updates) : new Set<string>();
     const condInner = [...innerSub].filter(([, n]) => !writtenByUpdate.has(n));
     const condMap = condInner.length > 0 ? new Map([...condInner, ...sub]) : sub;
@@ -6594,9 +6599,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         )
         .flatMap((op) => op.operands);
       const updateRoots = successorTo(dw.latch, dw.header)!.args;
+      // What the exit region renders before `stop`, the end of this withSub scope.
+      const region = new Set<Block>();
+      for (const work = [dw.exit]; work.length > 0;) {
+        const x = work.pop()!;
+        if (x !== stop && !dw.body.has(x) && !region.has(x)) {
+          region.add(x);
+          work.push(...successorsOf(x));
+        }
+      }
+      const regionRoots = [...region].flatMap((x) =>
+        x.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((sc) => sc.args)]),
+      );
       if (
         [...effectRoots, ...updateRoots].some((r) => needs(r, bodyMap, unreadable)) ||
-        needs(lterm.operands[0], condMap, condUnreadable)
+        [lterm.operands[0], ...exitArgs, ...regionRoots].some((r) => needs(r, condMap, condUnreadable))
       ) {
         throw new StructureError(
           `cannot structure '${fn.name}': a loop latch reads an inner loop's value whose name was rewritten ` +
@@ -6622,10 +6639,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       cond = folded;
     }
     const out: Stmt[] = [{ k: 'dowhile', cond, body }];
-    // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars).
+    // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars),
+    // and inner loops' values as the test does.
     out.push(
-      ...withSub(sub, () => [
-        ...argAssigns(dw.latch, dw.exit, sub, (j) => !sunk.has(j)),
+      ...withSub(condMap, () => [
+        ...argAssigns(dw.latch, dw.exit, condMap, (j) => !sunk.has(j)),
         ...structureRegion(dw.exit, stop),
       ]),
     );

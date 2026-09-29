@@ -21,6 +21,8 @@
 // substitution first missed; `T2_MERGE` / `T2_INVARIANT` / `IDENTITY_MERGE` the refusal where a
 // name was written before the latch; `ACTIVE_SUB` and `TEST_AFTER_UPDATE` the two maps the latch's
 // other lines read under. Each is red with its term dropped (measured, one term at a time).
+// `SEQUENTIAL_LOOPS` and `EXIT_READS_INNER` are the two places past the latch the same values are
+// read: a later loop's test, and the outer loop's own exit region.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -362,9 +364,9 @@ test('an identity merge after the inner loop leaves the name holding the inner v
 // ── the two other maps the latch reads under ──────────────────────────────────────────────────
 // `ACTIVE_SUB`: the whole nest sits in the EXIT REGION of an earlier loop, so an enclosing
 // post-loop naming is active while it is emitted (`n` holds that loop's final `n + 1`). The outer
-// update reads it (`acc = acc_inner + n`). The update copies take the latch's map, which replaces
-// the ambient one, so it carries that naming too — without it the copy re-derives `n + 1` and
-// adds one more than the machine did.
+// update reads it (`acc = acc_inner + n`). The update copies read under the latch's map, which
+// extends the ambient one — under the latch's map alone the copy re-derives `n + 1` and adds one
+// more than the machine did.
 const ACTIVE_SUB = `fn activesub {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -458,4 +460,76 @@ const TEST_AFTER_UPDATE_STALE = TEST_AFTER_UPDATE.replace('%15: s32 = add %0, %3
 
 test('a latch test that can read an inner value under neither name declines', () => {
   expect(() => structure(lifted(TEST_AFTER_UPDATE_STALE, true))).toThrow(/whose name was rewritten/);
+});
+
+// ── past the latch ────────────────────────────────────────────────────────────────────────────
+// `SEQUENTIAL_LOOPS`: `s = 0; g(s); do { g(0); s += 1; } while (g(s) < 12); do { t = g(2); h(t); }
+// while (t < s + a0 + 16);`. The second loop's test reads the first loop's update under the first
+// loop's post-loop naming, which the test's own map extends rather than replaces — re-derived from
+// the name that already holds it, it is `s + 1`. `EXIT_READS_INNER`: `do { j = g(i); do { t = g(t);
+// j += t; } while (g(t) < 9); i += j; } while (i < a0); return k(t, j);` — the outer loop's exit
+// reads the inner update `j + t` in the name the inner loop left it in, as its latch does, past
+// where the inner loop's own naming ends.
+const SEQUENTIAL_LOOPS = `fn seqloops {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = call %1 {target="g"}
+  br ^bb1(%1)
+^bb1(%3: s32):
+  %4: s32 = const {value=0}
+  %5: s32 = call %4 {target="g"}
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  %8: s32 = call %7 {target="g"}
+  %9: s32 = const {value=12}
+  %10: u32 = icmp_slt %8, %9
+  cond_br %10, ^bb1(%7), ^bb2()
+^bb2():
+  %11: s32 = const {value=2}
+  %12: s32 = call %11 {target="g"}
+  %13: s32 = call %12 {target="h"}
+  %20: s32 = add %7, %0
+  %21: s32 = const {value=16}
+  %22: s32 = add %20, %21
+  %14: u32 = icmp_slt %12, %22
+  cond_br %14, ^bb2(), ^bb3()
+^bb3():
+  %16: s32 = add %7, %7
+  %19: s32 = add %16, %12
+  ret %19
+}
+`;
+const EXIT_READS_INNER = `fn exitreadsinner {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = const {value=1}
+  br ^bb1(%1, %2)
+^bb1(%3: s32, %4: s32):
+  %5: s32 = call %3 {target="g"}
+  br ^bb2(%5, %4)
+^bb2(%6: s32, %7: s32):
+  %8: s32 = call %7 {target="g"}
+  %9: s32 = add %6, %8
+  %10: s32 = call %8 {target="g"}
+  %11: s32 = const {value=9}
+  %12: u32 = icmp_slt %10, %11
+  cond_br %12, ^bb2(%9, %8), ^bb3()
+^bb3():
+  %13: s32 = add %3, %9
+  %14: u32 = icmp_slt %13, %0
+  cond_br %14, ^bb1(%13, %8), ^bb4()
+^bb4():
+  %15: s32 = call %8, %9 {target="k"}
+  ret %15
+}
+`;
+
+test("a later loop's test reads an earlier loop's value under the earlier loop's naming", () => {
+  expect(disagreements(SEQUENTIAL_LOOPS)).toEqual({ judged: 64, differ: 0 });
+  expect(cBackend.emit(structure(lifted(SEQUENTIAL_LOOPS)))).toMatch(/while \(v\d+ < v\d+ \+ a0 \+ 16\);/);
+});
+
+test("the outer loop's exit reads an inner value under the name its latch reads it under", () => {
+  expect(disagreements(EXIT_READS_INNER)).toEqual({ judged: 64, differ: 0 });
+  expect(cBackend.emit(structure(lifted(EXIT_READS_INNER)))).toMatch(/return k\(v\d+, v\d+\);/);
 });
