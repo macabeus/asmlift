@@ -15,6 +15,8 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
+//   • capabilities.readSourceControl → the same audit: which frame bytes beside the object that
+//     device may read, so a slot it cannot reach is not refused.
 //   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
@@ -152,6 +154,12 @@ export interface TargetDescription {
     // (ARMv4T is bi-endian). ABSENT ⇒ every escape is assumed to write, which is the safe
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
+    // HOW FAR a device reads from the address a `readOnlyAddressSinks` register was handed, read
+    // off the control halfword at `sink + offset`: `(control >> modeShift) & 3` is 0 increment, 1
+    // decrement, 2 fixed, and `wideBit` set makes each unit 4 bytes rather than 2. A fixed source
+    // re-reads one unit, so the frame bytes beside the object are provably not read. ABSENT ⇒ the
+    // read is unbounded in both directions, the safe direction.
+    readSourceControl?: { offset: number; modeShift: number; wideBit: number };
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
     // so a source that touched one all but certainly declared it `volatile`. Its readers all ask
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
@@ -588,6 +596,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // The idiom this exists for is their `DMA_FILL`: `vu16 tmp = value;
     // DmaSet(n, &tmp, dest, … DMA_SRC_FIXED …)`, where the frame local is the source.
     readOnlyAddressSinks: [0x040000b0, 0x040000bc, 0x040000c8, 0x040000d4],
+    // DMAnCNT_H, 10 bytes above each SAD: Source Address Control is bits 7-8 and bit 10 selects
+    // 32-bit units. `DMA_FILL`'s `DMA_SRC_FIXED` is mode 2.
+    readSourceControl: { offset: 0xa, modeShift: 7, wideBit: 0x0400 },
     // The GBA I/O register file — one page from 0x04000000, the last live register being
     // 0x04000301 (HALTCNT). Everything a source reaches through `REG_*` is in here, and nothing
     // else is: IWRAM, EWRAM, palette, VRAM and OAM are ordinary memory a source does not qualify.

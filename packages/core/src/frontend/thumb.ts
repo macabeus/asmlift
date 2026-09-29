@@ -2458,16 +2458,17 @@ function auditFrameObjects({
       }
       return undefined;
     };
-    // Does this store hand the WHOLE address to something that only reads through it? Word stores
-    // only: a `strh` to a source register hands over half an address, so the device's source is
-    // not this object. A base this cannot resolve — computed, register-offset, merged by a phi —
-    // is the conservative answer.
-    const readsThrough = (op: Op): boolean => {
+    // The register this store hands the WHOLE address to, when it is one a device only reads
+    // through, else undefined. Word stores only: a `strh` to a source register hands over half an
+    // address, so the device's source is not this object. A base this cannot resolve — computed,
+    // register-offset, merged by a phi — is the conservative answer.
+    const readsThrough = (op: Op): number | undefined => {
       if (readOnlySinks.size === 0 || (op.attrs.width as number) !== 4) {
-        return false;
+        return undefined;
       }
       const base = literalAddrOf(op.operands[0]);
-      return base !== undefined && readOnlySinks.has(base + (op.attrs.off as number));
+      const at = base === undefined ? undefined : base + (op.attrs.off as number);
+      return at !== undefined && readOnlySinks.has(at) ? at : undefined;
     };
     const fail = (why: string): never => {
       throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
@@ -2620,6 +2621,9 @@ function auditFrameObjects({
     // hardware reads the object, and the DMA-fill idiom this capability was built for
     // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
     const mayWrite = new Set<number>();
+    // …and for the others, the source registers they reached, which is where `readWindow` below
+    // reads how far the device reads
+    const readerSinks = new Map<number, number[]>();
     // …and the two escapes SPLIT, because each decides something the other does not.
     // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
     // writer this frontend can name, which is what the struct-return premise re-check below rests
@@ -2705,8 +2709,11 @@ function auditFrameObjects({
           }
           if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
             escaped.add(off); // the address ESCAPES as a value — the point of the capability
-            if (!(op.opcode === 'store' && readsThrough(op))) {
+            const sink = op.opcode === 'store' ? readsThrough(op) : undefined;
+            if (sink === undefined) {
               mayWrite.add(off);
+            } else {
+              (readerSinks.get(off) ?? readerSinks.set(off, []).get(off)!).push(sink);
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
@@ -3039,11 +3046,9 @@ function auditFrameObjects({
     // whatever the recompiler made of it. Marking both volatile would not repair that: the locals
     // are still placed independently.
     //
-    // ACCEPTED RESIDUE, so the rule is not read as wider than it is: it counts `laddr` objects,
-    // so a neighbour that is merely SPILLED to an SSA slot is over-read just the same and nothing
-    // refuses, and the audit never reads the transfer's control word, so an incrementing source
-    // is vouched for exactly as a fixed one is. Both are reads, so the `undef` argument holds
-    // either way, and both predate this rule.
+    // It counts `laddr` objects. A neighbour SPILLED to an SSA slot is the slot rule's below,
+    // which bounds a device's read by its control word; this rule does not, since two objects
+    // are two placements whatever reads them.
     if (escaped.size > 0 && objects.size > 1) {
       fail(
         'the captured address escapes, so something outside this function reaches the whole ' +
@@ -3071,6 +3076,61 @@ function auditFrameObjects({
       );
     }
 
+    // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
+    // that may write, and anything this cannot bound, reaches the whole frame. A device that only
+    // reads is bounded by its channel's control halfword (`readSourceControl`), when every store
+    // to it that this function makes is a literal: fixed re-reads one unit, increment reads
+    // upward only, decrement downward only. A store to that halfword through a pointer this
+    // cannot resolve is not seen — the residue `readsThrough` already carries for the source
+    // register itself.
+    const readWindow = (off: number): readonly [number, number] => {
+      const control = target.capabilities.readSourceControl;
+      const sinks = readerSinks.get(off);
+      if (mayWrite.has(off) || sinks === undefined || control === undefined) {
+        return [-Infinity, Infinity];
+      }
+      const halves: number[] = [];
+      for (const sink of new Set(sinks)) {
+        const at = sink + control.offset;
+        let seen = false;
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            const base = op.opcode === 'store' ? literalAddrOf(op.operands[0]) : undefined;
+            if (base === undefined) {
+              continue;
+            }
+            const a = base + (op.attrs.off as number);
+            const w = op.attrs.width as number;
+            // the channel's count and control halfwords, [at - 2, at + 2)
+            if (a + w <= at - 2 || a >= at + 2 || (a === at - 2 && w === 2)) {
+              continue;
+            }
+            const v = defOf.get(op.operands[1]);
+            const whole = a === at - 2 && w === 4 && target.capabilities.endianness === 'little';
+            if (v?.opcode !== 'const' || !(whole || (a === at && w === 2))) {
+              return [-Infinity, Infinity];
+            }
+            halves.push(((v.attrs.value as number) >>> (whole ? 16 : 0)) & 0xffff);
+            seen = true;
+          }
+        }
+        if (!seen) {
+          return [-Infinity, Infinity];
+        }
+      }
+      let [lo, hi] = [0, 0];
+      for (const h of halves) {
+        const unit = (h & control.wideBit) !== 0 ? 4 : 2;
+        const mode = (h >> control.modeShift) & 3;
+        if (mode === 3) {
+          return [-Infinity, Infinity];
+        }
+        lo = Math.min(lo, mode === 1 ? -Infinity : 0);
+        hi = Math.max(hi, mode === 0 ? Infinity : unit);
+      }
+      return [lo, hi];
+    };
+
     // …and the SLOT MODEL is the third claim an escape retracts — the undef rule's argument
     // taken one step further. The extents above are inferred from OUR accesses, so an object
     // wider in the SOURCE than the bytes this function touches has its later words written by
@@ -3091,37 +3151,54 @@ function auditFrameObjects({
     // the callee's write dropped, no diagnostic. Exactly the silent-wrong-answer trade the sp
     // guards exist to prevent, so it refuses.
     //
-    // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
-    // a `mayWrite` object, which is blunter than the hazard it names — four corpus functions
-    // decline on it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`), none
-    // of them a benchmark row. Narrowing it needs the object's real extent, and this model does
+    // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot the
+    // escape may reach, which is blunter than the hazard it names — four corpus functions decline
+    // on it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`), none of them a
+    // benchmark row. Narrowing it needs the object's real extent, and this model does
     // not carry one: `extent` is a single width from a single access. The asm sometimes cannot
     // supply it either — the compiled twin at `capturedObjectIsTheWholeFrame` is exactly this
     // rule's shape, a slot THIS FUNCTION stores and reloads, undecidable between a spill and a
     // member.
     //
-    // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
-    // be part of it, and the overlap checks above already own the bytes it does cover.
+    // A callee is not the only writer. `struct M { u8 b; u8 pad[3]; s32 t; }; gp = &m; g2();
+    // use2(m.t);` PUBLISHES the base to an ordinary global and the machine reloads [sp,#4] after
+    // `bl g2` — `g2` writes through `gp`, which points here. Keyed on `passedToCallee` that lifted
+    // as `use2(v0)`: the same silent wrong answer as the call shape, one escape over.
     //
-    // `mayWrite`, the same predicate the undef rule takes, because the two rules rest on one
-    // argument and a callee is not the only writer. `struct M { u8 b; u8 pad[3]; s32 t; };
-    // gp = &m; g2(); use2(m.t);` PUBLISHES the base to an ordinary global and the machine reloads
-    // [sp,#4] after `bl g2` — `g2` writes through `gp`, which points here. Keyed on
-    // `passedToCallee` that lifted as `use2(v0)`, the reload replaced by the value from before
-    // the call, no diagnostic: the same silent wrong answer as the call shape, one escape over.
+    // …and a writer is not the only hazard, so the rule keys on `escaped`, not `mayWrite`. A
+    // device that only READS through the address reads the slot's bytes from memory, where the
+    // slot model never put them: `struct P { u32 a, b; } s; s.a = x; s.b = y; REG_DMA3SAD =
+    // (u32)&s;` above an outgoing block is `str r4, [sp, #0x4] / str r5, [sp, #0x8] / add r1, sp,
+    // #0x4 / str r1, [DMA3SAD]`, and keyed on `mayWrite` it lifted with `s.b = y` dropped as a
+    // dead def — the DMA transferring a word nothing wrote. The asm cannot tell that second word
+    // from a neighbour spilled beside the object, so what bounds the read is the transfer's own
+    // control word, `readWindow`.
     //
-    // Not `escaped`, which is the strictly wider set and the one that costs: the DMA-fill idiom
-    // publishes to a device SOURCE register, which reads the object and never writes it, and
-    // `readsThrough` is exactly the exemption that keeps `mayWrite` off those rows. What stays
-    // residue is a base stored through a pointer this cannot resolve: unresolvable is the
-    // conservative answer there, so such a store IS in `mayWrite` and such a frame declines.
-    for (const off of mayWrite) {
+    // …and BELOW the object as well as above it. A C object extends upward from its base, but a
+    // captured address need not BE a base: `add r0, sp, #0x4` is `&buf[1]` as readily as `&b`, and
+    // `buf[0]` at [sp,#0] is then read or written through `p[-1]`. Only down to the outgoing
+    // block, whose words are the callee's arguments and never part of a local.
+    for (const off of escaped) {
+      const [lo, hi] = readWindow(off);
+      const how = passedToCallee.has(off)
+        ? 'is passed to a callee'
+        : mayWrite.has(off)
+          ? 'is stored to memory'
+          : 'is handed to a device that reads through it';
       for (const slot of usedSlotOffsets) {
-        if (slot > off) {
-          const how = passedToCallee.has(off) ? 'is passed to a callee' : 'is stored to memory';
+        if (slot > off && slot < off + hi) {
           fail(
-            `the captured address at [sp,#${off}) ${how}, which may write the ` +
-              `slot at [sp,#${slot}] — this function's own store there would be forwarded past the write`,
+            mayWrite.has(off)
+              ? `the captured address at [sp,#${off}) ${how}, which may write the slot at [sp,#${slot}] — ` +
+                  "this function's own store there would be forwarded past the write"
+              : `the captured address at [sp,#${off}) ${how}, which may read the slot at [sp,#${slot}] — ` +
+                  "this function's own store there is kept in a register, not the frame",
+          );
+        }
+        if (slot < off && slot >= outgoingArea && slot + 4 > off + lo) {
+          fail(
+            `the captured address at [sp,#${off}) ${how}, and it may point INTO an object that starts ` +
+              `lower — the slot at [sp,#${slot}] below it is kept in a register, not the frame`,
           );
         }
       }
@@ -3142,13 +3219,12 @@ function auditFrameObjects({
     // reserved local area has to be an object this audit modelled or a slot the slot model keys;
     // a word that is neither is storage nothing here describes, so the emitted C reserves less
     // than the machine did and the writer reaches past what it allocated. Whole local area and
-    // not only the words above the object: a word BELOW cannot be part of the object, but it is
-    // still frame the declaration has to account for. Word granularity, not byte — the stack is
-    // word-aligned, so a halfword object owns its word and the padding beside it is not a second
-    // local.
+    // not only the words above the object: a word below it is still frame the declaration has to
+    // account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
+    // owns its word and the padding beside it is not a second local.
     //
-    // `mayWrite`, the predicate the two rules above take, and for the same reason: a device
-    // SOURCE register reads through the address and cannot write the frame back.
+    // `mayWrite`, the predicate the undef rule takes: a device SOURCE register reads through the
+    // address and cannot write the frame back, and an unwritten word it reads holds nothing.
     //
     // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
     // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
