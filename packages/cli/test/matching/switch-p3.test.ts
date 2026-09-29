@@ -59,8 +59,9 @@ SYMBOL TABLE:
 
   test('sections, symbols, and .text/.data relocs parse', () => {
     expect(ad.sections.get('.data')!.length).toBe(32);
-    expect(ad.symbols.get('@15')).toEqual({ section: '.data', value: 0, size: 0x20 });
-    expect(ad.symbols.get('sw_jt')).toEqual({ section: '.text', value: 0, size: 0x68 });
+    expect(ad.symbols.get('@15')).toEqual({ section: '.data', value: 0, size: 0x20, index: 3 });
+    expect(ad.symbols.get('sw_jt')).toEqual({ section: '.text', value: 0, size: 0x68, index: 4 });
+    expect(ad.symbolCount).toBe(4);
     expect(textRelocAt(ad, 0xa)!.sym).toBe('@15');
   });
 
