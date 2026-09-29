@@ -518,6 +518,9 @@ export function makeSsaBuilder(
     defs[b].set(reg, phi); // set before wiring operands to break cycles
     return phi;
   };
+  // The single-predecessor blocks the current read is walking up through. A join ends the walk:
+  // its phi is in `defs` before its operands are read, so a cycle through it is already cut there.
+  let singlePredWalk = new Set<string>();
   const readRecursive = (reg: string, b: number): Value => {
     if (!sealed[b]) {
       // predecessors not all filled yet (e.g. a loop back-edge): defer operand wiring.
@@ -568,9 +571,31 @@ export function makeSsaBuilder(
       return p;
     }
     if (ps.length === 1) {
-      const v = readAny(reg, ps[0]);
-      defs[b].set(reg, v);
-      return v;
+      // A walk up single predecessors that comes back to where it started has gone round a cycle
+      // no edge enters from outside, so no path from the entry reaches it — unless the entry is on
+      // it. agbcc leaves such a cycle behind a loop it proved never runs. No execution reads the
+      // key there, which is the uninitialised read's answer. Through the entry, the value is a
+      // live-in joined with the cycle's, which a single-predecessor block has no phi for.
+      const at = `${b}|${reg}`;
+      if (singlePredWalk.has(at)) {
+        if (singlePredWalk.has(`0|${reg}`)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': ${reg} is read in a cycle through the entry block with no join to meet at`,
+          );
+        }
+        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
+        irBlocks[b].ops.unshift(op);
+        defs[b].set(reg, op.results[0]);
+        return op.results[0];
+      }
+      singlePredWalk.add(at);
+      try {
+        const v = readAny(reg, ps[0]);
+        defs[b].set(reg, v);
+        return v;
+      } finally {
+        singlePredWalk.delete(at);
+      }
     }
     // sealed join: create the phi and wire every predecessor's terminator arg now.
     const phi = newPhi(reg, b);
@@ -581,6 +606,15 @@ export function makeSsaBuilder(
   // write-order record is keyed by. `phi` is passed rather than looked up: by the time a deferred
   // phi is wired the block may have written its key again, so `defs[b]` no longer names it.
   const addPhiOperands = (reg: string, b: number, phi: Value) => {
+    const walk = singlePredWalk;
+    singlePredWalk = new Set();
+    try {
+      addEachPhiOperand(reg, b, phi);
+    } finally {
+      singlePredWalk = walk;
+    }
+  };
+  const addEachPhiOperand = (reg: string, b: number, phi: Value) => {
     for (const p of distinctPreds(b)) {
       appendSuccessorArg(p, b, readAny(reg, p));
       const at = lastWriteAt[p].get(reg);

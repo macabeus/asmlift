@@ -13,7 +13,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { StructureError, structure } from '../src/structure/structure';
+import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -72,9 +72,9 @@ test('a header value read after a break is not re-derived from the updated name'
 // Refusals and their witnesses: header→exit copies the break cannot share (`HEADER_EXIT_COPIES`,
 // and `LATCH_BREAK_SHARES_UPDATED_NAME` for copies reading a name the update wrote,
 // `LATCH_BREAK_SHARES_IDENTITY_SLOT` for an exit value whose copy renders nothing; a break handing
-// the exit the header's own values shares them, `BREAK_SHARES_HEADER_COPIES`), a `do-while`
-// (`DO_WHILE_BREAK`), and a latch `break` under an `if` whose join is the loop's exit, where the
-// implicit continue does not hold (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
+// the exit the header's own values shares them, `BREAK_SHARES_HEADER_COPIES`), and a latch `break`
+// under an `if` whose join is the loop's exit, where the implicit continue does not hold
+// (`IF_JOINING_AT_THE_EXIT`, refused whatever the exit holds). A
 // refusal is otherwise loud only where the exit is a live merge; an exit that ends in a `ret` can
 // take the tail-copying spelling instead (`M8_RET_EXIT_WITH_COPIES`). A latch `break` the latch path
 // refuses is spelled here, ahead of the update (`LATCH_READS_OLD_VALUE`). Three have no
@@ -82,7 +82,8 @@ test('a header value read after a break is not re-derived from the updated name'
 // known to need: an edge out of a nested loop's body (a loop this recognizer admits leaves only to its
 // own exit, which lies inside ours); an in-body branch whose other edge leaves the loop as well
 // (if-recovery declines those branches first); and an exit region reading a name this iteration
-// already wrote (naming gives no header value such a name).
+// already wrote (naming gives no header value such a name). A bottom-tested loop with a `break` is
+// no `do-while` at all: `while (1)` takes it (`DO_WHILE_BREAK`, and `loop-dowhile-break.test.ts`).
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
 
 type Agreement = { judged: number; disagree: number };
@@ -634,7 +635,8 @@ test('a latch break under an `if` that joins at the loop exit declines', () => {
   );
 });
 
-/** A bottom-tested loop with a mid-body edge to its exit, which is not a `ret` block. */
+/** A bottom-tested loop with a mid-body edge to its exit, which is not a `ret` block. The exit reads
+ *  the counter the header read, on the latch's edge as well as the break's. */
 const DO_WHILE_BREAK = `fn dwbreak {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -657,6 +659,9 @@ const DO_WHILE_BREAK = `fn dwbreak {
   ret %3
 }`;
 
-test('a `do-while` with a mid-body `break` still declines', () => {
-  expect(() => emit(DO_WHILE_BREAK)).toThrow(StructureError);
+test('a bottom-tested loop with a mid-body `break` is `while (1)`', () => {
+  const r = judged(DO_WHILE_BREAK);
+  expect(r.src).toContain('while (1) {');
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });

@@ -337,7 +337,7 @@ export function raiseRecovered(
 /** Run `body`; if it declines, name the unmodelled instructions the function carries.
  *
  *  An `opaque` degrades its own value AND makes its block impure, so a shape recognizer refuses:
- *  `headerPure` rejects a header holding one, and the loop declines with "unrecovered back-edge …".
+ *  a loop none of whose recognizers takes it declines with "unrecovered back-edge …".
  *  True and useless — the shape is fine, an instruction is missing — and the benchmark classifies
  *  declines by that text, so the round is filed as a loop-capability gap and the improvement loop
  *  builds the wrong thing.

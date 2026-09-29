@@ -23,7 +23,7 @@ So the new wall is not a speed-up of the old figure, and the two must not be rea
 | `pnpm bench run` (all tiers)             | **~262 s ≈ 4.5 min**, over 1,257 rows                                                                                                  | the two tier lines of the 2026-09-23 run at `3888734f`: `✓ synthetic: 879 results in 189.4s`, `✓ real: 378 results in 182.2s`, 0 SKIPs, `time` wall 4:22.07. Docker up, candidate cache WARM (`hit 620` on the last synthetic shard alone) — and warmth, not load, is what this figure is sensitive to: the 2026-09-21 ship run at `a13dbe60` walled 708 s part-cold over 1,201 rows, and a neighbour's whole-tier run beside a scoped probe came in FASTER than its own uncontended time. Budget the larger number when the cache is cold                                                                                                                                                                                                                   |
 | `pnpm bench run --tier synthetic`        | **~189 s** over 879 rows                                                                                                               | same run, 2026-09-23; 382 s part-cold at `a13dbe60` on 2026-09-21 over 823 rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `pnpm bench run --tier real`             | **~182 s** over 378 rows, with the stillborn stop                                                                                      | same run, 2026-09-23; 326 s part-cold at `a13dbe60` on 2026-09-21. Every figure here before the stillborn stop priced a tier that compiled every candidate of every fan — 2,170 s on 2026-09-13 over 252 rows, and 2,941–5,720 s cold or contended in this repo's run logs of 2026-09-05/07/08. That is a different amount of work, not a slower machine                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `pnpm bench run --tier <t> --only <sym>` | **the row’s own price**: 3.1 s on the cheapest real row, 161 s on the dearest of that day — §3 carries the CURRENT artifact’s          | `time pnpm bench run --tier real --only sub_0804B254` → 3.1 s, 2026-09-21. The dearest is `kleod:PauseMenuScreenHandler:agbcc`, 161.0 s of `rankSeconds` in the same day’s artifact — the same row and 125.0 s in the artifact §3 reads, which is what a `rankSeconds` figure is worth across two runs on one box. The symbol this cell used to name, `ReadUnalignedU32`, is no longer a row of the real tier                                                                                                                                                                                                                                                                                                                                                |
+| `pnpm bench run --tier <t> --only <sym>` | **the row’s own price**: 5.1 s on the cheapest real row, 468 s on the dearest of that day — §3 carries the CURRENT artifact’s          | `time pnpm bench run --tier real --only sub_0804B254` → 5.1 s total, 2026-09-29, at a 1-minute load average of ~24. The dearest is `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, 468.1 s of `rankSeconds` in the same day’s artifact, measured under a load average of ~38 — the same row read 251.4 s in the artifact before it, which is what a `rankSeconds` figure is worth across two runs on one box                                                                                                                                                                                                                                                                                                                                           |
 | `pnpm bench baseline <sym>`              | **~2.6 s**, no bench at all                                                                                                            | `time pnpm bench baseline CountCollectedGems`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pnpm bench fan <row> --enumerate`       | **~115 candidates/s**                                                                                                                  | 9,192 candidates in 80.2 s on `kleod:CountCollectedGems:agbcc`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `pnpm bench fan <row>` (scored)          | **60 ms/candidate** synthetic, **85 ms** real, candidate cache OFF                                                                     | `SCORE_SECONDS_PER_CANDIDATE` in `apps/benchmark/src/run/fan.ts`, re-read at `8599234d` on 2026-09-12; its docstring carries the three cold runs behind the two constants. A WARM run is several times cheaper per candidate (the same artifact's `rankSeconds` medians are 40 ms synthetic / 35 ms real), so this over-prices the scored path — which is the right way round for a refusal                                                                                                                                                                                                                                                                                                                                                                  |
@@ -79,7 +79,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=97.4s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=265.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -139,18 +139,28 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of **2026-09-28**, taken at `0d4825f4`
-(`match/getcardstatus-cost`: a real row's callees are declared by its own context, and a fan of 500
-candidates or more compiles on four threads): the ranked pass alone is **1,654 s over 205 real
-rows** and **669 s over 799 synthetic rows**; wall clock was 274.3 s and 99.3 s on tiers that
-overlap, and **335.3 s** end to end, over a candidate cache warm from this branch's earlier runs.
-Against `origin/main` it is **122 field changes** over 25 rows and 0 lost, fan **71,830 → 50,500
-(0.70×)** over 1,002 comparable rows, and its ranked pass reads **2,827.5 s → 2,319.6 s (0.82×)**.
-The dearest single row is **251 s** on `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, **15%
-of the tier** — a `nonmatch` with a fan of 704, all of it compiled, and wall over its four compile
-threads. The queue started it first and the tier ended 23 s after it did.
+Summed out of the committed artifact of **2026-09-29**, taken at `81a9de98`
+(`match/loop-backedge`: a loop no other form takes is `while (1)`): the ranked pass alone is
+**3,386 s over 209 real rows** and **2,025 s over 812 synthetic rows**; wall clock was 510.6 s and
+280.4 s on tiers that overlap, and **766.7 s** end to end, under a 15-minute load average of ~38
+read at its end. Against `origin/main` it is **98 field changes** over 16 rows, 5 added
+and 0 lost, fan **50,508 → 50,508 (1.00×)** over 1,004 comparable rows, and its ranked pass reads
+**2,323.6 s → 5,206.8 s (2.24×)** — the load, with no fan moved. The dearest single row is
+**468 s** on `pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, **14% of the tier** — the
+same row, fan and outcome as the artifact before, at 1.86× its seconds.
 
-The artifact `origin/main` carried before this one, taken 2026-09-28 at `9691f920`
+The artifact `origin/main` carried before this one, taken 2026-09-28 at `0d4825f4`
+(`match/getcardstatus-cost`: a real row's callees are declared by its own context, and a fan of 500
+candidates or more compiles on four threads), read 1,654 s over 205 real rows and 669 s over 799
+synthetic rows; wall clock was 274.3 s and 99.3 s on tiers that overlap, and 335.3 s end to end,
+over a candidate cache warm from that branch's earlier runs. Against its own base it was 122 field
+changes over 25 rows and 0 lost, fan 71,830 → 50,500 (0.70×) over 1,002 comparable rows, and its
+ranked pass read 2,827.5 s → 2,319.6 s (0.82×). Its dearest single row was 251 s on the same
+`pikmin:getCardStatus__10MemoryCardFi:mwcc_233_163n`, 15% of the tier — a `nonmatch` with a fan of
+704, all of it compiled, and wall over its four compile threads. The queue started it first and the
+tier ended 23 s after it did.
+
+The one before that, taken 2026-09-28 at `9691f920`
 (`meta/parallel-run-recommendations`, #268: shards take rows off a shared queue, and no row moves),
 read 2,233 s over 203 real rows and 594 s over 799 synthetic rows; wall clock was 1,006.5 s and
 96.1 s on tiers that overlap, and 1,006.9 s end to end. Against its own base it was 0 field changes,
