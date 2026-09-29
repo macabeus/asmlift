@@ -1821,9 +1821,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           const pr = op.results[0];
           // AN OP THE ASM CALLED A HELPER FOR is placed as the call it was (`isHelper`: `bl
           // __divsi3` for `k / n` and `k / 5` on agbcc, `bl __ashrdi3` for a 64-bit `>>`, `bl
-          // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and a
-          // compiler with no scheduler (agbcc has no sched.c) leaves it where the source computed
-          // it; inlined at its use it moves there. So it is named at its def when:
+          // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and agbcc,
+          // with no scheduler, EMITS the call where the source spells the operation, so naming it
+          // where the asm ran it recompiles to that asm; inlined at its use it moves there. One
+          // direction only, as target.ts `readsStayWhereWritten` says of reads: the asm's position
+          // is not always where the source computed it — loop.c hoists an invariant `bl __divsi3`
+          // into the loop's guarded preheader, and naming it there is what recompiles. So it is
+          // named at its def when:
           //   • an effect, or another helper named there, lies between the def and a place it
           //     renders — `t = k / n; *q = n; return t + 1;` is `bl; str`, and inlined it comes
           //     back `*q = n; return k / n + 1;`, `str; bl`. A named one bars what the barrier
