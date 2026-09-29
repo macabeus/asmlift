@@ -2473,6 +2473,19 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int f(void); int g(int); void h(int);',
     proto: { f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } },
   },
+  // A do-while with a `break` into its return tail: the edge runs no update, so it hands the exit
+  // what the iteration read, where the bottom test hands it the update. `while (1)` spells each
+  // edge with its own copies. No MIPS cell: those compiles decline in the lift, on the call.
+  {
+    sym: 'dowbreak',
+    src:
+      'int g(int);\nvoid h(int);\n' +
+      'int dowbreak(int n){ int i = 0, s = 0; do { if (g(i) == 3) break; s += i; i++; } while (i < n); h(s); return i + s; }',
+    features: ['break'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'int g(int); void h(int);',
+    proto: { g: { params: 1 }, h: { params: 1, returnsVoid: true } },
+  },
   // A do-while whose `||` test calls a function in a later term. The IR cannot fold the call's term
   // into the one before it — the fold would run `g` on every iteration — so the loop reaches the
   // structurer with a latch per term, which is `while (1)` with a `continue` per term. agbcc only:
