@@ -2462,19 +2462,21 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A retry loop whose mid-body `continue` and bottom test are two latches of one header, which is
   // neither one test at its top nor one at its bottom: `while (1)` with a `continue` and a `break`.
+  // No gcc2.7.2kmc cell: its lift declines on the call before any loop is reached.
   {
     sym: 'retryloop',
     src:
       'int f(void);\nint g(int);\nvoid h(int);\n' +
       'int retryloop(int n){ int t; for(;;){ t = f(); if (t == n) continue; h(t); if (g(t)) break; } return t; }',
     features: [],
-    toolchains: CALL,
+    toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'int f(void); int g(int); void h(int);',
     proto: { f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } },
   },
   // A do-while whose `||` test calls a function in a later term. The IR cannot fold the call's term
   // into the one before it — the fold would run `g` on every iteration — so the loop reaches the
-  // structurer with several latches, chained at its bottom (`latchChain`).
+  // structurer with several latches, chained at its bottom (`latchChain`). agbcc only: the MIPS and
+  // PPC compiles of it decline in the lift, on the call, before any loop is reached.
   {
     sym: 'orchain',
     src:
@@ -2482,7 +2484,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'int orchain(int a, int s, int m, int n){ int t; do { t = f() % n; } ' +
       'while (t == a || g(t) == s || (m & gTbl[t])); return t; }',
     features: ['global'],
-    toolchains: CALL,
+    toolchains: ['agbcc'],
     ctx: 'extern int gTbl[]; int f(void); int g(int);',
     proto: { f: { params: 0 }, g: { params: 1 } },
   },
