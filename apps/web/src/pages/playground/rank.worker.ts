@@ -6,7 +6,7 @@
 // request and echoes its id back.
 import { NoScorableCandidateError } from '@asmlift/core/rank';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import { EngineFailedError } from '@matchkit/scoring';
+import { EngineFailedError } from '@match-kit/scoring';
 
 import { throttleProgress, whileCurrent } from './rank-progress';
 import {

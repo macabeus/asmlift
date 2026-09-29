@@ -10,7 +10,7 @@
     "@asmlift/cli": "workspace:*",
     "@asmlift/core": "workspace:*",
     "@asmlift/toolchains": "workspace:*",
-    "@matchkit/scoring": "link:../../../matchkit/packages/scoring",
+    "@match-kit/scoring": "link:../../../matchkit/packages/scoring",
     "yaml": "^2.9.0"
   }
 }

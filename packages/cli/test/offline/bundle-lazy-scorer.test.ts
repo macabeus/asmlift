@@ -1,4 +1,4 @@
-// A plain decompile runs from the CLI bundle even when @matchkit/scoring cannot be loaded: the bundle
+// A plain decompile runs from the CLI bundle even when @match-kit/scoring cannot be loaded: the bundle
 // loads the objdiff engine on the scoring path alone (score.ts says why).
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
@@ -21,7 +21,7 @@ beforeAll(async () => {
     platform: 'node',
     format: 'esm',
     target: 'node18',
-    external: ['@matchkit/scoring', 'yaml'],
+    external: ['@match-kit/scoring', 'yaml'],
     outfile: join(dir, 'asmlift.mjs'),
     logLevel: 'silent',
   });
@@ -31,14 +31,14 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}');
 });
 
-test('@matchkit/scoring does not resolve next to the bundle', () => {
-  expect(node(['--input-type=module', '-e', "await import('@matchkit/scoring')"]).status).not.toBe(0);
+test('@match-kit/scoring does not resolve next to the bundle', () => {
+  expect(node(['--input-type=module', '-e', "await import('@match-kit/scoring')"]).status).not.toBe(0);
 });
 
 test('a plain decompile runs from the bundle without it', () => {
   const asm = join(pkg, '../core/test/corpus/agbcc-clamp0.s');
   const run = node(['asmlift.mjs', asm, '--target', 'agbcc']);
-  expect(run.stderr).not.toMatch(/matchkit/);
+  expect(run.stderr).not.toMatch(/match-kit/);
   expect(run.status).toBe(0);
   expect(run.stdout).toMatch(/clamp0\(/);
 });

@@ -1,7 +1,7 @@
 // A dead objdiff engine ends a ranking: it fails every later score, so no later candidate compiles.
 // The engine is killed for real, by an object it panics on; vitest runs each file in its own worker.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
-import { EngineFailedError, UndiffableError } from '@matchkit/scoring';
+import { EngineFailedError, UndiffableError } from '@match-kit/scoring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, beforeEach, expect, test } from 'vitest';

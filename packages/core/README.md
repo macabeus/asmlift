@@ -76,7 +76,7 @@ Everything under `src/` is importable as `@asmlift/core/<path>` (e.g.
 Three ISA frontends (ARMv4T/Thumb, MIPS, PowerPC), four compiler families (`agbcc`, `ido`, `gcc`,
 `mwcc` — `codegen-flags.ts`'s `FlagFamily`) over seven target keys, three language backends over one neutral AST — all scored across the package seam
 by [`@asmlift/cli`](../cli/README.md) with the community `objdiff` engine (in-process through
-`@matchkit/scoring`, pinned `objdiff-wasm`; asmlift never hand-rolls a diff).
+`@match-kit/scoring`, pinned `objdiff-wasm`; asmlift never hand-rolls a diff).
 
 ### The pipeline (`decompile()` in `pipeline.ts`)
 
@@ -115,7 +115,7 @@ injected via hooks, never copied. `verify()` runs after every IR-mutating pass;
 | `contracts.ts`, `proto.ts`, `mangle.ts`   | Boundary contracts; prototype tables; the CodeWarrior mangler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Scoring and ranking live across the package seam in [`@asmlift/cli`](../cli/README.md):
-`score.ts` (toolchain compiles → `@matchkit/scoring`, the in-process pinned objdiff engine, fail-closed)
+`score.ts` (toolchain compiles → `@match-kit/scoring`, the in-process pinned objdiff engine, fail-closed)
 and `rank.ts` (ranked type candidates re-ranked by the differ).
 
 ### Honest coverage gaps

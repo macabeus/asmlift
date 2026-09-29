@@ -16,7 +16,7 @@
     "@asmlift/core": "workspace:*",
     "@codemirror/language": "^6.10.6",
     "@codemirror/legacy-modes": "^6.4.2",
-    "@matchkit/scoring": "link:../../../matchkit/packages/scoring",
+    "@match-kit/scoring": "link:../../../matchkit/packages/scoring",
     "@uiw/react-codemirror": "^4.23.7",
     "@wooorm/starry-night": "^3.10.0",
     "agbcc": "0.2.0",

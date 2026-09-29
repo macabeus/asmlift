@@ -29,7 +29,7 @@ import {
   TOOLCHAIN,
   mwccDir,
 } from '@asmlift/toolchains';
-import { OBJDIFF_VERSION } from '@matchkit/scoring';
+import { OBJDIFF_VERSION } from '@match-kit/scoring';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';

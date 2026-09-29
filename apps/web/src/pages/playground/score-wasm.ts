@@ -1,6 +1,6 @@
 // asmlift webapp — the in-browser objdiff scorer, agbcc/ARMv4T only. The playground's own match
 // verification: assemble the pasted `.s` to a target object, compile each
-// recovered-C candidate with agbcc, and score target-vs-candidate with @matchkit/scoring — the
+// recovered-C candidate with agbcc, and score target-vs-candidate with @match-kit/scoring — the
 // same scorer the CLI and the benchmark use, never a hand-rolled asm/text compare.
 import { cBackend } from '@asmlift/core/backend/c';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
@@ -10,7 +10,7 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import { EngineFailedError, type MatchScore, type Scorer, type Target, createScorer } from '@matchkit/scoring';
+import { EngineFailedError, type MatchScore, type Scorer, type Target, createScorer } from '@match-kit/scoring';
 import { assemble, compileToObject } from 'agbcc';
 
 import { toolFailureLine } from './candidate-compile';
@@ -73,7 +73,7 @@ type RankProgressMessage = { kind: 'progress'; reqId: number } & EmittedProgress
  *  a property, which is how a fourth shape later gets silently mis-routed. */
 export type RankMessage = RankProgressMessage | RankResponse;
 
-export type { DiffBreakdown, MatchScore } from '@matchkit/scoring';
+export type { DiffBreakdown, MatchScore } from '@match-kit/scoring';
 
 // one scorer per worker, loaded with its engine on first use
 let scorerPromise: Promise<Scorer> | null = null;

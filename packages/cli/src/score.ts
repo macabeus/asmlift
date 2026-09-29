@@ -1,5 +1,5 @@
 // asmlift — the scoring seam. asmlift is a pure generator; it does NOT own the scorer.
-// Scoring is @matchkit/scoring, the community objdiff engine in-process (a pinned `objdiff-wasm`),
+// Scoring is @match-kit/scoring, the community objdiff engine in-process (a pinned `objdiff-wasm`),
 // shared with Transmuter. Never a hand-rolled diff.
 //
 // This module holds ONLY the seam: the candidate-compile registry and the target-dispatched
@@ -9,18 +9,18 @@
 // @asmlift/toolchains workspace package (benchmark + matching-suite infrastructure) and
 // register themselves when imported; they are deliberately NOT part of this npm package.
 import { TargetDescription } from '@asmlift/core/target';
-import type { MatchScore } from '@matchkit/scoring';
+import type { MatchScore } from '@match-kit/scoring';
 
 import type { CandidateCompiler } from './compile-command';
 
-// A DYNAMIC import, and it must stay one: the CLI bundle keeps @matchkit/scoring external, and
+// A DYNAMIC import, and it must stay one: the CLI bundle keeps @match-kit/scoring external, and
 // esbuild hoists an external's static import to the top of the bundle, loading the engine on every
 // command. bundle-lazy-scorer.test.ts guards it.
-const { releaseTarget, scoreFiles } = await import('@matchkit/scoring/files');
-const { EngineFailedError } = await import('@matchkit/scoring');
+const { releaseTarget, scoreFiles } = await import('@match-kit/scoring/files');
+const { EngineFailedError } = await import('@match-kit/scoring');
 
 export { EngineFailedError, releaseTarget, scoreFiles as scoreObjects };
-export type { DiffBreakdown, MatchScore } from '@matchkit/scoring';
+export type { DiffBreakdown, MatchScore } from '@match-kit/scoring';
 export type { CandidateCompiler } from './compile-command';
 
 /** Scoring was requested but no compiler is available for the target. A SETUP error, not a

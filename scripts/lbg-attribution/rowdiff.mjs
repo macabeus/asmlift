@@ -1,10 +1,10 @@
 // One-off residual dumper for the LoadBGTilemapData attribution study: two objects and a symbol
 // in, objdiff's aligned display rows out.
 //
-// The `file://` fetch shim below is COPIED from @matchkit/scoring's Node and Bun engine loader, which owns
+// The `file://` fetch shim below is COPIED from @match-kit/scoring's Node and Bun engine loader, which owns
 // it — objdiff-wasm pulls its sibling `objdiff.core.wasm` over fetch, and Node's fetch will not
 // read a `file://` URL. The copy keeps this a plain `.mjs`, runnable by `node` alone, which is how
-// the attribution docs hand it to a reader. objdiff-wasm is resolved from @matchkit/scoring, the
+// the attribution docs hand it to a reader. objdiff-wasm is resolved from @match-kit/scoring, the
 // package that pins it, so this reads the same engine the benchmark scores with.
 //
 // The engine's resource DISPOSAL that the scorer does is deliberately omitted: the hazard it
@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const fromCli = createRequire(new URL('../../packages/cli/package.json', import.meta.url));
-const require = createRequire(fromCli.resolve('@matchkit/scoring/package.json'));
+const require = createRequire(fromCli.resolve('@match-kit/scoring/package.json'));
 
 const objdiff = await (async () => {
   const originalFetch = globalThis.fetch;
