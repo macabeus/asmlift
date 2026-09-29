@@ -6064,7 +6064,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // where the paths that go on meet: its nearest post-dominator over the rest. Null when none goes
   // on, and the region's own `stop` ends it. Without the deletion, a branch whose one arm continues
   // joins at the loop bottom, and whatever the other arm runs before its own continue is copied into
-  // both arms. A block that ends every path but TESTS first is still where its predecessors meet.
+  // both arms. A block that ends every path but TESTS first is still where its predecessors meet,
+  // and so is a latch two body paths reach: the foot of `for (…) { if (c) {…} }`, where deleting it
+  // moves the `if`'s join into one arm, which then copies the latch and adds a `continue` the
+  // source never wrote. A break block two paths share stays an end, each path its own `break`.
   // Computed once per loop.
   const foreverJoins = new Map<Block, Map<Block, Block | null>>();
   const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
@@ -6075,7 +6078,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const ends = (n: Block): boolean =>
         inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
-        n.ops.every((op) => !EFFECTFUL_OPS.has(op.opcode) && !materialize.has(op));
+        n.ops.every((op) => !EFFECTFUL_OPS.has(op.opcode) && !materialize.has(op)) &&
+        !(successorsOf(n)[0] === fl.header && new Set(preds.get(n)?.filter((q) => fl.body.has(q))).size > 1);
       ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
       foreverJoins.set(fl.header, ipdom);
     }

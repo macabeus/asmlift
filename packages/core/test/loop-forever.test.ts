@@ -490,6 +490,44 @@ test('the code after a `while (1)` declines where neither reading is the inner l
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
+/** The latch is where both arms of the body's last `if` meet: `while (1) { x = g(n); if (x == 0)
+ *  break; if (x & 1) h(x); n += 3; } return n;` */
+const LATCH_JOIN = `fn latchjoin {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = call %1 {target="g"}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb5(), ^bb2()
+^bb2():
+  %5: s32 = const {value=1}
+  %6: s32 = and %2, %5
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_ne %6, %7
+  cond_br %8, ^bb3(), ^bb4()
+^bb3():
+  %9: s32 = call %2 {target="h"}
+  br ^bb4()
+^bb4():
+  %10: s32 = const {value=3}
+  %11: s32 = add %1, %10
+  br ^bb1(%11)
+^bb5():
+  ret %1
+}`;
+
+test('a latch both arms of an `if` reach is the `if`’s join, written once', () => {
+  const r = judged(LATCH_JOIN);
+  expect(r.src).not.toContain('continue');
+  expect(r.src.match(/\+ 3;/g)).toHaveLength(1);
+  // a seed whose `g` never returns 0 does not terminate, and is not judged
+  for (const { judged: runs, disagree } of [r.agreement, r.shipped]) {
+    expect(disagree).toBe(0);
+    expect(runs).toBeGreaterThan(20);
+  }
+});
+
 test('a header that is its own latch beside an unconditional latch is `while (1)`', () => {
   const r = judged(NEST_WITHOUT_TEST);
   expect(r.src).toContain('while (1) {');
