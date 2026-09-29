@@ -547,7 +547,7 @@ describe('the audit judges each frame object on its own bytes', () => {
     // above the local area is the callee-saved block the epilogue pops, then the caller's frame
     expect(() => lift(DISJOINT)).not.toThrow();
     expect(() => lift(frame(OBJ.replace(/#0x4/g, '#0x8')))).toThrow(
-      /the captured address at \[sp,#8\) is above the reserved local area of 8 bytes/,
+      /the captured address at \[sp,#8\) is the top of the reserved local area of 8 bytes — one past the end/,
     );
     // …and one that STARTS inside it and runs past its top is refused for its width
     const straddle = '\tmov\tr3, sp\n\tstrh\tr1, [r3, #0x7]\n\tmov\tr3, sp\n\tldrh\tr0, [r3, #0x7]\n';

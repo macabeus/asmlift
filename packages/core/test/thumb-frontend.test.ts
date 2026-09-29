@@ -1613,6 +1613,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', inArg, ARMV4T_AGBCC, { prototypes: { g } })).toThrow(
         /the captured address at \[sp,#8\) is above the reserved local area of 4 bytes — an incoming stack argument/,
       );
+      // …while the TOP of the area is also C's one-past-the-end pointer: agbcc's `u32 r1(void){ u8
+      // buf[8]; fill(buf); return count(buf, buf + 8); }`, where the saved `lr` sits at [sp,#8]
+      const endPtr =
+        'r1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr0, sp\n\tbl\tfill\n\tadd\tr1, sp, #0x8\n\tmov\tr0, sp\n' +
+        '\tbl\tcount\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('r1', endPtr, ARMV4T_AGBCC, { prototypes: { fill: g, count: { params: 2 } } })).toThrow(
+        'is the top of the reserved local area of 8 bytes — one past the end of a local array',
+      );
     });
 
     // …and the same frame word READ back after a call that took its address at argument 0 is,

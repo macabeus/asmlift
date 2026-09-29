@@ -254,9 +254,16 @@ export function auditFrameObjects({
     // A LOCAL STARTS INSIDE THE RESERVED AREA. Above it are the registers the prologue saved and
     // then the caller's outgoing block, so an address there is an incoming stack argument's or a
     // saved register's — `g(&e)` for a fifth parameter `e` is `add r0, sp, #0x8` over a one-word
-    // local area — and no rule below is about that gap.
+    // local area — and no rule below is about that gap. The TOP itself is also C's one-past-the-end
+    // pointer, `g(buf, buf + 8)` over an 8-byte array, and the refusal names both readings.
     for (const off of objects.keys()) {
-      if (off >= owned.to) {
+      if (off === owned.to) {
+        fail(
+          `the captured address at [sp,#${off}) is the top of the reserved local area of ${owned.to - owned.from} bytes — ` +
+            'one past the end of a local array, or an incoming stack argument, neither of which is modelled',
+        );
+      }
+      if (off > owned.to) {
         fail(
           `the captured address at [sp,#${off}) is above the reserved local area of ${owned.to - owned.from} bytes — ` +
             'an incoming stack argument or a saved register, whose address is not modelled',
