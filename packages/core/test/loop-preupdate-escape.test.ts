@@ -357,7 +357,7 @@ test('a helper op named where it ran is a pre-update home too', () => {
   expect(() => emit(helper, admit)).toThrow(/reads a pre-update loop variable/);
 });
 
-// In a body of more than one block, under the default gates (generated IR, seed 1015): `%8` reads
+// In a body of more than one block, under the default gates: `%8` reads
 // the outer loop's `%6` and the bottom test reads `%8`. Inline, the test re-reads `%6` after the
 // update and the loop declines. Named at its def as a helper, it lifts, and the post-loop merge
 // then takes `%7`'s name, `v4 = v3; f0(v4);`, where the IR calls `f0` on `%2`.

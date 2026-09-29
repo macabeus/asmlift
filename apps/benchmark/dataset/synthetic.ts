@@ -1584,9 +1584,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // store, which `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses. It is the one exit row on
   // every toolchain, because the read arises on kmc and mwcc too (kmc computes `t + 1` in the
   // branch's delay slot, behind the counter's decrement). There the divide is an instruction, and
-  // the analysis names it at its def only for this, a pre-update exit value an effect separates it
-  // from. IDO unrolls the loop, and its lift stops at the unrolled remainder's branch before
-  // structuring.
+  // the analysis names it at its def only for this: a pre-update exit value that a memory access or
+  // an effect separates it from. IDO unrolls the loop.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1601,9 +1600,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // than only of a folded one. What still reaches that guard is an `opaque`, the only other
   // effectful op that defines a value, for which no placement rule exists.
   //
-  // The others are agbcc only, and the reason is the whole point: the shape IS the ARM rotation.
-  // Given the same C, ido/kmc/mwcc schedule the update after the test and the pre-update read never
-  // arises, so the rows would be more ordinary loops on those toolchains rather than coverage.
+  // The others are booked on agbcc only, whose rotation they were written against. The read is not
+  // ARM's alone: kmc and mwcc reach it on several of the same C sources, as `preupdate_exit_div`
+  // does on both.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',

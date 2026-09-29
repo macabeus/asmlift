@@ -598,9 +598,9 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   // memoized per value so one walk serves every slot. The walk stops DESCENDING at an
   // order-sensitive def: under a call or a memory read the value renders at that op's own position,
   // never at this edge. It crosses a trapping divide, which renders inline at the copy site with its
-  // operands — unless the asm called a helper for it and `analyze`'s helper clause names it at its
-  // def, which this walk runs before, so its operands are counted at the copy site anyway: an extra
-  // render, which costs a candidate that homes a value rendered once. The stopping op is still
+  // operands. `analyze` names some divides at their def (the helper clause, the pre-update exit
+  // rule), after this walk, so their operands still count as rendered here: an extra render, which
+  // costs a candidate that homes a value rendered once. The stopping op is still
   // recorded, so a membership test over the cone sees it.
   const coneCache = new Map<Value, Set<Value>>();
   const coneOf = (root: Value): Set<Value> => {

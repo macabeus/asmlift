@@ -8,7 +8,8 @@
 // (structure/analysis.ts, the helper clause) places a stamped op as the call it was: named at its
 // def when an effect or another named helper op lies between it and a render position, when it
 // renders outside its block or rides a branch's edge copy, or when it sits in a `&&`/`||` guarded
-// cone. A divide the ISA computes carries no stamp and renders at its use.
+// cone. A divide the ISA computes carries no stamp and renders at its use, save where a loop exits
+// with it (loop-preupdate-sink.test.ts).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
