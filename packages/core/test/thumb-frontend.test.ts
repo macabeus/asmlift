@@ -2393,6 +2393,32 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos)).toThrow(
         'handed to a device a later store through an unresolved pointer may re-arm, which may read the slot at [sp,#4]',
       );
+      // …and so is a pointer that is this frame's on only SOME paths: `p = cnt ? cnt : &o;
+      // *p = 0x84000002` may be the control halfword. Hand-written — the `pube` shape with that
+      // phi before the transfer; [sp,#4] is the object the device reads, [sp,#8] a slot, [sp,#0xc]
+      // `o` — and it assembles with GNU as.
+      const phiRearm = (pick: string) =>
+        'e9:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        pick +
+        '\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n' +
+        '\tbl\tfive\n\tstr\tr4, [sp, #0x4]\n\tstr\tr5, [sp, #0x8]\n\tldr\tr0, .L6\n\tadd\tr1, sp, #0x4\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr0, .L6+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L6+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L6+0x10\n\tstr\tr0, [r6]\n\tadd\tsp, sp, #0x10\n' +
+        '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x40000d4\n' +
+        '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7affffff\n\t.word\t-0x7bfffffe\n';
+      const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
+      expect(() =>
+        decompile(
+          'e9',
+          phiRearm('\tadd\tr6, r2, #0\n\tcmp\tr6, #0\n\tbne\t.L1\n\tadd\tr6, sp, #0xc\n.L1:\n'),
+          ARMV4T_AGBCC,
+          five,
+        ),
+      ).toThrow(/address-taken stack local — the captured address escapes, so something outside this function reaches/);
+      // CONTROL: `o` on every path is this frame's own store, which re-arms nothing
+      expect(decompile('e9', phiRearm('\tadd\tr6, sp, #0xc\n'), ARMV4T_AGBCC, five).source).toContain(
+        'volatile u32 sp4;',
+      );
     });
 
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it

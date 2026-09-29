@@ -349,6 +349,10 @@ export function auditFrameObjects({
       const at = base === undefined ? undefined : base + (op.attrs.off as number);
       return at !== undefined && readOnlySinks.has(at) ? at : undefined;
     };
+    const constOfValue = (v: Value): number | undefined => {
+      const d = defOf.get(v);
+      return d?.opcode === 'const' ? (d.attrs.value as number) : undefined;
+    };
     const fail = (why: string): never => {
       throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
     };
@@ -511,6 +515,54 @@ export function auditFrameObjects({
               taint.set(param, from);
               changed = true;
             });
+          }
+        }
+      }
+    }
+    // …and the values that hold a frame address on EVERY path, where `taint` answers "on some
+    // path": a `laddr`, a phi whose every incoming value is one, or one of those moved by a
+    // constant. `p = cnt ? cnt : &o` is tainted and not in here: it may be `cnt`, which may be
+    // anything, and reading it as this frame is how a store through it goes unseen.
+    const frameOnEveryPath = new Set<Value>(taint.keys());
+    {
+      const incoming = new Map<Value, Value[]>();
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          if (
+            op.opcode === 'add' &&
+            op.operands.length === 2 &&
+            op.operands.some((v) => constOfValue(v) !== undefined)
+          ) {
+            frameOnEveryPath.add(op.results[0]);
+          }
+          for (const s of op.successors ?? []) {
+            s.args.forEach((arg, i) => {
+              const param = s.block.params[i];
+              if (param !== undefined) {
+                (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(arg);
+              }
+            });
+          }
+        }
+      }
+      const objectValues = new Set([...objects.values()].flat().map((op) => op.results[0]));
+      const holdsFrame = (v: Value): boolean => {
+        const d = defOf.get(v);
+        if (objectValues.has(v)) {
+          return true;
+        }
+        if (d?.opcode === 'add') {
+          return d.operands.some((x) => constOfValue(x) === undefined && frameOnEveryPath.has(x));
+        }
+        const ins = incoming.get(v);
+        return d === undefined && ins !== undefined && ins.every((a) => frameOnEveryPath.has(a));
+      };
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const v of frameOnEveryPath) {
+          if (!holdsFrame(v)) {
+            frameOnEveryPath.delete(v);
+            changed = true;
           }
         }
       }
@@ -964,8 +1016,9 @@ export function auditFrameObjects({
     // address until a later word store to the same source register replaces it, so the control
     // stores that bound it are the ones reachable in between. Each has to be a literal the target
     // decodes. A call on that path may re-arm the channel with a control this function never
-    // wrote, and a store through a pointer this cannot resolve may BE the control halfword, so
-    // either leaves the read unbounded — as does a transfer never armed here at all. An unbounded
+    // wrote, and a store through a pointer this cannot resolve — one that is this frame's on only
+    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so either leaves the
+    // read unbounded — as does a transfer never armed here at all. An unbounded
     // device read says which of those it met (`why`): each is a different capability to build.
     const at = new Map<Op, { blk: Block; i: number }>();
     for (const blk of irBlocks) {
@@ -997,7 +1050,7 @@ export function auditFrameObjects({
             }
             const base = literalAddrOf(op.operands[0]);
             if (base === undefined) {
-              if (taint.get(op.operands[0]) === undefined) {
+              if (!frameOnEveryPath.has(op.operands[0])) {
                 return unbounded('a later store through an unresolved pointer may re-arm');
               }
               continue;
