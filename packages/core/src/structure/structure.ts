@@ -54,6 +54,7 @@ import {
   exprEquals,
   exprHasEffect,
   gapReasonFor,
+  isLoop,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
@@ -6209,15 +6210,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       .reduce<Block | null>((best, x) => (best === null || pdom.get(x)!.size > pdom.get(best)!.size ? x : best), null);
   };
 
+  // A `break` of the loop whose body `ss` is — not of a loop or `switch` inside it.
+  const breaksOut = (ss: Stmt[]): boolean =>
+    ss.some((s) => s.k === 'break' || (!isLoop(s) && s.k !== 'switch' && breaksOut(stmtChildren(s))));
   // `while (1) { body }`: the header structured as an ordinary block up to itself (its do-while-style
   // hook masked via dwActive), under a frame whose breaks leave for `exit`, which renders after it.
+  // Where no edge out rendered as a `break` — each one an early `return`, the exit's tail copied
+  // into it — nothing reaches the end of the loop, and the exit rendered after it would be a dead
+  // second copy of that tail.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
     const body = withLoop({ header: fl.header, exit: fl.exit, body: fl.body, arms: fl.arms, breaks: fl.breaks }, () =>
       structureBlock(fl.header, fl.header),
     );
     dwActive.delete(fl.header);
-    return [{ k: 'while', cond: { k: 'const', value: 1 }, body }, ...structureRegion(fl.exit, stop)];
+    return [
+      { k: 'while', cond: { k: 'const', value: 1 }, body },
+      ...(breaksOut(body) ? structureRegion(fl.exit, stop) : []),
+    ];
   };
 
   // The latch back-edge substitution (do-while) — subFor over the latch's back-edge args.

@@ -255,6 +255,33 @@ const MID_CLOBBER = `fn midclob {
   ret %9
 }`;
 
+/** The one edge out ends in a `return` tail with a call in it, which the body spells as an early
+ *  `return`: `i = 1; while (1) { i = k(i, a0); if (9 < i) return f(i) + i; if (i == a1) h(i);
+ *  else h(a0); }`. Nothing reaches the end of the loop. */
+const RETURN_TAIL = `fn rettail {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=1}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = call %3, %0 {target="k"}
+  %5: s32 = const {value=9}
+  %6: u32 = icmp_slt %5, %4
+  cond_br %6, ^bb3(), ^bb2()
+^bb2():
+  %7: u32 = icmp_eq %4, %1
+  cond_br %7, ^bb4(), ^bb5()
+^bb4():
+  %8: s32 = call %4 {target="h"}
+  br ^bb1(%4)
+^bb5():
+  %9: s32 = call %0 {target="h"}
+  br ^bb1(%4)
+^bb3():
+  %10: s32 = call %4 {target="f"}
+  %11: s32 = add %10, %4
+  ret %11
+}`;
+
 /** A header that is its own latch beside one other, unconditional latch: `sharedHeaderNest` splits
  *  it, and no `do-while` has that latch for a bottom test. `for (;;) { i++; t = f(i); if (t == a0)
  *  continue; h(t); if (g(t) < a1) { h(i); continue; } break; } return i;` */
@@ -356,6 +383,14 @@ test('one latch whose value the header computes before its last read of the para
   const { judged: runs, disagree } = r.agreement;
   expect(disagree).toBe(0);
   expect(runs).toBeGreaterThan(100);
+});
+
+test('a loop whose only way out is an early `return` renders nothing after it', () => {
+  const r = judged(RETURN_TAIL);
+  expect(r.src.match(/f\(/g)).toHaveLength(1);
+  expect(r.src).toMatch(/\n    }\n}\n$/);
+  expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
 
 test('a nest with no bottom test is left to `while (1)`', () => {
