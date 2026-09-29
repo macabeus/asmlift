@@ -1649,6 +1649,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ).toThrow('the captured address at [sp,#0) reaches a phi and is then moved by a constant');
     });
 
+    // …but a phi that merges the capture with a PARAMETER steps nothing: agbcc's own output for
+    // `u32 known(struct Info *info, u32 i){ struct Info local; if (!info) { info = &local;
+    // ReadInfo(info); } return info->bits[i]; }` (FE7J's `GGM_IsCharacterKnown` shape).
+    test('a capture merged with a parameter and then moved is refused as the merge', () => {
+      const merged =
+        'known:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x48\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tcmp\tr4, #0\n\tbne\t.L3\n\tmov\tr4, sp\n\tmov\tr0, sp\n\tbl\tReadInfo\n.L3:\n\tadd\tr0, r4, #0\n' +
+        '\tadd\tr0, r0, #0x40\n\tadd\tr0, r0, r5\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x48\n\tpop\t{r4, r5}\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() =>
+        decompile('known', merged, ARMV4T_AGBCC, { prototypes: { ReadInfo: { params: 1, returnsVoid: true } } }),
+      ).toThrow(
+        'the captured address at [sp,#0) reaches a phi that merges it with a pointer from outside the frame, and is then moved by a constant',
+      );
+    });
+
     // …and a READ of the capture between two moves does not end the walk: sa3's `sub_8068E5C`
     // addresses through a capture and then moves it (`mov r2, sp / adds r2, #5 / strb r0, [r2] /
     // … / adds r2, #2`). The move after the store is the capture at the sum, as the direct spelling

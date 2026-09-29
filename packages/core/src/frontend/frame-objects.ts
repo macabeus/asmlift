@@ -701,8 +701,17 @@ export function auditFrameObjects({
             indexedAccess(off, op.results[0]);
             return;
           }
-          // A CONSTANT move left after the fold above moves a capture a phi carried: a pointer
-          // stepped through the frame, which names a different object on each trip.
+          // A CONSTANT move left after the fold above moves a capture a phi carried. When the phi
+          // also carries a pointer from outside the frame — `if (!info) info = &local; info->x` —
+          // the missing capability is that merge, not a walk through the frame.
+          if (other !== undefined && defOf.get(other)?.opcode === 'const' && !frameOnEveryPath.has(v)) {
+            fail(
+              `the captured address at [sp,#${off}) reaches a phi that merges it with a pointer from outside the ` +
+                'frame, and is then moved by a constant — a field of what may or may not be a local is not modelled',
+            );
+          }
+          // …and when every value the phi carries is this frame's, it is a pointer stepped through
+          // the frame, which names a different object on each trip.
           if (other !== undefined && defOf.get(other)?.opcode === 'const') {
             fail(
               `the captured address at [sp,#${off}) reaches a phi and is then moved by a constant — ` +
