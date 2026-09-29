@@ -28,9 +28,7 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {
     const d = defs.get(v);
-    return d?.opcode === 'gaddr' && d.attrs.code !== true && !fn.localObjects?.has(d.attrs.sym as string)
-      ? (d.attrs.sym as string)
-      : null;
+    return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
   };
   const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
   const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
@@ -169,9 +167,6 @@ export type RefusedDeclarationReason =
  *  could put straight back. Every refusal is decided once, over the collector's output, in
  *  `refsOf` (see `RefusedDeclarationReason`).
  *
- *  A function-scope static the function DEFINES (`Fn.localObjects`) is not among them: its
- *  definition is in the emitted body, and a declaration beside it would be a second object.
- *
  *  A declaration built from this half is a HYPOTHESIS, and where `bareGlobalAccessFacts` gives it
  *  a width that width came out of the asm the candidate is scored against. The marker is
  *  `SymbolRef.synthesized`; the argument, and its price against the vendored maps, is declare.ts's
@@ -180,7 +175,7 @@ export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
   const out = new Map<string, SymbolInfo>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string' && !fn.localObjects?.has(op.attrs.sym)) {
+      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
         out.set(op.attrs.sym, { name: op.attrs.sym, kind: 'data' });
       }
     }

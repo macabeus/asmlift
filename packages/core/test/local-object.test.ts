@@ -46,6 +46,7 @@ import {
   readObjectLocalObject,
 } from '../src/frontend/local-object';
 import { decompile } from '../src/pipeline';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
@@ -287,7 +288,7 @@ test('a static sharing its name with a global the function names declines — th
     ['tide.3', 'tide'],
   );
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
-    "names a function-scope static ('tide.3') whose source name 'tide' is also a global this function names",
+    "names a function-scope static ('tide.3') whose source name 'tide' is also a global this one names",
   );
 });
 
@@ -360,5 +361,29 @@ test('a static named like a function this one calls declines', () => {
   const asm = thumbFn(rodata('g.3', [1, 2]), '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tg\n\tpop\t{r0}', ['g.3']);
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
     "names a function-scope static ('g.3') whose source name 'g' is also a function this one names",
+  );
+});
+
+test('the IR names a static by its linker name, so a map global of its source name stays another object', () => {
+  // agbcc over `extern u32 gBase; void f(void) { static const u8 tide[4] = {1,2,3,4}; use(tide);
+  // *(u32 *)((u8 *)&gBase + 4) = 7; gBase = 3; }`, with a map that puts a global `tide` at gBase+4:
+  // raise/offsetnames.ts names that store `tide`, the map's, which is not the static
+  const asm = thumbFn(
+    rodata('tide.3', [1, 2, 3, 4]),
+    [
+      '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tldr\tr0, .L3+0x4\n\tmov\tr1, #0x7\n\tstr\tr1, [r0]',
+      '\tsub\tr0, r0, #0x4\n\tmov\tr1, #0x3\n\tstr\tr1, [r0]\n\tpop\t{r0}',
+    ].join('\n'),
+    ['tide.3', 'gBase+0x4'],
+  );
+  const plain = decompile('f', asm, ARMV4T_AGBCC);
+  expect(plain.ir.raw).toContain('gaddr {sym="tide.3"}');
+  expect(plain.source).toContain('    static const u8 tide[4] = { 1, 2, 3, 4 };\n    use(tide);\n');
+  const symbols: SymbolMap = new Map([
+    [0x03000000, [{ name: 'gBase', kind: 'data', size: 4, shape: 'scalar' }]],
+    [0x03000004, [{ name: 'tide', kind: 'data', size: 4, shape: 'scalar' }]],
+  ]);
+  expect(() => decompile('f', asm, ARMV4T_AGBCC, { symbols })).toThrow(
+    "names a function-scope static ('tide.3') whose source name 'tide' is also a global this one names",
   );
 });

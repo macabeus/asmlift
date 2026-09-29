@@ -3391,11 +3391,9 @@ export function lift(
       : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
-  const statics = makeLocalStatics((symbol, why) => {
-    throw new FrontendUnsupportedError(`cannot lift '${name}': names a function-scope static ('${symbol}') ${why}`);
-  });
-  /** The source name of a function-scope static a pool word names, its definition read out of this
-   *  same asm — or a decline naming why there is none, or why it is not this function's alone. */
+  const statics = makeLocalStatics();
+  /** A function-scope static a pool word names, its definition read out of this same asm and
+   *  recorded — or a decline naming why there is none, or why it is not this function's alone. */
   const localStatic = (symbol: string): string => {
     const read = readGasLocalObject(asm, symbol);
     if ('refused' in read) {
@@ -5026,11 +5024,8 @@ export function lift(
           // path below, which would materialise the pool label as a phantom pointer parameter.
           if (ins.mnemonic === 'ldr' && b !== undefined) {
             const ref = poolRef(b, dataWords, nonWordData);
-            if (ref?.kind === 'gaddr') {
-              statics.plain(ref.sym);
-            }
             // A function-scope static is the address of an object this function DEFINES: the
-            // `gaddr` below under its source name, with the definition recorded beside the Fn.
+            // `gaddr` below under its linker name, with the definition recorded beside the Fn.
             const pr: PoolRef | null =
               ref?.kind === 'local-static' ? { kind: 'gaddr', sym: localStatic(ref.symbol), addend: ref.addend } : ref;
             if (pr?.kind === 'const') {
@@ -5055,7 +5050,6 @@ export function lift(
               const found = symbols ? lookupSymbol(symbols, pr.value) : null;
               const si = found && (!poolNamesSymbols || found.macroBody !== undefined) ? found : null;
               if (si) {
-                statics.plain(si.name);
                 const res = mkValue(T.unk(32));
                 irb.ops.push(
                   mkOp('gaddr', {
@@ -5074,7 +5068,6 @@ export function lift(
               // relocated — so the veto applies to it without the macro exemption above.
               const interior = symbols && !poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
               if (interior) {
-                statics.plain(interior.info.name);
                 const g = mkValue(T.unk(32));
                 const k = mkValue(T.unk(32));
                 const res = mkValue(T.unk(32));

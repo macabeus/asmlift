@@ -406,47 +406,20 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
 
 /** The statics one lift names, gathered as the frontend meets them. */
 export interface LocalStatics {
-  /** Record a static this function names, and answer the name its source wrote. */
+  /** Record a static this function names, and answer the name the IR calls it by: its linker name,
+   *  which no C identifier and no declared symbol can equal. */
   define(obj: LocalObject): string;
-  /** Record a global this function names that is not one of its statics. */
-  plain(sym: string): void;
-  /** Every static, once every name is in, or undefined for none. */
+  /** Every static, or undefined for none. */
   finish(): LocalObjects | undefined;
 }
 
-/** The registry a frontend collects its statics in. It refuses, through `fail` (the static's linker
- *  name and the sentence's tail), the two ways a block-scope definition would misname an object:
- *  two statics sharing a source name (inlined scopes each declaring an `n`), and a static sharing
- *  its name with a global the same function names, which the static would hide. */
-export function makeLocalStatics(fail: (symbol: string, why: string) => never): LocalStatics {
-  const byName = new Map<string, LocalObject>();
-  const plain = new Set<string>();
+export function makeLocalStatics(): LocalStatics {
+  const bySymbol = new Map<string, LocalObject>();
   return {
     define(obj) {
-      const seen = byName.get(obj.name);
-      if (seen !== undefined && seen.symbol !== obj.symbol) {
-        fail(
-          obj.symbol,
-          `whose source name '${obj.name}' another static here ('${seen.symbol}') also has — one block ` +
-            `cannot declare both`,
-        );
-      }
-      byName.set(obj.name, obj);
-      return obj.name;
+      bySymbol.set(obj.symbol, obj);
+      return obj.symbol;
     },
-    plain(sym) {
-      plain.add(sym);
-    },
-    finish() {
-      for (const obj of byName.values()) {
-        if (plain.has(obj.name)) {
-          fail(
-            obj.symbol,
-            `whose source name '${obj.name}' is also a global this function names — the static would hide it`,
-          );
-        }
-      }
-      return byName.size > 0 ? byName : undefined;
-    },
+    finish: () => (bySymbol.size > 0 ? bySymbol : undefined),
   };
 }

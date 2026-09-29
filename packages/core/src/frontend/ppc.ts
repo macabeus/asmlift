@@ -499,16 +499,14 @@ export function lift(
    *  `R_PPC_EMB_SDA21` is `a0 & 0`). An UNmodelled instruction refuses earlier and for a better
    *  reason: `lfs`/`lfd` under either relocation name the float gap, not this one. */
   let relocTaken = false;
-  const statics = makeLocalStatics((symbol, why) => {
-    throw new PpcUnsupportedError(`cannot lift '${name}': names a function-scope static ('${symbol}') ${why}`);
-  });
+  const statics = makeLocalStatics();
   /** The symbol a relocation names, once the naming policy has passed it. Every recovery below goes
    *  through here FIRST, so an unspellable name can never reach the declaration minter looking like
    *  an ordinary identifier — recovering the address is only half of being able to write it down.
    *
    *  A function-scope static is the one kind no `extern` can name that a lift can still WRITE: the
-   *  function defines it, so the name returned is the source's, and the definition, read out of the
-   *  side table, is recorded beside the Fn. */
+   *  function defines it, so its definition, read out of the side table, is recorded beside the Fn
+   *  under the linker name the IR keeps, and structure spells it by its source name. */
   const spellableSym = (ins: Instr): string => {
     relocTaken = true;
     const sym = ins.reloc?.sym ?? '';
@@ -525,7 +523,6 @@ export function lift(
     if (why) {
       throw new PpcUnsupportedError(`${relocSite(ins)} ${why}`);
     }
-    statics.plain(sym);
     return sym;
   };
   const relocPlaceholder = (ins: Instr): never => {
@@ -960,14 +957,8 @@ export function lift(
       }
       // The per-ISA rest of the match: PowerPC is RELA, so the two records must agree on the addend
       // as well as the symbol — two `@ha`/`@l` pairs into the same array at different offsets are
-      // different addresses. The symbol is compared as SPELLED, which is how the `@ha` recorded it.
-      const hi = highHalves.pair(
-        relocSite(ins),
-        rHi,
-        readVar(rHi, bi),
-        spellableSym(ins),
-        (h) => h.addend === lo.addend,
-      );
+      // different addresses.
+      const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
       return emitGaddr(hi.sym);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {

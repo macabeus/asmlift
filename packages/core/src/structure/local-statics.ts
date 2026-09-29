@@ -18,15 +18,30 @@
 //
 // The definition is a SymbolInfo as well as a declaration, because the structurer spells an access
 // through a symbol's declared shape (`tide[i]` for an array, the bare `q` for a scalar): the shape
-// it spells against and the object the backend defines are one reading of the same facts.
+// it spells against and the object the backend defines are one reading of the same facts. Both are
+// keyed by the LINKER name the IR carries (`tide.3`), and the finished tree is renamed to the
+// source's (`tide`) in one step, `nameLocalStatics`, which is where a clash between that name and
+// anything else the function names can first be seen whole.
 //
 // REFUSES, naming the static, when nothing in the definition settles the width and the accesses
 // disagree on it, when the width does not divide the size, when the loads and the definition
-// disagree on the signedness, when the definition is aligned narrower than its elements, or when a
-// callee carries the static's name (the block-scope static would hide the function in the call).
-import { type Fn, type LocalObject, type Op, type Value, defOpMap } from '../ir/core';
+// disagree on the signedness, when the definition is aligned narrower than its elements; and, at
+// the rename, when two statics share a source name (one block cannot declare both) or when the
+// function names anything else by it — a global, a callee, a parameter, a local, itself — which the
+// block-scope static would hide.
+import { type Fn, type LocalObject, type LocalObjects, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, T } from '../ir/types';
-import type { SStatic } from '../l3/ast';
+import {
+  type Expr,
+  type SFn,
+  type SStatic,
+  type Stmt,
+  mapExprChildren,
+  mapStmtExprs,
+  mapStmtLists,
+  walkExprs,
+} from '../l3/ast';
+import { takenNames } from '../l3/hoist';
 import { type SymbolInfo, accessSignedness } from '../symbols';
 
 /** Each static's shape for the structurer, and its definition for the backend. */
@@ -124,18 +139,12 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
   if (objs === undefined) {
     return { infos, statics };
   }
-  const callees = new Set(
-    fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'call').map((op) => op.attrs.target as string)),
-  );
   const access = accessesOf(fn, new Set(objs.keys()));
   // Declared in the target's declaration order, which the compiler lays the objects out by (mwcc
   // even reverses it in .sbss): the candidate's compiler then places each where the target has it.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
-    if (callees.has(obj.name) || obj.name === fn.name) {
-      return say(`whose source name '${obj.name}' is also a function this one names — the static would hide it`);
-    }
-    const accesses = access.get(obj.name) ?? [];
+    const accesses = access.get(obj.symbol) ?? [];
     const dir = obj.directives;
     let width: number;
     if (dir?.unit !== undefined) {
@@ -175,8 +184,8 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     const scalar = count === 1 && !(obj.section === 'data' && init!.every((v) => v === 0));
     const type: IrType = scalar ? elem : T.array(elem, count);
     const isConst = obj.section === 'rodata';
-    infos.set(obj.name, {
-      name: obj.name,
+    infos.set(obj.symbol, {
+      name: obj.symbol,
       kind: 'data',
       size: obj.size,
       ...(scalar
@@ -193,4 +202,61 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     });
   }
   return { infos, statics };
+}
+
+/** `sfn` with each static's linker name replaced by its source name — every reference, assignment
+ *  targets and the typed-global list included — or the refusal. The tree is final here, so what the
+ *  source name would collide with is all in it: every name its body mentions, callees included,
+ *  plus its parameters, locals and own name. */
+export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: string; refused: string } {
+  const taken = takenNames(sfn);
+  for (const g of sfn.globals ?? []) {
+    taken.add(g.name);
+  }
+  const bound = new Set([...sfn.params, ...sfn.locals].map((x) => x.name));
+  const callees = new Set<string>([sfn.name]);
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'call') {
+      callees.add(e.fn);
+    }
+  }
+  const rename = new Map<string, string>();
+  const bySource = new Map<string, string>();
+  for (const obj of objs.values()) {
+    const say = (why: string) => ({ symbol: obj.symbol, refused: `whose source name '${obj.name}' ${why}` });
+    const other = bySource.get(obj.name);
+    if (other !== undefined) {
+      return say(`another static here ('${other}') also has — one block cannot declare both`);
+    }
+    if (callees.has(obj.name) || taken.has(obj.name)) {
+      const what = callees.has(obj.name) ? 'a function' : bound.has(obj.name) ? 'a parameter or local' : 'a global';
+      return say(`is also ${what} this one names — the static would hide it`);
+    }
+    bySource.set(obj.name, obj.symbol);
+    rename.set(obj.symbol, obj.name);
+  }
+  const expr = (e: Expr): Expr => {
+    const r = mapExprChildren(e, expr);
+    return (r.k === 'var' || r.k === 'addr' || r.k === 'postincr') && rename.has(r.name)
+      ? { ...r, name: rename.get(r.name)! }
+      : r;
+  };
+  const assigns = (s: Stmt): Stmt => {
+    const r = mapStmtLists(s, (list) => list.map(assigns));
+    if (r.k === 'for') {
+      return { ...r, init: assigns(r.init), inc: assigns(r.inc) };
+    }
+    return r.k === 'assign' && rename.has(r.name) ? { ...r, name: rename.get(r.name)! } : r;
+  };
+  return {
+    ...sfn,
+    body: sfn.body.map((s) => assigns(mapStmtExprs(s, expr))),
+    ...(sfn.globals
+      ? {
+          globals: sfn.globals
+            .map((g) => ({ ...g, name: rename.get(g.name) ?? g.name }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        }
+      : {}),
+  };
 }

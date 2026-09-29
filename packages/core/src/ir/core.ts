@@ -98,10 +98,13 @@ export interface LocalObjectDirectives {
   negative: boolean;
 }
 
-/** The function-scope statics a function DEFINES, keyed by {@link LocalObject.name} — the object a
- *  `gaddr` of that name denotes. A `gaddr` names a symbol some declaration elsewhere describes;
- *  these have none, because the source defined them inside the function, so the definition
- *  travels with the function to the emitter, which writes it in the body (structure/local-statics.ts). */
+/** The function-scope statics a function DEFINES, keyed by {@link LocalObject.symbol} — the object a
+ *  `gaddr` of that name denotes. The IR keeps the linker name because it carries a `.` or `$` that
+ *  no C identifier and no declared symbol has, so a static can never be one name with a global of
+ *  its source name (a symbol map's `tide` beside `tide.3`); structure spells it by its source name.
+ *  A `gaddr` names a symbol some declaration elsewhere describes; these have none, because the
+ *  source defined them inside the function, so the definition travels with the function to the
+ *  emitter, which writes it in the body (structure/local-statics.ts). */
 export type LocalObjects = ReadonlyMap<string, LocalObject>;
 
 /** What the machine's own object shows about each ENTRY PARAMETER, beyond the value graph — two

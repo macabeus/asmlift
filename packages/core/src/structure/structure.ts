@@ -104,7 +104,7 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from './hazards';
-import { localStaticShapes } from './local-statics';
+import { localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { testRereadsOnly } from './redundant-test';
@@ -2080,8 +2080,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // of symbols — copying it per structuring is work proportional to the project, and a ranked run
   // structures one function thousands of times (the same argument the `laddr` name minter makes).
   //
-  // A function-scope static comes FIRST: it is this function's own definition, and a project
-  // global of the same name elsewhere is a different object the static hides.
+  // A function-scope static is asked by its linker name, which no map holds, and comes FIRST: its
+  // shape is its definition's, never the one raise/globalshape.ts infers from its accesses.
   const localStatics = localStaticShapes(fn);
   if ('refused' in localStatics) {
     throw new StructureError(
@@ -6731,7 +6731,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     lastLaddrOf.set(laddrName.get(op)!, op);
   }
   const structs = collectStructs(fn);
-  return {
+  const tree: SFn = {
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
     locals: [
@@ -6819,6 +6819,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
     ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
   };
+  if (fn.localObjects === undefined) {
+    return tree;
+  }
+  const named = nameLocalStatics(tree, fn.localObjects);
+  if ('refused' in named) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': names a function-scope static ('${named.symbol}') ${named.refused}`,
+    );
+  }
+  return named;
 }
 
 /** Of the declared callees' parameter types, the ones this body calls — every tree the ranked pass
