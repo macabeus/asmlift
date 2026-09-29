@@ -52,7 +52,7 @@ export type RelocSymbolKind =
 /** `ident$N` (mwcc) or `ident.N` (gcc, and so agbcc): a static declared inside a function, whose
  *  SOURCE name is `ident`. Anchored whole, one numeric suffix: see the ordering note in
  *  {@link classifyRelocSymbol}. */
-const LOCAL_STATIC = /^([A-Za-z_][A-Za-z0-9_]*)[.$]\d+$/;
+const LOCAL_STATIC = /^([A-Za-z_][A-Za-z0-9_]*)[.$](\d+)$/;
 
 /** Classify a relocation's symbol by its spelling. Order matters twice over. The shapes that ARE
  *  valid C identifiers (`__vt__…`, a mangled class-scoped name) or contain characters a C
@@ -157,9 +157,19 @@ export function unspellableReason(sym: string): string | null {
   }
 }
 
-/** The name a source wrote for a function-scope static — the linker name without the counter the
- *  compiler appended (`tide.3` → `tide`, `sprHideTbl$797` → `sprHideTbl`) — or null for a name of
- *  any other kind, a static of an inlined function among them. */
-export function localStaticSourceName(sym: string): string | null {
-  return classifyRelocSymbol(sym) === 'local-static' ? sym.match(LOCAL_STATIC)![1] : null;
+/** A function-scope static's linker name taken apart: the name the source wrote, and the counter
+ *  the compiler appended (`tide.3` → `tide`, 3; `sprHideTbl$797` → `sprHideTbl`, 797) — or null
+ *  for a name of any other kind, a static of an inlined function among them.
+ *
+ *  The counter is file-wide and counts DECLARATIONS, so within one function it is the order the
+ *  source declared its statics in. agbcc names and emits each static in one call, made while it
+ *  parses the declaration (toplev.c:2515-2529 `rest_of_decl_compilation`: varasm.c:690-698
+ *  `make_decl_rtl` takes `var_labelno++`, then `assemble_variable` writes the data); mwcc numbers
+ *  `z$4 a$5` in declaration order whatever order the code first reads them in (compiled). */
+export function localStaticName(sym: string): { name: string; counter: number } | null {
+  if (classifyRelocSymbol(sym) !== 'local-static') {
+    return null;
+  }
+  const m = sym.match(LOCAL_STATIC)!;
+  return { name: m[1], counter: Number(m[2]) };
 }

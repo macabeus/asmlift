@@ -3,7 +3,7 @@
 // `R_PPC_ADDR16_*` / `R_PPC_EMB_SDA21` line in a benchmark row's own objdump listing.
 import { expect, test } from 'vitest';
 
-import { classifyRelocSymbol, localStaticSourceName, unspellableReason } from '../src/frontend/reloc-symbol';
+import { classifyRelocSymbol, localStaticName, unspellableReason } from '../src/frontend/reloc-symbol';
 
 test('every corpus spelling classifies as the kind the policy names', () => {
   const corpus: [string, string][] = [
@@ -115,17 +115,17 @@ test("a static of an inlined function is its own kind, and is never read as this
   // function name may be mangled (`sqrtf__Ff` under C++). Read as `local-static`, its prefix would
   // be re-declared inside a function that only CALLED the inline one.
   expect(unspellableReason('_half$localstatic3$sqrtf')).toMatch(/of an inlined function/);
-  expect(localStaticSourceName('_half$localstatic3$sqrtf')).toBeNull();
-  expect(localStaticSourceName('_three$localstatic4$sqrtf__Ff')).toBeNull();
+  expect(localStaticName('_half$localstatic3$sqrtf')).toBeNull();
+  expect(localStaticName('_three$localstatic4$sqrtf__Ff')).toBeNull();
 });
 
-test('the source name of a function-scope static is the linker name without its counter', () => {
-  expect(localStaticSourceName('tide.3')).toBe('tide');
-  expect(localStaticSourceName('sprHideTbl$797')).toBe('sprHideTbl');
-  expect(localStaticSourceName('t_seiyo_days_tbl$32')).toBe('t_seiyo_days_tbl');
+test('a function-scope static is its source name and the counter the compiler appended', () => {
+  expect(localStaticName('tide.3')).toEqual({ name: 'tide', counter: 3 });
+  expect(localStaticName('sprHideTbl$797')).toEqual({ name: 'sprHideTbl', counter: 797 });
+  expect(localStaticName('t_seiyo_days_tbl$32')).toEqual({ name: 't_seiyo_days_tbl', counter: 32 });
   // every other kind answers null, a `$` name that is not `ident$N` included
   for (const sym of ['gFoo', '@193', '...bss.0', '__vt__6System.1', 'foo.isra.0', '$L1', 'a$b$3']) {
-    expect(localStaticSourceName(sym), sym).toBeNull();
+    expect(localStaticName(sym), sym).toBeNull();
   }
   expect(classifyRelocSymbol('$L1')).toBe('not-an-identifier');
 });

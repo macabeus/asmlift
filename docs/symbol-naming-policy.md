@@ -45,15 +45,17 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   what the target carries (`frontend/local-object.ts`): the section gives the qualifier and whether
   there is an initializer (`.rodata` → `static const`, `.data` → `static` with one, bss → `static`
   without), the size gives the extent, the bytes give the initializer, and the function's own
-  accesses give the element type (`structure/local-statics.ts`). The counter is left to the
-  candidate's compiler, and it does not matter whether it lands on the target's: agbcc's
-  assembler reduces the relocation to `.rodata`+offset, so the name never reaches the object, and
-  objdiff at its defaults does not compare a local symbol's name (a candidate whose static is
-  `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`). The same measurement means
-  **no score checks the definition**: a wrong initializer, a wrong name and a wrong offset all
-  MATCH, and only the section and the local linkage are scored — so the matching suite compares
-  the candidate's data sections with the target's byte for byte
-  (`packages/cli/test/matching/local-statics.test.ts`).
+  accesses give the element type (`structure/local-statics.ts`). The counter's VALUE is left to
+  the candidate's compiler: agbcc's assembler reduces the relocation to `.rodata`+offset, so the
+  name never reaches the object, and objdiff at its defaults does not compare a local symbol's name
+  (a candidate whose static is `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`).
+  Its ORDER is not left to anyone: both compilers count declarations, so the counters of one
+  function's statics record the order the source declared them in, which is the order the
+  compiler lays them out by — and the lift declares them in that order. The same measurement
+  means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
+  wrong alignment all MATCH, and only the section and the local linkage are scored — so the
+  matching suite compares the candidate's data sections with the target's byte for byte, with
+  their alignment (`packages/cli/test/matching/local-statics.test.ts`).
 
   The definition is refused when the target does not carry it, when a relocation falls inside it
   (an initializer holding an address), when its extent cannot be read, and when another function

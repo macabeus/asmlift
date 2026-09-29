@@ -57,6 +57,7 @@ test('agbcc: an unsized initialized static is the data run under its label', () 
   expect(readGasLocalObject(agbcc, 'tide.3')).toEqual({
     name: 'tide',
     symbol: 'tide.3',
+    order: 3,
     section: 'rodata',
     size: 3,
     bytes: Uint8Array.from([1, 2, 3]),
@@ -74,6 +75,7 @@ test('agbcc: a static with no initializer is `.lcomm`, bss, at its exact size', 
   expect(readGasLocalObject(agbcc, 'z.11')).toEqual({
     name: 'z',
     symbol: 'z.11',
+    order: 11,
     section: 'bss',
     size: 3,
     bigEndian: false,
@@ -142,6 +144,7 @@ test('mwcc: the symbol table gives the section and size, the section contents th
   expect(readObjectLocalObject(ad, 'kt$18', 'rtab')).toEqual({
     name: 'kt',
     symbol: 'kt$18',
+    order: 18,
     section: 'rodata',
     size: 12,
     bytes: Uint8Array.from([0, 0, 0, 7, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 9]),
@@ -168,6 +171,7 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
   ).toEqual({
     name: 'last_pad_read',
     symbol: 'last_pad_read$256',
+    order: 256,
     section: 'bss',
     size: 8,
     bigEndian: true,
@@ -223,6 +227,18 @@ test('the static is defined in the body under its source name, typed by the acce
   expect(decompile('fj', agbcc, ARMV4T_AGBCC).source).toContain(
     '    static const u16 big[40] = {\n        1, 2, 0, 0, 0, 0, 0, 0,\n',
   );
+});
+
+test('statics are declared in the order their counters record, not by name', () => {
+  // the compiler lays a function's statics out in declaration order, and the counter IS that order
+  const asm = thumbFn(
+    `${rodata('zeta.3', [1, 2])}\n${rodata('alpha.4', [3, 4])}`,
+    '\tldr\tr1, .L3+0x4\n\tldrb\tr0, [r1]\n\tldr\tr1, .L3\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1',
+    ['zeta.3', 'alpha.4'],
+  );
+  const src = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(src.indexOf('zeta[2]')).toBeGreaterThan(-1);
+  expect(src.indexOf('zeta[2]')).toBeLessThan(src.indexOf('alpha[2]'));
 });
 
 test('two statics sharing a source name decline — one block cannot declare both', () => {

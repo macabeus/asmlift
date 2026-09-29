@@ -71,6 +71,9 @@ export interface LocalObject {
   name: string;
   /** the linker name the target carries (`tide.3`, `sprHideTbl$797`) */
   symbol: string;
+  /** the counter in that name, which is the order the source declared the function's statics in
+   *  (frontend/reloc-symbol.ts `localStaticName`) */
+  order: number;
   section: LocalObjectSection;
   /** bytes */
   size: number;

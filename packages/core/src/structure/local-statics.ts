@@ -95,7 +95,9 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'call').map((op) => op.attrs.target as string)),
   );
   const access = accessesOf(fn, new Set(objs.keys()));
-  for (const obj of [...objs.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+  // Declared in the target's declaration order, which the compiler lays the objects out by (mwcc
+  // even reverses it in .sbss): the candidate's compiler then places each where the target has it.
+  for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
     if (callees.has(obj.name) || obj.name === fn.name) {
       return say(`whose source name '${obj.name}' is also a function this one names — the static would hide it`);

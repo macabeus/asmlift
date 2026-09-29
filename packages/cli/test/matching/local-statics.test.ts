@@ -8,8 +8,10 @@
 // linkage are scored. So the score here says the code is right, and the section comparison is the
 // only thing that says the emitted table is.
 //
-// The sections compared are the object's whole .rodata and .data contents and its .bss size: each
-// reference below defines one function and nothing else, so they hold exactly its statics.
+// Every data section is compared, small-data ones included, with its alignment: each reference below
+// defines one function and nothing else, so its data sections hold exactly that function's statics,
+// and where one of them lands depends on the ones declared before it and on its own alignment —
+// neither of which any score checks either.
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
@@ -27,8 +29,11 @@ import { describe, expect, test } from 'vitest';
 
 import { ppcDockerGate } from './docker-gate';
 
-/** The data sections of an ELF32 object: contents for .rodata/.data, the size of .bss. */
-function dataSections(obj: string): { rodata: number[]; data: number[]; bss: number } {
+const DATA_SECTIONS = new Set(['.rodata', '.data', '.bss', '.sdata', '.sdata2', '.sbss']);
+
+/** Each data section of an ELF32 object: its alignment, and its contents (its size when it
+ *  occupies no file space). */
+function dataSections(obj: string): Record<string, { align: number; bytes: number[] | number }> {
   const b = readFileSync(obj);
   const big = b[5] === 2;
   const u16 = (o: number) => (big ? b.readUInt16BE(o) : b.readUInt16LE(o));
@@ -37,27 +42,28 @@ function dataSections(obj: string): { rodata: number[]; data: number[]; bss: num
   const shentsize = u16(0x2e);
   const shnum = u16(0x30);
   const shstr = u32(shoff + u16(0x32) * shentsize + 16);
-  const out = { rodata: [] as number[], data: [] as number[], bss: 0 };
+  const out: Record<string, { align: number; bytes: number[] | number }> = {};
   for (let i = 0; i < shnum; i++) {
     const h = shoff + i * shentsize;
     const nameAt = shstr + u32(h);
     const name = b.toString('latin1', nameAt, b.indexOf(0, nameAt));
+    if (!DATA_SECTIONS.has(name)) {
+      continue;
+    }
+    const nobits = u32(h + 4) === 8;
     const off = u32(h + 16);
     const size = u32(h + 20);
-    if (name === '.rodata' || name === '.data') {
-      out[name.slice(1) as 'rodata' | 'data'] = [...b.subarray(off, off + size)];
-    } else if (name === '.bss') {
-      out.bss = size;
-    }
+    out[name] = { align: u32(h + 32), bytes: nobits ? size : [...b.subarray(off, off + size)] };
   }
   return out;
 }
 
-/** Each case: the function, and what its static's definition must read as in the emitted C.
+/** Each case: the function, and what its statics' definitions must read as in the emitted C —
+ *  `mwccSpelled` where mwcc's object shows less of the definition than agbcc's listing does.
  *  `agbccScore` is the default candidate's objdiff score where it is not 0: the same function
  *  reading an `extern` instead of a static lifts to the same body and scores the same, so the
  *  difference is a spelling gap of the access, not of the static. */
-const CASES: { sym: string; c: string; spelled: RegExp; agbccScore?: number }[] = [
+const CASES: { sym: string; c: string; spelled: RegExp; mwccSpelled?: RegExp; agbccScore?: number }[] = [
   {
     sym: 'tidef',
     c: 's32 tidef(s32 i) { static const u8 tide[] = {1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1}; return tide[i]; }',
@@ -84,6 +90,12 @@ const CASES: { sym: string; c: string; spelled: RegExp; agbccScore?: number }[] 
     sym: 'words',
     c: 'u32 words(s32 i) { static const u32 w[2] = {0x80000000, 5}; return w[i]; }',
     spelled: /static const u32 w\[2\] = \{ 0x80000000, 5 \};/,
+  },
+  {
+    // declared zeta first and read alpha first: the declarations keep the target's order
+    sym: 'ord',
+    c: 's32 ord(s32 i) { static const u8 zeta[4] = {1, 2, 3, 4}; static const u8 alpha[4] = {5, 6, 7, 8}; return alpha[i] + zeta[i]; }',
+    spelled: /static const u8 zeta\[4\] = \{ 1, 2, 3, 4 \};\n {4}static const u8 alpha\[4\]/,
   },
 ];
 
@@ -114,10 +126,10 @@ const HAVE_MWCC = ppcDockerGate('local-statics', 'mwcc_242_81');
 
 describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled }) => {
+  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled }) => {
     const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, FLAGS);
     const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
-    expect(r.source).toMatch(spelled);
+    expect(r.source).toMatch(mwccSpelled);
     expect(dataSections(compileCandPpc('mwcc_242_81', r.source, FLAGS))).toEqual(dataSections(obj));
     const s = scoreCPpc('mwcc_242_81', r.source, sym, obj, FLAGS);
     expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);

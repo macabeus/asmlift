@@ -26,7 +26,7 @@
 //     cannot show a second referrer.
 import type { LocalObject, LocalObjects } from '../ir/core';
 import type { AsmData } from './asmdata';
-import { localStaticSourceName } from './reloc-symbol';
+import { localStaticName } from './reloc-symbol';
 
 /** A definition, or why there is none: the tail of a refusal sentence the caller opens with
  *  "names a function-scope static ('<symbol>')", so every refusal of the kind reads the same. */
@@ -147,10 +147,11 @@ function dataBytes(directive: string, operands: string): number[] | { address: s
  *  extent is the data run under the label, which ends at the next label, section switch or any
  *  other directive, and `.size` where present must agree with it. */
 export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead {
-  const name = localStaticSourceName(symbol);
-  if (name === null) {
+  const parts = localStaticName(symbol);
+  if (parts === null) {
     return refused('whose name has no source spelling this reader knows');
   }
+  const { name, counter: order } = parts;
   const lines = asm.split('\n').map(code);
   let declaredSize: number | null = null;
   let section: string | null = null;
@@ -164,7 +165,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
       if (size === null || size <= 0) {
         return refused(`whose '.lcomm' size '${lcomm[2]}' is not a positive number`);
       }
-      return { name, symbol, section: 'bss', size, bigEndian: false };
+      return { name, symbol, order, section: 'bss', size, bigEndian: false };
     }
     const sz = line.match(/^\.size\s+([^\s,]+)\s*,\s*(\S+)$/);
     if (sz && sz[1] === symbol) {
@@ -227,10 +228,10 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
   }
   if (kind === 'bss') {
     return bytes.every((b) => b === 0)
-      ? { name, symbol, section: 'bss', size: bytes.length, bigEndian: false }
+      ? { name, symbol, order, section: 'bss', size: bytes.length, bigEndian: false }
       : refused('defined in bss with non-zero bytes');
   }
-  return { name, symbol, section: kind, size: bytes.length, bytes: Uint8Array.from(bytes), bigEndian: false };
+  return { name, symbol, order, section: kind, size: bytes.length, bytes: Uint8Array.from(bytes), bigEndian: false };
 }
 
 /** The functions whose literal pools name `symbol` in GNU as text, by the function each pool
@@ -284,10 +285,11 @@ const isDebugSection = (s: string): boolean => /^\.(debug|line)/.test(s);
  *  `fn` is the function reading it — a relocation naming the static from any other code, or from
  *  data, is another referrer. */
 export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): LocalObjectRead {
-  const name = localStaticSourceName(symbol);
-  if (name === null) {
+  const parts = localStaticName(symbol);
+  if (parts === null) {
     return refused('whose name has no source spelling this reader knows');
   }
+  const { name, counter: order } = parts;
   const sym = ad.symbols.get(symbol);
   if (sym === undefined) {
     return refused("whose definition the object's symbol table does not carry");
@@ -314,7 +316,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     }
   }
   if (kind === 'bss') {
-    return { name, symbol, section: 'bss', size: sym.size, bigEndian: ad.bigEndian };
+    return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian };
   }
   const contents = ad.sections.get(sym.section);
   if (contents === undefined || sym.value + sym.size > contents.length) {
@@ -323,6 +325,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
   return {
     name,
     symbol,
+    order,
     section: kind,
     size: sym.size,
     bytes: contents.slice(sym.value, sym.value + sym.size),
