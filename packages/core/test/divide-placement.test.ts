@@ -405,3 +405,36 @@ test('agbcc’s __ashldi3 ahead of a store stays ahead of it', () => {
   const src = decompile('shl64', THUMB_SHL64_STORE, ARMV4T_AGBCC, { prototypes }).source;
   expect(src).toMatch(/(v\d+) = a0 << a2;\n\s+\*a1 = a2;\n\s+return [^;]*\1;/);
 });
+
+// agbcc: `int v = gB; int t = v / n; if (t > 2) { q[3] = t; return 1; } q[1] = v; return 0;` — one
+// `ldr` of gB, kept in r4 across the `bl __divsi3` for the arm that stores it.
+const THUMB_READ_ACROSS_DIV = `l2:
+	push	{r4, r5, lr}
+	add	r5, r0, #0
+	ldr	r0, .L5
+	ldr	r4, [r0]
+	add	r0, r4, #0
+	bl	__divsi3
+	cmp	r0, #0x2
+	bgt	.L3	@cond_branch
+	str	r4, [r5, #0x4]
+	mov	r0, #0x0
+	b	.L4
+.L6:
+	.align	2, 0
+.L5:
+	.word	gB
+.L3:
+	str	r0, [r5, #0xc]
+	mov	r0, #0x1
+.L4:
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+`;
+
+test('a read the asm kept across a named helper divide is read once', () => {
+  const src = decompile('l2', THUMB_READ_ACROSS_DIV, ARMV4T_AGBCC, { prototypes: { l2: { params: 2 } } }).source;
+  expect(src.match(/gB/g)).toHaveLength(1);
+  expect(src).toMatch(/(v\d+) = gB;\n\s+(v\d+) = \1 \/ a1;/);
+});

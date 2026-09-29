@@ -2043,8 +2043,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           materialize.add(op);
           continue;
         }
+        // A named helper op bars it too, as it bars the single render below: it is the call the asm
+        // made, and a value read before it and used after it was read once and kept across it
+        // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
         if (poss.length > 1) {
-          const isWrite = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const writes = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const isWrite = (x: Op): boolean => writes(x) || namedHelper(x);
           if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
           }
