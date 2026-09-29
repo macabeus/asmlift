@@ -1581,7 +1581,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // the store. The analysis names an op the asm called a helper for where it ran whenever an effect
   // lies between it and its use (`divstore` is the straight-line row), and the exit value then reads
   // the name rather than the counter. Rebuilt at the add instead, the divide would run behind the
-  // store, which `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses.
+  // store, which `arg-safe-to-reevaluate` (PREUPDATE_SINK_GATES) refuses. It is the one exit row on
+  // every toolchain, because the read arises on kmc and mwcc too (kmc computes `t + 1` in the
+  // branch's delay slot, behind the counter's decrement). There the divide is an instruction, and
+  // the analysis names it at its def only for this, a pre-update exit value an effect separates it
+  // from. IDO unrolls the loop, and its lift stops at the unrolled remainder's branch before
+  // structuring.
   //
   // AND BESIDE THE EXIT ROWS, ONE ROW THAT IS NOT ABOUT THE PRE-UPDATE READ AT ALL, which
   // `preupdate_cond_effect` carries. The fold is what puts such a loop into a short-circuit spelling,
@@ -1596,9 +1601,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // than only of a folded one. What still reaches that guard is an `opaque`, the only other
   // effectful op that defines a value, for which no placement rule exists.
   //
-  // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
-  // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be six more ordinary loops on those toolchains rather than coverage.
+  // The others are agbcc only, and the reason is the whole point: the shape IS the ARM rotation.
+  // Given the same C, ido/kmc/mwcc schedule the update after the test and the pre-update read never
+  // arises, so the rows would be more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -1729,10 +1734,11 @@ export const SYNTHETIC: SynthSpec[] = [
       ' if (n > 0) { q = p + n; do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n); }' +
       ' return r; }',
     features: ['loop-preupdate'],
-    toolchains: ['agbcc'],
+    toolchains: ALL,
     note:
       "the exit value's tree holds a DIVIDE the asm runs ahead of a store in the body, so the divide " +
-      'has to keep its place there rather than be rebuilt after the loop behind the store',
+      'has to keep its place there rather than be rebuilt after the loop behind the store; a ' +
+      '`bl __divsi3` on agbcc, an instruction everywhere else',
   },
   {
     sym: 'preupdate_escape',

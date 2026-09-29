@@ -23,7 +23,7 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS, opSig } from '../ir/opcodes';
 import { raisedHelper } from '../runtime-helpers';
 
 export interface UseSite {
@@ -730,7 +730,7 @@ export interface StructureAnalysis {
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
   /** the members of `materialize` that name a pre-update read: the escape rule's
-   *  (`escapesAheadOfUpdate`), and a helper op the helper clause named over one */
+   *  (`escapesAheadOfUpdate`), and a helper op or exit divide named over one */
   preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
@@ -1524,6 +1524,41 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         !consumers.every((c) => L.body.has(opBlock.get(c)!)) &&
         readsPreUpdate(L, op, r),
     );
+  /** Would the pre-update sink rebuild `op` (result `r`) past a memory access or an effect? It
+   *  rebuilds an exit value that reads a loop variable at the op computing it, when that op is the
+   *  latch's (`preUpdateCopyHome`, hazards.ts), so it moves `op` there when `op` sits in the same
+   *  latch, ahead of it, inside the tree it would inline. */
+  const sinkMovesPast = (op: Op, r: Value): boolean =>
+    bottomTested.some((L) => {
+      if (opBlock.get(op) !== L.latch || !readsPreUpdate(L, op, r)) {
+        return false;
+      }
+      const seen = new Set<Value>();
+      const reaches = (x: Value): boolean => {
+        if (x === r) {
+          return true;
+        }
+        if (seen.has(x)) {
+          return false;
+        }
+        seen.add(x);
+        const d = defOf.get(x);
+        return !!d && L.body.has(opBlock.get(d)!) && !materialize.has(d) && d.operands.some(reaches);
+      };
+      const from = L.latch.ops.indexOf(op);
+      return L.term.successors.some(
+        (sc) =>
+          !L.body.has(sc.block) &&
+          sc.args.some((a) => {
+            const home = defOf.get(a);
+            if (!home || home === op || opBlock.get(home) !== L.latch || !reaches(a)) {
+              return false;
+            }
+            const to = L.latch.ops.indexOf(home);
+            return L.latch.ops.slice(from + 1, to).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+          }),
+      );
+    });
   /** Is `r` read where the update has run: after the loop, or by its bottom test? */
   const readAfterUpdate = (L: (typeof bottomTested)[number], r: Value, consumers: Op[]): boolean => {
     if (!consumers.every((c) => L.body.has(opBlock.get(c)!))) {
@@ -1754,6 +1789,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
+  /** the divides the pre-update exit rule below named (`sinkMovesPast`) */
+  const exitDivides = new Set<Op>();
   /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
   const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
   /** one the helper clause below named: a statement sequenced as a named call is */
@@ -1842,7 +1879,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           //     still carries it ran above the branch, and C's short circuit would skip it (the
           //     guarded-call rule below).
           // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
-          // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte.
+          // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte. The rule
+          // after this one names it only where the loop's exit value needs the name.
           if (isHelper(op) && pr && useSitesOf.has(pr)) {
             const at = emitPositions(op);
             if (
@@ -1855,6 +1893,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               materialize.add(op);
               continue;
             }
+          }
+          // A DIVIDE THE ISA COMPUTES, in a value the loop exits with that reads a loop variable, is
+          // named at its def when the pre-update sink would rebuild it past a memory access or an
+          // effect (`sinkMovesPast`) — once every other rule has settled (`escapePhase`), as the
+          // escape rule is. `arg-safe-to-reevaluate` (hazards.ts) refuses that move: kmc's `do { t
+          // = k / n; *q = n; r = t + 1; } while (--n);` is `div; …; sw; …; addiu v0, v1, 1`, and
+          // rebuilt at the add the divide runs behind the store. Named, the copy reads the name and
+          // the divide stays where the asm ran it. Where the sink moves nothing past it, it rebuilds
+          // the copy as it did, so a loop that lifts without the name is spelled as before.
+          if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && sinkMovesPast(op, pr)) {
+            materialize.add(op);
+            exitDivides.add(op);
+            continue;
           }
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
@@ -2200,13 +2251,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
   }
-  // A helper op the helper clause named is a pre-update home too when its value reads a loop
-  // variable and is read where the update has run. Named, it lifts the loop the pre-update hazard
-  // declines, in a body of any size — so the structurer's refusal on homes (`preUpdateHomes`) must
-  // see it, as it sees the escape rule's.
+  // A helper op the helper clause named, or a divide the exit rule did, is a pre-update home too
+  // when its value reads a loop variable and is read where the update has run. Named, it lifts the
+  // loop the pre-update hazard declines, in a body of any size — so the structurer's refusal on
+  // homes (`preUpdateHomes`) must see it, as it sees the escape rule's.
   for (const op of materialize) {
     const r = op.results[0];
-    if (!r || preUpdateHomes.has(op) || !isHelper(op)) {
+    if (!r || preUpdateHomes.has(op) || !(isHelper(op) || exitDivides.has(op))) {
       continue;
     }
     const consumers = consumersOf(op);

@@ -873,10 +873,11 @@ test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through
 });
 
 // `arg-safe-to-reevaluate` CAN BE REACHED THROUGH THE WHOLE PIPELINE BY A DIVIDE THE ISA
-// COMPUTES. The analysis names a read or a call wherever something would cross it, and an op the
-// asm called a runtime helper for wherever an effect would (the barrier scan, `ridesEdge`, the
-// helper clause), and a named leaf is not rebuilt, so the rest of the gate is guarded by a
-// hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1;
+// COMPUTES OUTSIDE THE LATCH. The analysis names a read or a call wherever something would cross
+// it, an op the asm called a runtime helper for wherever an effect would (the barrier scan,
+// `ridesEdge`, the helper clause), and a divide the sink would rebuild past a memory access or an
+// effect in the latch (`sinkMovesPast`); a named leaf is not rebuilt, so the rest of the gate is
+// guarded by a hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1;
 // } while (--n);`: `bl __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the store,
 // so the divide is named there, the exit value reads the name and not the counter, and the sink is
 // never asked.
@@ -912,4 +913,42 @@ test('a divide the asm ran ahead of a store is named there, so the exit value re
   raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
   const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
   expect(src).toMatch(/(v\d+) = a3 \/ (v\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3` on the same `dv`. The divide is an instruction here, `div` with its
+ *  `break` checks ahead of the store, and the exit value `t + 1` is computed in the branch's delay
+ *  slot, behind the counter's update. Named where the asm ran it, as the helper is on agbcc, the
+ *  exit value reads the name; inline, the sink would rebuild the divide behind the store, and
+ *  `arg-safe-to-reevaluate` refuses it. */
+const DIVIDE_AHEAD_OF_STORE_KMC = `00000000 <dv>:
+   0:\tblez\ta1,50 <dv+0x50>
+   4:\tmove\tv0,a2
+   8:\tsll\tv0,a1,0x2
+   c:\taddu\ta0,a0,v0
+  10:\tdiv\tzero,a3,a1
+  14:\tbnez\ta1,20 <dv+0x20>
+  18:\tnop
+  1c:\tbreak\t0x7
+  20:\tli\tat,-1
+  24:\tbne\ta1,at,38 <dv+0x38>
+  28:\tlui\tat,0x8000
+  2c:\tbne\ta3,at,38 <dv+0x38>
+  30:\tnop
+  34:\tbreak\t0x6
+  38:\tmflo\tv1
+  3c:\tsw\ta1,0(a0)
+  40:\taddiu\ta0,a0,-4
+  44:\taddiu\ta1,a1,-1
+  48:\tbnez\ta1,10 <dv+0x10>
+  4c:\taddiu\tv0,v1,1
+  50:\tjr\tra
+  54:\tnop
+`;
+
+test('a divide the ISA computes ahead of a store is named there when the loop exits with it', () => {
+  const fn = frontendFor(MIPS_GCC).lift('dv', DIVIDE_AHEAD_OF_STORE_KMC, MIPS_GCC, { dv: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (a\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
 });

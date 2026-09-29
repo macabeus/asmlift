@@ -158,11 +158,13 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
     // Sound for a read, a call or a divide: rebuilt behind a store, a read answers with what the
-    // store wrote, and a call, or a divide the asm called a helper for (`bl __divsi3` on agbcc),
-    // runs behind it. The analysis names a read or a call something would cross, and a helper op an
-    // effect would cross, and a named leaf is not rebuilt. What it leaves inline is a divide the
-    // ISA computes, and that one can reach the gate through the pipeline; the rest of it is reached
-    // from a hand-built analysis, which is its guard.
+    // store wrote, and a call or a divide runs behind it. The analysis names a read or a call
+    // something would cross, a helper op an effect would cross, and a divide this move would carry
+    // past a memory access or an effect in the latch (`sinkMovesPast`), and a named leaf is not
+    // rebuilt. What still reaches the gate through the pipeline is a divide the ISA computes in a
+    // body block other than the latch, which no name helps: a name defined there is stale where
+    // the copy lands (`arg-reads-current-names`). The rest of it is reached from a hand-built
+    // analysis, which is its guard.
     guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },
