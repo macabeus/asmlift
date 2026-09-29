@@ -29,9 +29,11 @@
 // source's (`tide`) in one step, `nameLocalStatics`, which is where a clash between that name and
 // anything else the function names can first be seen whole.
 //
-// REFUSES, naming the static, when nothing in the definition settles the width and the accesses
-// disagree on it, when the width does not divide the size, when the loads disagree on the
-// signedness, when the definition is aligned narrower than its elements; and, at
+// REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
+// in the definition settles the width and the accesses disagree on it, when the width does not
+// divide the size, when the loads disagree on the signedness, when the definition is aligned
+// narrower than its elements, when a bss static's offset says it was initialized to zero and it
+// is no scalar (or the input does not show the offset); and, at
 // the rename, when two statics share a source name (one block cannot declare both) or when the
 // function names anything else by it — a global, a callee, a parameter, a local, itself — which the
 // block-scope static would hide.
@@ -59,8 +61,34 @@ export interface StaticLayout {
   /** the alignment it gives a declaration initialized by a string literal */
   stringAlign: number;
   /** where a scalar initialized to zero goes: kept in `.data`, or moved to bss — where its
-   *  initializer is gone, and one element of zero in `.data` must then have been an aggregate */
+   *  initializer is gone, and one element of zero in `.data` must then have been an aggregate. A
+   *  compiler that moves them lays them out ahead of the statics with no initializer, in
+   *  declaration order, and those after them in reverse (mwcc: `a = 0; b; c = 0;` at +0, +8, +4),
+   *  so the offsets say which of a function's bss statics had the `= 0`. */
   zeroScalar: 'data' | 'bss';
+}
+
+/** The bss statics of `objs` that were initialized to zero, on a compiler that moves them there
+ *  ({@link StaticLayout.zeroScalar}), or the symbol of one whose offset the input does not show.
+ *  Within one section a function's zero-initialized statics come first with their counters rising,
+ *  the others after with their counters falling; so a static with a later-declared one at a higher
+ *  offset had the initializer. The last of the rising run cannot be told from the first of the
+ *  falling one, and both declarations put it in the same place: it is left without. */
+function zeroInitialized(objs: readonly LocalObject[]): Set<string> | { symbol: string } {
+  const out = new Set<string>();
+  const bss = objs.filter((o) => o.section === 'bss');
+  for (const o of bss) {
+    if (o.placement === undefined) {
+      return { symbol: o.symbol };
+    }
+  }
+  for (const o of bss) {
+    const at = o.placement!;
+    if (bss.some((p) => p.placement!.section === at.section && p.placement!.offset > at.offset && p.order > o.order)) {
+      out.add(o.symbol);
+    }
+  }
+  return out;
 }
 
 /** Each static's shape for the structurer, and its definition for the backend. */
@@ -166,8 +194,13 @@ export function localStaticShapes(
     return { symbol: first, refused: "whose layout rules this target's compiler does not declare" };
   }
   const access = accessesOf(fn, new Set(objs.keys()));
+  const zeroed = layout.zeroScalar === 'bss' ? zeroInitialized([...objs.values()]) : new Set<string>();
+  if (!(zeroed instanceof Set)) {
+    return { symbol: zeroed.symbol, refused: 'in bss at an offset this input does not show' };
+  }
   // Declared in the target's declaration order, which the compiler lays the objects out by (mwcc
-  // even reverses it in .sbss): the candidate's compiler then places each where the target has it.
+  // reverses it for bss statics with no initializer): the candidate's compiler then places each
+  // where the target has it.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
     const accesses = access.get(obj.symbol) ?? [];
@@ -200,7 +233,12 @@ export function localStaticShapes(
     const signed = signs.size > 0 ? signs.has(true) : dir?.negative === true;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
-    const init = obj.bytes === undefined ? undefined : elements(obj, width, signed);
+    const init = zeroed.has(obj.symbol) ? [0] : obj.bytes === undefined ? undefined : elements(obj, width, signed);
+    if (zeroed.has(obj.symbol) && count !== 1) {
+      return say(
+        `laid out ahead of a static declared after it, as only a scalar initialized to zero is, but of ${count} elements`,
+      );
+    }
     // One element is a scalar — unless it is initialized data holding zero on a compiler that
     // moves a zero scalar to bss, where it can only have been an aggregate, which the compiler
     // keeps in .data.

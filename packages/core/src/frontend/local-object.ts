@@ -449,7 +449,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
   if (align === null) {
     return refused("whose alignment the object's `.comment` section does not record");
   }
-  const placement = { align };
+  const placement = { align, section: sym.section, offset: sym.value };
   if (kind === 'bss') {
     return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian, placement };
   }

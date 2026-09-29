@@ -8,6 +8,9 @@
 //   corpus/mwcc-local-statics.txt  `objdump -s -r -t` of mwcc_242_81 `-O4,s -inline auto` over m2.c
 //   corpus/mwcc-dump-*.txt         the published `asmDump` of three benchmark rows, as the harness
 //                                  hands it to asmlift
+//   corpus/mwcc-zero-statics.{txt,asm}  the side table and disassembly of mwcc_242_81 at its
+//                                  canonical flags over
+//     u32 zeromix(void) { static u32 a = 0; static u32 b; static u32 c = 0; return a + b + c; }
 //
 // agbcc-local-statics.s:
 //   int fa(int i) { static const u8 tide[] = {1,2,3}; return tide[i]; }
@@ -53,7 +56,7 @@ import {
 } from '../src/frontend/local-object';
 import { decompile } from '../src/pipeline';
 import type { SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 const agbcc = corpus('agbcc-local-statics.s');
@@ -202,10 +205,26 @@ test('mwcc: the symbol table gives the section and size, the section contents th
     size: 12,
     bytes: Uint8Array.from([0, 0, 0, 7, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 9]),
     bigEndian: true,
-    placement: { align: 4 },
+    placement: { align: 4, section: '.rodata', offset: 0 },
   });
   // an aggregate initialized to zero stays in .data under mwcc
   expect(bytes(readObjectLocalObject(ad, 'zz$23', 'zdata'))).toEqual([0, 0, 0, 0]);
+});
+
+test('mwcc: a bss static laid out ahead of a later-declared one had `= 0`', () => {
+  // .sbss holds a$4 +0, c$6 +4, b$5 +8: the zero scalars first in declaration order, then the one
+  // with no initializer. c, the last of the rising run, lands there declared either way
+  const asm = corpus('mwcc-zero-statics.asm');
+  const ad = dump('mwcc-zero-statics.txt');
+  expect(decompile('zeromix', asm, PPC_MWCC, { asmData: ad }).source).toContain(
+    '    static u32 a = 0;\n    static u32 b;\n    static u32 c;\n',
+  );
+  // eight bytes read a word at a time are two elements, and no array is moved to bss for its zeros
+  ad.symbols.set('a$4', { ...ad.symbols.get('a$4')!, size: 8 });
+  expect(() => decompile('zeromix', asm, PPC_MWCC, { asmData: ad })).toThrow(
+    "names a function-scope static ('a$4') laid out ahead of a static declared after it, as only a scalar " +
+      'initialized to zero is, but of 2 elements',
+  );
 });
 
 test("mwcc: a static every inliner names is not one function's", () => {
@@ -230,7 +249,7 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
     section: 'bss',
     size: 8,
     bigEndian: true,
-    placement: { align: 8 },
+    placement: { align: 8, section: '.bss', offset: 0 },
   });
   expect(
     readObjectLocalObject(dump('mwcc-dump-mCoBG_MakeJumpFlag.txt'), 'make_jump_flag_proc$320', 'mCoBG_MakeJumpFlag'),

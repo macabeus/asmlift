@@ -8,10 +8,11 @@
 // linkage are scored. So the score here says the code is right, and the section comparison is the
 // only thing that says the emitted table is.
 //
-// Every data section is compared, small-data ones included, with its alignment: each reference below
-// defines one function and nothing else, so its data sections hold exactly that function's statics,
-// and where one of them lands depends on the ones declared before it and on its own alignment —
-// neither of which any score checks either.
+// Every data section is compared, small-data ones included, with its alignment, and so is the section
+// and offset of every static: each reference below defines one function and nothing else, so its
+// data sections hold exactly that function's statics, and where one of them lands depends on the
+// ones declared before it, on its own alignment and on whether it had an initializer — none of
+// which any score checks either.
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
@@ -31,29 +32,60 @@ import { ppcDockerGate } from './docker-gate';
 
 const DATA_SECTIONS = new Set(['.rodata', '.data', '.bss', '.sdata', '.sdata2', '.sbss']);
 
-/** Each data section of an ELF32 object: its alignment, and its contents (its size when it
- *  occupies no file space). */
-function dataSections(obj: string): Record<string, { align: number; bytes: number[] | number }> {
-  const b = readFileSync(obj);
+/** An ELF32 object's section headers: each one's name, type, file offset, size, alignment and link. */
+function sectionHeaders(b: Buffer) {
   const big = b[5] === 2;
   const u16 = (o: number) => (big ? b.readUInt16BE(o) : b.readUInt16LE(o));
   const u32 = (o: number) => (big ? b.readUInt32BE(o) : b.readUInt32LE(o));
   const shoff = u32(0x20);
   const shentsize = u16(0x2e);
-  const shnum = u16(0x30);
   const shstr = u32(shoff + u16(0x32) * shentsize + 16);
+  return {
+    u16,
+    u32,
+    headers: Array.from({ length: u16(0x30) }, (_, i) => {
+      const h = shoff + i * shentsize;
+      const nameAt = shstr + u32(h);
+      return {
+        name: b.toString('latin1', nameAt, b.indexOf(0, nameAt)),
+        type: u32(h + 4),
+        off: u32(h + 16),
+        size: u32(h + 20),
+        link: u32(h + 24),
+        align: u32(h + 32),
+      };
+    }),
+  };
+}
+
+/** Each data section of an ELF32 object: its alignment, and its contents (its size when it
+ *  occupies no file space). */
+function dataSections(obj: string): Record<string, { align: number; bytes: number[] | number }> {
+  const b = readFileSync(obj);
   const out: Record<string, { align: number; bytes: number[] | number }> = {};
-  for (let i = 0; i < shnum; i++) {
-    const h = shoff + i * shentsize;
-    const nameAt = shstr + u32(h);
-    const name = b.toString('latin1', nameAt, b.indexOf(0, nameAt));
-    if (!DATA_SECTIONS.has(name)) {
-      continue;
+  for (const h of sectionHeaders(b).headers) {
+    if (DATA_SECTIONS.has(h.name)) {
+      out[h.name] = { align: h.align, bytes: h.type === 8 ? h.size : [...b.subarray(h.off, h.off + h.size)] };
     }
-    const nobits = u32(h + 4) === 8;
-    const off = u32(h + 16);
-    const size = u32(h + 20);
-    out[name] = { align: u32(h + 32), bytes: nobits ? size : [...b.subarray(off, off + size)] };
+  }
+  return out;
+}
+
+/** Where each function-scope static of an ELF32 object sits, by its source name: its section and
+ *  offset. Two statics of the same size swapped leave every section's bytes alike, bss above all. */
+function staticPlaces(obj: string): Record<string, string> {
+  const b = readFileSync(obj);
+  const { u16, u32, headers } = sectionHeaders(b);
+  const symtab = headers.find((h) => h.type === 2)!;
+  const strtab = headers[symtab.link];
+  const out: Record<string, string> = {};
+  for (let at = symtab.off; at < symtab.off + symtab.size; at += 16) {
+    const nameAt = strtab.off + u32(at);
+    const m = b.toString('latin1', nameAt, b.indexOf(0, nameAt)).match(/^([A-Za-z_]\w*)[.$]\d+$/);
+    const shndx = u16(at + 14);
+    if (m && shndx > 0 && shndx < headers.length) {
+      out[m[1]] = `${headers[shndx].name}+${u32(at + 4)}`;
+    }
   }
   return out;
 }
@@ -112,6 +144,22 @@ const CASES: {
       'static const char s[] = "hello!"; use(a); use(s); }',
     spelled: /static const u8 a\[3\] = \{ 1, 2, 3 \};\n {4}static const u8 s\[7\] = "hello!";/,
     mwccSpelled: /static const u8 s\[7\] = \{ 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x21, 0 \};/,
+  },
+  {
+    // mwcc moves both to bss and lays them out in declaration order there, ahead of any static
+    // with no initializer, whose order it reverses — so the offsets say which had the `= 0`. The
+    // later of the two lands in the same place declared either way, and is left without
+    sym: 'zeropair',
+    c: 'u32 zeropair(void) { static u16 x = 0; static u8 y = 0; return x + y; }',
+    spelled: /static u16 x = 0;\n {4}static u8 y = 0;/,
+    mwccSpelled: /static u16 x = 0;\n {4}static u8 y;/,
+  },
+  {
+    sym: 'zeromix',
+    c: 'u32 zeromix(void) { static u32 a = 0; static u32 b; static u32 c = 0; return a + b + c; }',
+    spelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c = 0;/,
+    mwccSpelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c;/,
+    layoutOnly: true,
   },
   {
     sym: 'words',
@@ -224,7 +272,9 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
     const target = assembleTarget(asm);
     const r = decompile(sym, asm, ARMV4T_AGBCC);
     expect(r.source).toMatch(spelled);
-    expect(dataSections(compileCandAgbcc(context + r.source, FLAGS))).toEqual(dataSections(target));
+    const cand = compileCandAgbcc(context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(target));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(target));
     if (!layoutOnly) {
       expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
     }
@@ -250,7 +300,9 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, FLAGS);
     const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
     expect(r.source).toMatch(mwccSpelled);
-    expect(dataSections(compileCandPpc('mwcc_242_81', context + r.source, FLAGS))).toEqual(dataSections(obj));
+    const cand = compileCandPpc('mwcc_242_81', context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(obj));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
     if (!layoutOnly) {
       const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
       expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);

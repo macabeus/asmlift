@@ -92,6 +92,10 @@ export interface LocalObject {
 export interface LocalObjectPlacement {
   /** the alignment the compiler gave the object (mwcc's `.comment` record for its symbol) */
   align: number;
+  /** the object file's own section (`.sbss`, where {@link LocalObject.section} says `bss`) */
+  section: string;
+  /** its offset in that section */
+  offset: number;
 }
 
 /** An initialized static's data directives, as the compiler wrote them. The compiler writes each

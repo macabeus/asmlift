@@ -69,7 +69,10 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   (a candidate whose static is `t_seiyo_days_tbl$38` or `other_tbl$32` scores the same as `$32`).
   Its ORDER is not left to anyone: both compilers count declarations, so the counters of one
   function's statics record the order the source declared them in, which is the order the
-  compiler lays them out by — and the lift declares them in that order. The same measurement
+  compiler lays them out by — and the lift declares them in that order. In bss mwcc puts the
+  scalars it moved there for their `= 0` first, in that order, and reverses the ones with no
+  initializer after them, so the offsets also say which statics had the `= 0`, and the lift writes
+  it. The same measurement
   means **no score checks the definition**: a wrong initializer, a wrong name, a wrong order and a
   wrong alignment all MATCH, and only the section and the local linkage are scored — so the
   matching suite compares the candidate's data sections with the target's byte for byte, with
