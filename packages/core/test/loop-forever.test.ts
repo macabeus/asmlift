@@ -18,9 +18,10 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
-import { readabilityRewrites } from '../src/pipeline';
+import { decompile, readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, StructureError, type StructureHooks, structure } from '../src/structure/structure';
+import { PPC_MWCC } from '../src/target';
 import { irAgreement } from './helpers';
 
 const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
@@ -481,6 +482,76 @@ const INNER_INVARIANT = INNER_REWRITTEN.replace(
   '%40: s32 = const {value=3}\n  %10: s32 = add %0, %40',
 );
 const ADMIT_BACK_ARG: StructureHooks = { carrierNameGates: without(CARRIER_NAME_GATES, 'back-arg-live') };
+
+/** mwcc_242_81's `x2`: `do { if (--gF < 0) return u; do { s = g(s) + s; } while (--gF > 0 && s > 2);
+ *  if (g(u) == 1) break; u = 0; } while (1); h(c); return s * 5 + u * 11;`. The inner loop
+ *  writes `s`, a name the outer header owns, before the break, and the code after the loop reads
+ *  the inner update: under the inner loop's naming it is that name, not a re-derivation from it. */
+const INNER_WRITES_CARRIER = `ref.o:     file format elf32-powerpc
+
+
+Disassembly of section .text:
+
+00000000 <x2>:
+   0:	stwu    r1,-32(r1)
+   4:	mflr    r0
+   8:	stw     r0,36(r1)
+   c:	stw     r31,28(r1)
+  10:	li      r31,0
+  14:	stw     r30,24(r1)
+  18:	li      r30,2
+  1c:	stw     r29,20(r1)
+  20:	mr      r29,r5
+  24:	lwz     r3,0(0)
+			24: R_PPC_EMB_SDA21	gF
+  28:	addic.  r0,r3,-1
+  2c:	stw     r0,0(0)
+			2c: R_PPC_EMB_SDA21	gF
+  30:	bge-    3c <x2+0x3c>
+  34:	mr      r3,r30
+  38:	b       8c <x2+0x8c>
+  3c:	mr      r3,r31
+  40:	bl      40 <x2+0x40>
+			40: R_PPC_REL24	g
+  44:	lwz     r4,0(0)
+			44: R_PPC_EMB_SDA21	gF
+  48:	add     r31,r31,r3
+  4c:	addic.  r0,r4,-1
+  50:	stw     r0,0(0)
+			50: R_PPC_EMB_SDA21	gF
+  54:	ble-    60 <x2+0x60>
+  58:	cmpwi   r31,2
+  5c:	bgt+    3c <x2+0x3c>
+  60:	mr      r3,r30
+  64:	bl      64 <x2+0x64>
+			64: R_PPC_REL24	g
+  68:	cmpwi   r3,1
+  6c:	beq-    78 <x2+0x78>
+  70:	li      r30,0
+  74:	b       24 <x2+0x24>
+  78:	mr      r3,r29
+  7c:	bl      7c <x2+0x7c>
+			7c: R_PPC_REL24	h
+  80:	mulli   r3,r31,5
+  84:	mulli   r0,r30,11
+  88:	add     r3,r3,r0
+  8c:	lwz     r0,36(r1)
+  90:	lwz     r31,28(r1)
+  94:	lwz     r30,24(r1)
+  98:	lwz     r29,20(r1)
+  9c:	mtlr    r0
+  a0:	addi    r1,r1,32
+  a4:	blr
+`;
+
+test('a break judges the code after a `while (1)` under the inner loop’s naming', () => {
+  const src = decompile('x2', INNER_WRITES_CARRIER, PPC_MWCC, {
+    prototypes: { g: { params: 1 }, h: { params: 1, returnsVoid: true } },
+  }).source;
+  expect(src).toContain('while (1) {');
+  expect(src).toMatch(/= (v\d+) \* 5 \+ v\d+ \* 11;[\s\S]*$/);
+  expect(src).toMatch(/(v\d+) = \1 \+ v\d+;\n        } while/);
+});
 
 test('the code after a `while (1)` declines where neither reading is the inner loop’s value', () => {
   expect(() => structure(lifted(INNER_REWRITTEN), {}, ADMIT_BACK_ARG)).toThrow(StructureError);

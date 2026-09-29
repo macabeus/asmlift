@@ -5007,10 +5007,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
     // A `while (1)` has no copies of its own after the loop, so a break carries its own, computed
-    // where it leaves; what is left is the exit region's re-derivations.
-    if (foreverLoops.has(frame.header)) {
+    // where it leaves; what is left is the exit region's re-derivations. An inner loop's value the
+    // region reads under its name (`emitForever`) is no re-derivation.
+    const fl = foreverLoops.get(frame.header);
+    if (fl !== undefined) {
       const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
-      return loopEscapeHazard(frame.body, new Map(), writes, exitRegion)
+      const { sub } = latchInnerSub(fl.header, fl.body, [...fl.breaks], exitRegion);
+      return loopEscapeHazard(frame.body, sub, writes, exitRegion)
         ? { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' }
         : { bare: false };
     }
