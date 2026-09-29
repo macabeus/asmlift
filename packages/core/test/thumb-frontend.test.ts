@@ -1369,7 +1369,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', frame(oneInsn), ARMV4T_AGBCC).source).toBe(twoInsn);
     }
     // An immediate the constant form cannot evaluate is not the runtime form's register: read as
-    // one, `#(4)` became an entry parameter and the load `sp0[a0]`.
+    // one, `#(4)` is an entry parameter and the load `sp0[a0]`.
     for (const imm of ['#(4)', '#OFF']) {
       expect(() => decompile('f', `\t.set\tOFF, 4\n${frame(`\tadd\tr4, sp, ${imm}\n`)}`, ARMV4T_AGBCC)).toThrow(
         `operand '${imm}' read as a register`,
@@ -1692,7 +1692,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const five = { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true };
       // `struct P { u32 a, b; } s; five(x, y, x, y, x); s.a = x; s.b = y; REG_DMA3SAD = (u32)&s;
       // REG_DMA3DAD = (u32)dst; REG_DMA3CNT = 0x84000002;` — a device READS through the address,
-      // so nothing writes the frame back, and `s.b = y` was still a dead def
+      // so nothing writes the frame back, yet it reads `s.b`, which the slot model keeps in a
+      // register
       const dma = (frame: string, stores: string, ctl: string) =>
         `f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-${frame}\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n` +
         '\tadd\tr6, r2, #0\n\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n' +
@@ -1712,7 +1713,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
 
       // `vu32 buf[2]; buf[0] = x; buf[1] = h(buf[0]); g(&buf[1]); return buf[0];` — `g` may reach
-      // `buf[0]` through `p[-1]`, and the reload after the call was forwarded from before it
+      // `buf[0]` through `p[-1]`, and the slot model forwards the reload across the call
       const g = { params: ['vu32 *'], returnsVoid: true };
       const h = { params: ['s32'], returns: 's32' };
       test('below: the captured address may point into an object that starts lower', () => {

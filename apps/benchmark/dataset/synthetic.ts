@@ -3361,9 +3361,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // refuses nothing, because a call whose callee's declaration and whose staging stores agree word
   // for word is now consumed, and every disagreement declines naming what it saw.
   //
-  // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
-  // object's real extent is inferred from the accesses this function makes, so a wider frame has
-  // bytes no model describes, and the refusal stands there. An OUTPUT-only parameter taken at
+  // STILL MISSING, and what these rows will pin next: a frame word that is neither an object, a
+  // keyed slot, nor a licensed outgoing argument. The object's real extent is inferred from the
+  // accesses this function makes, so a wider object has bytes no model describes, and the refusal
+  // stands there. An OUTPUT-only parameter taken at
   // argument 0 is the other gap, and it is not narrowable from the assembly at all: it is
   // instruction-for-instruction the struct return above.
   //

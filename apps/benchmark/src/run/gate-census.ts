@@ -27,8 +27,8 @@
 // holding the call. Eight passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a
-// script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the Thumb
-// frontend's frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
+// script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
+// frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
 // `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
 // `raise/retsink.ts` is not in any of them — and a pass reached through a static import binding has

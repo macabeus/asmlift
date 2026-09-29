@@ -453,11 +453,10 @@ function expandRegList(tokens: string[]): string[] {
 //
 // Its callers, and which way each may be wrong:
 //   * `heldFrameWalk`, the one walk both frame-base acceptances and the constant-capture offsets
-//     are spelled with, asks it of EVERY instruction — directly for the two acceptances, and
-//     through `mayWriteReg` for the offsets. It is an ACCEPTANCE, so it may never
-//     over-approximate: MENTION, not "writes" — a `cmp` on the register ends the walk, which costs
-//     a decline, never a wrong value; and every instruction whose written register
-//     `mayWriteReg` cannot name answers as a mention.
+//     are spelled with, asks it of EVERY instruction. The two acceptances end a held register at
+//     any MENTION — a `cmp` on it ends the walk, which costs a decline, never a wrong value. The
+//     offsets end it at a write (`mayWriteReg`), which answers as a mention wherever it cannot
+//     name the written register, so it too may only end the walk early.
 //   * `highRegisterHeld` asks it only of a `pop` or a control transfer; calls, copies and stack
 //     slots it tracks itself. It feeds an acceptance (`wideReturn`) and a REFUSAL
 //     (`refuseWordReturns`), and for the refusal every over-statement — a spurious mention
@@ -2994,15 +2993,15 @@ export function lift(
   // WHICH FRAME ADDRESS DOES EACH REGISTER HOLD WHEN `consumes` FIRES? Every question this file
   // asks of a captured frame address before the lift is this one — the two frame-base escapes, and
   // which offsets a constant capture names — so they get ONE walk, the same rule `definiteRegList`
-  // and `regListOf` a few hundred lines above are written down for, and for the same reason: two
+  // and `regListOf` are written down for, and for the same reason: two
   // hand-rolled copies of a safety walk drift to unequal strength, and the one a future editor
   // does not fix is an ACCEPTANCE that over-approximates. `held` maps a register to the frame
   // offset its value is sp plus; `consumes` is called on every instruction, before the call clear.
   //
-  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-WRITE, because this feeds ACCEPTANCES and so may
-  // never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload scan
-  // skips them — an instruction that never executes is not a fact about the frame, and one appended
-  // `mov r0, sp; bl use` after the return was enough to license a whole function. A block is
+  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILLED WHERE `ends` SAYS, because this feeds ACCEPTANCES and
+  // so may never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload
+  // scan skips them — an instruction that never executes is not a fact about the frame, and one
+  // appended `mov r0, sp; bl use` after the return would license a whole function. A block is
   // straight-line, so a capture that is still held when the consuming instruction is decoded is
   // held on every execution that reaches it; and a register is dropped at any instruction `ends`
   // says ends it, which over-kills wherever it cannot name the written register and over-killing
@@ -3010,12 +3009,11 @@ export function lift(
   //
   // TWO KILL RULES, because the walk answers two questions. WHICH OFFSET A REGISTER HOLDS changes
   // only at a write (`mayWriteReg`): agbcc addresses through a capture and then moves it (`mov r2,
-  // sp / adds r2, #5 / strb r0, [r2] / … / adds r2, #2`), and ending at the `strb` left the move
-  // unfolded. WHETHER THE FRAME BASE WAS HANDED OVER is the escape licences' question, and there
-  // the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy addressed through and
-  // still live at a call is an addressing copy, not an argument — `EReader_Reset` is `mov r1, sp /
-  // strh r0, [r1] / … / bl` into callees that take nothing, and read as handed over, the licence's
-  // re-proof refused a function that lifts.
+  // sp / adds r2, #5 / strb r0, [r2] / … / adds r2, #2`), so the `strb` must not end the walk
+  // before the second move. WHETHER THE FRAME BASE WAS HANDED OVER is the escape licences'
+  // question, and there the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy
+  // addressed through and still live at a call is an addressing copy, not an argument —
+  // `EReader_Reset` is `mov r1, sp / strh r0, [r1] / … / bl` into callees that take nothing.
   //
   // A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
   // registers are the only ones it tests and the callee clobbers them. The publish escape can hold
@@ -3038,10 +3036,6 @@ export function lift(
           continue;
         }
         const carried = frameAddressDefined(ins, held);
-        // `mentionsReg` owns how a register is spotted in the operands, including the range
-        // expansion — `pop {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, and
-        // a dead capture surviving that `pop` made the callee acceptance fire on a frame that
-        // really did stage an outgoing argument, dropping all five of that call's arguments.
         for (const r of [...held.keys()]) {
           if (ends(ins, r)) {
             held.delete(r);
