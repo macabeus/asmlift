@@ -133,6 +133,14 @@ const CASES: {
     layoutOnly: true,
   },
   {
+    // the negative is field x's, and the byte the function reads is unsigned
+    sym: 'fieldneg',
+    c: 'u8 fieldneg(s32 i) { static const struct { s16 x; u8 id; u8 pad; } t[2] = {{-1, 5, 0}, {-2, 6, 0}}; return t[i].id; }',
+    spelled: /static const u8 t\[8\] __attribute__\(\(aligned\(4\)\)\) = \{ 0xff, 0xff, 5, 0, 0xfe, 0xff, 6, 0 \};/,
+    mwccSpelled: /static const u8 t\[8\] = \{ 0xff, 0xff, 5, 0, 0xff, 0xfe, 6, 0 \};/,
+    layoutOnly: true,
+  },
+  {
     sym: 'fields',
     c: 's32 fields(s32 i) { static const struct { s32 a; s32 b; } t[3] = {{1, 2}, {3, 4}, {5, 6}}; return t[i].b; }',
     spelled: /static const u32 t\[6\] = \{ 1, 2, 3, 4, 5, 6 \};/,

@@ -93,8 +93,8 @@ export interface LocalObjectDirectives {
   align: number;
   /** the width every value directive writes, when they all agree (`.word` → 4); padding does not count */
   unit?: number;
-  /** a directive narrower than a word wrote a negative value, which the compiler only does for a
-   *  signed element type */
+  /** the directives share a `unit` narrower than a word and one wrote a negative value, which the
+   *  compiler only does for a signed element type */
   negative: boolean;
 }
 

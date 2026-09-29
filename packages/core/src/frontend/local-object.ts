@@ -275,8 +275,9 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
   // A word's negative value says nothing: agbcc's constants are 32-bit host integers (machmode.h:30),
   // so an unsigned word past 0x7fffffff prints negative too, while a narrower constant keeps its
   // type's extension (varasm.c:1706-1710 `immed_double_const`) — `.short 0xffff` is a u16,
-  // `.short -0x1` an s16.
-  const unit = widths.size === 1 ? [...widths][0] : undefined;
+  // `.short -0x1` an s16. And it says so only of the ELEMENT when every value is one width: in a
+  // struct's mixed directives a negative belongs to one field, which says nothing of another.
+  const unit = widths.size === 1 && bytes.length % [...widths][0] === 0 ? [...widths][0] : undefined;
   return {
     name,
     symbol,
@@ -285,7 +286,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     size: bytes.length,
     bytes: Uint8Array.from(bytes),
     bigEndian: false,
-    directives: { align, ...(unit !== undefined && bytes.length % unit === 0 ? { unit } : {}), negative },
+    directives: { align, ...(unit !== undefined ? { unit } : {}), negative: unit !== undefined && negative },
   };
 }
 

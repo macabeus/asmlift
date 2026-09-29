@@ -346,14 +346,28 @@ test('an element of a struct array is read at its field, not at the stride', () 
   );
 });
 
-test('a negative element read zero-extended declines — the definition says signed, the load unsigned', () => {
-  const asm = thumbFn(
-    ['\t.section .rodata', 't.3:', '\t.byte\t-0x1', '\t.byte\t0x2'].join('\n'),
-    '\tldr\tr1, .L3\n\tldrb\tr0, [r1]',
+test('the loads settle the signedness, and the definition only where no load of the element does', () => {
+  const bytes = ['\t.section .rodata', 't.3:', '\t.byte\t-0x1', '\t.byte\t0x2'].join('\n');
+  // read zero-extended: the function computes with u8, and the byte is 0xff declared either way
+  const read = thumbFn(bytes, '\tldr\tr1, .L3\n\tldrb\tr0, [r1]', ['t.3']);
+  expect(decompile('f', read, ARMV4T_AGBCC).source).toContain('    static const u8 t[2] = { 0xff, 2 };\n');
+  // handed on, never loaded: the negative directive is the only word on it
+  const handed = thumbFn(bytes, '\tpush\t{lr}\n\tldr\tr0, .L3\n\tbl\tuse\n\tpop\t{r0}', ['t.3']);
+  expect(decompile('f', handed, ARMV4T_AGBCC).source).toContain('    static const s8 t[2] = { -1, 2 };\n');
+  // agbcc over `static const struct { s16 x; u8 id; u8 pad; } t[2] = {{-1, 5, 0}, {-2, 6, 0}};
+  // return t[i].id;` — the negative is field x's `.short`, and says nothing of the byte `id`
+  const struct = thumbFn(
+    [
+      '\t.section .rodata',
+      '\t.align\t2, 0',
+      't.3:',
+      ...['\t.short\t-0x1', '\t.byte\t0x5', '\t.byte\t0x0', '\t.short\t-0x2', '\t.byte\t0x6', '\t.byte\t0x0'],
+    ].join('\n'),
+    '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x2]',
     ['t.3'],
   );
-  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
-    "names a function-scope static ('t.3') whose definition holds negative elements that its loads read zero-extended",
+  expect(decompile('f', struct, ARMV4T_AGBCC).source).toContain(
+    '    static const u8 t[8] __attribute__((aligned(4))) = { 0xff, 0xff, 5, 0, 0xfe, 0xff, 6, 0 };\n',
   );
 });
 

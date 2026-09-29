@@ -6,8 +6,11 @@
 // compiler writes each scalar of the initializer with the directive of its width, so a table of
 // `.short`s is one of 16-bit elements whatever the function reads out of it, and a narrow negative
 // value is only ever written for a signed type. An object file (mwcc) shows no directives, and
-// there the element is the one width every access agrees on. The accesses of the element's width
-// then settle its signedness, and an object nothing says anything about is bytes.
+// there the element is the one width every access agrees on. The loads of the element's width then
+// settle its signedness — they are what the function computes, and a byte holds the same bits
+// declared either way, so they outrank a negative the source wrote through another type (a struct's
+// signed field, a cast) — and the definition settles it where no load does. An object nothing says
+// anything about is bytes.
 //
 // The listing also shows the ALIGNMENT, which decides where the object lands after the statics
 // declared before it. An element type aligns its array to its own width; a definition aligned
@@ -24,8 +27,8 @@
 // anything else the function names can first be seen whole.
 //
 // REFUSES, naming the static, when nothing in the definition settles the width and the accesses
-// disagree on it, when the width does not divide the size, when the loads and the definition
-// disagree on the signedness, when the definition is aligned narrower than its elements; and, at
+// disagree on it, when the width does not divide the size, when the loads disagree on the
+// signedness, when the definition is aligned narrower than its elements; and, at
 // the rename, when two statics share a source name (one block cannot declare both) or when the
 // function names anything else by it — a global, a callee, a parameter, a local, itself — which the
 // block-scope static would hide.
@@ -167,10 +170,7 @@ export function localStaticShapes(fn: Fn): LocalStaticShapes | { symbol: string;
     if (signs.size > 1) {
       return say('whose loads disagree on whether its elements are signed');
     }
-    if (dir?.negative === true && signs.has(false)) {
-      return say('whose definition holds negative elements that its loads read zero-extended');
-    }
-    const signed = dir?.negative === true || signs.has(true);
+    const signed = signs.size > 0 ? signs.has(true) : dir?.negative === true;
     if (dir !== undefined && dir.align < width) {
       return say(`whose definition is aligned to ${dir.align} bytes, less than its ${width}-byte elements are`);
     }
