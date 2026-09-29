@@ -166,9 +166,10 @@ export function auditFrameObjects({
     // split.
     // Why a capture was NOT split, when the reason is one no later message carries — the
     // `slotsOffReason` idiom: a refusal reported as the wrong capability sends the improvement
-    // loop to build the wrong thing. Per capture offset, so an access is refused with its own
-    // capture's reason and not the first one found.
-    const splitRefusal = new Map<number, string>();
+    // loop to build the wrong thing. Per CAPTURE and not per offset: every direct `[sp,#k]` word
+    // access is a capture of its own at k, refused here for its width, and a different capture at
+    // k whose access is refused for another reason must not be handed that one.
+    const splitRefusal = new Map<Value, string>();
     {
       const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
       const record = (v: Value, op: Op, idx: number, blk: Block) =>
@@ -207,7 +208,7 @@ export function auditFrameObjects({
         }
         if (!subWord) {
           splitRefusal.set(
-            capture.attrs.off as number,
+            capture.results[0],
             'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form',
           );
           continue;
@@ -361,7 +362,7 @@ export function auditFrameObjects({
             if ((op.attrs.off as number) !== 0) {
               fail(
                 `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
-                  (splitRefusal.get(off) ?? 'only a scalar at the captured address is modelled'),
+                  (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled'),
               );
             }
           };

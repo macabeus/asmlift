@@ -153,6 +153,27 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     );
   });
 
+  // …and two captures at ONE offset are two captures. Every direct `[sp,#4]` word access is one of
+  // its own, refused for its width; the escaping `add r4, sp, #0x4` beside them reads `[r4, #0x2]`,
+  // which no word access touches. agbcc's own output for `struct Q { u8 a; u8 b; u16 c; }; u32
+  // e1(u32 x, u32 y){ struct Q q; q.a = x; q.b = y; q.c = x + y; five(x, y, x, y, x); g(&q);
+  // return q.a + q.c; }`, at the corpus's flags.
+  test('a capture at an offset another capture shares is refused with its own reason', () => {
+    const e1 =
+      'e1:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tadd\tr3, r1, #0\n\tlsl\tr1, r2, #0x18\n' +
+      '\tlsr\tr1, r1, #0x18\n\tldr\tr4, .L3\n\tldr\tr0, [sp, #0x4]\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tlsl\tr1, r3, #0x18\n\tlsr\tr1, r1, #0x10\n\tldr\tr4, .L3+0x4\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tadd\tr1, r2, r3\n\tlsl\tr1, r1, #0x10\n\tldr\tr4, .L3+0x8\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tstr\tr2, [sp]\n\tadd\tr0, r2, #0\n\tadd\tr1, r3, #0\n\tbl\tfive\n' +
+      '\tadd\tr4, sp, #0x4\n\tadd\tr0, r4, #0\n\tbl\tg\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tldrh\tr1, [r4, #0x2]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x100\n\t.word\t-0xff01\n\t.word\t0xffff\n';
+    const prototypes = { five: { params: 5, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+    expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled/,
+    );
+  });
+
   test('a capture that ESCAPES keeps the frame base', () => {
     expect(() => lift(SPILL)).not.toThrow();
     expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);
