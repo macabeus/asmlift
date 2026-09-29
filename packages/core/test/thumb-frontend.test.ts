@@ -1573,8 +1573,38 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // …and a move the walk cannot follow — the capture in one block, the move in the next — is
-    // refused by that name, not as the slot the unfolded offset left behind.
+    // A MOVE THE WALK DOES NOT FOLLOW IS STILL THE CAPTURE AT THE SUM, because the IR holds the
+    // constant exactly: the register-offset spelling sa3's `sub_807A2AC` uses, `mov r0, sp / movs
+    // r2, #4 / ldrsh r0, [r0, r2]`, is the object `add r0, sp, #4 / ldrsh r0, [r0]` names.
+    test('a capture moved by a constant held in a register is the capture at the sum', () => {
+      const half = (store: string, load: string) =>
+        `f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n${store}\tbl\tg\n${load}\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n`;
+      const g = { params: 0, returnsVoid: true };
+      const byRegister = decompile(
+        'f',
+        half(
+          '\tmov\tr1, sp\n\tmovs\tr2, #4\n\tstrh\tr0, [r1, r2]\n',
+          '\tmov\tr0, sp\n\tmovs\tr2, #4\n\tldrsh\tr0, [r0, r2]\n',
+        ),
+        ARMV4T_AGBCC,
+        { prototypes: { g } },
+      ).source;
+      expect(byRegister).toBe(
+        decompile(
+          'f',
+          half('\tadd\tr1, sp, #4\n\tstrh\tr0, [r1]\n', '\tadd\tr0, sp, #4\n\tldrsh\tr0, [r0]\n'),
+          ARMV4T_AGBCC,
+          {
+            prototypes: { g },
+          },
+        ).source,
+      );
+      expect(byRegister).toContain('s16 sp4;');
+    });
+
+    // …but the walk is what routes a `[sp,#k]` word to the object rather than to a slot, so a move
+    // it cannot follow — the capture in one block, the move in the next — that lands on a keyed
+    // slot is refused by that name, not as the slot overlap alone.
     test('a capture moved in another block is refused as the move', () => {
       const crossBlock =
         'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tmov\tr5, sp\n' +
@@ -1583,8 +1613,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
       const get = { params: ['const s32 *'], returns: 's32' };
       expect(() => decompile('f', crossBlock, ARMV4T_AGBCC, { prototypes: { get } })).toThrow(
-        /the captured address at \[sp,#0\) is moved by a constant the pre-lift walk does not follow/,
+        /the capture moved by a constant to \[sp,#8\) is a move the pre-lift walk does not follow, so the slot model keys \[sp,#8\] too/,
       );
+    });
+
+    // …and a pointer a phi carries around a loop, stepped by a constant each trip (sa3's
+    // `sub_80B59E4`), names a different byte on each: no fold makes it one object.
+    test('a capture stepped around a loop is refused as the stepped pointer', () => {
+      const stepped =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tmovs\tr2, #0\n.L1:\n\tstrb\tr2, [r1]\n' +
+        '\tadds\tr1, #1\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() =>
+        decompile('f', stepped, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }),
+      ).toThrow('the captured address at [sp,#0) reaches a phi and is then moved by a constant');
     });
 
     // …and a READ of the capture between two moves does not end the walk: sa3's `sub_8068E5C`

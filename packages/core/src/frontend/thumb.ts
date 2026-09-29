@@ -3489,7 +3489,8 @@ export function lift(
   // arms fold a capture at an offset only where this says so, so the offsets the slot model and
   // the outgoing-argument analysis set aside below are, by construction, the ones the lift names.
   // What the walk cannot follow (a move in another block than the capture) the lift does not
-  // fold either, and the audit refuses the arithmetic by that name.
+  // fold either; the audit folds it from the IR, and refuses it by that name where the object
+  // lands on a word this left keyed as a slot.
   const captureOffsetOf = new Map<Instr, number>();
   heldFrameWalk(mayWriteReg, (ins, held) => {
     const defined = frameAddressDefined(ins, held);

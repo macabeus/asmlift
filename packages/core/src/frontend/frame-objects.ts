@@ -63,9 +63,50 @@ export function auditFrameObjects({
   symbols,
   target,
 }: FrameObjectAudit): void {
-  // A capture the add arm MOVED by a constant and nothing else reads names no object — the moved
-  // one does — so it is dropped rather than judged as an object with no use. Only those: an
-  // unused `mov rD, sp` of the machine's own is still a capture, and is judged.
+  // A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
+  // `add` of a `laddr` and a `const` — a register the lift could not see through, `mov r0, sp /
+  // movs r2, #0 / ldrsh r1, [r0, r2]`, or a move the pre-lift walk does not follow — is re-minted
+  // as the `laddr` it names. The walk still decides which `[sp,#k]` words are routed to an object
+  // rather than keyed as slots, so a fold it did not make is remembered: an object it lands on a
+  // keyed slot is refused as the move, the capability that is missing (`failIfSlotKeysIt`).
+  const moved = new Set<Value>(movedCaptures);
+  const foldedHere = new Set<Op>();
+  {
+    const constOf = new Map<Value, number>();
+    const laddrOf = new Map<Value, Op>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'const') {
+          constOf.set(op.results[0], op.attrs.value as number);
+        } else if (op.opcode === 'laddr') {
+          laddrOf.set(op.results[0], op);
+        }
+      }
+    }
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const blk of irBlocks) {
+        blk.ops = blk.ops.map((op) => {
+          const [x, y] = op.operands;
+          const base = laddrOf.get(x) ?? laddrOf.get(y);
+          const by = constOf.get(laddrOf.has(x) ? y : x);
+          if (op.opcode !== 'add' || op.operands.length !== 2 || base === undefined || by === undefined) {
+            return op;
+          }
+          const off = ((base.attrs.off as number) + by) | 0;
+          const object = mkOp('laddr', { results: op.results, attrs: { off } });
+          laddrOf.set(op.results[0], object);
+          moved.add(base.results[0]);
+          foldedHere.add(object);
+          changed = true;
+          return object;
+        });
+      }
+    }
+  }
+  // A capture MOVED by a constant and nothing else reads names no object — the moved one does —
+  // so it is dropped rather than judged as an object with no use. Only those: an unused `mov rD,
+  // sp` of the machine's own is still a capture, and is judged.
   const read = new Set<Value>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -75,9 +116,7 @@ export function auditFrameObjects({
   }
   let laddrs: Op[] = [];
   for (const blk of irBlocks) {
-    blk.ops = blk.ops.filter(
-      (op) => op.opcode !== 'laddr' || read.has(op.results[0]) || !movedCaptures.has(op.results[0]),
-    );
+    blk.ops = blk.ops.filter((op) => op.opcode !== 'laddr' || read.has(op.results[0]) || !moved.has(op.results[0]));
     for (const op of blk.ops) {
       if (op.opcode === 'laddr') {
         laddrs.push(op);
@@ -226,6 +265,9 @@ export function auditFrameObjects({
           const object = mkOp('laddr', { results: [res], attrs: { off: at } });
           u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
           minted.push(object);
+          if (foldedHere.has(capture)) {
+            foldedHere.add(object);
+          }
           // The ADDRESS operand only — the stored value (operand 1) is passed through
           // untouched, so no slot home moves (ir/core.ts `SlotHomes`). These accesses go through
           // a COPY of `sp` rather than the `[sp,#k]` keys the stamp reads, so none of them
@@ -439,13 +481,12 @@ export function auditFrameObjects({
             indexedAccess(off, op.results[0]);
             return;
           }
-          // A CONSTANT move the lift did not fold is one `heldFrameWalk` could not follow — made in
-          // another block than the capture, after a call, or by a constant held in a register — so
-          // no frame word was keyed to the offset it names, and saying so is the attribution.
+          // A CONSTANT move left after the fold above moves a capture a phi carried: a pointer
+          // stepped through the frame, which names a different object on each trip.
           if (other !== undefined && defOf.get(other)?.opcode === 'const') {
             fail(
-              `the captured address at [sp,#${off}) is moved by a constant the pre-lift walk does not follow ` +
-                "(it follows a move by an immediate in the capture's own block, with no call between)",
+              `the captured address at [sp,#${off}) reaches a phi and is then moved by a constant — ` +
+                'a pointer stepped through the frame names no one object',
             );
           }
           fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
@@ -578,7 +619,12 @@ export function auditFrameObjects({
     const failIfSlotKeysIt = (off: number, width: number): void => {
       for (const slot of usedSlotOffsets) {
         if (overlaps(off, width, slot, 4)) {
-          fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
+          fail(
+            objects.get(off)?.some((op) => foldedHere.has(op))
+              ? `the capture moved by a constant to [sp,#${off}) is a move the pre-lift walk does not follow, ` +
+                  `so the slot model keys [sp,#${slot}] too — one byte, two models`
+              : `the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`,
+          );
         }
       }
     };
